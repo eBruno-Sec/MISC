@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Divine Parallels — Verified v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #c9a84c;
+    --gold-light: #e8c87a;
+    --gold-dim: #7a5f28;
+    --bg: #08070a;
+    --bg2: #0f0d12;
+    --bg3: #161320;
+    --border: #221e30;
+    --text: #cfc0e8;
+    --text-dim: #6e6080;
+    --accent: #8060c0;
+    --red: #c04040;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'EB Garamond',serif; font-size:15px; line-height:1.6; min-height:100vh; }
+
+  header {
+    text-align:center; padding:60px 20px 36px;
+    background: radial-gradient(ellipse at top, #120e20 0%, var(--bg) 70%);
+    border-bottom: 1px solid var(--gold-dim);
+    position:relative;
+  }
+  header::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,var(--gold),transparent); }
+
+  .eyebrow { font-family:'Cinzel',serif; font-size:10px; letter-spacing:6px; color:var(--gold-dim); text-transform:uppercase; margin-bottom:14px; }
+  h1 { font-family:'Cinzel Decorative',serif; font-size:clamp(20px,4vw,40px); color:var(--gold); font-weight:700; text-shadow:0 0 40px rgba(201,168,76,.25); margin-bottom:10px; }
+  .sub { color:var(--text-dim); font-style:italic; font-size:15px; max-width:560px; margin:0 auto 20px; }
+  .version-badge { display:none; }
+
+  /* CONTROLS */
+  .controls {
+    padding:18px 20px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center;
+    background:var(--bg2); border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:100;
+  }
+  .filter-label { font-family:'Cinzel',serif; font-size:9px; letter-spacing:3px; color:var(--gold-dim); text-transform:uppercase; }
+  .filter-btn { background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:5px 12px; font-family:'Cinzel',serif; font-size:9px; letter-spacing:1px; cursor:pointer; transition:all .2s; text-transform:uppercase; }
+  .filter-btn:hover, .filter-btn.active { border-color:var(--gold); color:var(--gold); background:rgba(201,168,76,.05); }
+  .search-box { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:5px 12px; font-family:'EB Garamond',serif; font-size:14px; outline:none; width:200px; transition:border-color .2s; }
+  .search-box:focus { border-color:var(--accent); }
+  .search-box::placeholder { color:var(--text-dim); }
+
+  /* LEGEND */
+  .legend { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; padding:12px 20px; background:var(--bg2); border-bottom:1px solid var(--border); }
+  .legend-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text-dim); font-family:'Cinzel',serif; letter-spacing:.5px; }
+  .legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+  /* TABLE */
+  .table-wrapper { overflow-x:auto; padding:24px 14px; max-width:1700px; margin:0 auto; }
+  table { width:100%; border-collapse:collapse; min-width:1100px; }
+  thead tr { background:var(--bg3); border-bottom:2px solid var(--gold-dim); }
+  th { font-family:'Cinzel',serif; font-size:9px; letter-spacing:3px; text-transform:uppercase; color:var(--gold); padding:12px 10px; text-align:left; white-space:nowrap; border-right:1px solid var(--border); }
+  th:last-child { border-right:none; }
+  tbody tr { border-bottom:1px solid var(--border); transition:background .15s; }
+  tbody tr:hover { background:rgba(128,96,192,.04); }
+  td { padding:11px 10px; vertical-align:top; border-right:1px solid var(--border); font-size:13px; }
+  td:last-child { border-right:none; }
+
+  .name-cell { font-weight:500; font-size:13.5px; }
+  .note-cell { color:var(--text-dim); font-style:italic; font-size:12px; max-width:280px; }
+  .parallel-cell { font-size:12px; color:#8070a0; }
+
+  .pattern-tag { display:inline-block; background:rgba(128,96,192,.08); border:1px solid rgba(128,96,192,.2); color:#8060c0; padding:1px 5px; font-size:9px; font-family:'Cinzel',serif; margin:1px; letter-spacing:.5px; }
+
+  /* accuracy badge */
+  .acc { display:inline-block; padding:1px 6px; font-family:'Cinzel',serif; font-size:8px; letter-spacing:1px; text-transform:uppercase; border:1px solid; margin-left:4px; vertical-align:middle; }
+  .acc-high { color:#40a060; border-color:#40a060; }
+  .acc-med { color:#c09040; border-color:#c09040; }
+  .acc-fix { color:#c04040; border-color:#c04040; }
+
+  /* PANTHEON COLORS */
+  .p-hebrew { color:#c9a84c; } .p-christian { color:#8ab4d4; } .p-greek { color:#7ab8a0; }
+  .p-roman { color:#a09060; } .p-norse { color:#a0a0d8; } .p-japanese { color:#e8a090; }
+  .p-egyptian { color:#c8a060; } .p-sumerian { color:#b09870; } .p-hindu { color:#e07830; }
+  .p-celtic { color:#70a870; } .p-enoch { color:#c070c0; } .p-solomon { color:#d04040; }
+  .p-other { color:#909090; }
+
+  .dot-hebrew{background:#c9a84c;} .dot-christian{background:#8ab4d4;} .dot-greek{background:#7ab8a0;}
+  .dot-roman{background:#a09060;} .dot-norse{background:#a0a0d8;} .dot-japanese{background:#e8a090;}
+  .dot-egyptian{background:#c8a060;} .dot-sumerian{background:#b09870;} .dot-hindu{background:#e07830;}
+  .dot-celtic{background:#70a870;} .dot-enoch{background:#c070c0;} .dot-solomon{background:#d04040;}
+  .dot-other{background:#909090;}
+
+  .result-count { text-align:center; font-family:'Cinzel',serif; font-size:9px; letter-spacing:2px; color:var(--text-dim); padding:8px; }
+
+  /* PATTERNS SECTION */
+  .patterns-section { max-width:1200px; margin:0 auto; padding:40px 20px 60px; border-top:1px solid var(--border); }
+  .patterns-section h2 { font-family:'Cinzel Decorative',serif; color:var(--gold); font-size:18px; margin-bottom:6px; text-align:center; }
+  .patterns-intro { text-align:center; color:var(--text-dim); font-style:italic; margin-bottom:26px; font-size:13.5px; }
+  .pattern-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:14px; }
+  .pattern-card { background:var(--bg2); border:1px solid var(--border); padding:18px; position:relative; overflow:hidden; }
+  .pattern-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); }
+  .pattern-card h3 { font-family:'Cinzel',serif; font-size:11px; letter-spacing:2px; color:var(--accent); text-transform:uppercase; margin-bottom:8px; }
+  .pattern-card p { color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .pattern-card .examples { margin-top:8px; color:var(--text); font-size:12px; }
+
+  footer { text-align:center; padding:28px; color:var(--text-dim); font-size:11.5px; font-style:italic; border-top:1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Comparative Theology & Mythology</div>
+  <h1>Divine Parallels</h1>
+  <p class="sub">Cross-cultural map of deities, angels, and cosmic beings — Hebrew Bible, Enoch, Solomon/Goetia, Greek, Norse, Egyptian, Sumerian, Hindu, Japanese, Celtic, Zoroastrian and beyond.</p>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-hebrew"></div>Hebrew/OT</div>
+  <div class="legend-item"><div class="legend-dot dot-christian"></div>Christian/NT</div>
+  <div class="legend-item"><div class="legend-dot dot-enoch"></div>Book of Enoch</div>
+  <div class="legend-item"><div class="legend-dot dot-solomon"></div>Book of Solomon</div>
+  <div class="legend-item"><div class="legend-dot dot-greek"></div>Greek</div>
+  <div class="legend-item"><div class="legend-dot dot-norse"></div>Norse</div>
+  <div class="legend-item"><div class="legend-dot dot-egyptian"></div>Egyptian</div>
+  <div class="legend-item"><div class="legend-dot dot-sumerian"></div>Sumerian</div>
+  <div class="legend-item"><div class="legend-dot dot-japanese"></div>Japanese</div>
+  <div class="legend-item"><div class="legend-dot dot-hindu"></div>Hindu</div>
+  <div class="legend-item"><div class="legend-dot dot-celtic"></div>Celtic</div>
+  <div class="legend-item"><div class="legend-dot dot-other"></div>Other</div>
+</div>
+
+<div class="controls">
+  <span class="filter-label">Filter:</span>
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="hebrew">Hebrew</button>
+  <button class="filter-btn" data-filter="christian">Christian</button>
+  <button class="filter-btn" data-filter="enoch">Enoch</button>
+  <button class="filter-btn" data-filter="solomon">Solomon</button>
+  <button class="filter-btn" data-filter="greek">Greek</button>
+  <button class="filter-btn" data-filter="norse">Norse</button>
+  <button class="filter-btn" data-filter="egyptian">Egyptian</button>
+  <button class="filter-btn" data-filter="sumerian">Sumerian</button>
+  <button class="filter-btn" data-filter="japanese">Japanese</button>
+  <button class="filter-btn" data-filter="hindu">Hindu</button>
+  <button class="filter-btn" data-filter="celtic">Celtic</button>
+  <button class="filter-btn" data-filter="other">Other</button>
+  <input class="search-box" type="text" placeholder="Search name, role, pattern..." id="searchInput">
+</div>
+
+<div class="result-count" id="resultCount"></div>
+
+<div class="table-wrapper">
+<table id="mainTable">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Source</th>
+      <th>Domain / Role</th>
+      <th>Cross-Cultural Parallel</th>
+      <th>Patterns</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+</div>
+
+<div class="patterns-section">
+  <h2>Universal Patterns</h2>
+  <p class="patterns-intro">Themes appearing independently across cultures — the more universal, the harder to explain as coincidence</p>
+  <div class="pattern-grid">
+    <div class="pattern-card">
+      <h3>The Chief Sky Father</h3>
+      <p>Every major pantheon has a supreme male sky deity presiding over other gods. Appears on every inhabited continent.</p>
+      <p class="examples">El Elyon (Hebrew) · Zeus (Greek) · Jupiter (Roman) · Odin (Norse) · Ra/Amun (Egyptian) · Anu (Sumerian) · Izanagi (Japanese) · Brahma (Hindu) · Dagda (Celtic) · Ahura Mazda (Zoroastrian)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Divine Council</h3>
+      <p>Chief god presides over a council of lesser divine beings who execute cosmic will. Explicitly documented in Psalm 82, Job 1-2, and Enoch.</p>
+      <p class="examples">Bene Elohim (Hebrew) · Olympians (Greek) · Aesir/Vanir (Norse) · Ennead (Egyptian) · Anunnaki (Sumerian) · Devas (Hindu) · Watchers (Enoch)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>Dying & Rising God (Debated)</h3>
+      <p>A deity dies and resurrects — most clearly in Osiris, Inanna, and Baldr. The category is genuine but contested — many proposed examples only "die" without confirmed resurrection. Predates Christianity by 2,000+ years in Inanna's case.</p>
+      <p class="examples">Inanna/Ishtar (Sumerian — most confirmed) · Osiris (Egyptian) · Orphic Dionysus (Greek mystery cult only) · Baldr (Norse — post-Ragnarok) · Tammuz/Dumuzi (Sumerian)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Great Flood</h3>
+      <p>Divine flood destroys humanity; one righteous survivor on a vessel. The Sumerian version (Utnapishtim) predates Noah by ~1,000 years — confirmed by archaeology.</p>
+      <p class="examples">Utnapishtim (Sumerian) · Noah (Hebrew) · Atrahasis (Babylonian) · Deucalion (Greek) · Manu (Hindu) · Bergelmir (Norse)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Chaos Sea Monster</h3>
+      <p>Sky god defeats a primordial chaos serpent/monster to establish cosmic order. Called "chaoskampf" by scholars. Appears universally.</p>
+      <p class="examples">Leviathan (Hebrew) · Tiamat (Sumerian) · Apep (Egyptian) · Typhon (Greek) · Jormungandr (Norse) · Vritra (Hindu)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Trickster</h3>
+      <p>A divine figure who operates outside rules, causes chaos, and enables change — not purely good or evil. One of the most universal divine archetypes.</p>
+      <p class="examples">Ha-Satan/Adversary (Hebrew — original role) · Loki (Norse) · Hermes (Greek) · Set (Egyptian) · Susanoo (Japanese) · Coyote (Native American) · Anansi (West African)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>Forbidden Knowledge Bringer</h3>
+      <p>A divine/semi-divine figure gives humans knowledge they weren't supposed to have — punished for it. Appears across all traditions.</p>
+      <p class="examples">Azazel (Enoch — weapons/cosmetics) · Prometheus (Greek — fire) · Enki (Sumerian — warned of flood) · Lucifer (Christian) · Quetzalcoatl (Mesoamerican — maize/writing)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Divine Feminine</h3>
+      <p>A supreme female deity of fertility, war, love, or creation — often paired with or opposed to the sky father. Complex dual nature (love AND war) recurs across cultures.</p>
+      <p class="examples">Asherah (Hebrew, Yahweh's consort in early religion) · Inanna/Ishtar (Sumerian) · Isis (Egyptian) · Hera/Aphrodite (Greek) · Frigg/Freya (Norse) · Amaterasu (Japanese) · Devi/Kali (Hindu)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>The Underworld Ruler</h3>
+      <p>A god who rules the realm of the dead — typically not purely evil, just sovereign over death. Christian hell conflates ruler (Hades) with adversary (Satan) — originally separate figures.</p>
+      <p class="examples">Sheol/Ha-Satan (Hebrew) · Hades (Greek) · Hel (Norse) · Osiris/Anubis (Egyptian) · Ereshkigal (Sumerian) · Izanami (Japanese) · Yama (Hindu/Buddhist)</p>
+    </div>
+    <div class="pattern-card">
+      <h3>Conquered Gods Become Demons</h3>
+      <p>When one religion defeats another, the defeated religion's gods get demoted to demons or evil figures. Documented across all traditions.</p>
+      <p class="examples">Baal → Beelzebub · Astarte → Astaroth · Asuras (Hindu) were Devas who fell · Persian Daevas → demons · Cernunnos imagery absorbed into Satan iconography</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  v2 — Deep fact-checked against: Dead Sea Scrolls, Book of Enoch (R.H. Charles), Ars Goetia (Lemegeton), Theogony (Hesiod), Prose/Poetic Edda, Kojiki, Rigveda, Egyptian Book of the Dead, Enuma Elish, Descent of Inanna (ETCSL), Avesta. Scholarly references: Michael Heiser, Mark Smith, Roger Beck, David Ulansey, Tryggve Mettinger, Paola Corrente, Mary Boyce.
+</footer>
+
+<script>
+const VERIFIED = [
+  // ── HEBREW / OLD TESTAMENT ──
+  {name:"El / El Elyon",pantheon:"hebrew",source:"Hebrew Bible (MT & DSS)",domain:"Chief God, Most High, Divine Council President",parallel:"Zeus (Greek), Odin (Norse), Anu (Sumerian), Ra (Egyptian), Brahma (Hindu), Ahura Mazda (Zoroastrian)",patterns:["Sky Father","Chief Deity","Divine Council"],accuracy:"high",notes:"Original Canaanite chief deity. Yahweh begins as his son assigned Israel (Deut 32:8-9, DSS version). El Elyon = 'God Most High.' Name forms: Elohim (plural), El Shaddai, El Olam. Israelite polytheism evolved into monolatry then monotheism across 800 years."},
+  {name:"Yahweh / YHWH",pantheon:"hebrew",source:"Hebrew Bible",domain:"God of Israel; Storm/War God; later sole deity",parallel:"Baal (Canaanite), Indra (Hindu/Vedic), Thor (Norse), Zeus (Greek)",patterns:["Sky Father","Storm God","Warrior","Evolving Monotheism"],accuracy:"high",notes:"Originally one of El's divine sons, assigned Israel as his people (Deut 32:8-9). Storm and warrior characteristics match Baal — they were rival gods throughout Kings. Gradually absorbs El's identity. Inscription evidence: 'Yahweh of Samaria' and 'Yahweh of Teman' — local cult variations."},
+  {name:"Asherah",pantheon:"hebrew",source:"Hebrew Bible + Kuntillet Ajrud inscriptions (9th-8th c. BCE)",domain:"Mother Goddess, Sea, Fertility; possible consort of Yahweh",parallel:"Hera/Demeter (Greek), Isis (Egyptian), Frigg (Norse), Inanna (Sumerian)",patterns:["Mother Goddess","Divine Feminine"],accuracy:"med",notes:"Kuntillet Ajrud inscriptions read 'Yahweh and his Asherah' — confirmed real. NUANCE: 'asherah' may refer to a cultic wooden pole, not the goddess Asherah herself (pronominal suffixes on divine names are unusual in Hebrew). Drawings below inscription likely depict Egyptian god Bes, not Yahweh+Asherah. Consensus: Asherah worship existed alongside Yahweh in early Israel — the exact nature is debated."},
+  {name:"Baal",pantheon:"hebrew",source:"Hebrew Bible / Canaanite",domain:"Storm, Rain, Fertility; Yahweh's primary rival",parallel:"Zeus (Greek), Thor (Norse), Indra (Hindu), Hadad (Aramean), Teshub (Hurrian)",patterns:["Storm God","Rival Deity"],accuracy:"high",notes:"Yahweh's primary rival throughout Kings and Prophets. 1 Kings 18: Elijah vs Baal prophets. Baal = 'Lord' — a title applied to multiple storm deities. Canaanite Baal myth: Baal defeats Yam (sea) — parallel to Yahweh vs Leviathan. Direct precedent to the chaoskampf pattern."},
+  {name:"The Bene Elohim",pantheon:"hebrew",source:"Genesis 6, Job 1-2, Psalm 89, Deuteronomy 32",domain:"Sons of God / Divine Council members",parallel:"Titans (Greek), Aesir (Norse), Devas (Hindu), Anunnaki (Sumerian)",patterns:["Divine Council","Fallen Angels","Divine-Human"],accuracy:"high",notes:"'Sons of God' (bene elohim) — divine beings, members of Yahweh's council. Genesis 6: mate with human women, produce Nephilim. Job 1-2: present themselves before Yahweh alongside Ha-Satan. Deut 32:8-9 (DSS): nations assigned to sons of El. Original divine council, later reframed as angels."},
+  {name:"The Nephilim",pantheon:"hebrew",source:"Genesis 6, Numbers 13",domain:"Giant offspring of divine beings and human women",parallel:"Titans/Giants (Greek), Jotnar (Norse), Anakim (Hebrew), heroes of old",patterns:["Divine-Human Hybrid","Giants"],accuracy:"high",notes:"Genesis 6:4: 'There were giants in the earth in those days.' Numbers 13: Israelite spies report Canaanites are Nephilim-descended (Anakim). Hebrew 'nephilim' etymology debated: 'fallen ones' or 'those who fall upon others.' Same divine+human hybrid producing giants seen in Greek Titans era."},
+  {name:"Ha-Satan / The Adversary",pantheon:"hebrew",source:"Job 1-2, Zechariah 3, Numbers 22",domain:"Divine Prosecutor / Adversary — member of heavenly court",parallel:"Loki (Norse), Set (Egyptian), Ahriman (Zoroastrian)",patterns:["Trickster","Divine Prosecutor"],accuracy:"high",notes:"'Ha-Satan' = 'The Adversary' in Hebrew — a title, NOT a proper name. In Job: presents himself before Yahweh, gets permission to test Job. In Zechariah: accuses Joshua before Yahweh. This is NOT the ruler of hell — that conflation developed under Persian/Zoroastrian influence post-exile. The evil cosmic Satan is a later theological evolution."},
+  {name:"Lilith",pantheon:"hebrew",source:"Isaiah 34 (one mention); later: Alphabet of Ben Sira (medieval)",domain:"Night creature; later: Adam's first wife (post-biblical tradition)",parallel:"Lamia (Greek), Lilitu (Babylonian night demon)",patterns:["Dark Feminine","Demon"],accuracy:"med",notes:"Isaiah 34:14 — one reference to 'lilit' or 'night creature' in the desolation of Edom. The 'first wife of Adam' story appears only in medieval texts (Alphabet of Ben Sira, 8th-10th c. CE) — NOT in the Hebrew Bible. Etymologically possibly from 'layil' (night) or Babylonian 'lilitu.' Commonly overstated as biblical — it is mostly post-biblical tradition."},
+  {name:"Leviathan",pantheon:"hebrew",source:"Job 41, Psalm 74, Isaiah 27",domain:"Primordial chaos sea monster",parallel:"Tiamat (Sumerian), Typhon (Greek), Apep (Egyptian), Jormungandr (Norse), Lotan (Canaanite)",patterns:["Chaos Monster","Primordial Serpent"],accuracy:"high",notes:"Job 41: described in extensive detail — fire-breathing, armored. Psalm 74: Yahweh 'crushed the heads of Leviathan.' Isaiah 27: future defeat prophesied. Direct cognate with Canaanite Lotan that Baal defeats in Ugaritic texts — same sea monster, different names. Universal chaoskampf pattern."},
+  {name:"Moloch / Molech",pantheon:"hebrew",source:"Leviticus 18 & 20, 2 Kings 23, Jeremiah 32",domain:"Fire deity; associated with child sacrifice",parallel:"Chronos (Greek), Baal (Canaanite)",patterns:["Ritual Sacrifice","Dark Deity"],accuracy:"med",notes:"Leviticus and 2 Kings condemn 'passing children through fire to Molech.' Jeremiah 32: Valley of Hinnom (Gehenna). Scholarly debate: 'molek' may be a term for a type of sacrifice rather than a deity's name. Some scholars believe Moloch = Yahweh himself in early sacrifice contexts. The deity identification is real but the nature of the cult is disputed."},
+  {name:"Dagon",pantheon:"hebrew",source:"Judges 16, 1 Samuel 5",domain:"Philistine chief god; grain and sea",parallel:"Poseidon (Greek), Enki (Sumerian), Baal (Canaanite)",patterns:["Sea God","Grain/Fertility","Rival Deity"],accuracy:"high",notes:"Philistine chief deity. Samson destroys his temple (Judges 16). Ark of Covenant placed in his temple (1 Samuel 5) — Dagon falls before it. Fish-human iconography common in art. Name possibly from 'dag' (fish) or 'dagan' (grain) — both attested."},
+  {name:"Michael",pantheon:"hebrew",source:"Daniel 10-12, Jude 9, Revelation 12",domain:"Archangel; divine warrior; patron prince of Israel",parallel:"Ares/Mars (Greek/Roman), Tyr (Norse), Kartikeya (Hindu)",patterns:["Warrior Angel","Divine Council","Protector"],accuracy:"high",notes:"'Who is like God?' Daniel: Michael as Israel's patron prince against princes of Persia and Greece — divine-national war parallel. Leads heavenly armies in Revelation. Commands divine forces against cosmic enemies. Consistent with divine warrior archetype across cultures."},
+  {name:"Gabriel",pantheon:"hebrew",source:"Daniel 8-9, Luke 1, Quran (Jibril)",domain:"Divine messenger; revealer of prophecy",parallel:"Hermes (Greek), Mercury (Roman), Thoth (Egyptian), Metatron (Enoch)",patterns:["Divine Messenger","Winged Divine","Universal Messenger"],accuracy:"high",notes:"'God is my strength.' Appears to Daniel twice. In NT: announces birth of John and Jesus to Mary. In Islam: delivers entire Quran to Muhammad — identified as Jibril. Same being serving as divine messenger across all three Abrahamic faiths. Classic psychopomp-messenger archetype."},
+  {name:"Raphael",pantheon:"hebrew",source:"Book of Tobit, 1 Enoch",domain:"Healing; travel; binding of Azazel",parallel:"Asclepius (Greek), Dhanvantari (Hindu)",patterns:["Healer","Divine Messenger"],accuracy:"high",notes:"'God heals.' In Tobit: travels with Tobias in disguise, drives away demon Asmodeus with burning fish liver. In 1 Enoch: sent to bind Azazel in the desert until judgment. One of the four/seven named archangels. Healing angel archetype consistent cross-culturally."},
+
+  // ── BOOK OF ENOCH ──
+  {name:"Azazel",pantheon:"enoch",source:"1 Enoch 8-10, Leviticus 16",domain:"Leader of Fallen Watchers; taught weapons/metalworking/cosmetics",parallel:"Prometheus (Greek), Loki (Norse partial), Hephaestus (Greek)",patterns:["Fallen Angel","Teaches Forbidden Knowledge","Forbidden Knowledge Bringer"],accuracy:"high",notes:"1 Enoch 8:1: 'Azazel taught men to make swords, knives, shields, breastplates.' Also taught cosmetic arts, eye shadow. Leviticus 16 scapegoat ritual ('la-Azazel') may reference this figure — goat sent to the wilderness. In Enoch: Raphael binds him in the desert. Exact parallel to Prometheus — divine being punished for giving forbidden knowledge to humans."},
+  {name:"Semjaza / Shemihazah",pantheon:"enoch",source:"1 Enoch 6-7",domain:"Chief of the 200 Watchers; led descent to Mount Hermon",parallel:"Kronos/Uranos (Greek), Saturn (Roman), fallen divine leaders",patterns:["Fallen Angel","Divine Rebellion","Leader"],accuracy:"high",notes:"Led 200 Watchers to swear oath on Mount Hermon — the name 'Hermon' itself linked etymologically to the oath/curse they swore. Name meaning: 'my name has seen' (God). Bound in earth until judgment. The text names 19 other leaders under him. Distinct from Azazel — both are named as leaders in different sections of the text."},
+  {name:"The 200 Watchers / Grigori",pantheon:"enoch",source:"1 Enoch 6-16 (confirmed in Dead Sea Scrolls Aramaic fragments)",domain:"Fallen divine observers; taught forbidden knowledge; fathers of Nephilim",parallel:"Titans (Greek), Jotnar (Norse), Asuras (Hindu), fallen divine council",patterns:["Fallen Angels","Divine Council","Forbidden Knowledge"],accuracy:"high",notes:"200 specific Watchers named by role. Descend to Mount Hermon, swear oath, take human wives. Offspring = Nephilim who devour humanity. Watchers taught: astrology (Baraqijal), enchantments (Semjaza), herb-cutting, constellations (Kokabel), sun signs (Shamsiel), moon (Sariel). Confirmed in Aramaic DSS fragments (4QEna). Genesis 6 is the abbreviated version of this story."},
+  {name:"Metatron",pantheon:"enoch",source:"3 Enoch / Sefer Hekhalot (5th c. CE); Babylonian Talmud",domain:"Celestial scribe; 'lesser YHWH'; heavenly chancellor",parallel:"Thoth (Egyptian), Hermes Trismegistus (Greco-Egyptian), heavenly scribes",patterns:["Divine Messenger","Celestial Scribe","Transformed Human"],accuracy:"high",notes:"IMPORTANT: Metatron NOT in canonical Hebrew Bible. Appears in Merkabah mysticism (3 Enoch) and Talmud references. Human Enoch transformed into angel Metatron after ascension — 'flesh turned to flame.' Called 'lesser YHWH' in mystical texts. Controversial in Jewish theology — one rabbi (Aher) saw him enthroned and assumed two powers in heaven. Scholarly consensus: the Enoch-Metatron identification developed in the 5th century CE, later than early Enoch literature."},
+  {name:"Uriel",pantheon:"enoch",source:"1 Enoch, Book of Tobit (some versions)",domain:"Heavenly bodies; Tartarus guardian; revealed calendar to Enoch",parallel:"Helios (Greek), Sol Invictus (Roman), Ra (Egyptian)",patterns:["Divine Council","Celestial","Archangel"],accuracy:"high",notes:"'God is my light.' In 1 Enoch: shows Enoch the heavenly calendar system and cosmic geography. Guards Tartarus. Sometimes listed as one of four archangels (Michael, Gabriel, Raphael, Uriel). Some traditions include him; others substitute Sariel/Suriel."},
+  {name:"Sariel / Saraqael",pantheon:"enoch",source:"1 Enoch",domain:"Spirits who sin; Moon ruler",parallel:"Selene (Greek), Mani (Norse), Sin (Sumerian)",patterns:["Divine Council","Celestial","Moon"],accuracy:"high",notes:"Named archangel in 1 Enoch. Rules over spirits of humanity who sin against God. Sometimes merged with Uriel. Teaches Enoch the path of the moon. Moon deity as divine council member — consistent with universal celestial deity pattern."},
+
+  // ── BOOK OF SOLOMON (ARS GOETIA) ──
+  {name:"Bael / Baal",pantheon:"solomon",source:"Ars Goetia (Lemegeton, ~1650 CE, based on Testament of Solomon 1st-5th c. CE)",domain:"First King of Hell; 66 legions; grants invisibility and wisdom",parallel:"Baal (Hebrew/Canaanite chief deity), Zeus (Greek)",patterns:["Demonized Deity","Fallen King"],accuracy:"high",notes:"Direct corruption of Canaanite Baal, who was Yahweh's chief rival. Three heads: toad, man, cat. Commands 66 legions. Teaches art of invisibility. First spirit in Goetia — reflecting Baal's primacy in Canaanite religion. The Ars Goetia was compiled ~1650 CE from Johann Weyer's 1577 Pseudomonarchia Daemonum — not an ancient text but based on older traditions."},
+  {name:"Asmodeus / Asmoday",pantheon:"solomon",source:"Book of Tobit (1st-2nd c. BCE), Testament of Solomon, Ars Goetia",domain:"Lust; gambling; arithmetic and geometry; 72 legions",parallel:"Aeshma Daeva (Zoroastrian demon of wrath), Eros (Greek)",patterns:["Demon King","Lust","Persian Origin"],accuracy:"high",notes:"Origin: Persian Aeshma Daeva ('demon of wrath') — entered Judaism via Persian contact. In Tobit: kills seven husbands of Sarah before marriage can be consummated. In Ars Goetia: three heads (bull/man/ram), serpent tail, rides infernal dragon. Teaches arithmetic, astronomy, geometry. Commands 72 legions. One of the most consistently documented demons across multiple ancient sources."},
+  {name:"Astaroth",pantheon:"solomon",source:"1 Samuel 7 & 31 (as Ashtaroth), Ars Goetia",domain:"Liberal arts; past/present/future knowledge; 40 legions; vanity and laziness",parallel:"Astarte/Ishtar (Canaanite/Sumerian), Aphrodite (Greek), Inanna (Sumerian)",patterns:["Demonized Goddess","Dark Feminine","Knowledge"],accuracy:"high",notes:"Direct corruption of Astarte/Ashtaroth — Canaanite fertility goddess whom Israelites were condemned for worshipping (1 Samuel 7:3-4, 31:10). Female deity → male demon in Goetia: classic demonization pattern. Duke of Hell, 40 legions. Teaches mathematical sciences, makes men invisible, reveals hidden treasures. Astaroth's name 'possibly taken from Asherah or Astarte' — per Wikipedia's Goetia article."},
+  {name:"Beelzebub",pantheon:"solomon",source:"2 Kings 1, Matthew 12, Ars Goetia",domain:"Flies; gluttony; Prince of Hell; false idolatry",parallel:"Baal-Zebul (Canaanite), Zeus (Greek)",patterns:["Demonized Deity","Prince of Hell"],accuracy:"high",notes:"'Baal-Zebub' = 'Lord of Flies' — deliberate Hebrew mockery of 'Baal-Zebul' ('Lord of the Heavenly Dwelling' or 'Exalted Baal'). 2 Kings 1: Ahaziah consults Baal-Zebub of Ekron — Elijah condemns him. NT: Pharisees accuse Jesus of casting out demons by Beelzebub, 'prince of demons.' Separate from Satan in some traditions, merged in others."},
+  {name:"Paimon",pantheon:"solomon",source:"Ars Goetia",domain:"Arts; sciences; secrets; binding oaths; 200 legions",parallel:"Apollo (Greek), Odin (Norse — knowledge seeker), Thoth (Egyptian)",patterns:["Demon King","Knowledge","Arts"],accuracy:"high",notes:"King of Hell, commands 200 legions. Rides a camel (dromedary), preceded by musicians playing trumpets. Teaches all arts and sciences, reveals secrets, provides familiars. Crowned. Rules the northwest. Highly ranked — some traditions place him above other kings. Must be invoked with respect. Modern pop culture has romanticized Paimon (incorrectly as female in film 'Hereditary')."},
+  {name:"Vassago",pantheon:"solomon",source:"Ars Goetia",domain:"Past/present/future; finding lost things; good-natured disposition",parallel:"Apollo/Oracle (Greek), Odin (Norse), Cassandra (Greek)",patterns:["Demon Prince","Prophecy","Benign"],accuracy:"high",notes:"Third spirit listed. Notably described as 'good-natured' — an unusual designation in the Goetia. Prince of Hell. Discovers hidden and lost things. Reveals past, present, and future. This benign characterization is consistent across Goetia manuscripts. Note: Vassago, Seere, Dantalion, and Andromalius are NEW additions in the Ars Goetia not present in Weyer's earlier Pseudomonarchia Daemonum."},
+  {name:"Lucifer",pantheon:"solomon",source:"Isaiah 14 (Helel ben Shachar); Church Fathers; Ars Goetia hierarchy",domain:"Pride; Morning Star; Light-bringer; in Goetia: Emperor of Hell",parallel:"Helel/Venus (Hebrew), Prometheus (Greek — light-bringer punished), Phaethon (Greek)",patterns:["Fallen Angel","Light Bearer","Pride"],accuracy:"high",notes:"CRITICAL CLARIFICATION: Isaiah 14:12 — 'Helel ben Shachar' (shining one, son of dawn) is a taunt AGAINST THE KING OF BABYLON — not Satan. Jerome's 4th century Latin Vulgate translated it as 'Lucifer' (= morning star in Latin). Church Fathers (Origen, Tertullian) connected it to Luke 10:18 ('I saw Satan fall like lightning') — this is theological interpretation, not the original Hebrew meaning. The cosmic fallen-angel Lucifer is a Christian theological development, not present in the Hebrew Bible. In Goetia: Lucifer does NOT appear among the 72 bound demons — considered too powerful."},
+
+  // ── CHRISTIAN ──
+  {name:"Jesus of Nazareth",pantheon:"christian",source:"New Testament (Gospels ~70-100 CE); Paul's letters (~50-60 CE); Tacitus, Josephus (historical confirmation of execution)",domain:"Son of God; Savior; Dying and rising redeemer; Ethical teacher; Cosmic judge",parallel:"Heracles (Greek — divine father/mortal mother, suffers for humanity, ascends), Osiris (Egyptian — death/resurrection/judge), Dionysus (Greek — wine as sacred blood, born of god+mortal, mystery cult), Inanna (Sumerian — dead 3 days, resurrected), Prometheus (Greek — willing suffering for humanity), Vishnu avatars (Hindu — god incarnates to restore order), Isaiah's Suffering Servant (Hebrew — dies for others' sins)",patterns:["Dying & Rising God","Divine Son","Divine-Human","Willing Sacrifice","Ethical Teacher","Universal Redeemer"],accuracy:"high",notes:"The most cross-referenced figure in this table — half the entries point to him. What's confirmed: Jesus was a real historical person executed under Pontius Pilate (~30 CE) — confirmed by Tacitus (Annals 15.44) and Josephus (Antiquities 20.9.1). The resurrection is a theological claim, not a historical one. The narrative ingredients — divine father + mortal mother, suffers for humanity, dies, resurrects, ascends — all preexist in multiple traditions. What makes Jesus structurally unique: (1) He fuses all prior archetypes simultaneously in one figure. (2) He is tied to a specific historical person, time, and place — unlike Osiris or Dionysus. (3) His death is presented as a singular unrepeatable atonement event, not a seasonal cycle. (4) The ethical teaching (Sermon on the Mount) has no direct parallel in any prior dying-god tradition. Early Church Fathers (Justin Martyr, 2nd c. CE) openly acknowledged the Heracles and Dionysus parallels — not as embarrassment, but as argument: 'Your gods did this too.' Whether Jesus fulfills all prior patterns or is built from them is the core theological vs. comparative religion dispute — neither side can fully prove their case from evidence alone."},
+
+  // ── GREEK ──
+  {name:"Zeus",pantheon:"greek",source:"Theogony (Hesiod), Iliad (Homer)",domain:"Sky; Thunder; King of Olympians; Divine Council president",parallel:"El/Yahweh (Hebrew), Jupiter (Roman), Odin (Norse), Indra (Hindu), Amun-Ra (Egyptian), Anu (Sumerian)",patterns:["Sky Father","Chief Deity","Storm God","Divine Council"],accuracy:"high",notes:"Son of Kronos, overthrew him. Patriarch of Olympians. Judges gods and men. Distributes lots to other gods — exact parallel to El's distribution of nations to divine sons. Multiple wives and offspring — parallels El's divine council structure. Universal storm-father archetype."},
+  {name:"Hades",pantheon:"greek",source:"Theogony, Odyssey",domain:"Underworld ruler; Death; Hidden wealth",parallel:"Osiris/Anubis (Egyptian), Hel (Norse), Ereshkigal (Sumerian), Yama (Hindu/Buddhist), Sheol (Hebrew)",patterns:["Underworld Ruler","Death","Not Evil"],accuracy:"high",notes:"Brother of Zeus. Neutral sovereign of the dead — NOT evil in Greek religion. Rich one (Plouton). Rarely leaves underworld. Greek Sheol parallel. Christianity conflated Hades (ruler) with Satan (adversary) — originally completely separate divine figures. Universal underworld ruler archetype."},
+  {name:"Hermes",pantheon:"greek",source:"Theogony, Homeric Hymns",domain:"Divine messenger; Commerce; Thieves; Psychopomp (guide of dead souls)",parallel:"Mercury (Roman), Gabriel (Hebrew), Thoth (Egyptian), Loki (Norse — trickster aspect), Janus (Roman — threshold)",patterns:["Divine Messenger","Trickster","Psychopomp"],accuracy:"high",notes:"Winged sandals and helmet. Guides souls to underworld — psychopomp role. Steals Apollo's cattle the day he was born. Invented writing, music, commerce. Merged with Thoth by Greco-Egyptians = Hermes Trismegistus — foundation of Hermeticism, Gnosticism, and esoteric tradition."},
+  {name:"Prometheus",pantheon:"greek",source:"Theogony, Works and Days (Hesiod), Prometheus Bound (Aeschylus)",domain:"Fire-bringer; Humanity's benefactor; Trickster; Foresight",parallel:"Azazel (Enoch), Enki (Sumerian), Quetzalcoatl (Mesoamerican), Loki (Norse)",patterns:["Fallen Divine","Forbidden Knowledge Bringer","Trickster","Punished Benefactor"],accuracy:"high",notes:"Stole fire from gods (specifically from Hephaestus's forge / Zeus). Chained to rock, eagle eats his regenerating liver daily. Exactly parallel to Azazel — divine being punished for giving forbidden knowledge/technology to humans. Trickster who benefits humanity against divine hierarchy's wishes. This archetype appears independently on multiple continents."},
+  {name:"Dionysus",pantheon:"greek",source:"Theogony; Bacchae (Euripides); Orphic hymns",domain:"Wine; Ecstasy; Theater; Mystery religion; Rebirth",parallel:"Osiris (Egyptian), Tammuz/Dumuzi (Sumerian), Bacchus (Roman), Shiva (Hindu — ecstasy aspect)",patterns:["Ecstasy","Mystery Cult","Death-Rebirth (Orphic only)","Divine Birth"],accuracy:"med",notes:"NUANCE: The Olympian Dionysus did NOT die. The Orphic Dionysus (mystery cult, 6th c. BCE) was dismembered by Titans, reassembled by Rhea — this is the dying-and-rising version. These are distinct traditions. Born of Zeus and mortal Semele — born twice (Zeus sewed fetus into his thigh after Semele's death). Wine = sacred blood in mystery cult. Real parallel to Christian Eucharist via Dionysian ritual meal."},
+  {name:"Athena",pantheon:"greek",source:"Theogony, Iliad",domain:"Wisdom; Strategic war; Crafts; Justice",parallel:"Minerva (Roman), Saraswati (Hindu), Brigid (Celtic)",patterns:["Wisdom Deity","Warrior","Civilization"],accuracy:"high",notes:"Born fully armed from Zeus's head. Virgin warrior. Patron of Athens. Wisdom + strategic war (vs Ares's brutal war). Civilizational deity archetype — the goddess who enables cities and arts, distinct from the fertility/love goddess. Owl symbol = wisdom."},
+  {name:"Heracles / Hercules",pantheon:"greek",source:"Iliad (Homer), Theogony, Library (Pseudo-Apollodorus), Diodorus Siculus",domain:"Divine son; Monster slayer; Protector of humanity; Suffering hero; Ascends to godhood after death",parallel:"Jesus (Christian — closest structural parallel), Thor (Norse — physical monster-fighter), Samson (Hebrew — divine strength, betrayed, dies destroying enemies), Gilgamesh (Sumerian — 2/3 divine hero), Rama (Hindu — divine hero restoring order)",patterns:["Divine-Human","Suffering Hero","Monster Slayer","Ascension","Protector of Humanity"],accuracy:"high",notes:"Structural parallel to Jesus is the strongest in all of Greek mythology — and the early Church Fathers knew it. Born of Zeus (chief god) + Alcmene (mortal woman) — divine conception via Zeus visiting her in disguise. His entire life is labor and suffering in service of humanity — 12 Labors imposed as penance. Kills the monsters that threaten human civilization: Nemean Lion, Hydra, Cerberus, etc. Zeus's warrior son does the physical dirty work that Zeus himself doesn't do — exact parallel to how Yahweh operates through Jesus in Christian theology. Dies on a funeral pyre (burned alive by poisoned robe from Nessus — betrayal by someone who loved him, parallel to Judas). Ascends to Mount Olympus after death, becomes a full god, marries Hebe (goddess of youth). Justin Martyr (2nd c. CE) explicitly cited Heracles to Roman emperors: 'When we say Jesus was born of a virgin, you should compare him to Perseus. When we say he healed the sick, compare him to Asclepius. When we say he ascended to heaven, consider Heracles.' He was not embarrassed by the parallel — he used it as evidence."},
+  {name:"The Titans",pantheon:"greek",source:"Theogony (Hesiod)",domain:"Pre-Olympic gods; Primordial forces; Elder divine generation",parallel:"Watchers/Nephilim (Enoch), Jotnar (Norse), Asuras (Hindu), Anakim (Hebrew)",patterns:["Fallen Divine","Primordial","Divine Rebellion","Overthrown Older Order"],accuracy:"high",notes:"Ruled before Olympians. Kronos castrates Ouranos, Zeus overthrows Kronos. Cast into Tartarus. Exact structural parallel to fallen Watchers in Enoch — older divine order overthrown by current order, imprisoned below. The 'previous divine generation that rebelled' is one of the most consistent cross-cultural patterns."},
+  {name:"Typhon",pantheon:"greek",source:"Theogony",domain:"Primordial chaos; Storms; Father of all monsters",parallel:"Leviathan (Hebrew), Tiamat (Sumerian), Apep (Egyptian), Jormungandr (Norse), Vritra (Hindu)",patterns:["Chaos Monster","Primordial","Chaoskampf"],accuracy:"high",notes:"Last great monster Zeus defeats to establish cosmic order. Father of Cerberus, Hydra, Chimera, Sphinx, Lernaean Hydra, etc. Universal chaoskampf pattern: the sky god must defeat the chaos monster to establish/maintain order. This is one of the most documented universal mythological patterns."},
+  {name:"The Fates / Moirai",pantheon:"greek",source:"Theogony, Works and Days",domain:"Fate; Past/Present/Future; Lifespan of gods and men",parallel:"Norns (Norse — Urd/Verdandi/Skuld), Parcae (Roman), Vidyarani (Hindu), the Watchers (Enoch — fate recorders)",patterns:["Fate","Triple Goddess","Universal Pattern"],accuracy:"high",notes:"Three sisters: Clotho (spins), Lachesis (measures), Atropos (cuts) the thread of life. Even Zeus cannot override them. Triple fate goddess = one of the most universal archetypes: appears in Norse (Norns), Roman (Parcae), Celtic, Slavic, Hindu mythology independently. Number three as divine/fate number is nearly universal."},
+
+  // ── NORSE ──
+  {name:"Odin / Allfather",pantheon:"norse",source:"Prose Edda, Poetic Edda (Hávamál, Völuspá)",domain:"Wisdom; War; Death; Poetry; Runes; Shamanism (Seidr)",parallel:"El/Yahweh (Hebrew — wisdom), Zeus (Greek — chief), Mercury/Hermes (messenger aspect), Thoth (Egyptian — wisdom scribe)",patterns:["Sky Father","Chief Deity","Wisdom Seeker","Shamanic Initiation"],accuracy:"high",notes:"Hung on Yggdrasil 9 days, pierced by spear Gungnir, self-sacrifice to himself — confirmed in Hávamál (stanzas 138-141). NUANCE: This is shamanic initiation/ordeal to receive runes, not death-and-resurrection in the Christian sense. Odin existed before and after — he did not 'die.' Also sacrificed one eye for wisdom at Mimir's well. Wanderer archetype. Ravens Huginn (Thought) and Muninn (Memory) = information network."},
+  {name:"Thor",pantheon:"norse",source:"Prose Edda",domain:"Thunder; Storms; Strength; Protector of Midgard",parallel:"Zeus (Greek), Jupiter (Roman), Indra (Hindu/Vedic), Baal (Canaanite), Yahweh (Hebrew — storm), Taranis (Celtic)",patterns:["Storm God","Warrior","Protector"],accuracy:"high",notes:"Hammer Mjolnir. Protects humanity from Jotnar (giants). Red beard, enormous strength. Thursday = Thor's day. Storm + warrior god protecting humans from chaos = the most universal divine archetype across all cultures. Kills Jormungandr at Ragnarok but dies from its venom after walking 9 steps."},
+  {name:"Loki",pantheon:"norse",source:"Prose Edda, Poetic Edda",domain:"Mischief; Shapeshifting; Fire; Chaos; Engineered Baldr's death",parallel:"Ha-Satan/Adversary (Hebrew — adversarial role), Hermes (Greek — trickster), Set (Egyptian), Coyote (Native American), Anansi (West African)",patterns:["Trickster","Chaos","Fallen Divine","Shape-shifter"],accuracy:"high",notes:"Blood-brother of Odin. Engineers Baldr's death with mistletoe — the one thing that couldn't harm Baldr. Bound beneath earth (with entrails of his own son) until Ragnarok. Parents: Fenrir (wolf), Jormungandr (world serpent), Hel (goddess of dead). Gives birth to Sleipnir (Odin's 8-legged horse) as a mare. Gradual shift from mischievous to truly evil mirrors Satan's evolution."},
+  {name:"Baldr",pantheon:"norse",source:"Prose Edda (Gylfaginning)",domain:"Light; Beauty; Purity; Peace; Beloved by all",parallel:"Jesus (Christian — beloved, killed, returns), Osiris (Egyptian — beloved, killed), Apollo (Greek — light)",patterns:["Light Deity","Beloved Divine","Death"],accuracy:"med",notes:"Beloved by all gods; dreams of death prompt Frigg to make everything swear not to harm him. Loki tricks blind god Höðr into throwing mistletoe dart — kills Baldr. Descends to Hel. NUANCE: His 'resurrection' only happens AFTER Ragnarok — not a cyclic death-and-rebirth in the same way as Osiris or Inanna. His return is a post-apocalyptic new beginning, not seasonal resurrection."},
+  {name:"Freya",pantheon:"norse",source:"Prose Edda",domain:"Love; Fertility; War; Death; Seidr magic",parallel:"Aphrodite+Ares (Greek — love+war combined), Ishtar/Inanna (Sumerian — same dual nature), Asherah (Hebrew), Isis (Egyptian)",patterns:["Mother Goddess","Dark Feminine","War","Love"],accuracy:"high",notes:"Receives half the battle-dead (Odin gets other half — she chooses first). Wears Brísingamen necklace. Teaches Odin Seidr magic. Weeps golden tears for her husband Óðr. Love AND war AND death combined in one deity = exact parallel to Inanna/Ishtar. Cat-drawn chariot. Also known as Vanadís — of the Vanir (older divine race before Aesir)."},
+  {name:"Hel",pantheon:"norse",source:"Prose Edda",domain:"Ruler of Niflheim (realm of ordinary dead); Death goddess",parallel:"Hades (Greek), Ereshkigal (Sumerian), Izanami (Japanese), Osiris (Egyptian — underworld judge)",patterns:["Underworld Ruler","Death","Not Evil"],accuracy:"high",notes:"Half living flesh, half rotting corpse in appearance — half white (living), half dark blue-black (dead). Daughter of Loki. Rules those who die of illness, old age, or non-battle deaths. Not evil — neutral sovereign of the dead. The English word 'hell' derives directly from her name. Christian hell borrowed the name but transformed the concept into punishment."},
+  {name:"Jormungandr",pantheon:"norse",source:"Prose Edda",domain:"World Serpent; encircles Midgard; Thor's nemesis",parallel:"Leviathan (Hebrew), Apep (Egyptian), Typhon (Greek), Tiamat (Sumerian), Vritra (Hindu)",patterns:["Chaos Monster","Primordial Serpent","Apocalyptic"],accuracy:"high",notes:"Serpent so large it encircles the world and bites its own tail (ouroboros). Son of Loki. Kills Thor at Ragnarok — Thor kills it but dies from its venom after 9 steps. World-encircling chaos serpent threatening cosmic order = one of the most universally distributed mythological images on earth."},
+  {name:"The Norns",pantheon:"norse",source:"Prose Edda, Völuspá",domain:"Fate; Past/Present/Future; Weave destiny of all beings",parallel:"Moirai/Fates (Greek), Parcae (Roman), vidyarani (Hindu), Fates (universal)",patterns:["Fate","Triple Goddess","Universal Pattern"],accuracy:"high",notes:"Three sisters: Urðr (what was), Verðandi (what is becoming), Skuld (what shall be). Live by the Well of Urð at the base of Yggdrasil. Carve runes into the roots of the world tree — shaping fate of gods and men. Even Odin cannot override their decrees. Triple fate deity = universal archetype independently developed across cultures."},
+
+  // ── EGYPTIAN ──
+  {name:"Ra / Amun-Ra",pantheon:"egyptian",source:"Pyramid Texts, Book of the Dead, Amduat",domain:"Sun; Creation; King of Gods",parallel:"El (Hebrew), Zeus (Greek), Odin (Norse), Brahma/Surya (Hindu), Anu (Sumerian)",patterns:["Sky Father","Sun God","Chief Deity"],accuracy:"high",notes:"Solar barque crosses sky daily. Descends to underworld at night (Duat), battles Apep/Apophis, rises again each dawn. Merged with Amun to become Amun-Ra — syncretism within Egyptian religion. Solar cycle as divine narrative = universal sun god pattern. Pharaoh = son of Ra."},
+  {name:"Osiris",pantheon:"egyptian",source:"Pyramid Texts (2400 BCE), Book of the Dead",domain:"Death; Resurrection; Afterlife judge; Agriculture",parallel:"Jesus (Christian — death and resurrection), Dionysus (Greek), Baldr (Norse), Inanna (Sumerian), Tammuz (Sumerian)",patterns:["Dying & Rising God","Underworld Ruler","Agriculture","Judge of Dead"],accuracy:"high",notes:"Killed by Set, dismembered, reassembled and resurrected by Isis. Becomes ruler of afterlife. Judges the dead in Hall of Two Truths. Osiris resurrection narrative confirmed from Pyramid Texts (~2400 BCE) — predates Christianity by 2,400+ years. Ancient Greeks equated Osiris with Dionysus as early as Herodotus (5th c. BCE). One of the most robustly documented dying-and-rising gods."},
+  {name:"Isis",pantheon:"egyptian",source:"Pyramid Texts",domain:"Magic; Motherhood; Healing; Resurrection of Osiris",parallel:"Asherah (Hebrew), Demeter (Greek), Frigg (Norse), Parvati (Hindu), Virgin Mary (Christian — iconographic parallel)",patterns:["Mother Goddess","Divine Feminine","Magic","Resurrection"],accuracy:"high",notes:"Resurrects Osiris through magic. Mother of Horus. Conceives Horus posthumously via magic phallus — the divine conception parallel. Isis cult spread throughout Roman Empire (1st-4th c. CE) directly competing with early Christianity. Iconography: Isis nursing Horus influenced Madonna-and-child imagery. Some scholars argue direct influence on Christianity; others see independent parallel development."},
+  {name:"Horus",pantheon:"egyptian",source:"Pyramid Texts",domain:"Sky; Kingship; Avenging son; Sun",parallel:"Apollo (Greek), Jesus (Christian — son of god, restores divine order)",patterns:["Solar Deity","Divine Son","Warrior"],accuracy:"high",notes:"Son of Osiris and Isis. Born to avenge his father against Set. Eye of Horus (wadjet). Living pharaoh = Horus; dead pharaoh = Osiris. Born of divine father who was killed + magical/divine mother. Battles Set in cosmic contest. The 'son of god who avenges the father' is a real structural parallel to NT themes — though specific claims (born Dec 25, 12 disciples, etc.) attributed to Horus are NOT historically documented."},
+  {name:"Set / Seth",pantheon:"egyptian",source:"Pyramid Texts, Book of the Dead",domain:"Chaos; Desert; Storms; War; Protector of Ra's barque",parallel:"Satan (Hebrew), Loki (Norse), Ahriman (Zoroastrian), Typhon (Greek — sometimes merged)",patterns:["Chaos","Trickster","Not Purely Evil","Storm"],accuracy:"high",notes:"Kills Osiris. God of desert, chaos, and storms. IMPORTANT NUANCE: Set is NOT purely evil in original Egyptian religion — he protects Ra's solar barque from Apep each night, a vital cosmic function. Only progressively demonized in later periods, especially after Hyksos (foreign rulers) were associated with Set. Exact parallel to Satan's evolution: cosmic adversary/chaos agent → pure evil."},
+  {name:"Thoth",pantheon:"egyptian",source:"Book of the Dead, Pyramid Texts",domain:"Writing; Wisdom; Magic; Moon; Records of souls' judgment",parallel:"Hermes (Greek), Mercury (Roman), Gabriel (Hebrew), Metatron (Enoch)",patterns:["Divine Messenger","Celestial Scribe","Wisdom","Moon"],accuracy:"high",notes:"Ibis head or baboon form. Records the weighing of the heart against Ma'at's feather in Hall of Two Truths. Invented hieroglyphs. Settles dispute between Horus and Set. Merged with Hermes by Greeks = Hermes Trismegistus — foundational to Hermeticism, Gnosticism, Alchemy, and Western esoteric tradition. The divine scribe archetype is universal (cf. Metatron, Thoth, Nabu in Babylonia)."},
+  {name:"Anubis",pantheon:"egyptian",source:"Book of the Dead",domain:"Embalming; Death; Guiding souls to underworld",parallel:"Hermes Psychopomp (Greek), Izanami (Japanese), Yama (Hindu/Buddhist), Hermod (Norse — messenger to Hel)",patterns:["Psychopomp","Underworld","Death Guardian"],accuracy:"high",notes:"Jackal head. Guards the tomb. Weighs the heart against Ma'at's feather. Guides souls through Duat. Son of Osiris. Embalming as sacred ritual — preserving body for resurrection. Psychopomp (soul guide) archetype is universal: appears in all cultures that have developed concepts of afterlife."},
+  {name:"Apep / Apophis",pantheon:"egyptian",source:"Book of the Dead, Amduat",domain:"Chaos; Darkness; Eternal enemy of Ra; Primordial serpent",parallel:"Leviathan (Hebrew), Typhon (Greek), Jormungandr (Norse), Tiamat (Sumerian)",patterns:["Chaos Monster","Primordial Serpent","Never Permanently Defeated"],accuracy:"high",notes:"Eternal enemy of Ra. Attacks solar barque nightly in underworld. UNIQUE ASPECT: Never permanently defeated — chaos perpetually threatens cosmic order and must be constantly overcome. This 'ongoing battle against chaos' is different from Norse (Ragnarok = final defeat) and Hebrew (Leviathan = final eschatological battle). Egyptian chaos is cyclical, not apocalyptic."},
+
+  // ── SUMERIAN / BABYLONIAN ──
+  {name:"Anu",pantheon:"sumerian",source:"Enuma Elish, Sumerian king lists",domain:"Sky; Heaven; Chief God; Father of all gods",parallel:"El (Hebrew), Zeus (Greek), Odin (Norse), Brahma (Hindu)",patterns:["Sky Father","Chief Deity","Divine Council"],accuracy:"high",notes:"Highest Sumerian deity. Father of all gods. 'An' = sky in Sumerian. Divine council (Anunnaki = 'those who came from heaven to earth') meets in his presence. Later eclipsed by Enlil, then Marduk. The sky-father-above-other-gods structure is found universally — Anu is one of the earliest documented examples."},
+  {name:"Enlil",pantheon:"sumerian",source:"Enuma Elish, Atrahasis Epic, Sumerian Flood Story",domain:"Wind; Storm; Earth; Kingship; Sent the Great Flood",parallel:"Zeus (Greek), Yahweh (Hebrew), Thor (Norse), Baal (Canaanite)",patterns:["Storm God","Flood Sender","Chief Deity (middle period)"],accuracy:"high",notes:"Sends the Great Flood to destroy humanity — Utnapishtim (Noah parallel) survives. Storm god who holds 'Tablets of Destiny.' The Atrahasis Epic flood narrative predates Genesis by ~1,000 years — confirmed by archaeology. Enlil is specifically the flood-sender in Sumerian tradition; Enki opposes him by warning Utnapishtim."},
+  {name:"Enki / Ea",pantheon:"sumerian",source:"Enuma Elish, Atrahasis, Descent of Inanna",domain:"Wisdom; Fresh water; Magic; Creation; Warns humans of flood",parallel:"Poseidon (Greek — water), Thoth (Egyptian — wisdom), Prometheus (Greek — benefits humanity), Neptune (Roman)",patterns:["Sea/Water God","Wisdom","Forbidden Knowledge Bringer","Trickster-Benefactor"],accuracy:"high",notes:"God of fresh water (Abzu = underground freshwater). Warns Utnapishtim of flood against Enlil's wishes — saves humanity. Created humans from clay mixed with divine blood. Trickster-benefactor who protects humanity from harsher divine decisions. Sends rescue to Inanna in underworld. Template for Prometheus narrative — benevolent divine rebel who helps humans."},
+  {name:"Inanna / Ishtar",pantheon:"sumerian",source:"Descent of Inanna (3rd millennium BCE), Epic of Gilgamesh",domain:"Love; War; Fertility; Underworld descent and resurrection",parallel:"Aphrodite+Ares (Greek — love+war), Isis (Egyptian), Freya (Norse), Astarte (Canaanite)",patterns:["Mother Goddess","War","Dying & Rising (Confirmed)","Love+War Duality"],accuracy:"high",notes:"CONFIRMED dying-and-rising: Descends to underworld (Kur), stripped of regalia at each of 7 gates, killed by Ereshkigal and hung on hook, resurrected after 3 days by Enki's messengers with food and water of life. Dumuzi sent as replacement — spends half year underground (seasonal myth). Dated to ~2100 BCE minimum — predates Christianity by 2,100+ years. Also love AND war simultaneously — like Freya, Ishtar."},
+  {name:"Tiamat",pantheon:"sumerian",source:"Enuma Elish (Babylonian creation epic)",domain:"Primordial saltwater chaos; Dragonmother; Creation through defeat",parallel:"Leviathan (Hebrew), Typhon (Greek), Apep (Egyptian), Jormungandr (Norse)",patterns:["Chaos Monster","Primordial","Creation from Chaos (Chaoskampf)"],accuracy:"high",notes:"Primordial salt water. Mother of all gods (including Anu). Marduk defeats her, splits her body — sky from upper half, earth from lower half. 'Chaoskampf' (German: chaos-battle) — creation emerging from defeat of chaos monster. Genesis 1 shows parallel: 'tehom' (deep/abyss) derives from same Semitic root as 'Tiamat.' The waters of chaos in Genesis echo Tiamat narrative."},
+  {name:"Marduk",pantheon:"sumerian",source:"Enuma Elish",domain:"Creation; Chief Babylonian God; Defeats Tiamat",parallel:"Zeus (Greek), Yahweh (Hebrew), Amun-Ra (Egyptian)",patterns:["Sky Father","Chaos Slayer","Chief Deity","Creator"],accuracy:"high",notes:"Defeats Tiamat, creates world. Becomes chief Babylonian deity after this victory. The Enuma Elish parallels Genesis 1 in sequence — both begin with watery chaos, both create in stages. Scholarly consensus: Genesis reflects awareness of this tradition, likely adapted/responded to it during Babylonian exile. Marduk's rise to chief god mirrors Yahweh's absorption of El's attributes."},
+  {name:"Gilgamesh",pantheon:"sumerian",source:"Epic of Gilgamesh (~2100 BCE in written form; oral tradition older)",domain:"Heroic king; 2/3 divine; Seeks immortality; Flood connection",parallel:"Heracles (Greek), Samson (Hebrew), Achilles (Greek), Enkidu (companion = Patroclus parallel)",patterns:["Divine-Human Hybrid","Hero","Immortality Quest"],accuracy:"high",notes:"2/3 god, 1/3 human. Meets flood survivor Utnapishtim (Noah). Receives plant of immortality — snake steals it. Snake stealing immortality = direct parallel to Eden serpent taking immortality from humans (Genesis 3:22), predating Genesis by ~1,000 years. Friend Enkidu dies, spurring quest for immortality. Friendship+death+quest narrative parallels Achilles/Patroclus."},
+
+  // ── JAPANESE (SHINTO) ──
+  {name:"Izanagi",pantheon:"japanese",source:"Kojiki (712 CE), Nihon Shoki (720 CE)",domain:"Creation; Sky; Male principle; Father of Japanese islands",parallel:"El (Hebrew), Zeus (Greek), Odin (Norse), Brahma (Hindu)",patterns:["Sky Father","Creator","Chief Deity"],accuracy:"high",notes:"With Izanami created Japanese islands by stirring primordial ocean with jeweled spear. Descended to underworld (Yomi) to retrieve Izanami — fled when he saw her rotting. Purification ritual upon return: washing his left eye = Amaterasu (sun), right eye = Tsukuyomi (moon), nose = Susanoo (storm). The creator-couple is universal: Izanagi+Izanami parallel Enki+Ninhursag, Adam+Eve, Ouranos+Gaia."},
+  {name:"Amaterasu",pantheon:"japanese",source:"Kojiki",domain:"Sun; Universe; Imperial lineage; Light",parallel:"Ra (Egyptian), Apollo (Greek), Surya (Hindu), Lugh (Celtic)",patterns:["Sun God","Chief Deity","Divine Feminine (solar)"],accuracy:"high",notes:"Ruler of Heaven (Takamagahara). Japanese imperial family claims divine descent from her. Hid in cave after Susanoo's rampage — world went dark, gods used raucous celebration to lure her out. Female solar deity is less common but not unique (also Arinna in Hittite religion). The 'sun hides, world darkens, must be coaxed out' narrative parallels Ra vs Apep."},
+  {name:"Susanoo",pantheon:"japanese",source:"Kojiki",domain:"Storms; Sea; Chaos; Poetry; Defeats Yamata no Orochi",parallel:"Loki (Norse), Set (Egyptian), Baal (Canaanite — storm+chaos), Thor (Norse — monster slayer)",patterns:["Storm God","Trickster","Chaos","Monster Slayer"],accuracy:"high",notes:"Banished from Heaven for chaos (weeping caused crops to die, mountains to crumble). Expelled to earth, defeats 8-headed serpent Yamata no Orochi — finds the sword Kusanagi inside its tail (one of three imperial treasures). Wrote first waka poem after this victory. Trickster who causes chaos but defeats a greater chaos monster — mirrors Loki's complexity before his full corruption."},
+  {name:"Izanami",pantheon:"japanese",source:"Kojiki",domain:"Death; Underworld (Yomi); Creation co-creator",parallel:"Hel (Norse), Ereshkigal (Sumerian), Persephone (Greek), Hecate (Greek)",patterns:["Underworld Ruler","Dark Feminine","Death"],accuracy:"high",notes:"Co-creator with Izanagi. Died giving birth to fire god Kagutsuchi (killed immediately by Izanagi in grief). Became ruler of Yomi (underworld). Izanagi's visit = direct Orpheus parallel — looking at the forbidden, fleeing. When rejected, vowed to kill 1,000 people daily; Izanagi vowed to create 1,500 births daily — explains death rate. Creator-turned-death-deity is a consistent archetype."},
+  {name:"Raijin & Fujin",pantheon:"japanese",source:"Kojiki, Buddhist tradition",domain:"Thunder/Lightning (Raijin) and Wind (Fujin)",parallel:"Thor (Norse), Zeus (Greek), Indra (Hindu), Baal (Canaanite), Jupiter (Roman)",patterns:["Storm God","Thunder","Paired Storm Deities"],accuracy:"high",notes:"Raijin: drums thunder, often depicted as demon-like. Fujin: carries enormous bag of winds. Paired thunder-wind deities reflect how storms were understood as two separate forces. Storm deities are the most universally present divine archetype — every agricultural civilization needed to explain rain, lightning, and wind."},
+
+  // ── HINDU ──
+  {name:"Brahma",pantheon:"hindu",source:"Rigveda (as Brahmanaspati/Prajapati), Puranas",domain:"Creation; Knowledge; Four Vedas",parallel:"El (Hebrew), Anu (Sumerian), Zeus (Greek)",patterns:["Creator","Sky Father","Knowledge"],accuracy:"high",notes:"Creator of universe. Four heads, each reciting one Veda. Part of Trimurti with Vishnu (preserver) and Shiva (destroyer). Notably worshipped at far fewer temples than Vishnu or Shiva — myths explain a curse reduced his worship. The creator god often receives less worship than the sustainer or destroyer — a pattern in Hindu religious history."},
+  {name:"Vishnu",pantheon:"hindu",source:"Rigveda, Puranas",domain:"Preservation; Protection; 10 Avatars (Dashavatara)",parallel:"Osiris (Egyptian — death/resurrection), Jesus (Christian — incarnation), Horus (Egyptian — divine restorer)",patterns:["Preserver","Incarnation","Avatar"],accuracy:"high",notes:"10 avatars incarnate to restore dharma when cosmic order is threatened. Krishna and Rama are avatars. The concept of god taking human form to restore cosmic order predates Christianity's incarnation theology. Fish (Matsya), Turtle (Kurma), Boar (Varaha), Half-lion (Narasimha), Dwarf (Vamana), Rama, Krishna, Buddha (in some lists), and Kalki (future). Avatar = 'descent' in Sanskrit."},
+  {name:"Shiva",pantheon:"hindu",source:"Rigveda as Rudra, Puranas",domain:"Destruction; Transformation; Time; Asceticism; Cosmic dance",parallel:"Odin (Norse — wisdom through ordeal), Hades (Greek — death ruler), Set (Egyptian — chaos-transform), Dionysus (Greek — ecstasy)",patterns:["Destroyer","Transformer","Wisdom Through Suffering","Cosmic"],accuracy:"high",notes:"Destroyer of the universe — but destruction enables recreation. Meditating ascetic on Mount Kailash. Nataraja: cosmic dancer whose dance maintains the universe. Third eye. Holds Ganges in his hair. Simultaneous: terrifying (Rudra form), benevolent (Shankara), erotic (Lingam). Contradiction as divinity = more theologically sophisticated than simple good/evil dualism."},
+  {name:"Indra",pantheon:"hindu",source:"Rigveda (most mentioned deity)",domain:"Thunder; War; Rain; King of gods (Vedic period)",parallel:"Zeus (Greek), Thor (Norse), Baal (Canaanite), Yahweh (Hebrew — storm), Enlil (Sumerian)",patterns:["Storm God","Chief Deity (Vedic)","Warrior","Later Displaced"],accuracy:"high",notes:"Most mentioned deity in Rigveda — ~250 hymns. Thunder weapon Vajra (lightning bolt). Kills cosmic serpent Vritra (chaoskampf pattern) releasing cosmic waters. Later displaced by Trimurti (Brahma/Vishnu/Shiva). Storm god as original chief deity progressively superseded = exact pattern as Baal→Yahweh, Kronos→Zeus, Enlil→Marduk. Universal transition narrative."},
+  {name:"Kali",pantheon:"hindu",source:"Devi Mahatmya (~5th-6th c. CE), Puranas",domain:"Time; Death; Destruction; Liberation; Dark manifestation of Devi",parallel:"Hel (Norse), Ereshkigal (Sumerian), Morrigan (Celtic), Hecate (Greek)",patterns:["Dark Feminine","Death","Destroyer","Liberation"],accuracy:"high",notes:"Tongue out, skull garland, severed heads. Emerges from Durga's forehead in battle-rage. Dances on Shiva's chest. IMPORTANT NUANCE: Kali is not simply evil — she destroys evil and grants liberation (moksha). Dark feminine destroyer who simultaneously liberates = same complex archetype as Morrigan, Ereshkigal, Hecate. The 'terrible mother' is a universal Jungian archetype with documented cross-cultural presence."},
+  {name:"The Asuras",pantheon:"hindu",source:"Rigveda, Puranas",domain:"Anti-gods; Powerful beings in cosmic opposition to Devas",parallel:"Titans (Greek), Jotnar (Norse), Watchers/Nephilim (Enoch), Fallen Angels",patterns:["Fallen Divine","Divine Rebellion","Chaos"],accuracy:"high",notes:"Originally 'asura' meant powerful divine being (same root as 'Ahura' in Zoroastrian Ahura Mazda). Gradually differentiated from Devas (gods) into adversaries. Churning of cosmic ocean (Samudra Manthan): Asuras and Devas cooperate to produce amrita (immortality nectar), then Asuras are deceived. The 'former gods become adversaries' = exact pattern as Titans, Jotnar, and fallen Watchers."},
+
+  // ── CELTIC ──
+  {name:"The Dagda",pantheon:"celtic",source:"Irish mythology, Lebor Gabála Érenn (Book of Invasions)",domain:"Agriculture; Wisdom; Weather; Time; Magic club that kills and resurrects",parallel:"El (Hebrew), Zeus (Greek), Odin (Norse), Brahma (Hindu)",patterns:["Sky Father","Chief Deity","Abundance"],accuracy:"high",notes:"Father of the Tuatha Dé Danann (Irish gods). Magic cauldron of plenty (nobody leaves unsatisfied). Club: one end kills, other resurrects. Harp controls seasons. All-father with abundance, time, and resurrection power = universal sky father archetype. Also associated with feasting and excess — earthy, unlike the refined Olympians."},
+  {name:"The Morrigan",pantheon:"celtic",source:"Irish mythology, Ulster Cycle",domain:"War; Death; Fate; Shapeshifting; Prophecy; Sovereignty",parallel:"Kali (Hindu), Freya (Norse), Ishtar (Sumerian), Sekhmet (Egyptian)",patterns:["Dark Feminine","War","Fate","Prophecy"],accuracy:"high",notes:"Triple goddess (Badb, Macha, Nemain/Anand — three aspects). Crow form. Appears before battle to prophesy death. Propositions heroes — rejection = death prophecy. Sovereignty goddess: kings must ritually 'marry' the land through her. Sexual AND martial AND prophetic simultaneously = same complex archetype as Inanna/Freya/Kali."},
+  {name:"Lugh",pantheon:"celtic",source:"Irish mythology, Cath Maige Tuired",domain:"Sun; Crafts; Skills; Many arts simultaneously; War leader",parallel:"Apollo (Greek), Baldr (Norse), Horus (Egyptian), Surya (Hindu)",patterns:["Sun God","Multi-Skilled","Warrior"],accuracy:"high",notes:"'Lugh of the Long Arm' or 'Lugh Lamhfhada.' Unique entry qualification: master of ALL crafts simultaneously, not just one. Lughnasadh harvest festival (August 1) named for him. Father of Cú Chulainn (divine+mortal hero = demigod pattern). Kills his grandfather Balor of the Evil Eye. Solar warrior = universal archetype."},
+  {name:"Brigid",pantheon:"celtic",source:"Irish mythology; Christianized as St. Brigid of Kildare",domain:"Healing; Poetry; Smithcraft; Spring",parallel:"Athena (Greek — wisdom+craft), Saraswati (Hindu — arts), Minerva (Roman), Hephaestus (Greek — smithcraft)",patterns:["Wisdom","Healer","Divine Feminine","Syncretized"],accuracy:"high",notes:"Triple goddess of three crafts: healing, poetry, smithcraft. Imbolc festival (February 1). DOCUMENTED SYNCRETISM: Christianized as St. Brigid of Ireland — pagan goddess directly converted to Christian saint, keeping her feast day and sacred flame at Kildare. Clear documented example of pagan→Christian religious absorption. Her feast day became Candlemas in the Christian calendar."},
+  {name:"Cernunnos",pantheon:"celtic",source:"Gaulish archaeology; Pillar of the Boatmen (Paris, 1st c. CE); Gundestrup Cauldron",domain:"Animals; Fertility; Wild places; Wealth; Underworld connection",parallel:"Pan (Greek), Faunus (Roman), Green Man (universal nature deity)",patterns:["Nature","Fertility","Wild Places","Demonized"],accuracy:"med",notes:"Antlered seated figure surrounded by animals. Name appears ONLY ONCE in ancient sources (Pillar of the Boatmen). We know almost nothing about his mythology. NUANCE on demonization claim: Some scholars support Christian iconography incorporating horned pagan deities into Satan imagery. However, historians like Ronald Hutton note the 'unified Horned God' is largely a modern Neopagan/Wiccan construct — ancient Celts had multiple horned gods, not one unified archetype. The Cernunnos→Satan pipeline is plausible but contested."},
+
+  // ── ZOROASTRIAN / PERSIAN ──
+  {name:"Ahura Mazda",pantheon:"other",source:"Avesta (Zoroastrian scriptures, ~1500-500 BCE)",domain:"Truth; Light; Creation; Supreme God; Cosmic Good",parallel:"El/Yahweh (Hebrew), Zeus (Greek), Amun-Ra (Egyptian)",patterns:["Sky Father","Chief Deity","Light","Good Principle"],accuracy:"high",notes:"Supreme deity of Zoroastrianism. Creator of cosmic order (Asha = truth/righteousness). CONFIRMED INFLUENCE ON JUDAISM: During/after Babylonian exile (586-538 BCE), Jews had sustained contact with Persian Zoroastrianism. Scholarly consensus: Judaism's developed angelology, evolved Satan from adversary to cosmic evil, eschatology (heaven/hell, final judgment), and resurrection all show Zoroastrian parallel. Zoroastrianism is the 'missing link' explaining the jump from early Hebrew religion to post-exilic Judaism."},
+  {name:"Ahriman / Angra Mainyu",pantheon:"other",source:"Avesta",domain:"Evil; Darkness; Lies; Chaos; Cosmic adversary of Ahura Mazda",parallel:"Satan/Cosmic Evil (post-exilic Hebrew), Set (Egyptian), Loki (Norse)",patterns:["Chaos","Evil Principle","Cosmic Dualism"],accuracy:"high",notes:"Supreme evil force opposing Ahura Mazda. Cosmic dualism: good vs evil as fundamental cosmological opposites — NOT originally in Hebrew religion (early Hebrew religion has no cosmic evil figure, just 'Ha-Satan' as divine prosecutor). THIS is the mechanism: Zoroastrian cosmic dualism entered Judaism during Persian exile, transforming Ha-Satan from a divine court official into a cosmic evil figure. Confirmed by most scholars as the key turning point in Satan's theological evolution."},
+  {name:"Mithra / Mithras",pantheon:"other",source:"Avesta (Persian); Roman Mithraism (mystery cult, 1st-4th c. CE)",domain:"Sun; Contracts; Justice; War (Roman cult); Bull-slayer",parallel:"Apollo (Greek — solar), Sol Invictus (Roman), Surya (Hindu)",patterns:["Sun God","Mystery Cult","Contracts/Justice"],accuracy:"med",notes:"MAJOR CORRECTION FROM V1: Born from ROCK (petra genetrix), NOT a virgin. No confirmed December 25 birth in ancient sources — that date belonged to Sol Invictus, a separate Roman deity (though sometimes conflated with Mithras in late Mithraism). No confirmed 12 disciples. No confirmed resurrection narrative. No virgin birth. Claims of Jesus-Mithras parallel are largely internet mythology rejected by classicists Roger Beck and David Ulansey. WHAT IS CONFIRMED: Sacred meal ✅, Bull slaying (tauroctony) ✅, Mystery cult competing with Christianity ✅, solar associations ✅."},
+
+  // ── ISLAMIC ──
+  {name:"Iblis / Shaytan",pantheon:"other",source:"Quran (multiple surahs)",domain:"Pride; Temptation; Cosmic adversary; Refuses to bow to Adam",parallel:"Satan (Hebrew), Loki (Norse — adversarial), Ahriman (Zoroastrian)",patterns:["Fallen Divine","Trickster","Pride"],accuracy:"high",notes:"Quran: Iblis is a JINN (made of smokeless fire), NOT an angel (made of light) — this is a key distinction from Christian Satan. Refused Allah's command to bow before Adam — pride. Given permission to tempt humanity until Day of Judgment. Interesting theological nuance: in Islam, Iblis's rebellion was against divine authority's command to honor humanity, not against God himself."},
+  {name:"The Jinn",pantheon:"other",source:"Quran; pre-Islamic Arabian tradition",domain:"Parallel civilization of beings made from smokeless fire; various moral natures",parallel:"Spirits (universal), Devas/Asuras (Hindu), Angels/Demons (Christian), nature spirits",patterns:["Parallel Beings","Supernatural"],accuracy:"high",notes:"Entire parallel civilization — can be Muslim or non-Muslim, benevolent or malevolent. NOT angels (light) and NOT humans (clay) — third ontological category. Solomon controlled jinn (mentioned in Quran) — connects to Book of Solomon's demonic hierarchy. The concept of morally varied supernatural beings parallel to humanity = found in many traditions (Celtic faeries, Hindu spirits, Japanese kami)."},
+
+  // ── MESOAMERICAN ──
+  {name:"Quetzalcoatl",pantheon:"other",source:"Aztec/Toltec mythology; Florentine Codex",domain:"Creation; Wind; Learning; Writing; Feathered Serpent; Gave maize to humans",parallel:"Prometheus (Greek), Enki (Sumerian), Thoth (Egyptian — scribe), Kukulkan (Maya equivalent)",patterns:["Creator","Forbidden Knowledge Bringer","Serpent","Teacher"],accuracy:"high",notes:"Feathered serpent. Gave humans maize, writing, arts, and calendar. Left (in exile or shame) and promised to return from the east — Aztecs initially interpreted Cortés's arrival as his return. Divine teacher-serpent who gives humanity knowledge and civilization = Prometheus/Enki/Azazel archetype — independently developed in Mesoamerica with no contact with Old World traditions."},
+  {name:"Tezcatlipoca",pantheon:"other",source:"Aztec mythology; Florentine Codex",domain:"Night; Sorcery; Conflict; Earth; Smoking Mirror (sees all)",parallel:"Loki (Norse), Set (Egyptian), Ahriman (Zoroastrian), Satan (Hebrew — adversarial)",patterns:["Trickster","Chaos","Dark Divine","Cosmic Adversary"],accuracy:"high",notes:"'Smoking Mirror' (obsidian mirror that reveals truth). Lord of night sky. Jaguar associations. Enemy of Quetzalcoatl — tricked him into drunkenness and incest, causing his exile. This adversarial pairing (light/civilizing vs darkness/chaos) independently mirrors Ahura Mazda/Ahriman, Horus/Set, Yahweh/Satan, Ra/Apep. Cross-cultural independently developed cosmic dualism."},
+];
+
+function getPClass(p) {
+  const m = {hebrew:'p-hebrew',christian:'p-christian',greek:'p-greek',roman:'p-roman',norse:'p-norse',japanese:'p-japanese',egyptian:'p-egyptian',sumerian:'p-sumerian',hindu:'p-hindu',celtic:'p-celtic',enoch:'p-enoch',solomon:'p-solomon',other:'p-other'};
+  return m[p]||'p-other';
+}
+function getAccBadge(a) {
+  if(a==='high') return '<span class="acc acc-high">Verified</span>';
+  if(a==='med') return '<span class="acc acc-med">Nuanced</span>';
+  return '<span class="acc acc-fix">Corrected</span>';
+}
+
+let currentFilter='all', currentSearch='';
+
+function render(rows) {
+  const tb=document.getElementById('tableBody');
+  tb.innerHTML='';
+  rows.forEach(d=>{
+    const tr=document.createElement('tr');
+    const pc=getPClass(d.pantheon);
+    tr.innerHTML=`
+      <td class="name-cell ${pc}">${d.name}</td>
+      <td style="font-size:11px;color:var(--text-dim);">${d.source}</td>
+      <td style="font-size:12.5px;">${d.domain}</td>
+      <td class="parallel-cell">${d.parallel}</td>
+      <td>${d.patterns.map(p=>`<span class="pattern-tag">${p}</span>`).join('')}</td>
+      <td class="note-cell">${d.notes}</td>
+    `;
+    tb.appendChild(tr);
+  });
+  document.getElementById('resultCount').textContent=`Showing ${rows.length} of ${VERIFIED.length} entries`;
+}
+
+function applyFilters() {
+  let rows=VERIFIED;
+  if(currentFilter!=='all') rows=rows.filter(d=>d.pantheon===currentFilter);
+  if(currentSearch){
+    const q=currentSearch.toLowerCase();
+    rows=rows.filter(d=>
+      d.name.toLowerCase().includes(q)||
+      d.domain.toLowerCase().includes(q)||
+      d.patterns.some(p=>p.toLowerCase().includes(q))||
+      d.parallel.toLowerCase().includes(q)||
+      d.notes.toLowerCase().includes(q)
+    );
+  }
+  render(rows);
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter=btn.dataset.filter;
+    applyFilters();
+  });
+});
+document.getElementById('searchInput').addEventListener('input',e=>{
+  currentSearch=e.target.value;
+  applyFilters();
+});
+
+render(VERIFIED);
+</script>
+</body>
+</html>
