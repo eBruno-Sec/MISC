@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>祭り — Japan Festival Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+:root {
+  --red:       #C1392D;
+  --ink:       #0E0B08;
+  --paper:     #F7F2E8;
+  --gold:      #B8840A;
+  --gold-pale: #F0D080;
+  --muted:     #8A7A60;
+  --line:      rgba(139,120,80,0.18);
+  --mono: 'DM Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'Courier New', monospace;
+  --serif: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', Georgia, serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{background:var(--ink);color:var(--paper);font-family:var(--mono);overflow-x:hidden;min-height:100vh;-webkit-font-smoothing:antialiased;font-size:16px;}
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");pointer-events:none;z-index:50;opacity:0.6;}
+
+/* HEADER */
+header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:28px 48px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--ink);z-index:100;gap:24px;}
+.header-left{display:flex;align-items:center;gap:16px;}
+.torii svg{width:36px;height:36px;}
+.site-title{font-family:var(--serif);font-size:26px;font-weight:800;color:var(--paper);}
+.site-title span{color:var(--red);}
+.site-jp{font-family:var(--serif);font-size:12px;color:var(--muted);letter-spacing:4px;display:block;margin-top:2px;}
+.header-center{text-align:center;}
+.year-badge{font-family:var(--serif);font-size:13px;font-weight:600;letter-spacing:5px;color:var(--gold-pale);border:1px solid var(--line);padding:8px 20px;white-space:nowrap;}
+.header-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;}
+.filter-btn{background:transparent;border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 16px;cursor:pointer;transition:all 0.2s;}
+.filter-btn:hover,.filter-btn.active{border-color:var(--red);color:var(--red);}
+.filter-btn.active{background:rgba(193,57,45,0.08);}
+
+/* HERO */
+.hero-banner{padding:60px 48px 44px;position:relative;overflow:hidden;border-bottom:1px solid var(--line);}
+.hero-banner::before{content:'祭';position:absolute;font-family:var(--serif);font-size:380px;font-weight:800;color:rgba(193,57,45,0.04);right:-10px;top:-50px;line-height:1;user-select:none;pointer-events:none;}
+.hero-tagline{font-family:var(--serif);font-size:clamp(42px,6vw,80px);font-weight:800;line-height:1.05;max-width:700px;}
+.hero-tagline em{font-style:normal;color:var(--red);}
+.hero-sub{margin-top:18px;font-size:15px;color:var(--muted);letter-spacing:0.3px;line-height:1.8;max-width:480px;}
+.hero-stats{display:flex;gap:48px;margin-top:40px;}
+.stat{display:flex;flex-direction:column;gap:4px;}
+.stat-num{font-family:var(--serif);font-size:38px;font-weight:800;color:var(--paper);line-height:1;}
+.stat-label{font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;}
+
+/* CONTROLS */
+.controls{display:flex;align-items:center;padding:0 48px;border-bottom:1px solid var(--line);background:var(--ink);position:sticky;top:var(--header-h, 93px);z-index:90;}
+.search-wrap{flex:1;display:flex;align-items:center;gap:14px;border-right:1px solid var(--line);padding:16px 0;}
+.search-icon{color:var(--muted);font-size:14px;flex-shrink:0;}
+.search-input{flex:1;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:14px;color:var(--paper);letter-spacing:0.3px;}
+.search-input::placeholder{color:var(--muted);}
+.month-nav{display:flex;align-items:center;gap:2px;padding:0 18px;overflow-x:auto;scrollbar-width:none;}
+.month-nav::-webkit-scrollbar{display:none;}
+.month-pill{background:transparent;border:none;color:var(--muted);font-family:var(--mono);font-size:12px;letter-spacing:1px;padding:7px 11px;cursor:pointer;white-space:nowrap;transition:all 0.18s;border-radius:2px;}
+.month-pill:hover{color:var(--paper);}
+.month-pill.active{background:var(--red);color:white;}
+
+/* LAYOUT */
+.main{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 200px);}
+
+/* SIDEBAR */
+.sidebar{border-right:1px solid var(--line);padding:28px 0;position:sticky;top:var(--stack-h, 147px);height:calc(100vh - var(--stack-h, 147px));overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+.sidebar-section{padding:0 24px 24px;border-bottom:1px solid var(--line);margin-bottom:24px;}
+.sidebar-label{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+.region-btn{display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:none;color:var(--paper);font-family:var(--mono);font-size:13px;text-align:left;padding:8px 10px;cursor:pointer;transition:all 0.18s;border-radius:2px;letter-spacing:0.3px;}
+.region-btn:hover{background:rgba(255,255,255,0.04);}
+.region-btn.active{color:var(--red);background:rgba(193,57,45,0.08);}
+.type-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:10px;flex-shrink:0;}
+
+/* FESTIVAL LIST */
+.content{padding:0;}
+.month-header{display:grid;grid-template-columns:80px 1fr;align-items:center;padding:22px 48px;border-bottom:1px solid var(--line);position:sticky;top:var(--stack-h, 147px);background:var(--ink);z-index:10;gap:20px;}
+.month-num{font-family:var(--serif);font-size:52px;font-weight:800;color:var(--red);line-height:1;opacity:0.6;}
+.month-name-en{font-family:var(--serif);font-size:24px;font-weight:600;color:var(--paper);}
+.month-name-jp{font-size:12px;color:var(--muted);letter-spacing:3px;}
+
+.festival-list{padding:4px 0 10px;}
+.festival-row{display:grid;grid-template-columns:170px 1fr auto;align-items:start;gap:28px;padding:22px 48px;border-bottom:1px solid var(--line);transition:background 0.15s;cursor:pointer;position:relative;animation:fadeIn 0.3s ease both;}
+.festival-row::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--red);transform:scaleY(0);transform-origin:top;transition:transform 0.2s;}
+.festival-row:hover{background:rgba(255,255,255,0.025);}
+.festival-row:hover::before{transform:scaleY(1);}
+
+.festival-date{display:flex;flex-direction:column;gap:4px;padding-top:3px;}
+.date-range{font-family:var(--mono);font-size:14px;color:var(--gold-pale);letter-spacing:0.4px;line-height:1.5;}
+.date-duration{font-size:11px;color:var(--muted);letter-spacing:0.4px;margin-top:2px;}
+
+.festival-info{display:flex;flex-direction:column;gap:5px;}
+.festival-name-en{font-family:var(--serif);font-size:22px;font-weight:600;color:var(--paper);line-height:1.2;}
+.festival-name-jp{font-size:13px;color:var(--muted);letter-spacing:3px;font-family:var(--serif);}
+.festival-meta{display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;}
+.festival-location{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+.festival-location::before{content:'⊙';color:var(--red);font-size:10px;}
+.tag{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;padding:3px 9px;border:1px solid;border-radius:2px;}
+.tag-fire   {border-color:#E06030;color:#E06030;}
+.tag-water  {border-color:#5090C0;color:#5090C0;}
+.tag-parade {border-color:#9060C0;color:#9060C0;}
+.tag-harvest{border-color:#60A050;color:#60A050;}
+.tag-lantern{border-color:#E0A030;color:#E0A030;}
+.tag-shrine {border-color:#C03060;color:#C03060;}
+.tag-snow   {border-color:#80B0D0;color:#80B0D0;}
+.tag-dance  {border-color:#D06090;color:#D06090;}
+.tag-drum   {border-color:#C08020;color:#C08020;}
+
+.festival-aside{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:7px;padding-top:3px;}
+.notable-badge{font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:4px 10px;background:rgba(193,57,45,0.1);border:1px solid rgba(193,57,45,0.25);color:var(--red);}
+.prefecture-chip{font-size:11px;color:var(--muted);letter-spacing:1px;}
+
+/* DETAIL PANEL */
+.detail-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;opacity:0;pointer-events:none;transition:opacity 0.25s;backdrop-filter:blur(3px);}
+.detail-overlay.open{opacity:1;pointer-events:all;}
+.detail-panel{position:fixed;right:0;top:0;bottom:0;width:min(520px,100vw);background:#161008;z-index:201;transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.22,1,0.36,1);overflow-y:auto;border-left:1px solid var(--line);}
+.detail-panel.open{transform:translateX(0);}
+
+.detail-header{padding:32px 38px 26px;border-bottom:1px solid var(--line);}
+.detail-close{background:transparent;border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;padding:7px 14px;cursor:pointer;letter-spacing:1px;margin-bottom:24px;display:block;transition:all 0.2s;}
+.detail-close:hover{border-color:var(--red);color:var(--red);}
+.detail-name-jp{font-family:var(--serif);font-size:48px;font-weight:800;color:var(--red);line-height:1;margin-bottom:8px;opacity:0.5;}
+.detail-name-en{font-family:var(--serif);font-size:28px;font-weight:600;color:var(--paper);line-height:1.15;}
+
+.detail-body{padding:28px 38px;}
+
+/* DATES BLOCK */
+.dates-block{background:rgba(255,255,255,0.03);border:1px solid var(--line);padding:18px 20px;margin-bottom:22px;}
+.dates-block-label{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.dates-stable{font-size:22px;font-family:var(--serif);font-weight:600;color:var(--gold-pale);line-height:1.2;margin-bottom:6px;}
+.dates-note{font-size:13px;color:var(--muted);letter-spacing:0.3px;line-height:1.6;}
+
+/* VERIFY BLOCK */
+.verify-block{background:rgba(193,57,45,0.06);border:1px solid rgba(193,57,45,0.2);padding:16px 20px;margin-bottom:22px;}
+.verify-label{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(193,57,45,0.7);margin-bottom:12px;}
+.verify-links{display:flex;flex-direction:column;gap:8px;}
+.verify-link{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--paper);font-size:13px;letter-spacing:0.3px;padding:10px 14px;background:rgba(255,255,255,0.04);border:1px solid var(--line);transition:all 0.18s;}
+.verify-link:hover{background:rgba(255,255,255,0.08);border-color:rgba(193,57,45,0.4);}
+.verify-link .link-icon{font-size:15px;flex-shrink:0;}
+.verify-link .link-text{flex:1;}
+.verify-link .link-lang{font-size:10px;letter-spacing:1.5px;color:var(--muted);flex-shrink:0;}
+.verify-link .link-arrow{font-size:12px;color:var(--muted);flex-shrink:0;transition:transform 0.18s;}
+.verify-link:hover .link-arrow{transform:translateX(3px);color:var(--red);}
+
+/* CONTACT BLOCK */
+.contact-block{background:rgba(255,255,255,0.02);border:1px solid var(--line);padding:16px 20px;margin-bottom:22px;}
+.contact-label{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+.contact-item{display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid rgba(139,120,80,0.1);font-size:13px;color:var(--muted);line-height:1.5;}
+.contact-item:last-child{border-bottom:none;padding-bottom:0;}
+.contact-item .ci-icon{flex-shrink:0;margin-top:1px;font-size:13px;}
+.contact-item a{color:var(--gold-pale);text-decoration:none;letter-spacing:0.3px;}
+.contact-item a:hover{color:var(--paper);}
+
+.detail-field{display:grid;grid-template-columns:100px 1fr;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);align-items:start;}
+.detail-field:last-child{border-bottom:none;}
+.detail-field-label{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);padding-top:2px;}
+.detail-field-value{font-size:14px;color:var(--paper);line-height:1.6;}
+.detail-desc{padding:24px 38px;border-top:1px solid var(--line);}
+.detail-desc p{font-size:14px;color:var(--muted);line-height:2;}
+
+/* EMPTY */
+.empty-state{padding:72px 48px;text-align:center;color:var(--muted);}
+.empty-kanji{font-family:var(--serif);font-size:68px;opacity:0.1;display:block;margin-bottom:12px;}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px;}
+
+@media(max-width:900px){
+  header{grid-template-columns:1fr auto;padding:16px 20px;}
+  .header-right{display:none;}
+  .hero-banner{padding:36px 20px 28px;}
+  .controls{padding:0 20px;}
+  .main{grid-template-columns:1fr;}
+  .sidebar{display:none;}
+  .month-header{padding:14px 20px;}
+  .festival-row{grid-template-columns:130px 1fr;padding:13px 20px;gap:14px;}
+  .festival-aside{display:none;}
+  .detail-panel{width:100vw;}
+  .detail-header,.detail-body,.detail-desc{padding-left:20px;padding-right:20px;}
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── FLOATING NAV ── */
+.fab-cluster{
+  position:fixed;
+  bottom:32px;right:32px;
+  display:flex;flex-direction:column;align-items:flex-end;gap:10px;
+  z-index:1000;
+  opacity:0;transform:translateY(12px);
+  pointer-events:none;
+  transition:opacity 0.25s,transform 0.25s;
+}
+.fab-cluster.visible{opacity:1;transform:translateY(0);pointer-events:all;}
+
+/* month picker tray — slides up above the main button */
+.fab-months{
+  display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+  opacity:0;transform:translateY(8px);
+  pointer-events:none;
+  transition:opacity 0.2s,transform 0.2s;
+  max-height:0;overflow:hidden;
+}
+.fab-months.open{
+  opacity:1;transform:translateY(0);
+  pointer-events:all;
+  max-height:500px;
+}
+
+.fab-month-pill{
+  background:rgba(14,11,8,0.92);
+  border:1px solid var(--line);
+  color:var(--muted);
+  font-family:var(--mono);font-size:13px;letter-spacing:1px;
+  padding:8px 18px;cursor:pointer;
+  white-space:nowrap;
+  transition:all 0.15s;
+  backdrop-filter:blur(8px);
+}
+.fab-month-pill:hover{border-color:var(--red);color:var(--paper);}
+.fab-month-pill.has-festivals{color:var(--paper);}
+
+/* main buttons row */
+.fab-actions{display:flex;align-items:center;gap:8px;}
+
+.fab-btn{
+  width:52px;height:52px;
+  background:rgba(14,11,8,0.92);
+  border:1px solid var(--line);
+  color:var(--muted);
+  font-size:22px;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all 0.18s;
+  backdrop-filter:blur(8px);
+  flex-shrink:0;
+}
+.fab-btn:hover{border-color:var(--red);color:var(--paper);}
+.fab-btn.open{border-color:var(--red);color:var(--red);background:rgba(193,57,45,0.12);}
+
+/* top button */
+.fab-btn-top{
+  height:52px;
+  padding:0 22px;
+  background:rgba(14,11,8,0.92);
+  border:1px solid var(--line);
+  color:var(--muted);
+  font-family:var(--mono);font-size:13px;letter-spacing:1.5px;
+  text-transform:uppercase;
+  cursor:pointer;
+  display:flex;align-items:center;gap:10px;
+  transition:all 0.18s;
+  backdrop-filter:blur(8px);
+  white-space:nowrap;
+}
+.fab-btn-top:hover{border-color:rgba(193,57,45,0.6);color:var(--paper);}
+
+@media(max-width:900px){
+  .fab-cluster{bottom:20px;right:16px;}
+  .fab-btn-top .fab-top-label{display:none;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="torii">
+      <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="10" width="28" height="3.5" rx="1" fill="#C1392D"/>
+        <rect x="7" y="14" width="22" height="3" rx="1" fill="#C1392D" opacity="0.7"/>
+        <rect x="10" y="17" width="3" height="16" rx="1" fill="#C1392D"/>
+        <rect x="23" y="17" width="3" height="16" rx="1" fill="#C1392D"/>
+        <rect x="6" y="8.5" width="3" height="4" rx="1" fill="#C1392D"/>
+        <rect x="27" y="8.5" width="3" height="4" rx="1" fill="#C1392D"/>
+      </svg>
+    </div>
+    <div>
+      <div class="site-title">Matsu<span>ri</span></div>
+      <div class="site-jp">日本のお祭りガイド</div>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="year-badge" id="year-badge">JAPAN · FESTIVALS</div>
+  </div>
+  <div class="header-right">
+    <button class="filter-btn" id="notable-btn" onclick="toggleNotable()">Notable Only</button>
+  </div>
+</header>
+
+<div class="hero-banner">
+  <h1 class="hero-tagline">Every festival.<br>Every <em>season</em>.</h1>
+  <p class="hero-sub">Stable date windows for trip planning. Click any festival for official sources and contact info to verify exact dates for your year.</p>
+  <div class="hero-stats">
+    <div class="stat"><span class="stat-num" id="total-count">—</span><span class="stat-label">Festivals</span></div>
+    <div class="stat"><span class="stat-num">47</span><span class="stat-label">Prefectures</span></div>
+    <div class="stat"><span class="stat-num">12</span><span class="stat-label">Months</span></div>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="search-wrap">
+    <span class="search-icon">◎</span>
+    <input class="search-input" type="text" placeholder="Search festivals, locations, types…" id="search-input" oninput="handleSearch()">
+  </div>
+  <div class="month-nav">
+    <button class="month-pill active" onclick="scrollToMonth(0,this)">All</button>
+    <button class="month-pill" onclick="scrollToMonth(1,this)">Jan</button>
+    <button class="month-pill" onclick="scrollToMonth(2,this)">Feb</button>
+    <button class="month-pill" onclick="scrollToMonth(3,this)">Mar</button>
+    <button class="month-pill" onclick="scrollToMonth(4,this)">Apr</button>
+    <button class="month-pill" onclick="scrollToMonth(5,this)">May</button>
+    <button class="month-pill" onclick="scrollToMonth(6,this)">Jun</button>
+    <button class="month-pill" onclick="scrollToMonth(7,this)">Jul</button>
+    <button class="month-pill" onclick="scrollToMonth(8,this)">Aug</button>
+    <button class="month-pill" onclick="scrollToMonth(9,this)">Sep</button>
+    <button class="month-pill" onclick="scrollToMonth(10,this)">Oct</button>
+    <button class="month-pill" onclick="scrollToMonth(11,this)">Nov</button>
+    <button class="month-pill" onclick="scrollToMonth(12,this)">Dec</button>
+  </div>
+</div>
+
+<div class="main">
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Region</div>
+      <button class="region-btn active" onclick="filterRegion(this,'')">All Regions</button>
+      <button class="region-btn" onclick="filterRegion(this,'Hokkaido')">Hokkaido</button>
+      <button class="region-btn" onclick="filterRegion(this,'Tohoku')">Tōhoku</button>
+      <button class="region-btn" onclick="filterRegion(this,'Kanto')">Kantō</button>
+      <button class="region-btn" onclick="filterRegion(this,'Chubu')">Chūbu</button>
+      <button class="region-btn" onclick="filterRegion(this,'Kansai')">Kansai</button>
+      <button class="region-btn" onclick="filterRegion(this,'Shikoku')">Shikoku</button>
+      <button class="region-btn" onclick="filterRegion(this,'Kyushu')">Kyūshū</button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Type</div>
+      <button class="region-btn" onclick="filterType(this,'fire')"><span class="type-dot" style="background:#E06030"></span>Fire Festival</button>
+      <button class="region-btn" onclick="filterType(this,'water')"><span class="type-dot" style="background:#5090C0"></span>Water / Rain</button>
+      <button class="region-btn" onclick="filterType(this,'parade')"><span class="type-dot" style="background:#9060C0"></span>Parade / Float</button>
+      <button class="region-btn" onclick="filterType(this,'harvest')"><span class="type-dot" style="background:#60A050"></span>Harvest / Season</button>
+      <button class="region-btn" onclick="filterType(this,'lantern')"><span class="type-dot" style="background:#E0A030"></span>Lantern</button>
+      <button class="region-btn" onclick="filterType(this,'shrine')"><span class="type-dot" style="background:#C03060"></span>Shrine Ritual</button>
+      <button class="region-btn" onclick="filterType(this,'snow')"><span class="type-dot" style="background:#80B0D0"></span>Snow / Ice</button>
+      <button class="region-btn" onclick="filterType(this,'dance')"><span class="type-dot" style="background:#D06090"></span>Dance</button>
+      <button class="region-btn" onclick="filterType(this,'drum')"><span class="type-dot" style="background:#C08020"></span>Drum / Music</button>
+    </div>
+    <div class="sidebar-section" style="border-bottom:none">
+      <div class="sidebar-label">How to verify dates</div>
+      <div style="font-size:11px;color:var(--muted);line-height:2">Click any festival → see official website + phone/email to confirm exact dates for your year.</div>
+    </div>
+  </aside>
+  <div class="content" id="content"></div>
+</div>
+
+<!-- FLOATING NAV -->
+<div class="fab-cluster" id="fab-cluster">
+  <div class="fab-months" id="fab-months"></div>
+  <div class="fab-actions">
+    <button class="fab-btn-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+      <span>↑</span><span class="fab-top-label">Top</span>
+    </button>
+    <button class="fab-btn" id="fab-month-btn" onclick="toggleFabMonths()" title="Jump to month">祭</button>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <button class="detail-close" onclick="closeDetail()">← Close</button>
+    <div class="detail-name-jp" id="dp-jp"></div>
+    <div class="detail-name-en" id="dp-en"></div>
+  </div>
+  <div class="detail-body">
+    <div class="dates-block">
+      <div class="dates-block-label">Typical Date Window</div>
+      <div class="dates-stable" id="dp-stable"></div>
+      <div class="dates-note" id="dp-dates-note"></div>
+    </div>
+    <div class="verify-block">
+      <div class="verify-label">Verify Exact Dates</div>
+      <div class="verify-links" id="dp-links"></div>
+    </div>
+    <div class="contact-block" id="dp-contact-block">
+      <div class="contact-label">Contact to Confirm</div>
+      <div id="dp-contacts"></div>
+    </div>
+    <div class="detail-field"><span class="detail-field-label">Location</span><span class="detail-field-value" id="dp-location"></span></div>
+    <div class="detail-field"><span class="detail-field-label">Prefecture</span><span class="detail-field-value" id="dp-prefecture"></span></div>
+    <div class="detail-field"><span class="detail-field-label">Region</span><span class="detail-field-value" id="dp-region"></span></div>
+    <div class="detail-field"><span class="detail-field-label">Type</span><span class="detail-field-value" id="dp-type"></span></div>
+    <div class="detail-field"><span class="detail-field-label">Crowd Level</span><span class="detail-field-value" id="dp-crowd"></span></div>
+  </div>
+  <div class="detail-desc"><p id="dp-desc"></p></div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// DATA
+// sources: array of { label, url, lang }
+// contacts: array of { type: 'phone'|'email'|'org', value, label }
+// ─────────────────────────────────────────────────────────────
+const FESTIVALS = [
+
+// ── JANUARY ────────────────────────────────────────────────
+{id:'oshogatsu',month:1,nameEn:"Oshōgatsu (New Year)",nameJp:"お正月",
+ dateRange:"Jan 1–3",duration:"3 days",datesNote:"Fixed. Always Jan 1–3 nationwide.",
+ location:"Nationwide — Meiji Jingu (Tokyo) is busiest single site",prefecture:"All Japan",region:"",type:"shrine",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Meiji Jingu Official",url:"https://www.meijijingu.or.jp/",lang:"JA/EN"},
+   {label:"Japan Tourism Agency",url:"https://www.jnto.go.jp/eng/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Meiji Jingu Shrine Office",label:"Organizer"},
+   {type:"phone",value:"+81-3-3379-5511",label:"Meiji Jingu"},
+   {type:"email",value:"via website form",label:"meijijingu.or.jp"},
+ ],
+ desc:"Japan's most important holiday. Hatsumode — the first shrine visit — draws 3 million to Meiji Jingu alone in three days. Families eat osechi, play hanetsuki, and receive otoshidama envelopes."},
+
+{id:'wakakusa',month:1,nameEn:"Wakakusa Yamayaki",nameJp:"若草山焼き",
+ dateRange:"4th Saturday of January",duration:"1 evening",datesNote:"Date announced by Nara City annually — usually the 4th Saturday.",
+ location:"Wakakusa Hill, Nara Park, Nara",prefecture:"Nara",region:"Kansai",type:"fire",notable:true,crowd:"High",
+ sources:[
+   {label:"Nara City Tourism Official",url:"https://narashikanko.or.jp/en/event/wakakusayamayaki/",lang:"EN"},
+   {label:"Nara Tourism (JP)",url:"https://narashikanko.or.jp/event/wakakusayamayaki/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Nara City Tourism Association",label:"Organizer"},
+   {type:"phone",value:"+81-742-30-0230",label:"Tourism hotline"},
+   {type:"email",value:"kanko@narashikanko.or.jp",label:"Email"},
+ ],
+ desc:"The entire hillside of Wakakusa Mountain is set ablaze after sunset, preceded by fireworks. Said to settle an ancient territorial dispute between Todai-ji and Kofuku-ji. One of Japan's most striking winter spectacles."},
+
+{id:'nozawa_fire',month:1,nameEn:"Nozawa Onsen Fire Festival",nameJp:"道祖神祭り",
+ dateRange:"Jan 15",duration:"1 night",datesNote:"Fixed to January 15 every year by tradition.",
+ location:"Nozawa Onsen village, Nagano",prefecture:"Nagano",region:"Chubu",type:"fire",notable:true,crowd:"Medium",
+ sources:[
+   {label:"Nozawa Onsen Tourism",url:"https://www.nozawakanko.jp/en/event/dosojin/",lang:"EN"},
+   {label:"Nozawa Kanko (JP)",url:"https://www.nozawakanko.jp/event/dosojin/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Nozawa Onsen Tourism Association",label:"Organizer"},
+   {type:"phone",value:"+81-269-85-3155",label:"Tourism office"},
+   {type:"email",value:"info@nozawakanko.jp",label:"Email"},
+ ],
+ desc:"Village elders sit atop a 15-meter log shrine as torch-carrying young men battle to set it alight. A rite of passage between generations — one of Japan's three great fire festivals."},
+
+// ── FEBRUARY ───────────────────────────────────────────────
+{id:'setsubun',month:2,nameEn:"Setsubun",nameJp:"節分",
+ dateRange:"Feb 3 (occasionally Feb 4)",duration:"1 day",datesNote:"Feb 3 almost every year; exact date varies with the astronomical calendar — check JMA.",
+ location:"Shrines nationwide — Narita-san (Chiba), Senso-ji (Tokyo), Yoshida Jinja (Kyoto)",prefecture:"All Japan",region:"",type:"shrine",notable:true,crowd:"High",
+ sources:[
+   {label:"Narita-san Shinshoji Official",url:"https://www.naritasan.or.jp/",lang:"JA"},
+   {label:"Yoshida Jinja (Kyoto)",url:"https://www.yoshidajinja.com/",lang:"JA"},
+   {label:"JNTO Setsubun Guide",url:"https://www.japan.travel/en/spot/1718/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Narita-san Shinshoji Temple",label:"Major venue"},
+   {type:"phone",value:"+81-476-22-2111",label:"Narita-san"},
+   {type:"org",value:"Yoshida Jinja Shrine Office",label:"Kyoto venue"},
+   {type:"phone",value:"+81-75-771-3788",label:"Yoshida Jinja"},
+ ],
+ desc:"Bean-throwing ceremonies at shrines drive evil spirits out for the year. Celebrity guests hurl beans at major shrines to huge crowds. Families shout 'Oni wa soto! Fuku wa uchi!' and eat setsubun ehomaki rolls."},
+
+{id:'sapporo_snow',month:2,nameEn:"Sapporo Snow Festival",nameJp:"さっぽろ雪まつり",
+ dateRange:"Early February — approx. 7 days",duration:"7 days",datesNote:"Exact dates announced August–September the prior year on the official site.",
+ location:"Odori Park (main), Susukino, Tsudome — Sapporo, Hokkaido",prefecture:"Hokkaido",region:"Hokkaido",type:"snow",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Official Sapporo Snow Festival Site",url:"https://www.snowfes.com/en/",lang:"EN"},
+   {label:"公式サイト (JP)",url:"https://www.snowfes.com/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Sapporo Snow Festival Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-11-281-6400",label:"Sapporo Tourism"},
+   {type:"email",value:"via snowfes.com contact form",label:"Official site"},
+ ],
+ desc:"Two million+ visitors witness massive snow and ice sculptures along Odori Park's 1.5km expanse. International teams compete. Started in 1950 by six Sapporo high school students."},
+
+{id:'otaru_snow',month:2,nameEn:"Otaru Snow Light Path",nameJp:"小樽雪あかりの路",
+ dateRange:"Mid February — approx. 10 days",duration:"10 days",datesNote:"Typically runs during the Sapporo Snow Festival period. Check official site each year.",
+ location:"Otaru Canal & Temiya Line, Otaru, Hokkaido",prefecture:"Hokkaido",region:"Hokkaido",type:"lantern",notable:false,crowd:"Medium",
+ sources:[
+   {label:"Otaru Snow Light Path Official",url:"https://www.yukiakari.org/",lang:"JA"},
+   {label:"Otaru Tourism",url:"https://www.city.otaru.lg.jp/kanko/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Otaru Snow Light Path Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-134-32-4111",label:"Otaru City Tourism"},
+ ],
+ desc:"Thousands of handmade snow candles and floating lanterns illuminate Otaru's historic canal district — a quiet, romantic counterpart to Sapporo's grand sculptures nearby."},
+
+{id:'yokote',month:2,nameEn:"Yokote Kamakura Festival",nameJp:"横手のかまくら",
+ dateRange:"Feb 15–16",duration:"2 nights",datesNote:"Fixed to Feb 15–16 every year. A smaller preview event may occur Feb 10.",
+ location:"Yokote City, Akita",prefecture:"Akita",region:"Tohoku",type:"snow",notable:true,crowd:"Medium",
+ sources:[
+   {label:"Yokote City Tourism (EN)",url:"https://www.city.yokote.lg.jp/kanko/page100265.html",lang:"EN"},
+   {label:"秋田観光情報 (JP)",url:"https://akita-yulala.jp/event/kamakura/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Yokote City Tourism & Products Division",label:"Organizer"},
+   {type:"phone",value:"+81-182-35-2111",label:"Yokote City Hall"},
+   {type:"email",value:"kanko@city.yokote.akita.jp",label:"Tourism email"},
+ ],
+ desc:"Children build igloo-like kamakura snow huts and invite strangers inside to share warm amazake. The candlelit kamakura glow against the winter night — a 400-year-old tradition."},
+
+// ── MARCH ──────────────────────────────────────────────────
+{id:'omizutori',month:3,nameEn:"Omizutori (Water Drawing)",nameJp:"お水取り",
+ dateRange:"Mar 1–15 (torch ceremonies nightly, main ritual: Mar 12–13)",duration:"15 days",datesNote:"Fixed. Has run unbroken for over 1,260 years.",
+ location:"Nigatsu-do Hall, Todai-ji Temple, Nara",prefecture:"Nara",region:"Kansai",type:"fire",notable:true,crowd:"High",
+ sources:[
+   {label:"Todai-ji Official",url:"https://www.todaiji.or.jp/",lang:"JA"},
+   {label:"Nara Tourism — Omizutori",url:"https://narashikanko.or.jp/en/event/omizutori/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Todai-ji Temple",label:"Venue"},
+   {type:"phone",value:"+81-742-22-5511",label:"Todai-ji"},
+   {type:"email",value:"via todaiji.or.jp",label:"Contact form"},
+ ],
+ desc:"Monks carry massive burning cedar torches along Nigatsu-do's veranda, showering sparks over crowds below. Running without interruption for over 1,260 years. The water-drawing ritual on the night of Mar 12–13 is the climax."},
+
+{id:'hinamatsuri',month:3,nameEn:"Hinamatsuri (Doll Festival)",nameJp:"ひな祭り",
+ dateRange:"Mar 3",duration:"1 day",datesNote:"Fixed to March 3 every year.",
+ location:"Nationwide — Katsuura (Chiba) outdoor display is exceptional",prefecture:"All Japan",region:"",type:"shrine",notable:false,crowd:"Low",
+ sources:[
+   {label:"Katsuura Hinamatsuri (JP)",url:"https://www.katsuura-kankou.net/",lang:"JA"},
+   {label:"JNTO Guide",url:"https://www.japan.travel/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Katsuura City Tourism Association",label:"Katsuura display"},
+   {type:"phone",value:"+81-470-73-2500",label:"Katsuura Tourism"},
+ ],
+ desc:"Families display tiered ornamental imperial dolls and pray for daughters' health. Katsuura's outdoor display cascades thousands of donated dolls down an entire hillside."},
+
+// ── APRIL ──────────────────────────────────────────────────
+{id:'cherry_blossom',month:4,nameEn:"Sakura Season / Hanami",nameJp:"花見 · 桜",
+ dateRange:"Late March–mid April (varies by latitude & year)",duration:"2–3 weeks per location",datesNote:"Bloom dates vary annually by 1–2 weeks depending on winter temperatures. Check JMA or Weathernews forecast each year.",
+ location:"Nationwide — Shinjuku Gyoen, Maruyama Park (Kyoto), Hirosaki Castle (Aomori)",prefecture:"All Japan",region:"",type:"harvest",notable:true,crowd:"Very High",
+ sources:[
+   {label:"JMA Sakura Forecast (JP)",url:"https://www.jma.go.jp/jma/kishou/know/sakura/index.html",lang:"JA"},
+   {label:"Weathernews Sakura (EN)",url:"https://weathernews.jp/s/sakura/en/",lang:"EN"},
+   {label:"JNTO Cherry Blossom",url:"https://www.japan.travel/en/guide/cherry-blossom/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Japan Meteorological Agency (JMA)",label:"Forecast authority"},
+   {type:"org",value:"Weathernews Sakura Team",label:"Best English tracker"},
+ ],
+ desc:"Japan's most beloved annual tradition. Hanami parties gather under the sakura with bento and sake. The bloom front moves north from Kyushu to Hokkaido over six weeks — plan using the JMA or Weathernews forecast for your destination."},
+
+{id:'takayama_spring',month:4,nameEn:"Takayama Spring Festival",nameJp:"春の高山祭",
+ dateRange:"Apr 14–15",duration:"2 days",datesNote:"Fixed to April 14–15 every year. Night procession on the 14th; main float parade on the 15th.",
+ location:"Hie Shrine area, Takayama, Gifu",prefecture:"Gifu",region:"Chubu",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Takayama Festival Official (EN)",url:"https://www.hidahachimangu.jp/english/",lang:"EN"},
+   {label:"Takayama City Tourism",url:"https://www.hida.jp/english/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Hie Jinja Shrine (Sanno Festival Office)",label:"Organizer"},
+   {type:"phone",value:"+81-577-32-0240",label:"Hie Jinja"},
+   {type:"org",value:"Takayama City Tourism Division",label:"City info"},
+   {type:"phone",value:"+81-577-35-3145",label:"Tourism office"},
+ ],
+ desc:"Eleven ornate yatai floats with mechanical karakuri puppets parade through Takayama's preserved Edo-period streets. UNESCO Intangible Cultural Heritage — book accommodation many months ahead."},
+
+{id:'miyako_odori',month:4,nameEn:"Miyako Odori",nameJp:"都をどり",
+ dateRange:"All of April",duration:"30 days",datesNote:"Runs throughout April with multiple shows daily. Performance schedule published January–February on the official site.",
+ location:"Gion Kobu Kaburenjo Theatre, Hanamikoji, Gion, Kyoto",prefecture:"Kyoto",region:"Kansai",type:"dance",notable:true,crowd:"High",
+ sources:[
+   {label:"Miyako Odori Official",url:"https://www.miyako-odori.jp/",lang:"JA"},
+   {label:"Gion Hatanaka / Ticket Info",url:"https://gionhatanaka.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Gion Kobu Kaburenjo Theatre",label:"Venue & tickets"},
+   {type:"phone",value:"+81-75-541-3391",label:"Theatre box office"},
+   {type:"email",value:"via miyako-odori.jp",label:"Reservation form"},
+ ],
+ desc:"Geiko and maiko of the Gion Kobu district perform elegant choreographed dance shows throughout April. Begun in 1872. Reserve seats well in advance — popular shows sell out weeks ahead."},
+
+// ── MAY ────────────────────────────────────────────────────
+{id:'aoi_matsuri',month:5,nameEn:"Aoi Matsuri",nameJp:"葵祭",
+ dateRange:"May 15",duration:"1 day",datesNote:"Fixed to May 15 every year. Postponed to May 16 if May 15 falls on a Sunday.",
+ location:"Kyoto Imperial Palace → Shimogamo Jinja → Kamigamo Jinja",prefecture:"Kyoto",region:"Kansai",type:"parade",notable:true,crowd:"High",
+ sources:[
+   {label:"Shimogamo Jinja Official",url:"https://www.shimogamo-jinja.or.jp/",lang:"JA"},
+   {label:"Kamigamo Jinja Official",url:"https://www.kamigamojinja.jp/",lang:"JA"},
+   {label:"Kyoto Tourism — Aoi Matsuri",url:"https://kyoto.travel/en/event/aoimatsuri",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Shimogamo Shrine Office",label:"Co-organizer"},
+   {type:"phone",value:"+81-75-781-0010",label:"Shimogamo Jinja"},
+   {type:"org",value:"Kamigamo Shrine Office",label:"Co-organizer"},
+   {type:"phone",value:"+81-75-781-0011",label:"Kamigamo Jinja"},
+ ],
+ desc:"600 participants in authentic Heian-period court dress process 8km through Kyoto. One of the city's three great festivals, essentially unchanged for over 1,000 years. Departs the Imperial Palace at 10:30am."},
+
+{id:'hakata_dontaku',month:5,nameEn:"Hakata Dontaku Port Festival",nameJp:"博多どんたく港まつり",
+ dateRange:"May 3–4",duration:"2 days",datesNote:"Fixed to May 3–4 (Golden Week) every year.",
+ location:"Fukuoka City, Fukuoka",prefecture:"Fukuoka",region:"Kyushu",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Hakata Dontaku Official (JP)",url:"https://www.dontaku.fukunet.or.jp/",lang:"JA"},
+   {label:"Fukuoka City Tourism",url:"https://www.yokanavi.com/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Hakata Dontaku Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-92-441-1170",label:"Committee"},
+   {type:"org",value:"Fukuoka Convention & Visitors Bureau",label:"Tourist info"},
+   {type:"phone",value:"+81-92-733-5050",label:"CVB"},
+ ],
+ desc:"Japan's largest festival by attendance (2+ million visitors). Locals in costume march with shamisen, taiko, and elaborate floats representing each Fukuoka neighborhood."},
+
+{id:'kanda',month:5,nameEn:"Kanda Matsuri",nameJp:"神田祭",
+ dateRange:"Mid May — ODD years only (2025, 2027, 2029…)",duration:"3 days",datesNote:"Held only in odd-numbered years. Exact weekend announced by the shrine each year.",
+ location:"Kanda Myojin Shrine, Chiyoda, Tokyo",prefecture:"Tokyo",region:"Kanto",type:"shrine",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Kanda Myojin Official (JP)",url:"https://www.kandamyoujin.or.jp/",lang:"JA"},
+   {label:"Kanda Matsuri Schedule",url:"https://www.kandamyoujin.or.jp/kandasai/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Kanda Myojin Shrine",label:"Organizer"},
+   {type:"phone",value:"+81-3-3254-0753",label:"Shrine office"},
+   {type:"email",value:"via kandamyoujin.or.jp",label:"Contact form"},
+ ],
+ desc:"One of Tokyo's three great festivals: hundreds of mikoshi flood Akihabara and Nihonbashi. Held in odd years only; in even years Sanno Matsuri takes the spotlight."},
+
+{id:'hamamatsu',month:5,nameEn:"Hamamatsu Kite Festival",nameJp:"浜松まつり",
+ dateRange:"May 3–5",duration:"3 days",datesNote:"Fixed to May 3–5 (Golden Week) every year.",
+ location:"Nakatajima Dunes (kites) & City center (floats), Hamamatsu, Shizuoka",prefecture:"Shizuoka",region:"Chubu",type:"drum",notable:false,crowd:"High",
+ sources:[
+   {label:"Hamamatsu Matsuri Official (JP)",url:"https://www.hamamatsu-daisuki.net/matsuri/",lang:"JA"},
+   {label:"Hamamatsu Tourism",url:"https://www.hamamatsu-daisuki.net/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Hamamatsu Matsuri Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-53-457-2295",label:"Committee"},
+ ],
+ desc:"Rival kites with razor-edged strings battle for sky dominance over the beach by day while ornate float parades and taiko drumming fill city streets by night."},
+
+// ── JUNE ───────────────────────────────────────────────────
+{id:'sanno',month:6,nameEn:"Sanno Matsuri",nameJp:"山王祭",
+ dateRange:"Jun 7–17 — EVEN years only (2026, 2028, 2030…)",duration:"10 days",datesNote:"Held in even-numbered years only. Main procession (Shinkosai) is typically mid-June — exact date confirmed by Hie Shrine each year.",
+ location:"Hie Shrine, Akasaka, Minato, Tokyo",prefecture:"Tokyo",region:"Kanto",type:"shrine",notable:true,crowd:"High",
+ sources:[
+   {label:"Hie Jinja Official (JP)",url:"https://www.hiejinja.net/",lang:"JA"},
+   {label:"Sanno Matsuri Schedule",url:"https://www.hiejinja.net/jinja/festival/sanno/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Hie Jinja Shrine Office",label:"Organizer"},
+   {type:"phone",value:"+81-3-3581-2471",label:"Hie Shrine"},
+   {type:"email",value:"via hiejinja.net",label:"Contact form"},
+ ],
+ desc:"500 participants in ancient court costume process from Hie Shrine past the National Diet Building. Alternates with Kanda Matsuri every two years."},
+
+{id:'chagu_chagu',month:6,nameEn:"Chagu Chagu Umako",nameJp:"チャグチャグ馬コ",
+ dateRange:"2nd Saturday of June",duration:"1 day",datesNote:"Always the 2nd Saturday of June. Exact date shifts with the calendar.",
+ location:"Sozan Shrine (Takizawa) → Morioka Hachimangu, Iwate",prefecture:"Iwate",region:"Tohoku",type:"parade",notable:false,crowd:"Medium",
+ sources:[
+   {label:"Morioka Tourism (JP)",url:"https://www.morioka-tourism.com/",lang:"JA"},
+   {label:"Iwate Tourism (EN)",url:"https://iwatetabi.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Morioka Convention & Tourism Association",label:"Organizer"},
+   {type:"phone",value:"+81-19-604-3305",label:"Tourism office"},
+ ],
+ desc:"100 horses in vivid jingling harnesses parade 14km from Sozan Shrine to Morioka Hachimangu. The chagu-chagu bell sound gives the festival its name."},
+
+// ── JULY ───────────────────────────────────────────────────
+{id:'gion',month:7,nameEn:"Gion Matsuri",nameJp:"祇園祭",
+ dateRange:"All of July — Yamaboko Junko float parades: Jul 17 & Jul 24",duration:"31 days",datesNote:"Fixed. Jul 17 (Sakimatsuri) and Jul 24 (Atomatsuri) are the main float procession days. The Yoiyama evenings (Jul 14–16 and Jul 21–23) are also exceptional.",
+ location:"Central Kyoto — Shijo-Kawaramachi area, Kyoto",prefecture:"Kyoto",region:"Kansai",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Gion Matsuri Official (JP)",url:"https://www.gionmatsuri.or.jp/",lang:"JA"},
+   {label:"Kyoto Tourism Gion Guide",url:"https://kyoto.travel/en/event/gionmatsuri",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Gion Matsuri Yamaboko Rengokai",label:"Float committee"},
+   {type:"phone",value:"+81-75-223-0033",label:"Rengokai office"},
+   {type:"org",value:"Yasaka Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-75-561-6155",label:"Yasaka Shrine"},
+ ],
+ desc:"Kyoto's grandest festival — one of Japan's three greatest. Two float processions carry 32 towering yamaboko, some draped in 16th-century Flemish tapestries. Yoiyama street fairs the evenings before each main day are arguably more atmospheric than the processions."},
+
+{id:'hakata_yamakasa',month:7,nameEn:"Hakata Gion Yamakasa",nameJp:"博多祇園山笠",
+ dateRange:"Jul 1–15 (Oiyama race: Jul 15 at exactly 4:59am)",duration:"15 days",datesNote:"Fixed. Jul 15 race start is 4:59am sharp by tradition — arrive by 4am for a spot.",
+ location:"Kushida Shrine area, Hakata, Fukuoka",prefecture:"Fukuoka",region:"Kyushu",type:"parade",notable:true,crowd:"High",
+ sources:[
+   {label:"Hakata Yamakasa Official (JP)",url:"https://www.hakatayamakasa.com/",lang:"JA"},
+   {label:"Fukuoka Tourism (EN)",url:"https://www.yokanavi.com/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Hakata Yamakasa Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-92-291-2951",label:"Kushida Shrine"},
+   {type:"org",value:"Kushida Jinja",label:"Host shrine"},
+ ],
+ desc:"Men in fundoshi race one-ton floats through narrow Fukuoka streets at dawn on July 15. The race has run continuously since 1241. The 4:59am start time is fixed by tradition."},
+
+{id:'tenjin',month:7,nameEn:"Tenjin Matsuri",nameJp:"天神祭",
+ dateRange:"Jul 24–25",duration:"2 days",datesNote:"Fixed to July 24–25 every year. The water procession and fireworks are on the 25th.",
+ location:"Osaka Tenmangu Shrine, Kita, Osaka",prefecture:"Osaka",region:"Kansai",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Osaka Tenmangu Official (JP)",url:"https://www.tenjinsan.com/",lang:"JA"},
+   {label:"Osaka Tourism (EN)",url:"https://osaka-info.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Osaka Tenmangu Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-6-6353-0025",label:"Tenmangu"},
+   {type:"org",value:"Tenjin Matsuri Executive Committee",label:"Organizer"},
+ ],
+ desc:"One of Japan's three great festivals. Over 100 boats lit with torches and lanterns process on the Okawa river as 5,000 fireworks explode overhead on the 25th."},
+
+{id:'soma',month:7,nameEn:"Soma Nomaoi (Samurai Festival)",nameJp:"相馬野馬追",
+ dateRange:"Last full weekend of July (Fri–Sun)",duration:"3 days",datesNote:"Exact dates shift annually. Confirmed on the official website by March of each year.",
+ location:"Hibarigahara Racetrack, Minamisoma; Ota & Nakamura Shrines, Fukushima",prefecture:"Fukushima",region:"Tohoku",type:"parade",notable:true,crowd:"Medium",
+ sources:[
+   {label:"Soma Nomaoi Official (JP)",url:"https://www.nomaoi.co.jp/",lang:"JA"},
+   {label:"Fukushima Tourism (EN)",url:"https://www.tif.ne.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Soma Nomaoi Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-244-26-1301",label:"Committee"},
+   {type:"email",value:"via nomaoi.co.jp",label:"Contact form"},
+ ],
+ desc:"500 samurai in full armor gallop across an ancient battlefield — a tradition over 1,000 years old. Culminates in a wild horse capture ceremony where riders seize riderless horses bare-handed."},
+
+// ── AUGUST ─────────────────────────────────────────────────
+{id:'aomori_nebuta',month:8,nameEn:"Aomori Nebuta Matsuri",nameJp:"青森ねぶた祭",
+ dateRange:"Aug 2–7",duration:"6 days",datesNote:"Fixed to Aug 2–7 every year. The final night parade on Aug 7 is the most spectacular.",
+ location:"Aomori City center, Aomori",prefecture:"Aomori",region:"Tohoku",type:"lantern",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Aomori Nebuta Official (EN)",url:"https://www.nebuta.jp/english/",lang:"EN"},
+   {label:"公式サイト (JP)",url:"https://www.nebuta.jp/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Aomori Nebuta Festival Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-17-723-7211",label:"Committee"},
+   {type:"email",value:"info@nebuta.or.jp",label:"Email"},
+ ],
+ desc:"Enormous illuminated floats depicting warriors and mythological figures parade while thousands of haneto dancers leap and shout 'Rasserā!' UNESCO Intangible Cultural Heritage. Up to 3 million visitors across 6 days."},
+
+{id:'akita_kanto',month:8,nameEn:"Akita Kanto Festival",nameJp:"秋田竿燈まつり",
+ dateRange:"Aug 3–6",duration:"4 days",datesNote:"Fixed to Aug 3–6 every year.",
+ location:"Kanto Odori (central avenue), Akita City, Akita",prefecture:"Akita",region:"Tohoku",type:"lantern",notable:true,crowd:"High",
+ sources:[
+   {label:"Akita Kanto Official (EN)",url:"https://www.kantou.gr.jp/english/",lang:"EN"},
+   {label:"秋田竿燈まつり公式 (JP)",url:"https://www.kantou.gr.jp/",lang:"JA"},
+ ],
+ contacts:[
+   {type:"org",value:"Akita Kanto Festival Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-18-888-5602",label:"Committee"},
+   {type:"email",value:"kantou@city.akita.akita.jp",label:"Email"},
+ ],
+ desc:"Performers balance 12-meter poles strung with 46 lit lanterns (up to 50kg) on foreheads, shoulders, and hips. 280 illuminated poles swaying in unison against the night sky."},
+
+{id:'sendai_tanabata',month:8,nameEn:"Sendai Tanabata",nameJp:"仙台七夕まつり",
+ dateRange:"Aug 5–8",duration:"4 days",datesNote:"Fixed to Aug 5–8 every year. Fireworks show on Aug 5 (Tanabata Fireworks Festival, separate event).",
+ location:"Sendai city center arcade streets, Miyagi",prefecture:"Miyagi",region:"Tohoku",type:"lantern",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Sendai Tanabata Official (JP)",url:"https://www.sendaitanabata.com/",lang:"JA"},
+   {label:"Sendai Tourism (EN)",url:"https://www.sentabi.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Sendai Tanabata Festival Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-22-265-8185",label:"Committee"},
+   {type:"email",value:"via sendaitanabata.com",label:"Contact form"},
+ ],
+ desc:"Japan's most spectacular Tanabata: 3km of elaborate washi streamers transform Sendai's covered shopping arcades into tunnels of hanging art. Over 2 million visitors annually."},
+
+{id:'awa_odori',month:8,nameEn:"Awa Odori",nameJp:"阿波踊り",
+ dateRange:"Aug 12–15",duration:"4 days",datesNote:"Fixed to Aug 12–15 every year.",
+ location:"Tokushima City center, Tokushima",prefecture:"Tokushima",region:"Shikoku",type:"dance",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Awa Odori Official (JP)",url:"https://awaodori.net/",lang:"JA"},
+   {label:"Tokushima Tourism (EN)",url:"https://www.awanavi.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Tokushima City Awa Odori Executive Committee",label:"Organizer"},
+   {type:"phone",value:"+81-88-621-5676",label:"Committee"},
+   {type:"email",value:"awaodori@city.tokushima.tokushima.jp",label:"City tourism"},
+ ],
+ desc:"Japan's largest dance festival: 100,000 dancers in straw hats and yukata high-step through the city as 1.3 million watch. Tickets for premium viewing stands sell out months ahead."},
+
+{id:'obon',month:8,nameEn:"Obon",nameJp:"お盆",
+ dateRange:"Aug 13–16 (Jul 13–16 in Tokyo & some regions)",duration:"4 days",datesNote:"Nationwide Aug 13–16 for most of Japan; the Tokyo metropolitan area observes Jul 13–16. Dates are fixed.",
+ location:"Nationwide — every town and village",prefecture:"All Japan",region:"",type:"lantern",notable:true,crowd:"High",
+ sources:[
+   {label:"JNTO — Obon Overview",url:"https://www.japan.travel/en/guide/obon/",lang:"EN"},
+   {label:"NHK World — Obon",url:"https://www3.nhk.or.jp/nhkworld/en/ondemand/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Local municipal tourism offices",label:"Per-city events"},
+   {type:"org",value:"Regional shrine / temple offices",label:"Bon Odori schedules"},
+ ],
+ desc:"Japan honors returning ancestor spirits: grave cleaning, toro nagashi floating lanterns on rivers, and Bon Odori circle dances at shrines. Peak domestic travel season — trains and roads are extremely congested."},
+
+// ── SEPTEMBER ──────────────────────────────────────────────
+{id:'kishiwada',month:9,nameEn:"Kishiwada Danjiri Matsuri",nameJp:"岸和田だんじり祭り",
+ dateRange:"2nd Saturday & Sunday of September",duration:"2 days",datesNote:"Always the 2nd Sat–Sun of September. An October version (3rd Sat–Sun of October) also exists in surrounding towns.",
+ location:"Kishiwada City, Osaka Prefecture",prefecture:"Osaka",region:"Kansai",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Kishiwada Danjiri Official (JP)",url:"https://www.city.kishiwada.osaka.jp/soshiki/39/danjirimatsuri.html",lang:"JA"},
+   {label:"Osaka Tourism — Danjiri",url:"https://osaka-info.jp/en/event/kishiwada-danjiri-festival/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Kishiwada City Tourism & Cultural Division",label:"Organizer"},
+   {type:"phone",value:"+81-72-423-9486",label:"City tourism"},
+   {type:"email",value:"kanko@city.kishiwada.osaka.jp",label:"Email"},
+ ],
+ desc:"Multi-ton danjiri floats are pulled at full sprint through residential streets, cornering at terrifying speeds while men perform rooftop acrobatics. Equal parts religious ceremony and extreme sport."},
+
+{id:'yabusame',month:9,nameEn:"Yabusame at Tsurugaoka Hachimangu",nameJp:"流鏑馬",
+ dateRange:"Sep 16",duration:"1 day",datesNote:"Fixed to September 16 every year. A smaller yabusame is also performed at the autumn festival (Sep 14–16).",
+ location:"Tsurugaoka Hachimangu, Kamakura, Kanagawa",prefecture:"Kanagawa",region:"Kanto",type:"shrine",notable:true,crowd:"High",
+ sources:[
+   {label:"Tsurugaoka Hachimangu Official (JP)",url:"https://www.hachimangu.or.jp/",lang:"JA"},
+   {label:"Kamakura Tourism (EN)",url:"https://www.city.kamakura.kanagawa.jp/visitkamakura/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Tsurugaoka Hachimangu Shrine Office",label:"Venue & organizer"},
+   {type:"phone",value:"+81-467-22-0315",label:"Shrine"},
+ ],
+ desc:"Mounted archers in full Kamakura-era hunting dress gallop 255 meters and fire at wooden targets in a single fluid motion. One of Japan's most visually dramatic Shinto ceremonies."},
+
+// ── OCTOBER ────────────────────────────────────────────────
+{id:'takayama_autumn',month:10,nameEn:"Takayama Autumn Festival",nameJp:"秋の高山祭",
+ dateRange:"Oct 9–10",duration:"2 days",datesNote:"Fixed to October 9–10 every year. Night procession by lantern light on the 9th is particularly beautiful.",
+ location:"Sakurayama Hachimangu Shrine area, Takayama, Gifu",prefecture:"Gifu",region:"Chubu",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Takayama Festival Official (EN)",url:"https://www.hidahachimangu.jp/english/",lang:"EN"},
+   {label:"Takayama City Tourism",url:"https://www.hida.jp/english/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Sakurayama Hachimangu Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-577-32-0240",label:"Shrine office"},
+   {type:"org",value:"Takayama City Tourism Division",label:"City info"},
+   {type:"phone",value:"+81-577-35-3145",label:"Tourism office"},
+ ],
+ desc:"The autumn counterpart to April's spring festival: 11 different ornate yatai parade by lantern light against autumn foliage. Many consider this the more atmospheric of the two Takayama matsuri."},
+
+{id:'kurama_fire',month:10,nameEn:"Kurama Fire Festival",nameJp:"鞍馬の火祭",
+ dateRange:"Oct 22",duration:"1 night",datesNote:"Fixed to October 22 every year. Access roads close at 6pm — arrive by 5pm.",
+ location:"Kurama village, Sakyo, Kyoto",prefecture:"Kyoto",region:"Kansai",type:"fire",notable:true,crowd:"High",
+ sources:[
+   {label:"Kurama-dera Temple (JP)",url:"https://www.kuramadera.or.jp/",lang:"JA"},
+   {label:"Kyoto Tourism — Kurama Fire",url:"https://kyoto.travel/en/event/kurama_fire_festival",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Yuki Jinja Shrine (festival organizer)",label:"Organizer"},
+   {type:"phone",value:"+81-75-741-1670",label:"Yuki Shrine"},
+ ],
+ desc:"Villagers carry enormous torches through Kurama's narrow mountain paths shouting 'saireya, sairyo.' One of Japan's most raw fire festivals — access roads close early."},
+
+{id:'nada_kenka',month:10,nameEn:"Nada Kenka Matsuri (Fighting Festival)",nameJp:"灘のけんか祭り",
+ dateRange:"Oct 14–15",duration:"2 days",datesNote:"Fixed to October 14–15 every year.",
+ location:"Matsubara Hachiman Shrine (Shirahama), Himeji, Hyogo",prefecture:"Hyogo",region:"Kansai",type:"parade",notable:true,crowd:"High",
+ sources:[
+   {label:"Shirahama Shrine Official (JP)",url:"https://www.kenka-matsuri.com/",lang:"JA"},
+   {label:"Himeji Tourism (EN)",url:"https://www.himeji-kanko.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Matsubara Hachiman Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-79-245-0666",label:"Shrine office"},
+ ],
+ desc:"Three mikoshi are deliberately crashed into each other — splinters flying — to please the gods with intensity. Equal parts terrifying and thrilling."},
+
+{id:'nagasaki_kunchi',month:10,nameEn:"Nagasaki Kunchi",nameJp:"長崎くんち",
+ dateRange:"Oct 7–9",duration:"3 days",datesNote:"Fixed to October 7–9 every year.",
+ location:"Suwa Shrine area & city center, Nagasaki",prefecture:"Nagasaki",region:"Kyushu",type:"dance",notable:true,crowd:"High",
+ sources:[
+   {label:"Nagasaki Kunchi Official (JP)",url:"https://www.nagasaki-kunchi.com/",lang:"JA"},
+   {label:"Nagasaki Tourism (EN)",url:"https://www.nagasaki-tabinet.com/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Suwa Shrine (Nagasaki Suwa Jinja)",label:"Host shrine"},
+   {type:"phone",value:"+81-95-824-0445",label:"Suwa Shrine"},
+   {type:"org",value:"Nagasaki Kunchi Executive Committee",label:"Organizer"},
+ ],
+ desc:"Nagasaki's unique history as Japan's world gateway: dragon dances, Dutch-style ships, Chinese lion dances, and Shinto rituals all in one procession."},
+
+// ── NOVEMBER ───────────────────────────────────────────────
+{id:'karatsu',month:11,nameEn:"Karatsu Kunchi",nameJp:"唐津くんち",
+ dateRange:"Nov 2–4",duration:"3 days",datesNote:"Fixed to November 2–4 every year.",
+ location:"Karatsu Shrine, Karatsu City, Saga",prefecture:"Saga",region:"Kyushu",type:"parade",notable:true,crowd:"High",
+ sources:[
+   {label:"Karatsu Kunchi Official (JP)",url:"https://karatsukkunchi.com/",lang:"JA"},
+   {label:"Karatsu Tourism (EN)",url:"https://www.karatsu-kankou.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Karatsu Shrine (Karatsu Jinja)",label:"Host shrine"},
+   {type:"phone",value:"+81-955-72-2264",label:"Karatsu Shrine"},
+   {type:"org",value:"Karatsu Tourism Association",label:"Tourist info"},
+   {type:"phone",value:"+81-955-74-3355",label:"Tourism office"},
+ ],
+ desc:"14 ornate hikiyama floats shaped like sea creatures, warriors, and mythological beings are pulled through the streets. Dating to 1819, among Japan's most beautiful float festivals."},
+
+{id:'koyo',month:11,nameEn:"Kōyō (Autumn Foliage Season)",nameJp:"紅葉狩り",
+ dateRange:"Mid October–early December (varies by location & year)",duration:"3–4 weeks per location",datesNote:"Hokkaido peaks late September–October. Tokyo/Kyoto peak mid–late November. Dates shift by 1–2 weeks annually. Check JMA or Weathernews forecast.",
+ location:"Nationwide — Tofuku-ji (Kyoto), Nikko (Tochigi), Rikugien (Tokyo), Kokedera (Kyoto)",prefecture:"Multiple",region:"",type:"harvest",notable:true,crowd:"Very High",
+ sources:[
+   {label:"JMA Koyo Forecast (JP)",url:"https://www.jma.go.jp/jma/kishou/know/kouyou/index.html",lang:"JA"},
+   {label:"Weathernews Koyo (EN/JP)",url:"https://weathernews.jp/s/koyo/",lang:"EN/JA"},
+   {label:"JNTO Autumn Leaves",url:"https://www.japan.travel/en/guide/autumn-leaves/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Japan Meteorological Agency",label:"Official forecast"},
+   {type:"org",value:"Tofuku-ji Temple",label:"Kyoto's top koyo spot"},
+   {type:"phone",value:"+81-75-561-0087",label:"Tofuku-ji"},
+ ],
+ desc:"Temple gardens ignite in red, orange, and gold. Tofuku-ji in Kyoto sees extraordinary crowds at peak. Hokkaido turns first, Kyushu last. Check JMA or Weathernews for exact timing each year."},
+
+// ── DECEMBER ───────────────────────────────────────────────
+{id:'chichibu',month:12,nameEn:"Chichibu Night Festival",nameJp:"秩父夜祭",
+ dateRange:"Dec 2–3",duration:"2 nights",datesNote:"Fixed to December 2–3 every year. The main procession and fireworks are on Dec 3.",
+ location:"Chichibu Shrine, Chichibu City, Saitama",prefecture:"Saitama",region:"Kanto",type:"parade",notable:true,crowd:"Very High",
+ sources:[
+   {label:"Chichibu Jinja Official (JP)",url:"https://www.chichibu-jinja.or.jp/",lang:"JA"},
+   {label:"Chichibu Tourism (JP)",url:"https://www.chichibu-kanko.com/",lang:"JA"},
+   {label:"Saitama Tourism (EN)",url:"https://www.pref.saitama.lg.jp/a0001/welcome-saitama/english.html",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Chichibu Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-494-22-0262",label:"Chichibu Shrine"},
+   {type:"org",value:"Chichibu Festival Preservation Society",label:"Organizer"},
+   {type:"phone",value:"+81-494-25-5209",label:"Festival office"},
+ ],
+ desc:"Two floats and four smaller yatai wheel through the mountain town as fireworks explode directly overhead. The finale — floats silhouetted against bursting fireworks — is one of Japan's great visual spectacles."},
+
+{id:'kasuga_wakamiya',month:12,nameEn:"Kasuga Wakamiya Onmatsuri",nameJp:"春日若宮おん祭",
+ dateRange:"Dec 15–18",duration:"4 days",datesNote:"Fixed to December 15–18 every year. The main procession (Otabisho) is on Dec 17.",
+ location:"Kasuga Taisha Grand Shrine, Nara",prefecture:"Nara",region:"Kansai",type:"shrine",notable:true,crowd:"Medium",
+ sources:[
+   {label:"Kasuga Taisha Official (JP)",url:"https://www.kasugataisha.or.jp/",lang:"JA"},
+   {label:"Kasuga Taisha (EN)",url:"https://www.kasugataisha.or.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Kasuga Taisha Grand Shrine",label:"Host shrine"},
+   {type:"phone",value:"+81-742-22-7788",label:"Kasuga Taisha"},
+   {type:"email",value:"via kasugataisha.or.jp",label:"Contact form"},
+ ],
+ desc:"Nara's most important festival: a torchlit procession in Heian, Kamakura, and Muromachi period costumes, followed by bugaku court dance performances. Running continuously since 1136."},
+
+{id:'chichibu_namahage',month:12,nameEn:"Namahage (Village Version)",nameJp:"なまはげ",
+ dateRange:"Dec 31 (traditional) — Public festival: 2nd Fri–Sun of February",duration:"1 night (Dec) / 3 days (Feb)",datesNote:"The authentic village version (men going house-to-house) is Dec 31 — private, not public. The accessible public Sedo Festival is held in February at Shinzan Shrine.",
+ location:"Oga Peninsula villages, Akita (Dec) / Shinzan Shrine, Oga, Akita (Feb festival)",prefecture:"Akita",region:"Tohoku",type:"shrine",notable:true,crowd:"Low",
+ sources:[
+   {label:"Namahage Museum (JP)",url:"https://www.namahage.co.jp/namahagekan/",lang:"JA"},
+   {label:"Akita Tourism (EN)",url:"https://www.akita-yulala.jp/en/",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Oga City Tourism Association",label:"Organizer"},
+   {type:"phone",value:"+81-185-24-9220",label:"Oga Tourism"},
+   {type:"email",value:"kanko@city.oga.akita.jp",label:"Email"},
+ ],
+ desc:"Men in fearsome carved masks and straw coats go house-to-house demanding whether children have been lazy — a UNESCO-listed folk ritual. The Dec 31 village version is private; the February public Sedo Festival is accessible to visitors."},
+
+{id:'hagoita',month:12,nameEn:"Hagoita-ichi Fair",nameJp:"羽子板市",
+ dateRange:"Dec 17–19",duration:"3 days",datesNote:"Fixed to December 17–19 every year.",
+ location:"Senso-ji Temple, Asakusa, Taito, Tokyo",prefecture:"Tokyo",region:"Kanto",type:"harvest",notable:false,crowd:"Medium",
+ sources:[
+   {label:"Senso-ji Official (JP)",url:"https://www.senso-ji.jp/",lang:"JA"},
+   {label:"Taito City Tourism (EN)",url:"https://www.city.taito.lg.jp/kanko/asakusa/index.html",lang:"EN"},
+ ],
+ contacts:[
+   {type:"org",value:"Senso-ji Temple",label:"Venue"},
+   {type:"phone",value:"+81-3-3842-0181",label:"Senso-ji"},
+ ],
+ desc:"The year-end fair at Asakusa sells hagoita paddle boards featuring 3D silk depictions of kabuki actors, celebrities, and current events. A quintessential Tokyo December scene."},
+
+];
+
+// ─────────────────────────────────────────────────────────────
+const MONTH_NAMES={1:{en:"January",jp:"一月"},2:{en:"February",jp:"二月"},3:{en:"March",jp:"三月"},4:{en:"April",jp:"四月"},5:{en:"May",jp:"五月"},6:{en:"June",jp:"六月"},7:{en:"July",jp:"七月"},8:{en:"August",jp:"八月"},9:{en:"September",jp:"九月"},10:{en:"October",jp:"十月"},11:{en:"November",jp:"十一月"},12:{en:"December",jp:"十二月"}};
+const TYPE_LABELS={fire:"Fire Festival",water:"Water / Rain",parade:"Parade / Float",harvest:"Harvest / Season",lantern:"Lantern",shrine:"Shrine Ritual",snow:"Snow / Ice",dance:"Dance",drum:"Drum / Music"};
+
+let activeRegion='',activeType='',activeSearch='',notableOnly=false;
+const currentYear=new Date().getFullYear();
+document.getElementById('year-badge').textContent=`JAPAN · ${currentYear}`;
+
+function getFiltered(){
+  return FESTIVALS.filter(f=>{
+    if(activeRegion&&f.region!==activeRegion)return false;
+    if(activeType&&f.type!==activeType)return false;
+    if(notableOnly&&!f.notable)return false;
+    if(activeSearch){
+      const q=activeSearch.toLowerCase();
+      if(!f.nameEn.toLowerCase().includes(q)&&!f.location.toLowerCase().includes(q)&&
+         !f.prefecture.toLowerCase().includes(q)&&!f.type.toLowerCase().includes(q)&&
+         !f.dateRange.toLowerCase().includes(q))return false;
+    }
+    return true;
+  });
+}
+
+function render(){
+  const filtered=getFiltered();
+  document.getElementById('total-count').textContent=filtered.length;
+  const content=document.getElementById('content');
+  if(!filtered.length){
+    content.innerHTML=`<div class="empty-state"><span class="empty-kanji">祭</span>No festivals match your filters.</div>`;
+    return;
+  }
+  const byMonth={};
+  filtered.forEach(f=>{if(!byMonth[f.month])byMonth[f.month]=[];byMonth[f.month].push(f);});
+  let html='';
+  Object.keys(byMonth).sort((a,b)=>+a-+b).forEach(m=>{
+    const mn=MONTH_NAMES[m];
+    html+=`<div class="month-section" id="month-${m}">
+      <div class="month-header">
+        <div class="month-num">${String(m).padStart(2,'0')}</div>
+        <div><div class="month-name-en">${mn.en}</div><div class="month-name-jp">${mn.jp}</div></div>
+      </div>
+      <div class="festival-list">${filtered.filter(f=>f.month==m).map((f,i)=>row(f,i)).join('')}</div>
+    </div>`;
+  });
+  content.innerHTML=html;
+}
+
+function row(f,i){
+  return `<div class="festival-row" style="animation-delay:${(i*0.035).toFixed(2)}s" onclick="openDetail('${f.id}')">
+    <div class="festival-date">
+      <div class="date-range">${f.dateRange}</div>
+      <div class="date-duration">${f.duration}</div>
+    </div>
+    <div class="festival-info">
+      <div class="festival-name-en">${f.nameEn}</div>
+      <div class="festival-name-jp">${f.nameJp}</div>
+      <div class="festival-meta">
+        <span class="festival-location">${f.location.split('—')[0].split(',')[0].trim()}</span>
+        <span class="tag tag-${f.type}">${TYPE_LABELS[f.type]||f.type}</span>
+      </div>
+    </div>
+    <div class="festival-aside">
+      ${f.notable?'<span class="notable-badge">Notable</span>':''}
+      <span class="prefecture-chip">${f.prefecture}</span>
+    </div>
+  </div>`;
+}
+
+function filterRegion(btn,region){
+  activeRegion=region;
+  document.querySelectorAll('.sidebar .region-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');render();
+}
+function filterType(btn,type){
+  if(activeType===type){activeType='';btn.classList.remove('active');}
+  else{activeType=type;document.querySelectorAll('.sidebar .region-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+  render();
+}
+function toggleNotable(){
+  notableOnly=!notableOnly;
+  document.getElementById('notable-btn').classList.toggle('active',notableOnly);render();
+}
+function handleSearch(){activeSearch=document.getElementById('search-input').value.trim();render();}
+function scrollToMonth(m,btn){
+  document.querySelectorAll('.month-pill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(m===0){window.scrollTo({top:0,behavior:'smooth'});return;}
+  const el=document.getElementById('month-'+m);
+  if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function openDetail(id){
+  const f=FESTIVALS.find(x=>x.id===id);if(!f)return;
+  document.getElementById('dp-jp').textContent=f.nameJp;
+  document.getElementById('dp-en').textContent=f.nameEn;
+  document.getElementById('dp-stable').textContent=f.dateRange;
+  document.getElementById('dp-dates-note').textContent=f.datesNote;
+  document.getElementById('dp-location').textContent=f.location;
+  document.getElementById('dp-prefecture').textContent=f.prefecture;
+  document.getElementById('dp-region').textContent=f.region||'Nationwide';
+  document.getElementById('dp-type').textContent=TYPE_LABELS[f.type]||f.type;
+  document.getElementById('dp-crowd').textContent=f.crowd+' — '+crowdTip(f.crowd);
+  document.getElementById('dp-desc').textContent=f.desc;
+
+  // Sources
+  const linksEl=document.getElementById('dp-links');
+  linksEl.innerHTML=f.sources.map(s=>`
+    <a class="verify-link" href="${s.url}" target="_blank" rel="noopener">
+      <span class="link-icon">⊞</span>
+      <span class="link-text">${s.label}</span>
+      <span class="link-lang">${s.lang}</span>
+      <span class="link-arrow">→</span>
+    </a>`).join('');
+
+  // Contacts
+  const contactsEl=document.getElementById('dp-contacts');
+  const block=document.getElementById('dp-contact-block');
+  if(f.contacts&&f.contacts.length){
+    block.style.display='';
+    contactsEl.innerHTML=f.contacts.map(c=>{
+      const icon=c.type==='phone'?'☏':c.type==='email'?'✉':'◈';
+      let val=c.value;
+      if(c.type==='phone')val=`<a href="tel:${c.value}">${c.value}</a>`;
+      if(c.type==='email'&&c.value.includes('@'))val=`<a href="mailto:${c.value}">${c.value}</a>`;
+      return `<div class="contact-item"><span class="ci-icon">${icon}</span><span>${c.label}: ${val}</span></div>`;
+    }).join('');
+  } else {
+    block.style.display='none';
+  }
+
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeDetail(){
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
+  document.body.style.overflow='';
+}
+function crowdTip(l){return{'Very High':'Book accommodation 3–6 months ahead','High':'Book 1–2 months ahead','Medium':'Book 2–4 weeks ahead','Low':'Usually fine without advance booking'}[l]||'';}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDetail();closeFabMonths();}});
+
+// ── FLOATING NAV ──
+const MONTH_SHORT=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function buildFabMonths(){
+  const el=document.getElementById('fab-months');
+  // months that have visible festivals in current filter
+  const visible=new Set(getFiltered().map(f=>f.month));
+  el.innerHTML=MONTH_SHORT.map((name,i)=>{
+    const m=i+1;
+    const has=visible.has(m);
+    return `<button class="fab-month-pill${has?' has-festivals':''}"
+      onclick="fabJumpMonth(${m})">${name}</button>`;
+  }).join('');
+}
+
+function fabJumpMonth(m){
+  const el=document.getElementById('month-'+m);
+  if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}
+  else{window.scrollTo({top:0,behavior:'smooth'});}
+  closeFabMonths();
+}
+
+function toggleFabMonths(){
+  const tray=document.getElementById('fab-months');
+  const btn=document.getElementById('fab-month-btn');
+  const isOpen=tray.classList.contains('open');
+  if(isOpen){closeFabMonths();}
+  else{buildFabMonths();tray.classList.add('open');btn.classList.add('open');}
+}
+
+function closeFabMonths(){
+  document.getElementById('fab-months').classList.remove('open');
+  document.getElementById('fab-month-btn').classList.remove('open');
+}
+
+// show/hide FAB on scroll — also show immediately if page is already tall
+function updateFab(){
+  const fab=document.getElementById('fab-cluster');
+  if(window.scrollY>200||document.body.scrollHeight>window.innerHeight*1.5){
+    fab.classList.add('visible');
+  } else {
+    fab.classList.remove('visible');closeFabMonths();
+  }
+}
+window.addEventListener('scroll',updateFab,{passive:true});
+// show on load if content is tall enough
+setTimeout(updateFab,100);
+
+// close month tray if clicking outside
+document.addEventListener('click',e=>{
+  const cluster=document.getElementById('fab-cluster');
+  if(!cluster.contains(e.target))closeFabMonths();
+});
+
+// ── STICKY OFFSET MEASUREMENT ──
+function setStickyOffsets(){
+  const hdr=document.querySelector('header');
+  const ctrl=document.querySelector('.controls');
+  const root=document.documentElement;
+  const hH=hdr?hdr.getBoundingClientRect().height:93;
+  const cH=ctrl?ctrl.getBoundingClientRect().height:54;
+  root.style.setProperty('--header-h',hH+'px');
+  root.style.setProperty('--stack-h',(hH+cH)+'px');
+}
+
+render();
+requestAnimationFrame(()=>{
+  setStickyOffsets();
+  window.addEventListener('resize',setStickyOffsets);
+});
+</script>
+</body>
+</html>
