@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teyvat Codex — Genshin Impact Lore</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,600&family=Playfair+Display:ital,wght@0,700;0,900;1,700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #1c1a2e;
+  --bg2:      #252340;
+  --bg3:      #2e2b50;
+  --card:     #302d52;
+  --card2:    #3a3760;
+  --gold:     #f0c060;
+  --gold2:    #ffd980;
+  --gold-dim: #a07830;
+  --teal:     #5ecec8;
+  --teal-dim: #2a7a78;
+  --rose:     #f08080;
+  --rose-dim: #803030;
+  --purple:   #b090f0;
+  --green:    #80d890;
+  --green-dim:#2a6040;
+  --text:     #eae6ff;
+  --text-mute:#9a94c8;
+  --white:    #ffffff;
+  --border:   rgba(240,192,96,0.2);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Nunito', sans-serif;
+  font-size: 17px;
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* Stars in background */
+body::after {
+  content:'';
+  position:fixed;
+  inset:0;
+  background-image:
+    radial-gradient(1.5px 1.5px at 8%  12%, rgba(240,192,96,0.5)  0%, transparent 100%),
+    radial-gradient(1px   1px   at 22% 35%, rgba(255,255,255,0.35) 0%, transparent 100%),
+    radial-gradient(1px   1px   at 45% 7%,  rgba(94,206,200,0.4)   0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 67% 20%, rgba(255,255,255,0.3)  0%, transparent 100%),
+    radial-gradient(1px   1px   at 88% 55%, rgba(240,192,96,0.4)   0%, transparent 100%),
+    radial-gradient(1px   1px   at 30% 80%, rgba(255,255,255,0.25) 0%, transparent 100%),
+    radial-gradient(1px   1px   at 75% 88%, rgba(94,206,200,0.3)   0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 15% 65%, rgba(240,192,96,0.35) 0%, transparent 100%),
+    radial-gradient(1px   1px   at 92% 10%, rgba(255,255,255,0.3)  0%, transparent 100%),
+    radial-gradient(1px   1px   at 55% 50%, rgba(176,144,240,0.3)  0%, transparent 100%);
+  pointer-events:none;
+  z-index:0;
+}
+
+/* ── NAV ── */
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  background: rgba(28,26,46,0.96);
+  backdrop-filter: blur(12px);
+  border-bottom: 2px solid rgba(240,192,96,0.25);
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 16px;
+}
+
+nav a {
+  color: var(--text-mute);
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: 10px 22px;
+  border-radius: 50px;
+  transition: all 0.2s;
+}
+
+nav a:hover {
+  background: rgba(240,192,96,0.12);
+  color: var(--gold);
+}
+
+/* ── HERO ── */
+.hero {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 80px 24px 64px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(94,206,200,0.12) 0%, transparent 60%),
+              radial-gradient(ellipse at 20% 100%, rgba(240,192,96,0.08) 0%, transparent 50%);
+}
+
+.hero-tag {
+  display: inline-block;
+  background: rgba(94,206,200,0.15);
+  border: 1px solid rgba(94,206,200,0.4);
+  color: var(--teal);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  padding: 6px 20px;
+  border-radius: 50px;
+  margin-bottom: 24px;
+}
+
+.hero h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(38px, 7vw, 78px);
+  font-weight: 900;
+  color: var(--white);
+  line-height: 1.1;
+  margin-bottom: 16px;
+  text-shadow: 0 0 80px rgba(94,206,200,0.3);
+}
+
+.hero h1 em {
+  font-style: italic;
+  color: var(--gold);
+}
+
+.hero-sub {
+  font-size: 18px;
+  color: var(--text-mute);
+  max-width: 600px;
+  margin: 0 auto 32px;
+}
+
+.hero-divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 400px;
+}
+
+.hero-divider::before,
+.hero-divider::after {
+  content:'';
+  flex:1;
+  height:1px;
+  background: linear-gradient(90deg, transparent, rgba(240,192,96,0.5));
+}
+
+.hero-divider::after {
+  background: linear-gradient(90deg, rgba(240,192,96,0.5), transparent);
+}
+
+.hero-divider span {
+  color: var(--gold);
+  font-size: 20px;
+}
+
+/* ── SCROLL JUMP PILLS ── */
+.jump-pills {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 24px 20px 0;
+  position: relative;
+  z-index: 1;
+}
+
+.jump-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: 50px;
+  transition: all 0.2s;
+}
+
+.jump-pill:hover {
+  background: var(--card2);
+  border-color: var(--gold);
+  color: var(--gold);
+  transform: translateY(-2px);
+}
+
+.jump-pill .pill-icon { font-size: 18px; }
+
+/* ── SECTIONS ── */
+section {
+  position: relative;
+  z-index: 1;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 72px 24px;
+}
+
+.section-eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(28px, 4vw, 48px);
+  font-weight: 900;
+  color: var(--white);
+  line-height: 1.15;
+  margin-bottom: 12px;
+}
+
+.section-title em { font-style: italic; color: var(--gold); }
+
+.section-intro {
+  font-size: 17px;
+  color: var(--text-mute);
+  max-width: 760px;
+  margin-bottom: 44px;
+  line-height: 1.8;
+}
+
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(240,192,96,0.3), transparent);
+  margin: 72px 0 0;
+}
+
+/* ── PAIMON SECTION ── */
+.paimon-hero-box {
+  text-align: center;
+  padding: 48px 32px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(176,144,240,0.12) 0%, transparent 60%),
+              var(--bg2);
+  border: 1px solid rgba(176,144,240,0.25);
+  border-radius: 20px;
+  margin-bottom: 40px;
+}
+
+.paimon-big-q {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(26px, 5vw, 54px);
+  font-weight: 900;
+  color: var(--white);
+  line-height: 1.2;
+  margin-bottom: 20px;
+}
+
+.paimon-big-q .hl { color: var(--gold); }
+
+.verdict-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(240,192,96,0.12);
+  border: 2px solid rgba(240,192,96,0.4);
+  border-radius: 50px;
+  padding: 14px 32px;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--gold2);
+  margin: 20px 0 28px;
+  animation: softglow 3s ease-in-out infinite;
+}
+
+@keyframes softglow {
+  0%,100% { box-shadow: 0 0 0px rgba(240,192,96,0); }
+  50%      { box-shadow: 0 0 24px rgba(240,192,96,0.3); }
+}
+
+.paimon-desc {
+  font-size: 17px;
+  color: var(--text-mute);
+  max-width: 740px;
+  margin: 0 auto;
+  line-height: 1.85;
+}
+
+.paimon-desc strong { color: var(--text); }
+
+/* Evidence grid */
+.ev-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 40px;
+}
+
+.ev-col {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+}
+
+.ev-col-title {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.for-title  { color: var(--teal);  border-color: var(--teal-dim); }
+.against-title { color: var(--rose); border-color: var(--rose-dim); }
+
+.ev-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.ev-bullet {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 9px;
+}
+
+.for-b  { background: var(--teal); }
+.agst-b { background: var(--rose); }
+
+.ev-text {
+  font-size: 15px;
+  color: var(--text-mute);
+  line-height: 1.7;
+}
+
+.ev-text strong { color: var(--text); }
+
+/* Theory cards */
+.theory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 40px;
+}
+
+.theory-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--purple);
+  border-radius: 0 0 16px 16px;
+  padding: 22px 20px;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.theory-card:hover {
+  transform: translateY(-4px);
+  border-top-color: var(--gold);
+}
+
+.theory-num {
+  font-family: 'Playfair Display', serif;
+  font-size: 36px;
+  font-weight: 900;
+  color: rgba(176,144,240,0.25);
+  margin-bottom: 8px;
+}
+
+.theory-title {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--gold2);
+  margin-bottom: 10px;
+}
+
+.theory-body {
+  font-size: 14px;
+  color: var(--text-mute);
+  line-height: 1.7;
+}
+
+/* ── TIMELINE ── */
+.tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.tl-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg2);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 50px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-mute);
+}
+
+.tl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink:0; }
+
+.tl-era-block { margin-bottom: 48px; }
+
+.tl-era-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 8px 20px;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 20px;
+}
+
+.tl-era-label::before {
+  content: '◆';
+  font-size: 8px;
+  color: var(--gold-dim);
+}
+
+.tl-cards { display: flex; flex-direction: column; gap: 12px; }
+
+.tl-event {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+
+.tl-date-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-right: 20px;
+  padding-top: 18px;
+  gap: 0;
+  position: relative;
+}
+
+.tl-date-col::after {
+  content:'';
+  position: absolute;
+  right: -1px;
+  top: 26px;
+  bottom: 0;
+  width: 2px;
+  background: rgba(240,192,96,0.15);
+}
+
+.tl-date-text {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--gold-dim);
+  letter-spacing: 0.5px;
+  text-align: right;
+  line-height: 1.3;
+}
+
+.tl-node {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--gold);
+  position: absolute;
+  right: -7px;
+  top: 20px;
+  flex-shrink: 0;
+}
+
+.tl-card-wrap { padding-left: 24px; padding-bottom: 12px; }
+
+.tl-card {
+  background: var(--bg2);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-left: 4px solid;
+  border-radius: 0 12px 12px 0;
+  padding: 16px 20px;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.tl-card:hover {
+  background: var(--bg3);
+  transform: translateX(3px);
+}
+
+.tl-card.dragon    { border-left-color: var(--teal); }
+.tl-card.celestia  { border-left-color: var(--gold); }
+.tl-card.human     { border-left-color: var(--green); }
+.tl-card.war       { border-left-color: var(--rose); }
+.tl-card.fatui     { border-left-color: var(--purple); }
+.tl-card.traveler  { border-left-color: #60b0f0; }
+
+.tl-card-title {
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--white);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.tl-card-body {
+  font-size: 14px;
+  color: var(--text-mute);
+  line-height: 1.7;
+}
+
+/* ── GOETIA TABLES ── */
+.tab-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  background: var(--bg2);
+  padding: 6px;
+  border-radius: 14px;
+  width: fit-content;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-mute);
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 9px 22px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.tab-btn.active {
+  background: var(--card2);
+  color: var(--gold);
+}
+
+.tab-btn:hover:not(.active) {
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.table-wrap { overflow-x: auto; border-radius: 14px; }
+
+.goetia-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.goetia-table thead tr {
+  background: var(--bg3);
+}
+
+.goetia-table th {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+  padding: 14px 16px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.goetia-table tbody tr {
+  border-top: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.15s;
+}
+
+.goetia-table tbody tr:hover { background: rgba(255,255,255,0.04); }
+
+.goetia-table td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--text-mute);
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+.goetia-table td.num {
+  font-weight: 900;
+  font-size: 16px;
+  color: var(--gold-dim);
+  width: 40px;
+  text-align: center;
+}
+
+.goetia-table td.demon {
+  font-family: 'Playfair Display', serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--white);
+  white-space: nowrap;
+}
+
+.goetia-table td.gchar {
+  font-weight: 800;
+  color: var(--gold2);
+  font-size: 14px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 50px;
+  border: 1px solid;
+}
+
+.badge-archon   { color: var(--gold);   border-color: rgba(240,192,96,0.4);  background: rgba(240,192,96,0.08); }
+.badge-god      { color: var(--teal);   border-color: rgba(94,206,200,0.4);  background: rgba(94,206,200,0.08); }
+.badge-companion{ color: var(--purple); border-color: rgba(176,144,240,0.4); background: rgba(176,144,240,0.08); }
+.badge-unknown  { color: var(--text-mute); border-color: rgba(255,255,255,0.2); }
+.badge-primordial{ color: var(--rose);  border-color: rgba(240,128,128,0.4);  background: rgba(240,128,128,0.08); }
+
+/* highlight callout */
+.callout {
+  background: rgba(240,192,96,0.07);
+  border: 1px solid rgba(240,192,96,0.25);
+  border-left: 4px solid var(--gold);
+  border-radius: 0 12px 12px 0;
+  padding: 20px 24px;
+  margin-top: 28px;
+  font-size: 15px;
+  color: var(--text-mute);
+  line-height: 1.8;
+}
+
+.callout strong { color: var(--text); }
+.callout .callout-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+
+/* ── FOOTER ── */
+footer {
+  text-align: center;
+  padding: 40px 20px;
+  font-size: 13px;
+  color: var(--text-mute);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  position: relative;
+  z-index: 1;
+}
+
+footer span { color: var(--gold-dim); margin: 0 8px; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 680px) {
+  .ev-grid { grid-template-columns: 1fr; }
+  .theory-grid { grid-template-columns: 1fr; }
+  .tl-event { grid-template-columns: 80px 1fr; }
+  nav a { font-size: 12px; padding: 8px 14px; }
+  .tab-btn { font-size: 12px; padding: 8px 14px; }
+}
+
+/* fade in */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.fade { animation: fadeUp 0.6s ease both; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#paimon">🍎 Paimon Theory</a>
+  <a href="#timeline">📜 Lore Timeline</a>
+  <a href="#goetia">📖 Ars Goetia</a>
+</nav>
+
+<!-- HERO -->
+<div class="hero fade">
+  <div class="hero-tag">✦ Teyvat Codex — Lore Archive ✦</div>
+  <h1>The World of <em>Teyvat</em></h1>
+  <div class="hero-sub">A friendly guide to Genshin Impact's lore — from the very beginning to what's happening right now. Spoilers for all chapters included.</div>
+  <div class="hero-divider"><span>✦</span></div>
+</div>
+
+<div class="jump-pills fade">
+  <a class="jump-pill" href="#paimon"><span class="pill-icon">🍎</span> Is Paimon an Archon?</a>
+  <a class="jump-pill" href="#timeline"><span class="pill-icon">⏳</span> Full Lore Timeline</a>
+  <a class="jump-pill" href="#goetia"><span class="pill-icon">📖</span> Ars Goetia Table</a>
+</div>
+
+<!-- ════════════════════════════════ -->
+<!-- PAIMON SECTION -->
+<!-- ════════════════════════════════ -->
+<section id="paimon">
+  <div class="section-eyebrow">🔍 The Biggest Mystery in Teyvat</div>
+  <div class="section-title">Is <em>Paimon</em> Secretly an Archon?</div>
+
+  <!-- Hero box -->
+  <div class="paimon-hero-box">
+    <div class="paimon-big-q">
+      Your floating companion, your <span class="hl">"Emergency Food"</span> — what if she's one of the most powerful beings in Teyvat?
+    </div>
+    <div class="verdict-pill">
+      ⚠️ Official Status: Unconfirmed — But the Evidence Is Suspicious
+    </div>
+    <div class="paimon-desc">
+      MiHoYo has never explained Paimon's true identity. But here's the thing: every single Archon in Teyvat has a name pulled from the <strong>Ars Goetia</strong> — a 17th-century grimoire listing 72 demons of various ranks. Barbatos, Baal, Morax, Buer — all Archons, all Goetia demons. And Paimon? She's Goetia demon <strong>#9 — one of only 9 Kings of Hell</strong>, the highest rank in the entire 72. She commands 200 legions, rides a camel with a glorious crown, and grants all knowledge of arts and science. Sound familiar? That's your travel guide.
+    </div>
+  </div>
+
+  <!-- Evidence -->
+  <div class="ev-grid">
+    <div class="ev-col">
+      <div class="ev-col-title for-title">✅ Evidence She IS Divine</div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>She outranks Barbatos in the Ars Goetia.</strong> Paimon is a Great King (#9). Barbatos is a Duke (#8). In the original text, Kings are above Dukes. Venti is literally lower-ranked than your snack companion.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>One of only 9 Demon Kings.</strong> In the Ars Goetia, only 9 of the 72 demons hold the rank of King — the highest rank. Paimon is one of them, alongside Bael, Beleth, Purson, Asmoday, Vine, Balam, Zagan, and Belial. Bael (#1) is the Electro Archon. Asmoday (#32) is the Unknown God. Paimon is the only King whose Genshin identity remains unexplained.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>Mona cannot read her fortune.</strong> When Mona tries to read Paimon's future, she gets nothing. The same thing happens with Archon Venti — divine energy blocks her. Paimon creates no elemental interference, yet still cannot be read.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>Albedo's experiment reveals hidden power.</strong> Albedo calculates Paimon has enough latent elemental energy to shatter rock ten meters thick or reverse a waterfall. She looked confused — like she didn't know.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>Her clothes have Archon symbols on them.</strong> The markings on Paimon's sleeves and legs exactly match symbols found at the base of the Statues of the Seven — symbols tied to divine authority.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>An NPC says her string goes above the sky.</strong> One character describes Paimon as a balloon with a string extending upward — to somewhere above the sky. Above the sky in Teyvat means one place: Celestia.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet for-b"></div>
+        <div class="ev-text"><strong>She looks exactly like the Unknown God.</strong> White hair, floating crown, ethereal white clothes. The Unknown God (Asmoday) and Paimon share a very deliberate visual design. In 2025 teaser trailers, Asmoday is conspicuously absent while the other Three Shades appear.</div>
+      </div>
+    </div>
+
+    <div class="ev-col">
+      <div class="ev-col-title against-title">❌ Evidence She Is Just Emergency Food</div>
+      <div class="ev-item">
+        <div class="ev-bullet agst-b"></div>
+        <div class="ev-text"><strong>She has no Gnosis.</strong> Every Archon carries a Gnosis — the physical object linking them to Celestia's authority. Paimon has never shown one, and she shows none of the divine resonance that comes with it.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet agst-b"></div>
+        <div class="ev-text"><strong>She can't control any element.</strong> Archons command entire elements at a sovereign level. Paimon uses zero elemental abilities throughout the entire game, including situations where any god would use them.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet agst-b"></div>
+        <div class="ev-text"><strong>She's genuinely helpless in combat.</strong> Multiple Archons comment on how fragile she seems. Every other Archon — even ones pretending to be weak — carries themselves with underlying gravitas. Paimon screams and hides.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet agst-b"></div>
+        <div class="ev-text"><strong>No nation. No ideal.</strong> Every Archon rules over a nation and embodies a core ideal — Freedom, Contracts, Eternity, Wisdom, Justice, War, Love. Paimon has none of these. She's attached to the Traveler, not any region of Teyvat.</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-bullet agst-b"></div>
+        <div class="ev-text"><strong>The Unknown God was cold and ruthless.</strong> Asmoday coldly separated the Traveler twins without hesitation. Paimon is fiercely loyal, emotional, and protective. The personality gap is enormous — though a memory wipe could explain this.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theories -->
+  <div class="section-eyebrow" style="margin-top:10px;">💡 Top Community Theories</div>
+  <div class="theory-grid">
+    <div class="theory-card">
+      <div class="theory-num">I</div>
+      <div class="theory-title">The Rebirth Theory</div>
+      <div class="theory-body">Paimon is a reborn or fragmented version of Asmoday — the Unknown God — with no memory of her original form. She transformed herself to observe the Traveler up close, either as a hidden watcher or as a form of protection for someone she recognized as powerful.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-num">II</div>
+      <div class="theory-title">The Stripped Archon Theory</div>
+      <div class="theory-body">Paimon was a god before the Archon War — possibly Khaenri'ah's self-made deity — and was stripped of her authority and memory when the Heavenly Principles seized Teyvat. She survived as a powerless amnesiac until she found the Traveler.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-num">III</div>
+      <div class="theory-title">The Watcher Theory</div>
+      <div class="theory-body">Paimon knows exactly who she is, and is deliberately guiding the Traveler toward a specific outcome — whether that means dismantling Celestia or restoring the old world. The "emergency food" persona is a performance. Every moment of vulnerability is calculated.</div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider" style="max-width:1080px; margin:0 auto;"></div>
+
+<!-- ════════════════════════════════ -->
+<!-- TIMELINE SECTION -->
+<!-- ════════════════════════════════ -->
+<section id="timeline">
+  <div class="section-eyebrow">⏳ From the Beginning to Now</div>
+  <div class="section-title">The Full <em>Lore Timeline</em> of Teyvat</div>
+  <div class="section-intro">Everything that happened in Teyvat — from before the Archons existed to what's happening in the story right now. Big spoilers ahead for all chapters!</div>
+
+  <div class="tl-legend">
+    <div class="tl-pill"><div class="tl-dot" style="background:var(--teal)"></div> Dragon Age</div>
+    <div class="tl-pill"><div class="tl-dot" style="background:var(--gold)"></div> Celestia / Divine</div>
+    <div class="tl-pill"><div class="tl-dot" style="background:var(--green)"></div> Nations / Humans</div>
+    <div class="tl-pill"><div class="tl-dot" style="background:var(--rose)"></div> War / Destruction</div>
+    <div class="tl-pill"><div class="tl-dot" style="background:var(--purple)"></div> Fatui / Abyss</div>
+    <div class="tl-pill"><div class="tl-dot" style="background:#60b0f0"></div> Traveler's Story</div>
+  </div>
+
+  <!-- ERA 1 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">Before Everything</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Unknown Past</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card celestia">
+            <div class="tl-card-title">The Primordial One Arrives — First Descender</div>
+            <div class="tl-card-body">An unknown entity descends from beyond the cosmos and imposes order on formless chaos. It creates the sun, moon, the laws of reality, and — importantly — the artificial sky of Teyvat. The world we know is built on top of whatever came before. This is the First Descender.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Ancient Era</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card dragon">
+            <div class="tl-card-title">🐉 The Seven Dragon Sovereigns Rule Teyvat</div>
+            <div class="tl-card-body">Before Archons and Celestia, seven elemental dragon-sovereigns presided over seven nations. Nibelung was the Dragon King. Apep ruled Sumeru's ancient rainforest. The Hydro Dragon commanded the Primordial Sea — the origin of all life. Azhdaha held Geo. Xiuhcoatl held Pyro. No thrones. No divine mandates. Just raw elemental power.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Ancient Era</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card celestia">
+            <div class="tl-card-title">🌙 The Three Moon Sisters &amp; The Seelie</div>
+            <div class="tl-card-body">Nibelung creates three moon goddesses — Aria, Sonnet, and Canon — to watch over Teyvat. The Seelie, luminous beings of light, guide early humanity. It's an era of abundance and peace. These will all be destroyed in what comes next.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 2 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">The Fall — Second Who Came (~6,000+ Years Ago)</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Ancient</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card war">
+            <div class="tl-card-title">⚔️ Nibelung's War — The Dragon Age Ends</div>
+            <div class="tl-card-body">A second cosmic power — the Heavenly Principles — descends on Teyvat. Nibelung uses forbidden knowledge from the Abyss to fight back, but fails and is killed. The Heavenly Principles steal the Sovereigns' elemental Authorities, drive Celestial Nails into the earth to contain the Abyss, and dismantle the old world order. The Three Moon Sisters fall. The Seelie civilization collapses. Everything resets.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~6,000 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card human">
+            <div class="tl-card-title">🏙️ Khaenri'ah Founded — A Nation With No God</div>
+            <div class="tl-card-body">Humans build a subterranean civilization that completely rejects divine authority. No Archon. No Celestia. Just human ingenuity and the forbidden art of Khemia — alchemy capable of creating life itself. They thrive independently for thousands of years. This independence will eventually trigger the apocalypse.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 3 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">The Archon War (More Than 3,700 to 2,000 Years Ago)</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">&gt;3,700 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card war">
+            <div class="tl-card-title">💥 The Archon War Begins</div>
+            <div class="tl-card-body">Celestia creates seven Gnoses from the remains of a third descender and opens seven divine thrones from the stolen Dragon Authorities. Gods across Teyvat erupt into war for these thrones. Many scholars believe the Heavenly Principles engineered this conflict specifically so gods would eliminate each other — a controlled culling disguised as divine selection.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~2,600 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card war">
+            <div class="tl-card-title">🌬️ Mondstadt — Decarabian Falls, Barbatos Rises</div>
+            <div class="tl-card-body">Decarabian (God of Storms) rules Old Mondstadt behind giant walls. Boreas wages a war of blizzards from outside. A nameless bard, a wind spirit, and a knight lead a rebellion against Decarabian and defeat him. Boreas forfeits his claim, knowing he cannot be a kind and loving god. The wind spirit ascends as Barbatos, the Anemo Archon we know as Venti.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Ancient</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card human">
+            <div class="tl-card-title">🌿 Sumeru's Three God-Kings — and King Deshret's Fall</div>
+            <div class="tl-card-body">Sumeru was once ruled jointly by Greater Lord Rukkhadevata, King Deshret (the Red King), and the Goddess of Flowers. A golden age of knowledge. But King Deshret pursued forbidden knowledge from the Abyss and became corrupted. He died. The Goddess was lost. Rukkhadevata ruled alone, setting up Sumeru's 2,000-year obsession with wisdom above all else.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~2,000 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card celestia">
+            <div class="tl-card-title">👑 The Archon War Ends — The Seven Are Established</div>
+            <div class="tl-card-body">The final throne is claimed. Seven victors become the Archons: Barbatos (Anemo/Mondstadt), Morax/Zhongli (Geo/Liyue), Baal/Makoto (Electro/Inazuma), Rukkhadevata (Dendro/Sumeru), Egeria (Hydro/Fontaine), Xbalanque (Pyro/Natlan), and Belyi Tsar (Cryo/Snezhnaya). Defeated gods flee to the Dark Sea. The seven nations are formally established. A fragile peace begins.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 4 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">The Long Peace (2,000 to 500 Years Ago)</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~2,000 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card human">
+            <div class="tl-card-title">📜 Zhongli Builds Liyue Through Contracts</div>
+            <div class="tl-card-body">Morax shapes Liyue through an intricate web of contracts — agreements that bind even himself. He forms the Yakshas, five adepti tasked with purging the world's karmic debt. He rules for the longest uninterrupted reign of any Archon in Teyvat's history, watching every person he grows to care about eventually die.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card dragon">
+            <div class="tl-card-title">🐲 Neuvillette — The Hydro Sovereign Reborn as a Human</div>
+            <div class="tl-card-body">An ancient Enkanomiyan prophecy said the Hydro Dragon Sovereign would be reborn in human form. And it happened. Neuvillette is born without full memories or powers — his Hydro Authority is locked in Egeria's divine throne. Focalors invites him to serve as Chief Justice of Fontaine, hoping he can eventually recover what was taken from him.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 5 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">💀 The Cataclysm — 500 Years Ago</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card war">
+            <div class="tl-card-title">💥 Khaenri'ah Is Destroyed — The World Changes Forever</div>
+            <div class="tl-card-body">Khaenri'ah's master alchemist Rhinedottir (called "Gold") creates the black dragon Durin and unleashes synthetic monsters upon Teyvat. Whether this triggered Celestia's wrath, or whether Celestia struck first for other reasons, remains a mystery. The Heavenly Principles descend. Khaenri'ah is annihilated. Pure-blooded Khaenri'ahns are cursed with immortality. Those of mixed blood are transformed into the hilichurls we see wandering the world today.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card war">
+            <div class="tl-card-title">😢 Five Archons Fall in the Catastrophe</div>
+            <div class="tl-card-body">Raiden Makoto (Electro) dies fighting. Greater Lord Rukkhadevata (Dendro) exhausts all her power cleansing Irminsul from the knowledge pollution and dies. Egeria (Hydro, Fontaine) dies — her body becomes the Amrita Pool. Belyi Tsar (Cryo) dies. A Pyro Archon also perishes. Only Barbatos and Morax — the two oldest — survive intact.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card dragon">
+            <div class="tl-card-title">🐉 Dvalin Poisoned Over Dragonspine</div>
+            <div class="tl-card-body">Dvalin battles and kills Durin above Dragonspine, but swallows the black dragon's corrupted blood in the process. He retreats to Decarabian's old ruined tower to heal. He will not wake for 500 years — and when he does, the Abyss Order will have already found him and twisted his mind against Mondstadt.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">⭐ The Twin Travelers Arrive — Then Are Separated</div>
+            <div class="tl-card-body">Two travelers from beyond the stars descend on Teyvat and get caught in the Cataclysm. The Unknown God (Asmoday) appears. She captures one sibling — who eventually escapes, joins the Abyss Order, and becomes its leader. She seals the other sibling (our Traveler) into deep sleep. The Traveler will not wake for 500 years.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 6 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">Post-Cataclysm — The New World (500 to ~0 Years Ago)</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card fatui">
+            <div class="tl-card-title">🎭 The Fatui Are Founded</div>
+            <div class="tl-card-body">Pierro, a survivor from Khaenri'ah, meets the Cryo Archon Tsaritsa. Both are changed by what happened. They co-found the Fatui — officially the diplomatic corps of Snezhnaya, secretly a rebellion against Celestia. Venti once described the Tsaritsa as the kindest of all Archons. Whatever she once was, that person is gone now.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">~500 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card human">
+            <div class="tl-card-title">⚡ Raiden Ei Takes the Throne as "Baal"</div>
+            <div class="tl-card-body">After her twin sister Makoto's death, Ei adopts the title of Baal and pursues Eternity — a desperate attempt to preserve Inazuma exactly as it is so nothing else she loves can die. She builds the Raiden Shogun puppet to rule in her place and seals herself inside the Plane of Euthymia, cutting herself off from the world she's trying to protect.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">&gt;100 yrs ago</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card fatui">
+            <div class="tl-card-title">🌑 Abyss Order Founded — The Traveler's Sibling Takes Over</div>
+            <div class="tl-card-body">Chlothar Alberich founds the Abyss Order from Khaenri'ahn survivors seeking revenge against Celestia and the Seven. The Traveler's sibling eventually joins — and becomes their leader. Dainsleif, the immortal Twilight Sword of Khaenri'ah, becomes their declared enemy.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Recent years</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card fatui">
+            <div class="tl-card-title">💎 The Tsaritsa Begins Collecting Gnoses</div>
+            <div class="tl-card-body">The Cryo Archon directs the eleven Fatui Harbingers to take the Gnoses from each Archon. Zhongli surrenders his willingly. La Signora takes Venti's by force. What the Tsaritsa plans to do with all of them is the central unanswered question of the entire story.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ERA 7 -->
+  <div class="tl-era-block">
+    <div class="tl-era-label">Present Day — The Traveler's Journey (All Chapters)</div>
+    <div class="tl-cards">
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Chapter I</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">🌬️ Mondstadt + Liyue — Traveler Awakens, Rex Lapis "Dies"</div>
+            <div class="tl-card-body">The Traveler wakes up after 500 years, meets Paimon, and frees Dvalin from Abyss corruption, restoring his friendship with Barbatos. In Liyue, Zhongli stages his own death — surrendering his Gnosis to the Fatui to test whether Liyue can stand without a god watching over it. It can. He retires to live as a mortal funeral consultant named Zhongli.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Chapter II</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">⚡ Inazuma — Vision Hunt Decree Ends, Ei Faces Her Grief</div>
+            <div class="tl-card-body">Raiden Ei's Shogun puppet enforces the Vision Hunt Decree, collecting Visions and freezing Inazuma in time. The Traveler fights the puppet, enters the Plane of Euthymia, and challenges Ei directly. She is forced to confront 500 years of unresolved grief over Makoto and the Cataclysm. The Decree ends. For the first time in centuries, the real Ei re-engages with her nation and her people.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Chapter III</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">🌿 Sumeru — Rukkhadevata Is Erased from All Memory</div>
+            <div class="tl-card-body">Nahida has been imprisoned by the Akademiya for 500 years while they ran Sumeru in her name. The Traveler helps free her. To save Sumeru from the knowledge pollution still corrupting Irminsul (the world tree that stores all of Teyvat's memory), Nahida erases Greater Lord Rukkhadevata from Irminsul entirely. Every person in the world forgets Rukkhadevata ever existed. Only the Traveler and a few others remember.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Chapter IV</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">💧 Fontaine — Focalors Executes Herself, Neuvillette Reclaims His Power</div>
+            <div class="tl-card-body">Furina has spent 500 years pretending to be the Hydro Archon while secretly keeping her divinity completely separate. She executes herself in court to dissolve the ancient prophecy that Fontaine would sink beneath the waters. Her death returns the Hydro Authority to Neuvillette. He pardons all Fontainians of their original sin and steps into his role as Teyvat's true Hydro ruler. The most emotionally devastating arc in the game.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Chapter V</div>
+          <div class="tl-node"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card traveler">
+            <div class="tl-card-title">🔥 Natlan — The Abyss Reaches the Gates, Il Capitano Falls</div>
+            <div class="tl-card-body">Natlan — the nation of fire and war — faces the Abyss directly at its borders. Mavuika, the Pyro Archon, has spent 500 years preparing Ancient Name bearers for exactly this battle. The Abyss invades the Night Kingdom itself. Il Capitano sacrifices himself. The path to Snezhnaya and the final confrontation with the Tsaritsa grows closer with every step.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-event">
+        <div class="tl-date-col">
+          <div class="tl-date-text">Coming Soon</div>
+          <div class="tl-node" style="border-color:var(--text-mute); background:var(--bg2);"></div>
+        </div>
+        <div class="tl-card-wrap">
+          <div class="tl-card celestia">
+            <div class="tl-card-title">❓ Snezhnaya &amp; The Truth of Celestia — Story Ongoing</div>
+            <div class="tl-card-body">The Tsaritsa holds multiple Gnoses and her true plan is still unknown. The sky is artificial. History has been repeatedly erased. The Unknown God enforces a system of control, not divine benevolence. What happens when the Traveler reaches Snezhnaya — and what role Paimon plays in the final act — is the question the entire story has been building toward since day one.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="section-divider" style="max-width:1080px; margin:0 auto;"></div>
+
+<!-- ════════════════════════════════ -->
+<!-- ARS GOETIA SECTION -->
+<!-- ════════════════════════════════ -->
+<section id="goetia">
+  <div class="section-eyebrow">📖 The Lesser Key of Solomon</div>
+  <div class="section-title">Ars Goetia &amp; <em>Genshin Characters</em></div>
+  <div class="section-intro">A 17th-century grimoire called the <em>Lemegeton</em> lists 72 demons King Solomon supposedly commanded. MiHoYo named every Archon, most ancient gods, Paimon, and even the Unknown God after these demons. In Chinese, Teyvat's gods are literally called "Solomon's 72 Demon Gods." This was a deliberate design choice confirmed by MiHoYo in a 2021 interview.</div>
+
+  <div class="tab-row">
+    <button class="tab-btn active" onclick="switchTab('archons', this)">⭐ The Seven Archons</button>
+    <button class="tab-btn" onclick="switchTab('gods', this)">🏛️ Ancient Gods</button>
+    <button class="tab-btn" onclick="switchTab('other', this)">🍎 Paimon &amp; Others</button>
+  </div>
+
+  <!-- ARCHONS TAB -->
+  <div id="tab-archons" class="tab-panel active">
+    <div class="table-wrap">
+      <table class="goetia-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Goetia Demon</th>
+            <th>Rank in Hell</th>
+            <th>What the Demon Can Do</th>
+            <th>Genshin Character</th>
+            <th>Nation / Element</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">1</td>
+            <td class="demon">Baal</td>
+            <td>King of Hell. Commands 66 legions. The very first and most powerful.</td>
+            <td>Grants invisibility. Thunder aspect. Rules the East.</td>
+            <td class="gchar">Raiden Makoto (original) — Raiden Ei rules under this name</td>
+            <td>Inazuma / Electro</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">8</td>
+            <td class="demon">Barbatos</td>
+            <td>Duke &amp; Earl. Commands 30 legions. Has four kings as companions.</td>
+            <td>Understands animal voices, reveals hidden treasure, knows past &amp; future, reconciles friends &amp; rulers.</td>
+            <td class="gchar">Venti</td>
+            <td>Mondstadt / Anemo</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">10</td>
+            <td class="demon">Buer</td>
+            <td>Great President. Commands 50 legions.</td>
+            <td>Teaches natural philosophy, logic, virtues of plants. Heals all diseases.</td>
+            <td class="gchar">Nahida (Lesser Lord Kusanali)</td>
+            <td>Sumeru / Dendro</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">21</td>
+            <td class="demon">Morax</td>
+            <td>Great Earl &amp; President. Commands 30 legions.</td>
+            <td>Teaches astronomy, sciences, knowledge of herbs and precious stones. Makes men wise.</td>
+            <td class="gchar">Zhongli (Rex Lapis)</td>
+            <td>Liyue / Geo</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">41</td>
+            <td class="demon">Focalor</td>
+            <td>Great Duke. Commands 30 legions. Has griffin wings.</td>
+            <td>Controls wind and sea. Can drown men. Hoped to return to heaven after 1,000 years — but was deceived.</td>
+            <td class="gchar">Furina (Focalors)</td>
+            <td>Fontaine / Hydro</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">23</td>
+            <td class="demon">Aim (Haborym)</td>
+            <td>Great Duke. Commands 26 legions. Three heads: man, serpent, cat.</td>
+            <td>Sets cities and castles on fire. Makes men cunning in all ways. Gives true answers.</td>
+            <td class="gchar">Mavuika (Pyro Archon)</td>
+            <td>Natlan / Pyro</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">—</td>
+            <td class="demon">Beelzebub</td>
+            <td>Not in the 72 directly. Lord of the Flies. Second only to Lucifer.</td>
+            <td>Commands pride, war, and murder. Master of all demons.</td>
+            <td class="gchar">Raiden Ei (her true Archon name, used as the Shogun)</td>
+            <td>Inazuma / Electro</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">—</td>
+            <td class="demon">???</td>
+            <td>Unrevealed by MiHoYo as of 2026.</td>
+            <td>—</td>
+            <td class="gchar">The Tsaritsa (Cryo Archon)</td>
+            <td>Snezhnaya / Cryo</td>
+            <td><span class="badge badge-unknown">Unknown</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- GODS TAB -->
+  <div id="tab-gods" class="tab-panel">
+    <div class="table-wrap">
+      <table class="goetia-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Goetia Demon</th>
+            <th>Rank in Hell</th>
+            <th>What the Demon Can Do</th>
+            <th>Genshin Character</th>
+            <th>Who Are They?</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">32</td>
+            <td class="demon">Asmoday</td>
+            <td>Great King. Commands 72 legions. Rides an infernal dragon.</td>
+            <td>Teaches arithmetic, astronomy, geometry. Reveals and guards hidden treasure.</td>
+            <td class="gchar">The Unknown God (found in game files as her true name)</td>
+            <td>The Sustainer of Heavenly Principles — separated the Traveler twins</td>
+            <td><span class="badge badge-god">Celestia</span></td>
+          </tr>
+          <tr>
+            <td class="num">29</td>
+            <td class="demon">Astaroth</td>
+            <td>Great Duke. Commands 40 legions.</td>
+            <td>Teaches mathematical sciences, makes men invisible, power over time.</td>
+            <td class="gchar">Istaroth — Shade of Time, one of the Four Shades</td>
+            <td>Ancient pre-war god who governs time</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">27</td>
+            <td class="demon">Ronove</td>
+            <td>Marquis &amp; Earl. Commands 20 legions. Harvests souls of the dying.</td>
+            <td>Teaches rhetoric and languages. Takes old souls as they die.</td>
+            <td class="gchar">Ronova — Shade of Death, one of the Four Shades</td>
+            <td>Cast the Curse of Immortality on surviving Khaenri'ahns</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">24</td>
+            <td class="demon">Naberius</td>
+            <td>Most Valiant Marquis. Commands 19 legions. Appears as a raven or three-headed dog.</td>
+            <td>Makes men skilled in all arts, especially rhetoric. Restores lost dignity.</td>
+            <td class="gchar">Naberius — created Egeria, the first Hydro Archon</td>
+            <td>Ancient pre-war god; appears only in Albedo's background lore</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">69</td>
+            <td class="demon">Decarabia</td>
+            <td>Great Marquis. Commands 30 legions.</td>
+            <td>Knows virtues of herbs and stones. Commands birds.</td>
+            <td class="gchar">Decarabian — God of Storms, original ruler of Mondstadt</td>
+            <td>Ruled Old Mondstadt before Barbatos defeated him</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">55</td>
+            <td class="demon">Orobas</td>
+            <td>Great Prince. Commands 20 legions. Appears as a horse.</td>
+            <td>Knows past, present, and future. Gives true answers. Reconciles enemies.</td>
+            <td class="gchar">Orobashi — Sea Serpent God of Watatsumi Island</td>
+            <td>Was ordered by Celestia to commit ritual suicide as "punishment"</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">64</td>
+            <td class="demon">Flauros (Havres)</td>
+            <td>Duke. Commands 36 legions.</td>
+            <td>Gives true answers of past, present, and future. Destroys enemies.</td>
+            <td class="gchar">Havria — the gentle Salt God of Liyue</td>
+            <td>Killed by her own followers during the Archon War to spare her from defeat</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">35</td>
+            <td class="demon">Marchosias</td>
+            <td>Great Marquis. Commands 30 legions. Wolf with griffin wings, breathes fire.</td>
+            <td>Excellent fighter. Gives true answers. Wanted to return to the seventh throne.</td>
+            <td class="gchar">Marchosius — the Stove God. Guoba is his tiny weakened body.</td>
+            <td>Yes, Xianling's little panda Guoba is an ancient war god in a weakened form</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">48</td>
+            <td class="demon">Haagenti</td>
+            <td>President. Commands 33 legions. Gryphon-winged bull.</td>
+            <td>Makes men wise. Transmutes metals. Turns water into wine.</td>
+            <td class="gchar">Guizhong — the Lord of Dust, Zhongli's oldest friend</td>
+            <td>Died in the Archon War. Zhongli still mourns her thousands of years later.</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">57</td>
+            <td class="demon">Ose</td>
+            <td>Great President. Commands 3 legions.</td>
+            <td>Makes men wise in liberal sciences. Can cause insanity.</td>
+            <td class="gchar">Osial — Overlord of the Vortex (the sea boss in Liyue)</td>
+            <td>Ancient evil god sealed by Zhongli beneath the sea for thousands of years</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">7</td>
+            <td class="demon">Amon</td>
+            <td>Marquis. Commands 40 legions. Wolf with serpent tail.</td>
+            <td>Knows past and future. Procures conflicts and reconciles friends.</td>
+            <td class="gchar">King Deshret — the Red King of ancient Sumeru</td>
+            <td>Sought forbidden knowledge to save his people — became corrupted and died</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PAIMON TAB -->
+  <div id="tab-other" class="tab-panel">
+    <div class="table-wrap">
+      <table class="goetia-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Goetia Demon</th>
+            <th>Rank in Hell</th>
+            <th>What the Demon Can Do</th>
+            <th>Genshin Character</th>
+            <th>Why It Matters</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">9</td>
+            <td class="demon">Paimon</td>
+            <td>GREAT KING of Hell. One of only 9 Kings in the entire 72. Commands 200 demon legions + 25 angel legions.</td>
+            <td>Grants all knowledge of arts, sciences, and earth's deepest secrets. Gives glory and confirms it. Bestows excellent familiar servants. Rides a camel wearing a glorious crown.</td>
+            <td class="gchar">PAIMON — your "Emergency Food" travel companion</td>
+            <td>In the Goetia hierarchy, Kings outrank Dukes. Barbatos is a Duke (#8). Paimon is a King (#9). Only 9 of 72 demons hold the King rank. Baal (#1) is the Electro Archon. Asmoday (#32) is the Unknown God. Paimon is the only Goetia King whose Genshin identity remains unexplained.</td>
+            <td><span class="badge badge-companion">??? Unknown</span></td>
+          </tr>
+          <tr>
+            <td class="num">63</td>
+            <td class="demon">Andras</td>
+            <td>Great Marquis. Commands 30 legions. Winged angel body with an owl's head. Described as extremely dangerous.</td>
+            <td>Sows discord. Will kill anyone — including the person who summoned him — if precautions aren't taken.</td>
+            <td class="gchar">Andrius / Boreas — Wolf King of the North Wind</td>
+            <td>Mondstadt's north wind god who forfeited his claim to the Archon throne so that the kinder Barbatos could rule instead</td>
+            <td><span class="badge badge-god">God</span></td>
+          </tr>
+          <tr>
+            <td class="num">—</td>
+            <td class="demon">Beelzebub</td>
+            <td>Not in the 72 directly. Lord of the Flies. Second most powerful, next to Lucifer.</td>
+            <td>Commands pride, war, and murder. Master of all demons.</td>
+            <td class="gchar">Raiden Ei — her true divine name is "Beelzebul"</td>
+            <td>Just as Ei and Makoto are twin sisters sharing the same throne, Baal and Beelzebub are associated demons in demonology — not the same entity, but deeply connected</td>
+            <td><span class="badge badge-archon">Archon</span></td>
+          </tr>
+          <tr>
+            <td class="num">—</td>
+            <td class="demon">Phanes</td>
+            <td>Not Ars Goetia — Greek Orphic creation deity. First-born of the cosmos.</td>
+            <td>Creator god of all things. Both male and female. Surrounded by all animals. Holds Zeus's lightning. Stands in a cracked egg.</td>
+            <td class="gchar">Phanes — theorized to be the Primordial One / First Descender</td>
+            <td>Referenced in Chinese Bilibili lore analysis as the game's true first god. Not from the Goetia — from Greek creation mythology. Shows MiHoYo draws from multiple ancient sources.</td>
+            <td><span class="badge badge-primordial">Primordial</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <div class="callout-label">⭐ The Key Finding About Paimon</div>
+      In the Ars Goetia, only 9 of the 72 demons hold the rank of King — the highest tier. Paimon the demon is one of them. Bael (#1) is the Electro Archon. Asmoday (#32) is the Unknown God. That makes Paimon — the tiny floating companion who eats everything — the only Goetia King whose Genshin identity remains completely unexplained. MiHoYo has never addressed this. The silence has lasted since the game launched in 2020.
+    </div>
+  </div>
+
+</section>
+
+<footer>
+  Teyvat Codex <span>✦</span> Compiled from Genshin Impact Wiki, Zhihu, Bilibili, Ars Goetia (Wikipedia) <span>✦</span> All Spoilers Through Chapter V <span>✦</span> Story Still Ongoing
+</footer>
+
+<script>
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+
+</body>
+</html>
