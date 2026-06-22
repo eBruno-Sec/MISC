@@ -1,0 +1,8 @@
+services:
+  klynedarius-site:
+    build: .
+    image: klynedarius-site:latest
+    container_name: klynedarius-site
+    ports:
+      - "8080:80"
+    restart: unless-stopped
