@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Built on Request</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Space+Grotesk:wght@700;800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111318;
+    --surface: #1a1d24;
+    --border:  #272b36;
+    --accent:  #a78bfa;
+    --text:    #8b90a0;
+    --bright:  #e8eaf2;
+    --muted:   #4a4f62;
+    --display: 'Space Grotesk', sans-serif;
+    --body:    'Nunito', sans-serif;
+  }
+
+  html, body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1.5rem 4rem;
+  }
+
+  .wrap { width: 100%; max-width: 520px; }
+
+  header { margin-bottom: 2.5rem; }
+
+  .wave { font-size: 2.2rem; display: block; margin-bottom: 0.75rem; }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(1.9rem, 5vw, 2.6rem);
+    font-weight: 800;
+    color: var(--bright);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.6rem;
+  }
+
+  .sub {
+    font-size: 0.95rem;
+    color: var(--text);
+    max-width: 42ch;
+    line-height: 1.75;
+  }
+
+  .sub strong { color: var(--accent); font-weight: 700; }
+
+  nav { display: flex; flex-direction: column; gap: 8px; margin-bottom: 2rem; }
+
+  a.card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.2rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 14px;
+    text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  }
+
+  a.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(167,139,250,0.12);
+    border-color: var(--accent);
+  }
+
+  a.card:hover .arrow { color: var(--accent); }
+  a.card:hover .name  { color: var(--accent); }
+
+  .emoji {
+    font-size: 1.5rem;
+    width: 2.4rem;
+    height: 2.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border-radius: 9px;
+    flex-shrink: 0;
+  }
+
+  .info { flex: 1; min-width: 0; }
+
+  .name {
+    font-family: var(--display);
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--bright);
+    transition: color 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .desc {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .arrow {
+    font-size: 0.95rem;
+    color: var(--muted);
+    flex-shrink: 0;
+    transition: color 0.15s;
+  }
+
+  /* Email form */
+  .form-box {
+    background: var(--surface);
+    border: 1.5px dashed var(--border);
+    border-radius: 14px;
+    padding: 1.4rem 1.3rem;
+  }
+
+  .form-label {
+    font-family: var(--display);
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--bright);
+    margin-bottom: 0.3rem;
+    display: block;
+  }
+
+  .form-sub {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+  }
+
+  .form-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  input[type="email"] {
+    flex: 1;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 0.65rem 0.9rem;
+    font-family: var(--body);
+    font-size: 0.85rem;
+    color: var(--bright);
+    outline: none;
+    transition: border-color 0.15s;
+    min-width: 0;
+  }
+
+  input[type="email"]::placeholder { color: var(--muted); }
+  input[type="email"]:focus { border-color: var(--accent); }
+
+  button[type="submit"] {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.65rem 1.1rem;
+    font-family: var(--display);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+
+  button[type="submit"]:hover { opacity: 0.88; transform: translateY(-1px); }
+
+  .thanks {
+    display: none;
+    font-size: 0.82rem;
+    color: var(--accent);
+    margin-top: 0.75rem;
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .wrap { animation: pop-up 0.35s cubic-bezier(0.22,1,0.36,1) both; }
+    @keyframes pop-up {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    a.card { animation: pop-up 0.35s cubic-bezier(0.22,1,0.36,1) both; }
+    a.card:nth-child(1) { animation-delay: 0.05s; }
+    a.card:nth-child(2) { animation-delay: 0.10s; }
+    a.card:nth-child(3) { animation-delay: 0.15s; }
+    a.card:nth-child(4) { animation-delay: 0.20s; }
+    a.card:nth-child(5) { animation-delay: 0.25s; }
+    a.card:nth-child(6) { animation-delay: 0.30s; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="wave">👋</span>
+    <h1>Stuff built<br>on request</h1>
+    <p class="sub">These are <strong>requested projects</strong> — someone had an idea and I made it happen. Leave your email if you want in on the next round.</p>
+  </header>
+
+  <nav>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/tiny-knights/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🏰</div>
+      <div class="info">
+        <div class="name">Tiny Knights</div>
+        <div class="desc">Multiplication battle game for kids</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="card" href="https://ebruno-sec.github.io/MISC/InnerCompass/Index.html" target="_blank" rel="noopener">
+      <div class="emoji">🧭</div>
+      <div class="info">
+        <div class="name">Inner Compass</div>
+        <div class="desc">Beginner's guide to Carl Jung</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="card" href="https://ebruno-sec.github.io/MISC/klynedarius-site/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🏗️</div>
+      <div class="info">
+        <div class="name">KlyneDarius Construction</div>
+        <div class="desc">Seattle contractor & remodeling site</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="card" href="https://ebruno-sec.github.io/MISC/Myths/MythTableComparison.html" target="_blank" rel="noopener">
+      <div class="emoji">⚡</div>
+      <div class="info">
+        <div class="name">Mythology Comparison</div>
+        <div class="desc">Cross-cultural myth table</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="card" href="https://ebruno-sec.github.io/MISC/Genshin/genshin_codex.html" target="_blank" rel="noopener">
+      <div class="emoji">🌸</div>
+      <div class="info">
+        <div class="name">Genshin Codex</div>
+        <div class="desc">Genshin Impact reference</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="card" href="https://ebruno-sec.github.io/MISC/Matsuri/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🎏</div>
+      <div class="info">
+        <div class="name">Matsuri</div>
+        <div class="desc">Festival tracker</div>
+      </div>
+      <span class="arrow">→</span>
+    </a>
+  </nav>
+
+  <div class="form-box">
+    <span class="form-label">Want something like this? 👀</span>
+    <p class="form-sub">Drop your email — I'll reach out when I'm taking on new requests.</p>
+    <form action="https://formspree.io/f/YOUR_FORM_ID" method="POST" id="contact-form">
+      <div class="form-row">
+        <input type="email" name="email" placeholder="your@email.com" required />
+        <button type="submit">Notify me</button>
+      </div>
+    </form>
+    <p class="thanks" id="thanks">✅ Got it — I'll be in touch!</p>
+  </div>
+
+</div>
+
+<script>
+  const form = document.getElementById('contact-form');
+  const thanks = document.getElementById('thanks');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    const res = await fetch(form.action, {
+      method: 'POST',
+      body: data,
+      headers: { Accept: 'application/json' }
+    });
+    if (res.ok) {
+      form.style.display = 'none';
+      thanks.style.display = 'block';
+    }
+  });
+</script>
+</body>
+</html>
