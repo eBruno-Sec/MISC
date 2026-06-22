@@ -1,0 +1,2614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inner Compass — Jungian Psychology, Plainly Explained (All-in-One)</title>
+<meta name="description" content="The complete Inner Compass site — every archetype, shadow work, dreams, animal symbolism, Korean zodiac, and the quiz — bundled into a single offline-friendly file.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230d0c0a'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%23c9a24b' stroke-width='4'/%3E%3Ccircle cx='50' cy='50' r='4' fill='%23c9a24b'/%3E%3Cline x1='50' y1='10' x2='50' y2='22' stroke='%23c9a24b' stroke-width='4'/%3E%3Cline x1='50' y1='78' x2='50' y2='90' stroke='%23c9a24b' stroke-width='4'/%3E%3C/svg%3E">
+<style>
+/* ===========================================================
+   INNER COMPASS — design system
+   A field guide to the Jungian psyche.
+   =========================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=Source+Sans+3:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+:root{
+  /* color */
+  --bg: #0d0c0a;
+  --bg-1: #15120e;
+  --bg-2: #1d1812;
+  --line: #2c2620;
+  --line-soft: #221d17;
+  --gold: #c9a24b;
+  --gold-bright: #e3c275;
+  --forest: #2c4a37;
+  --forest-bright: #4b7b5c;
+  --ink: #ece5d6;
+  --ink-dim: #a89e8c;
+  --ink-faint: #6f6757;
+  --amber: #c98a3b;
+  --slate: #7a8690;
+
+  /* type */
+  --display: 'Fraunces', Georgia, serif;
+  --body: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+  --mono: 'Space Mono', 'SFMono-Regular', Menlo, monospace;
+
+  /* layout */
+  --max: 1180px;
+  --maxw-narrow: 760px;
+  --radius: 3px;
+  --radius-lg: 6px;
+}
+
+*,*::before,*::after{ box-sizing: border-box; }
+html{ scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce){
+  html{ scroll-behavior: auto; }
+  *,*::before,*::after{ animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+
+body{
+  margin:0;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(201,162,75,0.07), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 110% 10%, rgba(44,74,55,0.10), transparent 60%);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+img{ max-width:100%; display:block; }
+a{ color: inherit; text-decoration: none; }
+ul{ list-style:none; margin:0; padding:0; }
+
+h1,h2,h3,h4{
+  font-family: var(--display);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5em;
+  color: var(--ink);
+}
+h1{ font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 500; }
+h2{ font-size: clamp(1.7rem, 3vw, 2.5rem); }
+h3{ font-size: 1.35rem; font-weight: 600; }
+h4{ font-size: 1.05rem; font-weight: 600; font-family: var(--body); text-transform: uppercase; letter-spacing: 0.06em; color: var(--gold); }
+
+p{ margin: 0 0 1.1em; color: var(--ink-dim); }
+p.lead{ font-size: 1.15rem; color: var(--ink); }
+
+.container{ max-width: var(--max); margin: 0 auto; padding: 0 28px; }
+.container-narrow{ max-width: var(--maxw-narrow); margin: 0 auto; padding: 0 28px; }
+
+.eyebrow{
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.eyebrow::before{
+  content:"";
+  width: 18px; height: 1px;
+  background: var(--gold);
+  display:inline-block;
+}
+
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible{
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ---------------- skip link ---------------- */
+.skip-link{
+  position:absolute; left:-9999px; top:0; background: var(--gold); color:#0d0c0a; padding:10px 16px; z-index:200; font-family:var(--mono); font-size:0.8rem;
+}
+.skip-link:focus{ left:16px; top:16px; }
+
+/* ---------------- nav ---------------- */
+.site-header{
+  position: sticky; top:0; z-index: 100;
+  background: rgba(13,12,10,0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+}
+.nav{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 16px 28px;
+  max-width: var(--max); margin:0 auto;
+}
+.brand{
+  display:flex; align-items:center; gap:10px;
+  font-family: var(--display); font-size:1.25rem; color: var(--ink); font-weight:600;
+}
+.brand .mark{ color: var(--gold); }
+.nav-links{
+  display:flex; gap: 28px; align-items:center;
+}
+.nav-links a{
+  font-size: 0.92rem; color: var(--ink-dim); position:relative; padding: 4px 0;
+  transition: color .18s ease;
+}
+.nav-links a:hover, .nav-links a.active{ color: var(--ink); }
+.nav-links a.active::after{
+  content:""; position:absolute; left:0; right:0; bottom:-6px; height:1px; background: var(--gold);
+}
+.nav-cta{
+  border:1px solid var(--gold); color: var(--gold) !important; padding:8px 16px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.76rem !important; letter-spacing: 0.04em;
+}
+.nav-cta:hover{ background: var(--gold); color:#0d0c0a !important; }
+.nav-toggle{
+  display:none; background:none; border:1px solid var(--line); color: var(--ink); width:40px; height:40px; border-radius: var(--radius); cursor:pointer;
+}
+@media (max-width: 920px){
+  .nav-links{
+    position:absolute; top:100%; left:0; right:0; background: var(--bg-1); flex-direction:column; align-items:flex-start; gap:0; border-bottom: 1px solid var(--line-soft);
+    max-height:0; overflow:hidden; transition: max-height .25s ease;
+  }
+  .nav-links.open{ max-height: 480px; }
+  .nav-links a{ width:100%; padding: 14px 28px; border-top:1px solid var(--line-soft); }
+  .nav-links a.active::after{ display:none; }
+  .nav-cta{ margin: 14px 28px; text-align:center; }
+  .nav-toggle{ display:block; }
+}
+
+/* ---------------- buttons ---------------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  font-family: var(--mono); font-size:0.82rem; letter-spacing:0.03em;
+  padding: 13px 24px; border-radius: var(--radius); border:1px solid transparent; cursor:pointer;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+}
+.btn-primary{ background: var(--gold); color:#0d0c0a; }
+.btn-primary:hover{ background: var(--gold-bright); transform: translateY(-1px); }
+.btn-outline{ border-color: var(--line); color: var(--ink); }
+.btn-outline:hover{ border-color: var(--gold); color: var(--gold); }
+.btn-forest{ background: var(--forest); color: var(--ink); }
+.btn-forest:hover{ background: var(--forest-bright); }
+.btn-block{ width:100%; }
+
+/* ---------------- hero ---------------- */
+.hero{
+  padding: 96px 0 76px;
+  border-bottom: 1px solid var(--line-soft);
+  position:relative;
+  overflow:hidden;
+}
+.hero-grid{ display:grid; grid-template-columns: 1.1fr 0.9fr; gap:56px; align-items:center; }
+.hero h1{ margin-bottom:0.4em; }
+.hero .sub{ font-size:1.15rem; max-width:46ch; }
+.hero-actions{ display:flex; gap:14px; flex-wrap:wrap; margin-top: 30px; }
+.hero-glyph{ justify-self:end; opacity:0.9; }
+@media (max-width: 880px){
+  .hero-grid{ grid-template-columns:1fr; }
+  .hero-glyph{ display:none; }
+  .hero{ padding: 64px 0 48px; }
+}
+
+/* ---------------- glyph (signature element) ---------------- */
+.glyph{
+  width:46px; height:46px; flex-shrink:0;
+}
+.glyph circle, .glyph path, .glyph line, .glyph polygon, .glyph polyline{
+  stroke: var(--gold);
+  stroke-width: 1.3;
+  fill:none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.glyph-lg{ width:120px; height:120px; }
+.glyph-lg circle, .glyph-lg path, .glyph-lg line, .glyph-lg polygon, .glyph-lg polyline{ stroke-width: 1.1; }
+.card:hover .glyph circle, .card:hover .glyph path, .card:hover .glyph line, .card:hover .glyph polygon{
+  stroke: var(--gold-bright);
+}
+
+/* ---------------- sections ---------------- */
+.section{ padding: 76px 0; border-bottom: 1px solid var(--line-soft); }
+.section-head{ max-width: 640px; margin-bottom: 44px; }
+.section-tight{ padding: 52px 0; }
+.section:last-of-type{ border-bottom:none; }
+.bg-1{ background: var(--bg-1); }
+
+/* ---------------- grids & cards ---------------- */
+.grid{ display:grid; gap: 22px; }
+.grid-2{ grid-template-columns: repeat(2,1fr); }
+.grid-3{ grid-template-columns: repeat(3,1fr); }
+.grid-4{ grid-template-columns: repeat(4,1fr); }
+@media (max-width: 980px){ .grid-3{ grid-template-columns: repeat(2,1fr);} .grid-4{ grid-template-columns: repeat(2,1fr);} }
+@media (max-width: 620px){ .grid-2,.grid-3,.grid-4{ grid-template-columns: 1fr; } }
+
+.card{
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  transition: border-color .2s ease, transform .2s ease;
+  display:flex; flex-direction:column; gap:14px;
+}
+.card:hover{ border-color: var(--gold); transform: translateY(-2px); }
+.card h3{ margin:0; }
+.card p{ margin:0; font-size:0.95rem; }
+.card .tag{ font-family: var(--mono); font-size:0.68rem; letter-spacing:0.1em; text-transform:uppercase; color: var(--ink-faint); }
+.card-link{ margin-top:auto; font-family: var(--mono); font-size:0.78rem; color: var(--gold); }
+
+.topic-strip{ display:flex; gap:14px; flex-wrap:wrap; }
+.pill{
+  font-family: var(--mono); font-size:0.76rem; letter-spacing:0.04em;
+  border:1px solid var(--line); color: var(--ink-dim); padding:8px 14px; border-radius: 999px;
+  transition: all .15s ease; cursor:pointer; background:none;
+}
+.pill:hover, .pill.active{ border-color: var(--gold); color: var(--gold); }
+
+/* ---------------- quote ---------------- */
+.quote{
+  border-left: 2px solid var(--gold);
+  padding: 4px 0 4px 26px;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 1.4rem;
+  color: var(--ink);
+  margin: 36px 0;
+}
+.quote cite{ display:block; font-family: var(--mono); font-style:normal; font-size:0.78rem; color: var(--ink-faint); margin-top:12px; }
+
+/* ---------------- notice boxes ---------------- */
+.notice{
+  border: 1px solid var(--line); border-left: 3px solid var(--amber);
+  background: rgba(201,138,59,0.06);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  font-size: 0.92rem;
+  margin: 28px 0;
+}
+.notice strong{ color: var(--amber); font-family: var(--mono); font-size:0.78rem; letter-spacing:0.05em; text-transform:uppercase; display:block; margin-bottom:6px; }
+.notice.info{ border-left-color: var(--slate); background: rgba(122,134,144,0.06); }
+.notice.info strong{ color: var(--slate); }
+.notice p{ margin:0; color: var(--ink-dim); }
+
+/* ---------------- forms ---------------- */
+.field{ margin-bottom: 18px; display:flex; flex-direction:column; gap:8px; }
+.field label{ font-family: var(--mono); font-size:0.76rem; letter-spacing:0.05em; text-transform:uppercase; color: var(--ink-dim); }
+.field input, .field textarea, .field select{
+  background: var(--bg-1); border:1px solid var(--line); color: var(--ink);
+  padding: 13px 14px; border-radius: var(--radius); font-family: var(--body); font-size:0.95rem;
+}
+.field input:focus, .field textarea:focus{ border-color: var(--gold); }
+.field textarea{ resize: vertical; min-height: 120px; }
+.field-error{ font-size:0.78rem; color: var(--amber); display:none; }
+.field.has-error input, .field.has-error textarea{ border-color: var(--amber); }
+.field.has-error .field-error{ display:block; }
+
+.signup{
+  background: var(--bg-1); border:1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 36px; display:grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items:center;
+}
+@media (max-width:820px){ .signup{ grid-template-columns:1fr; } }
+.signup-form{ display:flex; gap:10px; flex-wrap:wrap; }
+.signup-form input{ flex:1; min-width:200px; }
+.form-success{ display:none; color: var(--forest-bright); font-family: var(--mono); font-size:0.85rem; padding:13px 0; }
+.form-success.show{ display:block; }
+
+/* ---------------- footer ---------------- */
+.site-footer{ padding: 56px 0 36px; }
+.footer-grid{ display:grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 36px; margin-bottom: 40px; }
+@media (max-width: 780px){ .footer-grid{ grid-template-columns: 1fr 1fr; } }
+.footer-grid h4{ color: var(--ink-dim); font-size:0.78rem; }
+.footer-grid ul li{ margin-bottom:10px; }
+.footer-grid a{ color: var(--ink-faint); font-size:0.92rem; }
+.footer-grid a:hover{ color: var(--gold); }
+.footer-bottom{ border-top:1px solid var(--line-soft); padding-top: 24px; display:flex; justify-content:space-between; gap:14px; flex-wrap:wrap; font-size:0.82rem; color: var(--ink-faint); }
+.footer-disclaimer{ max-width: 640px; font-size:0.82rem; color: var(--ink-faint); margin-bottom: 30px; line-height:1.6; }
+
+/* ---------------- breadcrumb ---------------- */
+.crumb{ font-family: var(--mono); font-size:0.78rem; color: var(--ink-faint); margin-bottom: 18px; }
+.crumb a{ color: var(--ink-dim); }
+.crumb a:hover{ color: var(--gold); }
+
+/* ---------------- archetype detail ---------------- */
+.detail-hero{ display:grid; grid-template-columns: 140px 1fr; gap: 32px; align-items:start; margin-bottom: 20px; }
+@media (max-width:640px){ .detail-hero{ grid-template-columns:1fr; } }
+.detail-hero .seal{
+  width:120px; height:120px; border:1px solid var(--line); border-radius:50%;
+  display:flex; align-items:center; justify-content:center; background: var(--bg-1);
+}
+.keyword-row{ display:flex; gap:10px; flex-wrap:wrap; margin: 18px 0 6px; }
+.keyword{ font-family: var(--mono); font-size:0.72rem; color: var(--ink-faint); border:1px solid var(--line); padding:5px 11px; border-radius:999px; }
+
+.split{ display:grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+@media (max-width:760px){ .split{ grid-template-columns:1fr; } }
+.split .col{ background: var(--bg-1); border:1px solid var(--line); border-radius: var(--radius-lg); padding:24px; }
+.split .col h4{ margin-bottom:14px; }
+.split .col ul li{ padding-left:18px; position:relative; margin-bottom:10px; color: var(--ink-dim); font-size:0.93rem; }
+.split .col ul li::before{ content:"—"; position:absolute; left:0; color: var(--gold); }
+
+/* ---------------- table ---------------- */
+.table-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius: var(--radius-lg); }
+table{ width:100%; border-collapse:collapse; font-size:0.92rem; }
+th,td{ text-align:left; padding: 14px 18px; border-bottom:1px solid var(--line-soft); }
+th{ font-family: var(--mono); font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; color: var(--gold); background: var(--bg-1); }
+tr:last-child td{ border-bottom:none; }
+
+/* ---------------- glossary ---------------- */
+.glossary-item{ border-bottom:1px solid var(--line-soft); padding: 22px 0; }
+.glossary-item h3{ display:flex; align-items:baseline; gap:12px; }
+.glossary-item .term-tag{ font-family: var(--mono); font-size:0.7rem; color: var(--ink-faint); }
+
+/* ---------------- blog ---------------- */
+.post-card{ }
+.post-meta{ font-family: var(--mono); font-size:0.72rem; color: var(--ink-faint); display:flex; gap:14px; }
+.article{ max-width: var(--maxw-narrow); margin: 0 auto; }
+.article h2{ margin-top:1.4em; }
+.article p{ font-size:1.02rem; color: var(--ink-dim); }
+.byline{ font-family: var(--mono); font-size:0.78rem; color: var(--ink-faint); margin-bottom: 30px; padding-bottom:20px; border-bottom:1px solid var(--line-soft); display:flex; gap:18px; flex-wrap:wrap; }
+
+/* ---------------- quiz ---------------- */
+.quiz-wrap{ max-width: 680px; margin:0 auto; }
+.progress-track{ height:3px; background: var(--line); border-radius:2px; overflow:hidden; margin-bottom: 36px; }
+.progress-fill{ height:100%; background: var(--gold); width:0%; transition: width .3s ease; }
+.quiz-q{ display:none; }
+.quiz-q.active{ display:block; animation: fadein .35s ease; }
+@keyframes fadein{ from{ opacity:0; transform: translateY(6px);} to{opacity:1; transform:none;} }
+.quiz-step-label{ font-family: var(--mono); font-size:0.76rem; color: var(--ink-faint); margin-bottom: 10px; }
+.quiz-options{ display:grid; gap:12px; margin-top: 24px; }
+.quiz-option{
+  text-align:left; background: var(--bg-1); border:1px solid var(--line); color: var(--ink);
+  padding: 18px 20px; border-radius: var(--radius); cursor:pointer; font-family: var(--body); font-size:1rem;
+  transition: border-color .15s ease, background .15s ease;
+}
+.quiz-option:hover{ border-color: var(--gold); background: var(--bg-2); }
+.quiz-option.selected{ border-color: var(--gold); background: rgba(201,162,75,0.1); }
+.quiz-nav{ display:flex; justify-content:space-between; margin-top: 30px; }
+.quiz-result{ display:none; }
+.quiz-result.show{ display:block; animation: fadein .4s ease; }
+.result-card{
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-2)); border:1px solid var(--gold); border-radius: var(--radius-lg);
+  padding: 40px; text-align:center; margin-bottom: 30px;
+}
+.result-card .eyebrow{ justify-content:center; }
+.result-card .eyebrow::before{ display:none; }
+.result-stats{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:30px; text-align:left; }
+@media (max-width:560px){ .result-stats{ grid-template-columns:1fr; } }
+
+/* ---------------- about ---------------- */
+.stat-row{ display:flex; gap:48px; flex-wrap:wrap; margin: 30px 0; }
+.stat{ }
+.stat .num{ font-family: var(--display); font-size:2.2rem; color: var(--gold); }
+.stat .label{ font-family: var(--mono); font-size:0.74rem; color: var(--ink-faint); text-transform:uppercase; letter-spacing:0.05em; }
+
+/* ---------------- utility ---------------- */
+.center{ text-align:center; }
+.mt-0{ margin-top:0; }
+.muted{ color: var(--ink-faint); }
+.visually-hidden{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
+
+.page-section{ display:none; }
+.page-section.active{ display:block; }
+</style>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to content</a>
+<header class="site-header">
+  <nav class="nav">
+    <a href="#index" class="brand"><span class="mark"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="50" y1="10" x2="50" y2="22"/><line x1="50" y1="78" x2="50" y2="90"/><line x1="10" y1="50" x2="22" y2="50"/><line x1="78" y1="50" x2="90" y2="50"/><circle cx="50" cy="50" r="3"/></svg></span> Inner Compass</a>
+    <ul class="nav-links">
+      <li><a href="#start-here">Start Here</a></li><li><a href="#archetypes">Archetypes</a></li><li><a href="#shadow-work">Shadow Work</a></li><li><a href="#dreams-symbols">Dreams & Symbols</a></li><li><a href="#animal-archetypes">Animal Archetypes</a></li><li><a href="#korean-symbolism">Korean Symbolism</a></li><li><a href="#blog">Blog</a></li><li><a href="#about">About</a></li><li><a href="#contact">Contact</a></li>
+    </ul>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <a href="#quiz" class="nav-cta">Take the Quiz</a>
+      <button class="nav-toggle" aria-label="Open menu" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="1" y1="4" x2="17" y2="4"/><line x1="1" y1="9" x2="17" y2="9"/><line x1="1" y1="14" x2="17" y2="14"/></svg>
+      </button>
+    </div>
+  </nav>
+</header>
+<main id="main">
+<div class="page-section active" id="index" data-title="Inner Compass — Jungian Psychology, Plainly Explained">
+<section class="hero">
+  <div class="container hero-grid">
+    <div>
+      <div class="eyebrow">Jungian psychology, plainly explained</div>
+      <h1>Understand yourself through the map Carl Jung spent a lifetime drawing.</h1>
+      <p class="sub">Inner Compass breaks down archetypes, the Shadow, dreams, and individuation into language you can actually use, fact-checked against Jung's own writing instead of recycled internet quotes.</p>
+      <div class="hero-actions">
+        <a href="#start-here" class="btn btn-primary">Start Here</a>
+        <a href="#quiz" class="btn btn-outline">Take the Archetype Quiz</a>
+      </div>
+    </div>
+    <div class="hero-glyph" style="width:220px;height:220px;"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="50" y1="10" x2="50" y2="22"/><line x1="50" y1="78" x2="50" y2="90"/><line x1="10" y1="50" x2="22" y2="50"/><line x1="78" y1="50" x2="90" y2="50"/><circle cx="50" cy="50" r="3"/></svg></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Where to go</div>
+      <h2>Six ways into the work</h2>
+      <p>Pick the door that matches what you're actually curious about.</p>
+    </div>
+    <div class="grid grid-3"><a href="#start-here" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="30"/><circle cx="50" cy="50" r="6"/><line x1="50" y1="14" x2="50" y2="20"/><line x1="50" y1="80" x2="50" y2="86"/><line x1="14" y1="50" x2="20" y2="50"/><line x1="80" y1="50" x2="86" y2="50"/><line x1="24" y1="24" x2="28" y2="28"/><line x1="72" y1="72" x2="76" y2="76"/><line x1="76" y1="24" x2="72" y2="28"/><line x1="28" y1="72" x2="24" y2="76"/></svg>
+          <h3>Start Here</h3>
+          <p>A clear, fact-checked introduction to Jung and the structure of the psyche.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a><a href="#archetypes" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg>
+          <h3>Archetypes</h3>
+          <p>13 archetypes, honestly labeled by what's genuinely Jung and what's a later extension.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a><a href="#shadow-work" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg>
+          <h3>Shadow Work</h3>
+          <p>What the Shadow is, what it isn't, and how to actually work with it.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a><a href="#dreams-symbols" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M58,20 A30,30 0 1 0 58,80 A24,24 0 1 1 58,20 Z"/><circle cx="78" cy="28" r="2"/><circle cx="84" cy="40" r="1.6"/></svg>
+          <h3>Dreams &amp; Symbols</h3>
+          <p>How Jung read dreams, and why he rejected one-size-fits-all dream dictionaries.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a><a href="#animal-archetypes" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,20 30,70 70,70"/><line x1="50" y1="20" x2="50" y2="8"/></svg>
+          <h3>Animal Archetypes</h3>
+          <p>Ten animal patterns, with an honest note on where this framework comes from.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a><a href="#korean-symbolism" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3>Korean Symbolism</h3>
+          <p>The 12-animal Korean zodiac, explained on its own cultural terms.</p>
+          <span class="card-link">Explore &rarr;</span>
+        </a></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="quote">
+      Jung's central teaching, in plain language: what you refuse to look at inside yourself doesn't go away. It keeps shaping your choices from outside your awareness, and you end up calling the result "fate."
+      <cite>— paraphrased from Jung's writing on the Shadow and the unconscious</cite>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">A preview</div>
+      <h2>Four archetypes to start with</h2>
+      <p>Each page is labeled honestly: what Jung actually wrote, and what later writers built on top of it.</p>
+    </div>
+    <div class="grid grid-4"><a href="#archetype-shadow" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg>
+          <span class="tag">Core Jungian concept</span>
+          <h3>Shadow</h3>
+          <p>The parts of yourself you've pushed out of view.</p>
+        </a><a href="#archetype-wise-one" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M14,50 C30,28 70,28 86,50 C70,72 30,72 14,50 Z"/><circle cx="50" cy="50" r="9"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Wise Old Man / Wise Woman</h3>
+          <p>The voice of earned insight, called on when you're out of your depth.</p>
+        </a><a href="#archetype-trickster" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Trickster</h3>
+          <p>The instinct that breaks rules to reveal what they were hiding.</p>
+        </a><a href="#archetype-mother" class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Mother</h3>
+          <p>The pattern of nurturing, protection, and unconditional containment.</p>
+        </a></div>
+    <p style="margin-top:24px;"><a href="#archetypes" class="btn btn-outline">See all 13 archetypes</a></p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="notice"><strong>Educational content only</strong><p>Inner Compass explains Jungian psychology and cultural symbolism for general learning. It is not therapy, a diagnostic tool, or a substitute for professional mental health care.</p></div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="start-here" data-title="Start Here — A Beginner's Guide to Carl Jung">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Start Here</div>
+    <h1>Who Carl Jung was, and the map he left behind</h1>
+    <p class="sub lead">Everything on this page is checked against Jung's biography and his own published work, not recycled internet quote graphics.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>The short biography</h2>
+    <p>Carl Gustav Jung was born July 26, 1875, in Kesswil, Switzerland, and died June 6, 1961, in Küsnacht. He trained as a psychiatrist, earning his medical degree from the University of Basel in 1900, then joined the Burghölzli psychiatric hospital in Zürich under Eugen Bleuler, where his word-association experiments led him to coin the term &ldquo;complex.&rdquo;</p>
+    <p>From 1907 to 1913 he worked closely with Sigmund Freud and was seen as his probable successor. They split over a genuine theoretical disagreement, Freud's insistence that neuroses were fundamentally sexual in origin went further than Jung was willing to follow. After the split, Jung built his own framework, naming it analytical psychology specifically to distinguish it from Freud's psychoanalysis. He married Emma Rauschenbach in 1903; they had five children and remained married until her death in 1955. Jung continued writing and practicing until his own death in 1961.</p>
+
+    <div class="notice info"><strong>A note on method</strong><p>Jung explicitly warned against using fixed symbol dictionaries to interpret dreams or archetypes the same way for everyone. His own method treated each person's material as specific to them. Keep that in mind as you read general explanations on this site, including this one.</p></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">The structure of the psyche</div>
+      <h2>Three layers, in Jung's model</h2>
+    </div>
+    <div class="grid grid-3">
+      <div class="card"><span class="tag">Layer 1</span><h3>Conscious Mind</h3><p>What you're directly aware of right now: perception, thought, immediate attention.</p></div>
+      <div class="card"><span class="tag">Layer 2</span><h3>Personal Unconscious</h3><p>Forgotten or suppressed material specific to your own life, including emotionally charged complexes.</p></div>
+      <div class="card"><span class="tag">Layer 3</span><h3>Collective Unconscious</h3><p>A deeper layer Jung believed was inherited and shared by all humans, holding the archetypes.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Key concepts</div>
+      <h2>The glossary you actually need</h2>
+      <p>Ten terms. Read them once and the rest of the site will make sense.</p>
+    </div>
+    <div class="glossary-item"><h3>Conscious Mind</h3><p>Whatever you're directly aware of right now: thoughts, perceptions, the contents of immediate attention.</p></div><div class="glossary-item"><h3>Personal Unconscious</h3><p>Material specific to your own life that's been forgotten or suppressed, including Jung's concept of &ldquo;complexes,&rdquo; emotionally charged clusters of association.</p></div><div class="glossary-item"><h3>Collective Unconscious</h3><p>Jung's most distinctive claim: a deeper layer of the unconscious he believed was inherited and shared across all humans, holding the archetypes.</p></div><div class="glossary-item"><h3>Archetype</h3><p>A universal pattern or mold, not a specific image, that Jung believed structures how humans experience recurring human situations: the Mother, the Shadow, the Hero of a story.</p></div><div class="glossary-item"><h3>Persona</h3><p>The social mask you present to the world. Necessary and useful, but a problem when you mistake it for your whole identity.</p></div><div class="glossary-item"><h3>Shadow</h3><p>The parts of yourself your conscious mind has rejected or never developed. Often projected onto other people.</p></div><div class="glossary-item"><h3>Anima / Animus</h3><p>In Jung's original formulation, the unconscious feminine aspect within men (anima) and unconscious masculine aspect within women (animus). Contemporary practice often treats this more fluidly than Jung's early-20th-century framing.</p></div><div class="glossary-item"><h3>The Self</h3><p>Not the ego. Jung used &ldquo;Self&rdquo; for the archetype of wholeness, the regulating center of the entire psyche, often symbolized by mandalas and circular forms.</p></div><div class="glossary-item"><h3>Individuation</h3><p>The lifelong process of integrating conscious and unconscious material into a more whole, coherent personality. Jung's word for becoming who you actually are.</p></div><div class="glossary-item"><h3>Synchronicity</h3><p>Jung's term for a meaningful coincidence between an inner state and an outer event, not connected by ordinary cause and effect. Developed with physicist Wolfgang Pauli.</p></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head">
+      <div class="eyebrow">Suggested order</div>
+      <h2>How to actually work through this site</h2>
+    </div>
+    <ol style="padding-left:22px; color:var(--ink-dim);">
+      <li style="margin-bottom:14px;"><strong style="color:var(--ink)">Learn the Shadow first.</strong> <a href="#shadow-work">Shadow Work</a> is the most immediately useful concept Jung developed.</li>
+      <li style="margin-bottom:14px;"><strong style="color:var(--ink)">Browse the archetypes.</strong> <a href="#archetypes">See all 13</a>, honestly labeled by what's genuinely Jung's own writing.</li>
+      <li style="margin-bottom:14px;"><strong style="color:var(--ink)">Read your dreams differently.</strong> <a href="#dreams-symbols">Dreams &amp; Symbols</a> covers Jung's compensatory theory of dreaming.</li>
+      <li style="margin-bottom:14px;"><strong style="color:var(--ink)">Take the quiz.</strong> <a href="#quiz">Find your animal archetype</a>, framed as reflection, not diagnosis.</li>
+      <li><strong style="color:var(--ink)">Go deeper.</strong> The <a href="#blog">blog</a> covers individual topics in more depth.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">FAQ</div>
+      <h2>Common questions</h2>
+    </div>
+    <div class="glossary-item"><h3 style="font-size:1.1rem;">Did Jung and Freud ever reconcile?</h3><p>No. They corresponded closely from 1907 to 1913, but split over irreconcilable theoretical differences, principally Freud's insistence on the sexual basis of neuroses. The break was final and personally painful for both.</p></div><div class="glossary-item"><h3 style="font-size:1.1rem;">Is Jungian psychology accepted by mainstream psychology today?</h3><p>Partially. Concepts like the Shadow, persona, and individuation remain influential in psychotherapy and culture broadly. Other parts of Jung's work, especially around alchemy, parapsychology, and synchronicity, sit outside mainstream empirical psychology and aren't treated as testable scientific claims.</p></div><div class="glossary-item"><h3 style="font-size:1.1rem;">Did Jung create the Myers-Briggs (MBTI) test?</h3><p>No. Jung's 1921 book &ldquo;Psychological Types&rdquo; inspired it, but MBTI itself was created decades later by Katharine Briggs and Isabel Myers, who had no formal affiliation with Jung.</p></div><div class="glossary-item"><h3 style="font-size:1.1rem;">What's the difference between the ego and the Self?</h3><p>The ego is your everyday sense of identity, the center of consciousness. The Self, in Jung's framework, is the larger, regulating center of the entire psyche, conscious and unconscious combined. Individuation is the process of the ego coming into right relationship with the Self.</p></div><div class="glossary-item"><h3 style="font-size:1.1rem;">Where should I actually start?</h3><p>With the Shadow. It's the most concrete, immediately useful concept Jung developed, and it makes the rest of the framework click into place.</p></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetypes" data-title="Archetypes — The Complete, Honestly-Labeled Guide">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Archetypes</div>
+    <h1>13 archetypes, honestly sourced</h1>
+    <p class="sub lead">Not everything called a &ldquo;Jungian archetype&rdquo; online actually comes from Jung. This page tells you which is which before you read a single page.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Label</th><th>What it means</th><th>Examples here</th></tr></thead>
+        <tbody>
+          <tr><td>Core Jungian concept</td><td>Defined directly by Jung as part of the structure of the psyche itself.</td><td>Shadow</td></tr>
+          <tr><td>Archetypal figure (Jung)</td><td>An archetype Jung wrote about directly, drawn from myth and dream material, often in a named essay.</td><td>Mother, Child, Trickster, Wise Old Man/Woman, King/Queen</td></tr>
+          <tr><td>Popularized archetype</td><td>Extends Jung's framework but was formalized later, mainly by Joseph Campbell's monomyth and Carol Pearson's brand-archetype model.</td><td>Hero, Warrior, Lover, Rebel, Caregiver, Explorer, Creator</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:18px;">Curious how this differs from MBTI or zodiac signs entirely? Read <a href="#blog-archetypes-vs-personality-types">Archetypes vs. Personality Types</a>.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="topic-strip" data-filter-group="[data-search-item]" style="margin-bottom:28px;">
+      <button class="pill active" data-cat="all">All</button>
+      <button class="pill" data-cat="core">Core concept</button>
+      <button class="pill" data-cat="figure">Jung's own figures</button>
+      <button class="pill" data-cat="popularized">Popularized</button>
+    </div>
+    <div class="grid grid-3"><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><line x1="50" y1="15" x2="50" y2="70"/><line x1="34" y1="34" x2="66" y2="34"/><circle cx="50" cy="80" r="6"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Hero</h3>
+          <p>The drive to prove yourself through difficulty.</p>
+          <a href="#archetype-hero" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="core" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg>
+          <span class="tag">Core Jungian concept</span>
+          <h3>Shadow</h3>
+          <p>The parts of yourself you've pushed out of view.</p>
+          <a href="#archetype-shadow" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="figure" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Trickster</h3>
+          <p>The instinct that breaks rules to reveal what they were hiding.</p>
+          <a href="#archetype-trickster" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="figure" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M14,50 C30,28 70,28 86,50 C70,72 30,72 14,50 Z"/><circle cx="50" cy="50" r="9"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Wise Old Man / Wise Woman</h3>
+          <p>The voice of earned insight, called on when you're out of your depth.</p>
+          <a href="#archetype-wise-one" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="figure" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Mother</h3>
+          <p>The pattern of nurturing, protection, and unconditional containment.</p>
+          <a href="#archetype-mother" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="figure" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="10"/><line x1="50" y1="20" x2="50" y2="32"/><line x1="50" y1="68" x2="50" y2="80"/><line x1="20" y1="50" x2="32" y2="50"/><line x1="68" y1="50" x2="80" y2="50"/><line x1="29" y1="29" x2="38" y2="38"/><line x1="62" y1="62" x2="71" y2="71"/><line x1="71" y1="29" x2="62" y2="38"/><line x1="38" y1="62" x2="29" y2="71"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>Child</h3>
+          <p>The part of you still capable of beginning again.</p>
+          <a href="#archetype-child" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="30" y1="30" x2="70" y2="70"/><line x1="70" y1="30" x2="30" y2="70"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Warrior</h3>
+          <p>Disciplined force aimed at a worthy target.</p>
+          <a href="#archetype-warrior" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="figure" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polyline points="20,68 20,42 35,55 50,30 65,55 80,42 80,68 20,68"/></svg>
+          <span class="tag">Archetypal figure (Jung)</span>
+          <h3>King / Queen (Ruler)</h3>
+          <p>The instinct to bring order and stability to your domain.</p>
+          <a href="#archetype-ruler" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="40" cy="50" r="24"/><circle cx="60" cy="50" r="24"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Lover</h3>
+          <p>The drive toward connection, intimacy, and aliveness.</p>
+          <a href="#archetype-lover" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,16 A34,34 0 1 1 26,28"/><line x1="48" y1="6" x2="58" y2="22"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Rebel</h3>
+          <p>The refusal to conform just because everyone else has.</p>
+          <a href="#archetype-rebel" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="32" r="10"/><path d="M22,78 C22,55 40,46 50,46 C60,46 78,55 78,78"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Caregiver</h3>
+          <p>The instinct to ease another person's suffering.</p>
+          <a href="#archetype-caregiver" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,12 58,42 88,50 58,58 50,88 42,58 12,50 42,42"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Explorer</h3>
+          <p>The need to find out what's actually out there.</p>
+          <a href="#archetype-explorer" class="card-link">Read more &rarr;</a>
+        </div><div class="card" data-cat="popularized" data-search-item>
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg>
+          <span class="tag">Popularized archetype</span>
+          <h3>Creator</h3>
+          <p>The instinct to give an inner image a form in the outer world.</p>
+          <a href="#archetype-creator" class="card-link">Read more &rarr;</a>
+        </div></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-hero" data-title="Hero Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Hero</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><line x1="50" y1="15" x2="50" y2="70"/><line x1="34" y1="34" x2="66" y2="34"/><circle cx="50" cy="80" r="6"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Hero</h1>
+        <p class="lead" style="margin:0;">The drive to prove yourself through difficulty.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">The Hero shows up as the urge to take on a real challenge and come back changed. Jung studied hero myths closely — in his reading, the hero's journey out of childhood dependence and into a separate, capable identity mirrors the ego's own struggle to separate from the unconscious and stand on its own. Jung didn't build a standalone &ldquo;Hero&rdquo; personality type the way later writers did. That popularized version comes mostly from Joseph Campbell's work on myth structure and from brand-archetype models built on top of Jung's foundation. What's genuinely Jungian underneath it is the core idea: real growth requires a confrontation, not a shortcut.</p>
+    <div class="keyword-row"><span class="keyword">ego development</span><span class="keyword">myth</span><span class="keyword">Joseph Campbell</span><span class="keyword">courage</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Takes on hard things voluntarily, even when avoidable</li><li>Measures self-worth by what's been overcome</li><li>Uncomfortable sitting still for long</li><li>Drawn to competition and tests of capability</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Needs a crisis to feel useful or alive</li><li>Can't accept help without feeling diminished</li><li>Turns ordinary problems into battles</li><li>Burns out chasing the next proof point</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-warrior" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="30" y1="30" x2="70" y2="70"/><line x1="70" y1="30" x2="30" y2="70"/></svg><h3 style="font-size:1.05rem;">Warrior</h3></a><a href="#archetype-explorer" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,12 58,42 88,50 58,58 50,88 42,58 12,50 42,42"/></svg><h3 style="font-size:1.05rem;">Explorer</h3></a><a href="#archetype-shadow" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg><h3 style="font-size:1.05rem;">Shadow</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-shadow" data-title="Shadow Archetype — Meaning &amp; How to Work With It">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Shadow</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg></div>
+      <div>
+        <span class="tag">Core Jungian concept</span>
+        <h1 style="margin:8px 0 6px;">Shadow</h1>
+        <p class="lead" style="margin:0;">The parts of yourself you've pushed out of view.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Defined directly by Jung as part of the structure of the psyche.</p></div>
+    <p class="lead">The Shadow is one of Jung's foundational concepts, not a later addition. It refers to the parts of your personality your conscious self has rejected, suppressed, or never developed, usually because they were unacceptable to your family, culture, or self-image. The Shadow isn't inherently evil — it often holds traits that are simply unapproved of: anger, ambition, sexuality, even creativity that didn't fit the role you were given. Jung argued that what you don't own, you project onto other people. The person who infuriates you out of proportion to what they actually did is frequently showing you your own Shadow. Integration, not elimination, is the goal. A Shadow you've acknowledged becomes raw material. A Shadow you've denied runs your life from the basement.</p>
+    <div class="keyword-row"><span class="keyword">shadow work</span><span class="keyword">projection</span><span class="keyword">repression</span><span class="keyword">the unconscious</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Strong reactions to specific people that feel oversized</li><li>Recurring &ldquo;I would never...&rdquo; statements</li><li>Traits you mock in others that you privately do yourself</li><li>Dreams featuring threatening figures of your own gender</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Projecting disowned traits onto others as judgment</li><li>Repeated patterns you can't explain</li><li>Compulsive behavior that contradicts your stated values</li><li>Defensiveness when a trait is named directly</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-trickster" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg><h3 style="font-size:1.05rem;">Trickster</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-trickster" data-title="Trickster Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Trickster</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg></div>
+      <div>
+        <span class="tag">Archetypal figure (Jung)</span>
+        <h1 style="margin:8px 0 6px;">Trickster</h1>
+        <p class="lead" style="margin:0;">The instinct that breaks rules to reveal what they were hiding.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>An archetype Jung wrote about directly, drawn from myth and dream material.</p></div>
+    <p class="lead">Jung wrote directly about the Trickster in his essay &ldquo;On the Psychology of the Trickster-Figure,&rdquo; drawing on mythological figures from Native American trickster cycles and the European fool. The Trickster disrupts order, mocks authority, and breaks taboos, not out of pure malice but because rigid systems need disruption to stay honest. Jung saw the Trickster as an early, undifferentiated form of the Shadow: chaotic, amoral, half-animal, half-divine. In a person, this archetype shows up as the impulse to question, joke, provoke, or undermine a system that's taken itself too seriously. It can be generative (the person who says the thing nobody else will) or destructive (the person who can't stop sabotaging things that are working).</p>
+    <div class="keyword-row"><span class="keyword">trickster figure</span><span class="keyword">mythology</span><span class="keyword">chaos</span><span class="keyword">the fool</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Humor that punctures pretension</li><li>Discomfort with rigid hierarchy or unquestioned authority</li><li>Instinct to point out the absurdity in serious situations</li><li>Resistance to rules that lack a clear reason</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Sabotages stability out of boredom</li><li>Uses humor to avoid real intimacy</li><li>Breaks trust just to prove a point</li><li>Can't tell the difference between honest disruption and cruelty</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-shadow" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg><h3 style="font-size:1.05rem;">Shadow</h3></a><a href="#archetype-rebel" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,16 A34,34 0 1 1 26,28"/><line x1="48" y1="6" x2="58" y2="22"/></svg><h3 style="font-size:1.05rem;">Rebel</h3></a><a href="#archetype-creator" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg><h3 style="font-size:1.05rem;">Creator</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-wise-one" data-title="Wise Old Man / Wise Woman Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Wise Old Man / Wise Woman</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M14,50 C30,28 70,28 86,50 C70,72 30,72 14,50 Z"/><circle cx="50" cy="50" r="9"/></svg></div>
+      <div>
+        <span class="tag">Archetypal figure (Jung)</span>
+        <h1 style="margin:8px 0 6px;">Wise Old Man / Wise Woman</h1>
+        <p class="lead" style="margin:0;">The voice of earned insight, called on when you're out of your depth.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>An archetype Jung wrote about directly, drawn from myth and dream material.</p></div>
+    <p class="lead">Jung described this archetype directly, sometimes as the Wise Old Man, sometimes the Wise Old Woman, appearing in dreams and myths as a mentor, guide, or magician figure who shows up exactly when the dreamer is stuck. He linked it to the archetype of meaning and spirit: the part of the psyche that offers perspective the ego can't generate on its own. This isn't about literal age. It's about earned, integrated knowledge offered without ego attached. In a person, it shows up as the instinct to step back, find the larger pattern, and offer counsel rather than react.</p>
+    <div class="keyword-row"><span class="keyword">mentor archetype</span><span class="keyword">wisdom</span><span class="keyword">spirit archetype</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>People come to you for perspective, not just sympathy</li><li>Comfortable saying &ldquo;I don't know&rdquo; before offering guidance</li><li>Drawn to teaching, mentoring, or synthesizing ideas</li><li>Patient with long timelines</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Hides behind wisdom to avoid being vulnerable</li><li>Uses knowledge to control rather than guide</li><li>Detachment that reads as coldness</li><li>Certainty that calcifies into dogma</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-mother" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg><h3 style="font-size:1.05rem;">Mother</h3></a><a href="#archetype-creator" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg><h3 style="font-size:1.05rem;">Creator</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-mother" data-title="Mother Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Mother</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg></div>
+      <div>
+        <span class="tag">Archetypal figure (Jung)</span>
+        <h1 style="margin:8px 0 6px;">Mother</h1>
+        <p class="lead" style="margin:0;">The pattern of nurturing, protection, and unconditional containment.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>An archetype Jung wrote about directly, drawn from myth and dream material.</p></div>
+    <p class="lead">Jung wrote a full essay on this one: &ldquo;Psychological Aspects of the Mother Archetype.&rdquo; He described the Mother as an archetype with two faces, the nurturing, protective, life-giving side, and a devouring, overprotective, suffocating side. Both are the same archetype expressed differently. This isn't only about literal mothers — it's a pattern that shows up in institutions, relationships, and self-talk: anything that nurtures, contains, or holds you, or that smothers and won't let you grow up. Jung treated this as one of the clearest examples of how a single archetype always carries its opposite within it.</p>
+    <div class="keyword-row"><span class="keyword">mother archetype</span><span class="keyword">the Great Mother</span><span class="keyword">ambivalence</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Instinct to care for and protect people or projects</li><li>Ability to create safety for others</li><li>Drawn to roles that nurture growth</li><li>Discomfort watching someone struggle without stepping in</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Nurturing that tips into control</li><li>Can't let people fail and learn from it</li><li>Identity collapses if no one needs you</li><li>Protection that curdles into possessiveness</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-caregiver" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="32" r="10"/><path d="M22,78 C22,55 40,46 50,46 C60,46 78,55 78,78"/></svg><h3 style="font-size:1.05rem;">Caregiver</h3></a><a href="#archetype-child" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="10"/><line x1="50" y1="20" x2="50" y2="32"/><line x1="50" y1="68" x2="50" y2="80"/><line x1="20" y1="50" x2="32" y2="50"/><line x1="68" y1="50" x2="80" y2="50"/><line x1="29" y1="29" x2="38" y2="38"/><line x1="62" y1="62" x2="71" y2="71"/><line x1="71" y1="29" x2="62" y2="38"/><line x1="38" y1="62" x2="29" y2="71"/></svg><h3 style="font-size:1.05rem;">Child</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-child" data-title="Child Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Child</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="10"/><line x1="50" y1="20" x2="50" y2="32"/><line x1="50" y1="68" x2="50" y2="80"/><line x1="20" y1="50" x2="32" y2="50"/><line x1="68" y1="50" x2="80" y2="50"/><line x1="29" y1="29" x2="38" y2="38"/><line x1="62" y1="62" x2="71" y2="71"/><line x1="71" y1="29" x2="62" y2="38"/><line x1="38" y1="62" x2="29" y2="71"/></svg></div>
+      <div>
+        <span class="tag">Archetypal figure (Jung)</span>
+        <h1 style="margin:8px 0 6px;">Child</h1>
+        <p class="lead" style="margin:0;">The part of you still capable of beginning again.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>An archetype Jung wrote about directly, drawn from myth and dream material.</p></div>
+    <p class="lead">Jung wrote about the Child archetype in &ldquo;The Psychology of the Child Archetype&rdquo; as a symbol of potential, renewal, and the future self not yet realized. The &ldquo;Divine Child&rdquo; in mythology is small, vulnerable, often abandoned or endangered, and yet carries the seed of something greater than the adults around it. Jung connected it to individuation itself — the new, more whole personality that's always trying to be born from the conflict between conscious and unconscious. In daily life, this archetype is the part of you that can still be curious, start over, and approach something without the armor of expertise.</p>
+    <div class="keyword-row"><span class="keyword">child archetype</span><span class="keyword">renewal</span><span class="keyword">individuation</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Genuine curiosity that hasn't calcified into cynicism</li><li>Willingness to be a beginner again</li><li>Play as a real need, not an indulgence</li><li>Hope that persists past the evidence against it</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Avoids responsibility by staying perpetually undeveloped</li><li>Naivety that ignores real risk</li><li>Dependency dressed up as innocence</li><li>Refuses to grow up when growth is required</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-mother" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg><h3 style="font-size:1.05rem;">Mother</h3></a><a href="#archetype-creator" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg><h3 style="font-size:1.05rem;">Creator</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-warrior" data-title="Warrior Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Warrior</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="30" y1="30" x2="70" y2="70"/><line x1="70" y1="30" x2="30" y2="70"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Warrior</h1>
+        <p class="lead" style="margin:0;">Disciplined force aimed at a worthy target.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">The Warrior, as a standalone branding archetype, comes mostly from later writers extending Jung's framework, not from Jung's own essays. What's genuinely Jungian underneath it is the idea that aggression, drive, and the capacity for conflict are real psychic forces that need a conscious, disciplined outlet, not suppression. A Warrior who has integrated their Shadow fights for something. One who hasn't just fights, often without knowing why. The line between Warrior and Rebel is intent: the Warrior serves a code, the Rebel breaks one.</p>
+    <div class="keyword-row"><span class="keyword">discipline</span><span class="keyword">aggression</span><span class="keyword">conflict</span><span class="keyword">boundaries</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Discipline under pressure</li><li>Comfort with confrontation when it's necessary</li><li>Protects boundaries without apologizing for them</li><li>Trains, prepares, and takes responsibility seriously</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Turns every disagreement into a fight</li><li>Mistakes aggression for honesty</li><li>Can't stand down once provoked</li><li>Defines self entirely by what they're against</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-hero" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><line x1="50" y1="15" x2="50" y2="70"/><line x1="34" y1="34" x2="66" y2="34"/><circle cx="50" cy="80" r="6"/></svg><h3 style="font-size:1.05rem;">Hero</h3></a><a href="#archetype-ruler" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polyline points="20,68 20,42 35,55 50,30 65,55 80,42 80,68 20,68"/></svg><h3 style="font-size:1.05rem;">King / Queen (Ruler)</h3></a><a href="#archetype-shadow" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg><h3 style="font-size:1.05rem;">Shadow</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-ruler" data-title="King / Queen (Ruler) Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / King / Queen (Ruler)</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polyline points="20,68 20,42 35,55 50,30 65,55 80,42 80,68 20,68"/></svg></div>
+      <div>
+        <span class="tag">Archetypal figure (Jung)</span>
+        <h1 style="margin:8px 0 6px;">King / Queen (Ruler)</h1>
+        <p class="lead" style="margin:0;">The instinct to bring order and stability to your domain.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>An archetype Jung wrote about directly, drawn from myth and dream material.</p></div>
+    <p class="lead">Jung studied royal figures extensively in alchemical symbolism, where the king and queen frequently represent the regulating center of the psyche — an early symbolic stand-in for what he later called the Self. The Ruler archetype is the instinct to organize chaos into order and take responsibility for a domain, whether that's a household, a team, or your own life. Healthy Ruler energy creates structures other people can rely on. Unhealthy Ruler energy becomes control for its own sake.</p>
+    <div class="keyword-row"><span class="keyword">order</span><span class="keyword">structure</span><span class="keyword">alchemy</span><span class="keyword">the Self</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Takes ownership of outcomes, not just intentions</li><li>Builds systems and structure naturally</li><li>Comfortable being accountable in front of others</li><li>Sets standards and actually holds them</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Control disguised as order</li><li>Can't tolerate being wrong in front of others</li><li>Rigid rule-following that ignores context</li><li>Equates authority with personal worth</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-warrior" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="30" y1="30" x2="70" y2="70"/><line x1="70" y1="30" x2="30" y2="70"/></svg><h3 style="font-size:1.05rem;">Warrior</h3></a><a href="#archetype-wise-one" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M14,50 C30,28 70,28 86,50 C70,72 30,72 14,50 Z"/><circle cx="50" cy="50" r="9"/></svg><h3 style="font-size:1.05rem;">Wise Old Man / Wise Woman</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-lover" data-title="Lover Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Lover</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="40" cy="50" r="24"/><circle cx="60" cy="50" r="24"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Lover</h1>
+        <p class="lead" style="margin:0;">The drive toward connection, intimacy, and aliveness.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">The Lover archetype, as a personality category, is a later extension of Jung's work, but it stands on a real Jungian foundation: Eros, the principle of relatedness and connection, which Jung treated as one half of psychic life, paired with Logos, the principle of discernment and separation. The Lover archetype is the instinct that wants closeness, sensation, beauty, and aliveness through connection to another person, an idea, or an experience. It's not only romantic — it's the part of you that wants to be moved.</p>
+    <div class="keyword-row"><span class="keyword">eros</span><span class="keyword">connection</span><span class="keyword">relatedness</span><span class="keyword">intimacy</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Prioritizes connection and shared experience</li><li>Drawn to beauty, art, and sensation</li><li>Values emotional honesty in relationships</li><li>Loyal once genuinely attached</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Loses a sense of self entirely inside relationships</li><li>Mistakes intensity for intimacy</li><li>Fear of being alone drives bad decisions</li><li>Jealousy disguised as devotion</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-caregiver" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="32" r="10"/><path d="M22,78 C22,55 40,46 50,46 C60,46 78,55 78,78"/></svg><h3 style="font-size:1.05rem;">Caregiver</h3></a><a href="#archetype-child" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="10"/><line x1="50" y1="20" x2="50" y2="32"/><line x1="50" y1="68" x2="50" y2="80"/><line x1="20" y1="50" x2="32" y2="50"/><line x1="68" y1="50" x2="80" y2="50"/><line x1="29" y1="29" x2="38" y2="38"/><line x1="62" y1="62" x2="71" y2="71"/><line x1="71" y1="29" x2="62" y2="38"/><line x1="38" y1="62" x2="29" y2="71"/></svg><h3 style="font-size:1.05rem;">Child</h3></a><a href="#archetype-shadow" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg><h3 style="font-size:1.05rem;">Shadow</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-rebel" data-title="Rebel Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Rebel</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,16 A34,34 0 1 1 26,28"/><line x1="48" y1="6" x2="58" y2="22"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Rebel</h1>
+        <p class="lead" style="margin:0;">The refusal to conform just because everyone else has.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">The Rebel, as a packaged archetype, is largely a later addition, but it connects to something Jung treated as central: individuation often requires breaking from the collective's expectations to become a separate, whole person. Jung warned against blind conformity to social roles — what he called over-identifying with the Persona — because it stunts development. The Rebel archetype is the instinct that won't accept an answer just because it's the accepted one. Healthy, it produces independent thought. Unhealthy, it produces reflexive opposition to anything resembling authority, which is its own kind of conformity.</p>
+    <div class="keyword-row"><span class="keyword">individuation</span><span class="keyword">conformity</span><span class="keyword">authenticity</span><span class="keyword">persona</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Questions defaults before accepting them</li><li>Uncomfortable with groupthink</li><li>Willing to be the only dissenting voice in the room</li><li>Values authenticity over approval</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Opposes things automatically, without actually evaluating them</li><li>Mistakes attention-seeking for independence</li><li>Burns bridges that didn't need burning</li><li>Identity built entirely in opposition to something</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-trickster" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg><h3 style="font-size:1.05rem;">Trickster</h3></a><a href="#archetype-explorer" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,12 58,42 88,50 58,58 50,88 42,58 12,50 42,42"/></svg><h3 style="font-size:1.05rem;">Explorer</h3></a><a href="#archetype-shadow" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="42" cy="50" r="26"/><circle cx="58" cy="50" r="26"/></svg><h3 style="font-size:1.05rem;">Shadow</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-caregiver" data-title="Caregiver Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Caregiver</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="32" r="10"/><path d="M22,78 C22,55 40,46 50,46 C60,46 78,55 78,78"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Caregiver</h1>
+        <p class="lead" style="margin:0;">The instinct to ease another person's suffering.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">Caregiver as a standalone branding archetype comes from later writers, but the underlying psychology is Jungian: it draws on both the Mother archetype (nurturing, protection) and Eros (relatedness). The Caregiver is the part of you oriented toward easing someone else's pain, often before tending to your own. Done consciously, it's one of the most valuable instincts a person can have. Done unconsciously, it becomes a way to avoid your own needs by staying endlessly useful to other people's.</p>
+    <div class="keyword-row"><span class="keyword">nurturing</span><span class="keyword">eros</span><span class="keyword">self-sacrifice</span><span class="keyword">boundaries</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Notices what others need before they ask</li><li>Comfortable putting others first, sometimes too comfortable</li><li>Finds meaning through service</li><li>Patient with people who are struggling</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Martyrdom that quietly resents the people it serves</li><li>Can't receive help without discomfort</li><li>Identity collapses without someone to care for</li><li>Enables instead of actually helping</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-mother" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="14"/></svg><h3 style="font-size:1.05rem;">Mother</h3></a><a href="#archetype-lover" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="40" cy="50" r="24"/><circle cx="60" cy="50" r="24"/></svg><h3 style="font-size:1.05rem;">Lover</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-explorer" data-title="Explorer Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Explorer</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,12 58,42 88,50 58,58 50,88 42,58 12,50 42,42"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Explorer</h1>
+        <p class="lead" style="margin:0;">The need to find out what's actually out there.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">The Explorer archetype, as a personal-branding category, comes from later writers, but it carries a real Jungian undercurrent: individuation often requires leaving the familiar territory of inherited belief and finding out what's true for you specifically, not what you were handed. Jung's own life followed this pattern closely after his break with Freud in 1913, when he deliberately explored his own unconscious instead of accepting an inherited theoretical system. The Explorer archetype is the instinct that gets restless inside any answer it didn't arrive at itself.</p>
+    <div class="keyword-row"><span class="keyword">individuation</span><span class="keyword">restlessness</span><span class="keyword">autonomy</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Distrust of secondhand conclusions</li><li>Restlessness inside routine</li><li>Drawn to new environments, ideas, and disciplines</li><li>Values direct experience over theory</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Can't commit because something better might be out there</li><li>Mistakes novelty for growth</li><li>Avoids depth by constantly moving to the next thing</li><li>Isolation from never staying anywhere long enough to be known</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-rebel" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,16 A34,34 0 1 1 26,28"/><line x1="48" y1="6" x2="58" y2="22"/></svg><h3 style="font-size:1.05rem;">Rebel</h3></a><a href="#archetype-creator" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg><h3 style="font-size:1.05rem;">Creator</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="archetype-creator" data-title="Creator Archetype — Meaning &amp; Shadow">
+<section class="section" style="padding-top:48px;">
+  <div class="container container-narrow">
+    <div class="crumb"><a href="#archetypes">Archetypes</a> / Creator</div>
+    <div class="detail-hero">
+      <div class="seal"><svg class="glyph-lg" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50,50 m0,-2 a2,2 0 1,1 -2,2 a6,6 0 1,1 6,-6 a10,10 0 1,1 -10,10 a16,16 0 1,1 16,-16 a22,22 0 1,1 -22,22 a30,30 0 1,1 30,-30"/></svg></div>
+      <div>
+        <span class="tag">Popularized archetype</span>
+        <h1 style="margin:8px 0 6px;">Creator</h1>
+        <p class="lead" style="margin:0;">The instinct to give an inner image a form in the outer world.</p>
+      </div>
+    </div>
+    <div class="notice info"><strong>Source note</strong><p>Extends Jung's framework; formalized later by writers like Carol Pearson and Joseph Campbell.</p></div>
+    <p class="lead">Creator as a packaged archetype is a later addition to Jung's original framework, but it tracks closely with something Jung practiced himself: active imagination, a technique of deliberately engaging unconscious images, dreams, and fantasies and giving them concrete form through writing, drawing, or building. Jung built an actual stone tower at Bollingen partly as this kind of symbolic work made physical. The Creator archetype is the instinct to take what's internal and make it real, whether that's a piece of art, a business, or a life.</p>
+    <div class="keyword-row"><span class="keyword">active imagination</span><span class="keyword">symbolism</span><span class="keyword">Bollingen</span></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="split">
+      <div class="col">
+        <h4>How it expresses, healthy</h4>
+        <ul><li>Needs to make things, not just consume them</li><li>Treats ideas as unfinished until they have a form</li><li>Comfortable with ugly first drafts</li><li>Restless without a project in progress</li></ul>
+      </div>
+      <div class="col">
+        <h4>Shadow warning signs</h4>
+        <ul><li>Never finishes anything because nothing feels done</li><li>Identity entirely tied to output, collapses without it</li><li>Perfectionism that prevents starting</li><li>Uses creation to avoid relationships</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Related</div><h2>Connected archetypes</h2></div>
+    <div class="grid grid-3"><a href="#archetype-child" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="10"/><line x1="50" y1="20" x2="50" y2="32"/><line x1="50" y1="68" x2="50" y2="80"/><line x1="20" y1="50" x2="32" y2="50"/><line x1="68" y1="50" x2="80" y2="50"/><line x1="29" y1="29" x2="38" y2="38"/><line x1="62" y1="62" x2="71" y2="71"/><line x1="71" y1="29" x2="62" y2="38"/><line x1="38" y1="62" x2="29" y2="71"/></svg><h3 style="font-size:1.05rem;">Child</h3></a><a href="#archetype-trickster" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><polyline points="32,38 44,62 56,38 68,62"/></svg><h3 style="font-size:1.05rem;">Trickster</h3></a><a href="#archetype-wise-one" class="card" style="padding:18px;"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M14,50 C30,28 70,28 86,50 C70,72 30,72 14,50 Z"/><circle cx="50" cy="50" r="9"/></svg><h3 style="font-size:1.05rem;">Wise Old Man / Wise Woman</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>See which archetype fits you</h3>
+    <p>Take the 7-question animal archetype quiz for a quick, low-stakes reflection.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="shadow-work" data-title="Shadow Work — A Practical Guide to Jung's Shadow">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Shadow Work</div>
+    <h1>Working with the Shadow, without the mysticism</h1>
+    <p class="sub lead">The Shadow is one of Jung's most concrete, immediately useful ideas. Here's what it actually is, and how to start working with it.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>What the Shadow is</h2>
+    <p>The Shadow is the part of your personality your conscious mind has rejected, usually because it was unacceptable somewhere along the way: to your family, your culture, or your own self-image. Jung's claim was specific: what you don't consciously own about yourself doesn't disappear, it goes underground, and finds its way back out through projection onto other people.</p>
+
+    <h2>What it isn't</h2>
+    <div class="notice info"><strong>Common misconception</strong><p>The Shadow isn't a secret evil twin, and it isn't always negative. People often repress positive traits, like ambition or creativity, because expressing them wasn't safe in their family or culture. It's also not something you defeat once. Shadow work is an ongoing practice, not a single breakthrough.</p></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <h2>Signs you're looking at a projection</h2>
+    <ul style="color:var(--ink-dim); padding-left:20px;"><li>Your reaction to someone feels bigger than what they actually did</li><li>You can't stop thinking about a trait in someone else that doesn't actually affect you</li><li>You judge a behavior in others that you've also done quietly yourself</li><li>A trait you publicly mock shows up in your own behavior when no one's watching</li><li>Recurring relationship or conflict patterns you can't fully explain</li></ul>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>Journal prompts to start with</h2>
+    <p>Pick one. Write without editing for ten minutes. Don't aim for a tidy answer.</p>
+    <ul style="color:var(--ink-dim); padding-left:20px;"><li>Who irritates you far more than the situation seems to justify? What trait of theirs is it, specifically?</li><li>What's a compliment you'd be uncomfortable receiving? Why?</li><li>What did your family consider unacceptable to express, anger, ambition, sadness, need?</li><li>What's something you secretly do that contradicts a value you state publicly?</li><li>If you let yourself want the thing you've decided not to want, what would it be?</li><li>What trait do you mock in other people that you've also shown yourself?</li><li>What would the people who raised you be most uncomfortable seeing you become?</li><li>When was the last time you reacted to someone far harder than they actually deserved?</li></ul>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <h2>Integration vs. suppression</h2>
+    <p>Suppression pushes the trait further down. Integration means acknowledging it exists, understanding where it came from, and deciding consciously what to do with it. A repressed temper runs you. An acknowledged temper becomes information, a signal you need to set a boundary, end a conversation, or change a situation.</p>
+    <div class="notice"><strong>Educational content only</strong><p>This page describes a reflective practice, not a clinical one. If shadow material connects to trauma, or brings up distress that doesn't ease with reflection, bring it to a licensed therapist rather than working through it alone.</p></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the Shadow Work starter kit</h3>
+    <p>12 journal prompts and a short guide to projection, delivered as a free PDF.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="dreams-symbols" data-title="Dreams & Symbols — Jung's Approach to Dream Interpretation">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Dreams &amp; Symbols</div>
+    <h1>How Jung actually read dreams</h1>
+    <p class="sub lead">Not as a fixed code to decrypt, but as the unconscious compensating for whatever the conscious mind has been ignoring.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>The compensatory function</h2>
+    <p>Jung's working theory was that dreams compensate for a one-sided conscious attitude. If you're consciously over-confident, the unconscious might generate a dream of failure or vulnerability to balance the picture. If you're consciously dismissing a feeling, a dream might exaggerate it until you can't ignore it. Dreams, in this view, aren't garbage data. They're a second channel of communication from the parts of the psyche you don't consciously control.</p>
+    <div class="notice info"><strong>Jung's own caveat</strong><p>Jung explicitly argued against universal dream dictionaries. He insisted a symbol's meaning depends on the dreamer's personal associations and context, not a fixed lookup table. Treat everything below as a starting question, not a verdict.</p></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="section-head"><div class="eyebrow">Common patterns</div><h2>Frequently reported dream themes</h2></div>
+    <div class="grid grid-3"><div class="card"><h3>Being chased</h3><p>Often read as avoidance, something demanding attention that the dreamer is running from rather than confronting directly.</p></div><div class="card"><h3>Falling</h3><p>Frequently associated with a loss of control or a fear of failure in waking life, a sense the ground you relied on isn't stable.</p></div><div class="card"><h3>Teeth falling out</h3><p>One of the most common reported dream images. Often linked to anxiety about appearance, communication, or a fear of losing power in a situation.</p></div><div class="card"><h3>Flying</h3><p>Can reflect a sense of freedom or rising above a constraint, though context, anxious or joyful, changes the reading significantly.</p></div><div class="card"><h3>Naked in public</h3><p>Commonly tied to a fear of exposure, of being truly seen, flaws and all, without the usual Persona in place.</p></div><div class="card"><h3>Lost or can't find a room</h3><p>Often linked to searching for a part of yourself or a direction in life that hasn't been located yet.</p></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head"><div class="eyebrow">A starting glossary</div><h2>Recurring symbols</h2></div>
+    <div class="glossary-item"><h3>Water</h3><p>Often tied to the unconscious itself, calm water suggesting clarity, turbulent water suggesting emotional upheaval.</p></div><div class="glossary-item"><h3>House</h3><p>Frequently read as a symbol of the self, different rooms sometimes representing different parts of the personality.</p></div><div class="glossary-item"><h3>Snake</h3><p>One of the oldest cross-cultural symbols of transformation, danger, and renewal, given how literally snakes shed their skin.</p></div><div class="glossary-item"><h3>Doors</h3><p>Often associated with transitions, choices, or thresholds between one state and another.</p></div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <h2>Starting a dream journal</h2>
+    <ol style="padding-left:22px; color:var(--ink-dim);">
+      <li style="margin-bottom:12px;">Keep a notebook or note app within reach of where you sleep.</li>
+      <li style="margin-bottom:12px;">Write immediately on waking, before checking your phone or getting up. Detail fades within minutes.</li>
+      <li style="margin-bottom:12px;">Record the dream first, then separately note your associations: what each image reminds you of, not what it &ldquo;means.&rdquo;</li>
+      <li style="margin-bottom:12px;">Look for patterns across weeks, not single dreams. Recurring images carry more weight than one-off ones.</li>
+      <li>Bring genuinely distressing or recurring nightmares to a therapist rather than interpreting them alone.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the Dream Journal starter template</h3>
+    <p>A simple page format for recording dreams and your own associations, free.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="animal-archetypes" data-title="Animal Archetypes — Wolf, Bear, Owl & More, Explained">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Animal Archetypes</div>
+    <h1>Ten animal patterns, honestly framed</h1>
+    <p class="sub lead">Jung wrote about animals as symbols of instinct in dreams and alchemy, but a structured 10-animal personality framework is a later, popularized synthesis, not a direct Jungian taxonomy. It's a useful reflection tool, not a Jung quote.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="notice info"><strong>Worth reading first</strong><p>Before you reach for the phrase “spirit animal,” it's worth knowing where that specific term comes from and why some people prefer alternatives like “animal archetype.”</p></div>
+    <p><a href="#blog-spirit-animal-better-words">Why people say &ldquo;spirit animal&rdquo; — and better words to use &rarr;</a></p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="grid grid-3"><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,20 30,70 70,70"/><line x1="50" y1="20" x2="50" y2="8"/></svg>
+          <h3>Wolf</h3>
+          <p class="tag">Loyalty, instinct, protection, pack-mindedness.</p>
+          <p>The wolf moves and decides as part of a group, fiercely protective of its own, guided by instinct as much as calculation. As a symbolic pattern, it represents people who orient their identity around the people they're responsible for, and who trust gut instinct over abstract theory.</p>
+          <a href="#blog-wolf-archetype-meaning" class="card-link">Read more &rarr;</a>
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="55" r="28"/><circle cx="32" cy="28" r="8"/><circle cx="68" cy="28" r="8"/></svg>
+          <h3>Bear</h3>
+          <p class="tag">Strength, protection, solitude, grounded power.</p>
+          <p>The bear is enormous, capable of real damage, and mostly chooses stillness. As a symbol, it represents quiet strength: power that doesn't need to be performed, paired with a real need for solitude to recover and think.</p>
+          <a href="#blog-bear-archetype-meaning" class="card-link">Read more &rarr;</a>
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="16"/><line x1="50" y1="14" x2="50" y2="26"/><line x1="50" y1="74" x2="50" y2="86"/><line x1="14" y1="50" x2="26" y2="50"/><line x1="74" y1="50" x2="86" y2="50"/><line x1="24" y1="24" x2="32" y2="32"/><line x1="76" y1="76" x2="68" y2="68"/><line x1="76" y1="24" x2="68" y2="32"/><line x1="24" y1="76" x2="32" y2="68"/></svg>
+          <h3>Lion</h3>
+          <p class="tag">Courage, leadership, pride.</p>
+          <p>The lion is visible by design, the center of its pride, used to being watched and followed. As a symbol, it represents people comfortable being seen, leading from the front, and carrying the weight of visibility that leadership requires.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,18 30,52 50,46 70,52"/><line x1="38" y1="52" x2="32" y2="80"/><line x1="62" y1="52" x2="68" y2="80"/></svg>
+          <h3>Fox</h3>
+          <p class="tag">Strategy, adaptability, cleverness.</p>
+          <p>The fox survives by reading situations quickly and adjusting, not by overpowering anything. As a symbol, it represents strategic thinking, adaptability under pressure, and a preference for clever solutions over brute force.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M10,55 Q50,25 90,55"/><path d="M50,25 L50,80"/><path d="M30,80 Q50,68 70,80"/></svg>
+          <h3>Eagle</h3>
+          <p class="tag">Vision, freedom, high standards.</p>
+          <p>The eagle sees from far above, spotting patterns invisible at ground level. As a symbol, it represents the instinct to step back for perspective, a preference for the long view, and standards that can feel distant to people still on the ground.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M16,30 C40,30 16,50 40,50 C64,50 40,70 64,70 C80,70 84,76 86,82"/></svg>
+          <h3>Snake</h3>
+          <p class="tag">Transformation, danger, rebirth.</p>
+          <p>The snake sheds its skin entirely and emerges changed. As a symbol, it's one of the oldest images of transformation across cultures and appears frequently in dream material connected to renewal, sexuality, and necessary endings.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="55" r="24"/><polygon points="30,28 38,46 22,46"/><polygon points="70,28 78,46 62,46"/></svg>
+          <h3>Dog</h3>
+          <p class="tag">Loyalty, service, companionship.</p>
+          <p>The dog's identity is built around relationship, bonded to its people, oriented toward service. As a symbol, it represents loyalty as a defining trait and a deep need for genuine companionship, not just usefulness.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="30"/><circle cx="38" cy="48" r="8"/><circle cx="62" cy="48" r="8"/><circle cx="38" cy="48" r="2.4"/><circle cx="62" cy="48" r="2.4"/></svg>
+          <h3>Owl</h3>
+          <p class="tag">Wisdom, observation, hidden knowledge.</p>
+          <p>The owl sees in the dark and moves silently, watching before acting. As a symbol, it represents the instinct to observe carefully, gather information quietly, and hold knowledge that isn't always shared right away.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><polygon points="50,20 70,55 50,80 30,55"/><line x1="20" y1="42" x2="40" y2="50"/><line x1="80" y1="42" x2="60" y2="50"/></svg>
+          <h3>Raven</h3>
+          <p class="tag">Mystery, intelligence, transformation.</p>
+          <p>The raven is one of the most cognitively complex birds known, associated across cultures with omens, trickery, and uncomfortable truths. As a symbol, it represents sharp intelligence paired with a willingness to say the thing nobody wants to hear.</p>
+          
+        </div><div class="card">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><line x1="50" y1="20" x2="50" y2="40"/><line x1="36" y1="22" x2="40" y2="42"/><line x1="64" y1="22" x2="60" y2="42"/></svg>
+          <h3>Tiger</h3>
+          <p class="tag">Power, independence, intensity.</p>
+          <p>The tiger hunts alone, territorial and self-sufficient. As a symbol, it represents intensity, independence, and a refusal to dilute yourself to fit a group's comfort level.</p>
+          
+        </div></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow center">
+    <h3>Find your own animal pattern</h3>
+    <p>Seven quick questions, scored against the ten animals above.</p>
+    <a href="#quiz" class="btn btn-primary">Take the Quiz</a>
+  </div>
+</section>
+</div>
+<div class="page-section" id="korean-symbolism" data-title="Korean Zodiac & Symbolism — The 12 Animal Signs Explained">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Korean Symbolism</div>
+    <h1>The Korean zodiac, on its own terms</h1>
+    <p class="sub lead">A real cultural and astrological tradition, the 12-animal cycle known as 띠 (ddi), explained respectfully and separately from Jungian psychology.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>Where it comes from</h2>
+    <p>The Korean zodiac assigns one of twelve animals to each year in a repeating 12-year cycle, based on birth year. It shares its root structure with the Chinese zodiac and related systems found across East and Southeast Asia, each with regional variations. In Korea, it's woven into the traditional calendar, folk belief, and everyday culture, and it gets particular attention each year around the Lunar New Year.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container">
+    <div class="section-head"><div class="eyebrow">The cycle</div><h2>The 12 animals, in order</h2></div>
+    <div class="grid grid-4"><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Rat</h3>
+          <p class="tag">쥐 (jwi)</p>
+          <p style="font-size:0.9rem;">Resourcefulness, quick thinking, adaptability.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Ox</h3>
+          <p class="tag">소 (so)</p>
+          <p style="font-size:0.9rem;">Patience, dependability, quiet hard work.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Tiger</h3>
+          <p class="tag">호랑이 (horangi)</p>
+          <p style="font-size:0.9rem;">Courage, boldness, a protective streak.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Rabbit</h3>
+          <p class="tag">토끼 (tokki)</p>
+          <p style="font-size:0.9rem;">Gentleness, caution, diplomacy.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Dragon</h3>
+          <p class="tag">용 (yong)</p>
+          <p style="font-size:0.9rem;">Ambition, vitality, the only mythical animal in the cycle.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Snake</h3>
+          <p class="tag">뱀 (baem)</p>
+          <p style="font-size:0.9rem;">Wisdom, introspection, calm intensity.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Horse</h3>
+          <p class="tag">말 (mal)</p>
+          <p style="font-size:0.9rem;">Energy, independence, a love of movement.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Goat</h3>
+          <p class="tag">양 (yang)</p>
+          <p style="font-size:0.9rem;">Gentleness, creativity, a peaceable nature.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Monkey</h3>
+          <p class="tag">원숭이 (wonsungi)</p>
+          <p style="font-size:0.9rem;">Cleverness, curiosity, quick problem-solving.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Rooster</h3>
+          <p class="tag">닭 (dak)</p>
+          <p style="font-size:0.9rem;">Honesty, punctuality, confidence.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Dog</h3>
+          <p class="tag">개 (gae)</p>
+          <p style="font-size:0.9rem;">Loyalty, honesty, a strong sense of justice.</p>
+        </div><div class="card" style="padding:20px;">
+          <svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="2"/><line x1="50" y1="18" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="82"/><line x1="18" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="82" y2="50"/></svg>
+          <h3 style="font-size:1.1rem;">Pig</h3>
+          <p class="tag">돼지 (dwaeji)</p>
+          <p style="font-size:0.9rem;">Generosity, diligence, good fortune.</p>
+        </div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">An important distinction</div><h2>This isn't a Jungian archetype</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Korean Zodiac</th><th>Jungian Archetypes</th></tr></thead>
+        <tbody>
+          <tr><td>How it's assigned</td><td>Fixed by birth year</td><td>Theorized to exist in everyone, in different proportions</td></tr>
+          <tr><td>Origin</td><td>East Asian cultural-astrological tradition</td><td>20th-century psychological framework</td></tr>
+          <tr><td>Basis</td><td>Centuries of regional folk tradition</td><td>Jung's clinical and mythological research</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:18px;">Treating the two as interchangeable misrepresents both. Read more in <a href="#blog-korean-zodiac-explained">Korean Zodiac Animals Explained</a>.</p>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="notice info"><strong>A note on respect</strong><p>This page describes a living cultural tradition, treated here with the same respect and accuracy as the psychological material elsewhere on this site. It is not a personality quiz.</p></div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="quiz" data-title="Animal Archetype Quiz — Which Animal Are You?">
+<section class="hero" style="padding:56px 0 36px;">
+  <div class="container container-narrow center">
+    <div class="eyebrow" style="justify-content:center;">Animal Archetype Quiz</div>
+    <h1>What's your animal archetype?</h1>
+    <p class="sub lead">Seven questions, about two minutes. This is a reflection tool, not a personality diagnosis.</p>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container quiz-wrap">
+    <div id="quiz-app">
+      <div class="progress-track"><div class="progress-fill"></div></div>
+      <div id="quiz-form-wrap">
+        <div id="quiz-questions"></div>
+      </div>
+      <div id="quiz-result" class="quiz-result"></div>
+      <p class="center" style="margin-top:30px;"><button id="quiz-restart" class="btn btn-outline" type="button">Start over</button></p>
+    </div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog" data-title="Blog — Inner Compass">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">Blog</div>
+    <h1>Deeper reads on Jung, archetypes, and symbolism</h1>
+    <p class="sub lead">Shorter pieces that go deep on one idea at a time, fact-checked the same as the rest of the site.</p>
+    <div class="field" style="max-width:360px; margin-top:24px;">
+      <input type="text" id="site-search" placeholder="Search posts..." aria-label="Search posts">
+    </div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container">
+    <div class="topic-strip" data-filter-group="[data-search-item]" style="margin-bottom:28px;"><button class="pill active" data-cat="all">All</button><button class="pill" data-cat="Animal Symbolism">Animal Symbolism</button><button class="pill" data-cat="Culture">Culture</button><button class="pill" data-cat="Foundations">Foundations</button><button class="pill" data-cat="Shadow Work">Shadow Work</button></div>
+    <div class="grid grid-3"><a href="#blog-carl-jung-explained" class="card post-card" data-cat="Foundations" data-search-item>
+          <span class="tag">Foundations</span>
+          <h3>Carl Jung, Explained Like You're New</h3>
+          <p>Who he was, what he actually argued, and why analytical psychology still matters a century later.</p>
+          <span class="post-meta"><span>6 min read</span></span>
+        </a><a href="#blog-what-is-the-shadow" class="card post-card" data-cat="Shadow Work" data-search-item>
+          <span class="tag">Shadow Work</span>
+          <h3>What Is the Shadow?</h3>
+          <p>Jung's most useful idea, explained without the mysticism: what it is, what it isn't, and how to actually work with it.</p>
+          <span class="post-meta"><span>5 min read</span></span>
+        </a><a href="#blog-archetypes-vs-personality-types" class="card post-card" data-cat="Foundations" data-search-item>
+          <span class="tag">Foundations</span>
+          <h3>Archetypes vs. Personality Types</h3>
+          <p>Jungian archetypes, MBTI, and zodiac signs get lumped together constantly. They're not the same thing, and the differences matter.</p>
+          <span class="post-meta"><span>5 min read</span></span>
+        </a><a href="#blog-wolf-archetype-meaning" class="card post-card" data-cat="Animal Symbolism" data-search-item>
+          <span class="tag">Animal Symbolism</span>
+          <h3>Wolf Archetype Meaning</h3>
+          <p>Loyalty, instinct, and the pull of the pack: what the wolf pattern represents and where it shows up in real behavior.</p>
+          <span class="post-meta"><span>3 min read</span></span>
+        </a><a href="#blog-bear-archetype-meaning" class="card post-card" data-cat="Animal Symbolism" data-search-item>
+          <span class="tag">Animal Symbolism</span>
+          <h3>Bear Archetype Meaning</h3>
+          <p>Strength that doesn't need an audience: what the bear pattern represents.</p>
+          <span class="post-meta"><span>3 min read</span></span>
+        </a><a href="#blog-spirit-animal-better-words" class="card post-card" data-cat="Culture" data-search-item>
+          <span class="tag">Culture</span>
+          <h3>Why People Say "Spirit Animal" — and Better Words to Use</h3>
+          <p>The phrase has a specific origin, and it's worth knowing before you reach for it casually.</p>
+          <span class="post-meta"><span>5 min read</span></span>
+        </a><a href="#blog-korean-zodiac-explained" class="card post-card" data-cat="Culture" data-search-item>
+          <span class="tag">Culture</span>
+          <h3>Korean Zodiac Animals Explained</h3>
+          <p>The 12-animal cycle, its shared roots across East Asia, and what each sign traditionally represents.</p>
+          <span class="post-meta"><span>4 min read</span></span>
+        </a><a href="#blog-synchronicity-coincidence-or-pattern" class="card post-card" data-cat="Foundations" data-search-item>
+          <span class="tag">Foundations</span>
+          <h3>Synchronicity: Meaningful Coincidence or Pattern-Seeking?</h3>
+          <p>Jung's most contested idea, laid out fairly, including the strongest case against it.</p>
+          <span class="post-meta"><span>5 min read</span></span>
+        </a></div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-carl-jung-explained" data-title="Carl Jung, Explained Like You're New">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Foundations</div>
+    <h1>Carl Jung, Explained Like You're New</h1>
+    <div class="byline"><span>Foundations</span><span>6 min read</span></div>
+    <p class="lead">Carl Gustav Jung was born on July 26, 1875, in Kesswil, Switzerland, and died on June 6, 1961, in Küsnacht, just outside Zurich. He trained as a psychiatrist, took his medical degree at the University of Basel in 1900, and spent his early career at the Burghölzli psychiatric hospital under Eugen Bleuler, studying how patients' word associations revealed emotionally charged material hiding underneath conscious awareness. He called these clusters "complexes." That word is now everywhere in casual English, and it started here.</p>
+
+<p>For five years starting in 1907, Jung worked closely with Sigmund Freud and was widely seen as his likely successor. They split in 1913 over a real theoretical disagreement: Freud insisted neuroses were fundamentally sexual in origin, and Jung didn't think that explanation went far enough. The break was personally painful for both men. It also freed Jung to build something of his own, which he eventually named analytical psychology, specifically to distinguish it from Freud's psychoanalysis.</p>
+
+<h2>The core idea</h2>
+<p>Jung's central claim is that the psyche has layers. On top sits the conscious mind, what you're aware of right now. Beneath it sits the personal unconscious, holding memories and material specific to your own life that you've forgotten or suppressed. Beneath that, Jung proposed something more controversial: a collective unconscious, a layer of the psyche shared across all humans, inherited rather than learned, containing universal patterns he called archetypes.</p>
+
+<p>Archetypes aren't specific images. They're more like empty molds that get filled in by your culture and experience: the Mother, the Shadow, the Self. Jung argued you could see the same patterns surface independently across unrelated mythologies, which he took as evidence they weren't culturally transmitted but built into the structure of the human mind itself.</p>
+
+<h2>Why it still matters</h2>
+<p>Jung's framework gave language to things people had always sensed but couldn't name: the gap between who you present yourself as and who you actually are (Persona vs. Shadow), the lifelong project of becoming a fuller, more integrated version of yourself (individuation), and the idea that dreams aren't garbage data but a second channel of communication from parts of the mind you don't consciously control.</p>
+
+<p>None of this requires accepting Jung uncritically. Some of his ideas, especially around alchemy and parapsychology, sit well outside mainstream psychology today. But the core architecture, shadow, persona, individuation, archetypes, has proven durable enough to shape therapy, literature, and film for a hundred years. That's the version this site teaches.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-archetypes-vs-personality-types" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Archetypes vs. Personality Types</h3></a><a href="#blog-synchronicity-coincidence-or-pattern" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Synchronicity: Meaningful Coincidence or Pattern-Seeking?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-what-is-the-shadow" data-title="What Is the Shadow?">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Shadow Work</div>
+    <h1>What Is the Shadow?</h1>
+    <div class="byline"><span>Shadow Work</span><span>5 min read</span></div>
+    <p class="lead">The Shadow is the part of your personality that your conscious self has rejected. Not necessarily because it's evil, usually just because it was unacceptable somewhere along the way: to your family, your culture, your own self-image.</p>
+
+<p>Jung's claim was specific: whatever you don't consciously own about yourself doesn't disappear. It goes underground, into the personal unconscious, and from there it finds its way back out, usually through projection. You see a trait in someone else and react far harder than the situation warrants. That oversized reaction is often a signal, not that the other person is uniquely terrible, but that they're showing you something about yourself you haven't acknowledged.</p>
+
+<h2>What the Shadow is not</h2>
+<p>The Shadow isn't a secret evil twin. It isn't always negative, either, sometimes people repress positive traits, like ambition or creativity, because expressing them wasn't safe or acceptable in their family or culture. And it's not something you defeat once and move past. Shadow work is closer to an ongoing practice than a single breakthrough.</p>
+
+<h2>Signs you're looking at a projection</h2>
+<ul>
+<li>Your reaction to someone feels bigger than what they actually did</li>
+<li>You can't stop thinking about a trait in someone else that doesn't actually affect you</li>
+<li>You judge a behavior in others that you've also done, quietly, yourself</li>
+<li>A trait you publicly mock shows up in your own behavior when no one's watching</li>
+</ul>
+
+<h2>Integration vs. suppression</h2>
+<p>Suppression pushes the trait further down. Integration means acknowledging it exists, understanding where it came from, and deciding consciously what to do with it. A repressed temper runs you. An acknowledged temper becomes information: a sign you need to set a boundary, end a conversation, or change a situation.</p>
+
+<p>This is reflective work, not therapy. If shadow material connects to trauma, or brings up distress that doesn't ease with reflection, that's a sign to bring it to a licensed therapist, not just a journal.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-archetypes-vs-personality-types" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Archetypes vs. Personality Types</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-archetypes-vs-personality-types" data-title="Archetypes vs. Personality Types">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Foundations</div>
+    <h1>Archetypes vs. Personality Types</h1>
+    <div class="byline"><span>Foundations</span><span>5 min read</span></div>
+    <p class="lead">These three get blended together so often that it's worth separating them cleanly, because they come from genuinely different places and make different kinds of claims.</p>
+
+<h2>Jungian archetypes</h2>
+<p>Archetypes are Jung's term for universal symbolic patterns Jung believed are inherited and shared across all humans, living in what he called the collective unconscious. They aren't a personality test. They're a way of reading recurring patterns in myth, dream, and behavior, things like the Shadow, the Mother, the Hero. You don't "get" one archetype as a label. Jung's view was that every archetype lives in everyone, expressed to different degrees at different times.</p>
+
+<h2>MBTI (Myers-Briggs)</h2>
+<p>This is the one most often mistakenly credited to Jung. Jung did write "Psychological Types" in 1921, introducing the introvert/extravert distinction and four cognitive functions, thinking, feeling, sensation, intuition. But the Myers-Briggs Type Indicator itself was developed decades later by Katharine Cook Briggs and her daughter Isabel Briggs Myers, who were not psychologists and were not affiliated with Jung. MBTI is loosely inspired by Jung's typology, not authored or endorsed by him, and mainstream psychology has substantial criticism of its reliability and validity as a personality measure.</p>
+
+<h2>Zodiac signs</h2>
+<p>Western and East Asian zodiac systems are cultural-astrological traditions, assigning traits based on birth date according to systems with their own histories, completely separate from Jung's psychology. They're worth understanding on their own terms, as this site does with Korean zodiac symbolism, but they aren't a Jungian concept and shouldn't be presented as one.</p>
+
+<h2>Why the distinction matters</h2>
+<p>Conflating these flattens all three. Archetypes lose their depth when treated like a quiz result. MBTI loses credibility when it borrows Jung's name without his actual involvement. And zodiac traditions lose their cultural context when treated as interchangeable with psychology. Understanding where each one actually comes from is the first step toward using any of them honestly.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-synchronicity-coincidence-or-pattern" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Synchronicity: Meaningful Coincidence or Pattern-Seeking?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-wolf-archetype-meaning" data-title="Wolf Archetype Meaning">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Animal Symbolism</div>
+    <h1>Wolf Archetype Meaning</h1>
+    <div class="byline"><span>Animal Symbolism</span><span>3 min read</span></div>
+    <p class="lead">Across cultures, the wolf is rarely a solitary symbol. It's a pack animal, and most of its symbolic weight comes from what it means to belong to one: fierce loyalty, shared responsibility, and decisions made on instinct as much as deliberation.</p>
+
+<h2>What it represents</h2>
+<p>As an animal archetype, the wolf maps onto people whose identity is built around the people they're responsible for. Loyalty isn't performed, it's assumed, often without being stated out loud. There's also a strong instinctual streak: trusting gut read on a person or situation over a slower, more analytical process.</p>
+
+<h2>Where it shows up</h2>
+<p>People carrying strong wolf-pattern traits tend to organize life around a tight circle, family, team, close friends, and protect that circle without much ambiguity about where loyalty lies. They read social dynamics fast and tend to notice threats to the group before anyone names them out loud.</p>
+
+<h2>The growth edge</h2>
+<p>The risk is over-identifying with the role of protector to the point that your own needs get permanently deprioritized, or treating every outsider as a threat to be managed rather than someone who might earn trust over time.</p>
+
+<p>Want the full picture, not just one animal? <a href="#animal-archetypes">See every animal archetype</a> or <a href="#quiz">take the quiz</a> to find your own.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-what-is-the-shadow" class="card"><span class="tag">Shadow Work</span><h3 style="font-size:1.05rem;">What Is the Shadow?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-bear-archetype-meaning" data-title="Bear Archetype Meaning">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Animal Symbolism</div>
+    <h1>Bear Archetype Meaning</h1>
+    <div class="byline"><span>Animal Symbolism</span><span>3 min read</span></div>
+    <p class="lead">The bear is one of the largest, most powerful animals in the symbolic library most cultures draw from, and yet its dominant association isn't violence. It's restraint. A bear that chooses stillness over confrontation most of the time is exactly what makes its strength credible.</p>
+
+<h2>What it represents</h2>
+<p>As an animal archetype, the bear maps onto grounded, quiet power, people who don't need to perform strength because it isn't in question. There's also a strong pull toward solitude, not as avoidance, but as a genuine requirement for recovery and clear thinking.</p>
+
+<h2>Where it shows up</h2>
+<p>Bear-pattern people tend to be the steady ones in a crisis, unbothered by pressure that rattles everyone else, and they recharge alone rather than in groups. They don't escalate easily. When they do act, it tends to be decisive.</p>
+
+<h2>The growth edge</h2>
+<p>The risk is letting solitude tip into isolation, or letting quiet strength become a reason to never ask for help, even when it's genuinely needed.</p>
+
+<p>Want the full picture, not just one animal? <a href="#animal-archetypes">See every animal archetype</a> or <a href="#quiz">take the quiz</a> to find your own.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-what-is-the-shadow" class="card"><span class="tag">Shadow Work</span><h3 style="font-size:1.05rem;">What Is the Shadow?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-spirit-animal-better-words" data-title="Why People Say &quot;Spirit Animal&quot; — and Better Words to Use">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Culture</div>
+    <h1>Why People Say "Spirit Animal" — and Better Words to Use</h1>
+    <div class="byline"><span>Culture</span><span>5 min read</span></div>
+    <p class="lead">"What's your spirit animal?" is common enough in casual conversation that most people using it have no idea where the phrase comes from. It originates in specific Indigenous spiritual traditions in North America, where spirit animals are understood as sacred guides tied to particular ceremonies, beliefs, and cultural practices, not a casual personality quiz.</p>
+
+<h2>Why it's worth a second thought</h2>
+<p>Using a sacred concept from a specific living culture as throwaway internet language strips it of the context and meaning it actually carries within that tradition. This isn't about banning a phrase or policing speech. It's about understanding that the casual version most people use has very little to do with the original practice, and that the people whose tradition it comes from have been explicit that the casual usage feels like a trivialization of something meaningful to them.</p>
+
+<h2>Better words for what people usually mean</h2>
+<p>Most people using "spirit animal" casually aren't trying to reference Indigenous ceremonial practice. They mean something closer to: "which animal's traits feel like mine?" For that, more accurate and respectful options include:</p>
+<ul>
+<li><strong>Animal archetype</strong> — a symbolic personality pattern, which is the term this site uses</li>
+<li><strong>Totem symbol</strong> — accurate only if you're knowingly referencing a specific tradition that uses this term</li>
+<li><strong>"The animal I identify with"</strong> — plain, accurate, and claims nothing it shouldn't</li>
+</ul>
+
+<p>"Power animal" has its own separate lineage, popularized within neo-shamanism by writers like Michael Harner in the late 20th century, which is itself a modern synthesis rather than a single Indigenous tradition. It carries less direct sacred weight than "spirit animal" but still isn't a neutral, generic term.</p>
+
+<p>None of this requires walking on eggshells. It just means knowing what you're borrowing, and choosing language that says what you actually mean.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-what-is-the-shadow" class="card"><span class="tag">Shadow Work</span><h3 style="font-size:1.05rem;">What Is the Shadow?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-korean-zodiac-explained" data-title="Korean Zodiac Animals Explained">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Culture</div>
+    <h1>Korean Zodiac Animals Explained</h1>
+    <div class="byline"><span>Culture</span><span>4 min read</span></div>
+    <p class="lead">The Korean zodiac, known as 띠 (ddi), assigns one of twelve animals to each year in a repeating 12-year cycle, based on your birth year. It shares its root structure with the Chinese zodiac and related systems found across East and Southeast Asia, each with their own regional variations.</p>
+
+<h2>The twelve animals</h2>
+<p>In order, the cycle runs: Rat, Ox, Tiger, Rabbit, Dragon, Snake, Horse, Goat, Monkey, Rooster, Dog, and Pig. Each year belongs to one animal, and the cycle repeats every twelve years, so people born in the same animal year are traditionally thought to share certain personality traits associated with that animal.</p>
+
+<h2>Where it's used</h2>
+<p>Beyond personal traits, the zodiac cycle is built into the traditional Korean calendar system and shows up in cultural references, children's stories, art, and everyday conversation, particularly around the Lunar New Year, when the incoming year's animal gets widespread attention.</p>
+
+<h2>How it differs from Jungian archetypes</h2>
+<p>This is worth being explicit about, since the two get confused. The Korean zodiac is a cultural-astrological tradition: your animal is fixed by your birth year, and the traits associated with it come from centuries of folk tradition specific to East Asian culture. Jungian archetypes are a psychological framework: they're not assigned by birth date, every archetype is theorized to exist in everyone to different degrees, and they're not tied to any single culture's calendar. Treating the two as interchangeable misrepresents both.</p>
+
+<p>This site covers Korean zodiac symbolism on its own terms, as a real cultural tradition worth understanding, separate from the animal archetype material elsewhere on the site.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-what-is-the-shadow" class="card"><span class="tag">Shadow Work</span><h3 style="font-size:1.05rem;">What Is the Shadow?</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="blog-synchronicity-coincidence-or-pattern" data-title="Synchronicity: Meaningful Coincidence or Pattern-Seeking?">
+<section class="section" style="padding-top:48px;">
+  <div class="container article">
+    <div class="crumb"><a href="#blog">Blog</a> / Foundations</div>
+    <h1>Synchronicity: Meaningful Coincidence or Pattern-Seeking?</h1>
+    <div class="byline"><span>Foundations</span><span>5 min read</span></div>
+    <p class="lead">Jung defined synchronicity as a meaningful coincidence between an inner psychological state and an outer event, where the two aren't connected by ordinary cause and effect, but feel connected by meaning. He called it an "acausal connecting principle." The concept took shape over decades and was developed in close collaboration with physicist Wolfgang Pauli; Jung presented it fully in a 1951 lecture and published it formally in 1952 in "Synchronicity: An Acausal Connecting Principle."</p>
+
+<h2>Jung's case</h2>
+<p>Jung's most cited example involved a patient describing a dream about a scarab beetle, at the exact moment a real scarab-like beetle tapped on his office window. He treated moments like this as evidence that the psyche and the physical world aren't as separate as ordinary causality assumes, particularly at moments of intense emotional significance. He didn't claim it as evidence of supernatural power, he framed it as a structural feature of how meaning organizes experience.</p>
+
+<h2>The skeptical case</h2>
+<p>The strongest critique is straightforward: humans are extraordinarily good at noticing patterns and connections, and extraordinarily bad at noticing the much larger number of non-coincidences that happen constantly and go unremarked. This tendency has a name in cognitive psychology, apophenia, the perception of meaningful patterns in random or unconnected data. Confirmation bias compounds it: a striking coincidence gets remembered and retold; the thousands of non-coincidences each day are immediately forgotten. From this view, synchronicity isn't describing a real feature of the world, it's describing a reliable feature of human memory and attention.</p>
+
+<h2>Where that leaves it</h2>
+<p>Synchronicity sits outside mainstream empirical psychology and isn't treated as a testable scientific claim by most researchers today. It remains influential less as a falsifiable theory and more as a way of thinking about how people make meaning out of their lives. Whether you find it compelling or not, it's worth understanding accurately, including the genuine scientific skepticism, rather than presented as settled either way.</p>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <div class="section-head"><div class="eyebrow">Keep reading</div><h2>Related posts</h2></div>
+    <div class="grid grid-2"><a href="#blog-carl-jung-explained" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Carl Jung, Explained Like You're New</h3></a><a href="#blog-archetypes-vs-personality-types" class="card"><span class="tag">Foundations</span><h3 style="font-size:1.05rem;">Archetypes vs. Personality Types</h3></a></div>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="signup">
+  <div>
+    <div class="eyebrow">Free guide</div>
+    <h3 class="mt-0">Get the free Beginner's Map to Carl Jung</h3>
+    <p>A short PDF covering the psyche, the shadow, and where to start. No spam, unsubscribe anytime.</p>
+  </div>
+  <div>
+    <form class="signup-form" data-signup-form aria-label="Email signup">
+      <input type="email" placeholder="you@email.com" required aria-label="Email address">
+      <button type="submit" class="btn btn-primary">Send it to me</button>
+    </form>
+    <p class="form-success" aria-live="polite"></p>
+  </div>
+</div>
+  </div>
+</section>
+</div>
+<div class="page-section" id="about" data-title="About — Inner Compass">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container">
+    <div class="eyebrow">About</div>
+    <h1>Why this site exists</h1>
+    <p class="sub lead">Most of what circulates online about Carl Jung is a misattributed quote graphic or a personality quiz with his name slapped on it. We built Inner Compass to fix that, without losing what makes the material genuinely useful.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container-narrow">
+    <h2>What we're trying to do</h2>
+    <p>Jung's ideas, the Shadow, individuation, archetypes, are some of the most practically useful psychological concepts ever written, and also some of the most distorted by a century of secondhand retelling. Inner Compass exists to explain them clearly, attribute them honestly, including distinguishing Jung's own writing from later popularizations, and connect them to real cultural traditions, like Korean zodiac symbolism, with the same care.</p>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">13</div><div class="label">Archetypes mapped</div></div>
+      <div class="stat"><div class="num">10</div><div class="label">Animal patterns</div></div>
+      <div class="stat"><div class="num">12</div><div class="label">Korean zodiac signs</div></div>
+      <div class="stat"><div class="num">0</div><div class="label">Diagnoses made</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section bg-1">
+  <div class="container container-narrow">
+    <h2>Research standards</h2>
+    <p>Biographical and conceptual material is checked against primary and well-established secondary sources, including Encyclopaedia Britannica's biography of Jung, the Society of Analytical Psychology, and the International Association for Analytical Psychology. Where a popular idea (like the MBTI, or a 10-animal personality framework) isn't actually from Jung's own writing, we say so explicitly rather than letting the association stand uncorrected.</p>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <div class="notice"><strong>Educational content only</strong><p>Inner Compass provides educational content only. It is not therapy, medical advice, or a diagnostic tool. If you're struggling, please reach out to a licensed therapist or counselor.</p></div>
+    <p class="center" style="margin-top:24px;"><a href="#contact" class="btn btn-outline">Get in touch</a></p>
+  </div>
+</section>
+</div>
+<div class="page-section" id="contact" data-title="Contact — Inner Compass">
+<section class="hero" style="padding:64px 0 48px;">
+  <div class="container container-narrow">
+    <div class="eyebrow">Contact</div>
+    <h1>Get in touch</h1>
+    <p class="sub lead">Questions, corrections, or a fact you think we got wrong about Jung? We want to know.</p>
+  </div>
+</section>
+
+<section class="section" style="border-bottom:none;">
+  <div class="container container-narrow">
+    <form id="contact-form" novalidate>
+      <div class="field">
+        <label for="c-name">Name</label>
+        <input type="text" id="c-name" name="name" required>
+        <span class="field-error">Please enter your name.</span>
+      </div>
+      <div class="field">
+        <label for="c-email">Email</label>
+        <input type="email" id="c-email" name="email" required>
+        <span class="field-error">Please enter a valid email.</span>
+      </div>
+      <div class="field">
+        <label for="c-reason">Reason</label>
+        <select id="c-reason" name="reason">
+          <option>General question</option>
+          <option>Fact-check / correction</option>
+          <option>Partnership or press</option>
+          <option>Site bug</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="c-message">Message</label>
+        <textarea id="c-message" name="message" required></textarea>
+        <span class="field-error">Please enter a message.</span>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Send message</button>
+    </form>
+    <p id="contact-success" class="form-success" style="margin-top:18px;">Thanks, message received. We read every one.</p>
+  </div>
+</section>
+</div>
+
+</main>
+<footer class="site-footer">
+  <div class="container">
+    <p class="footer-disclaimer"><strong style="color:var(--ink-dim)">Educational content only.</strong> Inner Compass explains Jungian psychology and cultural symbolism for general learning. It is not therapy, medical advice, or a diagnostic tool. If you're struggling, talk to a licensed therapist or counselor.</p>
+    <div class="footer-grid">
+      <div>
+        <a href="#index" class="brand" style="margin-bottom:10px; display:flex;"><span class="mark"><svg class="glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34"/><line x1="50" y1="10" x2="50" y2="22"/><line x1="50" y1="78" x2="50" y2="90"/><line x1="10" y1="50" x2="22" y2="50"/><line x1="78" y1="50" x2="90" y2="50"/><circle cx="50" cy="50" r="3"/></svg></span> Inner Compass</a>
+        <p style="font-size:0.9rem; max-width:32ch;">Learn Jungian psychology without academic confusion.</p>
+      </div>
+      <div>
+        <h4>Learn</h4>
+        <ul>
+          <li><a href="#start-here">Start Here</a></li>
+          <li><a href="#archetypes">Archetypes</a></li>
+          <li><a href="#shadow-work">Shadow Work</a></li>
+          <li><a href="#dreams-symbols">Dreams &amp; Symbols</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Symbols</h4>
+        <ul>
+          <li><a href="#animal-archetypes">Animal Archetypes</a></li>
+          <li><a href="#korean-symbolism">Korean Symbolism</a></li>
+          <li><a href="#quiz">Archetype Quiz</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="#blog">Blog</a></li>
+          <li><a href="#about">About</a></li>
+          <li><a href="#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Inner Compass. All concepts attributed to their original sources.</span>
+      <span>Built for learning, not diagnosing.</span>
+    </div>
+  </div>
+</footer>
+<script>
+// ===========================================================
+// INNER COMPASS — shared site behavior
+// ===========================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  initNav();
+  initSignupForms();
+  initContactForm();
+  initFilters();
+  initQuiz();
+});
+
+/* ---------------- mobile nav ---------------- */
+function initNav(){
+  const toggle = document.querySelector('.nav-toggle');
+  const links = document.querySelector('.nav-links');
+  if(!toggle || !links) return;
+  toggle.addEventListener('click', () => {
+    const open = links.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  links.querySelectorAll('a').forEach(a => a.addEventListener('click', () => links.classList.remove('open')));
+}
+
+/* ---------------- email signup (lead capture) ---------------- */
+function initSignupForms(){
+  document.querySelectorAll('[data-signup-form]').forEach(form => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = form.querySelector('input[type="email"]');
+      const success = form.parentElement.querySelector('.form-success');
+      if(!input || !input.checkValidity()){
+        input && input.reportValidity();
+        return;
+      }
+      form.style.display = 'none';
+      if(success){
+        success.textContent = `Sent. Check ${input.value} for your guide.`;
+        success.classList.add('show');
+      }
+      // Production note: wire this submit to your email provider
+      // (Resend, ConvertKit, Mailchimp) via a serverless endpoint.
+    });
+  });
+}
+
+/* ---------------- contact form ---------------- */
+function initContactForm(){
+  const form = document.querySelector('#contact-form');
+  if(!form) return;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    let valid = true;
+    form.querySelectorAll('[required]').forEach(field => {
+      const wrap = field.closest('.field');
+      const isEmail = field.type === 'email';
+      const ok = field.value.trim().length > 1 && (!isEmail || field.checkValidity());
+      wrap.classList.toggle('has-error', !ok);
+      if(!ok) valid = false;
+    });
+    if(!valid) return;
+    form.style.display = 'none';
+    document.querySelector('#contact-success').classList.add('show');
+  });
+}
+
+/* ---------------- pill filters (archetypes / animals / blog) ---------------- */
+function initFilters(){
+  document.querySelectorAll('[data-filter-group]').forEach(group => {
+    const pills = group.querySelectorAll('.pill');
+    const targetSelector = group.getAttribute('data-filter-group');
+    const scope = group.closest('.page-section') || document;
+    const items = scope.querySelectorAll(targetSelector);
+    pills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        pills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        const cat = pill.getAttribute('data-cat');
+        items.forEach(item => {
+          const show = cat === 'all' || item.getAttribute('data-cat') === cat;
+          item.style.display = show ? '' : 'none';
+        });
+      });
+    });
+  });
+
+  const search = document.querySelector('#site-search');
+  if(search){
+    const scope = search.closest('.page-section') || document;
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      scope.querySelectorAll('[data-search-item]').forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(q) ? '' : 'none';
+      });
+    });
+  }
+}
+
+/* ===========================================================
+   QUIZ ENGINE
+   "What Is Your Animal Archetype?"
+   =========================================================== */
+const QUIZ_QUESTIONS = [
+  {
+    q: "A conflict breaks out in a group you're part of. Your instinct is to:",
+    options: [
+      { text: "Step in and settle it before it escalates.", scores: { wolf: 2, bear: 1 } },
+      { text: "Watch closely first, then choose the right moment to act.", scores: { owl: 2, fox: 1 } },
+      { text: "Say exactly what you think, even if it's unpopular.", scores: { tiger: 2, lion: 1 } },
+      { text: "Step back and let it resolve on its own.", scores: { bear: 2, raven: 1 } }
+    ]
+  },
+  {
+    q: "What does other people's praise of you usually mention?",
+    options: [
+      { text: "That you're loyal and show up for people.", scores: { wolf: 2, dog: 2 } },
+      { text: "That you notice things others miss.", scores: { owl: 2, fox: 1 } },
+      { text: "That you're hard to rattle under pressure.", scores: { bear: 2, lion: 1 } },
+      { text: "That you make people rethink their assumptions.", scores: { raven: 2, fox: 1 } }
+    ]
+  },
+  {
+    q: "When a plan falls apart, you tend to:",
+    options: [
+      { text: "Improvise fast and find another way through.", scores: { fox: 2, raven: 1 } },
+      { text: "Hold the line and absorb the disruption.", scores: { bear: 2, dog: 1 } },
+      { text: "Rally the people around you and push forward.", scores: { lion: 2, wolf: 1 } },
+      { text: "Get above it, literally or figuratively, to see the whole picture.", scores: { eagle: 2, owl: 1 } }
+    ]
+  },
+  {
+    q: "Which sentence sounds most like you?",
+    options: [
+      { text: "\"I'd rather be right than liked.\"", scores: { tiger: 2, raven: 1 } },
+      { text: "\"I'll figure out a way around this.\"", scores: { fox: 2, snake: 1 } },
+      { text: "\"I just want everyone to get home safe.\"", scores: { dog: 2, wolf: 1 } },
+      { text: "\"Give me the long view before I decide.\"", scores: { eagle: 2, owl: 1 } }
+    ]
+  },
+  {
+    q: "Your closest relationships are built mostly on:",
+    options: [
+      { text: "Unspoken loyalty, you don't need to say it out loud.", scores: { wolf: 2, dog: 1 } },
+      { text: "Mutual respect for each other's independence.", scores: { tiger: 2, eagle: 1 } },
+      { text: "Shared history and protecting what you've built together.", scores: { bear: 2, lion: 1 } },
+      { text: "Honest, sometimes uncomfortable truth-telling.", scores: { raven: 2, snake: 1 } }
+    ]
+  },
+  {
+    q: "What are you most afraid of becoming?",
+    options: [
+      { text: "Someone who can't be trusted.", scores: { dog: 2, wolf: 1 } },
+      { text: "Someone who never grew past their old self.", scores: { snake: 2, raven: 1 } },
+      { text: "Someone irrelevant, ignored, overlooked.", scores: { lion: 2, eagle: 1 } },
+      { text: "Someone who got outsmarted because they weren't paying attention.", scores: { fox: 2, owl: 1 } }
+    ]
+  },
+  {
+    q: "How do you make big decisions?",
+    options: [
+      { text: "Quietly, after a lot of private thought.", scores: { owl: 2, bear: 1 } },
+      { text: "Quickly, by trusting your gut.", scores: { tiger: 2, fox: 1 } },
+      { text: "By weighing how it affects the people who depend on you.", scores: { wolf: 2, dog: 1 } },
+      { text: "By imagining how it looks five years from now.", scores: { eagle: 2, snake: 1 } }
+    ]
+  }
+];
+
+const ANIMAL_RESULTS = {
+  wolf: { name: "Wolf", traits: "Loyalty, instinct, protection, pack-mindedness.", growth: "Loosen your grip on control inside the group you protect. Not everyone needs guarding, some just need trust.", shadow: "Watch for over-identifying with the pack at the cost of your own needs." },
+  bear: { name: "Bear", traits: "Strength, solitude, grounded power, patience.", growth: "Your strength is real, but isolation isn't the same as peace. Let a few people closer.", shadow: "Withdrawal can tip into avoidance. Notice when solitude becomes hiding." },
+  lion: { name: "Lion", traits: "Courage, leadership, pride, visibility.", growth: "Leadership that listens lasts longer than leadership that performs.", shadow: "Pride curdles into defensiveness when you can't tolerate being questioned." },
+  fox: { name: "Fox", traits: "Strategy, adaptability, cleverness.", growth: "Cleverness is a tool, not an identity. Let yourself be direct sometimes.", shadow: "Constant maneuvering can read as untrustworthy, even when your intentions are good." },
+  eagle: { name: "Eagle", traits: "Vision, freedom, high standards.", growth: "The view from above is useful, but people live on the ground. Come down more often.", shadow: "High standards aimed at others can isolate you from the people trying to keep up." },
+  snake: { name: "Snake", traits: "Transformation, renewal, healthy fear of stagnation.", growth: "You're built for change. Let some things stay the same long enough to matter.", shadow: "Reinventing yourself can become a way of running from unresolved patterns." },
+  dog: { name: "Dog", traits: "Loyalty, service, companionship.", growth: "Service is a gift, not an obligation. Make sure you're choosing it, not defaulting to it.", shadow: "Constant giving without receiving breeds quiet resentment." },
+  owl: { name: "Owl", traits: "Wisdom, observation, hidden knowledge.", growth: "Observation is only useful if it eventually turns into action.", shadow: "Watching from a distance can become a way of avoiding the risk of participating." },
+  raven: { name: "Raven", traits: "Mystery, intelligence, transformation, uncomfortable truths.", growth: "Your honesty is valuable. Pair it with timing so it lands instead of wounding.", shadow: "Truth-telling without compassion is just cruelty with good aim." },
+  tiger: { name: "Tiger", traits: "Power, independence, intensity.", growth: "Your intensity is a strength when it's aimed at something. Find the target.", shadow: "Independence taken too far can read as an unwillingness to need anyone." }
+};
+
+function initQuiz(){
+  const root = document.querySelector('#quiz-app');
+  if(!root) return;
+
+  const qContainer = root.querySelector('#quiz-questions');
+  const progressFill = root.querySelector('.progress-fill');
+  const stepLabel = root.querySelector('.quiz-step-label');
+  const resultEl = root.querySelector('#quiz-result');
+  const formEl = root.querySelector('#quiz-form-wrap');
+  const restartBtn = root.querySelector('#quiz-restart');
+
+  let current = 0;
+  const totalScores = {};
+  const answered = new Array(QUIZ_QUESTIONS.length).fill(null);
+
+  QUIZ_QUESTIONS.forEach((item, i) => {
+    const block = document.createElement('div');
+    block.className = 'quiz-q' + (i === 0 ? ' active' : '');
+    block.setAttribute('data-index', i);
+    block.innerHTML = `
+      <div class="quiz-step-label">Question ${i + 1} of ${QUIZ_QUESTIONS.length}</div>
+      <h3>${item.q}</h3>
+      <div class="quiz-options"></div>
+      <div class="quiz-nav">
+        <button type="button" class="btn btn-outline quiz-back" ${i === 0 ? 'disabled style="visibility:hidden;"' : ''}>Back</button>
+        <button type="button" class="btn btn-primary quiz-next" disabled>Next</button>
+      </div>
+    `;
+    const optWrap = block.querySelector('.quiz-options');
+    item.options.forEach((opt, oi) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'quiz-option';
+      b.textContent = opt.text;
+      b.addEventListener('click', () => {
+        optWrap.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
+        b.classList.add('selected');
+        answered[i] = oi;
+        block.querySelector('.quiz-next').disabled = false;
+      });
+      optWrap.appendChild(b);
+    });
+    block.querySelector('.quiz-next').addEventListener('click', () => goTo(i + 1));
+    block.querySelector('.quiz-back').addEventListener('click', () => goTo(i - 1));
+    qContainer.appendChild(block);
+  });
+
+  function goTo(index){
+    if(index >= QUIZ_QUESTIONS.length){
+      showResult();
+      return;
+    }
+    if(index < 0) return;
+    qContainer.querySelectorAll('.quiz-q').forEach(b => b.classList.remove('active'));
+    qContainer.querySelector(`.quiz-q[data-index="${index}"]`).classList.add('active');
+    current = index;
+    progressFill.style.width = `${(index / QUIZ_QUESTIONS.length) * 100}%`;
+  }
+
+  function showResult(){
+    Object.keys(ANIMAL_RESULTS).forEach(k => totalScores[k] = 0);
+    answered.forEach((choiceIndex, qi) => {
+      if(choiceIndex === null) return;
+      const scores = QUIZ_QUESTIONS[qi].options[choiceIndex].scores;
+      Object.entries(scores).forEach(([animal, pts]) => {
+        totalScores[animal] = (totalScores[animal] || 0) + pts;
+      });
+    });
+    const winner = Object.entries(totalScores).sort((a, b) => b[1] - a[1])[0][0];
+    const result = ANIMAL_RESULTS[winner];
+    const animalLink = document.querySelector('.page-section') ? '#animal-archetypes' : 'animal-archetypes.html';
+    progressFill.style.width = '100%';
+    formEl.style.display = 'none';
+    resultEl.innerHTML = `
+      <div class="result-card">
+        <div class="eyebrow">Your result</div>
+        <h2>The ${result.name}</h2>
+        <p class="lead">${result.traits}</p>
+        <div class="result-stats">
+          <div>
+            <h4>Growth edge</h4>
+            <p>${result.growth}</p>
+          </div>
+          <div>
+            <h4>Shadow warning</h4>
+            <p>${result.shadow}</p>
+          </div>
+        </div>
+      </div>
+      <form class="signup-form" data-signup-form aria-label="Email me my full archetype report">
+        <input type="email" placeholder="you@email.com" required aria-label="Email address">
+        <button type="submit" class="btn btn-primary">Email me the full report</button>
+      </form>
+      <p class="form-success" aria-live="polite"></p>
+      <p class="center"><a href="${animalLink}" class="btn btn-outline" style="margin-top:18px;">Read about every animal archetype</a></p>
+    `;
+    resultEl.classList.add('show');
+    initSignupForms();
+  }
+
+  if(restartBtn){
+    restartBtn.addEventListener('click', () => location.reload());
+  }
+}
+
+
+(function(){
+  function activate(hash){
+    var id = (hash || '').replace('#','') || 'index';
+    var sections = document.querySelectorAll('.page-section');
+    var found = false;
+    sections.forEach(function(s){
+      if(s.id === id){ s.classList.add('active'); found = true;
+        if(s.dataset.title){ document.title = s.dataset.title; }
+      } else { s.classList.remove('active'); }
+    });
+    if(!found){
+      var home = document.getElementById('index');
+      if(home){ home.classList.add('active'); }
+    }
+    document.querySelectorAll('.nav-links a, a.nav-cta').forEach(function(a){
+      var href = a.getAttribute('href') || '';
+      a.classList.toggle('active', href === '#' + id);
+    });
+    window.scrollTo(0,0);
+    var links = document.querySelector('.nav-links');
+    if(links){ links.classList.remove('open'); }
+  }
+  window.addEventListener('hashchange', function(){ activate(location.hash); });
+  document.addEventListener('DOMContentLoaded', function(){ activate(location.hash); });
+})();
+
+</script>
+</body>
+</html>
