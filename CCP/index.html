@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCP Readiness Quiz</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--border:#2a2f3a;
+  --text:#e7e9ee;--dim:#9aa1b1;--accent:#5b8def;--accent-bg:rgba(91,141,239,0.12);
+  --accent-dim:#2c4977;--good:#3fb97f;--bad:#e2574c;--warn:#e0a23b;
+  --r:8px;font-family:'Inter',system-ui,sans-serif;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
+#app{max-width:880px;margin:0 auto;padding:0 16px 60px;}
+.topnav{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:28px;}
+.brand{font-weight:700;font-size:1rem;color:var(--text);text-decoration:none;cursor:pointer;}
+.brand:hover{color:var(--accent);}
+h1{font-size:1.55rem;font-weight:700;margin-bottom:6px;}
+h2{font-size:1.05rem;font-weight:600;margin:24px 0 10px;}
+.sub{color:var(--dim);font-size:0.9rem;margin-bottom:20px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px;}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:6px;}
+.stat{background:var(--panel2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;}
+.stat .lbl{color:var(--dim);font-size:0.75rem;font-weight:500;letter-spacing:.02em;}
+.stat .val{font-size:1.5rem;font-weight:700;margin-top:4px;}
+button,.btn{background:var(--accent);color:#0b1320;border:none;border-radius:var(--r);padding:10px 16px;font-size:0.9rem;font-weight:600;cursor:pointer;transition:opacity .15s;}
+button:hover,.btn:hover{opacity:.88;}
+button.sec{background:transparent;color:var(--text);border:1px solid var(--border);}
+button.sec:hover{border-color:var(--accent);color:var(--accent);}
+button.danger{background:var(--bad);color:#fff;}
+button:disabled{opacity:.45;cursor:not-allowed;}
+.flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+.flex-between{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:0.72rem;font-weight:600;background:var(--panel2);border:1px solid var(--border);color:var(--dim);}
+.pill.easy{background:rgba(63,185,127,.12);color:var(--good);border-color:var(--good);}
+.pill.exam{background:rgba(226,87,76,.12);color:var(--bad);border-color:var(--bad);}
+.pill.warn{background:rgba(224,162,59,.12);color:var(--warn);border-color:var(--warn);}
+.progress{height:5px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-bottom:16px;}
+.progress .fill{height:100%;background:var(--accent);transition:width .3s;}
+.choices{display:flex;flex-direction:column;gap:8px;margin:16px 0;}
+.choice{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--panel2);cursor:pointer;transition:border-color .15s,background .15s;font-size:0.9rem;line-height:1.5;}
+.choice:hover{border-color:var(--accent-dim);}
+.choice.sel{border-color:var(--accent);background:var(--accent-bg);}
+.choice.correct{border-color:var(--good);background:rgba(63,185,127,.1);}
+.choice.wrong{border-color:var(--bad);background:rgba(226,87,76,.1);}
+.letter{font-weight:700;color:var(--dim);min-width:1.1em;flex-shrink:0;}
+.tip-box{background:var(--accent-bg);border:1px solid var(--accent-dim);border-radius:var(--r);padding:12px 14px;margin-top:12px;font-size:0.87rem;line-height:1.65;}
+.trap-box{background:rgba(224,162,59,.08);border:1px solid var(--warn);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:0.87rem;line-height:1.65;}
+.nav-row{display:flex;justify-content:space-between;gap:10px;margin-top:18px;flex-wrap:wrap;}
+table{width:100%;border-collapse:collapse;font-size:0.875rem;}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+th{color:var(--dim);font-weight:600;font-size:0.78rem;letter-spacing:.04em;text-transform:uppercase;}
+.muted{color:var(--dim);font-size:0.82rem;}
+kbd{background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:0.78rem;font-family:monospace;}
+input[type="number"],select{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;font-size:0.9rem;width:120px;}
+.chk-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:0.9rem;}
+.chk-row input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
+.section-label{font-size:0.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:20px 0 6px;}
+.toggle-group{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+.toggle-group button{padding:7px 13px;font-size:0.82rem;}
+.q-meta{color:var(--dim);font-size:0.78rem;margin-bottom:10px;}
+.q-text{font-size:1.02rem;line-height:1.65;margin-bottom:2px;}
+.badge{display:inline-block;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.06em;text-transform:uppercase;}
+.badge.pass{background:rgba(63,185,127,.2);color:var(--good);}
+.badge.fail{background:rgba(226,87,76,.2);color:var(--bad);}
+.review-q{border-bottom:1px solid var(--border);padding:16px 0;}
+.review-q:last-child{border-bottom:none;}
+.review-q .correct-mark{color:var(--good);}
+.review-q .wrong-mark{color:var(--bad);}
+.loading{display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--dim);font-size:0.9rem;}
+a.card-link{display:flex;align-items:center;gap:1rem;padding:12px 16px;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);text-decoration:none;cursor:pointer;transition:border-color .15s;}
+a.card-link:hover{border-color:var(--accent);}
+@media(max-width:600px){.grid2{grid-template-columns:1fr 1fr;} h1{font-size:1.3rem;} .nav-row{flex-direction:column;} .nav-row .flex{justify-content:stretch;} .nav-row .flex button{flex:1;}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+
+// ── FACTS DATA ──────────────────────────────────────────────────────────────
+const ALL_FACTS = [{"id": "D1-ROLE-OUSD", "d": 1, "task": "D1.T1", "cat": "role", "topic": "OUSD / DoW / DoD CIO", "text": "OUSD/DoW/DoD CIO is the government program authority. It sets cybersecurity standards and policy direction and publishes authoritative CMMC documentation through DoD/DoW channels.", "can": "Owns program direction, model/source documentation, and rulemaking context.", "cannot": "Does not act as a contractor consultant or as a C3PAO assessor.", "trap": "If a question asks for the authoritative source of CMMC documents, choose the DoW/DoD CIO/OUSD source, never an RPO or a private training vendor."}, {"id": "D1-ROLE-CYBERAB", "d": 1, "task": "D1.T1", "cat": "role", "topic": "Cyber AB / CMMC-AB", "text": "Cyber AB / CMMC-AB operates ecosystem infrastructure for CMMC organizations and individuals, historically functioning as the accreditation body for the ecosystem.", "can": "Connects OSCs, RPOs, C3PAOs, practitioners, and assessors, and maintains ecosystem listings.", "cannot": "Does not itself become the OSC and does not perform contractor implementation work.", "trap": "If an answer claims Cyber AB directly implements all controls for an OSC, reject it."}, {"id": "D1-ROLE-CAICO", "d": 1, "task": "D1.T1", "cat": "role", "topic": "CAICO", "text": "CAICO (CMMC Assessors and Instructors Certification Organization) handles the CMMC assessor/instructor certification ecosystem functions, and is associated with the ISACA certification transition.", "can": "Is relevant to CCP, CCA, and CCI credentialing and certification pathways.", "cannot": "Does not certify an OSC as CMMC compliant; that is the C3PAO/authorized assessment process.", "trap": "If the question asks who certifies people/instructors/assessors, think CAICO/ISACA; if it asks who certifies organizations, think C3PAO assessment ecosystem."}, {"id": "D1-ROLE-OSC", "d": 1, "task": "D1.T1", "cat": "role", "topic": "OSC (Organization Seeking Certification)", "text": "The OSC is the contractor/entity preparing for or undergoing a CMMC assessment or certification.", "can": "Defines its environment, assets, FCI/CUI flow, boundaries, scope, and provides evidence.", "cannot": "Does not assess itself for a Level 2 third-party certification when a third-party assessment is required.", "trap": "The OSC owns implementation and evidence; an assessor evaluates but does not implement for the OSC during an assessment."}, {"id": "D1-ROLE-C3PAO", "d": 1, "task": "D1.T1", "cat": "role", "topic": "C3PAO", "text": "A C3PAO (CMMC Third-Party Assessment Organization) is the authorized organization that performs official CMMC third-party assessments.", "can": "Provides the assessment team structure and submits assessment outputs through required channels.", "cannot": "Cannot provide consulting that creates a conflict of interest with a later assessment of the same OSC.", "trap": "If a scenario asks who performs the official third-party assessment, choose the C3PAO, not an RPO or RP."}, {"id": "D1-ROLE-RPO", "d": 1, "task": "D1.T1", "cat": "role", "topic": "RPO (Registered Provider Organization)", "text": "An RPO is an organization that provides CMMC consulting, implementation, and readiness services.", "can": "Helps an OSC prepare through gap assessments, documentation, implementation advice, and readiness support.", "cannot": "Does not conduct official certified CMMC assessments.", "trap": "If an RPO is offered as the certifier in an answer choice, reject it. RPO advises; C3PAO assesses."}, {"id": "D1-ROLE-RP", "d": 1, "task": "D1.T1", "cat": "role", "topic": "RP (Registered Practitioner)", "text": "An RP is an individual who advises, consults, recommends, and helps implement readiness work for OSCs.", "can": "Helps an OSC before an assessment and can help interpret practices and prepare evidence.", "cannot": "Does not participate in certified CMMC assessments as an official assessment team member based solely on the RP role.", "trap": "An RP may be knowledgeable, but is not an assessor by role."}, {"id": "D1-ROLE-LPP", "d": 1, "task": "D1.T1", "cat": "role", "topic": "LPP (Licensed Partner Publisher)", "text": "An LPP publishes authorized training materials and courseware for the CMMC training ecosystem.", "can": "Acts as the materials source for LTPs, instructors, and candidates.", "cannot": "Does not certify OSCs and does not conduct assessments.", "trap": "If a scenario is about courseware or publishing, choose LPP."}, {"id": "D1-ROLE-LTP", "d": 1, "task": "D1.T1", "cat": "role", "topic": "LTP (Licensed Training Provider)", "text": "An LTP delivers authorized training for the CMMC certification path.", "can": "Provides CCP/CCA/CCI training classes through approved channels.", "cannot": "Does not grant certification merely by training attendance, and does not certify OSC compliance.", "trap": "Mandatory training is one step; exam, application, and other requirements still apply."}, {"id": "D1-ROLE-PA", "d": 1, "task": "D1.T1", "cat": "role", "topic": "PA (Provisional Assessor)", "text": "A PA is a transitional/provisional assessor category used during earlier CMMC ecosystem development.", "can": "Is a historical/sunset concept; know its purpose and transition timeline.", "cannot": "Should not be treated as the normal current CCA-equivalent in current CCP role questions unless the scenario explicitly references the provisional period.", "trap": "If an answer uses provisional status to bypass current certification requirements, reject it."}, {"id": "D1-ROLE-PI", "d": 1, "task": "D1.T1", "cat": "role", "topic": "PI (Provisional Instructor)", "text": "A PI is a transitional/provisional instructor category used during the earlier CMMC training rollout.", "can": "Is a historical/sunset concept; know its purpose and transition timeline.", "cannot": "Should not be confused with CCI, which is the stable instructor credential.", "trap": "If a question describes teaching an authorized CMMC course in the stable certification ecosystem, the CCI/LTP/LPP context is more likely correct than PI."}, {"id": "D1-ROLE-CCP", "d": 1, "task": "D1.T1", "cat": "role", "topic": "CCP (Certified CMMC Professional)", "text": "The CCP is the foundational certification for participation in the implementation/assessment ecosystem.", "can": "Can help an OSC become assessment-ready, and may participate on an assessment team in an appropriate role under a qualified assessor or lead.", "cannot": "Alone, the CCP does not lead a formal Level 2 assessment and does not replace a CCA or Lead Assessor.", "trap": "If asked what a CCP can do: support and assist, not independently certify."}, {"id": "D1-ROLE-CCA", "d": 1, "task": "D1.T1", "cat": "role", "topic": "CCA (Certified CMMC Assessor)", "text": "The CCA is the credential required to perform formal CMMC Level 2 assessments.", "can": "Evaluates evidence, validates controls, conducts interviews/tests, and determines implementation against Level 2 requirements.", "cannot": "Does not implement controls for the same OSC being assessed, due to independence and conflict-of-interest rules.", "trap": "The CCA is the assessment authority; the CCP is the foundational/support role."}, {"id": "D1-ROLE-CCI", "d": 1, "task": "D1.T1", "cat": "role", "topic": "CCI (Certified CMMC Instructor)", "text": "The CCI is the certified instructor credential for CMMC training.", "can": "Teaches authorized CMMC content through ecosystem training channels.", "cannot": "Does not certify OSCs, and is not automatically a C3PAO assessor unless separately credentialed/authorized.", "trap": "A training role is not the same as an assessment role."}, {"id": "D1-ROLE-ATM", "d": 1, "task": "D1.T1", "cat": "role", "topic": "Assessment Team Member", "text": "An Assessment Team Member assists in collecting and examining evidence, interviewing, testing/observing, supporting practice scoring, and supporting preliminary and final findings.", "can": "Works under the assessment plan, scope, lead assessor, and CAP methodology.", "cannot": "Does not unilaterally change assessment scope or the final certification outcome.", "trap": "If a scenario asks about a CCP's role during an assessment, the answer should be assist/support evidence collection and validation within the assessment team process."}, {"id": "D1-ROLE-LEAD-ASSESSOR", "d": 1, "task": "D1.T1", "cat": "role", "topic": "Lead Assessor / LCCA", "text": "The Lead Assessor is responsible for leading assessment execution, the final findings process, coordination, and assessment reporting/submission through required channels.", "can": "Controls assessment conduct and validates team work.", "cannot": "A CCP alone is not the Lead Assessor.", "trap": "If an answer says a CCP drafts final findings as the final authority, reject it; the Lead Assessor owns final assessment leadership."}, {"id": "D1-MODEL-DFARS", "d": 1, "task": "D1.T1", "cat": "model_concept", "topic": "DFARS 252.204-7012 trust and CMMC verification model", "text": "DFARS 252.204-7012 requires contractors to provide adequate security on covered contractor information systems and report cyber incidents within 72 hours. Before CMMC, the government relied heavily on contractor self-attestation. CMMC adds structured verification (self-assessment, government assessment, or C3PAO assessment depending on level) that confirms cybersecurity requirements are actually implemented.", "trap": "CMMC does not erase DFARS 252.204-7012; it operationalizes and verifies implementation. A signed clause or an SPRS score alone is not automatically sufficient evidence for CMMC certification."}, {"id": "D2-ETHICS-PROFESSIONALISM", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Professionalism", "text": "Professionalism requires applying disciplined, respectful, and competent conduct to assessment and consulting behavior, evidence handling, reporting, and communications with OSCs and the assessment team."}, {"id": "D2-ETHICS-OBJECTIVITY", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Objectivity", "text": "Objectivity requires that an assessor's scoring and findings be based on evidence, not on prior consulting relationships, friendship, financial interest, or pressure from the OSC.", "trap": "An assessor cannot let prior consulting work, friendship, financial interest, or OSC pressure change scoring."}, {"id": "D2-ETHICS-CONFIDENTIALITY", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Confidentiality", "text": "Confidentiality requires protecting OSC evidence, CUI, findings, and assessment details, disclosing them only through authorized channels.", "trap": "Do not disclose OSC evidence, CUI, findings, or assessment details outside authorized channels."}, {"id": "D2-ETHICS-METHODS", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Proper Use of Methods", "text": "Proper Use of Methods requires following the approved examine/interview/test methodology and required process steps rather than improvising unauthorized shortcuts.", "trap": "Do not invent methods, skip required steps, or use unauthorized evidence shortcuts."}, {"id": "D2-ETHICS-INTEGRITY", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Information Integrity", "text": "Information Integrity requires reporting findings accurately and completely, without altering evidence, hiding negative findings, or reporting unsupported conclusions.", "trap": "Do not alter evidence, hide negative findings, or report unsupported conclusions."}, {"id": "D2-ETHICS-COI", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Conflicts of Interest", "text": "A conflict of interest exists when the same party both consults on and assesses the same implementation, creating an independence concern that must be disclosed and managed.", "trap": "Same-party consulting and assessing of the same implementation creates an independence concern."}, {"id": "D2-ETHICS-IP", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Respect for Intellectual Property", "text": "Respect for Intellectual Property requires not copying, redistributing, or misusing copyrighted exam content, training materials, or proprietary OSC materials without authorization."}, {"id": "D2-ETHICS-LAWFUL", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Lawful and Ethical Practices", "text": "Lawful and Ethical Practices requires that all consulting and assessment conduct comply with applicable laws, regulations, and the CMMC-AB Code of Professional Conduct."}, {"id": "D2-ETHICS-NDAS", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Contracts and NDAs", "text": "Contracts and NDAs govern the obligations between assessors, C3PAOs, and OSCs, including confidentiality terms that survive the assessment engagement."}, {"id": "D2-ETHICS-ISO", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "ISO/IEC and DoW alignment", "text": "The CMMC-AB Code of Professional Conduct is built to align with ISO/IEC accreditation expectations and Department of War (DoW) program requirements for assessor independence and conduct."}, {"id": "D2-ETHICS-EXAM-INTEGRITY", "d": 2, "task": "D2.T1", "cat": "ethics_topic", "topic": "Exam and Certification Integrity", "text": "Candidates and certification holders must not memorize, share, sell, or otherwise reproduce exam content; doing so is prohibited and violates exam security and professional conduct rules and can result in score nullification or revocation.", "trap": "Sharing or reproducing real exam questions is always prohibited, regardless of intent."}, {"id": "D2-ETHICS-SCENARIO-COI", "d": 2, "task": "D2.T1", "cat": "scenario_drill", "topic": "Assessor independence conflict of interest", "text": "An assessor who previously built the OSC environment now wants to assess that same OSC. This is a conflict-of-interest situation under the CoPC and ecosystem independence rules.", "best": "Identify the conflict of interest and follow ecosystem/C3PAO independence rules; do not assess your own prior implementation work.", "trap": "Prior consulting relationships do not disqualify someone from the ecosystem entirely, but they do disqualify them from assessing that same implementation."}, {"id": "D2-ETHICS-SCENARIO-WEAK", "d": 2, "task": "D2.T1", "cat": "scenario_drill", "topic": "Reporting findings with integrity despite pressure", "text": "An OSC asks the assessment team not to mention weak MFA evidence in the findings. Integrity and objectivity require reporting findings based on the actual evidence collected.", "best": "Maintain integrity and objectivity; report findings strictly based on the evidence, regardless of OSC pressure.", "trap": "Pressure from the OSC to omit or downplay a finding is itself an ethics/objectivity violation if the assessor complies."}, {"id": "D3-DOC-32CFR170", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "32 CFR Part 170 / CMMC Program Rule", "text": "Establishes the CMMC program rule: program requirements, levels, assessments, and implementation structure.", "trap": "Use when a question asks for the CMMC regulatory program authority."}, {"id": "D3-DOC-48CFR-DFARS", "d": 3, "task": "D3.T1", "cat": "source_doc", "topic": "48 CFR / DFARS", "text": "The acquisition regulation framework for defense contract clauses, including cyber clauses.", "trap": "Use when a question asks about contract clause/flowdown/acquisition obligations."}, {"id": "D3-DOC-DFARS-7012", "d": 3, "task": "D3.T1", "cat": "source_doc", "topic": "DFARS 252.204-7012", "text": "Safeguarding Covered Defense Information and Cyber Incident Reporting clause.", "trap": "Use for CDI/CUI safeguarding, 72-hour reporting, and the NIST SP 800-171 connection."}, {"id": "D3-DOC-DFARS-7013", "d": 3, "task": "D3.T1", "cat": "source_doc", "topic": "DFARS 252.227-7013", "text": "Rights in Technical Data, Other Than Commercial Products and Commercial Services.", "trap": "Use when a technical-data definition or reference appears in the question."}, {"id": "D3-DOC-FEDRAMP", "d": 3, "task": "D3.T1", "cat": "source_doc", "topic": "FedRAMP", "text": "The federal cloud authorization program referenced when external/cloud service providers appear in scope.", "trap": "Use when external/cloud service providers and authorized cloud services appear."}, {"id": "D3-DOC-FAR-52-204-21", "d": 3, "task": "D3.T1", "cat": "source_doc", "topic": "FAR 52.204-21", "text": "Basic safeguarding of covered contractor information systems; the basis for CMMC Level 1 practices.", "trap": "Use for CMMC Level 1 / FCI basic-safeguarding mapping."}, {"id": "D3-DOC-FAR-4-1901", "d": 3, "task": "D3.T2", "cat": "source_doc", "topic": "FAR 4.1901", "text": "Defines Federal Contract Information (FCI).", "trap": "Use when distinguishing FCI from CUI."}, {"id": "D3-DOC-EO-13556", "d": 3, "task": "D3.T2", "cat": "source_doc", "topic": "Executive Order 13556", "text": "Established the government-wide CUI program.", "trap": "Use for the authority behind CUI standardization."}, {"id": "D3-DOC-32CFR2002", "d": 3, "task": "D3.T2", "cat": "source_doc", "topic": "32 CFR Part 2002", "text": "Implements the CUI program and definitions, including CUI Basic and CUI Specified.", "trap": "Use for CUI Basic/Specified and authorized-holder obligations."}, {"id": "D3-DOC-DODI-5200-48", "d": 3, "task": "D3.T2", "cat": "source_doc", "topic": "DoDI 5200.48", "text": "DoD instruction implementing Controlled Unclassified Information handling within DoD.", "trap": "Use for DoD CUI marking/handling responsibilities."}, {"id": "D3-DOC-MODEL-OVERVIEW", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Model Overview", "text": "Explains the CMMC model, levels, domains, practices, and overall program concept.", "trap": "Use for model architecture / level questions."}, {"id": "D3-DOC-L1-ASSESSMENT-GUIDE", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Level 1 Assessment Guide", "text": "Provides assessment guidance for Level 1 practices.", "trap": "Use for L1 objectives, methods, and evidence discussion."}, {"id": "D3-DOC-L2-ASSESSMENT-GUIDE", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Level 2 Assessment Guide", "text": "Provides assessment guidance for Level 2 practices.", "trap": "Use for L2 objectives, methods, practice discussion, and evidence."}, {"id": "D3-DOC-L1-SCOPING", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Level 1 Scoping Guidance", "text": "Defines Level 1 scoping of FCI assets and the related people, technology, facilities, and ESPs.", "trap": "Use for FCI-only scoping questions."}, {"id": "D3-DOC-L2-SCOPING", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Level 2 Scoping Guidance", "text": "Defines Level 2 scoping of CUI assets, security protection assets, contractor risk managed assets, specialized assets, and out-of-scope assets.", "trap": "Use for CUI scoping questions."}, {"id": "D3-DOC-CAP", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Assessment Process (CAP)", "text": "Defines assessment process phases: planning, evidence collection, scoring, reporting, and POA&M closeout.", "trap": "Use for phase/order/role/process questions."}, {"id": "D3-DOC-GLOSSARY", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Glossary", "text": "Defines CMMC-specific terms authoritatively.", "trap": "Use when a definition conflicts with a casual or vendor definition."}, {"id": "D3-DOC-HASHING-GUIDE", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "CMMC Artifact Hashing Tool User Guide", "text": "Provides guidance for hashing artifacts/evidence to preserve integrity and the record.", "trap": "Use for evidence integrity/packaging/archive questions."}, {"id": "D3-DOC-ISOO-NARA", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "ISOO/NARA CUI Registry", "text": "The official CUI categories and markings registry, administered by NARA.", "trap": "Use to identify CUI categories such as Export Controlled / SP-EXPT."}, {"id": "D3-DOC-DOD-CUI-REGISTRY", "d": 3, "task": "D3.T3", "cat": "source_doc", "topic": "DoD CUI Registry", "text": "DoD-specific CUI markings and handling aids.", "trap": "Use for DoD-specific CUI categories such as NNPI context."}, {"id": "D3-FCI-DEFINITION", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Federal Contract Information (FCI)", "text": "FCI is information provided by or generated for the government under a contract, not intended for public release, except information provided by the government to the public or simple transactional information needed to process payments."}, {"id": "D3-CUI-DEFINITION", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Controlled Unclassified Information (CUI)", "text": "CUI is information the government creates or possesses, or that an entity creates or possesses for or on behalf of the government, that requires safeguarding or dissemination controls under law, regulation, or government-wide policy."}, {"id": "D3-FCI-VS-CUI", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "FCI vs. CUI relationship", "text": "All CUI in a contractor environment can be contract-related, but not all FCI is CUI.", "trap": "Treating FCI and CUI as interchangeable terms is a common exam trap."}, {"id": "D3-CUI-BASIC", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "CUI Basic", "text": "CUI Basic is CUI where the authorizing law, regulation, or policy does not specify controls beyond the CUI program baseline."}, {"id": "D3-CUI-SPECIFIED", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "CUI Specified", "text": "CUI Specified is CUI where the authorizing law, regulation, or policy specifies particular controls or handling requirements beyond the baseline."}, {"id": "D3-CUI-MARKING", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "CUI marking authority", "text": "The government or an authorized designating authority identifies and marks CUI. Contractors and authorized holders must follow the marking and handling instructions and protect the information accordingly."}, {"id": "D3-AUTHORIZED-HOLDER", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Authorized Holder", "text": "An authorized holder is a person or entity with a lawful government purpose to access or handle CUI."}, {"id": "D3-CONTRACTOR-RESPONSIBILITY", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Contractor responsibility for CUI", "text": "If a contractor processes, stores, or transmits CUI in nonfederal systems, it must implement the required safeguards and manage scope and evidence accordingly."}, {"id": "D3-FCI-SCENARIO", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "FCI scenario: purchase order details", "text": "Purchase order details from a nonpublic DoD contract with no CUI markings may be FCI, where CMMC Level 1 safeguards apply."}, {"id": "D3-CUI-SCENARIO", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "CUI scenario: export-controlled drawings", "text": "Controlled technical drawings marked Export Controlled are CUI; CMMC Level 2 / NIST SP 800-171 requirements may apply when the contract requires it."}, {"id": "D3-TRAP-SELF-DECLARE", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Self-declaring data out of scope", "text": "A contractor cannot self-declare everything out-of-scope merely by removing labels; actual data flow and contract/government designation determine FCI/CUI status.", "trap": "Removing a label does not remove FCI/CUI status if the data flow and designation say otherwise."}, {"id": "D3-TRAP-PUBLIC-MARKETING", "d": 3, "task": "D3.T2", "cat": "fci_cui_concept", "topic": "Public marketing content is not automatically FCI/CUI", "text": "Public marketing content is not FCI/CUI merely because the contractor also performs DoD work.", "trap": "Having a DoD contract does not turn all of a contractor's public content into FCI/CUI."}, {"id": "D3-FALSE-CLAIMS-ACT", "d": 3, "task": "D3.T1", "cat": "fci_cui_concept", "topic": "False Claims Act / Civil Cyber-Fraud Initiative", "text": "Noncompliance consequences include failure to win a contract award, contractual liability, and potential False Claims Act exposure pursued by the Department of Justice's Civil Cyber-Fraud Initiative when cybersecurity compliance is misrepresented."}, {"id": "D4-MODEL-ARCHITECTURE", "d": 4, "task": "D4.T1", "cat": "model_concept", "topic": "Model architecture", "text": "CMMC organizes cybersecurity requirements by levels, domains, practices, assessment objectives, methods, and evidence objects."}, {"id": "D4-MODEL-LEVEL1", "d": 4, "task": "D4.T1", "cat": "model_concept", "topic": "Level 1 (Foundational)", "text": "Level 1 is foundational/basic safeguarding for FCI, aligned to FAR 52.204-21 basic safeguarding requirements, and includes 17 practices."}, {"id": "D4-MODEL-LEVEL2", "d": 4, "task": "D4.T1", "cat": "model_concept", "topic": "Level 2 (Advanced)", "text": "Level 2 is advanced protection for CUI, aligned to NIST SP 800-171 requirements, and includes 110 total practices (cumulative with the 17 Level 1 practices)."}, {"id": "D4-MODEL-CUMULATIVE", "d": 4, "task": "D4.T1", "cat": "model_concept", "topic": "Cumulative nature of levels", "text": "A higher level includes/assumes the lower level's safeguarding concepts where applicable; Level 2 includes Level 1 and the 800-171-aligned practices.", "trap": "Do not treat Level 1 and Level 2 as unrelated, independent practice sets; Level 2 is cumulative."}, {"id": "D4-MODEL-NUMBERING", "d": 4, "task": "D4.T1", "cat": "model_concept", "topic": "Practice numbering scheme", "text": "A code like AC.L1-3.1.1 means Access Control domain, Level 1, aligned to NIST family/control reference 3.1.1. AC.L2-3.1.3 means Access Control domain, Level 2, NIST SP 800-171 requirement 3.1.3."}, {"id": "D4-METHOD-EXAMINE", "d": 4, "task": "D4.T2", "cat": "assessment_method", "topic": "Examine method", "text": "Examine means reviewing documents, records, configurations, screenshots, logs, policies, procedures, tickets, diagrams, training records, inventories, SSP/POA&M entries, or other artifacts."}, {"id": "D4-METHOD-INTERVIEW", "d": 4, "task": "D4.T2", "cat": "assessment_method", "topic": "Interview method", "text": "Interview means asking responsible personnel to explain what they do, how often, who approves it, how exceptions work, and how the process is actually performed."}, {"id": "D4-METHOD-TEST", "d": 4, "task": "D4.T2", "cat": "assessment_method", "topic": "Test method", "text": "Test means observing or performing a technical or operational demonstration to verify the control works, such as an access attempt, an MFA prompt, log generation, a scan result, a screen lock, or a boundary rule in action."}, {"id": "D4-EVIDENCE-OBJECTS", "d": 4, "task": "D4.T2", "cat": "evidence_concept", "topic": "Evidence objects", "text": "Evidence objects include specifications, mechanisms, activities, individuals, records, configurations, processes, procedures, system components, logs, and plans."}, {"id": "D4-SUFFICIENCY-RULE", "d": 4, "task": "D4.T3", "cat": "evidence_concept", "topic": "Evidence sufficiency rule", "text": "Evidence must be adequate, accurate, current, attributable, in-scope, and must demonstrate implementation, not just intention.", "trap": "A policy alone describes what should happen; it rarely proves what actually happens."}, {"id": "D4-PERSISTENT-HABITUAL", "d": 4, "task": "D4.T3", "cat": "evidence_concept", "topic": "Persistent and habitual implementation", "text": "Strong evidence shows the practice is institutionalized in routine operations: policy plus procedure plus resourcing plus training plus logs/tickets/reviews over time, not a one-time event.", "trap": "Interview alone may show understanding, but it often needs supporting examine/test evidence to prove implementation is persistent and habitual."}, {"id": "D4-ADEQUATE-EVIDENCE", "d": 4, "task": "D4.T3", "cat": "evidence_concept", "topic": "Adequate evidence characteristics", "text": "Adequate evidence directly maps to the assessment objective, comes from an in-scope asset/process/person/facility, is current, authentic, complete enough, and shows implementation."}, {"id": "D4-INSUFFICIENT-EVIDENCE", "d": 4, "task": "D4.T3", "cat": "evidence_concept", "topic": "Insufficient evidence patterns", "text": "Evidence is insufficient when it is policy-only with no operational proof, from an out-of-scope system, stale/outdated, an unsupported verbal claim, or belongs to a neighboring practice rather than the one being assessed."}, {"id": "D4-EVIDENCE-TRIANGULATION", "d": 4, "task": "D4.T3", "cat": "evidence_concept", "topic": "Evidence triangulation", "text": "The strongest evidence pattern combines examine, interview, and test for the same in-scope artifact or process, since each method offsets the weaknesses of the others."}, {"id": "D4-PRACTICE-AC.L1-3.1.1", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "AC.L1-3.1.1 Authorized Access Control", "text": "Limit information system access to authorized users, processes acting on behalf of authorized users, and devices, including other information systems.", "code": "AC.L1-3.1.1", "name": "Authorized Access Control", "family": "AC", "level": 1, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L1-3.1.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L1-3.1.2", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "AC.L1-3.1.2 Transaction and Function Control", "text": "Limit information system access to the types of transactions and functions that authorized users are permitted to execute.", "code": "AC.L1-3.1.2", "name": "Transaction and Function Control", "family": "AC", "level": 1, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L1-3.1.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L1-3.1.20", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "AC.L1-3.1.20 External Connections", "text": "Verify and control or limit connections to, and use of, external information systems.", "code": "AC.L1-3.1.20", "name": "External Connections", "family": "AC", "level": 1, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L1-3.1.20 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L1-3.1.22", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "AC.L1-3.1.22 Control Public Information", "text": "Control information posted or processed on publicly accessible information systems.", "code": "AC.L1-3.1.22", "name": "Control Public Information", "family": "AC", "level": 1, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L1-3.1.22 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L1-3.5.1", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "IA.L1-3.5.1 Identification", "text": "Identify information system users, processes acting on behalf of users, and devices.", "code": "IA.L1-3.5.1", "name": "Identification", "family": "IA", "level": 1, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L1-3.5.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L1-3.5.2", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "IA.L1-3.5.2 Authentication", "text": "Authenticate, or verify, the identities of those users, processes, and devices as a prerequisite to allowing access to organizational information systems.", "code": "IA.L1-3.5.2", "name": "Authentication", "family": "IA", "level": 1, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L1-3.5.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L1-3.8.3", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "MP.L1-3.8.3 Media Disposal", "text": "Sanitize or destroy information system media containing FCI before disposal or release for reuse.", "code": "MP.L1-3.8.3", "name": "Media Disposal", "family": "MP", "level": 1, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L1-3.8.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L1-3.10.1", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "PE.L1-3.10.1 Limit Physical Access", "text": "Limit physical access to organizational information systems, equipment, and respective operating environments to authorized individuals.", "code": "PE.L1-3.10.1", "name": "Limit Physical Access", "family": "PE", "level": 1, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L1-3.10.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L1-3.10.3", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "PE.L1-3.10.3 Escort Visitors", "text": "Escort visitors and monitor visitor activity.", "code": "PE.L1-3.10.3", "name": "Escort Visitors", "family": "PE", "level": 1, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L1-3.10.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L1-3.10.4", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "PE.L1-3.10.4 Physical Access Logs", "text": "Maintain audit logs of physical access.", "code": "PE.L1-3.10.4", "name": "Physical Access Logs", "family": "PE", "level": 1, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L1-3.10.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L1-3.10.5", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "PE.L1-3.10.5 Manage Physical Access", "text": "Control and manage physical access devices.", "code": "PE.L1-3.10.5", "name": "Manage Physical Access", "family": "PE", "level": 1, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L1-3.10.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L1-3.13.1", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SC.L1-3.13.1 Boundary Protection", "text": "Monitor, control, and protect organizational communications at the external boundaries and key internal boundaries of information systems.", "code": "SC.L1-3.13.1", "name": "Boundary Protection", "family": "SC", "level": 1, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L1-3.13.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L1-3.13.5", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SC.L1-3.13.5 Public-Access System Separation", "text": "Implement subnetworks for publicly accessible system components that are physically or logically separated from internal networks.", "code": "SC.L1-3.13.5", "name": "Public-Access System Separation", "family": "SC", "level": 1, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L1-3.13.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L1-3.14.1", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SI.L1-3.14.1 Flaw Remediation", "text": "Identify, report, and correct information and information system flaws in a timely manner.", "code": "SI.L1-3.14.1", "name": "Flaw Remediation", "family": "SI", "level": 1, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L1-3.14.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L1-3.14.2", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SI.L1-3.14.2 Malicious Code Protection", "text": "Provide protection from malicious code at appropriate locations within organizational information systems.", "code": "SI.L1-3.14.2", "name": "Malicious Code Protection", "family": "SI", "level": 1, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L1-3.14.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L1-3.14.4", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SI.L1-3.14.4 Update Malicious Code Protection", "text": "Update malicious code protection mechanisms when new releases are available.", "code": "SI.L1-3.14.4", "name": "Update Malicious Code Protection", "family": "SI", "level": 1, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L1-3.14.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L1-3.14.5", "d": 4, "task": "D4.T1", "cat": "l1_practice", "topic": "SI.L1-3.14.5 System and File Scanning", "text": "Perform periodic scans of information systems and real-time scans of files from external sources as files are downloaded, opened, or executed.", "code": "SI.L1-3.14.5", "name": "System and File Scanning", "family": "SI", "level": 1, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L1-3.14.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.3 Control CUI Flow", "text": "Control the flow of CUI in accordance with approved authorizations.", "code": "AC.L2-3.1.3", "name": "Control CUI Flow", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.4 Separation of Duties", "text": "Separate the duties of individuals to reduce the risk of malevolent activity without collusion.", "code": "AC.L2-3.1.4", "name": "Separation of Duties", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.5 Least Privilege", "text": "Employ the principle of least privilege, including for specific security functions and privileged accounts.", "code": "AC.L2-3.1.5", "name": "Least Privilege", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.6 Nonprivileged Account Use", "text": "Use non-privileged accounts or roles when accessing nonsecurity functions.", "code": "AC.L2-3.1.6", "name": "Nonprivileged Account Use", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.7 Privileged Functions", "text": "Prevent non-privileged users from executing privileged functions and capture the execution of such functions in audit logs.", "code": "AC.L2-3.1.7", "name": "Privileged Functions", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.8 Unsuccessful Logon Attempts", "text": "Limit unsuccessful logon attempts.", "code": "AC.L2-3.1.8", "name": "Unsuccessful Logon Attempts", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.9 Privacy and Security Notices", "text": "Provide privacy and security notices consistent with applicable CUI rules.", "code": "AC.L2-3.1.9", "name": "Privacy and Security Notices", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.10", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.10 Session Lock", "text": "Use session lock with pattern-hiding displays to prevent access to and viewing of data after a period of inactivity.", "code": "AC.L2-3.1.10", "name": "Session Lock", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.10 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.11", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.11 Session Termination", "text": "Automatically terminate a user session after a defined condition.", "code": "AC.L2-3.1.11", "name": "Session Termination", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.11 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.12", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.12 Control Remote Access", "text": "Monitor and control remote access sessions.", "code": "AC.L2-3.1.12", "name": "Control Remote Access", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.12 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.13", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.13 Remote Access Confidentiality", "text": "Employ cryptographic mechanisms to protect the confidentiality of remote access sessions.", "code": "AC.L2-3.1.13", "name": "Remote Access Confidentiality", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.13 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.14", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.14 Remote Access Routing", "text": "Route remote access via managed access control points.", "code": "AC.L2-3.1.14", "name": "Remote Access Routing", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.14 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.15", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.15 Privileged Remote Access", "text": "Authorize remote execution of privileged commands and remote access to security-relevant information.", "code": "AC.L2-3.1.15", "name": "Privileged Remote Access", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.15 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.16", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.16 Wireless Access Authorization", "text": "Authorize wireless access prior to allowing such connections.", "code": "AC.L2-3.1.16", "name": "Wireless Access Authorization", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.16 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.17", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.17 Wireless Access Protection", "text": "Protect wireless access using authentication and encryption.", "code": "AC.L2-3.1.17", "name": "Wireless Access Protection", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.17 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.18", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.18 Mobile Device Connection", "text": "Control connection of mobile devices.", "code": "AC.L2-3.1.18", "name": "Mobile Device Connection", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.18 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.19", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.19 Encrypt CUI on Mobile", "text": "Encrypt CUI on mobile devices and mobile computing platforms.", "code": "AC.L2-3.1.19", "name": "Encrypt CUI on Mobile", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.19 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AC.L2-3.1.21", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AC.L2-3.1.21 Portable Storage Use", "text": "Limit use of portable storage devices on external systems.", "code": "AC.L2-3.1.21", "name": "Portable Storage Use", "family": "AC", "level": 2, "family_name": "Access Control", "trap": "Do not select evidence that belongs to a neighboring practice; AC.L2-3.1.21 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AT.L2-3.2.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AT.L2-3.2.1 Role-Based Risk Awareness", "text": "Ensure that managers, system administrators, and users of organizational systems are made aware of the security risks associated with their activities and of the applicable policies, standards, and procedures related to the security of those systems.", "code": "AT.L2-3.2.1", "name": "Role-Based Risk Awareness", "family": "AT", "level": 2, "family_name": "Awareness and Training", "trap": "Do not select evidence that belongs to a neighboring practice; AT.L2-3.2.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AT.L2-3.2.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AT.L2-3.2.2 Role-Based Training", "text": "Ensure that organizational personnel are adequately trained to carry out their assigned information security responsibilities.", "code": "AT.L2-3.2.2", "name": "Role-Based Training", "family": "AT", "level": 2, "family_name": "Awareness and Training", "trap": "Do not select evidence that belongs to a neighboring practice; AT.L2-3.2.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AT.L2-3.2.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AT.L2-3.2.3 Insider Threat Awareness", "text": "Provide security awareness training on recognizing and reporting potential indicators of insider threat.", "code": "AT.L2-3.2.3", "name": "Insider Threat Awareness", "family": "AT", "level": 2, "family_name": "Awareness and Training", "trap": "Do not select evidence that belongs to a neighboring practice; AT.L2-3.2.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.1 System Auditing", "text": "Create and retain system audit logs and records to the extent needed to enable the monitoring, analysis, investigation, and reporting of unlawful or unauthorized system activity.", "code": "AU.L2-3.3.1", "name": "System Auditing", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.2 User Accountability", "text": "Ensure that the actions of individual system users can be uniquely traced to those users so they can be held accountable for their actions.", "code": "AU.L2-3.3.2", "name": "User Accountability", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.3 Event Review", "text": "Review and update logged events.", "code": "AU.L2-3.3.3", "name": "Event Review", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.4 Alert on Audit Failure", "text": "Alert in the event of an audit logging process failure.", "code": "AU.L2-3.3.4", "name": "Alert on Audit Failure", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.5 Audit Correlation", "text": "Correlate audit record review, analysis, and reporting processes for investigation and response to indications of unlawful, unauthorized, suspicious, or unusual activity.", "code": "AU.L2-3.3.5", "name": "Audit Correlation", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.6 Reduction and Reporting", "text": "Provide audit record reduction and report generation to support on-demand analysis and reporting.", "code": "AU.L2-3.3.6", "name": "Reduction and Reporting", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.7 Authoritative Time Source", "text": "Provide a system capability that compares and synchronizes internal system clocks with an authoritative source to generate time stamps for audit records.", "code": "AU.L2-3.3.7", "name": "Authoritative Time Source", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.8 Audit Protection", "text": "Protect audit information and audit tools from unauthorized access, modification, and deletion.", "code": "AU.L2-3.3.8", "name": "Audit Protection", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-AU.L2-3.3.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "AU.L2-3.3.9 Audit Management", "text": "Limit management of audit logging to a subset of privileged users.", "code": "AU.L2-3.3.9", "name": "Audit Management", "family": "AU", "level": 2, "family_name": "Audit and Accountability", "trap": "Do not select evidence that belongs to a neighboring practice; AU.L2-3.3.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.1 System Baselining", "text": "Establish and maintain baseline configurations and inventories of organizational systems throughout the respective system development life cycles.", "code": "CM.L2-3.4.1", "name": "System Baselining", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.2 Security Configuration Enforcement", "text": "Establish and enforce security configuration settings for information technology products employed in organizational systems.", "code": "CM.L2-3.4.2", "name": "Security Configuration Enforcement", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.3 System Change Control", "text": "Track, review, approve, log, and update changes to organizational systems.", "code": "CM.L2-3.4.3", "name": "System Change Control", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.4 Security Impact Analysis", "text": "Analyze the security impact of changes prior to implementation.", "code": "CM.L2-3.4.4", "name": "Security Impact Analysis", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.5 Least Functionality", "text": "Define, document, approve, and enforce physical and logical access restrictions associated with changes to organizational systems.", "code": "CM.L2-3.4.5", "name": "Least Functionality", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.6 Software Inventory", "text": "Employ the principle of least functionality by configuring organizational systems to provide only essential capabilities.", "code": "CM.L2-3.4.6", "name": "Software Inventory", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.7 Nonessential Functionality", "text": "Restrict, disable, or prevent the use of nonessential programs, functions, ports, protocols, and services.", "code": "CM.L2-3.4.7", "name": "Nonessential Functionality", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.8 Application Execution Policy", "text": "Apply deny-by-exception policy to prevent the use of unauthorized software or deny-all, permit-by-exception (whitelisting) policy to allow the execution of authorized software.", "code": "CM.L2-3.4.8", "name": "Application Execution Policy", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CM.L2-3.4.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CM.L2-3.4.9 User-Installed Software", "text": "Control and monitor user-installed software.", "code": "CM.L2-3.4.9", "name": "User-Installed Software", "family": "CM", "level": 2, "family_name": "Configuration Management", "trap": "Do not select evidence that belongs to a neighboring practice; CM.L2-3.4.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.3 Multifactor Authentication", "text": "Use multifactor authentication for local and network access to privileged accounts and for network access to non-privileged accounts.", "code": "IA.L2-3.5.3", "name": "Multifactor Authentication", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.4 Replay-Resistant Authentication", "text": "Employ replay-resistant authentication mechanisms for network access to privileged and non-privileged accounts.", "code": "IA.L2-3.5.4", "name": "Replay-Resistant Authentication", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.5 Identifier Reuse", "text": "Prevent reuse of identifiers for a defined period.", "code": "IA.L2-3.5.5", "name": "Identifier Reuse", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.6 Identifier Handling", "text": "Disable identifiers after a defined period of inactivity.", "code": "IA.L2-3.5.6", "name": "Identifier Handling", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.7 Password Complexity", "text": "Enforce a minimum password complexity and change of characters when new passwords are created.", "code": "IA.L2-3.5.7", "name": "Password Complexity", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.8 Password Reuse", "text": "Prohibit password reuse for a specified number of generations.", "code": "IA.L2-3.5.8", "name": "Password Reuse", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.9 Temporary Passwords", "text": "Allow temporary password use for system logons with an immediate change to a permanent password.", "code": "IA.L2-3.5.9", "name": "Temporary Passwords", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.10", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.10 Cryptographically-Protected Passwords", "text": "Store and transmit only cryptographically-protected passwords.", "code": "IA.L2-3.5.10", "name": "Cryptographically-Protected Passwords", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.10 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IA.L2-3.5.11", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IA.L2-3.5.11 Obscure Feedback", "text": "Obscure feedback of authentication information during the authentication process.", "code": "IA.L2-3.5.11", "name": "Obscure Feedback", "family": "IA", "level": 2, "family_name": "Identification and Authentication", "trap": "Do not select evidence that belongs to a neighboring practice; IA.L2-3.5.11 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IR.L2-3.6.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IR.L2-3.6.1 Incident Handling", "text": "Establish an operational incident-handling capability for organizational systems that includes preparation, detection, analysis, containment, recovery, and user response activities.", "code": "IR.L2-3.6.1", "name": "Incident Handling", "family": "IR", "level": 2, "family_name": "Incident Response", "trap": "Do not select evidence that belongs to a neighboring practice; IR.L2-3.6.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IR.L2-3.6.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IR.L2-3.6.2 Incident Reporting", "text": "Track, document, and report incidents to designated officials and authorities, both internal and external to the organization.", "code": "IR.L2-3.6.2", "name": "Incident Reporting", "family": "IR", "level": 2, "family_name": "Incident Response", "trap": "Do not select evidence that belongs to a neighboring practice; IR.L2-3.6.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-IR.L2-3.6.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "IR.L2-3.6.3 Incident Response Testing", "text": "Test the organizational incident response capability.", "code": "IR.L2-3.6.3", "name": "Incident Response Testing", "family": "IR", "level": 2, "family_name": "Incident Response", "trap": "Do not select evidence that belongs to a neighboring practice; IR.L2-3.6.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.1 Perform Maintenance", "text": "Perform maintenance on organizational systems.", "code": "MA.L2-3.7.1", "name": "Perform Maintenance", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.2 System Maintenance Control", "text": "Provide controls on the tools, techniques, mechanisms, and personnel used to conduct system maintenance.", "code": "MA.L2-3.7.2", "name": "System Maintenance Control", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.3 Equipment Sanitization", "text": "Ensure equipment removed for off-site maintenance is sanitized of any CUI.", "code": "MA.L2-3.7.3", "name": "Equipment Sanitization", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.4 Media Inspection", "text": "Check media containing diagnostic and test programs for malicious code before use.", "code": "MA.L2-3.7.4", "name": "Media Inspection", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.5 Nonlocal Maintenance", "text": "Require multifactor authentication and terminate session and network connections when nonlocal maintenance is complete.", "code": "MA.L2-3.7.5", "name": "Nonlocal Maintenance", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MA.L2-3.7.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MA.L2-3.7.6 Maintenance Personnel", "text": "Supervise the maintenance activities of maintenance personnel without required access authorization.", "code": "MA.L2-3.7.6", "name": "Maintenance Personnel", "family": "MA", "level": 2, "family_name": "Maintenance", "trap": "Do not select evidence that belongs to a neighboring practice; MA.L2-3.7.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.1 Media Protection", "text": "Protect, physically control, and securely store system media containing CUI, both paper and digital.", "code": "MP.L2-3.8.1", "name": "Media Protection", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.2 Media Access", "text": "Limit access to CUI on system media to authorized users.", "code": "MP.L2-3.8.2", "name": "Media Access", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.4 Media Markings", "text": "Mark media with the necessary CUI markings and distribution limitations.", "code": "MP.L2-3.8.4", "name": "Media Markings", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.5", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.5 Media Accountability", "text": "Control access to media containing CUI and maintain accountability for media during transport outside of controlled areas.", "code": "MP.L2-3.8.5", "name": "Media Accountability", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.5 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.6 Portable Storage Encryption", "text": "Implement cryptographic mechanisms to protect the confidentiality of CUI stored on digital media during transport unless otherwise protected by alternative physical safeguards.", "code": "MP.L2-3.8.6", "name": "Portable Storage Encryption", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.7 Removable Media", "text": "Control the use of removable media on system components.", "code": "MP.L2-3.8.7", "name": "Removable Media", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.8 Shared Media", "text": "Prohibit the use of portable storage devices when such devices have no identifiable owner.", "code": "MP.L2-3.8.8", "name": "Shared Media", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-MP.L2-3.8.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "MP.L2-3.8.9 Protect Backups", "text": "Protect the confidentiality of backup CUI at storage locations.", "code": "MP.L2-3.8.9", "name": "Protect Backups", "family": "MP", "level": 2, "family_name": "Media Protection", "trap": "Do not select evidence that belongs to a neighboring practice; MP.L2-3.8.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PS.L2-3.9.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "PS.L2-3.9.1 Screen Individuals", "text": "Screen individuals prior to authorizing access to organizational systems containing CUI.", "code": "PS.L2-3.9.1", "name": "Screen Individuals", "family": "PS", "level": 2, "family_name": "Personnel Security", "trap": "Do not select evidence that belongs to a neighboring practice; PS.L2-3.9.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PS.L2-3.9.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "PS.L2-3.9.2 Personnel Actions", "text": "Ensure that organizational systems containing CUI are protected during and after personnel actions such as terminations and transfers.", "code": "PS.L2-3.9.2", "name": "Personnel Actions", "family": "PS", "level": 2, "family_name": "Personnel Security", "trap": "Do not select evidence that belongs to a neighboring practice; PS.L2-3.9.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L2-3.10.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "PE.L2-3.10.2 Monitor Facility", "text": "Protect and monitor the physical facility and support infrastructure for organizational systems.", "code": "PE.L2-3.10.2", "name": "Monitor Facility", "family": "PE", "level": 2, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L2-3.10.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-PE.L2-3.10.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "PE.L2-3.10.6 Alternative Work Sites", "text": "Enforce safeguarding measures for CUI at alternate work sites.", "code": "PE.L2-3.10.6", "name": "Alternative Work Sites", "family": "PE", "level": 2, "family_name": "Physical Protection", "trap": "Do not select evidence that belongs to a neighboring practice; PE.L2-3.10.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-RA.L2-3.11.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "RA.L2-3.11.1 Risk Assessments", "text": "Periodically assess the risk to organizational operations, assets, and individuals resulting from the operation of organizational systems and the associated processing, storage, or transmission of CUI.", "code": "RA.L2-3.11.1", "name": "Risk Assessments", "family": "RA", "level": 2, "family_name": "Risk Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; RA.L2-3.11.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-RA.L2-3.11.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "RA.L2-3.11.2 Vulnerability Scan", "text": "Scan for vulnerabilities in organizational systems and applications periodically and when new vulnerabilities affecting those systems are identified.", "code": "RA.L2-3.11.2", "name": "Vulnerability Scan", "family": "RA", "level": 2, "family_name": "Risk Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; RA.L2-3.11.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-RA.L2-3.11.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "RA.L2-3.11.3 Vulnerability Remediation", "text": "Remediate vulnerabilities in accordance with risk assessments.", "code": "RA.L2-3.11.3", "name": "Vulnerability Remediation", "family": "RA", "level": 2, "family_name": "Risk Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; RA.L2-3.11.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CA.L2-3.12.1", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CA.L2-3.12.1 Security Control Assessment", "text": "Periodically assess the security controls in organizational systems to determine if the controls are effective in their application.", "code": "CA.L2-3.12.1", "name": "Security Control Assessment", "family": "CA", "level": 2, "family_name": "Security Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; CA.L2-3.12.1 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CA.L2-3.12.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CA.L2-3.12.2 Plan of Action", "text": "Develop and implement plans of action designed to correct deficiencies and reduce or eliminate vulnerabilities in organizational systems.", "code": "CA.L2-3.12.2", "name": "Plan of Action", "family": "CA", "level": 2, "family_name": "Security Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; CA.L2-3.12.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CA.L2-3.12.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CA.L2-3.12.3 Security Control Monitoring", "text": "Monitor security controls on an ongoing basis to ensure continued effectiveness.", "code": "CA.L2-3.12.3", "name": "Security Control Monitoring", "family": "CA", "level": 2, "family_name": "Security Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; CA.L2-3.12.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-CA.L2-3.12.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "CA.L2-3.12.4 System Security Plan", "text": "Develop, document, and periodically update system security plans that describe system boundaries, environments of operation, how security requirements are implemented, and relationships with or connections to other systems.", "code": "CA.L2-3.12.4", "name": "System Security Plan", "family": "CA", "level": 2, "family_name": "Security Assessment", "trap": "Do not select evidence that belongs to a neighboring practice; CA.L2-3.12.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.2", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.2 Security Engineering", "text": "Employ architectural designs, software development techniques, and systems engineering principles that promote effective information security within organizational systems.", "code": "SC.L2-3.13.2", "name": "Security Engineering", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.2 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.3 Role Separation", "text": "Separate user functionality from system management functionality.", "code": "SC.L2-3.13.3", "name": "Role Separation", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.4", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.4 Shared Resource Control", "text": "Prevent unauthorized and unintended information transfer via shared system resources.", "code": "SC.L2-3.13.4", "name": "Shared Resource Control", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.4 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.6 Network Communication by Exception", "text": "Deny network communications traffic by default and allow network communications traffic by exception (deny-all, permit-by-exception).", "code": "SC.L2-3.13.6", "name": "Network Communication by Exception", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.7 Split Tunneling", "text": "Prevent remote devices from simultaneously establishing non-remote connections with organizational systems and communicating via some other connection to resources in external networks.", "code": "SC.L2-3.13.7", "name": "Split Tunneling", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.8", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.8 Data in Transit", "text": "Implement cryptographic mechanisms to prevent unauthorized disclosure of CUI during transmission unless otherwise protected by alternative physical safeguards.", "code": "SC.L2-3.13.8", "name": "Data in Transit", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.8 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.9", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.9 Connections Termination", "text": "Terminate network connections associated with communications sessions at the end of the session or after a defined period of inactivity.", "code": "SC.L2-3.13.9", "name": "Connections Termination", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.9 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.10", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.10 Key Management", "text": "Establish and manage cryptographic keys for cryptography employed in organizational systems.", "code": "SC.L2-3.13.10", "name": "Key Management", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.10 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.11", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.11 CUI Encryption", "text": "Employ FIPS-validated cryptography when used to protect the confidentiality of CUI.", "code": "SC.L2-3.13.11", "name": "CUI Encryption", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.11 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.12", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.12 Collaborative Device Control", "text": "Prohibit remote activation of collaborative computing devices and provide an indication of devices in use to users present at the device.", "code": "SC.L2-3.13.12", "name": "Collaborative Device Control", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.12 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.13", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.13 Mobile Code", "text": "Control and monitor the use of mobile code.", "code": "SC.L2-3.13.13", "name": "Mobile Code", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.13 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.14", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.14 Voice over Internet Protocol", "text": "Control and monitor the use of Voice over Internet Protocol (VoIP) technologies.", "code": "SC.L2-3.13.14", "name": "Voice over Internet Protocol", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.14 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.15", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.15 Communications Authenticity", "text": "Protect the authenticity of communications sessions.", "code": "SC.L2-3.13.15", "name": "Communications Authenticity", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.15 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SC.L2-3.13.16", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SC.L2-3.13.16 Data at Rest", "text": "Protect the confidentiality of CUI at rest.", "code": "SC.L2-3.13.16", "name": "Data at Rest", "family": "SC", "level": 2, "family_name": "System and Communications Protection", "trap": "Do not select evidence that belongs to a neighboring practice; SC.L2-3.13.16 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L2-3.14.3", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SI.L2-3.14.3 Security Alerts and Advisories", "text": "Monitor system security alerts and advisories and take action in response.", "code": "SI.L2-3.14.3", "name": "Security Alerts and Advisories", "family": "SI", "level": 2, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L2-3.14.3 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L2-3.14.6", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SI.L2-3.14.6 Monitor Communications for Attacks", "text": "Monitor organizational systems, including inbound and outbound communications traffic, to detect attacks and indicators of potential attacks.", "code": "SI.L2-3.14.6", "name": "Monitor Communications for Attacks", "family": "SI", "level": 2, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L2-3.14.6 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D4-PRACTICE-SI.L2-3.14.7", "d": 4, "task": "D4.T1", "cat": "l2_practice", "topic": "SI.L2-3.14.7 Identify Unauthorized Use", "text": "Identify unauthorized use of organizational systems.", "code": "SI.L2-3.14.7", "name": "Identify Unauthorized Use", "family": "SI", "level": 2, "family_name": "System and Information Integrity", "trap": "Do not select evidence that belongs to a neighboring practice; SI.L2-3.14.7 must be satisfied on its own assessment objective(s). Evidence must be current, in-scope, and show the practice actually operating, not just planned."}, {"id": "D5-CAP-PHASE-1", "d": 5, "task": "D5.T1", "cat": "cap_phase", "topic": "Phase 1: Plan and Prepare Assessment", "text": "Phase 1 covers analyzing requirements, developing the assessment plan, and verifying readiness to conduct the assessment. It includes identifying scope, assets, practices, evidence needs, logistics, and assessment team roles.", "trap": "Do not conduct the assessment before scope, evidence, and readiness planning are complete in Phase 1."}, {"id": "D5-CAP-PHASE-2", "d": 5, "task": "D5.T2", "cat": "cap_phase", "topic": "Phase 2: Conduct Assessment", "text": "Phase 2 covers collecting and examining evidence, interviewing, testing/observing, scoring practices, validating preliminary results, and generating final recommended assessment results.", "trap": "Do not report final results before evidence validation and scoring are complete."}, {"id": "D5-CAP-PHASE-3", "d": 5, "task": "D5.T3", "cat": "cap_phase", "topic": "Phase 3: Report Recommended Assessment Results", "text": "Phase 3 covers delivering the recommended assessment results and preparing findings/the report. The Lead Assessor coordinates final scoring, reporting, and submission to required parties.", "trap": "The Lead Assessor drafts and submits final findings; a CCP claiming final reporting authority is a trap answer."}, {"id": "D5-CAP-PHASE-4", "d": 5, "task": "D5.T4", "cat": "cap_phase", "topic": "Phase 4: Evaluate/Close Outstanding POA&M Items", "text": "Phase 4 covers evaluating POA&M closeout items when allowed, confirming remediation evidence, applying scoring/eligibility criteria, and updating the final status as permitted.", "trap": "POA&M closeout evaluation happens after the assessment, not as a substitute for evidence during Phase 2."}, {"id": "D5-ASSESSMENT-PLAN", "d": 5, "task": "D5.T1", "cat": "cap_concept", "topic": "Assessment Plan content", "text": "A CMMC Assessment Plan includes scope, OSC information, assessment type, dates, the assessment team, roles/responsibilities, practices, evidence expectations, the interview/test schedule, logistics, facilities/technology, ESP handling, and risk/constraints."}, {"id": "D5-READINESS-REVIEW", "d": 5, "task": "D5.T1", "cat": "cap_concept", "topic": "Readiness Review", "text": "The Readiness Review checks whether the OSC has enough organized evidence and scope clarity to proceed. Readiness is not the same as certification.", "trap": "Passing a readiness review does not mean the OSC has passed the assessment."}, {"id": "D5-PRELIMINARY-RESULTS", "d": 5, "task": "D5.T2", "cat": "cap_concept", "topic": "Preliminary Results", "text": "Preliminary results are shared and validated during the conduct/reporting process. They are not the same as the final certification decision until the process is complete.", "trap": "Treating a preliminary result as a final, binding certification outcome is a trap."}, {"id": "D5-FINAL-FINDINGS", "d": 5, "task": "D5.T3", "cat": "cap_concept", "topic": "Final Findings", "text": "The Lead Assessor and the assessment process consolidate evidence and scoring into the final recommended assessment results/report. A CCP alone does not own or finalize the final findings."}, {"id": "D5-POAM-RULE", "d": 5, "task": "D5.T4", "cat": "cap_concept", "topic": "POA&M rule", "text": "A Plan of Action and Milestones (POA&M) is limited; not all practices can be placed on a POA&M. POA&M use depends on the scoring methodology, the minimum assessment score, and qualifying items.", "trap": "Having a POA&M does not automatically mean pass or certification."}, {"id": "D5-POAM-TRAP", "d": 5, "task": "D5.T4", "cat": "cap_concept", "topic": "POA&M closeout trap", "text": "POA&M eligibility and closeout evidence both matter; an OSC's verbal claim of remediation is not sufficient by itself.", "trap": "Accepting an OSC's unverified claim that a POA&M item is closed is a common trap."}, {"id": "D5-CAP-SCENARIO-READINESS", "d": 5, "task": "D5.T1", "cat": "scenario_drill", "topic": "Scope/readiness before evidence collection", "text": "An OSC lacks an asset inventory and CUI data flow diagram. The best action in Phase 1 is to resolve scope and readiness gaps before conducting the evidence assessment.", "best": "Resolve scope/readiness before conducting evidence assessment."}, {"id": "D5-CAP-SCENARIO-CONTRADICTORY", "d": 5, "task": "D5.T2", "cat": "scenario_drill", "topic": "Contradictory evidence during conduct", "text": "During the assessment, a team member finds contradictory evidence for a practice. The best action is to validate through additional examine/interview/test activity and escalate through the Lead Assessor process.", "best": "Validate with more evidence and escalate through the Lead Assessor process.", "trap": "Unilaterally deciding the outcome without escalation is a trap."}, {"id": "D5-CAP-SCENARIO-POAM-CLOSEOUT", "d": 5, "task": "D5.T4", "cat": "scenario_drill", "topic": "POA&M closeout after assessment", "text": "After the assessment, the OSC remediates a qualifying POA&M item. The best action is to evaluate the closeout evidence under the Phase 4 process, not to simply accept the OSC's statement.", "best": "Evaluate closeout evidence under Phase 4 process, not simply accept OSC statement."}, {"id": "D6-ORGANIZATION", "d": 6, "task": "D6.T1", "cat": "scoping_concept", "topic": "Organization", "text": "The organization is the legal/organizational entity being assessed or seeking certification."}, {"id": "D6-HOST-UNIT", "d": 6, "task": "D6.T1", "cat": "scoping_concept", "topic": "Host unit", "text": "The host unit is the organizational unit where the assessed systems/processes are hosted or managed."}, {"id": "D6-SUPPORTING-UNIT", "d": 6, "task": "D6.T1", "cat": "scoping_concept", "topic": "Supporting unit", "text": "A supporting unit is an internal unit that supports the scoped environment, such as HR, facilities, IT, the SOC, procurement, or identity management."}, {"id": "D6-SCOPING-DIMENSIONS", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Scoping dimensions/activities", "text": "Scoping activities cover four dimensions: people, technology, facilities, and external service providers (ESPs)."}, {"id": "D6-FCI-ASSET", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "FCI asset", "text": "An FCI asset is an asset that processes, stores, or transmits Federal Contract Information."}, {"id": "D6-CUI-ASSET", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "CUI asset", "text": "A CUI asset is an asset that processes, stores, or transmits Controlled Unclassified Information."}, {"id": "D6-SECURITY-PROTECTION-ASSET", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Security protection asset", "text": "A security protection asset is an asset that provides security functions/capabilities to protect CUI assets or the CMMC scope, even if it does not store CUI itself.", "trap": "Not storing CUI does not automatically mean out-of-scope if the asset provides security protection for CUI assets."}, {"id": "D6-CONTRACTOR-RISK-MANAGED", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Contractor risk managed asset", "text": "A contractor risk managed asset can, but is not intended to, process/store/transmit CUI because policies, procedures, and practices in place prevent it; it is still risk-managed."}, {"id": "D6-SPECIALIZED-ASSET", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Specialized asset", "text": "A specialized asset may or may not process/store/transmit CUI. Examples include government property, IoT/IIoT devices, operational technology (OT), restricted information systems, and test equipment.", "trap": "Specialized assets cannot be assumed excluded from scope by default; each must be evaluated."}, {"id": "D6-OUT-OF-SCOPE", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Out-of-scope asset", "text": "An out-of-scope asset cannot process, store, or transmit CUI/FCI and is logically, physically, or procedurally separated from the scope.", "trap": "An engineering workstation that can technically access CUI drawings is not out-of-scope merely because policy says users should not access them; actual capability overrides policy intent."}, {"id": "D6-LOGICAL-SEPARATION", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Logical separation", "text": "Logical separation techniques include VLANs, firewall rules, identity boundaries, access controls, segmentation, and routing restrictions."}, {"id": "D6-PHYSICAL-SEPARATION", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "Physical separation", "text": "Physical separation techniques include gates, locks, badge access, guards, and separated facilities/rooms/cabinets."}, {"id": "D6-ESP", "d": 6, "task": "D6.T2", "cat": "scoping_concept", "topic": "External Service Provider (ESP)", "text": "An External Service Provider (ESP) must be considered in scope when it processes/stores/transmits CUI/FCI or provides security functions for the scoped environment.", "trap": "The cloud vendor handles it is not enough; an agreement, responsibility matrix, and evidence are required."}, {"id": "D6-RESPONSIBILITY-MATRIX", "d": 6, "task": "D6.T3", "cat": "scoping_concept", "topic": "Responsibility matrix", "text": "A responsibility matrix defines which party performs which practice/control activity, especially with ESPs, cloud providers, and MSSPs."}, {"id": "D6-NONDUPLICATION", "d": 6, "task": "D6.T3", "cat": "scoping_concept", "topic": "Nonduplication", "text": "Nonduplication means avoiding assessing the same inherited/provider responsibility twice, while the OSC must still prove the responsibility allocation and coverage."}, {"id": "D6-FCI-CUI-SAME-SCOPE", "d": 6, "task": "D6.T3", "cat": "scoping_concept", "topic": "FCI and CUI within the same assessment scope", "text": "If FCI and CUI are within the same assessment boundary, Level 1 and Level 2 practices are applied and certified for that scope as applicable."}, {"id": "D6-FCI-CUI-SEPARATE-SCOPE", "d": 6, "task": "D6.T3", "cat": "scoping_concept", "topic": "FCI and CUI not within the same assessment scope", "text": "FCI assets may be self-assessed separately while CUI assets are assessed for Level 2 when required, when FCI and CUI are not within the same assessment scope."}, {"id": "D6-SCOPING-SCENARIO-SIEM", "d": 6, "task": "D6.T2", "cat": "scenario_drill", "topic": "SIEM that does not store CUI", "text": "A SIEM collects logs for CUI systems but does not store CUI itself. The best category is security protection asset, and relevant scope/evidence should be included.", "best": "Security protection asset; include relevant scope/evidence."}, {"id": "D6-SCOPING-SCENARIO-HR", "d": 6, "task": "D6.T1", "cat": "scenario_drill", "topic": "HR screening of admins for CUI systems", "text": "HR performs background screening for administrators of CUI systems. The best category is a supporting unit/personnel process relevant to Personnel Security practice evidence.", "best": "Supporting unit/personnel process relevant to PS practice evidence."}, {"id": "D6-SCOPING-SCENARIO-MSSP", "d": 6, "task": "D6.T2", "cat": "scenario_drill", "topic": "MSSP monitoring CUI system alerts", "text": "An MSSP monitors alerts for CUI systems. The best category is ESP/security protection service, requiring an agreement, responsibility matrix, and evidence.", "best": "ESP/security protection service; need agreement/responsibility matrix/evidence."}, {"id": "D6-SCOPING-SCENARIO-OT", "d": 6, "task": "D6.T2", "cat": "scenario_drill", "topic": "OT test equipment receiving CUI test data", "text": "OT test equipment sometimes receives CUI test data. The best category is a specialized asset that may be in scope; it cannot be assumed excluded.", "best": "Specialized asset that may be in scope; cannot assume excluded."}];
+
+// ── SEEDED PRNG ──────────────────────────────────────────────────────────────
+function mulberry32(seed){
+  return function(){
+    seed|=0; seed=seed+0x6D2B79F5|0;
+    var t=Math.imul(seed^seed>>>15,1|seed);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function hashStr(s){
+  let h=2166136261;
+  for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),16777619);}
+  return h>>>0;
+}
+function seededShuffle(arr,seed){
+  const a=[...arr],rng=mulberry32(hashStr(String(seed)));
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a;
+}
+function pick(arr,n,seed){return seededShuffle(arr,seed).slice(0,n);}
+
+// ── QUESTION GENERATOR ────────────────────────────────────────────────────────
+let _qcache=null;
+function getAllQuestions(){
+  if(_qcache) return _qcache;
+  const qs=[];
+  const byDomain={};
+  for(const f of ALL_FACTS){(byDomain[f.d]||(byDomain[f.d]=[])).push(f);}
+
+  function siblings(f,n,seed){
+    const pool=(byDomain[f.d]||[]).filter(x=>x.id!==f.id&&x.topic!==f.topic);
+    return pick(pool,n,f.id+seed);
+  }
+  function cross(f,n,seed){
+    const pool=ALL_FACTS.filter(x=>x.d!==f.d);
+    return pick(pool,n,f.id+seed);
+  }
+  function mkChoices(correctText,wrongTexts,seed){
+    const cs=[{id:'A',text:correctText,correct:true},...wrongTexts.slice(0,3).map((t,i)=>({id:String.fromCharCode(66+i),text:t,correct:false}))];
+    const shuffled=seededShuffle(cs,f.id+seed);
+    let letter='A';
+    return shuffled.map(c=>({...c,id:letter++}));
+  }
+  function addQ(id,domain,task,type,text,choices,explanation,tip,trap,difficulty){
+    qs.push({id,domain,task,type,text,choices,explanation:explanation||'',tip:tip||null,trap:trap||null,difficulty:difficulty||'medium'});
+  }
+
+  for(const f of ALL_FACTS){
+    const sibs=siblings(f,6,'s');
+    const crs=cross(f,3,'c');
+
+    // 1. Definition recall
+    if(f.text&&f.text.length>20){
+      const wrongs=sibs.slice(0,3).map(s=>s.text.slice(0,100)+(s.text.length>100?'…':''));
+      if(wrongs.length===3){
+        addQ(f.id+'-DR',f.d,f.task,'definition_recall',
+          `Which of the following best defines or describes "${f.topic}"?`,
+          mkChoices(f.text,wrongs,'DR'),
+          `The correct description of "${f.topic}": ${f.text}`,f.can||null,f.trap||null,'easy');
+      }
+    }
+
+    // 2. Negative (what CANNOT/DOES NOT)
+    if(f.cannot){
+      const wrongs=sibs.slice(0,3).map(s=>s.cannot||s.can||s.text.slice(0,80)+'…').filter(Boolean);
+      if(wrongs.length===3){
+        addQ(f.id+'-NEG',f.d,f.task,'negative',
+          `Regarding the ${f.topic}, which of the following is TRUE about what this role or concept CANNOT or DOES NOT do?`,
+          mkChoices(f.cannot,wrongs,'NEG'),
+          `${f.topic} cannot/does not: ${f.cannot}`,null,f.trap||null,'hard');
+      }
+    }
+
+    // 3. Role boundary (can/does vs cannot)
+    if(f.can&&f.cannot){
+      const wrongs=sibs.slice(0,3).map(s=>s.can||s.text.slice(0,80)+'…').filter(Boolean);
+      if(wrongs.length===3){
+        addQ(f.id+'-RB',f.d,f.task,'role_boundary',
+          `A CCP is evaluating the correct responsibilities of "${f.topic}". Which activity is within its authorized scope?`,
+          mkChoices(f.can,wrongs,'RB'),
+          `${f.topic} CAN: ${f.can}`,null,f.trap||null,'medium');
+      }
+    }
+
+    // 4. Scenario / best answer
+    if(f.best){
+      const wrongs=sibs.slice(0,3).map(s=>s.best||s.cannot||s.text.slice(0,80)+'…').filter(Boolean);
+      if(wrongs.length===3){
+        addQ(f.id+'-SBA',f.d,f.task,'scenario_best_answer',
+          `Scenario: ${f.text} What is the BEST course of action?`,
+          mkChoices(f.best,wrongs,'SBA'),
+          `Best action: ${f.best}`,null,f.trap||null,'hard');
+      }
+    }
+
+    // 5. Trap question
+    if(f.trap){
+      const wrong1='This situation does not raise any compliance concerns under the CMMC program.';
+      const wrong2='The standard practice is to defer this to the next assessment cycle.';
+      const wrong3='Verbal attestation from the responsible party is sufficient.';
+      addQ(f.id+'-TRAP',f.d,f.task,'trap',
+        `An assessor encounters the following situation. Which response best avoids the classic exam trap? Situation: "${f.topic}" — ${f.trap}`,
+        mkChoices(`Apply the CMMC framework rule as stated: ${f.trap}`,[wrong1,wrong2,wrong3],'TRAP'),
+        `Exam trap awareness: ${f.trap}`,null,f.trap,'brutal');
+    }
+
+    // 6. Evidence method (D4 focus)
+    if(f.d===4&&(f.cat==='l1_practice'||f.cat==='l2_practice')){
+      const examMethods=['Examine the policy document only','Request a verbal explanation from the system owner','Review only the asset inventory spreadsheet'];
+      addQ(f.id+'-EM',f.d,f.task,'scenario_evidence_method',
+        `An assessor is evaluating practice ${f.code||f.topic}. Which evidence collection approach best demonstrates implementation?`,
+        mkChoices(
+          `Examine current configuration records + interview responsible personnel + test/observe the control in operation on in-scope assets`,
+          examMethods,'EM'),
+        `The strongest evidence triangulates examine, interview, and test across all in-scope assets. For ${f.topic}: ${f.text}`,
+        'Combine all three methods for maximum confidence.',f.trap||null,'hard');
+
+      // 7. Evidence sufficiency
+      const goodEvidence=`Current system screenshot dated within 90 days, matched to the in-scope asset list, showing ${(f.name||f.topic)} actively enforced.`;
+      const badEvidences=[
+        'A generic enterprise-wide policy statement with no operational proof.',
+        'A screenshot from a non-in-scope test system provided as proxy evidence.',
+        'An undated configuration export that may not reflect the current state.',
+      ];
+      addQ(f.id+'-ES',f.d,f.task,'scenario_evidence_sufficiency',
+        `Which of the following best represents SUFFICIENT evidence for practice ${f.code||f.topic}?`,
+        mkChoices(goodEvidence,badEvidences,'ES'),
+        `Sufficient evidence must be current, in-scope, attributable, and demonstrate actual implementation — not just intention. ${f.text}`,
+        null,f.trap||null,'medium');
+    }
+
+    // 8. CAP phase decision (D5)
+    if(f.d===5&&f.cat==='cap_phase'){
+      const phaseOpts=['Phase 1: Plan and Prepare Assessment','Phase 2: Conduct Assessment','Phase 3: Report Recommended Assessment Results','Phase 4: Evaluate/Close Outstanding POA&M Items'];
+      const correct=f.topic;
+      const wrongs=phaseOpts.filter(p=>p!==correct);
+      addQ(f.id+'-CPD',f.d,f.task,'cap_phase_decision',
+        `During which CAP phase would you ${f.text.split('.')[0].toLowerCase().replace(/phase \d covers /,'')}?`,
+        mkChoices(correct,wrongs,'CPD'),
+        `${f.topic}: ${f.text}`,null,f.trap||null,'medium');
+    }
+
+    // 9. Scoping scenario (D6)
+    if(f.d===6&&f.cat==='scenario_drill'){
+      const scopeOpts=['CUI asset','Security protection asset','Contractor risk managed asset','Specialized asset','Out-of-scope asset','External Service Provider (ESP)','Supporting unit'];
+      const correct=f.best||scopeOpts[0];
+      const wrongs=scopeOpts.filter(o=>!correct.toLowerCase().includes(o.toLowerCase())).slice(0,3);
+      if(wrongs.length===3){
+        addQ(f.id+'-SS',f.d,f.task,'scenario_scope',
+          `Scoping scenario: ${f.text} What is the most appropriate categorization?`,
+          mkChoices(correct,wrongs,'SS'),
+          `Correct categorization: ${correct}. ${f.text}`,null,f.trap||null,'hard');
+      }
+    }
+  }
+
+  _qcache=qs;
+  console.log('Questions generated:',qs.length);
+  return qs;
+}
+
+// ── LOCAL STORAGE ─────────────────────────────────────────────────────────────
+const LS_STATS='ccp_stats';
+const LS_ATTEMPT='ccp_attempt';
+function getStats(){try{return JSON.parse(localStorage.getItem(LS_STATS)||'null')||{totalAttempts:0,totalSeen:0,totalCorrect:0,domainStats:{},typeStats:{},missedIds:[],markedIds:[],lastScore:null,lastAt:null};}catch{return{totalAttempts:0,totalSeen:0,totalCorrect:0,domainStats:{},typeStats:{},missedIds:[],markedIds:[],lastScore:null,lastAt:null};}}
+function saveStats(s){localStorage.setItem(LS_STATS,JSON.stringify(s));}
+function clearAttempt(){localStorage.removeItem(LS_ATTEMPT);}
+
+// ── APP STATE ─────────────────────────────────────────────────────────────────
+let S={
+  screen:'dashboard',// dashboard|setup|quiz|results
+  mode:'easy',
+  examType:'custom',
+  domains:[],
+  difficulty:[],
+  count:20,
+  missedOnly:false,
+  markedOnly:false,
+  weakOnly:false,
+  shuffleChoices:true,
+  questions:[],
+  idx:0,
+  answers:{},// qid -> {selected, marked, revealed}
+  results:null,
+  timer:null,
+  timerSecs:null,
+  timerInterval:null,
+};
+const DOMAIN_NAMES={1:'CMMC Ecosystem',2:'Ethics',3:'Governance',4:'Model Construct & Evaluation',5:'CAP / Assessment Process',6:'Scoping'};
+const DOMAIN_WEIGHTS={1:.05,2:.05,3:.15,4:.35,5:.25,6:.15};
+
+// ── QUESTION SAMPLING ─────────────────────────────────────────────────────────
+function sampleQuestions(){
+  const all=getAllQuestions();
+  const stats=getStats();
+  let pool=all.filter(q=>q!=null);
+
+  if(S.domains.length>0) pool=pool.filter(q=>S.domains.includes(q.domain));
+  if(S.difficulty.length>0) pool=pool.filter(q=>S.difficulty.includes(q.difficulty));
+
+  if(S.missedOnly){
+    const missed=new Set(stats.missedIds||[]);
+    pool=pool.filter(q=>missed.has(q.id));
+    if(!pool.length) return{error:'No missed questions yet. Take a quiz first.'};
+  }
+  if(S.markedOnly){
+    const marked=new Set(stats.markedIds||[]);
+    pool=pool.filter(q=>marked.has(q.id));
+    if(!pool.length) return{error:'No marked questions yet. Mark some during a quiz first.'};
+  }
+  if(S.weakOnly){
+    const ds=stats.domainStats||{};
+    const ranked=Object.entries(ds).filter(([,v])=>v.total>=3).sort((a,b)=>a[1].correct/a[1].total-b[1].correct/b[1].total).slice(0,2).map(([k])=>Number(k));
+    if(ranked.length>0) pool=pool.filter(q=>ranked.includes(q.domain));
+  }
+
+  if(!pool.length) return{error:'No questions match your filters.'};
+
+  let target=S.examType==='full'?170:Math.min(S.count,pool.length);
+  target=Math.min(target,pool.length);
+
+  let selected;
+  if(S.examType==='full'||S.domains.length===0){
+    // Domain-weighted sampling
+    const byDomain={};
+    for(const q of pool)(byDomain[q.domain]||(byDomain[q.domain]=[])).push(q);
+    const buckets=Object.keys(byDomain).map(Number);
+    const out=[];
+    for(const d of buckets){
+      const w=DOMAIN_WEIGHTS[d]||0;
+      const want=Math.round(target*w);
+      const available=byDomain[d];
+      const chosen=seededShuffle(available,Date.now()+d).slice(0,want);
+      out.push(...chosen);
+    }
+    if(out.length<target){
+      const extra=seededShuffle(pool.filter(q=>!out.some(o=>o.id===q.id)),Date.now()).slice(0,target-out.length);
+      out.push(...extra);
+    }
+    selected=seededShuffle(out,Date.now()).slice(0,target);
+  }else{
+    selected=seededShuffle(pool,Date.now()).slice(0,target);
+  }
+
+  // Shuffle choices per-question if enabled
+  if(S.shuffleChoices){
+    selected=selected.map(q=>({...q,choices:seededShuffle(q.choices,q.id+Date.now())}));
+  }
+  return{questions:selected};
+}
+
+// ── SCORING ────────────────────────────────────────────────────────────────────
+function computeResults(){
+  const qs=S.questions;
+  const ans=S.answers;
+  let correct=0,unanswered=0;
+  const missed=[],marked=[],traps=[];
+  const domainMap={},typeMap={};
+
+  for(const q of qs){
+    const a=ans[q.id]||{};
+    const isCorrect=a.selected&&q.choices.find(c=>c.id===a.selected)?.correct;
+    if(!a.selected) unanswered++;
+    if(isCorrect) correct++;
+    else missed.push(q.id);
+    if(a.marked) marked.push(q.id);
+    if(q.type==='trap'&&!isCorrect) traps.push(q.id);
+
+    const dk=String(q.domain);
+    if(!domainMap[dk]) domainMap[dk]={total:0,correct:0};
+    domainMap[dk].total++;
+    if(isCorrect) domainMap[dk].correct++;
+
+    const tk=q.type;
+    if(!typeMap[tk]) typeMap[tk]={total:0,correct:0};
+    typeMap[tk].total++;
+    if(isCorrect) typeMap[tk].correct++;
+  }
+
+  const scorePercent=qs.length?Math.round((correct/qs.length)*1000)/10:0;
+  const passEstimate=scorePercent>=75;
+  return{total:qs.length,correct,unanswered,scorePercent,passEstimate,missed,marked,traps,domainMap,typeMap};
+}
+
+function persistStats(results){
+  const stats=getStats();
+  stats.totalAttempts=(stats.totalAttempts||0)+1;
+  stats.totalSeen=(stats.totalSeen||0)+results.total;
+  stats.totalCorrect=(stats.totalCorrect||0)+results.correct;
+  stats.lastScore=results.scorePercent;
+  stats.lastAt=new Date().toISOString();
+
+  const ds=stats.domainStats||{};
+  for(const[k,v]of Object.entries(results.domainMap)){
+    if(!ds[k]) ds[k]={total:0,correct:0};
+    ds[k].total+=v.total; ds[k].correct+=v.correct;
+  }
+  stats.domainStats=ds;
+
+  const ts=stats.typeStats||{};
+  for(const[k,v]of Object.entries(results.typeMap)){
+    if(!ts[k]) ts[k]={total:0,correct:0};
+    ts[k].total+=v.total; ts[k].correct+=v.correct;
+  }
+  stats.typeStats=ts;
+
+  // Accumulate missed/marked
+  const missedSet=new Set([...(stats.missedIds||[]),...results.missed]);
+  // Remove questions answered correctly from missed set
+  for(const q of S.questions){
+    const a=S.answers[q.id]||{};
+    if(a.selected&&q.choices.find(c=>c.id===a.selected)?.correct) missedSet.delete(q.id);
+  }
+  stats.missedIds=[...missedSet].slice(-1000);
+
+  const markedSet=new Set([...(stats.markedIds||[]),...results.marked]);
+  stats.markedIds=[...markedSet].slice(-500);
+
+  saveStats(stats);
+}
+
+// ── TIMER ──────────────────────────────────────────────────────────────────────
+function startTimer(secs){
+  S.timerSecs=secs;
+  clearInterval(S.timerInterval);
+  S.timerInterval=setInterval(()=>{
+    S.timerSecs--;
+    if(S.timerSecs<=0){clearInterval(S.timerInterval);submitQuiz(true);}
+    else renderTimerOnly();
+  },1000);
+}
+function fmtTime(s){return`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+
+// ── RENDER HELPERS ────────────────────────────────────────────────────────────
+function el(tag,cls='',html=''){const e=document.createElement(tag);if(cls)e.className=cls;e.innerHTML=html;return e;}
+function e$(s){return document.querySelector(s);}
+
+function render(){
+  const app=document.getElementById('app');
+  let nav=`<div class="topnav"><span class="brand" onclick="goHome()">⚡ CCP Readiness</span><div class="flex">${S.screen!=='dashboard'?'<button class="sec" style="font-size:.82rem;padding:6px 12px;" onclick="goHome()">Dashboard</button>':''}</div></div>`;
+  app.innerHTML=nav;
+  const main=document.createElement('div');
+  app.appendChild(main);
+  if(S.screen==='dashboard') renderDashboard(main);
+  else if(S.screen==='setup') renderSetup(main);
+  else if(S.screen==='quiz') renderQuiz(main);
+  else if(S.screen==='results') renderResults(main);
+}
+
+function renderTimerOnly(){
+  const timerEl=e$('#quiz-timer');
+  if(timerEl) timerEl.textContent=fmtTime(S.timerSecs);
+}
+
+function goHome(){clearInterval(S.timerInterval);S.screen='dashboard';render();}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function renderDashboard(root){
+  const stats=getStats();
+  const qs=getAllQuestions();
+  const readiness=stats.totalSeen>0?Math.round((stats.totalCorrect/stats.totalSeen)*1000)/10:null;
+
+  const byDomain={};
+  for(const q of qs)(byDomain[q.domain]||(byDomain[q.domain]=[])).push(q);
+
+  const domainRows=Object.entries(byDomain).sort((a,b)=>a[0]-b[0]).map(([d,arr])=>{
+    const acc=stats.domainStats?.[d];
+    const accStr=acc&&acc.total>=1?`${Math.round((acc.correct/acc.total)*1000)/10}%`:'—';
+    return`<tr><td>D${d}. ${DOMAIN_NAMES[d]||''}</td><td>${arr.length}</td><td>${accStr}</td></tr>`;
+  }).join('');
+
+  const ds=stats.domainStats||{};
+  const weakest=Object.entries(ds).filter(([,v])=>v.total>=3).sort((a,b)=>a[1].correct/a[1].total-b[1].correct/b[1].total).slice(0,3);
+  const weakPills=weakest.map(([d,v])=>`<span class="pill warn">D${d}: ${Math.round((v.correct/v.total)*1000)/10}%</span>`).join(' ');
+
+  const ts=stats.typeStats||{};
+  const weakTypes=Object.entries(ts).filter(([,v])=>v.total>=3).sort((a,b)=>a[1].correct/a[1].total-b[1].correct/b[1].total).slice(0,3);
+  const typePills=weakTypes.map(([t,v])=>`<span class="pill warn">${t.replace(/_/g,' ')}: ${Math.round((v.correct/v.total)*1000)/10}%</span>`).join(' ');
+
+  root.innerHTML=`
+    <h1>CCP Readiness Dashboard</h1>
+    <p class="sub">Track your CMMC Certified Professional exam readiness across all six domains.</p>
+    <div class="grid2">
+      <div class="stat"><div class="lbl">Question bank</div><div class="val">${qs.length}</div></div>
+      <div class="stat"><div class="lbl">Readiness score</div><div class="val">${readiness!=null?readiness+'%':'—'}</div></div>
+      <div class="stat"><div class="lbl">Last quiz score</div><div class="val">${stats.lastScore!=null?stats.lastScore+'%':'—'}</div></div>
+      <div class="stat"><div class="lbl">Attempts</div><div class="val">${stats.totalAttempts||0}</div></div>
+    </div>
+    <h2>Questions by domain</h2>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table><thead><tr><th>Domain</th><th>Available</th><th>Your accuracy</th></tr></thead>
+      <tbody>${domainRows}</tbody></table>
+    </div>
+    ${weakPills?`<h2>Weakest domains</h2><div class="card">${weakPills}</div>`:''}
+    ${typePills?`<h2>Weakest question types</h2><div class="card">${typePills}</div>`:''}
+    <h2>Study loop</h2>
+    <div class="card">
+      <div class="flex">
+        <button onclick="goSetup()">New quiz</button>
+        <button class="sec" onclick="goSetup('weak')">Drill weak areas</button>
+        <button class="sec" onclick="goSetup('missed')">Retake missed</button>
+        <button class="sec" onclick="goSetup('full')">Full 170-Q mock exam</button>
+      </div>
+    </div>`;
+}
+
+// ── SETUP ─────────────────────────────────────────────────────────────────────
+function goSetup(preset){
+  S.screen='setup';
+  if(preset==='weak'){S.weakOnly=true;S.missedOnly=false;S.markedOnly=false;}
+  else if(preset==='missed'){S.missedOnly=true;S.weakOnly=false;S.markedOnly=false;}
+  else if(preset==='full'){S.examType='full';S.mode='exam';}
+  else{S.weakOnly=false;S.missedOnly=false;S.markedOnly=false;S.examType='custom';S.mode='easy';}
+  render();
+}
+
+function renderSetup(root){
+  root.innerHTML=`
+    <h1>Set up your quiz</h1>
+    <div class="card">
+      <h2 style="margin-top:0">Mode</h2>
+      <div class="flex">
+        <button id="btn-easy" onclick="S.mode='easy';syncSetup()" ${S.mode==='easy'?'':'class="sec"'}>Easy (tips + reveal)</button>
+        <button id="btn-exam" onclick="S.mode='exam';syncSetup()" ${S.mode==='exam'?'':'class="sec"'}>Real Exam (timed, no hints)</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Scope</h2>
+      <div class="flex" style="margin-bottom:14px;">
+        <button id="btn-custom" onclick="S.examType='custom';syncSetup()" ${S.examType==='custom'?'':'class="sec"'}>Custom quiz</button>
+        <button id="btn-full" onclick="S.examType='full';syncSetup()" ${S.examType==='full'?'':'class="sec"'}>Full 170-Q mock exam</button>
+      </div>
+      <div id="count-row" style="${S.examType==='full'?'display:none':''}">
+        <label class="muted" style="display:block;margin-bottom:6px;">Number of questions</label>
+        <input type="number" id="qcount" min="5" max="300" value="${S.count}" onchange="S.count=Number(this.value)">
+      </div>
+      <p class="section-label" style="margin-top:14px;">Domains (empty = all, domain-weighted)</p>
+      <div class="toggle-group" id="domain-toggles">
+        ${[1,2,3,4,5,6].map(d=>`<button id="dtog-${d}" onclick="toggleDomain(${d})" class="${S.domains.includes(d)?'':'sec'}">D${d}</button>`).join('')}
+      </div>
+      <p class="section-label">Difficulty (empty = all)</p>
+      <div class="toggle-group" id="diff-toggles">
+        ${['easy','medium','hard','brutal'].map(d=>`<button id="diftog-${d}" onclick="toggleDiff('${d}')" class="${S.difficulty.includes(d)?'':'sec'}">${d}</button>`).join('')}
+      </div>
+      <div class="chk-row"><input type="checkbox" id="chk-missed" ${S.missedOnly?'checked':''} onchange="S.missedOnly=this.checked"><label for="chk-missed">Missed questions only</label></div>
+      <div class="chk-row"><input type="checkbox" id="chk-marked" ${S.markedOnly?'checked':''} onchange="S.markedOnly=this.checked"><label for="chk-marked">Marked for review only</label></div>
+      <div class="chk-row"><input type="checkbox" id="chk-weak" ${S.weakOnly?'checked':''} onchange="S.weakOnly=this.checked"><label for="chk-weak">Focus on weakest domains</label></div>
+      <div class="chk-row"><input type="checkbox" id="chk-shuffle" ${S.shuffleChoices?'checked':''} onchange="S.shuffleChoices=this.checked"><label for="chk-shuffle">Shuffle answer choices</label></div>
+    </div>
+    <div id="setup-error" class="card" style="display:none;border-color:var(--bad);color:var(--bad);"></div>
+    <button onclick="startQuiz()">Start quiz</button>`;
+}
+
+function syncSetup(){
+  e$('#btn-easy').className=S.mode==='easy'?'':'sec';
+  e$('#btn-exam').className=S.mode==='exam'?'':'sec';
+  e$('#btn-custom').className=S.examType==='custom'?'':'sec';
+  e$('#btn-full').className=S.examType==='full'?'':'sec';
+  const cr=e$('#count-row');
+  if(cr) cr.style.display=S.examType==='full'?'none':'';
+}
+function toggleDomain(d){
+  S.domains=S.domains.includes(d)?S.domains.filter(x=>x!==d):[...S.domains,d];
+  const b=e$(`#dtog-${d}`);if(b)b.className=S.domains.includes(d)?'':'sec';
+}
+function toggleDiff(d){
+  S.difficulty=S.difficulty.includes(d)?S.difficulty.filter(x=>x!==d):[...S.difficulty,d];
+  const b=e$(`#diftog-${d}`);if(b)b.className=S.difficulty.includes(d)?'':'sec';
+}
+
+function startQuiz(){
+  const result=sampleQuestions();
+  if(result.error){
+    const errEl=e$('#setup-error');
+    if(errEl){errEl.style.display='';errEl.textContent=result.error;}
+    return;
+  }
+  S.questions=result.questions;
+  S.idx=0;
+  S.answers={};
+  S.timerSecs=null;
+  clearInterval(S.timerInterval);
+  S.screen='quiz';
+  render();
+  if(S.mode==='exam'&&S.examType==='full') startTimer(210*60);
+  else if(S.mode==='exam') startTimer(S.questions.length*75);
+}
+
+// ── QUIZ ─────────────────────────────────────────────────────────────────────
+function renderQuiz(root){
+  const q=S.questions[S.idx];
+  if(!q){root.innerHTML='<div class="card">No question found.</div>';return;}
+  const a=S.answers[q.id]||{};
+  const prog=Math.round(((S.idx+1)/S.questions.length)*100);
+  const answered=Object.keys(S.answers).filter(id=>S.answers[id].selected).length;
+  const markedCount=Object.keys(S.answers).filter(id=>S.answers[id].marked).length;
+
+  root.innerHTML=`
+    <div class="flex-between" style="margin-bottom:10px;">
+      <div class="flex">
+        <span class="pill ${S.mode==='easy'?'easy':'exam'}">${S.mode==='easy'?'Easy Mode':'Exam Mode'}</span>
+        <span class="q-meta">Q ${S.idx+1}/${S.questions.length} &middot; D${q.domain} ${DOMAIN_NAMES[q.domain]||''}</span>
+      </div>
+      <div class="flex">
+        ${S.timerSecs!=null?`<span class="pill warn" id="quiz-timer">${fmtTime(S.timerSecs)}</span>`:''}
+        <span class="muted">Answered ${answered}/${S.questions.length}</span>
+        ${markedCount?`<span class="muted">&middot; Marked ${markedCount}</span>`:''}
+      </div>
+    </div>
+    <div class="progress"><div class="fill" style="width:${prog}%"></div></div>
+    <div class="card">
+      <div class="q-meta">${q.type.replace(/_/g,' ')} &middot; ${q.difficulty}</div>
+      <p class="q-text">${escHtml(q.text)}</p>
+      <div class="choices" id="choices">
+        ${q.choices.map((c,i)=>{
+          let cls='choice';
+          if(a.selected===c.id) cls+=' sel';
+          if(a.revealed){
+            if(c.correct) cls=cls.replace(' sel','')+' correct';
+            else if(a.selected===c.id) cls+=' wrong';
+          }
+          return`<div class="${cls}" onclick="selectChoice('${q.id}','${c.id}')">
+            <span class="letter">${String.fromCharCode(65+i)}.</span><span>${escHtml(c.text)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      ${S.mode==='easy'&&!a.revealed?`<button class="sec" onclick="revealAnswer('${q.id}')">Reveal answer &amp; explanation</button>`:''}
+      ${a.revealed?renderExplanation(q,a):''}
+      <div class="nav-row">
+        <div class="flex">
+          <button class="sec" onclick="navQ(-1)" ${S.idx===0?'disabled':''}>← Prev</button>
+          <button class="sec" onclick="navQ(1)" ${S.idx===S.questions.length-1?'disabled':''}>Next →</button>
+        </div>
+        <div class="flex">
+          <button class="sec" onclick="clearAnswer('${q.id}')">Clear</button>
+          <button class="sec" onclick="toggleMark('${q.id}')">${a.marked?'Unmark':'Mark for review'}</button>
+          <button class="danger" onclick="confirmSubmit()">Submit</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:10px;">Keys: <kbd>1</kbd>–<kbd>4</kbd> select &nbsp;<kbd>N</kbd> next &nbsp;<kbd>P</kbd> prev &nbsp;<kbd>M</kbd> mark &nbsp;<kbd>C</kbd> clear</p>
+    </div>
+    <div id="confirm-submit" style="display:none;" class="card">
+      <p>You've answered ${answered}/${S.questions.length} questions. ${S.questions.length-answered>0?`${S.questions.length-answered} unanswered will count as incorrect. `:''}Submit now?</p>
+      <div class="flex"><button onclick="submitQuiz(false)">Yes, submit</button><button class="sec" onclick="e$('#confirm-submit').style.display='none'">Keep working</button></div>
+    </div>`;
+
+  // Keyboard shortcuts
+  window.onkeydown=function(e){
+    if(['1','2','3','4'].includes(e.key)){
+      const c=S.questions[S.idx]?.choices[Number(e.key)-1];
+      if(c) selectChoice(S.questions[S.idx].id,c.id);
+    } else if(e.key.toLowerCase()==='n') navQ(1);
+    else if(e.key.toLowerCase()==='p') navQ(-1);
+    else if(e.key.toLowerCase()==='m') toggleMark(S.questions[S.idx]?.id);
+    else if(e.key.toLowerCase()==='c') clearAnswer(S.questions[S.idx]?.id);
+  };
+}
+
+function renderExplanation(q,a){
+  const correctChoice=q.choices.find(c=>c.correct);
+  return`<div class="tip-box">
+    <strong>Correct answer: ${correctChoice?.id}. ${escHtml(correctChoice?.text||'')}</strong><br><br>
+    ${q.explanation?escHtml(q.explanation):''}
+    ${q.tip?`<br><br><strong>Tip:</strong> ${escHtml(q.tip)}`:''}
+  </div>
+  ${q.trap?`<div class="trap-box"><strong>Exam trap:</strong> ${escHtml(q.trap)}</div>`:''}`;
+}
+
+function escHtml(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function selectChoice(qid,cid){
+  S.answers[qid]={...(S.answers[qid]||{}),selected:cid};
+  if(S.screen==='quiz') renderQuiz(document.querySelector('#app>div:last-child'));
+}
+function clearAnswer(qid){S.answers[qid]={...(S.answers[qid]||{}),selected:null};if(S.screen==='quiz') renderQuiz(document.querySelector('#app>div:last-child'));}
+function toggleMark(qid){if(!qid)return;S.answers[qid]={...(S.answers[qid]||{}),marked:!(S.answers[qid]?.marked)};if(S.screen==='quiz') renderQuiz(document.querySelector('#app>div:last-child'));}
+function revealAnswer(qid){S.answers[qid]={...(S.answers[qid]||{}),revealed:true};if(S.screen==='quiz') renderQuiz(document.querySelector('#app>div:last-child'));}
+function navQ(delta){S.idx=Math.max(0,Math.min(S.questions.length-1,S.idx+delta));renderQuiz(document.querySelector('#app>div:last-child'));}
+function confirmSubmit(){const d=e$('#confirm-submit');if(d)d.style.display='';}
+
+function submitQuiz(autoSubmit){
+  clearInterval(S.timerInterval);
+  window.onkeydown=null;
+  const results=computeResults();
+  persistStats(results);
+  S.results=results;
+  S.screen='results';
+  render();
+}
+
+// ── RESULTS ───────────────────────────────────────────────────────────────────
+function renderResults(root){
+  const r=S.results;
+  if(!r){root.innerHTML='<div class="card">No results found.</div>';return;}
+  const domRows=Object.entries(r.domainMap).sort((a,b)=>a[0]-b[0]).map(([d,v])=>{
+    const acc=v.total?Math.round((v.correct/v.total)*1000)/10:0;
+    return`<tr><td>D${d}. ${DOMAIN_NAMES[d]||''}</td><td>${v.correct}/${v.total}</td><td>${acc}%</td></tr>`;
+  }).join('');
+  const typeRows=Object.entries(r.typeMap).sort().map(([t,v])=>{
+    const acc=v.total?Math.round((v.correct/v.total)*1000)/10:0;
+    return`<tr><td>${t.replace(/_/g,' ')}</td><td>${v.correct}/${v.total}</td><td>${acc}%</td></tr>`;
+  }).join('');
+
+  root.innerHTML=`
+    <h1>Results</h1>
+    <div class="grid2">
+      <div class="stat"><div class="lbl">Score</div><div class="val">${r.scorePercent}%</div></div>
+      <div class="stat"><div class="lbl">Pass estimate</div><div class="val"><span class="badge ${r.passEstimate?'pass':'fail'}">${r.passEstimate?'Likely Pass':'Likely Fail'}</span></div></div>
+      <div class="stat"><div class="lbl">Correct</div><div class="val">${r.correct}/${r.total}</div></div>
+      <div class="stat"><div class="lbl">Unanswered</div><div class="val">${r.unanswered}</div></div>
+    </div>
+    <p class="muted" style="margin-bottom:16px;">Pass estimate is a heuristic (~75% raw accuracy), not ISACA's official scaled-scoring formula.</p>
+    ${r.traps.length?`<div class="card" style="border-color:var(--warn);">⚠️ You missed <strong>${r.traps.length}</strong> trap question(s). Review them in the question breakdown below.</div>`:''}
+    <h2>Domain breakdown</h2>
+    <div class="card" style="padding:0;overflow:hidden;"><table><thead><tr><th>Domain</th><th>Correct</th><th>Accuracy</th></tr></thead><tbody>${domRows}</tbody></table></div>
+    <h2>Question type breakdown</h2>
+    <div class="card" style="padding:0;overflow:hidden;"><table><thead><tr><th>Type</th><th>Correct</th><th>Accuracy</th></tr></thead><tbody>${typeRows}</tbody></table></div>
+    <h2>Study loop</h2>
+    <div class="card"><div class="flex">
+      <button onclick="goSetup('missed')">Retake missed</button>
+      <button class="sec" onclick="goSetup('weak')">Drill weakest</button>
+      <button class="sec" onclick="goSetup()">New quiz</button>
+      <button class="sec" onclick="goSetup('full')">Full mock exam</button>
+    </div></div>
+    <h2>Question review</h2>
+    <div class="card">
+      <button class="sec" onclick="toggleReview()">Show/hide full review</button>
+      <div id="review-panel" style="display:none;margin-top:16px;">${renderReview()}</div>
+    </div>`;
+}
+
+function toggleReview(){const p=e$('#review-panel');if(p)p.style.display=p.style.display==='none'?'':'none';}
+
+function renderReview(){
+  return S.questions.map((q,i)=>{
+    const a=S.answers[q.id]||{};
+    const correctChoice=q.choices.find(c=>c.correct);
+    const selectedChoice=a.selected?q.choices.find(c=>c.id===a.selected):null;
+    const isCorrect=selectedChoice?.correct;
+    return`<div class="review-q">
+      <p class="muted">Q${i+1} &middot; D${q.domain} &middot; ${q.type.replace(/_/g,' ')} &middot; <span class="${isCorrect?'correct-mark':'wrong-mark'}">${isCorrect?'✓ Correct':'✗ Missed'}${!a.selected?' (unanswered)':''}</span></p>
+      <p style="margin:6px 0;font-size:.9rem;line-height:1.6;">${escHtml(q.text)}</p>
+      <ul style="list-style:none;margin:8px 0;display:flex;flex-direction:column;gap:4px;">
+        ${q.choices.map(c=>`<li style="font-size:.85rem;padding:4px 8px;border-radius:4px;background:${c.correct?'rgba(63,185,127,.1)':c.id===a.selected?'rgba(226,87,76,.1)':'transparent'};color:${c.correct?'var(--good)':c.id===a.selected&&!c.correct?'var(--bad)':'var(--dim)'};">
+          ${c.id}. ${escHtml(c.text)}${c.correct?' ✓':''}${c.id===a.selected&&!c.correct?' (your answer)':''}
+        </li>`).join('')}
+      </ul>
+      ${q.explanation?`<p style="font-size:.83rem;color:var(--dim);margin-top:6px;">${escHtml(q.explanation)}</p>`:''}
+      ${q.trap?`<div class="trap-box" style="margin-top:8px;font-size:.82rem;"><strong>Trap:</strong> ${escHtml(q.trap)}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+// Pre-generate questions in background so first quiz starts instantly
+setTimeout(()=>getAllQuestions(),300);
+render();
+</script>
+</body>
+</html>
