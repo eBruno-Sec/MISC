@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mondrian Project</title>
+  <style>
+    .container1 {
+      /* border: solid black; */
+      height: 100vh;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+    .container2 {
+      /* height: 748px;
+      width: 748px; */
+      display: grid;
+      grid-template-columns: 320px 198px 153px 50px;
+      grid-template-rows: 414px 130px 155px 20px; 
+      /* border: solid black; */
+      gap: 9px;
+      background-color: #000000
+      ;
+    }
+
+    .Red{
+      background-color: #E72F24;
+      /* border-bottom: solid #000000 2px;
+      border-right:#000000 solid 2px; */
+      /* width: 320px;
+      height: 414px; */
+    }
+
+    #whiteTop {
+      grid-column: span 3;
+      /* border-bottom: #000000 solid 2px;
+      border-left: #000000 solid 2px; */
+    }
+     .empty {
+      background-color: #F0F1EC;
+     }
+
+     #whiteLeft {
+      grid-row: span 2;
+      /* border-bottom: #000000 solid 2px;
+      border-right: #000000 solid 2px;
+      border-top: #000000 solid 2px; */
+     }
+
+     #whiteRight {
+      grid-column: span 2;
+      grid-row: span 2;
+      /* border: #000000 solid 2px; */
+     }
+
+     .Blue {
+      background-color: #004592;
+      border-bottom: #000000 solid 10px;
+
+     }
+
+     #underBlue {
+      grid-row: span 2;
+     }
+
+     #bottomWhite {
+      /* border-top: #000000 solid 2px;
+      border-right: #000000 solid 2px; */
+      /* height: 20px;  */
+     }
+
+     .Yellow {
+      background-color: #F9D01E;
+      /* border-top: #000000 solid 2px;
+      border-right: #000000 solid 2px;
+      border-left: #000000 solid 2px;  */
+      /* width: 198px;  
+      height: 20px;   */
+    }
+
+     .Black {
+      background-color: #232629;
+      /* border-top: #000000 solid 2px;
+      border-right: #000000 solid 2px;
+      border-left: #000000 solid 2px;   */
+      /* width: 153px;
+      height: 20px;  */
+     }
+    /* 
+    Write your CSS here 
+    Gap Colour: #000
+    White: #F0F1EC
+    Red: #E72F24
+    Black: #232629
+    Blue: #004592
+    Yellow: #F9D01E
+
+    For dimensions, see dimensions.png image.
+    HINT: Remember you can't change the properties of grid lines.
+    But grid lines are transparent!
+    */
+  </style>
+</head>
+
+<body>
+  <div class="container1">
+    <div class="container2">
+      <div class="item Red"></div>
+      <div class="item empty" id="whiteTop"></div>
+      <div class="item empty" id="whiteLeft"></div>
+      <div class="item empty" id="whiteRight"></div>
+
+      <div class="item Blue"></div>
+
+      <div class="item empty" id="underBlue"></div>
+      <div class="item empty" id="bottomWhite"></div>
+      <div class="item Yellow"></div>
+      <div class="item Black"></div>
+
+
+
+      </div>
+
+    </div>
+
+  </div>
+</body>
+
+</html>
