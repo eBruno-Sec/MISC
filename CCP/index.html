@@ -121,9 +121,9 @@ function getAllQuestions(){
     const pool=ALL_FACTS.filter(x=>x.d!==f.d);
     return pick(pool,n,f.id+seed);
   }
-  function mkChoices(correctText,wrongTexts,seed){
+  function mkChoices(correctText,wrongTexts,seedKey){
     const cs=[{id:'A',text:correctText,correct:true},...wrongTexts.slice(0,3).map((t,i)=>({id:String.fromCharCode(66+i),text:t,correct:false}))];
-    const shuffled=seededShuffle(cs,f.id+seed);
+    const shuffled=seededShuffle(cs,seedKey);
     let letter='A';
     return shuffled.map(c=>({...c,id:letter++}));
   }
@@ -141,7 +141,7 @@ function getAllQuestions(){
       if(wrongs.length===3){
         addQ(f.id+'-DR',f.d,f.task,'definition_recall',
           `Which of the following best defines or describes "${f.topic}"?`,
-          mkChoices(f.text,wrongs,'DR'),
+          mkChoices(f.text,wrongs,f.id+'DR'),
           `The correct description of "${f.topic}": ${f.text}`,f.can||null,f.trap||null,'easy');
       }
     }
@@ -152,7 +152,7 @@ function getAllQuestions(){
       if(wrongs.length===3){
         addQ(f.id+'-NEG',f.d,f.task,'negative',
           `Regarding the ${f.topic}, which of the following is TRUE about what this role or concept CANNOT or DOES NOT do?`,
-          mkChoices(f.cannot,wrongs,'NEG'),
+          mkChoices(f.cannot,wrongs,f.id+'NEG'),
           `${f.topic} cannot/does not: ${f.cannot}`,null,f.trap||null,'hard');
       }
     }
@@ -163,7 +163,7 @@ function getAllQuestions(){
       if(wrongs.length===3){
         addQ(f.id+'-RB',f.d,f.task,'role_boundary',
           `A CCP is evaluating the correct responsibilities of "${f.topic}". Which activity is within its authorized scope?`,
-          mkChoices(f.can,wrongs,'RB'),
+          mkChoices(f.can,wrongs,f.id+'RB'),
           `${f.topic} CAN: ${f.can}`,null,f.trap||null,'medium');
       }
     }
@@ -174,7 +174,7 @@ function getAllQuestions(){
       if(wrongs.length===3){
         addQ(f.id+'-SBA',f.d,f.task,'scenario_best_answer',
           `Scenario: ${f.text} What is the BEST course of action?`,
-          mkChoices(f.best,wrongs,'SBA'),
+          mkChoices(f.best,wrongs,f.id+'SBA'),
           `Best action: ${f.best}`,null,f.trap||null,'hard');
       }
     }
@@ -186,7 +186,7 @@ function getAllQuestions(){
       const wrong3='Verbal attestation from the responsible party is sufficient.';
       addQ(f.id+'-TRAP',f.d,f.task,'trap',
         `An assessor encounters the following situation. Which response best avoids the classic exam trap? Situation: "${f.topic}" — ${f.trap}`,
-        mkChoices(`Apply the CMMC framework rule as stated: ${f.trap}`,[wrong1,wrong2,wrong3],'TRAP'),
+        mkChoices(`Apply the CMMC framework rule as stated: ${f.trap}`,[wrong1,wrong2,wrong3],f.id+'TRAP'),
         `Exam trap awareness: ${f.trap}`,null,f.trap,'brutal');
     }
 
@@ -197,7 +197,7 @@ function getAllQuestions(){
         `An assessor is evaluating practice ${f.code||f.topic}. Which evidence collection approach best demonstrates implementation?`,
         mkChoices(
           `Examine current configuration records + interview responsible personnel + test/observe the control in operation on in-scope assets`,
-          examMethods,'EM'),
+          examMethods,f.id+'EM'),
         `The strongest evidence triangulates examine, interview, and test across all in-scope assets. For ${f.topic}: ${f.text}`,
         'Combine all three methods for maximum confidence.',f.trap||null,'hard');
 
@@ -210,7 +210,7 @@ function getAllQuestions(){
       ];
       addQ(f.id+'-ES',f.d,f.task,'scenario_evidence_sufficiency',
         `Which of the following best represents SUFFICIENT evidence for practice ${f.code||f.topic}?`,
-        mkChoices(goodEvidence,badEvidences,'ES'),
+        mkChoices(goodEvidence,badEvidences,f.id+'ES'),
         `Sufficient evidence must be current, in-scope, attributable, and demonstrate actual implementation — not just intention. ${f.text}`,
         null,f.trap||null,'medium');
     }
@@ -222,7 +222,7 @@ function getAllQuestions(){
       const wrongs=phaseOpts.filter(p=>p!==correct);
       addQ(f.id+'-CPD',f.d,f.task,'cap_phase_decision',
         `During which CAP phase would you ${f.text.split('.')[0].toLowerCase().replace(/phase \d covers /,'')}?`,
-        mkChoices(correct,wrongs,'CPD'),
+        mkChoices(correct,wrongs,f.id+'CPD'),
         `${f.topic}: ${f.text}`,null,f.trap||null,'medium');
     }
 
@@ -234,7 +234,7 @@ function getAllQuestions(){
       if(wrongs.length===3){
         addQ(f.id+'-SS',f.d,f.task,'scenario_scope',
           `Scoping scenario: ${f.text} What is the most appropriate categorization?`,
-          mkChoices(correct,wrongs,'SS'),
+          mkChoices(correct,wrongs,f.id+'SS'),
           `Correct categorization: ${correct}. ${f.text}`,null,f.trap||null,'hard');
       }
     }
