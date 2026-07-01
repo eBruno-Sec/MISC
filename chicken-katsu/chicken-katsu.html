@@ -300,7 +300,7 @@
     font-weight: 900;
     line-height: 1;
     user-select: none;
-    animation: subtleDrift 240s ease-in-out infinite alternate;
+    animation: none;
     z-index: 0;
   }
 
@@ -309,7 +309,7 @@
     position: relative;
     width: 360px;
     height: 360px;
-    animation: float 4s ease-in-out infinite, fadeUp 1s 0.2s ease both;
+    animation: fadeUp 1s 0.2s ease both;
     flex-shrink: 0;
     z-index: 1;
   }
@@ -426,7 +426,7 @@
 
   .marquee-track {
     display: flex;
-    animation: marquee 120s linear infinite;
+    animation: none;
     width: max-content;
   }
 
@@ -1107,7 +1107,34 @@
 <script>
   // ── Nav: solid background on scroll ──
   const nav = document.getElementById('mainNav');
-  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 40);
+
+  // ── Scroll-driven motion ──
+  const kanji = document.querySelector('.hero-kanji');
+  const marqueeTrack = document.querySelector('.marquee-track');
+  let lastScroll = 0;
+  let marqueeOffset = 0;
+
+  const onScroll = () => {
+    const scrollY = window.scrollY;
+
+    // Nav solid bg
+    nav.classList.toggle('scrolled', scrollY > 40);
+
+    // Kanji: rotate based on scroll position (1 deg per 12px scrolled)
+    if (kanji) {
+      const rotation = scrollY / 12;
+      kanji.style.transform = `rotate(${rotation}deg)`;
+    }
+
+    // Marquee: scroll-driven translate (moves right-to-left as you scroll down)
+    if (marqueeTrack) {
+      marqueeOffset = -(scrollY * 0.18);
+      marqueeTrack.style.transform = `translateX(${marqueeOffset}px)`;
+    }
+
+    lastScroll = scrollY;
+  };
+
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
