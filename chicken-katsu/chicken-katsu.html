@@ -300,7 +300,7 @@
     font-weight: 900;
     line-height: 1;
     user-select: none;
-    animation: slowSpin 180s linear infinite;
+    animation: subtleDrift 240s ease-in-out infinite alternate;
     z-index: 0;
   }
 
@@ -426,7 +426,7 @@
 
   .marquee-track {
     display: flex;
-    animation: marquee 55s linear infinite;
+    animation: marquee 120s linear infinite;
     width: max-content;
   }
 
@@ -809,9 +809,9 @@
     50%       { transform: translateY(-14px); }
   }
 
-  @keyframes slowSpin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
+  @keyframes subtleDrift {
+    from { transform: rotate(-4deg) scale(1); }
+    to   { transform: rotate(4deg) scale(1.03); }
   }
 
   @keyframes marquee {
