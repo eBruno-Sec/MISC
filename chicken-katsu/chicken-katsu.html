@@ -1122,13 +1122,13 @@
 
     // Kanji: rotate based on scroll position (1 deg per 12px scrolled)
     if (kanji) {
-      const rotation = scrollY / 12;
+      const rotation = scrollY / 7;
       kanji.style.transform = `rotate(${rotation}deg)`;
     }
 
     // Marquee: scroll-driven translate (moves right-to-left as you scroll down)
     if (marqueeTrack) {
-      marqueeOffset = -(scrollY * 0.18);
+      marqueeOffset = -(scrollY * 0.35);
       marqueeTrack.style.transform = `translateX(${marqueeOffset}px)`;
     }
 
