@@ -288,6 +288,7 @@
     justify-content: center;
     background: var(--cream);
     overflow: hidden;
+    isolation: isolate;
   }
 
   .hero-kanji {
@@ -295,11 +296,12 @@
     font-family: 'Zen Old Mincho', serif;
     font-size: 500px;
     color: var(--gold);
-    opacity: 0.06;
+    opacity: 0.04;
     font-weight: 900;
     line-height: 1;
     user-select: none;
-    animation: slowSpin 60s linear infinite;
+    animation: slowSpin 180s linear infinite;
+    z-index: 0;
   }
 
   /* CSS katsu plate illustration */
@@ -309,6 +311,7 @@
     height: 360px;
     animation: float 4s ease-in-out infinite, fadeUp 1s 0.2s ease both;
     flex-shrink: 0;
+    z-index: 1;
   }
 
   .plate {
@@ -423,7 +426,7 @@
 
   .marquee-track {
     display: flex;
-    animation: marquee 24s linear infinite;
+    animation: marquee 55s linear infinite;
     width: max-content;
   }
 
