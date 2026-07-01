@@ -20,8 +20,18 @@
   h1 { font-family:var(--display); font-size:clamp(1.9rem,5vw,2.6rem); font-weight:800; color:var(--bright); line-height:1.15; letter-spacing:-0.02em; margin-bottom:0.6rem; }
   .sub { font-size:0.95rem; color:var(--text); max-width:42ch; line-height:1.75; }
   .sub strong { color:var(--accent); font-weight:700; }
-  .section-label { font-size:0.68rem; font-weight:700; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); margin:2rem 0 0.6rem; }
-  nav { display:flex; flex-direction:column; gap:8px; margin-bottom:1rem; }
+
+  .section-label {
+    font-size:0.68rem; font-weight:700; letter-spacing:0.15em; text-transform:uppercase;
+    color:var(--muted); margin:2.2rem 0 0.65rem;
+    display:flex; align-items:center; gap:0.6rem;
+  }
+  .section-label::after {
+    content:''; flex:1; height:1px; background:var(--border);
+  }
+
+  nav { display:flex; flex-direction:column; gap:8px; }
+
   a.card { display:flex; align-items:center; gap:1rem; padding:1rem 1.2rem; background:var(--surface); border:1.5px solid var(--border); border-radius:14px; text-decoration:none; transition:transform 0.15s,box-shadow 0.15s,border-color 0.15s; }
   a.card:hover { transform:translateY(-2px); box-shadow:0 6px 24px rgba(167,139,250,0.12); border-color:var(--accent); }
   a.card:hover .arrow { color:var(--accent); }
@@ -31,7 +41,8 @@
   .name { font-family:var(--display); font-size:0.92rem; font-weight:700; color:var(--bright); transition:color 0.15s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .desc { font-size:0.75rem; color:var(--muted); margin-top:0.1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .arrow { font-size:0.95rem; color:var(--muted); flex-shrink:0; transition:color 0.15s; }
-  .form-box { margin-top:2.5rem; background:var(--surface); border:1.5px dashed var(--border); border-radius:14px; padding:1.4rem 1.3rem; }
+
+  .form-box { margin-top:2.8rem; background:var(--surface); border:1.5px dashed var(--border); border-radius:14px; padding:1.4rem 1.3rem; }
   .form-label { font-family:var(--display); font-size:0.88rem; font-weight:700; color:var(--bright); margin-bottom:0.3rem; display:block; }
   .form-sub   { font-size:0.75rem; color:var(--muted); margin-bottom:1rem; }
   .form-row { display:flex; gap:8px; }
@@ -41,6 +52,7 @@
   button[type="submit"] { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:0.65rem 1.1rem; font-family:var(--display); font-size:0.85rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:opacity 0.15s,transform 0.15s; }
   button[type="submit"]:hover { opacity:0.88; transform:translateY(-1px); }
   .thanks { display:none; font-size:0.82rem; color:var(--accent); margin-top:0.75rem; text-align:center; }
+
   @media (prefers-reduced-motion:no-preference) {
     .wrap { animation:pop-up 0.35s cubic-bezier(0.22,1,0.36,1) both; }
     @keyframes pop-up { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
@@ -55,38 +67,52 @@
     <p class="sub">These are <strong>requested projects</strong> — someone had an idea and I made it happen. Leave your email if you want in on the next round.</p>
   </header>
 
-  <p class="section-label">Featured</p>
+  <p class="section-label">Cybersecurity</p>
   <nav>
     <a class="card" href="https://ebruno-sec.github.io/MISC/rmf-zero-to-hero/" target="_blank" rel="noopener">
       <div class="emoji">🛡️</div><div class="info"><div class="name">RMF Zero-to-Hero</div><div class="desc">Interactive RMF lifecycle, acronym decoder &amp; fact-checked source library</div></div><span class="arrow">→</span>
     </a>
-
     <a class="card" href="https://ebruno-sec.github.io/MISC/CCP/index.html" target="_blank" rel="noopener">
       <div class="emoji">🔐</div><div class="info"><div class="name">CCP Readiness Quiz</div><div class="desc">CMMC Certified Professional exam drill — 1,000+ questions, Easy &amp; Exam mode</div></div><span class="arrow">→</span>
     </a>
+  </nav>
 
-    <a class="card" href="https://ebruno-sec.github.io/MISC/RedFlag/index.html" target="_blank" rel="noopener">
-      <div class="emoji">🚩</div><div class="info"><div class="name">RedFlag</div><div class="desc">Identify behavioral patterns in your relationship</div></div><span class="arrow">→</span>
-    </a>
-        <a class="card" href="https://ebruno-sec.github.io/MISC/tiny-knights/index.html" target="_blank" rel="noopener">
-      <div class="emoji">🏰</div><div class="info"><div class="name">Tiny Knights</div><div class="desc">Multiplication battle game for kids</div></div><span class="arrow">→</span>
-    </a>
+  <p class="section-label">Business &amp; Landing Pages</p>
+  <nav>
     <a class="card" href="https://ebruno-sec.github.io/MISC/klynedarius-site/index.html" target="_blank" rel="noopener">
-      <div class="emoji">🏗️</div><div class="info"><div class="name">KlyneDarius Construction</div><div class="desc">Seattle contractor & remodeling site</div></div><span class="arrow">→</span>
+      <div class="emoji">🏗️</div><div class="info"><div class="name">KlyneDarius Construction</div><div class="desc">Seattle contractor &amp; remodeling site</div></div><span class="arrow">→</span>
+    </a>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/WebDesignAgency/index.html" target="_blank" rel="noopener">
+      <div class="emoji">💻</div><div class="info"><div class="name">Web Design Agency</div><div class="desc">Agency landing page concept</div></div><span class="arrow">→</span>
     </a>
     <a class="card" href="https://ebruno-sec.github.io/MISC/FruityLemons/index.html" target="_blank" rel="noopener">
       <div class="emoji">🍋</div><div class="info"><div class="name">Fruity Lemons</div><div class="desc">Lemon drink shop — full multi-page site</div></div><span class="arrow">→</span>
     </a>
-    <a class="card" href="https://ebruno-sec.github.io/MISC/LittleSeeds/index.html" target="_blank" rel="noopener">
-      <div class="emoji">🌱</div><div class="info"><div class="name">Little Seeds</div><div class="desc">20-day story series</div></div><span class="arrow">→</span>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/chicken-katsu/chicken-katsu.html" target="_blank" rel="noopener">
+      <div class="emoji">🍗</div><div class="info"><div class="name">Katsu</div><div class="desc">Chicken katsu restaurant landing page</div></div><span class="arrow">→</span>
     </a>
     <a class="card" href="https://ebruno-sec.github.io/MISC/TinDog/index.html" target="_blank" rel="noopener">
       <div class="emoji">🐶</div><div class="info"><div class="name">TinDog</div><div class="desc">Tinder for dogs — landing page</div></div><span class="arrow">→</span>
     </a>
-    <a class="card" href="https://ebruno-sec.github.io/MISC/chicken-katsu/chicken-katsu.html" target="_blank" rel="noopener"> <div class="emoji">🍗</div><div class="info"><div class="name">Katsu</div><div class="desc">Chicken katsu restaurant landing page</div></div><span class="arrow">→</span> </a>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/FlexboxPricingTable/index.html" target="_blank" rel="noopener">
+      <div class="emoji">💰</div><div class="info"><div class="name">Pricing Table</div><div class="desc">Flexbox pricing layout</div></div><span class="arrow">→</span>
+    </a>
   </nav>
 
-  <p class="section-label">More</p>
+  <p class="section-label">Games &amp; Interactive</p>
+  <nav>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/tiny-knights/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🏰</div><div class="info"><div class="name">Tiny Knights</div><div class="desc">Multiplication battle game for kids</div></div><span class="arrow">→</span>
+    </a>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/RedFlag/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🚩</div><div class="info"><div class="name">RedFlag</div><div class="desc">Identify behavioral patterns in your relationship</div></div><span class="arrow">→</span>
+    </a>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/ColorVocab/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🎨</div><div class="info"><div class="name">Color Vocab</div><div class="desc">Color vocabulary project</div></div><span class="arrow">→</span>
+    </a>
+  </nav>
+
+  <p class="section-label">Culture &amp; Reference</p>
   <nav>
     <a class="card" href="https://ebruno-sec.github.io/MISC/InnerCompass/Index.html" target="_blank" rel="noopener">
       <div class="emoji">🧭</div><div class="info"><div class="name">Inner Compass</div><div class="desc">Beginner's guide to Carl Jung</div></div><span class="arrow">→</span>
@@ -97,17 +123,15 @@
     <a class="card" href="https://ebruno-sec.github.io/MISC/Genshin/genshin_codex.html" target="_blank" rel="noopener">
       <div class="emoji">🌸</div><div class="info"><div class="name">Genshin Codex</div><div class="desc">Genshin Impact reference</div></div><span class="arrow">→</span>
     </a>
-    <a class="card" href="https://ebruno-sec.github.io/MISC/WebDesignAgency/index.html" target="_blank" rel="noopener">
-      <div class="emoji">💻</div><div class="info"><div class="name">Web Design Agency</div><div class="desc">Agency landing page concept</div></div><span class="arrow">→</span>
-    </a>
-    <a class="card" href="https://ebruno-sec.github.io/MISC/FlexboxPricingTable/index.html" target="_blank" rel="noopener">
-      <div class="emoji">💰</div><div class="info"><div class="name">Pricing Table</div><div class="desc">Flexbox pricing layout</div></div><span class="arrow">→</span>
-    </a>
-    <a class="card" href="https://ebruno-sec.github.io/MISC/ColorVocab/index.html" target="_blank" rel="noopener">
-      <div class="emoji">🎨</div><div class="info"><div class="name">Color Vocab</div><div class="desc">Color vocabulary project</div></div><span class="arrow">→</span>
-    </a>
     <a class="card" href="https://ebruno-sec.github.io/MISC/Matsuri/index.html" target="_blank" rel="noopener">
       <div class="emoji">🎏</div><div class="info"><div class="name">Matsuri</div><div class="desc">Festival tracker</div></div><span class="arrow">→</span>
+    </a>
+  </nav>
+
+  <p class="section-label">Stories &amp; Creative</p>
+  <nav>
+    <a class="card" href="https://ebruno-sec.github.io/MISC/LittleSeeds/index.html" target="_blank" rel="noopener">
+      <div class="emoji">🌱</div><div class="info"><div class="name">Little Seeds</div><div class="desc">20-day story series</div></div><span class="arrow">→</span>
     </a>
   </nav>
 
@@ -134,4 +158,3 @@
 </script>
 </body>
 </html>
-
