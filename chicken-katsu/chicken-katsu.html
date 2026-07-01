@@ -17,7 +17,6 @@
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   html { scroll-behavior: smooth; }
 
   body {
@@ -27,7 +26,6 @@
     overflow-x: hidden;
   }
 
-  /* NOISE TEXTURE OVERLAY */
   body::before {
     content: '';
     position: fixed;
@@ -38,7 +36,152 @@
     opacity: 0.5;
   }
 
-  /* HERO */
+  /* ── NAV ── */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 60px;
+    transition: background 0.35s, box-shadow 0.35s, padding 0.35s;
+    /* start: fully transparent over dark hero */
+    background: transparent;
+  }
+
+  nav.scrolled {
+    background: rgba(26, 18, 8, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 1px 0 rgba(200,146,42,0.15);
+    padding: 16px 60px;
+  }
+
+  .nav-logo {
+    font-family: 'Zen Old Mincho', serif;
+    font-size: 22px;
+    color: var(--gold);
+    font-weight: 900;
+    letter-spacing: 6px;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 36px;
+    list-style: none;
+  }
+
+  .nav-links a {
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: rgba(250,243,224,0.65);
+    text-decoration: none;
+    transition: color 0.2s;
+    position: relative;
+  }
+
+  .nav-links a::after {
+    content: '';
+    position: absolute;
+    bottom: -3px; left: 0;
+    width: 0; height: 1px;
+    background: var(--gold);
+    transition: width 0.25s;
+  }
+
+  .nav-links a:hover { color: var(--gold); }
+  .nav-links a:hover::after { width: 100%; }
+
+  .nav-order {
+    background: var(--gold);
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 10px 24px;
+    text-decoration: none;
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+
+  .nav-order:hover { background: var(--gold-light); }
+
+  /* Hamburger — mobile only */
+  .nav-burger {
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 4px;
+  }
+
+  .nav-burger span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background: var(--gold);
+    transition: transform 0.3s, opacity 0.3s;
+    transform-origin: center;
+  }
+
+  .nav-burger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .nav-burger.open span:nth-child(2) { opacity: 0; }
+  .nav-burger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+  /* Mobile drawer */
+  .nav-drawer {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: rgba(26,18,8,0.98);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 190;
+    padding: 100px 40px 48px;
+    flex-direction: column;
+    gap: 8px;
+    transform: translateY(-110%);
+    transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  .nav-drawer.open { transform: translateY(0); }
+
+  .nav-drawer a {
+    font-family: 'Zen Old Mincho', serif;
+    font-size: 28px;
+    color: var(--paper);
+    text-decoration: none;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(200,146,42,0.15);
+    display: block;
+    transition: color 0.2s;
+  }
+
+  .nav-drawer a:hover { color: var(--gold); }
+
+  .nav-drawer .drawer-order {
+    margin-top: 24px;
+    display: inline-block;
+    background: var(--gold);
+    color: var(--ink);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    padding: 16px 40px;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  }
+
+  /* ── HERO ── */
   .hero {
     min-height: 100vh;
     display: grid;
@@ -52,7 +195,7 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 80px 60px;
+    padding: 120px 60px 80px;
     position: relative;
     z-index: 2;
   }
@@ -60,21 +203,20 @@
   .hero-left::after {
     content: '';
     position: absolute;
-    right: -40px;
-    top: 0;
-    bottom: 0;
-    width: 80px;
+    right: -1px;
+    top: 0; bottom: 0;
+    width: 60px;
     background: var(--ink);
-    clip-path: polygon(0 0, 40px 0, 100% 100%, 0 100%);
+    clip-path: polygon(0 0, 0% 0, 100% 100%, 0 100%);
     z-index: 3;
   }
 
   .stamp {
     display: inline-block;
-    border: 3px solid var(--red);
+    border: 2px solid var(--red);
     color: var(--red);
     font-family: 'Zen Old Mincho', serif;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 4px;
     text-transform: uppercase;
     padding: 6px 14px;
@@ -86,7 +228,7 @@
 
   .hero-title {
     font-family: 'Zen Old Mincho', serif;
-    font-size: clamp(72px, 9vw, 130px);
+    font-size: clamp(68px, 8vw, 120px);
     font-weight: 900;
     line-height: 0.9;
     color: var(--paper);
@@ -94,16 +236,13 @@
     animation: fadeUp 0.8s 0.1s ease both;
   }
 
-  .hero-title span {
-    display: block;
-    color: var(--gold);
-  }
+  .hero-title span { display: block; color: var(--gold); }
 
   .hero-jp {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 28px;
+    font-size: 24px;
     color: var(--gold-pale);
-    opacity: 0.5;
+    opacity: 0.45;
     margin-top: 16px;
     letter-spacing: 8px;
     animation: fadeUp 0.8s 0.2s ease both;
@@ -115,7 +254,7 @@
     line-height: 1.9;
     margin-top: 36px;
     max-width: 360px;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
     animation: fadeUp 0.8s 0.3s ease both;
   }
 
@@ -127,26 +266,19 @@
     background: var(--gold);
     color: var(--ink);
     text-decoration: none;
-    font-weight: 500;
-    font-size: 13px;
-    letter-spacing: 2px;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 2.5px;
     text-transform: uppercase;
     padding: 18px 36px;
     clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
     transition: background 0.2s, transform 0.2s;
     animation: fadeUp 0.8s 0.4s ease both;
+    width: fit-content;
   }
 
-  .hero-cta:hover {
-    background: var(--gold-light);
-    transform: translateY(-2px);
-  }
-
-  .hero-cta-arrow {
-    font-size: 20px;
-    transition: transform 0.2s;
-  }
-
+  .hero-cta:hover { background: var(--gold-light); transform: translateY(-2px); }
+  .hero-cta-arrow { font-size: 18px; transition: transform 0.2s; }
   .hero-cta:hover .hero-cta-arrow { transform: translateX(4px); }
 
   .hero-right {
@@ -158,7 +290,6 @@
     overflow: hidden;
   }
 
-  /* Big decorative Japanese character */
   .hero-kanji {
     position: absolute;
     font-family: 'Zen Old Mincho', serif;
@@ -171,12 +302,13 @@
     animation: slowSpin 60s linear infinite;
   }
 
-  /* Illustrated katsu plate using CSS */
+  /* CSS katsu plate illustration */
   .katsu-visual {
     position: relative;
-    width: 380px;
-    height: 380px;
+    width: 360px;
+    height: 360px;
     animation: float 4s ease-in-out infinite, fadeUp 1s 0.2s ease both;
+    flex-shrink: 0;
   }
 
   .plate {
@@ -184,10 +316,7 @@
     inset: 30px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, #fff 0%, #E8E0CC 60%, #D4C9A8 100%);
-    box-shadow:
-      0 20px 80px rgba(0,0,0,0.15),
-      0 4px 20px rgba(0,0,0,0.1),
-      inset 0 -4px 12px rgba(0,0,0,0.08);
+    box-shadow: 0 20px 80px rgba(0,0,0,0.15), 0 4px 20px rgba(0,0,0,0.1), inset 0 -4px 12px rgba(0,0,0,0.08);
   }
 
   .plate::after {
@@ -200,19 +329,14 @@
 
   .cutlet {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    top: 50%; left: 50%;
     transform: translate(-50%, -55%);
-    width: 200px;
-    height: 140px;
+    width: 190px; height: 135px;
     background: linear-gradient(145deg, #C8822A 0%, #A86820 40%, #D09030 70%, #B87828 100%);
     border-radius: 40% 60% 50% 50% / 45% 45% 55% 55%;
-    box-shadow:
-      0 8px 24px rgba(100,50,0,0.3),
-      inset 0 2px 8px rgba(255,200,100,0.2);
+    box-shadow: 0 8px 24px rgba(100,50,0,0.3), inset 0 2px 8px rgba(255,200,100,0.2);
   }
 
-  /* Breading texture dots */
   .cutlet::before {
     content: '';
     position: absolute;
@@ -226,42 +350,32 @@
       radial-gradient(circle at 65% 65%, rgba(255,210,90,0.35) 3px, transparent 3px),
       radial-gradient(circle at 15% 55%, rgba(200,150,50,0.3) 2px, transparent 2px),
       radial-gradient(circle at 90% 70%, rgba(220,170,60,0.4) 2px, transparent 2px);
-    background-size: 100% 100%;
   }
 
-  /* Sauce drizzle */
   .sauce {
     position: absolute;
-    top: 44%;
-    left: 50%;
+    top: 44%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 160px;
-    height: 80px;
+    width: 155px; height: 78px;
     background: linear-gradient(135deg, #5A1A00 0%, #8B2E00 50%, #6B2200 100%);
     border-radius: 60% 40% 50% 50% / 40% 60% 40% 60%;
     opacity: 0.85;
     filter: blur(1px);
   }
 
-  /* Rice mound */
   .rice {
     position: absolute;
-    bottom: 70px;
-    right: 70px;
-    width: 100px;
-    height: 65px;
+    bottom: 70px; right: 68px;
+    width: 95px; height: 62px;
     background: radial-gradient(ellipse at 40% 30%, #FFFFF0 0%, #F0EDD0 60%, #D8D4B8 100%);
     border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   }
 
-  /* Cabbage shreds */
   .cabbage {
     position: absolute;
-    bottom: 75px;
-    left: 68px;
-    width: 80px;
-    height: 40px;
+    bottom: 75px; left: 66px;
+    width: 80px; height: 40px;
   }
 
   .cabbage-strand {
@@ -272,24 +386,19 @@
     transform-origin: left center;
   }
 
-  /* Lemon wedge */
   .lemon {
     position: absolute;
-    top: 72px;
-    right: 85px;
-    width: 40px;
-    height: 40px;
+    top: 72px; right: 84px;
+    width: 38px; height: 38px;
     background: radial-gradient(circle at 35% 35%, #FFEE88 0%, #FFD700 60%, #E6B800 100%);
-    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    border-radius: 50%;
     clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
     transform: rotate(20deg);
   }
 
-  /* Price badge */
   .price-badge {
     position: absolute;
-    top: 40px;
-    right: 40px;
+    top: 36px; right: 36px;
     background: var(--red);
     color: white;
     font-family: 'Zen Old Mincho', serif;
@@ -300,11 +409,52 @@
     animation: fadeUp 1s 0.5s ease both;
   }
 
-  .price-badge .from { font-size: 9px; letter-spacing: 2px; opacity: 0.8; display: block; }
+  .price-badge .from  { font-size: 9px; letter-spacing: 2px; opacity: 0.8; display: block; }
   .price-badge .amount { font-size: 28px; line-height: 1; }
-  .price-badge .cents { font-size: 14px; }
+  .price-badge .cents  { font-size: 14px; }
 
-  /* MENU SECTION */
+  /* ── FEATURE STRIP ── */
+  .features {
+    background: var(--gold);
+    padding: 24px 0;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .marquee-track {
+    display: flex;
+    animation: marquee 24s linear infinite;
+    width: max-content;
+  }
+
+  .feature-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0 40px;
+  }
+
+  .feature-icon { font-size: 20px; }
+
+  .feature-text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .feature-divider {
+    width: 4px; height: 4px;
+    background: var(--ink);
+    opacity: 0.25;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── MENU ── */
   .menu {
     padding: 120px 80px;
     background: var(--ink);
@@ -316,12 +466,12 @@
     content: 'メニュー';
     position: absolute;
     font-family: 'Zen Old Mincho', serif;
-    font-size: 220px;
+    font-size: 200px;
     color: white;
     opacity: 0.02;
-    bottom: -20px;
-    right: -20px;
+    bottom: -20px; right: -20px;
     font-weight: 900;
+    pointer-events: none;
   }
 
   .section-label {
@@ -334,7 +484,7 @@
 
   .section-title {
     font-family: 'Zen Old Mincho', serif;
-    font-size: clamp(36px, 5vw, 64px);
+    font-size: clamp(34px, 5vw, 60px);
     color: var(--paper);
     line-height: 1.1;
     margin-bottom: 64px;
@@ -351,54 +501,55 @@
     padding: 40px 36px;
     position: relative;
     overflow: hidden;
-    cursor: pointer;
+    cursor: default;
     transition: background 0.3s;
+    display: flex;
+    flex-direction: column;
   }
 
-  .menu-item:hover { background: #2E2010; }
+  .menu-item:hover { background: #2A2010; }
 
-  .menu-item::before {
+  .menu-item::after {
     content: '';
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: 0; left: 0; right: 0;
     height: 2px;
     background: var(--gold);
     transform: scaleX(0);
     transform-origin: left;
-    transition: transform 0.3s ease;
+    transition: transform 0.35s ease;
   }
 
-  .menu-item:hover::before { transform: scaleX(1); }
+  .menu-item:hover::after { transform: scaleX(1); }
 
   .item-number {
     font-family: 'Zen Old Mincho', serif;
     font-size: 11px;
     color: var(--gold);
     letter-spacing: 3px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
 
   .item-name {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 26px;
+    font-size: 24px;
     color: var(--paper);
     line-height: 1.2;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .item-jp {
-    font-size: 12px;
-    color: #665A40;
+    font-size: 11px;
+    color: #554A30;
     letter-spacing: 3px;
     margin-bottom: 16px;
   }
 
   .item-desc {
     font-size: 12px;
-    color: #887860;
-    line-height: 1.8;
+    color: #7A6A50;
+    line-height: 1.85;
+    flex: 1;
     margin-bottom: 24px;
   }
 
@@ -406,17 +557,17 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    margin-top: auto;
   }
 
   .item-price {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 24px;
+    font-size: 22px;
     color: var(--gold);
   }
 
   .item-add {
-    width: 36px;
-    height: 36px;
+    width: 36px; height: 36px;
     border: 1.5px solid var(--gold);
     background: transparent;
     color: var(--gold);
@@ -427,53 +578,16 @@
     justify-content: center;
     transition: all 0.2s;
     clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+    font-family: inherit;
+    line-height: 1;
   }
 
-  .item-add:hover {
+  .item-add:hover, .item-add.added {
     background: var(--gold);
     color: var(--ink);
   }
 
-  /* FEATURE STRIP */
-  .features {
-    background: var(--gold);
-    padding: 28px 80px;
-    display: flex;
-    align-items: center;
-    gap: 60px;
-    overflow: hidden;
-  }
-
-  .feature-item {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .feature-icon {
-    font-size: 22px;
-  }
-
-  .feature-text {
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: var(--ink);
-  }
-
-  .feature-divider {
-    width: 4px;
-    height: 4px;
-    background: var(--ink);
-    opacity: 0.3;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  /* ABOUT / CRAFT SECTION */
+  /* ── CRAFT ── */
   .craft {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -492,7 +606,6 @@
     margin-top: 48px;
     display: flex;
     flex-direction: column;
-    gap: 0;
   }
 
   .craft-step {
@@ -505,7 +618,7 @@
 
   .step-num {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 42px;
+    font-size: 40px;
     font-weight: 900;
     color: var(--gold);
     opacity: 0.3;
@@ -514,14 +627,15 @@
     width: 52px;
   }
 
-  .step-content {}
   .step-title {
     font-family: 'Zen Old Mincho', serif;
     font-size: 18px;
     font-weight: 700;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    color: var(--ink);
   }
-  .step-desc { font-size: 13px; color: #665A40; line-height: 1.7; }
+
+  .step-desc { font-size: 13px; color: #665A40; line-height: 1.75; }
 
   .craft-right {
     background: var(--ink);
@@ -541,6 +655,7 @@
     font-weight: 900;
     writing-mode: vertical-rl;
     user-select: none;
+    pointer-events: none;
   }
 
   .craft-stat-grid {
@@ -564,27 +679,27 @@
     transition: background 0.3s;
   }
 
-  .craft-stat:hover { background: #201408; }
+  .craft-stat:hover { background: #1E1208; }
 
   .stat-num {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 56px;
+    font-size: 52px;
     font-weight: 900;
     color: var(--gold);
     line-height: 1;
   }
 
-  .stat-unit { font-size: 20px; color: var(--gold-light); }
+  .stat-unit { font-size: 18px; color: var(--gold-light); }
 
   .stat-label {
-    font-size: 11px;
-    color: #665A40;
+    font-size: 10px;
+    color: #554A30;
     letter-spacing: 2px;
     text-transform: uppercase;
     margin-top: 10px;
   }
 
-  /* ORDER CTA */
+  /* ── ORDER CTA ── */
   .order-cta {
     background: var(--paper);
     padding: 120px 80px;
@@ -599,26 +714,21 @@
   .order-cta::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 50%;
+    top: 0; left: 50%;
     transform: translateX(-50%);
-    width: 1px;
-    height: 80px;
+    width: 1px; height: 80px;
     background: linear-gradient(to bottom, transparent, var(--gold));
   }
 
   .order-tagline {
     font-family: 'Zen Old Mincho', serif;
-    font-size: clamp(40px, 6vw, 80px);
+    font-size: clamp(38px, 6vw, 76px);
     font-weight: 900;
     line-height: 1.1;
     margin-bottom: 24px;
   }
 
-  .order-tagline em {
-    font-style: normal;
-    color: var(--gold);
-  }
+  .order-tagline em { font-style: normal; color: var(--gold); }
 
   .order-sub {
     font-size: 14px;
@@ -628,22 +738,19 @@
     margin-bottom: 48px;
   }
 
-  .order-buttons {
-    display: flex;
-    gap: 16px;
-  }
+  .order-buttons { display: flex; gap: 16px; }
 
   .btn-primary {
     background: var(--ink);
     color: var(--paper);
     padding: 18px 48px;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 700;
     letter-spacing: 2.5px;
     text-transform: uppercase;
     text-decoration: none;
     clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s;
   }
 
   .btn-primary:hover { background: var(--gold); color: var(--ink); }
@@ -652,31 +759,31 @@
     background: transparent;
     color: var(--ink);
     padding: 18px 48px;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 700;
     letter-spacing: 2.5px;
     text-transform: uppercase;
     text-decoration: none;
     border: 1.5px solid var(--ink);
     clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
-    transition: all 0.2s;
+    transition: border-color 0.2s, color 0.2s;
   }
 
   .btn-secondary:hover { border-color: var(--gold); color: var(--gold); }
 
-  /* FOOTER */
+  /* ── FOOTER ── */
   footer {
     background: var(--ink);
-    padding: 40px 80px;
+    padding: 36px 80px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-top: 1px solid #2A1E0A;
+    border-top: 1px solid rgba(200,146,42,0.12);
   }
 
   .footer-logo {
     font-family: 'Zen Old Mincho', serif;
-    font-size: 24px;
+    font-size: 22px;
     color: var(--gold);
     font-weight: 900;
     letter-spacing: 4px;
@@ -684,137 +791,99 @@
 
   .footer-note {
     font-size: 11px;
-    color: #443A28;
+    color: #3A3020;
     letter-spacing: 1px;
   }
 
-  /* NAV */
-  nav {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 24px 60px;
-    background: linear-gradient(to bottom, rgba(26,18,8,0.9), transparent);
-    backdrop-filter: blur(4px);
-  }
-
-  .nav-logo {
-    font-family: 'Zen Old Mincho', serif;
-    font-size: 22px;
-    color: var(--gold);
-    font-weight: 900;
-    letter-spacing: 6px;
-    text-decoration: none;
-  }
-
-  .nav-links {
-    display: flex;
-    gap: 36px;
-    list-style: none;
-  }
-
-  .nav-links a {
-    font-size: 11px;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: rgba(250,243,224,0.6);
-    text-decoration: none;
-    transition: color 0.2s;
-  }
-
-  .nav-links a:hover { color: var(--gold); }
-
-  .nav-order {
-    background: var(--gold);
-    color: var(--ink);
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    padding: 10px 24px;
-    text-decoration: none;
-    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
-    transition: background 0.2s;
-  }
-
-  .nav-order:hover { background: var(--gold-light); }
-
-  /* ANIMATIONS */
+  /* ── ANIMATIONS ── */
   @keyframes fadeUp {
     from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-14px); }
+    0%, 100% { transform: translateY(0); }
+    50%       { transform: translateY(-14px); }
   }
 
   @keyframes slowSpin {
     from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    to   { transform: rotate(360deg); }
   }
 
   @keyframes marquee {
     from { transform: translateX(0); }
-    to { transform: translateX(-50%); }
+    to   { transform: translateX(-50%); }
   }
 
-  .marquee-track {
-    display: flex;
-    animation: marquee 20s linear infinite;
-  }
-
-  /* SCROLL REVEAL */
+  /* ── SCROLL REVEAL ── */
   .reveal {
     opacity: 0;
-    transform: translateY(30px);
-    transition: opacity 0.7s ease, transform 0.7s ease;
+    transform: translateY(24px);
+    transition: opacity 0.65s ease, transform 0.65s ease;
   }
 
-  .reveal.visible {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
 
-  /* RESPONSIVE */
+  /* ── RESPONSIVE ── */
   @media (max-width: 900px) {
-    .hero { grid-template-columns: 1fr; }
+    nav { padding: 18px 24px; }
+    nav.scrolled { padding: 14px 24px; }
+    .nav-links, .nav-order { display: none; }
+    .nav-burger { display: flex; }
+
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .hero-left { padding: 100px 32px 60px; }
     .hero-left::after { display: none; }
-    .hero-right { min-height: 400px; }
-    .menu { padding: 60px 24px; }
+    .hero-right { min-height: 380px; }
+    .katsu-visual { width: 280px; height: 280px; }
+
+    .menu { padding: 64px 24px; }
     .menu-grid { grid-template-columns: 1fr; }
+
     .craft { grid-template-columns: 1fr; }
-    .craft-left { padding: 60px 32px; }
-    .order-cta { padding: 80px 32px; }
-    .order-buttons { flex-direction: column; }
-    footer { flex-direction: column; gap: 12px; text-align: center; }
-    nav { padding: 20px 24px; }
-    .nav-links { display: none; }
-    .features { padding: 20px 32px; gap: 32px; }
+    .craft-left { padding: 64px 32px; }
+    .craft-right { min-height: 320px; }
+
+    .order-cta { padding: 80px 24px; }
+    .order-buttons { flex-direction: column; align-items: center; }
+
+    footer { flex-direction: column; gap: 12px; text-align: center; padding: 32px 24px; }
+
+    .features { padding: 20px 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
 </style>
 </head>
 <body>
 
+<!-- MOBILE DRAWER -->
+<div class="nav-drawer" id="navDrawer" aria-hidden="true">
+  <a href="#menu" onclick="closeDrawer()">Menu</a>
+  <a href="#craft" onclick="closeDrawer()">Our Craft</a>
+  <a href="#order" onclick="closeDrawer()">Order</a>
+  <a href="#order" class="drawer-order" onclick="closeDrawer()">Order Now</a>
+</div>
+
 <!-- NAV -->
-<nav>
-  <a href="#" class="nav-logo">KATSU</a>
+<nav id="mainNav" role="navigation" aria-label="Main navigation">
+  <a href="#hero" class="nav-logo">KATSU</a>
   <ul class="nav-links">
     <li><a href="#menu">Menu</a></li>
     <li><a href="#craft">Our Craft</a></li>
     <li><a href="#order">Order</a></li>
   </ul>
   <a href="#order" class="nav-order">Order Now</a>
+  <button class="nav-burger" id="navBurger" aria-label="Toggle menu" aria-expanded="false" aria-controls="navDrawer">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
 
 <!-- HERO -->
-<section class="hero">
+<section class="hero" id="hero">
   <div class="hero-left">
     <div class="stamp">Est. Osaka · Since 2018</div>
     <h1 class="hero-title">
@@ -823,8 +892,8 @@
     </h1>
     <p class="hero-jp">チキンカツ</p>
     <p class="hero-desc">
-      Hand-pounded chicken breast, double-coated in toasted panko, 
-      fried to a perfect amber crisp. Served with house tonkatsu sauce, 
+      Hand-pounded chicken breast, double-coated in toasted panko,
+      fried to a perfect amber crisp. Served with house tonkatsu sauce,
       shredded cabbage, and steamed white rice.
     </p>
     <a href="#order" class="hero-cta">
@@ -833,23 +902,21 @@
   </div>
 
   <div class="hero-right">
-    <div class="hero-kanji">カツ</div>
-
-    <div class="katsu-visual">
+    <div class="hero-kanji" aria-hidden="true">カツ</div>
+    <div class="katsu-visual" aria-hidden="true">
       <div class="plate"></div>
       <div class="sauce"></div>
       <div class="cutlet"></div>
       <div class="rice"></div>
       <div class="cabbage">
-        <div class="cabbage-strand" style="width:70px; top:8px; left:4px; transform:rotate(-8deg)"></div>
-        <div class="cabbage-strand" style="width:55px; top:16px; left:10px; transform:rotate(5deg)"></div>
-        <div class="cabbage-strand" style="width:65px; top:24px; left:2px; transform:rotate(-3deg)"></div>
-        <div class="cabbage-strand" style="width:50px; top:32px; left:8px; transform:rotate(10deg)"></div>
+        <div class="cabbage-strand" style="width:70px;top:8px;left:4px;transform:rotate(-8deg)"></div>
+        <div class="cabbage-strand" style="width:55px;top:16px;left:10px;transform:rotate(5deg)"></div>
+        <div class="cabbage-strand" style="width:65px;top:24px;left:2px;transform:rotate(-3deg)"></div>
+        <div class="cabbage-strand" style="width:50px;top:32px;left:8px;transform:rotate(10deg)"></div>
       </div>
       <div class="lemon"></div>
     </div>
-
-    <div class="price-badge">
+    <div class="price-badge" aria-label="Starting from $12.90">
       <span class="from">From</span>
       <span class="amount">$12<span class="cents">.90</span></span>
     </div>
@@ -857,7 +924,7 @@
 </section>
 
 <!-- FEATURE STRIP -->
-<div class="features">
+<div class="features" aria-hidden="true">
   <div class="marquee-track">
     <div class="feature-item"><span class="feature-icon">🌾</span><span class="feature-text">Japanese Panko Breadcrumb</span></div>
     <div class="feature-divider"></div>
@@ -886,16 +953,16 @@
 <section class="menu" id="menu">
   <p class="section-label reveal">Our Menu</p>
   <h2 class="section-title reveal">Pick Your<br>Perfect Katsu</h2>
-
   <div class="menu-grid">
+
     <div class="menu-item reveal">
       <p class="item-number">No. 01</p>
       <h3 class="item-name">Classic Chicken Katsu</h3>
       <p class="item-jp">クラシックチキンカツ</p>
-      <p class="item-desc">Our signature. Hand-pounded 200g chicken breast, double-panko coated, fried at 180°C until amber gold. Served with tonkatsu sauce, shredded cabbage & steamed rice.</p>
+      <p class="item-desc">Our signature. Hand-pounded 200g chicken breast, double-panko coated, fried at 180°C until amber gold. Served with tonkatsu sauce, shredded cabbage &amp; steamed rice.</p>
       <div class="item-footer">
         <span class="item-price">$12.90</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Classic Chicken Katsu to order">+</button>
       </div>
     </div>
 
@@ -906,7 +973,7 @@
       <p class="item-desc">Sliced chicken katsu over steamed Japanese short-grain rice, smothered in slow-cooked golden curry sauce with pickled daikon on the side.</p>
       <div class="item-footer">
         <span class="item-price">$15.50</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Katsu Curry Bowl to order">+</button>
       </div>
     </div>
 
@@ -917,7 +984,7 @@
       <p class="item-desc">Japanese milk bread, lightly toasted. Layered with crispy katsu, fine-shredded cabbage, and our house Kewpie mayo-tonkatsu blend. Served with chips.</p>
       <div class="item-footer">
         <span class="item-price">$14.00</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Katsu Sando to order">+</button>
       </div>
     </div>
 
@@ -928,7 +995,7 @@
       <p class="item-desc">Katsu rice bowl with simmered egg, onion, and a spicy dashi-mirin glaze. Finished with togarashi, spring onion, and toasted sesame.</p>
       <div class="item-footer">
         <span class="item-price">$16.00</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Spicy Katsu Don to order">+</button>
       </div>
     </div>
 
@@ -939,7 +1006,7 @@
       <p class="item-desc">Nagoya-style. Thicker-cut chicken katsu glazed with rich hatcho miso sauce, served over rice with pickled cucumber and sesame spinach.</p>
       <div class="item-footer">
         <span class="item-price">$15.90</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Miso Katsu to order">+</button>
       </div>
     </div>
 
@@ -950,9 +1017,10 @@
       <p class="item-desc">The full experience. Classic katsu with rice, miso soup, pickled vegetables, shredded cabbage, and a small side of house potato salad.</p>
       <div class="item-footer">
         <span class="item-price">$19.90</span>
-        <button class="item-add">+</button>
+        <button type="button" class="item-add" aria-label="Add Katsu Set Meal to order">+</button>
       </div>
     </div>
+
   </div>
 </section>
 
@@ -960,34 +1028,33 @@
 <section class="craft" id="craft">
   <div class="craft-left">
     <p class="section-label reveal">The Process</p>
-    <h2 class="section-title reveal" style="color: var(--ink);">Crafted in<br>Four Steps</h2>
-
+    <h2 class="section-title reveal" style="color:var(--ink)">Crafted in<br>Four Steps</h2>
     <div class="craft-steps">
       <div class="craft-step reveal">
-        <span class="step-num">01</span>
-        <div class="step-content">
-          <p class="step-title">Select & Pound</p>
+        <span class="step-num" aria-hidden="true">01</span>
+        <div>
+          <p class="step-title">Select &amp; Pound</p>
           <p class="step-desc">Free-range chicken breast, tenderized to an even 1.5cm thickness for consistent crunch in every bite.</p>
         </div>
       </div>
       <div class="craft-step reveal">
-        <span class="step-num">02</span>
-        <div class="step-content">
+        <span class="step-num" aria-hidden="true">02</span>
+        <div>
           <p class="step-title">Double Coat</p>
           <p class="step-desc">Flour, beaten egg, then hand-pressed Japanese panko. The double coat locks in moisture and builds the signature shatter-crunch exterior.</p>
         </div>
       </div>
       <div class="craft-step reveal">
-        <span class="step-num">03</span>
-        <div class="step-content">
+        <span class="step-num" aria-hidden="true">03</span>
+        <div>
           <p class="step-title">Fry at Precision</p>
           <p class="step-desc">Dropped into 180°C canola oil for exactly 5 minutes. No shortcuts. A probe confirms 74°C internal before every serve.</p>
         </div>
       </div>
       <div class="craft-step reveal">
-        <span class="step-num">04</span>
-        <div class="step-content">
-          <p class="step-title">Rest & Serve</p>
+        <span class="step-num" aria-hidden="true">04</span>
+        <div>
+          <p class="step-title">Rest &amp; Serve</p>
           <p class="step-desc">Rested 90 seconds on a wire rack, sliced on the bias, and plated immediately. Never held under a lamp.</p>
         </div>
       </div>
@@ -995,7 +1062,7 @@
   </div>
 
   <div class="craft-right">
-    <div class="craft-bg-text">カツ</div>
+    <div class="craft-bg-text" aria-hidden="true">カツ</div>
     <div class="craft-stat-grid">
       <div class="craft-stat">
         <span class="stat-num">180<span class="stat-unit">°C</span></span>
@@ -1030,34 +1097,68 @@
 <!-- FOOTER -->
 <footer>
   <span class="footer-logo">KATSU</span>
-  <span class="footer-note">© 2024 Katsu. All rights reserved.</span>
+  <span class="footer-note">© 2025 Katsu. All rights reserved.</span>
   <span class="footer-note">チキンカツ専門店</span>
 </footer>
 
 <script>
-  // Scroll reveal
-  const reveals = document.querySelectorAll('.reveal');
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach((e, i) => {
+  // ── Nav: solid background on scroll ──
+  const nav = document.getElementById('mainNav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 40);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // ── Mobile burger / drawer ──
+  const burger = document.getElementById('navBurger');
+  const drawer = document.getElementById('navDrawer');
+  let drawerOpen = false;
+
+  function openDrawer() {
+    drawerOpen = true;
+    drawer.style.display = 'flex';
+    requestAnimationFrame(() => drawer.classList.add('open'));
+    burger.classList.add('open');
+    burger.setAttribute('aria-expanded', 'true');
+    drawer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeDrawer() {
+    drawerOpen = false;
+    drawer.classList.remove('open');
+    burger.classList.remove('open');
+    burger.setAttribute('aria-expanded', 'false');
+    drawer.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    setTimeout(() => { if (!drawerOpen) drawer.style.display = 'none'; }, 400);
+  }
+
+  burger.addEventListener('click', () => drawerOpen ? closeDrawer() : openDrawer());
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && drawerOpen) closeDrawer(); });
+
+  // ── Scroll reveal ──
+  const revealEls = document.querySelectorAll('.reveal');
+  const revealObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
       if (e.isIntersecting) {
-        setTimeout(() => e.target.classList.add('visible'), i * 80);
+        e.target.classList.add('visible');
+        revealObs.unobserve(e.target);
       }
     });
-  }, { threshold: 0.1 });
-  reveals.forEach(el => observer.observe(el));
+  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+  revealEls.forEach(el => revealObs.observe(el));
 
-  // Add to cart feedback
+  // ── Add to order feedback ──
   document.querySelectorAll('.item-add').forEach(btn => {
-    btn.addEventListener('click', function() {
-      const orig = this.textContent;
+    btn.addEventListener('click', function () {
+      if (this.classList.contains('added')) return;
+      this.classList.add('added');
       this.textContent = '✓';
-      this.style.background = 'var(--gold)';
-      this.style.color = 'var(--ink)';
       setTimeout(() => {
-        this.textContent = orig;
-        this.style.background = '';
-        this.style.color = '';
-      }, 1200);
+        this.classList.remove('added');
+        this.textContent = '+';
+      }, 1400);
     });
   });
 </script>
