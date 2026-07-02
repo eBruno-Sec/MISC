@@ -1,15 +1,39 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jonah and the Cave of Shadows – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #60a5fa; }
+    .chapter h4 { color: #60a5fa; }
+    .story-header h1 { color: #60a5fa; text-shadow: 0 3px 20px #60a5fa55; }
+    .day-label { color: #60a5fa; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(96,165,250,0.13);
+      border: 3px solid #60a5fa44;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #60a5fa; background: #60a5fa18; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
@@ -28,40 +52,23 @@
         <a href="./Day16.html">Day 16</a>
         <a href="./Day17.html">Day 17</a>
         <a href="./Day18.html">Day 18</a>
-        <a href="./Day19.html">Day 19</a>
+        <a href="./Day19.html" class="active">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    <div class="page">
-      <h2>Day 19: Jonah and the Cave of Shadows</h2>
-      <p><strong>Theme:</strong> Courage, Facing Fears, Emotional Strength, Growth, Confidence</p>
-    
-      <h3>🌌 Chapter 1: The Scary Place</h3>
-      <p>Jonah had a great imagination. But sometimes, it made his fears feel big—too big.</p>
-      <p>Dark rooms, loud noises, even trying something new made his tummy twist into knots.</p>
-      <p>One day, his grandpa gave him a drawing of a mountain with a cave and said, “Every fear is like a cave. It looks scary… until you step inside.”</p>
-    
-      <h3>🕯️ Chapter 2: The First Step</h3>
-      <p>Jonah was quiet that night. The hall light was off, and he felt nervous walking to his room.</p>
-      <p>But he remembered Grandpa’s cave. He whispered, “One step into the cave…” and took a deep breath.</p>
-      <p>He walked with shaky feet and made it to his bed. His heart beat fast—but he did it.</p>
-    
-      <h3>🐾 Chapter 3: The Tiny Friend</h3>
-      <p>In a dream, Jonah met a tiny glowing creature named Bravie.</p>
-      <p>“I live in every kid who tries, even when scared,” Bravie said. “Every time you face a fear, I glow brighter.”</p>
-      <p>“Even if I’m still scared?” Jonah asked.</p>
-      <p>“Especially then,” Bravie said. “Bravery isn’t the absence of fear—it’s moving forward anyway.”</p>
-    
-      <h3>🌤️ Chapter 4: Little by Little</h3>
-      <p>The next day, Jonah tried new things one at a time—raising his hand in class, saying hi to a new kid, and even turning off the hallway light himself.</p>
-      <p>Each time, Bravie glowed in his chest like a warm lantern.</p>
-      <p>“I’m scared,” he’d whisper… then he’d do it anyway.</p>
-    
-      <h3>🌟 Chapter 5: The Cave Wasn’t Empty</h3>
-      <p>Jonah learned something important: most fears are not monsters. They’re empty caves with echoes.</p>
-      <p>And when he walked in bravely, he found strength, joy, and surprises waiting inside.</p>
-    
-      <h3>🛌 Chapter 6: Jonah’s Bravery Promise</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🕯️</div>
+      <span class="day-label">Day 19</span>
+      <h1>Jonah and the Cave of Shadows</h1>
+      <div class="theme-pills"><span class="theme-pill">Courage</span><span class="theme-pill">Facing Fears</span><span class="theme-pill">Emotional Strength</span><span class="theme-pill">Growth</span><span class="theme-pill">Confidence</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>Before bed, Jonah whispered,</p>
       <blockquote>
         “Fear might visit, but it won’t stay.<br>
@@ -69,28 +76,38 @@
         Bravery grows in steps I take—<br>
         And every little fear I break.”</blockquote>
     
-      <h3>🔥 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>🔥 Reflect & Inspire</h4>
       <ul>
         <li>What’s one thing that makes you feel nervous or scared?</li>
         <li>What small step could you take to face that fear this week?</li>
         <li>How do you feel after doing something even when you were scared?</li>
         <li>Who can you talk to when you need help being brave?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day18.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 18</span></a><a href="./Day20.html" class="next"><span><span class="nav-sub">Next</span>Day 20</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
