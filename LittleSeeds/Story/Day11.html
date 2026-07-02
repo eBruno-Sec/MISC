@@ -15,8 +15,8 @@
     .day-label { color: #34d399; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(52,211,153,0.13);
-      border: 3px solid #34d39944;
+      background: #34d39922;
+      border: 3px solid #34d39955;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #34d399; background: #34d39918; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,30 +67,45 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🎒</div>
-      <span class="day-label">Day 11</span>
+      <span class="day-label">DAY 11</span>
       <h1>The Heavy Backpack</h1>
       <div class="theme-pills"><span class="theme-pill">Forgiveness</span><span class="theme-pill">Letting Go</span><span class="theme-pill">Making Peace</span><span class="theme-pill">Responsibility</span><span class="theme-pill">Emotional Freedom</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Micah had a bright smile and a big imagination. But today, he walked slowly to school with his backpack feeling heavier than ever.</p>
+      <p>Inside it were his books, pencils, and one more thing—anger. His best friend Noah had broken Micah’s favorite toy by accident.</p>
+      <p>Micah hadn’t spoken to him since. “Why should I forgive him?” he muttered.</p>
+    
+      
+      <p>At school, their kind teacher, Mr. Wren, noticed Micah’s frown. After class, he told a story.</p>
+      <p>“Once, a boy carried stones in his backpack for every time someone hurt him. The more he held onto those stones, the heavier it got. One day, he realized—he could take them out.”</p>
+      <p>Micah blinked. “What happened when he let go?”</p>
+      <p>Mr. Wren smiled. “He felt light again. Forgiveness doesn’t mean what they did was okay. It means you’re ready to stop carrying the pain.”</p>
+    
+      
       <p>At lunch, Noah sat alone, looking down. Micah took a deep breath and sat beside him.</p>
       <p>“You broke my toy,” Micah said. “And I was really sad.”</p>
       <p>Noah’s eyes filled with tears. “I didn’t mean to. I was scared to say sorry.”</p>
       <p>Micah looked at his lunchbox, then back at Noah. “I forgive you. I don’t want to be mad forever.”</p>
       <p>Noah whispered, “I’m really sorry, Micah.”</p>
     
-      </div><div class="chapter"><h4>🌤️ Chapter 4: The Lighter Walk</h4>
+      
       <p>After school, Micah walked home. His backpack felt lighter—not because the books were gone, but because the anger had been set down.</p>
       <p>He realized forgiveness wasn’t just for Noah—it was also a gift to himself. Now, there was room for peace again.</p>
     
-      </div><div class="chapter"><h4>💬 Chapter 5: Asking to Be Forgiven</h4>
+      
       <p>That evening, Micah remembered the time he had shouted at his little brother, Leo. He went to Leo’s room and said softly, “I’m sorry I yelled. It wasn’t fair.”</p>
       <p>Leo gave him a quick hug. “I forgave you already.”</p>
       <p>Micah smiled. “Forgiving and saying sorry... it helps hearts grow strong, doesn’t it?”</p>
     
-      </div><div class="chapter"><h4>🌙 Chapter 6: Micah’s Heart Promise</h4>
+      
       <p>That night, Micah looked at the stars and whispered,</p>
       <blockquote>
         “I forgive to set my heart free.<br>
@@ -92,13 +113,13 @@
         I can grow, heal, and love better every day.” 
       </blockquote>
     
-      </div><div class="chapter"><h4>🕊️ Reflect & Inspire</h4>
+      
       <ul>
         <li>Is there someone you’re ready to forgive, even just a little?</li>
         <li>How does your heart feel when you let go of anger?</li>
         <li>Have you ever been forgiven? How did it feel?</li>
         <li>What does it mean to you to be strong and gentle at the same time?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day10.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 10</span></a><a href="./Day12.html" class="next"><span><span class="nav-sub">Next</span>Day 12</span> →</a></div>
@@ -110,14 +131,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
