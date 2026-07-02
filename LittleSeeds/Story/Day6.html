@@ -1,21 +1,45 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ethan and the Little Steps – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #38bdf8; }
+    .chapter h4 { color: #38bdf8; }
+    .story-header h1 { color: #38bdf8; text-shadow: 0 3px 20px #38bdf855; }
+    .day-label { color: #38bdf8; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(56,189,248,0.13);
+      border: 3px solid #38bdf844;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #38bdf8; background: #38bdf818; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
         <a href="./Day4.html">Day 4</a>
         <a href="./Day5.html">Day 5</a>
-        <a href="./Day6.html">Day 6</a>
+        <a href="./Day6.html" class="active">Day 6</a>
         <a href="./Day7.html">Day 7</a>
         <a href="./Day8.html">Day 8</a>
         <a href="./Day9.html">Day 9</a>
@@ -30,42 +54,28 @@
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-      <h2>Day 6: Ethan and the Little Steps</h2>
-      <p><strong>Theme:</strong> Sibling Bond, Growth, Patience, Empathy, Leadership</p>
-    
-      <h3>👟 Chapter 1: Big Brother’s Shadow</h3>
-      <p>Ethan was seven years old and loved building towers, solving puzzles, and racing around the yard like a rocket ship. He was the big brother. And to him, that meant he could do everything faster, better, and smarter than his little brother, Noah, who was just three.</p>
-      <p>But sometimes, Ethan got frustrated. Noah always wanted to play too, but he couldn’t run as fast, talk as clearly, or build as high.</p>
-      <p>“You’re too slow!” Ethan would sigh.</p>
-      <p>But Noah never stopped smiling. He always said, “I just want to be like you.”</p>
-    
-      <h3>🐢 Chapter 2: The Falling Tower</h3>
-      <p>One rainy day, they stayed indoors. Ethan built a tall block tower, piece by piece. It was the tallest tower he’d ever made.</p>
-      <p>Noah waddled over, eyes shining. “Can I help?”</p>
-      <p>Ethan hesitated. Then he handed Noah a block. “Okay, but be careful.”</p>
-      <p>But Noah’s hands weren’t as steady. The tower wobbled... and then—crash! Blocks scattered everywhere.</p>
-      <p>Ethan’s face turned red. “You ruined it!” he shouted, tears welling up.</p>
-      <p>Noah’s smile faded. He looked down. “I just wanted to build with you.”</p>
-    
-      <h3>🧸 Chapter 3: Grandma’s Lesson</h3>
-      <p>Grandma heard the noise and walked in with a gentle smile. She helped them pick up the blocks quietly.</p>
-      <p>“Ethan,” she said softly, “do you know what being a big brother means?”</p>
-      <p>“It means doing things better,” Ethan mumbled.</p>
-      <p>Grandma shook her head. “Being a big brother doesn’t mean being better. It means growing together. You get to help Noah take little steps. And each step he takes is a step you helped him with.”</p>
-      <p>Ethan was quiet. He looked at Noah, who was holding one block in his tiny hands.</p>
-    
-      <h3>🧱 Chapter 4: A New Kind of Tower</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">👟</div>
+      <span class="day-label">Day 6</span>
+      <h1>Ethan and the Little Steps</h1>
+      <div class="theme-pills"><span class="theme-pill">Sibling Bond</span><span class="theme-pill">Growth</span><span class="theme-pill">Patience</span><span class="theme-pill">Empathy</span><span class="theme-pill">Leadership</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>This time, Ethan sat beside Noah and said, “Let’s build a tower together, but we’ll go slow.”</p>
       <p>Block by block, they stacked their tower. It wasn’t as tall. It leaned a little. But they built it together.</p>
       <p>And this time, it didn’t fall.</p>
       <p>Noah clapped his hands and giggled. “We did it!”</p>
       <p>Ethan smiled wide. “Yeah. We really did.”</p>
     
-      <h3>🌠 Chapter 5: Steps in the Dark</h3>
+      </div><div class="chapter"><h4>🌠 Chapter 5: Steps in the Dark</h4>
       <p>That night, the lights went out in a surprise storm. Thunder boomed. Noah cried and ran to Ethan’s room.</p>
       <p>Ethan pulled up the blanket and let Noah crawl in.</p>
       <p>“I’m scared,” Noah whispered.</p>
@@ -74,7 +84,7 @@
       <p>“Promise.”</p>
       <p>And just like that, the dark didn’t feel so scary anymore.</p>
     
-      <h3>🛏️ Chapter 6: Big Brother’s Promise</h3>
+      </div><div class="chapter"><h4>🛏️ Chapter 6: Big Brother’s Promise</h4>
       <p>As they drifted to sleep, Ethan whispered a promise into the night.</p>
       <blockquote>
         “I will help Noah grow, even if it means going slow.<br>
@@ -82,29 +92,38 @@
         Because growing together makes our hearts shine.” 
       </blockquote>
     
-      <h3>🧠 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>🧠 Reflect & Inspire</h4>
       <ul>
         <li>What is something you’ve taught your younger brother or sister?</li>
         <li>How does it feel when you do something together, even if it takes longer?</li>
         <li>Can you remember a time when you helped someone take a small step?</li>
         <li>What can you do tomorrow to grow together with your sibling?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day5.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 5</span></a><a href="./Day7.html" class="next"><span><span class="nav-sub">Next</span>Day 7</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
