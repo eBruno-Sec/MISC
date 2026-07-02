@@ -1,83 +1,288 @@
+/* ── Little Seeds – shared story page styles ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --sky:    #1a1040;
+  --sky2:   #2d1b6e;
+  --moon:   #ffe066;
+  --star:   #fff8dc;
+  --green:  #4caf7d;
+  --green2: #2e7d52;
+  --cream:  #fff8f0;
+  --peach:  #ffe0c2;
+  --purple: #9b59b6;
+  --teal:   #1abc9c;
+  --coral:  #ff6b6b;
+  --gold:   #f9c74f;
+  --white:  #ffffff;
+  --font-h: 'Fredoka One', cursive;
+  --font-b: 'Nunito', sans-serif;
+  --radius: 16px;
+}
+
+html { scroll-behavior: smooth; }
+
 body {
-    margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #121212;
-    color: #f1f1f1;
-    line-height: 1.6;
-    overflow-x: hidden;
-  }
-  nav {
-    background-color: #1e1e1e;
-    padding: 1.5rem;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    border-bottom: 1px solid #333;
-    position: relative;
-  }
-  .nav-toggle {
-    display: none;
-    background-color: #1e1e1e;
-    color: #fff;
-    border: none;
-    font-size: 1.2rem;
-    cursor: pointer;
-  }
-  .nav-links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    justify-content: center;
-  }
-  nav a {
-    color: #cfcfcf;
-    text-decoration: none;
-    font-weight: bold;
-    cursor: pointer;
-  }
-  nav a:hover {
-    color: #ffffff;
-  }
-  .container {
-    max-width: 800px;
-    margin: auto;
-    padding: 2rem;
-    transition: transform 0.5s ease-in-out;
-  }
-  .carousel {
-    display: flex;
-    width: 100vw;
-    transition: transform 0.5s ease-in-out;
-  }
-  .page {
-    min-width: 100vw;
-    box-sizing: border-box;
-    padding: 2rem;
-  }
-  h1, h2, h3 {
-    color: #ffffff;
-  }
-  footer {
-    text-align: center;
-    color: #888;
-    padding: 1rem;
-    font-size: 0.9rem;
-  }
-  @media (max-width: 768px) {
-    .nav-links {
-      display: none;
-      flex-direction: column;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-    .nav-links.show {
-      display: flex;
-    }
-    .nav-toggle {
-      display: block;
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-    }
-  }
-  
+  font-family: var(--font-b);
+  background: var(--sky);
+  color: var(--cream);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.75;
+}
+
+/* ── STARS ── */
+.stars-layer {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.star {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--star);
+  animation: twinkle var(--d, 3s) ease-in-out infinite alternate;
+  opacity: 0;
+}
+@keyframes twinkle {
+  0%   { opacity: 0.1; transform: scale(0.8); }
+  100% { opacity: 0.9; transform: scale(1.2); }
+}
+
+/* ── NAV ── */
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(26,16,64,0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 2px solid rgba(255,224,102,0.2);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-h);
+  font-size: 1.4rem;
+  color: var(--moon);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.nav-links a {
+  color: var(--cream);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: 20px;
+  border: 1.5px solid rgba(255,255,255,0.12);
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  background: var(--moon);
+  color: var(--sky);
+  border-color: var(--moon);
+}
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 2px solid var(--moon);
+  color: var(--moon);
+  font-size: 1.1rem;
+  border-radius: 8px;
+  padding: 0.28rem 0.6rem;
+  cursor: pointer;
+  font-family: var(--font-b);
+  font-weight: 800;
+}
+
+/* ── STORY PAGE ── */
+.story-wrapper {
+  position: relative;
+  z-index: 1;
+  max-width: 740px;
+  margin: 3rem auto 4rem;
+  padding: 0 1.25rem;
+}
+
+.story-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+.day-label {
+  display: inline-block;
+  font-family: var(--font-h);
+  font-size: 0.9rem;
+  letter-spacing: 0.1em;
+  color: var(--teal);
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.story-header h1 {
+  font-family: var(--font-h);
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  color: var(--moon);
+  line-height: 1.15;
+  text-shadow: 0 3px 20px rgba(249,199,79,0.35);
+  margin-bottom: 0.75rem;
+}
+.theme-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+.theme-pill {
+  background: rgba(255,255,255,0.08);
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--peach);
+}
+
+/* ── STORY BODY ── */
+.story-body p {
+  margin-bottom: 1.1rem;
+  font-size: 1.05rem;
+  color: var(--cream);
+}
+.story-body strong { color: var(--moon); }
+.story-body em { color: var(--teal); font-style: italic; }
+
+/* ── CHAPTER ── */
+.chapter {
+  margin: 2.5rem 0 1.5rem;
+  background: rgba(255,255,255,0.04);
+  border-left: 4px solid var(--green);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 1rem 1.25rem 0.5rem;
+}
+.chapter h4 {
+  font-family: var(--font-h);
+  font-size: 1.3rem;
+  color: var(--green);
+  margin-bottom: 0.75rem;
+}
+
+/* ── REFLECT BLOCK ── */
+.reflect {
+  background: linear-gradient(135deg, rgba(155,89,182,0.18), rgba(26,188,156,0.12));
+  border: 2px solid rgba(155,89,182,0.35);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.5rem 1rem;
+  margin-top: 2.5rem;
+}
+.reflect h3 {
+  font-family: var(--font-h);
+  font-size: 1.4rem;
+  color: var(--purple);
+  margin-bottom: 1rem;
+}
+.reflect ul {
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.reflect li { font-size: 0.97rem; color: var(--peach); }
+
+/* ── LEARNED LIST ── */
+.learned {
+  background: rgba(76,175,125,0.1);
+  border: 2px solid rgba(76,175,125,0.3);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem 1rem;
+  margin-top: 2rem;
+}
+.learned h4 {
+  font-family: var(--font-h);
+  font-size: 1.2rem;
+  color: var(--green);
+  margin-bottom: 0.75rem;
+}
+.learned ul {
+  padding-left: 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.learned li { font-size: 0.95rem; color: var(--cream); }
+
+/* ── PREV / NEXT NAV ── */
+.story-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3rem;
+  flex-wrap: wrap;
+}
+.story-nav a {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.12);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.1rem;
+  color: var(--cream);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.92rem;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+.story-nav a:hover {
+  background: rgba(255,224,102,0.12);
+  border-color: var(--moon);
+  transform: translateY(-2px);
+}
+.story-nav a.next { justify-content: flex-end; text-align: right; }
+.story-nav a .nav-sub { font-size: 0.72rem; opacity: 0.6; display: block; font-weight: 600; }
+
+/* ── FOOTER ── */
+footer {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 2rem 1rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  color: rgba(255,248,240,0.35);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-top: 2rem;
+}
+footer span { color: var(--coral); }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+  .nav-links { display: none; flex-direction: column; width: 100%; }
+  .nav-links.show { display: flex; }
+  .nav-toggle { display: block; }
+  nav { flex-wrap: wrap; }
+  .story-wrapper { margin-top: 2rem; }
+}
+
+/* ── UTILITY: page load fade ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.story-wrapper { animation: fadeUp 0.55s ease both; }
