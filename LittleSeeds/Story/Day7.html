@@ -15,8 +15,8 @@
     .day-label { color: #4caf7d; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(76,175,125,0.13);
-      border: 3px solid #4caf7d44;
+      background: #4caf7d22;
+      border: 3px solid #4caf7d55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #4caf7d; background: #4caf7d18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,14 +67,25 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🌳</div>
-      <span class="day-label">Day 7</span>
+      <span class="day-label">DAY 7</span>
       <h1>The Thankful Tree</h1>
       <div class="theme-pills"><span class="theme-pill">Gratitude</span><span class="theme-pill">Family</span><span class="theme-pill">Mindfulness</span><span class="theme-pill">Happiness</span><span class="theme-pill">Perspective</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>It was a chilly morning when Liam woke up with a frown. His blanket was warm, but he grumbled anyway.</p>
+      <p>“Why do I have to get up?” he sighed. “Why can’t I just play all day?”</p>
+      <p>He didn’t like his breakfast. He didn’t want to wear socks. And his little sister, Mia, had taken the blue crayon he liked.</p>
+      <p>“Ugh. Nothing goes my way,” Liam mumbled.</p>
+      <p>Mom noticed and sat down beside him. “Liam, when you focus on what’s missing, you miss what’s already good.”</p>
+    
+      
       <p>After school, Liam went outside and saw the old tree behind their fence. It had big branches, golden leaves, and the softest shade under it.</p>
       <p>Grandpa was sitting there in his lawn chair, sipping tea and smiling at the wind.</p>
       <p>“What are you smiling at, Grandpa?” Liam asked.</p>
@@ -76,7 +93,7 @@
       <p>“Why?”</p>
       <p>“Because being thankful turns a simple day into a great one.”</p>
     
-      </div><div class="chapter"><h4>✋ Chapter 3: Three Things</h4>
+      
       <p>Liam sat down next to Grandpa. He thought for a moment. “Umm... I guess I like the sun today. It’s not too hot.”</p>
       <p>“That’s one,” Grandpa said, holding up a finger.</p>
       <p>“And... my dog, Rusty. He’s funny.”</p>
@@ -84,13 +101,13 @@
       <p>Liam thought harder. “And... I guess having you to talk to.”</p>
       <p>Grandpa smiled and held up three fingers. “See? Not so hard. Your heart’s already smiling.”</p>
     
-      </div><div class="chapter"><h4>📒 Chapter 4: A Jar of Thanks</h4>
+      
       <p>That night, Mom gave Liam a small glass jar and a stack of paper.</p>
       <p>“This is your Gratitude Jar. Each night, write down one thing you’re thankful for. Even a small thing.”</p>
       <p>Liam rolled his eyes but gave it a try. He wrote, “Rusty made me laugh when he chased his tail.”</p>
       <p>He dropped it into the jar and went to bed with a little smile.</p>
     
-      </div><div class="chapter"><h4>📆 Chapter 5: A Week of Thanks</h4>
+      
       <p>Every night, Liam added something new to the jar:</p>
       <ul>
         <li>“Mia shared her cookie.”</li>
@@ -98,11 +115,11 @@
         <li>“I didn’t cry when I scraped my knee.”</li>
         <li>“Dad read me an extra story.”</li>
         <li>“I helped clean and Mom said thank you.”</li>
-      </ul></div>
+      </ul>
       <p>The jar was filling up, and so was Liam’s heart.</p>
       <p>He even noticed that Mia had started a little jar of her own.</p>
     
-      </div><div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
       <p>Before bedtime, Liam sat with Mom, both holding their jars.</p>
       <p>“Did you know,” Mom said, “that when we are thankful, we see more of the good in life?”</p>
       <p>Liam nodded. “It makes me feel happy, even when the day wasn’t perfect.”</p>
@@ -113,13 +130,13 @@
         I will grow my heart with gratitude.” 
       </blockquote>
     
-      </div><div class="chapter"><h4>🌟 Reflect & Inspire</h4>
+      
       <ul>
         <li>What are three things you are thankful for today?</li>
         <li>Did someone do something kind for you? How did it make you feel?</li>
         <li>What is one thing in your room, house, or school that you’re glad to have?</li>
         <li>Can you start your own Gratitude Jar? What would go in it first?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day6.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 6</span></a><a href="./Day8.html" class="next"><span><span class="nav-sub">Next</span>Day 8</span> →</a></div>
@@ -131,14 +148,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
