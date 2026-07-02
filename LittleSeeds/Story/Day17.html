@@ -1,15 +1,39 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zane and the Circle of Good Friends – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #4caf7d; }
+    .chapter h4 { color: #4caf7d; }
+    .story-header h1 { color: #4caf7d; text-shadow: 0 3px 20px #4caf7d55; }
+    .day-label { color: #4caf7d; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(76,175,125,0.13);
+      border: 3px solid #4caf7d44;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #4caf7d; background: #4caf7d18; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
@@ -26,43 +50,25 @@
         <a href="./Day14.html">Day 14</a>
         <a href="./Day15.html">Day 15</a>
         <a href="./Day16.html">Day 16</a>
-        <a href="./Day17.html">Day 17</a>
+        <a href="./Day17.html" class="active">Day 17</a>
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-      <h2>Day 17: Zane and the Circle of Good Friends</h2>
-      <p><strong>Theme:</strong> Friendship, Respect, Trust, Values, Choosing the Right People</p>
-    
-      <h3>🤝 Chapter 1: The Loud Group</h3>
-      <p>Zane was excited to make friends at his new school. He noticed a group of kids who laughed loudly, played rough, and made fun of others when teachers weren’t looking.</p>
-      <p>“They’re cool,” Zane thought. “Maybe if I join them, I’ll be cool too.”</p>
-      <p>But something didn’t feel right in his belly. He watched them more carefully.</p>
-    
-      <h3>🧠 Chapter 2: The Feeling Inside</h3>
-      <p>One day, Zane saw them push a quiet kid out of the lunch line. He felt his heart beat faster, like it was warning him.</p>
-      <p>Later at home, he told his mom, “They’re fun… but mean sometimes. I don’t like it.”</p>
-      <p>She nodded, “That’s your inner compass. It helps you choose friends who treat others well—and who treat you well too.”</p>
-    
-      <h3>🌟 Chapter 3: The Kind Crew</h3>
-      <p>The next day, Zane sat near a quiet table. One boy smiled and said, “Hi, I’m Amir. Want to draw with us?”</p>
-      <p>They laughed gently, shared markers, and helped each other fix mistakes. Nobody got teased. Nobody was left out.</p>
-      <p>It felt calm. It felt good. It felt… right.</p>
-    
-      <h3>🪞 Chapter 4: Who You Are</h3>
-      <p>That night, Zane asked, “Mom, how do I know if someone’s a good friend?”</p>
-      <p>She replied, “Good friends make you feel safe, seen, and strong. And being a good friend means you help others feel that too.”</p>
-      <p>Zane nodded. “So I don’t have to try to be cool?”</p>
-      <p>“Nope,” she smiled. “Just be kind, be real, and you’ll find your circle.”</p>
-    
-      <h3>🌈 Chapter 5: Zane’s Circle Grows</h3>
-      <p>Over time, Zane’s new group grew. More kind kids joined. They played fair, shared ideas, and looked out for each other.</p>
-      <p>Zane felt strong—not because he followed others, but because he followed what was right.</p>
-    
-      <h3>🫶 Chapter 6: Zane’s Friendship Promise</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🤝</div>
+      <span class="day-label">Day 17</span>
+      <h1>Zane and the Circle of Good Friends</h1>
+      <div class="theme-pills"><span class="theme-pill">Friendship</span><span class="theme-pill">Respect</span><span class="theme-pill">Trust</span><span class="theme-pill">Values</span><span class="theme-pill">Choosing the Right People</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>Before bed, Zane whispered,</p>
       <blockquote>
         “I choose friends who lift me high,<br>
@@ -70,29 +76,38 @@
         I will be kind, honest, and true—<br>
         And choose the best in what I do.”</blockquote>
     
-      <h3>🌻 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>🌻 Reflect & Inspire</h4>
       <ul>
         <li>What makes someone a good friend?</li>
         <li>How do you feel around people who are kind and respectful?</li>
         <li>Have you ever felt uncomfortable with how someone treated others?</li>
         <li>How can you be the kind of friend you’d want to have?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day16.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 16</span></a><a href="./Day18.html" class="next"><span><span class="nav-sub">Next</span>Day 18</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
