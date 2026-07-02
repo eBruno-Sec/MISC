@@ -1,15 +1,39 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eli and the Little Lion Voice – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #fbbf24; }
+    .chapter h4 { color: #fbbf24; }
+    .story-header h1 { color: #fbbf24; text-shadow: 0 3px 20px #fbbf2455; }
+    .day-label { color: #fbbf24; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(251,191,36,0.13);
+      border: 3px solid #fbbf2444;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #fbbf24; background: #fbbf2418; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
@@ -25,45 +49,41 @@
         <a href="./Day13.html">Day 13</a>
         <a href="./Day14.html">Day 14</a>
         <a href="./Day15.html">Day 15</a>
-        <a href="./Day16.html">Day 16</a>
+        <a href="./Day16.html" class="active">Day 16</a>
         <a href="./Day17.html">Day 17</a>
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-      <h2>Day 16: Eli and the Little Lion Voice</h2>
-      <p><strong>Theme:</strong> Confidence, Courage, Self-Belief, Taking Action, Inner Voice</p>
-    
-      <h3>🦁 Chapter 1: The Voice That Hid</h3>
-      <p>Eli loved to think big but speak small. In class, he had good answers but stayed quiet. At karate, he knew the moves but stepped back during group demos.</p>
-      <p>“I want to be braver,” he told his dad. “But my voice… hides.”</p>
-      <p>Dad gave him a hug and said, “Then let’s help it grow. One small roar at a time.”</p>
-    
-      <h3>🐾 Chapter 2: The Little Lion</h3>
-      <p>That night, Eli dreamed of a tiny lion in his chest.</p>
-      <p>“I’m your Brave Voice,” the lion said. “Every time you speak, try, or stand tall, I get stronger.”</p>
-      <p>“But what if I mess up?” Eli asked.</p>
-      <p>“Then I’ll still grow—because trying makes me roar.”</p>
-    
-      <h3>🎤 Chapter 3: A Brave Little Step</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🦁</div>
+      <span class="day-label">Day 16</span>
+      <h1>Eli and the Little Lion Voice</h1>
+      <div class="theme-pills"><span class="theme-pill">Confidence</span><span class="theme-pill">Courage</span><span class="theme-pill">Self-Belief</span><span class="theme-pill">Taking Action</span><span class="theme-pill">Inner Voice</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>The next morning, Eli raised his hand once in class. His heart beat fast—but he did it!</p>
       <p>“Good idea, Eli,” said his teacher. The lion inside gave a tiny growl of pride.</p>
       <p>At practice, he offered to lead one move. It wasn’t perfect—but he did it loud and proud.</p>
     
-      <h3>🔥 Chapter 4: The Roar Gets Louder</h3>
+      </div><div class="chapter"><h4>🔥 Chapter 4: The Roar Gets Louder</h4>
       <p>Each time Eli tried, the lion grew louder.</p>
       <p>“You’re getting braver,” it said. “Mistakes are just steps. Confidence means showing up, even with shaky legs.”</p>
       <p>One day, Eli said out loud, “I’m proud of me today.”</p>
       <p>His little lion gave a mighty roar.</p>
     
-      <h3>🏆 Chapter 5: Eli’s Big Moment</h3>
+      </div><div class="chapter"><h4>🏆 Chapter 5: Eli’s Big Moment</h4>
       <p>At the school show, Eli felt nervous. But he took a deep breath and imagined the lion inside him standing tall.</p>
       <p>He played his song. Not perfect—but confident. The crowd clapped. Eli smiled, not because he was the best… but because he was brave.</p>
     
-      <h3>🦁 Chapter 6: Eli’s Roar Promise</h3>
+      </div><div class="chapter"><h4>🦁 Chapter 6: Eli’s Roar Promise</h4>
       <p>Before bed, Eli whispered,</p>
       <blockquote>
         “My voice is strong, my heart is wide.<br>
@@ -71,29 +91,38 @@
         I try with courage every day.<br>
         My lion grows with what I say.”</blockquote>
     
-      <h3>🌟 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>🌟 Reflect & Inspire</h4>
       <ul>
         <li>When do you feel your Brave Voice trying to speak?</li>
         <li>What’s one thing you did today that made your lion grow stronger?</li>
         <li>Can you remember a time you tried even if you felt nervous?</li>
         <li>How can you help someone else feel confident too?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day15.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 15</span></a><a href="./Day17.html" class="next"><span><span class="nav-sub">Next</span>Day 17</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
