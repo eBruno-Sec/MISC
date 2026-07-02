@@ -15,8 +15,8 @@
     .day-label { color: #a78bfa; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(167,139,250,0.13);
-      border: 3px solid #a78bfa44;
+      background: #a78bfa22;
+      border: 3px solid #a78bfa55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #a78bfa; background: #a78bfa18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,28 +67,83 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🦋</div>
-      <span class="day-label">Day 4</span>
+      <span class="day-label">DAY 4</span>
       <h1>Kaito and the Words That Made Him Fly</h1>
       <div class="theme-pills"><span class="theme-pill">Family Support</span><span class="theme-pill">Confidence</span><span class="theme-pill">Feedback</span><span class="theme-pill">Emotional Strength</span><span class="theme-pill">Motivation to Win</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>One evening, Kaito sat quietly on the floor, lacing up his practice shoes. His tournament was only a week away, but his heart felt heavy.</p>
+        <p>His mom noticed.<br>“You okay, sweetheart?”</p>
+        <p>Kaito shrugged. “I don’t know if I can win. Everyone’s expecting it now…”</p>
+        <p>His dad knelt beside him. “Do you want to know something? Winning doesn’t come from your muscles. It comes from the words you carry with you.”</p>
+        <p>Kaito looked up. “Words?”</p>
+        <p>His little sister ran over, clutching her favorite plushie. “I believe in you, Kaito! You kick fast like a dragon!”</p>
+        <p>Kaito smiled for the first time that day.</p>
+      
+        
+        <p>That night, Kaito’s family gathered around the dinner table.</p>
+        <p>His mom passed him rice and said,<br>“Whether you win or lose, we’re already proud. But we believe you can do it—because of how hard you try.”</p>
+        <p>His grandpa, who once trained in judo, said,<br>“You have the spirit of a warrior. Just remember: Never let fear decide your moves.”</p>
+        <p>Kaito’s older cousin added,<br>“You’ve already inspired your little sister. Now inspire yourself.”</p>
+        <p>Kaito didn’t say much. But inside, something stirred. A warmth. A quiet flame.</p>
+      
+        
+        <p>At training the next day, Master Enso watched Kaito more closely.</p>
+        <p>“You’re faster today,” he said.</p>
+        <p>“I’m carrying something,” Kaito replied, thinking of the words from his family.</p>
+        <p>“Good,” said Master Enso. “Real warriors don’t fight alone. They carry belief from their tribe.”</p>
+        <p>Kaito trained harder that day—not to prove something, but to become something.</p>
+      
+        
+        <p>Two days before the tournament, Kaito opened his backpack and found a folded piece of paper. It was a letter from his mom.</p>
+        <p><em>Dear Kaito,</em></p>
+        <p>I know you’ll be nervous. That’s okay.</p>
+        <p>Just remember—you are not alone on that mat.</p>
+        <p>You carry our love with every step.</p>
+        <p>You trained hard. You gave your all. That’s already a win.</p>
+        <p>Now go be brave. Go be YOU.</p>
+        <p>Love,<br>Mom</p>
+        <p>Kaito held the letter to his heart.</p>
+      
+        
+        <p>The day came. The Spring Martial Arts Tournament.</p>
+        <p>Kaito stood on the mat. His heart thumped. His opponent looked taller. Stronger.</p>
+        <p>Then he remembered:</p>
+        <ul>
+          <li>“I believe in you, Kaito!”</li>
+          <li>“Whether you win or lose, we’re proud.”</li>
+          <li>“Never let fear decide your moves.”</li>
+        </ul>
+        <p>The crowd faded.</p>
+        <p>His body moved like a stream. Calm. Sharp. Focused.</p>
+        <p>Round one—Kaito won. Round two—tie. Final round—close match.</p>
+        <p>Last second. One opening.</p>
+        <p><strong>KICK!</strong></p>
+        <p>Kaito landed it. The ref raised his hand.</p>
+        <p>He had won.</p>
+      
+        
         <p>Back at home, his family didn’t cheer wildly. They didn’t shout.</p>
         <p>They hugged him.</p>
         <p>“You did it!” said his sister.</p>
         <p>“But not just because you won,” said his dad. “You did it because you trusted yourself.”</p>
         <p>His mom kissed his forehead. “You remembered our words. You carried us in your heart. And we carried you from home.”</p>
       
-        </div><div class="chapter"><h4>🌙 Sleep-Time Reflection (Soft Whisper Together)</h4>
+        
         <ul>
           <li>“I am never alone when I try my best.”</li>
           <li>“My family’s love is with me—even in the hardest moments.”</li>
           <li>“Their belief makes me stronger.”</li>
           <li>“And I will make them proud… by never giving up.”</li>
-        </ul></div>
-        <p>Close your eyes, little warrior.<br>Let those words stay warm in your chest.<br>Tomorrow, you rise again—with your family behind you, and your dream ahead.</p></div>
+        </ul>
+        <p>Close your eyes, little warrior.<br>Let those words stay warm in your chest.<br>Tomorrow, you rise again—with your family behind you, and your dream ahead.</p>
     </div>
 
     <div class="story-nav"><a href="./Day3.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 3</span></a><a href="./Day5.html" class="next"><span><span class="nav-sub">Next</span>Day 5</span> →</a></div>
@@ -94,14 +155,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
