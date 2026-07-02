@@ -1,17 +1,41 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Dream That Built the Stars – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #ffe066; }
+    .chapter h4 { color: #ffe066; }
+    .story-header h1 { color: #ffe066; text-shadow: 0 3px 20px #ffe06655; }
+    .day-label { color: #ffe066; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(255,224,102,0.12);
+      border: 3px solid #ffe06644;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #ffe066; background: #ffe06618; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
-        <a href="./Day2.html">Day 2</a>
+        <a href="./Day2.html" class="active">Day 2</a>
         <a href="./Day3.html">Day 3</a>
         <a href="./Day4.html">Day 4</a>
         <a href="./Day5.html">Day 5</a>
@@ -30,29 +54,21 @@
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-      <h2>Day 2: The Dream That Built the Stars</h2>
-      <p><strong>Theme:</strong> Calmness, Wonder, Inner Peace, Big Dreams, Bedtime Routine</p>
-    
-      <h3>🐻 Chapter 1: The Sleepy Bear and the Wishing Sky</h3>
-      <p>In a quiet valley surrounded by silver mountains lived a little bear named Bodhi. He loved one thing more than honey, more than adventures—even more than splashing in the river.</p>
-      <p>He loved the stars.</p>
-      <p>Every night, Bodhi would climb to the top of a hill, wrap himself in his soft blanket, and whisper to the sky:</p>
-      <p>“I wonder who lights the stars…”</p>
-      <p>One evening, his Grandbear tucked him into his leaf-bed and said, “If you listen closely, the stars will whisper back in dreams.”</p>
-      <p>That night, Bodhi closed his eyes.</p>
-    
-      <h3>🌌 Chapter 2: A Visitor from the Sky</h3>
-      <p>As he drifted off, the wind wrapped around him like a lullaby. A gentle light blinked beside him.</p>
-      <p>It was a glowing creature—a Starfox—with eyes like galaxies and a tail made of moonlight.</p>
-      <p>“Bodhi,” she said kindly, “you’ve been invited to the Dreammakers’ Garden.”</p>
-      <p>Bodhi blinked sleepily. “What’s that?”</p>
-      <p>“It’s where dreams grow into stars.”</p>
-    
-      <h3>🌿 Chapter 3: The Garden of Dreams</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">⭐</div>
+      <span class="day-label">Day 2</span>
+      <h1>The Dream That Built the Stars</h1>
+      <div class="theme-pills"><span class="theme-pill">Calmness</span><span class="theme-pill">Wonder</span><span class="theme-pill">Inner Peace</span><span class="theme-pill">Big Dreams</span><span class="theme-pill">Bedtime Routine</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>The Starfox led him through the night sky. They floated past the moon, dipped behind clouds, and arrived at a peaceful garden filled with soft lights.</p>
       <p>Each plant shimmered and swayed with gentle, glowing dreams.</p>
       <p>“This,” the Starfox said, “is where all children’s dreams are planted. The calm ones become stars. The joyful ones become comets.”</p>
@@ -61,54 +77,53 @@
         <li>“I want to help others.”</li>
         <li>“I hope to fly one day.”</li>
         <li>“I want to love who I am.”</li>
-      </ul>
+      </ul></div>
       <p>He smiled. “They're beautiful.”</p>
     
-      <h3>🕊️ Chapter 4: The Gentle Dream</h3>
-      <p>The Starfox turned to Bodhi. “You haven’t planted your dream yet.”</p>
-      <p>“I don’t know what to dream,” Bodhi said.</p>
-      <p>The Starfox nodded. “Then I’ll teach you how to listen.”</p>
-      <p>They sat by a dream-lake, silent and still. Bodhi breathed deeply. In… out… in… out...</p>
-      <p>A warm feeling filled his chest.</p>
-      <p>“I just want peace,” he said softly. “For everyone.”</p>
-      <p>The Starfox beamed. “That’s the purest dream of all.”</p>
-      <p>She gently pressed a tiny glowing seed into his paw.</p>
-    
-      <h3>✨ Chapter 5: A New Star is Born</h3>
+      </div><div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>Bodhi planted the seed.</p>
       <p>It glowed a gentle golden color, warmer than any light he’d seen. Slowly, it rose into the sky, higher and higher, and became a new star.</p>
       <p>The other stars twinkled in delight.</p>
       <p>“That one is yours,” the Starfox whispered. “Whenever you feel scared or small, look up. It’s still growing—just like you.”</p>
     
-      <h3>🛏️ Chapter 6: Back in the Cozy Bed</h3>
+      </div><div class="chapter"><h4>🛏️ Chapter 6: Back in the Cozy Bed</h4>
       <p>Bodhi blinked, and he was back in his bed.</p>
       <p>Grandbear kissed his forehead. “Sleep well, little star-builder.”</p>
       <p>Outside the window, Bodhi saw a new light in the sky. It twinkled gently, like a lullaby in the distance.</p>
       <p>He whispered, “Thank you,” and smiled as sleep took him gently in its arms.</p>
     
-      <h3>🌙 Nighttime Reflection (read in a soft voice)</h3>
+      </div><div class="chapter"><h4>🌙 Nighttime Reflection (read in a soft voice)</h4>
       <ul>
         <li>Let’s take a deep breath together. <em>Inhale through your nose… and exhale slowly.</em> Feel your heart calm down. You’re safe. You’re loved.</li>
         <li>What kind of dream would you plant in the Garden of Dreams?</li>
         <li>Remember: <strong>every time you rest, your body grows, your mind heals, and your heart learns.</strong></li>
         <li>The stars are watching over you tonight—especially the one you helped create.</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day1.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 1</span></a><a href="./Day3.html" class="next"><span><span class="nav-sub">Next</span>Day 3</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
