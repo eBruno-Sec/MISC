@@ -15,8 +15,8 @@
     .day-label { color: #ff6b6b; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(255,107,107,0.13);
-      border: 3px solid #ff6b6b44;
+      background: #ff6b6b22;
+      border: 3px solid #ff6b6b55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #ff6b6b; background: #ff6b6b18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,23 +67,44 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🧱</div>
-      <span class="day-label">Day 20</span>
+      <span class="day-label">DAY 20</span>
       <h1>Niko and the Falling Tower</h1>
       <div class="theme-pills"><span class="theme-pill">Resilience</span><span class="theme-pill">Growth Mindset</span><span class="theme-pill">Grit</span><span class="theme-pill">Learning from Mistakes</span><span class="theme-pill">Self-Compassion</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Niko loved building with blocks. He wanted to build the tallest tower ever—taller than the table, taller than the dog, even taller than his own head!</p>
+      <p>He carefully stacked one block, then two, then three. He was so proud… until—</p>
+      <p>CRASH! The tower fell. Pieces flew everywhere.</p>
+      <p>Niko sat still. His eyes filled with tears. “I ruined it,” he whispered.</p>
+    
+      
+      <p>His mom came over and sat beside him. She didn’t fix the tower. She didn’t scold him. She just held his hand.</p>
+      <p>“It’s okay to be sad,” she said softly. “But this isn’t the end. This is your beginning.”</p>
+      <p>“But it broke,” Niko sniffled.</p>
+      <p>“It means you tried something big. That’s braver than most people.”</p>
+    
+      
+      <p>After a few deep breaths, Niko looked at his blocks. He started stacking again. Slower this time. Smarter.</p>
+      <p>He tried a wider base. He placed heavier blocks at the bottom. He made adjustments.</p>
+      <p>The tower grew again. This time, taller than before.</p>
+    
+      
       <p>That night, Niko told his dad, “I built it again. It fell the first time, but I figured out why.”</p>
       <p>His dad smiled. “Mistakes are the best teachers, Niko. You didn’t fail—you learned.”</p>
       <p>“Next time,” Niko said, “I’m going to build it even stronger.”</p>
     
-      </div><div class="chapter"><h4>🏗️ Chapter 5: The Builder’s Heart</h4>
+      
       <p>From that day on, Niko was proud of every try—even the messy ones. He knew each attempt made him wiser, steadier, and stronger inside.</p>
       <p>He became not just a builder of towers—but a builder of courage, too.</p>
     
-      </div><div class="chapter"><h4>🧠 Chapter 6: Niko’s Builder Promise</h4>
+      
       <p>Before bed, Niko whispered,</p>
       <blockquote>
         “If I fall, I’ll rise again.<br>
@@ -85,13 +112,13 @@
         I will try, learn, and never quit—<br>
         My heart is strong, and I won’t sit.”</blockquote>
     
-      </div><div class="chapter"><h4>🪜 Reflect & Inspire</h4>
+      
       <ul>
         <li>Have you ever felt upset when something didn’t work out?</li>
         <li>What helped you calm down and try again?</li>
         <li>What can you learn from making a mistake?</li>
         <li>What’s something big you want to try, even if it takes a few tries?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day19.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 19</span></a></div>
@@ -103,14 +130,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
