@@ -15,8 +15,8 @@
     .day-label { color: #c084fc; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(192,132,252,0.13);
-      border: 3px solid #c084fc44;
+      background: #c084fc22;
+      border: 3px solid #c084fc55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #c084fc; background: #c084fc18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,14 +67,29 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">⚡</div>
-      <span class="day-label">Day 10</span>
+      <span class="day-label">DAY 10</span>
       <h1>Eli and the Storm Inside</h1>
       <div class="theme-pills"><span class="theme-pill">Self-Kindness</span><span class="theme-pill">Emotional Regulation</span><span class="theme-pill">Safe Expression</span><span class="theme-pill">Inner Strength</span><span class="theme-pill">Growing Through Struggles</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Eli was a boy full of energy and heart. But some days, when he felt angry or sad, his feelings felt too big to hold.</p>
+      <p>One afternoon, his tower of blocks fell right before he finished it. Eli clenched his fists, kicked the wall, and hit his hand on the floor.</p>
+      <p>“Why can’t I do anything right?” he shouted.</p>
+      <p>His hand turned red, and he sat on the ground, sniffling. The pain didn’t make him feel better—it made him feel worse.</p>
+    
+      
+      <p>Later, Mom sat with him on the couch. “Sometimes when our feelings are too big, it feels like there’s a storm cloud inside us,” she said.</p>
+      <p>“I didn’t know what to do,” Eli mumbled. “I just wanted the feeling to go away.”</p>
+      <p>“It’s okay to feel big things,” Mom said, hugging him. “But hurting your body is not the way to help your heart.”</p>
+    
+      
       <p>Mom brought out a small wooden box. Inside were soft items—squeeze balls, crayons, paper, a picture of Eli smiling, and a list titled “My Safe Ways.”</p>
       <p>“This is your Safe Box,” she explained. “When you feel like hurting, choose one of these instead.”</p>
       <ul>
@@ -76,10 +97,21 @@
         <li>Rip paper and throw it in a basket</li>
         <li>Draw your feelings</li>
         <li>Hug a pillow or talk to someone you love</li>
-      </ul></div>
+      </ul>
       <p>Eli looked through the items, then picked up the ball and squeezed it hard. His face relaxed. “It helps,” he whispered.</p>
     
-      </div><div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+      <p>That week, Eli tried something new. When he felt angry, he paused. He squeezed his ball, drew a red scribble on paper, and took deep breaths.</p>
+      <p>Every time he chose a safe way, the storm inside got a little smaller. His brain felt clearer. His hands stayed safe.</p>
+      <p>One day, his brother knocked over his drawing by accident. Eli stood still, breathing deep.</p>
+      <p>“I’m mad,” he said, “but I’m going to calm down instead of hitting.”</p>
+    
+      
+      <p>Eli learned that feelings don’t last forever—but hurting himself could leave a mark.</p>
+      <p>His hands weren’t for pain. They were for drawing, building, helping, and hugging.</p>
+      <p>And every time he made a strong choice, his heart grew stronger too.</p>
+    
+      
       <p>That night, Eli looked at his hands and whispered,</p>
       <blockquote>
         “These hands are for good.<br>
@@ -88,13 +120,13 @@
         I am safe, strong, and kind.” 
       </blockquote>
     
-      </div><div class="chapter"><h4>🌈 Reflect & Inspire</h4>
+      
       <ul>
         <li>What do you feel in your body when you’re really mad or upset?</li>
         <li>Can you name a “safe way” you like best from Eli’s Safe Box?</li>
         <li>What is something kind your hands can do tomorrow?</li>
         <li>How does it feel when you stay calm and protect your body?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day9.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 9</span></a><a href="./Day11.html" class="next"><span><span class="nav-sub">Next</span>Day 11</span> →</a></div>
@@ -106,14 +138,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
