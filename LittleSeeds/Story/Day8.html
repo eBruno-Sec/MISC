@@ -15,8 +15,8 @@
     .day-label { color: #fbbf24; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(251,191,36,0.13);
-      border: 3px solid #fbbf2444;
+      background: #fbbf2422;
+      border: 3px solid #fbbf2455;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #fbbf24; background: #fbbf2418; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,20 +67,44 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">⏰</div>
-      <span class="day-label">Day 8</span>
+      <span class="day-label">DAY 8</span>
       <h1>Milo and the Race Against Later</h1>
       <div class="theme-pills"><span class="theme-pill">Sense of Urgency</span><span class="theme-pill">Time Management</span><span class="theme-pill">Motivation</span><span class="theme-pill">Focus</span><span class="theme-pill">Action</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Milo was a smart boy who loved building things with blocks and racing his toy cars. But there was one thing Milo always said:</p>
+      <p>“I’ll do it later.”</p>
+      <p>Whether it was cleaning up his toys, brushing his teeth, or getting dressed, Milo always delayed.</p>
+      <p>“Later,” he said, lying on the couch. “There’s still time.”</p>
+    
+      
+      <p>One day, Milo’s big cousin Jake came over to invite him to the park. “There’s a rocket-building contest! It starts in one hour!”</p>
+      <p>Milo jumped up, excited. “Yes! Let me just finish my cartoon first.”</p>
+      <p>Thirty minutes passed. Then ten more. By the time Milo started packing, the clock struck the hour.</p>
+      <p>Jake shook his head. “We’re too late. The contest already started.”</p>
+      <p>Milo’s heart dropped. He had missed something amazing—because of “later.”</p>
+    
+      
+      <p>That night, Dad gave Milo a small wooden toolbox. “Want to learn a secret?”</p>
+      <p>Milo nodded. Dad opened the box. Inside were three tools labeled: **Now**, **Next**, and **Later**.</p>
+      <p>“Use these tools every day,” Dad explained. “When something is important, use the ‘Now’ tool. When you plan what comes after, use ‘Next.’ And only save little things for ‘Later.’”</p>
+      <p>“Like magic?” Milo asked.</p>
+      <p>Dad smiled. “Like focus.”</p>
+    
+      
       <p>The next morning, Milo tried using the “Now” tool first. He made his bed right away. Then he brushed his teeth and put on his clothes—fast and proud.</p>
       <p>“That took only ten minutes!” Milo shouted. “Now I have more time to play!”</p>
       <p>He used the “Next” tool to plan his school bag and the “Later” tool to save drawing time for the evening.</p>
       <p>His day felt lighter. He didn’t forget anything, and he wasn’t rushing. He was ready before the school bell rang.</p>
     
-      </div><div class="chapter"><h4>⛅ Chapter 5: The Lost Kite</h4>
+      
       <p>One afternoon, a strong wind picked up outside. Milo remembered his kite.</p>
       <p>“I’ll fly it later,” he said.</p>
       <p>But then he paused. What if the wind stopped?</p>
@@ -83,7 +113,7 @@
       <p>Then... the wind stopped.</p>
       <p>He smiled. “Good thing I didn’t wait.”</p>
     
-      </div><div class="chapter"><h4>🧠 Chapter 6: Milo’s Fast Mind</h4>
+      
       <p>Now Milo became known for doing things right away. He even helped his little sister when she needed help with her puzzle.</p>
       <p>“Later is okay,” he said, “but now is powerful.”</p>
       <p>Before bed, Milo held his toolbox and whispered his new promise.</p>
@@ -93,13 +123,13 @@
         I will use my time like gold.” 
       </blockquote>
     
-      </div><div class="chapter"><h4>⏳ Reflect & Inspire</h4>
+      
       <ul>
         <li>What is something important that you sometimes wait too long to do?</li>
         <li>How do you feel when you finish something quickly and early?</li>
         <li>Can you make your own “Now, Next, Later” list for tomorrow?</li>
         <li>What is something fun you might miss if you say “later” too often?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day7.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 7</span></a><a href="./Day9.html" class="next"><span><span class="nav-sub">Next</span>Day 9</span> →</a></div>
@@ -111,14 +141,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
