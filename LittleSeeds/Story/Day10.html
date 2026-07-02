@@ -1,15 +1,39 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eli and the Storm Inside – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #c084fc; }
+    .chapter h4 { color: #c084fc; }
+    .story-header h1 { color: #c084fc; text-shadow: 0 3px 20px #c084fc55; }
+    .day-label { color: #c084fc; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(192,132,252,0.13);
+      border: 3px solid #c084fc44;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #c084fc; background: #c084fc18; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
@@ -19,7 +43,7 @@
         <a href="./Day7.html">Day 7</a>
         <a href="./Day8.html">Day 8</a>
         <a href="./Day9.html">Day 9</a>
-        <a href="./Day10.html">Day 10</a>
+        <a href="./Day10.html" class="active">Day 10</a>
         <a href="./Day11.html">Day 11</a>
         <a href="./Day12.html">Day 12</a>
         <a href="./Day13.html">Day 13</a>
@@ -30,25 +54,21 @@
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-      <h2>Day 10: Eli and the Storm Inside</h2>
-      <p><strong>Theme:</strong> Self-Kindness, Emotional Regulation, Safe Expression, Inner Strength, Growing Through Struggles</p>
-    
-      <h3>💥 Chapter 1: The Stomp and the Slam</h3>
-      <p>Eli was a boy full of energy and heart. But some days, when he felt angry or sad, his feelings felt too big to hold.</p>
-      <p>One afternoon, his tower of blocks fell right before he finished it. Eli clenched his fists, kicked the wall, and hit his hand on the floor.</p>
-      <p>“Why can’t I do anything right?” he shouted.</p>
-      <p>His hand turned red, and he sat on the ground, sniffling. The pain didn’t make him feel better—it made him feel worse.</p>
-    
-      <h3>🌧️ Chapter 2: The Storm Cloud</h3>
-      <p>Later, Mom sat with him on the couch. “Sometimes when our feelings are too big, it feels like there’s a storm cloud inside us,” she said.</p>
-      <p>“I didn’t know what to do,” Eli mumbled. “I just wanted the feeling to go away.”</p>
-      <p>“It’s okay to feel big things,” Mom said, hugging him. “But hurting your body is not the way to help your heart.”</p>
-    
-      <h3>🧰 Chapter 3: The Safe Box</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">⚡</div>
+      <span class="day-label">Day 10</span>
+      <h1>Eli and the Storm Inside</h1>
+      <div class="theme-pills"><span class="theme-pill">Self-Kindness</span><span class="theme-pill">Emotional Regulation</span><span class="theme-pill">Safe Expression</span><span class="theme-pill">Inner Strength</span><span class="theme-pill">Growing Through Struggles</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>Mom brought out a small wooden box. Inside were soft items—squeeze balls, crayons, paper, a picture of Eli smiling, and a list titled “My Safe Ways.”</p>
       <p>“This is your Safe Box,” she explained. “When you feel like hurting, choose one of these instead.”</p>
       <ul>
@@ -56,21 +76,10 @@
         <li>Rip paper and throw it in a basket</li>
         <li>Draw your feelings</li>
         <li>Hug a pillow or talk to someone you love</li>
-      </ul>
+      </ul></div>
       <p>Eli looked through the items, then picked up the ball and squeezed it hard. His face relaxed. “It helps,” he whispered.</p>
     
-      <h3>🧠 Chapter 4: The Brave Brain</h3>
-      <p>That week, Eli tried something new. When he felt angry, he paused. He squeezed his ball, drew a red scribble on paper, and took deep breaths.</p>
-      <p>Every time he chose a safe way, the storm inside got a little smaller. His brain felt clearer. His hands stayed safe.</p>
-      <p>One day, his brother knocked over his drawing by accident. Eli stood still, breathing deep.</p>
-      <p>“I’m mad,” he said, “but I’m going to calm down instead of hitting.”</p>
-    
-      <h3>🌱 Chapter 5: Healing Hands</h3>
-      <p>Eli learned that feelings don’t last forever—but hurting himself could leave a mark.</p>
-      <p>His hands weren’t for pain. They were for drawing, building, helping, and hugging.</p>
-      <p>And every time he made a strong choice, his heart grew stronger too.</p>
-    
-      <h3>🌙 Chapter 6: Eli’s Heart Promise</h3>
+      </div><div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>That night, Eli looked at his hands and whispered,</p>
       <blockquote>
         “These hands are for good.<br>
@@ -79,29 +88,38 @@
         I am safe, strong, and kind.” 
       </blockquote>
     
-      <h3>🌈 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>🌈 Reflect & Inspire</h4>
       <ul>
         <li>What do you feel in your body when you’re really mad or upset?</li>
         <li>Can you name a “safe way” you like best from Eli’s Safe Box?</li>
         <li>What is something kind your hands can do tomorrow?</li>
         <li>How does it feel when you stay calm and protect your body?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day9.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 9</span></a><a href="./Day11.html" class="next"><span><span class="nav-sub">Next</span>Day 11</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
