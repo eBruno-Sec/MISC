@@ -15,8 +15,8 @@
     .day-label { color: #4caf7d; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(76,175,125,0.13);
-      border: 3px solid #4caf7d44;
+      background: #4caf7d22;
+      border: 3px solid #4caf7d55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #4caf7d; background: #4caf7d18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,14 +67,43 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🤝</div>
-      <span class="day-label">Day 17</span>
+      <span class="day-label">DAY 17</span>
       <h1>Zane and the Circle of Good Friends</h1>
       <div class="theme-pills"><span class="theme-pill">Friendship</span><span class="theme-pill">Respect</span><span class="theme-pill">Trust</span><span class="theme-pill">Values</span><span class="theme-pill">Choosing the Right People</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Zane was excited to make friends at his new school. He noticed a group of kids who laughed loudly, played rough, and made fun of others when teachers weren’t looking.</p>
+      <p>“They’re cool,” Zane thought. “Maybe if I join them, I’ll be cool too.”</p>
+      <p>But something didn’t feel right in his belly. He watched them more carefully.</p>
+    
+      
+      <p>One day, Zane saw them push a quiet kid out of the lunch line. He felt his heart beat faster, like it was warning him.</p>
+      <p>Later at home, he told his mom, “They’re fun… but mean sometimes. I don’t like it.”</p>
+      <p>She nodded, “That’s your inner compass. It helps you choose friends who treat others well—and who treat you well too.”</p>
+    
+      
+      <p>The next day, Zane sat near a quiet table. One boy smiled and said, “Hi, I’m Amir. Want to draw with us?”</p>
+      <p>They laughed gently, shared markers, and helped each other fix mistakes. Nobody got teased. Nobody was left out.</p>
+      <p>It felt calm. It felt good. It felt… right.</p>
+    
+      
+      <p>That night, Zane asked, “Mom, how do I know if someone’s a good friend?”</p>
+      <p>She replied, “Good friends make you feel safe, seen, and strong. And being a good friend means you help others feel that too.”</p>
+      <p>Zane nodded. “So I don’t have to try to be cool?”</p>
+      <p>“Nope,” she smiled. “Just be kind, be real, and you’ll find your circle.”</p>
+    
+      
+      <p>Over time, Zane’s new group grew. More kind kids joined. They played fair, shared ideas, and looked out for each other.</p>
+      <p>Zane felt strong—not because he followed others, but because he followed what was right.</p>
+    
+      
       <p>Before bed, Zane whispered,</p>
       <blockquote>
         “I choose friends who lift me high,<br>
@@ -76,13 +111,13 @@
         I will be kind, honest, and true—<br>
         And choose the best in what I do.”</blockquote>
     
-      </div><div class="chapter"><h4>🌻 Reflect & Inspire</h4>
+      
       <ul>
         <li>What makes someone a good friend?</li>
         <li>How do you feel around people who are kind and respectful?</li>
         <li>Have you ever felt uncomfortable with how someone treated others?</li>
         <li>How can you be the kind of friend you’d want to have?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day16.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 16</span></a><a href="./Day18.html" class="next"><span><span class="nav-sub">Next</span>Day 18</span> →</a></div>
@@ -94,14 +129,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
