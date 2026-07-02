@@ -15,8 +15,8 @@
     .day-label { color: #f43f5e; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(244,63,94,0.13);
-      border: 3px solid #f43f5e44;
+      background: #f43f5e22;
+      border: 3px solid #f43f5e55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #f43f5e; background: #f43f5e18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,28 +67,42 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🥋</div>
-      <span class="day-label">Day 14</span>
+      <span class="day-label">DAY 14</span>
       <h1>Kai and the Practice Path</h1>
       <div class="theme-pills"><span class="theme-pill">Discipline</span><span class="theme-pill">Passion</span><span class="theme-pill">Mastery</span><span class="theme-pill">Effort</span><span class="theme-pill">Growth</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Kai had two big dreams: to be a black belt in martial arts and to play beautiful songs on the piano. But some days, his body felt lazy and his fingers wanted to quit.</p>
+      <p>“I don’t want to practice,” he mumbled one afternoon. “It’s hard. And boring.”</p>
+      <p>His teacher gently replied, “Kai, the ones who shine bright are the ones who sweat with effort when no one is watching.”</p>
+    
+      
+      <p>That evening, Kai visited the dojo’s back wall. Pictures of champions—smiling, proud, strong—looked down at him.</p>
+      <p>“They practiced every day,” said his Sensei. “Even when it was hard. That’s why they’re up there.”</p>
+      <p>At home, he stared at his piano keys. “What if I played like a champion?”</p>
+    
+      
       <p>Kai closed his eyes. He imagined himself on stage, playing a song that made people cry. He saw himself doing a perfect spin kick while a crowd cheered.</p>
       <p>His heart raced. “Maybe I can become that good,” he whispered.</p>
       <p>So, he began. One kick at a time. One note at a time. With full power.</p>
     
-      </div><div class="chapter"><h4>💦 Chapter 4: 100% Power</h4>
+      
       <p>Each day, Kai gave his best—even if he only practiced for 15 minutes. His sweat felt like trophies. His hands got stronger. His music became smoother.</p>
       <p>“I’m not just practicing,” he said. “I’m training to be great.”</p>
     
-      </div><div class="chapter"><h4>🌟 Chapter 5: A New Feeling</h4>
+      
       <p>After weeks of effort, something changed. Practice felt exciting. His body moved faster. His fingers danced on keys.</p>
       <p>And when his teacher smiled and said, “I’m proud of you,” Kai grinned wide.</p>
       <p>“This is what champions feel like.”</p>
     
-      </div><div class="chapter"><h4>🧘‍♂️ Chapter 6: Kai’s Champion Promise</h4>
+      
       <p>Before bed, Kai whispered,</p>
       <blockquote>
         “I train with heart, with power, with pride.<br>
@@ -90,13 +110,13 @@
         Practice is my path to the best me.<br>
         I will rise, and the world will see.”</blockquote>
     
-      </div><div class="chapter"><h4>🥁 Reflect & Inspire</h4>
+      
       <ul>
         <li>What would happen if you practiced with 100% energy for just 10 minutes?</li>
         <li>Who do you want to become—on the mat or on the piano bench?</li>
         <li>How does it feel when you give your full effort?</li>
         <li>What can you do tomorrow to take one step toward greatness?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day13.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 13</span></a><a href="./Day15.html" class="next"><span><span class="nav-sub">Next</span>Day 15</span> →</a></div>
@@ -108,14 +128,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
