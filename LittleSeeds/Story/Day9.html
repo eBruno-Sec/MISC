@@ -15,8 +15,8 @@
     .day-label { color: #60a5fa; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(96,165,250,0.13);
-      border: 3px solid #60a5fa44;
+      background: #60a5fa22;
+      border: 3px solid #60a5fa55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #60a5fa; background: #60a5fa18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,24 +67,52 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🖊️</div>
-      <span class="day-label">Day 9</span>
+      <span class="day-label">DAY 9</span>
       <h1>Jonah and the Broken Pen</h1>
       <div class="theme-pills"><span class="theme-pill">Emotional Strength</span><span class="theme-pill">Calming Down</span><span class="theme-pill">Resilience</span><span class="theme-pill">Self-Regulation</span><span class="theme-pill">Problem Solving</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Jonah had a blue pen he loved more than any other. He used it for drawing, writing, and even signing pretend autographs.</p>
+      <p>It wasn’t just any pen—it was his “lucky pen.” He felt strong and smart when he held it.</p>
+      <p>One day, while trying to draw a racing car really fast, Jonah pressed too hard. *Snap!* The pen cracked in half.</p>
+      <p>“NOOO!” Jonah shouted. His heart sank. Tears filled his eyes, and he threw the broken pen on the floor.</p>
+    
+      
+      <p>Jonah sat on the carpet, arms crossed, frowning. “This is the worst day ever,” he mumbled.</p>
+      <p>His little brother, Eli, tried to bring him a crayon. “Go away!” Jonah snapped.</p>
+      <p>Mom sat beside him. “It’s okay to feel sad. But you don’t have to stay stuck there.”</p>
+      <p>“But my pen is ruined,” Jonah sniffed.</p>
+      <p>“Let’s teach your brain a magic trick,” Mom whispered.</p>
+    
+      
+      <p>Mom showed Jonah a quiet code: **Stop. Breathe. Think. Try.**</p>
+      <ul>
+        <li><strong>Stop</strong> moving and freeze like a statue.</li>
+        <li><strong>Breathe</strong> in slowly, then out.</li>
+        <li><strong>Think</strong> about what happened—and how to fix it.</li>
+        <li><strong>Try</strong> something that makes it better.</li>
+      </ul>
+      <p>Jonah tried. He sat still. He took a slow breath. Then another.</p>
+      <p>His shoulders relaxed. His heart beat softer. “I feel... okay,” he said quietly.</p>
+    
+      
       <p>Jonah got an idea. He taped the pen together and made a label that read: “Battle Pen – Wounded but Brave.”</p>
       <p>Then he got another pen from his drawer—one he had ignored before. “This one still works,” he said.</p>
       <p>He gave Eli a high five. “Wanna draw with me?”</p>
     
-      </div><div class="chapter"><h4>🌟 Chapter 5: Stronger Than a Pen</h4>
+      
       <p>Jonah didn’t forget the pen breaking—but he learned something more important.</p>
       <p>He could feel big emotions… and calm them down.</p>
       <p>He wasn’t a cry-baby. He was growing braver, smarter, and stronger.</p>
     
-      </div><div class="chapter"><h4>🛏️ Chapter 6: Jonah’s Quiet Power</h4>
+      
       <p>That night, Jonah whispered the Calm-Down Code again:</p>
       <blockquote>
         “Stop. Breathe. Think. Try.<br>
@@ -86,13 +120,13 @@
         I am calm, clever, and in control.” 
       </blockquote>
     
-      </div><div class="chapter"><h4>🌈 Reflect & Inspire</h4>
+      
       <ul>
         <li>Can you remember the Calm-Down Code: Stop, Breathe, Think, Try?</li>
         <li>What do you feel in your body when you're upset?</li>
         <li>What helps you feel calm again?</li>
         <li>How do you feel after calming down instead of staying upset?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day8.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 8</span></a><a href="./Day10.html" class="next"><span><span class="nav-sub">Next</span>Day 10</span> →</a></div>
@@ -104,14 +138,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
