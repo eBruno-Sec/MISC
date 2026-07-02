@@ -1,19 +1,43 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kaito and the Words That Made Him Fly – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #a78bfa; }
+    .chapter h4 { color: #a78bfa; }
+    .story-header h1 { color: #a78bfa; text-shadow: 0 3px 20px #a78bfa55; }
+    .day-label { color: #a78bfa; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(167,139,250,0.13);
+      border: 3px solid #a78bfa44;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #a78bfa; background: #a78bfa18; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
-        <a href="./Day4.html">Day 4</a>
+        <a href="./Day4.html" class="active">Day 4</a>
         <a href="./Day5.html">Day 5</a>
         <a href="./Day6.html">Day 6</a>
         <a href="./Day7.html">Day 7</a>
@@ -30,94 +54,60 @@
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    
-    <div class="page">
-        <h2>Day 4: Kaito and the Words That Made Him Fly</h2>
-        <p><strong>Theme:</strong> Family Support, Confidence, Feedback, Emotional Strength, Motivation to Win</p>
-      
-        <h3>🏠 Chapter 1: The Living Room Talk</h3>
-        <p>One evening, Kaito sat quietly on the floor, lacing up his practice shoes. His tournament was only a week away, but his heart felt heavy.</p>
-        <p>His mom noticed.<br>“You okay, sweetheart?”</p>
-        <p>Kaito shrugged. “I don’t know if I can win. Everyone’s expecting it now…”</p>
-        <p>His dad knelt beside him. “Do you want to know something? Winning doesn’t come from your muscles. It comes from the words you carry with you.”</p>
-        <p>Kaito looked up. “Words?”</p>
-        <p>His little sister ran over, clutching her favorite plushie. “I believe in you, Kaito! You kick fast like a dragon!”</p>
-        <p>Kaito smiled for the first time that day.</p>
-      
-        <h3>💬 Chapter 2: The Words Begin</h3>
-        <p>That night, Kaito’s family gathered around the dinner table.</p>
-        <p>His mom passed him rice and said,<br>“Whether you win or lose, we’re already proud. But we believe you can do it—because of how hard you try.”</p>
-        <p>His grandpa, who once trained in judo, said,<br>“You have the spirit of a warrior. Just remember: Never let fear decide your moves.”</p>
-        <p>Kaito’s older cousin added,<br>“You’ve already inspired your little sister. Now inspire yourself.”</p>
-        <p>Kaito didn’t say much. But inside, something stirred. A warmth. A quiet flame.</p>
-      
-        <h3>🧘‍♂️ Chapter 3: Practice with Purpose</h3>
-        <p>At training the next day, Master Enso watched Kaito more closely.</p>
-        <p>“You’re faster today,” he said.</p>
-        <p>“I’m carrying something,” Kaito replied, thinking of the words from his family.</p>
-        <p>“Good,” said Master Enso. “Real warriors don’t fight alone. They carry belief from their tribe.”</p>
-        <p>Kaito trained harder that day—not to prove something, but to become something.</p>
-      
-        <h3>📣 Chapter 4: The Letter From Home</h3>
-        <p>Two days before the tournament, Kaito opened his backpack and found a folded piece of paper. It was a letter from his mom.</p>
-        <p><em>Dear Kaito,</em></p>
-        <p>I know you’ll be nervous. That’s okay.</p>
-        <p>Just remember—you are not alone on that mat.</p>
-        <p>You carry our love with every step.</p>
-        <p>You trained hard. You gave your all. That’s already a win.</p>
-        <p>Now go be brave. Go be YOU.</p>
-        <p>Love,<br>Mom</p>
-        <p>Kaito held the letter to his heart.</p>
-      
-        <h3>🥋 Chapter 5: The Mat</h3>
-        <p>The day came. The Spring Martial Arts Tournament.</p>
-        <p>Kaito stood on the mat. His heart thumped. His opponent looked taller. Stronger.</p>
-        <p>Then he remembered:</p>
-        <ul>
-          <li>“I believe in you, Kaito!”</li>
-          <li>“Whether you win or lose, we’re proud.”</li>
-          <li>“Never let fear decide your moves.”</li>
-        </ul>
-        <p>The crowd faded.</p>
-        <p>His body moved like a stream. Calm. Sharp. Focused.</p>
-        <p>Round one—Kaito won. Round two—tie. Final round—close match.</p>
-        <p>Last second. One opening.</p>
-        <p><strong>KICK!</strong></p>
-        <p>Kaito landed it. The ref raised his hand.</p>
-        <p>He had won.</p>
-      
-        <h3>🌠 Chapter 6: The Hug That Meant the World</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🦋</div>
+      <span class="day-label">Day 4</span>
+      <h1>Kaito and the Words That Made Him Fly</h1>
+      <div class="theme-pills"><span class="theme-pill">Family Support</span><span class="theme-pill">Confidence</span><span class="theme-pill">Feedback</span><span class="theme-pill">Emotional Strength</span><span class="theme-pill">Motivation to Win</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
         <p>Back at home, his family didn’t cheer wildly. They didn’t shout.</p>
         <p>They hugged him.</p>
         <p>“You did it!” said his sister.</p>
         <p>“But not just because you won,” said his dad. “You did it because you trusted yourself.”</p>
         <p>His mom kissed his forehead. “You remembered our words. You carried us in your heart. And we carried you from home.”</p>
       
-        <h3>🌙 Sleep-Time Reflection (Soft Whisper Together)</h3>
+        </div><div class="chapter"><h4>🌙 Sleep-Time Reflection (Soft Whisper Together)</h4>
         <ul>
           <li>“I am never alone when I try my best.”</li>
           <li>“My family’s love is with me—even in the hardest moments.”</li>
           <li>“Their belief makes me stronger.”</li>
           <li>“And I will make them proud… by never giving up.”</li>
-        </ul>
-        <p>Close your eyes, little warrior.<br>Let those words stay warm in your chest.<br>Tomorrow, you rise again—with your family behind you, and your dream ahead.</p>
-      </div>
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+        </ul></div>
+        <p>Close your eyes, little warrior.<br>Let those words stay warm in your chest.<br>Tomorrow, you rise again—with your family behind you, and your dream ahead.</p></div>
+    </div>
+
+    <div class="story-nav"><a href="./Day3.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 3</span></a><a href="./Day5.html" class="next"><span><span class="nav-sub">Next</span>Day 5</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
