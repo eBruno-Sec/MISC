@@ -15,8 +15,8 @@
     .day-label { color: #60a5fa; }
     .hero-emoji-wrap {
       width: 100px; height: 100px;
-      background: rgba(96,165,250,0.13);
-      border: 3px solid #60a5fa44;
+      background: #60a5fa22;
+      border: 3px solid #60a5fa55;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 3rem;
@@ -24,6 +24,12 @@
       animation: float 4s ease-in-out infinite;
     }
     .story-nav a:hover { border-color: #60a5fa; background: #60a5fa18; }
+    .reflect-subhead {
+      font-weight: 800;
+      color: var(--peach);
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -61,14 +67,43 @@
 
     <div class="story-header">
       <div class="hero-emoji-wrap">🕯️</div>
-      <span class="day-label">Day 19</span>
+      <span class="day-label">DAY 19</span>
       <h1>Jonah and the Cave of Shadows</h1>
       <div class="theme-pills"><span class="theme-pill">Courage</span><span class="theme-pill">Facing Fears</span><span class="theme-pill">Emotional Strength</span><span class="theme-pill">Growth</span><span class="theme-pill">Confidence</span></div>
     </div>
 
     <div class="story-body">
-      <div class="chapter">
-      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
+      
+    </div>
+
+    
+    <div class="reflect">
+      <h3>🌱 Reflect Together</h3>
+      <p>Jonah had a great imagination. But sometimes, it made his fears feel big—too big.</p>
+      <p>Dark rooms, loud noises, even trying something new made his tummy twist into knots.</p>
+      <p>One day, his grandpa gave him a drawing of a mountain with a cave and said, “Every fear is like a cave. It looks scary… until you step inside.”</p>
+    
+      
+      <p>Jonah was quiet that night. The hall light was off, and he felt nervous walking to his room.</p>
+      <p>But he remembered Grandpa’s cave. He whispered, “One step into the cave…” and took a deep breath.</p>
+      <p>He walked with shaky feet and made it to his bed. His heart beat fast—but he did it.</p>
+    
+      
+      <p>In a dream, Jonah met a tiny glowing creature named Bravie.</p>
+      <p>“I live in every kid who tries, even when scared,” Bravie said. “Every time you face a fear, I glow brighter.”</p>
+      <p>“Even if I’m still scared?” Jonah asked.</p>
+      <p>“Especially then,” Bravie said. “Bravery isn’t the absence of fear—it’s moving forward anyway.”</p>
+    
+      
+      <p>The next day, Jonah tried new things one at a time—raising his hand in class, saying hi to a new kid, and even turning off the hallway light himself.</p>
+      <p>Each time, Bravie glowed in his chest like a warm lantern.</p>
+      <p>“I’m scared,” he’d whisper… then he’d do it anyway.</p>
+    
+      
+      <p>Jonah learned something important: most fears are not monsters. They’re empty caves with echoes.</p>
+      <p>And when he walked in bravely, he found strength, joy, and surprises waiting inside.</p>
+    
+      
       <p>Before bed, Jonah whispered,</p>
       <blockquote>
         “Fear might visit, but it won’t stay.<br>
@@ -76,13 +111,13 @@
         Bravery grows in steps I take—<br>
         And every little fear I break.”</blockquote>
     
-      </div><div class="chapter"><h4>🔥 Reflect & Inspire</h4>
+      
       <ul>
         <li>What’s one thing that makes you feel nervous or scared?</li>
         <li>What small step could you take to face that fear this week?</li>
         <li>How do you feel after doing something even when you were scared?</li>
         <li>Who can you talk to when you need help being brave?</li>
-      </ul></div></div>
+      </ul>
     </div>
 
     <div class="story-nav"><a href="./Day18.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 18</span></a><a href="./Day20.html" class="next"><span><span class="nav-sub">Next</span>Day 20</span> →</a></div>
@@ -94,14 +129,13 @@
   </footer>
 
   <script>
-    // Stars
     (function() {
       const layer = document.getElementById('stars');
       for (let i = 0; i < 80; i++) {
         const s = document.createElement('div');
         s.className = 'star';
-        const size = Math.random() * 3 + 1;
-        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
         layer.appendChild(s);
       }
     })();
