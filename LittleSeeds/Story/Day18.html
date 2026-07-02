@@ -1,15 +1,39 @@
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Miko and the Heart Rope – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #f472b6; }
+    .chapter h4 { color: #f472b6; }
+    .story-header h1 { color: #f472b6; text-shadow: 0 3px 20px #f472b655; }
+    .day-label { color: #f472b6; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(244,114,182,0.13);
+      border: 3px solid #f472b644;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #f472b6; background: #f472b618; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
         <a href="./Day1.html">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
@@ -27,43 +51,44 @@
         <a href="./Day15.html">Day 15</a>
         <a href="./Day16.html">Day 16</a>
         <a href="./Day17.html">Day 17</a>
-        <a href="./Day18.html">Day 18</a>
+        <a href="./Day18.html" class="active">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-    <div class="page">
-      <h2>Day 18: Miko and the Heart Rope</h2>
-      <p><strong>Theme:</strong> Parent-Child Bond, Love, Trust, Understanding, Time Together</p>
-    
-      <h3>🧵 Chapter 1: The Invisible Rope</h3>
-      <p>Miko sometimes wondered if his parents really understood him.</p>
-      <p>“They’re always telling me what to do,” he mumbled one evening. “Do this, do that… why don’t they just let me play?”</p>
-      <p>That night, his dad sat beside him with a storybook and said, “Did you know there’s an invisible rope between us?”</p>
-      <p>Miko blinked. “There is?”</p>
-      <p>“Yes,” said Dad, tapping his chest. “It’s made of love. Stronger than anything. It stretches, but never breaks.”</p>
-    
-      <h3>🌙 Chapter 2: Through the Day</h3>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🧵</div>
+      <span class="day-label">Day 18</span>
+      <h1>Miko and the Heart Rope</h1>
+      <div class="theme-pills"><span class="theme-pill">Parent-Child Bond</span><span class="theme-pill">Love</span><span class="theme-pill">Trust</span><span class="theme-pill">Understanding</span><span class="theme-pill">Time Together</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
       <p>The next morning, Miko woke up cranky. He didn’t want to brush his teeth. He didn’t want to eat. He stomped a little and frowned a lot.</p>
       <p>Mom just gave him a gentle hug and whispered, “I love you even when you feel grumpy.”</p>
       <p>He felt the invisible rope give a little tug. It was still there.</p>
     
-      <h3>🛠️ Chapter 3: Fixing the Rope</h3>
+      </div><div class="chapter"><h4>🛠️ Chapter 3: Fixing the Rope</h4>
       <p>Later, Miko broke a toy on accident. He tried to hide it, worried they’d be mad.</p>
       <p>But when he finally showed Dad, he didn’t yell. Instead, he said, “Thank you for being honest. We can fix this together.”</p>
       <p>The rope tightened gently again—safe and warm.</p>
     
-      <h3>🎈 Chapter 4: Rope of the Heart</h3>
+      </div><div class="chapter"><h4>🎈 Chapter 4: Rope of the Heart</h4>
       <p>At bedtime, Miko asked, “Is the rope there even when I mess up?”</p>
       <p>“Always,” Mom said. “It’s love. We’re a team. We learn, grow, and stay connected.”</p>
       <p>Miko smiled. “Even when I grow up?”</p>
       <p>“Even then,” Dad said. “The rope never breaks.”</p>
     
-      <h3>🫂 Chapter 5: Miko’s Choice</h3>
+      </div><div class="chapter"><h4>🫂 Chapter 5: Miko’s Choice</h4>
       <p>The next day, Miko helped set the table without being asked. He smiled at Mom and said, “Because we’re a team.”</p>
       <p>She hugged him tight. The rope shimmered in their hearts—stronger than ever.</p>
     
-      <h3>💞 Chapter 6: Miko’s Heart Promise</h3>
+      </div><div class="chapter"><h4>💞 Chapter 6: Miko’s Heart Promise</h4>
       <p>Before bed, Miko whispered,</p>
       <blockquote>
         “Our hearts are tied by love and care.<br>
@@ -71,28 +96,38 @@
         I’ll listen, share, and do my part.<br>
         Because you are forever in my heart.”</blockquote>
     
-      <h3>👪 Reflect & Inspire</h3>
+      </div><div class="chapter"><h4>👪 Reflect & Inspire</h4>
       <ul>
         <li>How do you feel when you know someone loves you no matter what?</li>
         <li>What are some ways you and your parent show love to each other?</li>
         <li>Why do parents give rules or reminders? How does it help you?</li>
         <li>What’s something kind or helpful you can do for your parent tomorrow?</li>
-      </ul>
+      </ul></div></div>
     </div>
-    
-    <footer>
-      &copy; 2025 Gentle Stories. All rights reserved.
-    </footer>
-  
-    <script>
-      function toggleNav() {
-        document.getElementById("navLinks").classList.toggle("show");
+
+    <div class="story-nav"><a href="./Day17.html" class="prev">← <span><span class="nav-sub">Previous</span>Day 17</span></a><a href="./Day19.html" class="next"><span><span class="nav-sub">Next</span>Day 19</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
       }
-  
-      function goToPage(index) {
-        const carousel = document.getElementById("carousel");
-        carousel.style.transform = `translateX(-${index * 100}vw)`;
-      }
-    </script>
-  </body>
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
 </html>
