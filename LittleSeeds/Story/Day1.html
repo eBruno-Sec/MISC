@@ -1,17 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Gentle Stories for Growing Minds</title>
-        <link rel="stylesheet" href="../styles.css" />
-    </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Brave Seed and the Giant Oak – Little Seeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .chapter { border-left-color: #4caf7d; }
+    .chapter h4 { color: #4caf7d; }
+    .story-header h1 { color: #4caf7d; text-shadow: 0 3px 20px #4caf7d55; }
+    .day-label { color: #4caf7d; }
+    .hero-emoji-wrap {
+      width: 100px; height: 100px;
+      background: rgba(76,175,125,0.15);
+      border: 3px solid #4caf7d44;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3rem;
+      margin: 0 auto 1.25rem;
+      animation: float 4s ease-in-out infinite;
+    }
+    .story-nav a:hover { border-color: #4caf7d; background: #4caf7d18; }
+  </style>
+</head>
 <body>
-    <nav>
-      <button class="nav-toggle" onclick="toggleNav()">☰ Menu</button>
-      <div class="nav-links" id="navLinks">
-        <a href="../index.html">Home</a>
-        <a href="./Day1.html">Day 1</a>
+
+  <div class="stars-layer" id="stars"></div>
+
+  <nav>
+    <a href="../index.html" class="nav-brand">🌱 Little Seeds</a>
+    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
+    <div class="nav-links" id="navLinks">
+        <a href="./Day1.html" class="active">Day 1</a>
         <a href="./Day2.html">Day 2</a>
         <a href="./Day3.html">Day 3</a>
         <a href="./Day4.html">Day 4</a>
@@ -31,31 +54,28 @@
         <a href="./Day18.html">Day 18</a>
         <a href="./Day19.html">Day 19</a>
         <a href="./Day20.html">Day 20</a>
-      </div>
-    </nav>
-  
-      <div class="page">
-        <h2>Day 1: The Brave Seed and the Giant Oak</h2>
-        <p><strong>Theme:</strong> Courage, Patience, Growth Mindset, Emotional Resilience</p>
-      
-        <h4>🐿️ Chapter 1: The Lonely Acorn</h4>
-        <p>Once in a peaceful forest, under the golden light of an autumn sun, a tiny acorn lay on the ground, far from its mother oak. The wind had shaken it loose, and now it was all alone.</p>
-        <p>The acorn whispered to itself, “I’m too small. I’ll never be like the mighty trees.”</p>
-        <p>Just then, a red squirrel named Ruby scampered over.</p>
-        <p>“What’s wrong, little one?” she asked.</p>
-        <p>“I’m scared I’ll never grow. I’m just... me.”</p>
-        <p>Ruby smiled. “Even the tallest oak once whispered those same words.”</p>
-        <p>The acorn blinked. “Really?”</p>
-        <p>“Oh yes,” Ruby said. “It’s not where you start, but how you grow.”</p>
-      
-        <h4>🌧️ Chapter 2: Rain, Cold, and Darkness</h4>
+    </div>
+  </nav>
+
+  <div class="story-wrapper">
+
+    <div class="story-header">
+      <div class="hero-emoji-wrap">🌰</div>
+      <span class="day-label">Day 1</span>
+      <h1>The Brave Seed and the Giant Oak</h1>
+      <div class="theme-pills"><span class="theme-pill">Courage</span><span class="theme-pill">Patience</span><span class="theme-pill">Growth Mindset</span><span class="theme-pill">Emotional Resilience</span></div>
+    </div>
+
+    <div class="story-body">
+      <div class="chapter">
+      <div class="chapter"><div class="learned"><h4>💡 What I Learned</h4>
         <p>That night, the rain came. Cold, heavy, and endless. The acorn shivered in the dirt.</p>
         <p>“I want to quit,” the acorn said. “It’s too hard.”</p>
         <p>But deep underground, something magical was happening — a tiny root began to grow.</p>
         <p>The acorn didn’t know it yet, but its strength was already growing, quietly, in the dark.</p>
         <p>Sometimes, the most important things happen when no one can see them.</p>
       
-        <h4>🐛 Chapter 3: The Voice of the Worm</h4>
+        </div><div class="chapter"><h4>🐛 Chapter 3: The Voice of the Worm</h4>
         <p>A wise old worm named Wally popped out of the soil.</p>
         <p>“Growing hurts, doesn’t it?” Wally said.</p>
         <p>“Yes,” the acorn said. “Why does it have to be this hard?”</p>
@@ -63,20 +83,20 @@
         <p>The acorn thought about that. “So I’m strong... even now?”</p>
         <p>“Especially now,” Wally winked.</p>
       
-        <h4>☀️ Chapter 4: The First Leaf</h4>
+        </div><div class="chapter"><h4>☀️ Chapter 4: The First Leaf</h4>
         <p>Spring finally came. The acorn’s shell cracked. A green shoot reached toward the sky.</p>
         <p>Children playing nearby cheered when they saw it.</p>
         <p>“You did it!” Ruby the squirrel squealed, returning to visit.</p>
         <p>“I’m just a sprout,” said the acorn.</p>
         <p>“But look how far you’ve come!” Ruby said. “Every great tree starts small. What matters is you kept growing.”</p>
       
-        <h4>🦉 Chapter 5: A Promise From the Sky</h4>
+        </div><div class="chapter"><h4>🦉 Chapter 5: A Promise From the Sky</h4>
         <p>That night, an owl flew overhead and landed on a branch.</p>
         <p>“You’ve already inspired others,” the owl hooted. “See the seeds nearby? They’ve started to sprout because they saw your courage.”</p>
         <p>The acorn, now a seedling, stood tall. “Me? But I’m not done growing.”</p>
         <p>“Exactly,” said the owl. “You’re growing <em>and</em> helping others grow. That’s true greatness.”</p>
       
-        <h4>💡 Chapter 6: What the Acorn Learned</h4>
+        </div><div class="chapter"><h4>💡 Chapter 6: What the Acorn Learned</h4>
         <p>Before the stars came out, the little tree whispered:</p>
         <ul>
           <li>“Courage isn’t loud—it’s quiet and steady.”</li>
@@ -84,32 +104,41 @@
           <li>“Every dark moment helps me grow stronger.”</li>
           <li>“Helping others makes me bigger inside.”</li>
           <li>“I’m still becoming who I’m meant to be.”</li>
-        </ul>
+        </ul></div>
       
-        <h3>🌱 Reflect With Me (You can read this part together)</h3>
+        </div><div class="chapter"><h4>🌱 Reflect With Me (You can read this part together)</h4>
         <p><strong>Questions to think about:</strong></p>
         <ul>
           <li>What would you tell the little acorn when it was scared?</li>
           <li>When have <em>you</em> done something even though it was hard?</li>
           <li>What do you want to grow into someday?</li>
           <li>Who can <em>you</em> inspire just by being brave?</li>
-        </ul>
-      </div>
+        </ul></div>
+    </div>
 
-      <footer>
-        &copy; 2025 Gentle Stories. All rights reserved.
-      </footer>
-    
-      <script>
-        function toggleNav() {
-          document.getElementById("navLinks").classList.toggle("show");
-        }
-    
-        function goToPage(index) {
-          const carousel = document.getElementById("carousel");
-          carousel.style.transform = `translateX(-${index * 100}vw)`;
-        }
-      </script>
-    </body>
-  </html>
-  
+    <div class="story-nav"><a href="./Day2.html" class="next"><span><span class="nav-sub">Next</span>Day 2</span> →</a></div>
+
+  </div>
+
+  <footer>
+    Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp; &copy; 2025 Little Seeds
+  </footer>
+
+  <script>
+    // Stars
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 80; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const size = Math.random() * 3 + 1;
+        s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
+      }
+    })();
+    function toggleNav() {
+      document.getElementById('navLinks').classList.toggle('show');
+    }
+  </script>
+</body>
+</html>
