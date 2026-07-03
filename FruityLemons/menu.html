@@ -3,613 +3,254 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Menu — Fruity Lemons</title>
+  <link rel="stylesheet" href="./style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&family=Gochi+Hand&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --lemon:    #f6e96b;
-      --lime:     #BEDC74;
-      --forest:   #387F39;
-      --dark:     #1a2e1b;
-      --cream:    #fffef0;
-      --tan:      #825B32;
-      --white:    #ffffff;
-      --radius:   20px;
-      --font-display: "Gochi Hand", cursive;
-      --font-head:    "Fredoka", sans-serif;
-      --font-body:    "DM Sans", sans-serif;
-    }
-
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: var(--font-body);
-      background: var(--cream);
-      color: var(--dark);
-      min-height: 100vh;
-    }
-
-    /* ── NAV ─────────────────────────────────── */
-    nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: linear-gradient(135deg, var(--lemon) 0%, var(--lime) 50%, var(--forest) 100%);
-      background-size: 300% 300%;
-      animation: gradShift 18s ease infinite;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 2rem;
-      height: 64px;
-      box-shadow: 0 2px 16px rgba(56,127,57,.25);
-    }
-
-    @keyframes gradShift {
-      0%   { background-position: 0% 50%; }
-      50%  { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-
-    .nav-brand {
-      font-family: var(--font-display);
-      font-size: 1.75rem;
-      background: linear-gradient(120deg, #fff382, #ffffff, #c8f09a);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-decoration: none;
-      letter-spacing: .02em;
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: .25rem;
-      list-style: none;
-    }
-
-    .nav-links a {
-      font-family: var(--font-head);
-      font-weight: 500;
-      font-size: .95rem;
-      color: var(--dark);
-      text-decoration: none;
-      padding: .4rem .85rem;
-      border-radius: 50px;
-      transition: background .2s, color .2s;
-    }
-
-    .nav-links a:hover { background: rgba(255,255,255,.45); }
-
-    .nav-links a.active {
-      background: var(--dark);
-      color: var(--lemon);
-    }
-
-    .nav-toggle {
-      display: none;
-      background: none;
-      border: none;
-      cursor: pointer;
-      flex-direction: column;
-      gap: 5px;
-      padding: 6px;
-    }
-
-    .nav-toggle span {
-      display: block;
-      width: 24px;
-      height: 2px;
-      background: var(--dark);
-      border-radius: 2px;
-      transition: transform .3s, opacity .3s;
-    }
-
-    @media (max-width: 720px) {
-      .nav-toggle { display: flex; }
-
-      .nav-links {
-        position: fixed;
-        top: 64px;
-        left: 0;
-        width: 100%;
-        flex-direction: column;
-        background: linear-gradient(180deg, var(--lime), var(--lemon));
-        padding: 1.5rem 2rem;
-        gap: .5rem;
-        transform: translateY(-120%);
-        opacity: 0;
-        transition: transform .35s ease, opacity .35s ease;
-        box-shadow: 0 8px 32px rgba(0,0,0,.12);
-      }
-
-      .nav-links.open {
-        transform: translateY(0);
-        opacity: 1;
-      }
-
-      .nav-links a { width: 100%; display: block; }
-    }
-
-    /* ── HERO ────────────────────────────────── */
-    .hero {
-      position: relative;
-      overflow: hidden;
-      background: linear-gradient(160deg, #f3ffe8 0%, #fffde0 60%, #e8f9d0 100%);
-      padding: 5rem 2rem 4rem;
-      text-align: center;
-    }
-
-    .hero-eyebrow {
-      font-family: var(--font-head);
-      font-size: .85rem;
-      font-weight: 500;
-      letter-spacing: .15em;
-      text-transform: uppercase;
-      color: var(--forest);
-      margin-bottom: .75rem;
-    }
-
-    .hero-title {
-      font-family: var(--font-display);
-      font-size: clamp(2.8rem, 8vw, 5.5rem);
-      color: var(--dark);
-      line-height: 1.05;
-      margin-bottom: 1rem;
-    }
-
-    .hero-title span {
-      background: linear-gradient(120deg, var(--forest), #5ab85c);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .hero-sub {
-      font-family: var(--font-body);
-      font-size: 1.1rem;
-      color: var(--tan);
-      max-width: 460px;
-      margin: 0 auto 2.5rem;
-    }
-
-    .hero-cta {
-      display: inline-block;
-      background: var(--forest);
-      color: var(--lemon);
-      font-family: var(--font-head);
-      font-weight: 600;
-      font-size: 1rem;
-      padding: .85rem 2.2rem;
-      border-radius: 50px;
-      text-decoration: none;
-      transition: transform .2s, box-shadow .2s;
-      box-shadow: 0 4px 20px rgba(56,127,57,.3);
-    }
-
-    .hero-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(56,127,57,.4); }
-
-    /* floating lemon bubbles */
-    .bubbles {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      overflow: hidden;
-    }
-
-    .bubble {
-      position: absolute;
-      border-radius: 50%;
-      background: rgba(246,233,107,.35);
-      animation: floatUp var(--dur, 18s) linear infinite;
-      bottom: -60px;
-    }
-
-    @keyframes floatUp {
-      0%   { transform: translateY(0) rotate(0deg); opacity: .8; }
-      100% { transform: translateY(-110vh) rotate(540deg); opacity: 0; }
-    }
-
-    /* ── FEATURED DRINK (spotlight) ─────────── */
-    .spotlight {
-      padding: 3rem 2rem;
-      text-align: center;
-    }
-
-    .section-label {
-      font-family: var(--font-head);
-      font-size: .78rem;
-      font-weight: 600;
-      letter-spacing: .18em;
-      text-transform: uppercase;
-      color: var(--forest);
-      margin-bottom: .5rem;
-    }
-
-    .section-title {
-      font-family: var(--font-display);
-      font-size: clamp(1.8rem, 4vw, 2.8rem);
-      color: var(--dark);
-      margin-bottom: 3rem;
-    }
-
-    /* ── FLAVORS GRID ────────────────────────── */
-    .flavors {
-      padding: 2rem 2rem 5rem;
-      max-width: 1300px;
-      margin: 0 auto;
-    }
-
-    .filter-bar {
-      display: flex;
-      gap: .5rem;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 3rem;
-    }
-
-    .filter-btn {
-      font-family: var(--font-head);
-      font-size: .88rem;
-      font-weight: 500;
-      border: 2px solid transparent;
-      border-radius: 50px;
-      padding: .45rem 1.2rem;
-      cursor: pointer;
-      background: var(--white);
-      color: var(--tan);
-      transition: all .2s;
-    }
-
-    .filter-btn:hover,
-    .filter-btn.active {
-      background: var(--forest);
-      color: var(--lemon);
-      border-color: var(--forest);
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 1.5rem;
-    }
-
-    .card {
-      background: var(--white);
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: 0 2px 12px rgba(0,0,0,.07);
-      transition: transform .25s ease, box-shadow .25s ease;
-      cursor: pointer;
-      position: relative;
-    }
-
-    .card:hover {
-      transform: translateY(-6px);
-      box-shadow: 0 12px 32px rgba(56,127,57,.18);
-    }
-
-    .card-img-wrap {
-      background: linear-gradient(145deg, #f3ffe8, #fffde0);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem 1rem 1rem;
-    }
-
-    .card-img-wrap img {
-      width: 120px;
-      height: 120px;
-      object-fit: cover;
-      border-radius: 50%;
-      box-shadow: 0 4px 16px rgba(56,127,57,.15);
-      transition: transform .3s ease;
-    }
-
-    .card:hover .card-img-wrap img { transform: scale(1.07) rotate(3deg); }
-
-    .card-body {
-      padding: 1rem 1.2rem 1.4rem;
-      text-align: center;
-    }
-
-    .card-name {
-      font-family: var(--font-head);
-      font-weight: 600;
-      font-size: 1rem;
-      color: var(--dark);
-      margin-bottom: .25rem;
-      min-height: 1.5rem;
-    }
-
-    .card-ingredients {
-      font-size: .82rem;
-      color: var(--tan);
-      line-height: 1.4;
-    }
-
-    .card-tag {
-      display: inline-block;
-      margin-top: .6rem;
-      font-size: .7rem;
-      font-weight: 600;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      background: #e8f9d0;
-      color: var(--forest);
-      padding: .2rem .6rem;
-      border-radius: 50px;
-    }
-
-    /* ── FULL MENU PHOTO ─────────────────────── */
-    .menu-photo {
-      padding: 2rem 2rem 5rem;
-      text-align: center;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .menu-photo img {
-      width: 100%;
-      border-radius: var(--radius);
-      box-shadow: 0 8px 40px rgba(0,0,0,.12);
-    }
-
-    /* ── FOOTER ──────────────────────────────── */
-    footer {
-      background: linear-gradient(135deg, var(--lemon), var(--lime), var(--forest));
-      background-size: 300% 300%;
-      animation: gradShift 18s ease infinite;
-      padding: 2rem;
-      text-align: center;
-    }
-
-    footer p {
-      font-family: var(--font-head);
-      font-size: .95rem;
-      color: var(--dark);
-    }
-
-    footer a {
-      color: var(--dark);
-      text-decoration: underline;
-      text-underline-offset: 3px;
-    }
-
-    /* ── LIGHTBOX ────────────────────────────── */
-    .lightbox-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(10,20,10,.85);
-      z-index: 200;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-    }
-
-    .lightbox-overlay.open { display: flex; }
-
-    .lightbox-card {
-      background: var(--cream);
-      border-radius: calc(var(--radius) * 1.5);
-      max-width: 380px;
-      width: 100%;
-      text-align: center;
-      padding: 2.5rem 2rem;
-      position: relative;
-      animation: popIn .25s ease;
-    }
-
-    @keyframes popIn {
-      from { transform: scale(.88); opacity: 0; }
-      to   { transform: scale(1);   opacity: 1; }
-    }
-
-    .lightbox-card img {
-      width: 160px;
-      height: 160px;
-      object-fit: cover;
-      border-radius: 50%;
-      box-shadow: 0 8px 24px rgba(56,127,57,.2);
-      margin-bottom: 1.25rem;
-    }
-
-    .lightbox-name {
-      font-family: var(--font-display);
-      font-size: 1.8rem;
-      color: var(--dark);
-      margin-bottom: .35rem;
-    }
-
-    .lightbox-ing {
-      color: var(--tan);
-      font-size: .95rem;
-    }
-
-    .lightbox-close {
-      position: absolute;
-      top: 1rem;
-      right: 1.25rem;
-      background: none;
-      border: none;
-      font-size: 1.6rem;
-      cursor: pointer;
-      color: var(--tan);
-      line-height: 1;
-    }
-
-    .lightbox-close:hover { color: var(--dark); }
-
-    /* hidden cards */
-    .card.hidden { display: none; }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, .bubble { animation: none !important; transition: none !important; }
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&family=Gochi+Hand&family=Quicksand:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <title>Menu — Fruity Lemons</title>
 </head>
-<body>
-
-<!-- ── NAV ── -->
-<nav>
-  <a class="nav-brand" href="./index.html">Fruity Lemons 🍋</a>
+<body><nav class="site-nav gradient-background">
+  <a class="nav-brand" href="./index.html">Fruity Lemons</a>
   <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
     <span></span><span></span><span></span>
   </button>
   <ul class="nav-links" id="navLinks">
-    <li><a href="./index.html">Home</a></li>
-    <li><a href="./menu.html" class="active">Menu</a></li>
-    <li><a href="./order.html">Order Now</a></li>
-    <li><a href="./contact.html">Contact</a></li>
-    <li><a href="./career.html">Career</a></li>
-    <li><a href="./franchise.html">Franchise</a></li>
+    <li><a href="./index.html" >Home</a></li>
+    <li><a href="./menu.html" class='active'>Menu</a></li>
+    <li><a href="./order.html" >Order Now</a></li>
+    <li><a href="./contact.html" >Contact Us</a></li>
+    <li><a href="./career.html" >Career</a></li>
+    <li><a href="./franchise.html" >Franchise</a></li>
   </ul>
 </nav>
-
-<!-- ── HERO ── -->
-<section class="hero">
-  <div class="bubbles" aria-hidden="true">
-    <div class="bubble" style="left:8%;  width:60px;  height:60px;  --dur:22s; animation-delay:0s;"></div>
-    <div class="bubble" style="left:22%; width:30px;  height:30px;  --dur:14s; animation-delay:3s;"></div>
-    <div class="bubble" style="left:40%; width:80px;  height:80px;  --dur:28s; animation-delay:6s;"></div>
-    <div class="bubble" style="left:60%; width:20px;  height:20px;  --dur:16s; animation-delay:1s;"></div>
-    <div class="bubble" style="left:75%; width:50px;  height:50px;  --dur:20s; animation-delay:9s;"></div>
-    <div class="bubble" style="left:90%; width:35px;  height:35px;  --dur:25s; animation-delay:4s;"></div>
+<section class="page-hero">
+  <div class="bubble-wrap" aria-hidden="true">
+    <div class="bubble" style="left:10%;width:50px;height:50px;--dur:20s"></div>
+    <div class="bubble" style="left:80%;width:70px;height:70px;--dur:26s;animation-delay:4s"></div>
   </div>
-  <p class="hero-eyebrow">Fresh &amp; Handcrafted</p>
-  <h1 class="hero-title">Our <span>Menu</span></h1>
-  <p class="hero-sub">13 unique lemon-based drinks, made with real fruit and a whole lot of love.</p>
-  <a class="hero-cta" href="#flavors">Explore All Flavors</a>
+  <h1>Our Menu 🍋</h1>
+  <p>13 handcrafted lemon drinks, made fresh every day</p>
 </section>
 
-<!-- ── FLAVORS GRID ── -->
-<section class="flavors" id="flavors">
-  <div class="section-label">What we make</div>
-  <div class="section-title" style="text-align:center">Pick Your Flavor</div>
-
-  <div class="filter-bar">
-    <button class="filter-btn active" data-filter="all">All</button>
-    <button class="filter-btn" data-filter="classic">Classic</button>
-    <button class="filter-btn" data-filter="fruity">Fruity</button>
-    <button class="filter-btn" data-filter="wellness">Wellness</button>
+<div class="section">
+  <div class="carousel-wrap">
+    <div class="carousel-track">
+      <div class="carousel-slide">
+    <img src="assets/pics/menu/original.png" alt="Original" loading="lazy">
+    <h3>Original</h3>
+    <p>Fruity Lemon</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/lemoney.png" alt="Lemoney" loading="lazy">
+    <h3>Lemoney</h3>
+    <p>Lemon + Honey</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/chiafresca.png" alt="Lemon Chia Fresca" loading="lazy">
+    <h3>Lemon Chia Fresca</h3>
+    <p>Lemon + Chia</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/grapefruitlemon.png" alt="Grapefruit Lemon" loading="lazy">
+    <h3>Grapefruit Lemon</h3>
+    <p>Lemon + Grapefruit</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/tanglad.png" alt="Tanglad Lemon" loading="lazy">
+    <h3>Tanglad Lemon</h3>
+    <p>Lemon + Tanglad</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/berrymon.png" alt="Berrymon" loading="lazy">
+    <h3>Berrymon</h3>
+    <p>Lemon + Strawberry</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/lecumber.png" alt="Lecumber" loading="lazy">
+    <h3>Lecumber</h3>
+    <p>Lemon + Cucumber</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/yakumon.png" alt="Yakumon" loading="lazy">
+    <h3>Yakumon</h3>
+    <p>Lemon + Yakult</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/lemonyogurt.png" alt="Lemon Yogurt" loading="lazy">
+    <h3>Lemon Yogurt</h3>
+    <p>Lemon + Yogurt</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/orangeyakumon.png" alt="Orange Yakumon" loading="lazy">
+    <h3>Orange Yakumon</h3>
+    <p>Lemon + Yakult + Orange</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/orangelemon.png" alt="Orange Lemon" loading="lazy">
+    <h3>Orange Lemon</h3>
+    <p>Lemon + Orange</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/kiwilemon.png" alt="Kiwi Lemon" loading="lazy">
+    <h3>Kiwi Lemon</h3>
+    <p>Kiwi + Lemon</p>
+  </div>
+<div class="carousel-slide">
+    <img src="assets/pics/menu/lemonginger.png" alt="Lemon Ginger" loading="lazy">
+    <h3>Lemon Ginger</h3>
+    <p>Lemon + Ginger</p>
+  </div>
+    </div>
+    <button class="carousel-btn carousel-prev" aria-label="Previous">&#8249;</button>
+    <button class="carousel-btn carousel-next" aria-label="Next">&#8250;</button>
+    <div class="carousel-dots"><button class="dot active" data-i="0" aria-label="Slide 1"></button>
+<button class="dot" data-i="1" aria-label="Slide 2"></button>
+<button class="dot" data-i="2" aria-label="Slide 3"></button>
+<button class="dot" data-i="3" aria-label="Slide 4"></button>
+<button class="dot" data-i="4" aria-label="Slide 5"></button>
+<button class="dot" data-i="5" aria-label="Slide 6"></button>
+<button class="dot" data-i="6" aria-label="Slide 7"></button>
+<button class="dot" data-i="7" aria-label="Slide 8"></button>
+<button class="dot" data-i="8" aria-label="Slide 9"></button>
+<button class="dot" data-i="9" aria-label="Slide 10"></button>
+<button class="dot" data-i="10" aria-label="Slide 11"></button>
+<button class="dot" data-i="11" aria-label="Slide 12"></button>
+<button class="dot" data-i="12" aria-label="Slide 13"></button></div>
   </div>
 
-  <div class="grid" id="menuGrid">
-    <!-- cards injected by JS -->
+  <h2 class="section-title">All Flavors</h2>
+  <div class="menu-grid">
+    <div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/original.png" alt="Original" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Original</div>
+      <div class="menu-card-ing">Fruity Lemon</div>
+    </div>
   </div>
-</section>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/lemoney.png" alt="Lemoney" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Lemoney</div>
+      <div class="menu-card-ing">Lemon + Honey</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/chiafresca.png" alt="Lemon Chia Fresca" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Lemon Chia Fresca</div>
+      <div class="menu-card-ing">Lemon + Chia</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/grapefruitlemon.png" alt="Grapefruit Lemon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Grapefruit Lemon</div>
+      <div class="menu-card-ing">Lemon + Grapefruit</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/tanglad.png" alt="Tanglad Lemon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Tanglad Lemon</div>
+      <div class="menu-card-ing">Lemon + Tanglad</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/berrymon.png" alt="Berrymon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Berrymon</div>
+      <div class="menu-card-ing">Lemon + Strawberry</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/lecumber.png" alt="Lecumber" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Lecumber</div>
+      <div class="menu-card-ing">Lemon + Cucumber</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/yakumon.png" alt="Yakumon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Yakumon</div>
+      <div class="menu-card-ing">Lemon + Yakult</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/lemonyogurt.png" alt="Lemon Yogurt" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Lemon Yogurt</div>
+      <div class="menu-card-ing">Lemon + Yogurt</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/orangeyakumon.png" alt="Orange Yakumon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Orange Yakumon</div>
+      <div class="menu-card-ing">Lemon + Yakult + Orange</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/orangelemon.png" alt="Orange Lemon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Orange Lemon</div>
+      <div class="menu-card-ing">Lemon + Orange</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/kiwilemon.png" alt="Kiwi Lemon" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Kiwi Lemon</div>
+      <div class="menu-card-ing">Kiwi + Lemon</div>
+    </div>
+  </div>
+<div class="menu-card">
+    <div class="menu-card-img"><img src="assets/pics/menu/lemonginger.png" alt="Lemon Ginger" loading="lazy"></div>
+    <div class="menu-card-body">
+      <div class="menu-card-name">Lemon Ginger</div>
+      <div class="menu-card-ing">Lemon + Ginger</div>
+    </div>
+  </div>
+  </div>
 
-<!-- ── FULL MENU PHOTO ── -->
-<section class="menu-photo">
-  <div class="section-label">The full lineup</div>
-  <h2 class="section-title">Our Complete Menu</h2>
-  <img src="./assets/pics/menu.JPG" alt="Full Fruity Lemons menu board" loading="lazy">
-</section>
-
-<!-- ── LIGHTBOX ── -->
-<div class="lightbox-overlay" id="lightbox" role="dialog" aria-modal="true" aria-label="Drink details">
-  <div class="lightbox-card">
-    <button class="lightbox-close" id="lightboxClose" aria-label="Close">&times;</button>
-    <img id="lbImg" src="" alt="">
-    <p class="lightbox-name" id="lbName"></p>
-    <p class="lightbox-ing" id="lbIng"></p>
+  <div class="menu-photo" style="margin-top:3rem">
+    <img src="./assets/pics/menu.JPG" alt="Full Fruity Lemons menu board" loading="lazy">
   </div>
 </div>
+<footer class="gradient-background">
+  <p><a href="https://facebook.com/realfruitylemons" target="_blank" rel="noopener">facebook.com/realfruitylemons</a>
+  &nbsp;|&nbsp;
+  <a href="mailto:info@freshproenterprise.com">info@freshproenterprise.com</a></p>
+</footer><script>
+  const track = document.querySelector('.carousel-track');
+  const dots = document.querySelectorAll('.dot');
+  let cur = 0, total = 13, timer;
 
-<!-- ── FOOTER ── -->
-<footer>
-  <p>
-    <a href="https://facebook.com/realfruitylemons" target="_blank" rel="noopener">facebook.com/realfruitylemons</a>
-    &nbsp;|&nbsp;
-    <a href="mailto:info@freshproenterprise.com">info@freshproenterprise.com</a>
-  </p>
-</footer>
-
-<script>
-  const drinks = [
-    { slug:"original",     name:"Original",         ingredients:"Fruity Lemon",             tag:"classic"  },
-    { slug:"lemoney",      name:"Lemoney",           ingredients:"Lemon + Honey",             tag:"classic"  },
-    { slug:"chiafresca",   name:"Lemon Chia Fresca", ingredients:"Lemon + Chia",              tag:"wellness" },
-    { slug:"grapefruitlemon", name:"Grapefruit Lemon", ingredients:"Lemon + Grapefruit",     tag:"fruity"   },
-    { slug:"tanglad",      name:"Tanglad Lemon",     ingredients:"Lemon + Tanglad",           tag:"wellness" },
-    { slug:"berrymon",     name:"Berrymon",           ingredients:"Lemon + Strawberry",       tag:"fruity"   },
-    { slug:"lecumber",     name:"Lecumber",           ingredients:"Lemon + Cucumber",         tag:"wellness" },
-    { slug:"yakumon",      name:"Yakumon",            ingredients:"Lemon + Yakult",           tag:"classic"  },
-    { slug:"lemonyogurt",  name:"Lemon Yogurt",       ingredients:"Lemon + Yogurt",           tag:"wellness" },
-    { slug:"orangeyakumon",name:"Orange Yakumon",     ingredients:"Lemon + Yakult + Orange",  tag:"fruity"   },
-    { slug:"orangelemon",  name:"Orange Lemon",       ingredients:"Lemon + Orange",           tag:"fruity"   },
-    { slug:"kiwilemon",    name:"Kiwi Lemon",         ingredients:"Kiwi + Lemon",             tag:"fruity"   },
-    { slug:"lemonginger",  name:"Lemon Ginger",       ingredients:"Lemon + Ginger",           tag:"wellness" },
-  ];
-
-  const tagLabels = { classic:"Classic", fruity:"Fruity Mix", wellness:"Wellness" };
-  const grid = document.getElementById("menuGrid");
-
-  function buildGrid(filter) {
-    grid.innerHTML = "";
-    drinks.forEach(d => {
-      const hidden = filter !== "all" && d.tag !== filter ? "hidden" : "";
-      const card = document.createElement("div");
-      card.className = `card ${hidden}`;
-      card.dataset.slug = d.slug;
-      card.innerHTML = `
-        <div class="card-img-wrap">
-          <img src="assets/pics/menu/${d.slug}.png" alt="${d.name}" loading="lazy">
-        </div>
-        <div class="card-body">
-          <div class="card-name">${d.name}</div>
-          <div class="card-ingredients">${d.ingredients}</div>
-          <span class="card-tag">${tagLabels[d.tag]}</span>
-        </div>`;
-      card.addEventListener("click", () => openLightbox(d));
-      grid.appendChild(card);
-    });
+  function go(n) {
+    cur = (n + total) % total;
+    track.style.transform = `translateX(-${cur * 100}%)`;
+    dots.forEach((d,i) => d.classList.toggle('active', i===cur));
   }
 
-  buildGrid("all");
+  function next() { go(cur+1); }
+  function prev() { go(cur-1); }
 
-  // filter buttons
-  document.querySelectorAll(".filter-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      const f = btn.dataset.filter;
-      document.querySelectorAll(".card").forEach(c => {
-        const d = drinks.find(x => x.slug === c.dataset.slug);
-        c.classList.toggle("hidden", f !== "all" && d.tag !== f);
-      });
-    });
+  document.querySelector('.carousel-next').addEventListener('click', () => { next(); reset(); });
+  document.querySelector('.carousel-prev').addEventListener('click', () => { prev(); reset(); });
+  dots.forEach(d => d.addEventListener('click', () => { go(+d.dataset.i); reset(); }));
+
+  function reset() { clearInterval(timer); timer = setInterval(next, 3500); }
+  timer = setInterval(next, 3500);
+
+  // touch swipe
+  let tx=0;
+  track.addEventListener('touchstart', e=>tx=e.touches[0].clientX, {passive:true});
+  track.addEventListener('touchend', e=>{
+    const dx = e.changedTouches[0].clientX - tx;
+    if(Math.abs(dx)>40){ dx<0?next():prev(); reset(); }
   });
-
-  // lightbox
-  const lb = document.getElementById("lightbox");
-  function openLightbox(d) {
-    document.getElementById("lbImg").src = `assets/pics/menu/${d.slug}.png`;
-    document.getElementById("lbImg").alt = d.name;
-    document.getElementById("lbName").textContent = d.name;
-    document.getElementById("lbIng").textContent = d.ingredients;
-    lb.classList.add("open");
-    document.body.style.overflow = "hidden";
-  }
-  function closeLightbox() {
-    lb.classList.remove("open");
-    document.body.style.overflow = "";
-  }
-  document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
-  lb.addEventListener("click", e => { if (e.target === lb) closeLightbox(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
-
-  // mobile nav
-  const toggle = document.getElementById("navToggle");
-  const links  = document.getElementById("navLinks");
-  toggle.addEventListener("click", () => links.classList.toggle("open"));
-  links.querySelectorAll("a").forEach(a => a.addEventListener("click", () => links.classList.remove("open")));
-</script>
-</body>
-</html>
+</script><script>
+  const t=document.getElementById('navToggle'),l=document.getElementById('navLinks');
+  t.addEventListener('click',()=>l.classList.toggle('open'));
+  l.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>l.classList.remove('open')));
+</script></body></html>
