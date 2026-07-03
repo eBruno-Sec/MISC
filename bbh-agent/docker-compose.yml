@@ -1,0 +1,21 @@
+version: '3.9'
+
+services:
+  agent:
+    build: ./agent
+    environment:
+      - AI_PROVIDER=${AI_PROVIDER:-openrouter}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct:free}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ui:/app/ui:ro
+      - nuclei_templates:/root/nuclei-templates
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
+volumes:
+  nuclei_templates:
