@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApexShield GRC Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #04080a;
+  --surface:  #080f14;
+  --surface2: #0c1820;
+  --surface3: #0f2030;
+  --border:   #112233;
+  --accent:   #00c8ff;
+  --accent2:  #ff3d6b;
+  --green:    #00e676;
+  --gold:     #ffc107;
+  --purple:   #c084fc;
+  --text:     #b8d4e0;
+  --text-dim: #4a7a90;
+  --text-bright: #eef6fa;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Syne', sans-serif;
+  --radius: 2px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.6; overflow-x: hidden; }
+button { cursor: pointer; font-family: var(--mono); }
+input, select, textarea { font-family: var(--mono); }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* LOGIN */
+#login-screen {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+}
+.login-box {
+  width: 380px; border: 1px solid var(--border); background: var(--surface);
+  padding: 2.5rem;
+}
+.login-logo { font-family: var(--sans); font-weight: 800; font-size: 1.5rem; color: var(--accent); margin-bottom: 0.25rem; }
+.login-sub { font-size: 0.72rem; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 2rem; }
+.login-field { margin-bottom: 1rem; }
+.login-field label { display: block; font-size: 0.7rem; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.4rem; }
+.login-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text-bright); padding: 0.7rem 0.9rem; font-size: 0.85rem; outline: none; transition: border-color 0.2s; }
+.login-field input:focus { border-color: var(--accent); }
+.login-btn { width: 100%; background: var(--accent); color: var(--bg); border: none; padding: 0.85rem; font-family: var(--sans); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 0.5rem; transition: opacity 0.2s; }
+.login-btn:hover { opacity: 0.85; }
+.login-error { color: var(--accent2); font-size: 0.75rem; margin-top: 0.75rem; display: none; }
+
+/* APP SHELL */
+#app { display: none; height: 100vh; flex-direction: column; }
+#app.visible { display: flex; }
+
+/* TOP NAV */
+.topnav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 1.5rem; height: 52px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0; position: relative; z-index: 100;
+}
+.topnav-logo { font-family: var(--sans); font-weight: 800; font-size: 1rem; color: var(--accent); letter-spacing: 0.05em; }
+.topnav-logo span { color: var(--text-dim); font-weight: 600; }
+.topnav-right { display: flex; align-items: center; gap: 1.5rem; }
+.topnav-user { font-size: 0.72rem; color: var(--text-dim); }
+.topnav-logout { background: none; border: 1px solid var(--border); color: var(--text-dim); padding: 0.3rem 0.8rem; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.2s; }
+.topnav-logout:hover { border-color: var(--accent2); color: var(--accent2); }
+
+/* BODY SPLIT */
+.app-body { display: flex; flex: 1; overflow: hidden; }
+
+/* SIDEBAR */
+.sidebar {
+  width: 220px; flex-shrink: 0; background: var(--surface);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.sidebar-section { padding: 1.25rem 1rem 0.5rem; }
+.sidebar-label { font-size: 0.62rem; color: var(--text-dim); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 0.6rem; padding: 0 0.25rem; }
+.sidebar-nav { list-style: none; }
+.sidebar-nav li a {
+  display: flex; align-items: center; gap: 0.65rem; padding: 0.55rem 0.75rem;
+  color: var(--text-dim); text-decoration: none; font-size: 0.8rem;
+  border-radius: var(--radius); transition: all 0.15s; position: relative;
+}
+.sidebar-nav li a:hover { color: var(--text); background: var(--surface2); }
+.sidebar-nav li a.active { color: var(--accent); background: rgba(0,200,255,0.06); }
+.sidebar-nav li a.active::before { content: ''; position: absolute; left: 0; top: 20%; bottom: 20%; width: 2px; background: var(--accent); border-radius: 0 2px 2px 0; }
+.nav-icon { font-size: 0.85rem; width: 1rem; text-align: center; }
+
+.client-list { list-style: none; margin-top: 0.25rem; }
+.client-list li { display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.75rem; border-radius: var(--radius); cursor: pointer; transition: background 0.15s; }
+.client-list li:hover { background: var(--surface2); }
+.client-list li.active-client { background: rgba(0,200,255,0.05); }
+.client-list li.active-client .client-name { color: var(--accent); }
+.client-name { font-size: 0.78rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+.client-score { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 2px; font-weight: 700; }
+.score-green { background: rgba(0,230,118,0.12); color: var(--green); }
+.score-gold { background: rgba(255,193,7,0.12); color: var(--gold); }
+.score-red { background: rgba(255,61,107,0.12); color: var(--accent2); }
+
+.sidebar-add-btn { margin: 0.75rem 1rem; width: calc(100% - 2rem); background: none; border: 1px dashed var(--border); color: var(--text-dim); padding: 0.55rem; font-size: 0.75rem; transition: all 0.2s; }
+.sidebar-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* MAIN CONTENT */
+.main { flex: 1; overflow-y: auto; background: var(--bg); }
+.page { display: none; padding: 2rem; }
+.page.active { display: block; }
+
+/* PAGE HEADER */
+.page-hd { margin-bottom: 2rem; }
+.page-eyebrow { font-size: 0.68rem; color: var(--accent2); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 0.4rem; }
+.page-title { font-family: var(--sans); font-weight: 800; font-size: 1.6rem; color: var(--text-bright); }
+.page-sub { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.3rem; }
+
+/* CARDS & GRID */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }
+.grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }
+.card { background: var(--surface); padding: 1.5rem; }
+.card-label { font-size: 0.65rem; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 0.5rem; }
+.card-value { font-family: var(--sans); font-weight: 800; font-size: 2rem; color: var(--text-bright); line-height: 1; }
+.card-value.accent { color: var(--accent); }
+.card-value.green { color: var(--green); }
+.card-value.gold { color: var(--gold); }
+.card-value.red { color: var(--accent2); }
+.card-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.4rem; }
+
+/* SECTION */
+.section { margin-bottom: 2rem; }
+.section-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+.section-title { font-family: var(--sans); font-weight: 700; font-size: 0.95rem; color: var(--text-bright); }
+.section-action { background: none; border: 1px solid var(--border); color: var(--text-dim); padding: 0.35rem 0.85rem; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.2s; }
+.section-action:hover { border-color: var(--accent); color: var(--accent); }
+.section-action.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+.section-action.primary:hover { opacity: 0.85; }
+
+/* TABLE */
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th { font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); padding: 0.6rem 1rem; text-align: left; border-bottom: 1px solid var(--border); background: var(--surface); }
+.tbl td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.82rem; color: var(--text); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr:hover td { background: var(--surface2); }
+.tbl-empty { text-align: center; color: var(--text-dim); padding: 2.5rem 1rem; font-size: 0.8rem; }
+
+/* BADGES */
+.badge { display: inline-block; font-size: 0.62rem; padding: 0.15rem 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; border-radius: 2px; }
+.b-critical { background: rgba(255,61,107,0.15); color: var(--accent2); border: 1px solid rgba(255,61,107,0.3); }
+.b-high { background: rgba(255,152,0,0.12); color: #ff9800; border: 1px solid rgba(255,152,0,0.3); }
+.b-medium { background: rgba(255,193,7,0.1); color: var(--gold); border: 1px solid rgba(255,193,7,0.25); }
+.b-low { background: rgba(0,230,118,0.08); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.b-open { background: rgba(255,61,107,0.1); color: var(--accent2); border: 1px solid rgba(255,61,107,0.2); }
+.b-inprogress { background: rgba(255,193,7,0.1); color: var(--gold); border: 1px solid rgba(255,193,7,0.2); }
+.b-closed { background: rgba(0,230,118,0.08); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.b-compliant { background: rgba(0,230,118,0.08); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.b-noncompliant { background: rgba(255,61,107,0.1); color: var(--accent2); border: 1px solid rgba(255,61,107,0.2); }
+.b-na { background: rgba(74,122,144,0.1); color: var(--text-dim); border: 1px solid var(--border); }
+.b-info { background: rgba(0,200,255,0.08); color: var(--accent); border: 1px solid rgba(0,200,255,0.2); }
+
+/* PROGRESS BAR */
+.progress-wrap { background: var(--border); height: 4px; border-radius: 2px; overflow: hidden; margin-top: 0.5rem; }
+.progress-bar { height: 100%; border-radius: 2px; transition: width 0.4s; }
+.pb-green { background: var(--green); }
+.pb-gold { background: var(--gold); }
+.pb-red { background: var(--accent2); }
+
+/* MODAL */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(4,8,10,0.85);
+  display: none; align-items: center; justify-content: center; z-index: 500;
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.open { display: flex; }
+.modal { background: var(--surface); border: 1px solid var(--border); width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+.modal-hd { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); }
+.modal-title { font-family: var(--sans); font-weight: 700; font-size: 1rem; color: var(--text-bright); }
+.modal-close { background: none; border: none; color: var(--text-dim); font-size: 1.2rem; line-height: 1; padding: 0.2rem 0.4rem; transition: color 0.2s; }
+.modal-close:hover { color: var(--accent2); }
+.modal-body { padding: 1.5rem; }
+.modal-footer { padding: 1rem 1.5rem; border-top: 1px solid var(--border); display: flex; gap: 0.75rem; justify-content: flex-end; }
+
+/* FORM */
+.form-field { margin-bottom: 1.1rem; }
+.form-label { display: block; font-size: 0.68rem; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.4rem; }
+.form-input, .form-select, .form-textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text-bright); padding: 0.65rem 0.85rem; font-size: 0.82rem;
+  outline: none; transition: border-color 0.2s; border-radius: var(--radius);
+}
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+.form-select option { background: var(--surface); }
+.form-textarea { resize: vertical; min-height: 80px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.btn-cancel { background: none; border: 1px solid var(--border); color: var(--text-dim); padding: 0.6rem 1.2rem; font-size: 0.78rem; letter-spacing: 0.08em; transition: all 0.2s; }
+.btn-cancel:hover { border-color: var(--accent2); color: var(--accent2); }
+.btn-save { background: var(--accent); color: var(--bg); border: none; padding: 0.6rem 1.4rem; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; transition: opacity 0.2s; }
+.btn-save:hover { opacity: 0.85; }
+.btn-danger { background: var(--accent2); color: #fff; border: none; padding: 0.6rem 1.2rem; font-size: 0.78rem; font-weight: 700; transition: opacity 0.2s; }
+.btn-danger:hover { opacity: 0.85; }
+
+/* ICON BUTTONS */
+.icon-btn { background: none; border: none; color: var(--text-dim); padding: 0.25rem 0.4rem; font-size: 0.8rem; transition: color 0.2s; }
+.icon-btn:hover { color: var(--accent); }
+.icon-btn.del:hover { color: var(--accent2); }
+
+/* RISK MATRIX */
+.risk-score { font-family: var(--sans); font-weight: 800; font-size: 1.4rem; }
+
+/* CLIENT CARD DASHBOARD */
+.client-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }
+.client-card { background: var(--surface); padding: 1.5rem; cursor: pointer; transition: background 0.15s; position: relative; overflow: hidden; }
+.client-card::after { content: ''; position: absolute; top: 0; left: 0; width: 0; height: 2px; background: var(--accent); transition: width 0.3s; }
+.client-card:hover { background: var(--surface2); }
+.client-card:hover::after { width: 100%; }
+.cc-name { font-family: var(--sans); font-weight: 700; font-size: 1rem; color: var(--text-bright); margin-bottom: 0.25rem; }
+.cc-type { font-size: 0.68rem; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 1rem; }
+.cc-stats { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
+.cc-stat-val { font-family: var(--sans); font-weight: 700; font-size: 1.1rem; color: var(--text-bright); }
+.cc-stat-val.red { color: var(--accent2); }
+.cc-stat-val.gold { color: var(--gold); }
+.cc-stat-val.green { color: var(--green); }
+.cc-stat-lbl { font-size: 0.62rem; color: var(--text-dim); }
+
+/* SCORE RING */
+.score-display { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.score-number { font-family: var(--sans); font-weight: 800; font-size: 2.5rem; line-height: 1; }
+
+/* TOOLTIP */
+[data-tip] { position: relative; }
+[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%); background: var(--surface3); border: 1px solid var(--border); color: var(--text); font-size: 0.7rem; padding: 0.3rem 0.6rem; white-space: nowrap; z-index: 200; pointer-events: none; }
+
+/* EMPTY STATE */
+.empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-dim); }
+.empty-state .es-icon { font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.4; }
+.empty-state .es-title { font-family: var(--sans); font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 0.5rem; }
+.empty-state .es-sub { font-size: 0.8rem; }
+
+/* POAM SPECIFIC */
+.poam-days { font-size: 0.75rem; }
+.poam-days.overdue { color: var(--accent2); }
+.poam-days.due-soon { color: var(--gold); }
+.poam-days.ok { color: var(--green); }
+
+/* RISK REGISTER */
+.risk-exposure { font-family: var(--sans); font-weight: 700; }
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .sidebar { width: 0; overflow: hidden; }
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* ANIMATIONS */
+.page.active { animation: fadeIn 0.2s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* CONTROL TRACKER */
+.control-group { margin-bottom: 1.5rem; border: 1px solid var(--border); }
+.control-group-hd { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: var(--surface2); cursor: pointer; user-select: none; }
+.control-group-title { font-family: var(--sans); font-weight: 700; font-size: 0.85rem; color: var(--text-bright); }
+.control-group-meta { display: flex; align-items: center; gap: 1rem; }
+.control-row { display: grid; grid-template-columns: 3rem 1fr auto auto; align-items: center; gap: 1rem; padding: 0.7rem 1rem; border-top: 1px solid var(--border); transition: background 0.15s; }
+.control-row:hover { background: var(--surface2); }
+.control-id { font-size: 0.7rem; color: var(--accent); font-weight: 700; }
+.control-name { font-size: 0.8rem; color: var(--text); }
+.control-status-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); padding: 0.25rem 0.6rem; font-size: 0.65rem; font-family: var(--mono); letter-spacing: 0.08em; transition: all 0.2s; min-width: 100px; text-align: center; }
+.control-note-btn { background: none; border: none; color: var(--text-dim); font-size: 0.75rem; padding: 0.25rem; transition: color 0.2s; }
+.control-note-btn:hover { color: var(--accent); }
+
+/* FRAMEWORK TABS */
+.fw-tabs { display: flex; gap: 0; margin-bottom: 1.5rem; border: 1px solid var(--border); width: fit-content; }
+.fw-tab { background: none; border: none; border-right: 1px solid var(--border); color: var(--text-dim); padding: 0.55rem 1.2rem; font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.2s; }
+.fw-tab:last-child { border-right: none; }
+.fw-tab.active { background: var(--accent); color: var(--bg); font-weight: 700; }
+
+/* EXPORT BTN */
+.export-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); padding: 0.35rem 0.85rem; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.2s; }
+.export-btn:hover { border-color: var(--green); color: var(--green); }
+
+/* NOTIFICATION */
+.notif { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--green); padding: 0.75rem 1.25rem; font-size: 0.8rem; color: var(--text-bright); z-index: 9999; transform: translateY(100px); opacity: 0; transition: all 0.3s; max-width: 320px; }
+.notif.show { transform: translateY(0); opacity: 1; }
+.notif.error { border-left-color: var(--accent2); }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">ApexShield</div>
+    <div class="login-sub">GRC Portal &middot; Secure Access</div>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="login-user" placeholder="admin" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password">
+    </div>
+    <button class="login-btn" onclick="doLogin()">Authenticate</button>
+    <div class="login-error" id="login-error">Invalid credentials. Try again.</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <!-- TOP NAV -->
+  <div class="topnav">
+    <div class="topnav-logo">ApexShield <span>GRC</span></div>
+    <div class="topnav-right">
+      <div class="topnav-user" id="nav-user"></div>
+      <button class="topnav-logout" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="app-body">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Navigation</div>
+        <ul class="sidebar-nav">
+          <li><a href="#" class="active" data-page="dashboard" onclick="nav(this)"><span class="nav-icon">▦</span> Dashboard</a></li>
+          <li><a href="#" data-page="controls" onclick="nav(this)"><span class="nav-icon">✓</span> Controls</a></li>
+          <li><a href="#" data-page="findings" onclick="nav(this)"><span class="nav-icon">⚑</span> Findings</a></li>
+          <li><a href="#" data-page="poam" onclick="nav(this)"><span class="nav-icon">◷</span> POA&amp;M</a></li>
+          <li><a href="#" data-page="risk" onclick="nav(this)"><span class="nav-icon">◈</span> Risk Register</a></li>
+        </ul>
+      </div>
+      <div class="sidebar-section" style="flex:1">
+        <div class="sidebar-label">Clients</div>
+        <ul class="client-list" id="sidebar-clients"></ul>
+      </div>
+      <button class="sidebar-add-btn" onclick="openModal('client-modal')">+ New Client</button>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+      <!-- DASHBOARD PAGE -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-hd">
+          <div class="page-eyebrow">Overview</div>
+          <div class="page-title">Client Dashboard</div>
+          <div class="page-sub" id="dash-date"></div>
+        </div>
+        <div class="grid-4" id="dash-stats">
+          <div class="card"><div class="card-label">Total Clients</div><div class="card-value accent" id="stat-clients">0</div></div>
+          <div class="card"><div class="card-label">Open Findings</div><div class="card-value red" id="stat-findings">0</div></div>
+          <div class="card"><div class="card-label">Overdue POA&Ms</div><div class="card-value gold" id="stat-poam">0</div></div>
+          <div class="card"><div class="card-label">Avg Compliance</div><div class="card-value green" id="stat-compliance">0%</div></div>
+        </div>
+        <div class="section">
+          <div class="section-hd">
+            <div class="section-title">Active Engagements</div>
+            <button class="section-action primary" onclick="openModal('client-modal')">+ Add Client</button>
+          </div>
+          <div class="client-cards" id="client-cards-grid"></div>
+          <div class="empty-state" id="client-empty" style="display:none">
+            <div class="es-icon">◫</div>
+            <div class="es-title">No clients yet</div>
+            <div class="es-sub">Add your first client to get started</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTROLS PAGE -->
+      <div class="page" id="page-controls">
+        <div class="page-hd">
+          <div class="page-eyebrow" id="controls-client-name">Select a client</div>
+          <div class="page-title">Control Tracker</div>
+        </div>
+        <div id="controls-no-client" class="empty-state">
+          <div class="es-icon">◫</div>
+          <div class="es-title">No client selected</div>
+          <div class="es-sub">Select a client from the sidebar</div>
+        </div>
+        <div id="controls-content" style="display:none">
+          <div class="section-hd">
+            <div style="display:flex;gap:0.75rem;align-items:center">
+              <div class="fw-tabs" id="fw-tabs">
+                <button class="fw-tab active" data-fw="cis" onclick="switchFramework(this)">CIS v8</button>
+                <button class="fw-tab" data-fw="cmmc" onclick="switchFramework(this)">CMMC L1</button>
+                <button class="fw-tab" data-fw="nist" onclick="switchFramework(this)">NIST CSF</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center">
+              <span id="controls-score-display" style="font-family:var(--sans);font-weight:800;font-size:1.1rem;color:var(--green)"></span>
+              <button class="export-btn" onclick="exportControls()">Export CSV</button>
+            </div>
+          </div>
+          <div id="controls-list"></div>
+        </div>
+      </div>
+
+      <!-- FINDINGS PAGE -->
+      <div class="page" id="page-findings">
+        <div class="page-hd">
+          <div class="page-eyebrow" id="findings-client-name">Select a client</div>
+          <div class="page-title">Finding Manager</div>
+        </div>
+        <div id="findings-no-client" class="empty-state">
+          <div class="es-icon">◫</div>
+          <div class="es-title">No client selected</div>
+          <div class="es-sub">Select a client from the sidebar</div>
+        </div>
+        <div id="findings-content" style="display:none">
+          <div class="section-hd">
+            <div class="section-title">Findings</div>
+            <div style="display:flex;gap:0.5rem">
+              <button class="export-btn" onclick="exportFindings()">Export CSV</button>
+              <button class="section-action primary" onclick="openFindingModal()">+ Add Finding</button>
+            </div>
+          </div>
+          <div class="grid-4" id="findings-stats">
+            <div class="card"><div class="card-label">Critical</div><div class="card-value red" id="fc-critical">0</div></div>
+            <div class="card"><div class="card-label">High</div><div class="card-value" style="color:#ff9800" id="fc-high">0</div></div>
+            <div class="card"><div class="card-label">Medium</div><div class="card-value gold" id="fc-medium">0</div></div>
+            <div class="card"><div class="card-label">Low</div><div class="card-value green" id="fc-low">0</div></div>
+          </div>
+          <table class="tbl" id="findings-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Title</th><th>Severity</th><th>Asset</th><th>Status</th><th>Framework</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="findings-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- POAM PAGE -->
+      <div class="page" id="page-poam">
+        <div class="page-hd">
+          <div class="page-eyebrow" id="poam-client-name">Select a client</div>
+          <div class="page-title">POA&amp;M Tracker</div>
+        </div>
+        <div id="poam-no-client" class="empty-state">
+          <div class="es-icon">◫</div>
+          <div class="es-title">No client selected</div>
+          <div class="es-sub">Select a client from the sidebar</div>
+        </div>
+        <div id="poam-content" style="display:none">
+          <div class="section-hd">
+            <div class="section-title">Plan of Action &amp; Milestones</div>
+            <div style="display:flex;gap:0.5rem">
+              <button class="export-btn" onclick="exportPOAM()">Export CSV</button>
+              <button class="section-action primary" onclick="openPOAMModal()">+ Add Item</button>
+            </div>
+          </div>
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>ID</th><th>Weakness</th><th>Responsible Party</th><th>Milestone Date</th><th>Days</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="poam-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- RISK PAGE -->
+      <div class="page" id="page-risk">
+        <div class="page-hd">
+          <div class="page-eyebrow" id="risk-client-name">Select a client</div>
+          <div class="page-title">Risk Register</div>
+        </div>
+        <div id="risk-no-client" class="empty-state">
+          <div class="es-icon">◫</div>
+          <div class="es-title">No client selected</div>
+          <div class="es-sub">Select a client from the sidebar</div>
+        </div>
+        <div id="risk-content" style="display:none">
+          <div class="section-hd">
+            <div class="section-title">Risk Register (FAIR-lite)</div>
+            <div style="display:flex;gap:0.5rem">
+              <button class="export-btn" onclick="exportRisk()">Export CSV</button>
+              <button class="section-action primary" onclick="openRiskModal()">+ Add Risk</button>
+            </div>
+          </div>
+          <div class="grid-3" id="risk-summary-cards" style="margin-bottom:1.5rem">
+            <div class="card"><div class="card-label">Total Risks</div><div class="card-value accent" id="risk-total">0</div></div>
+            <div class="card"><div class="card-label">Total Annual Exposure</div><div class="card-value red" id="risk-exposure">$0</div></div>
+            <div class="card"><div class="card-label">Avg Risk Score</div><div class="card-value gold" id="risk-avg">0</div></div>
+          </div>
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Asset</th><th>Threat</th><th>Likelihood</th><th>Impact</th><th>Score</th><th>Annual Exposure</th><th>Owner</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="risk-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /main -->
+  </div><!-- /app-body -->
+</div><!-- /app -->
+
+<!-- NOTIFICATION -->
+<div class="notif" id="notif"></div>
+
+<!-- MODALS -->
+
+<!-- CLIENT MODAL -->
+<div class="modal-overlay" id="client-modal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-title" id="client-modal-title">New Client</div>
+      <button class="modal-close" onclick="closeModal('client-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="client-edit-id">
+      <div class="form-field">
+        <label class="form-label">Company Name *</label>
+        <input class="form-input" id="client-name" placeholder="Acme Defense LLC">
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Industry</label>
+          <select class="form-select" id="client-industry">
+            <option>Defense Contractor</option>
+            <option>Manufacturing</option>
+            <option>Healthcare</option>
+            <option>Financial Services</option>
+            <option>Retail</option>
+            <option>Technology</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Employee Count</label>
+          <select class="form-select" id="client-size">
+            <option>1-10</option>
+            <option>11-50</option>
+            <option>51-200</option>
+            <option>201-500</option>
+            <option>500+</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Primary Contact</label>
+          <input class="form-input" id="client-contact" placeholder="John Smith">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Contact Email</label>
+          <input class="form-input" id="client-email" placeholder="john@acme.com">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Engagement Type</label>
+          <select class="form-select" id="client-type">
+            <option>Discovery / Gap Assessment</option>
+            <option>Monthly Retainer</option>
+            <option>CMMC Prep</option>
+            <option>Penetration Test</option>
+            <option>Incident Response</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Monthly Value ($)</label>
+          <input class="form-input" id="client-value" type="number" placeholder="1500">
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="client-notes" placeholder="Engagement notes, scope, special requirements..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('client-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveClient()">Save Client</button>
+    </div>
+  </div>
+</div>
+
+<!-- FINDING MODAL -->
+<div class="modal-overlay" id="finding-modal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-title" id="finding-modal-title">New Finding</div>
+      <button class="modal-close" onclick="closeModal('finding-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="finding-edit-id">
+      <div class="form-field">
+        <label class="form-label">Title *</label>
+        <input class="form-input" id="finding-title" placeholder="Missing MFA on VPN">
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Severity</label>
+          <select class="form-select" id="finding-severity">
+            <option>Critical</option>
+            <option>High</option>
+            <option>Medium</option>
+            <option>Low</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="finding-status">
+            <option>Open</option>
+            <option>In Progress</option>
+            <option>Closed</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Affected Asset</label>
+          <input class="form-input" id="finding-asset" placeholder="VPN Gateway">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Framework Reference</label>
+          <select class="form-select" id="finding-framework">
+            <option>CIS v8</option>
+            <option>CMMC L1</option>
+            <option>CMMC L2</option>
+            <option>NIST CSF</option>
+            <option>NIST 800-53</option>
+            <option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Description</label>
+        <textarea class="form-textarea" id="finding-description" placeholder="Describe the finding, evidence, and impact..."></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Recommendation</label>
+        <textarea class="form-textarea" id="finding-recommendation" placeholder="Recommended remediation steps..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('finding-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveFinding()">Save Finding</button>
+    </div>
+  </div>
+</div>
+
+<!-- POAM MODAL -->
+<div class="modal-overlay" id="poam-modal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-title">POA&amp;M Item</div>
+      <button class="modal-close" onclick="closeModal('poam-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="poam-edit-id">
+      <div class="form-field">
+        <label class="form-label">Weakness / Control Gap *</label>
+        <input class="form-input" id="poam-weakness" placeholder="No multi-factor authentication">
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Responsible Party</label>
+          <input class="form-input" id="poam-owner" placeholder="IT Manager">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Milestone Date</label>
+          <input class="form-input" id="poam-date" type="date">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="poam-status">
+            <option>Open</option>
+            <option>In Progress</option>
+            <option>Closed</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Resources Required</label>
+          <input class="form-input" id="poam-resources" placeholder="MFA license, IT time">
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Milestones / Notes</label>
+        <textarea class="form-textarea" id="poam-notes" placeholder="Milestone 1: Evaluate MFA vendors by..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('poam-modal')">Cancel</button>
+      <button class="btn-save" onclick="savePOAM()">Save Item</button>
+    </div>
+  </div>
+</div>
+
+<!-- RISK MODAL -->
+<div class="modal-overlay" id="risk-modal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-title">Risk Entry (FAIR-lite)</div>
+      <button class="modal-close" onclick="closeModal('risk-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="risk-edit-id">
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Asset *</label>
+          <input class="form-input" id="risk-asset" placeholder="Customer database">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Threat</label>
+          <input class="form-input" id="risk-threat" placeholder="Ransomware">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Likelihood (1-5)</label>
+          <select class="form-select" id="risk-likelihood">
+            <option value="1">1 - Very Low</option>
+            <option value="2">2 - Low</option>
+            <option value="3">3 - Moderate</option>
+            <option value="4">4 - High</option>
+            <option value="5">5 - Very High</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Impact (1-5)</label>
+          <select class="form-select" id="risk-impact">
+            <option value="1">1 - Negligible</option>
+            <option value="2">2 - Minor</option>
+            <option value="3">3 - Moderate</option>
+            <option value="4">4 - Significant</option>
+            <option value="5">5 - Severe</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Asset Value ($)</label>
+          <input class="form-input" id="risk-asset-value" type="number" placeholder="50000">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Risk Owner</label>
+          <input class="form-input" id="risk-owner" placeholder="CEO">
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Treatment</label>
+        <select class="form-select" id="risk-treatment">
+          <option>Mitigate</option>
+          <option>Accept</option>
+          <option>Transfer</option>
+          <option>Avoid</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="risk-notes" placeholder="Context, existing controls, mitigation plan..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('risk-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveRisk()">Save Risk</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONTROL NOTE MODAL -->
+<div class="modal-overlay" id="control-note-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-hd">
+      <div class="modal-title" id="cn-title">Control Note</div>
+      <button class="modal-close" onclick="closeModal('control-note-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="cn-fw">
+      <input type="hidden" id="cn-id">
+      <div class="form-field">
+        <label class="form-label">Evidence / Notes</label>
+        <textarea class="form-textarea" id="cn-note" style="min-height:120px" placeholder="Evidence, implementation notes, compensating controls..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('control-note-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveControlNote()">Save Note</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// =====================================================================
+// DATA STORE
+// =====================================================================
+const DB = {
+  get(k) { try { return JSON.parse(localStorage.getItem('apx_' + k) || 'null'); } catch(e) { return null; } },
+  set(k, v) { localStorage.setItem('apx_' + k, JSON.stringify(v)); },
+  clients() { return this.get('clients') || []; },
+  saveClients(c) { this.set('clients', c); },
+  clientData(id) { return this.get('cd_' + id) || { findings: [], poam: [], risks: [], controls: {} }; },
+  saveClientData(id, d) { this.set('cd_' + id, d); }
+};
+
+// =====================================================================
+// AUTH
+// =====================================================================
+const CREDS = { admin: 'ApexShield2025!' }; // change in production
+let currentUser = null;
+
+function doLogin() {
+  const u = document.getElementById('login-user').value.trim();
+  const p = document.getElementById('login-pass').value;
+  if (CREDS[u] && CREDS[u] === p) {
+    currentUser = u;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').classList.add('visible');
+    document.getElementById('nav-user').textContent = u;
+    initApp();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+document.getElementById('login-pass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+document.getElementById('login-user').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+function doLogout() {
+  currentUser = null;
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').style.display = 'none';
+}
+
+// =====================================================================
+// NAVIGATION
+// =====================================================================
+let currentPage = 'dashboard';
+let currentClient = null;
+
+function nav(el) {
+  event.preventDefault();
+  document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+  el.classList.add('active');
+  const page = el.dataset.page;
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  renderPage(page);
+}
+
+function renderPage(page) {
+  if (page === 'dashboard') renderDashboard();
+  else if (page === 'controls') renderControls();
+  else if (page === 'findings') renderFindings();
+  else if (page === 'poam') renderPOAM();
+  else if (page === 'risk') renderRisk();
+}
+
+function selectClient(id) {
+  currentClient = id;
+  document.querySelectorAll('.client-list li').forEach(li => li.classList.remove('active-client'));
+  const li = document.querySelector(`.client-list li[data-id="${id}"]`);
+  if (li) li.classList.add('active-client');
+  renderPage(currentPage);
+}
+
+// =====================================================================
+// INIT
+// =====================================================================
+function initApp() {
+  document.getElementById('dash-date').textContent = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  renderSidebar();
+  renderDashboard();
+}
+
+// =====================================================================
+// SIDEBAR
+// =====================================================================
+function renderSidebar() {
+  const clients = DB.clients();
+  const ul = document.getElementById('sidebar-clients');
+  if (!clients.length) { ul.innerHTML = '<li style="padding:0.5rem 0.75rem;color:var(--text-dim);font-size:0.75rem;">No clients yet</li>'; return; }
+  ul.innerHTML = clients.map(c => {
+    const score = getComplianceScore(c.id);
+    const cls = score >= 70 ? 'score-green' : score >= 40 ? 'score-gold' : 'score-red';
+    return `<li data-id="${c.id}" onclick="selectClient('${c.id}')" ${currentClient===c.id?'class="active-client"':''}>
+      <span class="client-name">${c.name}</span>
+      <span class="client-score ${cls}">${score}%</span>
+    </li>`;
+  }).join('');
+}
+
+// =====================================================================
+// DASHBOARD
+// =====================================================================
+function renderDashboard() {
+  const clients = DB.clients();
+  document.getElementById('stat-clients').textContent = clients.length;
+  let totalFindings = 0, overduePoam = 0, totalCompliance = 0;
+  clients.forEach(c => {
+    const d = DB.clientData(c.id);
+    totalFindings += d.findings.filter(f => f.status === 'Open').length;
+    const today = new Date();
+    overduePoam += d.poam.filter(p => p.status !== 'Closed' && p.date && new Date(p.date) < today).length;
+    totalCompliance += getComplianceScore(c.id);
+  });
+  document.getElementById('stat-findings').textContent = totalFindings;
+  document.getElementById('stat-poam').textContent = overduePoam;
+  document.getElementById('stat-compliance').textContent = clients.length ? Math.round(totalCompliance / clients.length) + '%' : '0%';
+
+  const grid = document.getElementById('client-cards-grid');
+  const empty = document.getElementById('client-empty');
+  if (!clients.length) { grid.innerHTML = ''; grid.style.display = 'none'; empty.style.display = 'block'; return; }
+  grid.style.display = 'grid';
+  empty.style.display = 'none';
+  grid.innerHTML = clients.map(c => {
+    const d = DB.clientData(c.id);
+    const open = d.findings.filter(f => f.status === 'Open').length;
+    const crit = d.findings.filter(f => f.severity === 'Critical' && f.status === 'Open').length;
+    const score = getComplianceScore(c.id);
+    const scoreClass = score >= 70 ? 'green' : score >= 40 ? 'gold' : 'red';
+    const val = c.value ? '$' + Number(c.value).toLocaleString() + '/mo' : '';
+    return `<div class="client-card" onclick="goToClient('${c.id}')">
+      <div class="cc-name">${c.name}</div>
+      <div class="cc-type">${c.industry} &middot; ${c.type}${val ? ' &middot; ' + val : ''}</div>
+      <div class="cc-stats">
+        <div><div class="cc-stat-val ${crit > 0 ? 'red' : ''}">${crit}</div><div class="cc-stat-lbl">Critical</div></div>
+        <div><div class="cc-stat-val ${open > 0 ? 'gold' : 'green'}">${open}</div><div class="cc-stat-lbl">Open</div></div>
+        <div><div class="cc-stat-val ${scoreClass}">${score}%</div><div class="cc-stat-lbl">Compliance</div></div>
+      </div>
+      <div class="progress-wrap"><div class="progress-bar ${scoreClass === 'green' ? 'pb-green' : scoreClass === 'gold' ? 'pb-gold' : 'pb-red'}" style="width:${score}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function goToClient(id) {
+  selectClient(id);
+  document.querySelector('[data-page="findings"]').click();
+}
+
+// =====================================================================
+// COMPLIANCE SCORE
+// =====================================================================
+function getComplianceScore(clientId) {
+  const d = DB.clientData(clientId);
+  const ctrls = d.controls;
+  const fw = 'cis';
+  const fwControls = FRAMEWORKS[fw];
+  let total = 0, compliant = 0;
+  fwControls.forEach(g => g.controls.forEach(c => {
+    const key = `${fw}_${c.id}`;
+    total++;
+    if (ctrls[key] && ctrls[key].status === 'Compliant') compliant++;
+  }));
+  return total ? Math.round((compliant / total) * 100) : 0;
+}
+
+// =====================================================================
+// FRAMEWORKS DATA
+// =====================================================================
+const FRAMEWORKS = {
+  cis: [
+    { group: 'IG1 - Basic Cyber Hygiene', controls: [
+      { id: '1.1', name: 'Establish and Maintain Detailed Enterprise Asset Inventory' },
+      { id: '1.2', name: 'Address Unauthorized Assets' },
+      { id: '2.1', name: 'Establish and Maintain a Software Inventory' },
+      { id: '2.2', name: 'Ensure Authorized Software is Currently Supported' },
+      { id: '3.3', name: 'Configure Data Access Control Lists' },
+      { id: '4.1', name: 'Establish and Maintain a Secure Configuration Process' },
+      { id: '4.2', name: 'Establish and Maintain a Secure Configuration Process for Network Infrastructure' },
+      { id: '5.1', name: 'Establish and Maintain an Inventory of Accounts' },
+      { id: '5.2', name: 'Use Unique Passwords' },
+      { id: '5.3', name: 'Disable Dormant Accounts' },
+      { id: '6.1', name: 'Establish an Access Granting Process' },
+      { id: '6.2', name: 'Establish an Access Revoking Process' },
+    ]},
+    { group: 'IG1 - Protective Controls', controls: [
+      { id: '7.1', name: 'Establish and Maintain a Vulnerability Management Process' },
+      { id: '7.2', name: 'Establish and Maintain a Remediation Process' },
+      { id: '8.2', name: 'Ensure Anti-Malware Software is Enabled' },
+      { id: '9.2', name: 'Use DNS Filtering Services' },
+      { id: '10.1', name: 'Deploy and Maintain Anti-Malware Software' },
+      { id: '11.2', name: 'Perform Automated Backups' },
+      { id: '11.3', name: 'Protect Recovery Data' },
+      { id: '12.1', name: 'Ensure Network Infrastructure is Up-to-Date' },
+      { id: '13.1', name: 'Centralize Security Event Alerting' },
+      { id: '14.1', name: 'Establish and Maintain a Security Awareness Program' },
+    ]},
+    { group: 'IG2 - Advanced Controls', controls: [
+      { id: '3.1', name: 'Establish and Maintain a Data Management Process' },
+      { id: '4.7', name: 'Manage Default Accounts on Enterprise Assets and Software' },
+      { id: '5.4', name: 'Restrict Administrator Privileges to Dedicated Admin Accounts' },
+      { id: '6.3', name: 'Require MFA for Externally-Exposed Applications' },
+      { id: '6.4', name: 'Require MFA for Remote Network Access' },
+      { id: '6.5', name: 'Require MFA for Administrative Access' },
+      { id: '7.5', name: 'Perform Automated Vulnerability Scans of Internal Enterprise Assets' },
+      { id: '7.6', name: 'Perform Automated Vulnerability Scans of Externally-Exposed Enterprise Assets' },
+      { id: '12.2', name: 'Establish and Maintain a Secure Network Architecture' },
+      { id: '12.6', name: 'Use of Secure Network Management and Communication Protocols' },
+    ]}
+  ],
+  cmmc: [
+    { group: 'Access Control (AC)', controls: [
+      { id: 'AC.1.001', name: 'Limit system access to authorized users' },
+      { id: 'AC.1.002', name: 'Limit system access to authorized transactions and functions' },
+      { id: 'AC.1.003', name: 'Verify and control external system connections' },
+      { id: 'AC.1.004', name: 'Control information posted or processed on publicly accessible systems' },
+    ]},
+    { group: 'Identification & Authentication (IA)', controls: [
+      { id: 'IA.1.076', name: 'Identify information system users and processes' },
+      { id: 'IA.1.077', name: 'Authenticate users, processes, or devices before system access' },
+    ]},
+    { group: 'Media Protection (MP)', controls: [
+      { id: 'MP.1.118', name: 'Sanitize or destroy media before disposal or reuse' },
+    ]},
+    { group: 'Physical Protection (PE)', controls: [
+      { id: 'PE.1.131', name: 'Limit physical access to organizational systems' },
+      { id: 'PE.1.132', name: 'Escort visitors and monitor visitor activity' },
+      { id: 'PE.1.133', name: 'Maintain audit logs of physical access' },
+      { id: 'PE.1.134', name: 'Control and manage physical access devices' },
+    ]},
+    { group: 'System & Communications Protection (SC)', controls: [
+      { id: 'SC.1.175', name: 'Monitor, control, and protect communications at external boundaries' },
+      { id: 'SC.1.176', name: 'Implement subnetworks for publicly accessible system components' },
+    ]},
+    { group: 'System & Information Integrity (SI)', controls: [
+      { id: 'SI.1.210', name: 'Identify, report, and correct system flaws in a timely manner' },
+      { id: 'SI.1.211', name: 'Provide protection from malicious code' },
+      { id: 'SI.1.212', name: 'Update malicious code protection mechanisms' },
+      { id: 'SI.1.213', name: 'Perform periodic scans and real-time scans of files' },
+    ]}
+  ],
+  nist: [
+    { group: 'Identify (ID)', controls: [
+      { id: 'ID.AM-1', name: 'Physical devices and systems inventoried' },
+      { id: 'ID.AM-2', name: 'Software platforms and applications inventoried' },
+      { id: 'ID.AM-5', name: 'Resources prioritized based on classification and criticality' },
+      { id: 'ID.GV-1', name: 'Organizational cybersecurity policy established' },
+      { id: 'ID.GV-4', name: 'Governance and risk management processes address cybersecurity risks' },
+      { id: 'ID.RA-1', name: 'Asset vulnerabilities identified and documented' },
+      { id: 'ID.RA-5', name: 'Threats, vulnerabilities, likelihoods, and impacts used to determine risk' },
+    ]},
+    { group: 'Protect (PR)', controls: [
+      { id: 'PR.AC-1', name: 'Identities and credentials issued, managed, verified, revoked' },
+      { id: 'PR.AC-3', name: 'Remote access managed' },
+      { id: 'PR.AC-4', name: 'Access permissions managed incorporating least privilege' },
+      { id: 'PR.AC-7', name: 'Users, devices, and assets authenticated commensurate with risk' },
+      { id: 'PR.AT-1', name: 'All users informed and trained' },
+      { id: 'PR.DS-1', name: 'Data-at-rest protected' },
+      { id: 'PR.DS-2', name: 'Data-in-transit protected' },
+      { id: 'PR.IP-1', name: 'Baseline configuration of systems established and maintained' },
+      { id: 'PR.PT-3', name: 'Principle of least functionality incorporated' },
+    ]},
+    { group: 'Detect (DE)', controls: [
+      { id: 'DE.AE-1', name: 'Baseline of network operations established' },
+      { id: 'DE.CM-1', name: 'Network monitored to detect potential cybersecurity events' },
+      { id: 'DE.CM-4', name: 'Malicious code detected' },
+      { id: 'DE.CM-7', name: 'Monitoring for unauthorized personnel, connections, devices performed' },
+    ]},
+    { group: 'Respond (RS)', controls: [
+      { id: 'RS.RP-1', name: 'Response plan executed during or after an incident' },
+      { id: 'RS.CO-2', name: 'Incidents reported consistent with established criteria' },
+      { id: 'RS.AN-1', name: 'Notifications from detection systems investigated' },
+    ]},
+    { group: 'Recover (RC)', controls: [
+      { id: 'RC.RP-1', name: 'Recovery plan executed during or after a cybersecurity incident' },
+      { id: 'RC.IM-1', name: 'Recovery plans incorporate lessons learned' },
+    ]}
+  ]
+};
+
+// =====================================================================
+// CONTROLS
+// =====================================================================
+let currentFramework = 'cis';
+
+function switchFramework(el) {
+  document.querySelectorAll('.fw-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentFramework = el.dataset.fw;
+  renderControlsList();
+}
+
+function renderControls() {
+  if (!currentClient) {
+    document.getElementById('controls-no-client').style.display = 'block';
+    document.getElementById('controls-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('controls-no-client').style.display = 'none';
+  document.getElementById('controls-content').style.display = 'block';
+  const client = DB.clients().find(c => c.id === currentClient);
+  document.getElementById('controls-client-name').textContent = client ? client.name : '';
+  renderControlsList();
+}
+
+function renderControlsList() {
+  const d = DB.clientData(currentClient);
+  const ctrls = d.controls;
+  const fw = currentFramework;
+  const groups = FRAMEWORKS[fw];
+  let totalControls = 0, compliantCount = 0;
+  const html = groups.map(g => {
+    const rows = g.controls.map(c => {
+      const key = `${fw}_${c.id}`;
+      const entry = ctrls[key] || { status: 'Not Assessed' };
+      totalControls++;
+      if (entry.status === 'Compliant') compliantCount++;
+      const statusColors = {
+        'Compliant': 'b-compliant',
+        'Non-Compliant': 'b-noncompliant',
+        'N/A': 'b-na',
+        'Not Assessed': 'b-info'
+      };
+      const nextStatus = { 'Not Assessed': 'Compliant', 'Compliant': 'Non-Compliant', 'Non-Compliant': 'N/A', 'N/A': 'Not Assessed' };
+      return `<div class="control-row">
+        <div class="control-id">${c.id}</div>
+        <div class="control-name">${c.name}${entry.note ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + entry.note + '</span>' : ''}</div>
+        <button class="control-status-btn badge ${statusColors[entry.status]}" onclick="cycleControlStatus('${fw}','${c.id}','${nextStatus[entry.status]}')">${entry.status}</button>
+        <button class="control-note-btn" title="Add note" onclick="openControlNote('${fw}','${c.id}','${(entry.note||'').replace(/'/g,'&#39;')}')">✎</button>
+      </div>`;
+    }).join('');
+    const groupCompliant = g.controls.filter(c => { const k=`${fw}_${c.id}`; return ctrls[k] && ctrls[k].status==='Compliant'; }).length;
+    return `<div class="control-group">
+      <div class="control-group-hd">
+        <div class="control-group-title">${g.group}</div>
+        <div class="control-group-meta">
+          <span style="font-size:0.72rem;color:var(--text-dim)">${groupCompliant}/${g.controls.length} compliant</span>
+        </div>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+  document.getElementById('controls-list').innerHTML = html;
+  const pct = totalControls ? Math.round((compliantCount / totalControls) * 100) : 0;
+  const color = pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--gold)' : 'var(--accent2)';
+  document.getElementById('controls-score-display').style.color = color;
+  document.getElementById('controls-score-display').textContent = pct + '% compliant';
+}
+
+function cycleControlStatus(fw, id, newStatus) {
+  const d = DB.clientData(currentClient);
+  const key = `${fw}_${id}`;
+  if (!d.controls[key]) d.controls[key] = {};
+  d.controls[key].status = newStatus;
+  DB.saveClientData(currentClient, d);
+  renderControlsList();
+  renderSidebar();
+}
+
+function openControlNote(fw, id, existingNote) {
+  document.getElementById('cn-fw').value = fw;
+  document.getElementById('cn-id').value = id;
+  document.getElementById('cn-note').value = existingNote || '';
+  const ctrl = FRAMEWORKS[fw].flatMap(g => g.controls).find(c => c.id === id);
+  document.getElementById('cn-title').textContent = 'Note: ' + (ctrl ? ctrl.id : id);
+  openModal('control-note-modal');
+}
+
+function saveControlNote() {
+  const fw = document.getElementById('cn-fw').value;
+  const id = document.getElementById('cn-id').value;
+  const note = document.getElementById('cn-note').value;
+  const d = DB.clientData(currentClient);
+  const key = `${fw}_${id}`;
+  if (!d.controls[key]) d.controls[key] = { status: 'Not Assessed' };
+  d.controls[key].note = note;
+  DB.saveClientData(currentClient, d);
+  closeModal('control-note-modal');
+  renderControlsList();
+  notify('Note saved');
+}
+
+// =====================================================================
+// FINDINGS
+// =====================================================================
+function renderFindings() {
+  if (!currentClient) {
+    document.getElementById('findings-no-client').style.display = 'flex';
+    document.getElementById('findings-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('findings-no-client').style.display = 'none';
+  document.getElementById('findings-content').style.display = 'block';
+  const client = DB.clients().find(c => c.id === currentClient);
+  document.getElementById('findings-client-name').textContent = client ? client.name : '';
+  const d = DB.clientData(currentClient);
+  const f = d.findings;
+  document.getElementById('fc-critical').textContent = f.filter(x => x.severity==='Critical').length;
+  document.getElementById('fc-high').textContent = f.filter(x => x.severity==='High').length;
+  document.getElementById('fc-medium').textContent = f.filter(x => x.severity==='Medium').length;
+  document.getElementById('fc-low').textContent = f.filter(x => x.severity==='Low').length;
+  const tbody = document.getElementById('findings-tbody');
+  if (!f.length) { tbody.innerHTML = '<tr><td colspan="7" class="tbl-empty">No findings yet. Add your first finding.</td></tr>'; return; }
+  tbody.innerHTML = f.map((item, i) => `<tr>
+    <td style="color:var(--text-dim);font-size:0.72rem">F-${String(i+1).padStart(3,'0')}</td>
+    <td><strong style="color:var(--text-bright)">${item.title}</strong>${item.description ? '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + item.description.substring(0,80) + (item.description.length>80?'...':'') + '</span>' : ''}</td>
+    <td><span class="badge b-${item.severity.toLowerCase()}">${item.severity}</span></td>
+    <td>${item.asset || ''}</td>
+    <td><span class="badge b-${item.status.toLowerCase().replace(' ','')}">${item.status}</span></td>
+    <td style="font-size:0.75rem;color:var(--text-dim)">${item.framework || ''}</td>
+    <td style="white-space:nowrap">
+      <button class="icon-btn" onclick="editFinding(${i})" title="Edit">✎</button>
+      <button class="icon-btn del" onclick="deleteFinding(${i})" title="Delete">✕</button>
+    </td>
+  </tr>`).join('');
+}
+
+function openFindingModal(editIdx = null) {
+  document.getElementById('finding-modal-title').textContent = editIdx !== null ? 'Edit Finding' : 'New Finding';
+  document.getElementById('finding-edit-id').value = editIdx !== null ? editIdx : '';
+  if (editIdx !== null) {
+    const d = DB.clientData(currentClient);
+    const f = d.findings[editIdx];
+    document.getElementById('finding-title').value = f.title;
+    document.getElementById('finding-severity').value = f.severity;
+    document.getElementById('finding-status').value = f.status;
+    document.getElementById('finding-asset').value = f.asset || '';
+    document.getElementById('finding-framework').value = f.framework || 'CIS v8';
+    document.getElementById('finding-description').value = f.description || '';
+    document.getElementById('finding-recommendation').value = f.recommendation || '';
+  } else {
+    ['finding-title','finding-asset','finding-description','finding-recommendation'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('finding-severity').value = 'High';
+    document.getElementById('finding-status').value = 'Open';
+  }
+  openModal('finding-modal');
+}
+
+function editFinding(i) { openFindingModal(i); }
+
+function saveFinding() {
+  const title = document.getElementById('finding-title').value.trim();
+  if (!title) { notify('Title is required', true); return; }
+  const editIdx = document.getElementById('finding-edit-id').value;
+  const entry = {
+    title, severity: document.getElementById('finding-severity').value,
+    status: document.getElementById('finding-status').value,
+    asset: document.getElementById('finding-asset').value,
+    framework: document.getElementById('finding-framework').value,
+    description: document.getElementById('finding-description').value,
+    recommendation: document.getElementById('finding-recommendation').value,
+    date: new Date().toISOString().split('T')[0]
+  };
+  const d = DB.clientData(currentClient);
+  if (editIdx !== '') d.findings[parseInt(editIdx)] = entry;
+  else d.findings.push(entry);
+  DB.saveClientData(currentClient, d);
+  closeModal('finding-modal');
+  renderFindings();
+  renderDashboard();
+  renderSidebar();
+  notify(editIdx !== '' ? 'Finding updated' : 'Finding added');
+}
+
+function deleteFinding(i) {
+  if (!confirm('Delete this finding?')) return;
+  const d = DB.clientData(currentClient);
+  d.findings.splice(i, 1);
+  DB.saveClientData(currentClient, d);
+  renderFindings();
+  renderDashboard();
+  renderSidebar();
+  notify('Finding deleted');
+}
+
+// =====================================================================
+// POAM
+// =====================================================================
+function renderPOAM() {
+  if (!currentClient) {
+    document.getElementById('poam-no-client').style.display = 'flex';
+    document.getElementById('poam-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('poam-no-client').style.display = 'none';
+  document.getElementById('poam-content').style.display = 'block';
+  const client = DB.clients().find(c => c.id === currentClient);
+  document.getElementById('poam-client-name').textContent = client ? client.name : '';
+  const d = DB.clientData(currentClient);
+  const tbody = document.getElementById('poam-tbody');
+  if (!d.poam.length) { tbody.innerHTML = '<tr><td colspan="7" class="tbl-empty">No POA&M items yet.</td></tr>'; return; }
+  const today = new Date(); today.setHours(0,0,0,0);
+  tbody.innerHTML = d.poam.map((item, i) => {
+    let daysTxt = '', daysCls = '';
+    if (item.date) {
+      const due = new Date(item.date); due.setHours(0,0,0,0);
+      const diff = Math.round((due - today) / 86400000);
+      if (item.status === 'Closed') { daysTxt = 'Closed'; daysCls = 'ok'; }
+      else if (diff < 0) { daysTxt = Math.abs(diff) + 'd overdue'; daysCls = 'overdue'; }
+      else if (diff <= 14) { daysTxt = diff + 'd remaining'; daysCls = 'due-soon'; }
+      else { daysTxt = diff + 'd remaining'; daysCls = 'ok'; }
+    }
+    return `<tr>
+      <td style="color:var(--text-dim);font-size:0.72rem">PM-${String(i+1).padStart(3,'0')}</td>
+      <td><strong style="color:var(--text-bright)">${item.weakness}</strong>${item.notes ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + item.notes.substring(0,60) + '</span>' : ''}</td>
+      <td>${item.owner || ''}</td>
+      <td style="font-size:0.75rem">${item.date || ''}</td>
+      <td><span class="poam-days ${daysCls}">${daysTxt}</span></td>
+      <td><span class="badge b-${item.status.toLowerCase().replace(' ','')}">${item.status}</span></td>
+      <td style="white-space:nowrap">
+        <button class="icon-btn" onclick="editPOAM(${i})">✎</button>
+        <button class="icon-btn del" onclick="deletePOAM(${i})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openPOAMModal(editIdx = null) {
+  document.getElementById('poam-edit-id').value = editIdx !== null ? editIdx : '';
+  if (editIdx !== null) {
+    const d = DB.clientData(currentClient);
+    const p = d.poam[editIdx];
+    document.getElementById('poam-weakness').value = p.weakness;
+    document.getElementById('poam-owner').value = p.owner || '';
+    document.getElementById('poam-date').value = p.date || '';
+    document.getElementById('poam-status').value = p.status;
+    document.getElementById('poam-resources').value = p.resources || '';
+    document.getElementById('poam-notes').value = p.notes || '';
+  } else {
+    ['poam-weakness','poam-owner','poam-date','poam-resources','poam-notes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('poam-status').value = 'Open';
+  }
+  openModal('poam-modal');
+}
+
+function editPOAM(i) { openPOAMModal(i); }
+
+function savePOAM() {
+  const weakness = document.getElementById('poam-weakness').value.trim();
+  if (!weakness) { notify('Weakness is required', true); return; }
+  const editIdx = document.getElementById('poam-edit-id').value;
+  const entry = {
+    weakness, owner: document.getElementById('poam-owner').value,
+    date: document.getElementById('poam-date').value,
+    status: document.getElementById('poam-status').value,
+    resources: document.getElementById('poam-resources').value,
+    notes: document.getElementById('poam-notes').value
+  };
+  const d = DB.clientData(currentClient);
+  if (editIdx !== '') d.poam[parseInt(editIdx)] = entry;
+  else d.poam.push(entry);
+  DB.saveClientData(currentClient, d);
+  closeModal('poam-modal');
+  renderPOAM();
+  renderDashboard();
+  notify(editIdx !== '' ? 'POA&M updated' : 'POA&M item added');
+}
+
+function deletePOAM(i) {
+  if (!confirm('Delete this POA&M item?')) return;
+  const d = DB.clientData(currentClient);
+  d.poam.splice(i, 1);
+  DB.saveClientData(currentClient, d);
+  renderPOAM();
+  renderDashboard();
+  notify('Item deleted');
+}
+
+// =====================================================================
+// RISK REGISTER
+// =====================================================================
+function renderRisk() {
+  if (!currentClient) {
+    document.getElementById('risk-no-client').style.display = 'flex';
+    document.getElementById('risk-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('risk-no-client').style.display = 'none';
+  document.getElementById('risk-content').style.display = 'block';
+  const client = DB.clients().find(c => c.id === currentClient);
+  document.getElementById('risk-client-name').textContent = client ? client.name : '';
+  const d = DB.clientData(currentClient);
+  const risks = d.risks;
+  document.getElementById('risk-total').textContent = risks.length;
+  const totalExposure = risks.reduce((sum, r) => sum + calcExposure(r), 0);
+  const avgScore = risks.length ? (risks.reduce((sum, r) => sum + (r.likelihood * r.impact), 0) / risks.length).toFixed(1) : 0;
+  document.getElementById('risk-exposure').textContent = '$' + totalExposure.toLocaleString();
+  document.getElementById('risk-avg').textContent = avgScore;
+  const tbody = document.getElementById('risk-tbody');
+  if (!risks.length) { tbody.innerHTML = '<tr><td colspan="8" class="tbl-empty">No risks yet.</td></tr>'; return; }
+  const sorted = [...risks].map((r,i) => ({...r, _i:i})).sort((a,b) => (b.likelihood*b.impact) - (a.likelihood*a.impact));
+  tbody.innerHTML = sorted.map(r => {
+    const score = r.likelihood * r.impact;
+    const scoreColor = score >= 16 ? 'var(--accent2)' : score >= 9 ? '#ff9800' : score >= 4 ? 'var(--gold)' : 'var(--green)';
+    const exposure = calcExposure(r);
+    return `<tr>
+      <td><strong style="color:var(--text-bright)">${r.asset}</strong></td>
+      <td>${r.threat}</td>
+      <td style="text-align:center">${r.likelihood}</td>
+      <td style="text-align:center">${r.impact}</td>
+      <td style="text-align:center"><strong style="color:${scoreColor};font-family:var(--sans);font-weight:800">${score}</strong></td>
+      <td><strong style="color:${exposure>10000?'var(--accent2)':exposure>5000?'var(--gold)':'var(--green)'}">${exposure ? '$' + exposure.toLocaleString() : 'N/A'}</strong></td>
+      <td>${r.owner || ''}</td>
+      <td style="white-space:nowrap">
+        <button class="icon-btn" onclick="editRisk(${r._i})">✎</button>
+        <button class="icon-btn del" onclick="deleteRisk(${r._i})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function calcExposure(r) {
+  if (!r.assetValue) return 0;
+  const likelihoodPct = [0, 0.05, 0.1, 0.25, 0.5, 0.9][parseInt(r.likelihood)];
+  const impactPct = [0, 0.05, 0.15, 0.3, 0.6, 1.0][parseInt(r.impact)];
+  return Math.round(Number(r.assetValue) * likelihoodPct * impactPct * 12);
+}
+
+function openRiskModal(editIdx = null) {
+  document.getElementById('risk-edit-id').value = editIdx !== null ? editIdx : '';
+  if (editIdx !== null) {
+    const d = DB.clientData(currentClient);
+    const r = d.risks[editIdx];
+    document.getElementById('risk-asset').value = r.asset;
+    document.getElementById('risk-threat').value = r.threat || '';
+    document.getElementById('risk-likelihood').value = r.likelihood;
+    document.getElementById('risk-impact').value = r.impact;
+    document.getElementById('risk-asset-value').value = r.assetValue || '';
+    document.getElementById('risk-owner').value = r.owner || '';
+    document.getElementById('risk-treatment').value = r.treatment || 'Mitigate';
+    document.getElementById('risk-notes').value = r.notes || '';
+  } else {
+    ['risk-asset','risk-threat','risk-asset-value','risk-owner','risk-notes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('risk-likelihood').value = '3';
+    document.getElementById('risk-impact').value = '3';
+    document.getElementById('risk-treatment').value = 'Mitigate';
+  }
+  openModal('risk-modal');
+}
+
+function editRisk(i) { openRiskModal(i); }
+
+function saveRisk() {
+  const asset = document.getElementById('risk-asset').value.trim();
+  if (!asset) { notify('Asset is required', true); return; }
+  const editIdx = document.getElementById('risk-edit-id').value;
+  const entry = {
+    asset, threat: document.getElementById('risk-threat').value,
+    likelihood: document.getElementById('risk-likelihood').value,
+    impact: document.getElementById('risk-impact').value,
+    assetValue: document.getElementById('risk-asset-value').value,
+    owner: document.getElementById('risk-owner').value,
+    treatment: document.getElementById('risk-treatment').value,
+    notes: document.getElementById('risk-notes').value
+  };
+  const d = DB.clientData(currentClient);
+  if (editIdx !== '') d.risks[parseInt(editIdx)] = entry;
+  else d.risks.push(entry);
+  DB.saveClientData(currentClient, d);
+  closeModal('risk-modal');
+  renderRisk();
+  notify(editIdx !== '' ? 'Risk updated' : 'Risk added');
+}
+
+function deleteRisk(i) {
+  if (!confirm('Delete this risk?')) return;
+  const d = DB.clientData(currentClient);
+  d.risks.splice(i, 1);
+  DB.saveClientData(currentClient, d);
+  renderRisk();
+  notify('Risk deleted');
+}
+
+// =====================================================================
+// CLIENT CRUD
+// =====================================================================
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function saveClient() {
+  const name = document.getElementById('client-name').value.trim();
+  if (!name) { notify('Company name is required', true); return; }
+  const editId = document.getElementById('client-edit-id').value;
+  const clients = DB.clients();
+  const entry = {
+    id: editId || 'c_' + Date.now(),
+    name, industry: document.getElementById('client-industry').value,
+    size: document.getElementById('client-size').value,
+    contact: document.getElementById('client-contact').value,
+    email: document.getElementById('client-email').value,
+    type: document.getElementById('client-type').value,
+    value: document.getElementById('client-value').value,
+    notes: document.getElementById('client-notes').value,
+    created: editId ? (clients.find(c=>c.id===editId)||{}).created : new Date().toISOString()
+  };
+  if (editId) { const idx = clients.findIndex(c=>c.id===editId); clients[idx] = entry; }
+  else clients.push(entry);
+  DB.saveClients(clients);
+  if (!editId) currentClient = entry.id;
+  closeModal('client-modal');
+  renderSidebar();
+  renderDashboard();
+  notify(editId ? 'Client updated' : 'Client added');
+  document.getElementById('client-name').value = '';
+  document.getElementById('client-edit-id').value = '';
+}
+
+// =====================================================================
+// EXPORTS
+// =====================================================================
+function downloadCSV(filename, rows) {
+  const csv = rows.map(r => r.map(cell => `"${String(cell||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = filename;
+  a.click();
+}
+
+function exportControls() {
+  const d = DB.clientData(currentClient);
+  const client = DB.clients().find(c => c.id === currentClient);
+  const fw = currentFramework;
+  const rows = [['Control ID','Control Name','Status','Notes','Framework']];
+  FRAMEWORKS[fw].forEach(g => g.controls.forEach(c => {
+    const key = `${fw}_${c.id}`;
+    const entry = d.controls[key] || {};
+    rows.push([c.id, c.name, entry.status || 'Not Assessed', entry.note || '', fw.toUpperCase()]);
+  }));
+  downloadCSV(`${client.name}-controls-${fw}.csv`, rows);
+}
+
+function exportFindings() {
+  const d = DB.clientData(currentClient);
+  const client = DB.clients().find(c => c.id === currentClient);
+  const rows = [['ID','Title','Severity','Status','Asset','Framework','Description','Recommendation','Date']];
+  d.findings.forEach((f,i) => rows.push([`F-${String(i+1).padStart(3,'0')}`,f.title,f.severity,f.status,f.asset,f.framework,f.description,f.recommendation,f.date]));
+  downloadCSV(`${client.name}-findings.csv`, rows);
+}
+
+function exportPOAM() {
+  const d = DB.clientData(currentClient);
+  const client = DB.clients().find(c => c.id === currentClient);
+  const rows = [['ID','Weakness','Responsible Party','Milestone Date','Status','Resources','Notes']];
+  d.poam.forEach((p,i) => rows.push([`PM-${String(i+1).padStart(3,'0')}`,p.weakness,p.owner,p.date,p.status,p.resources,p.notes]));
+  downloadCSV(`${client.name}-poam.csv`, rows);
+}
+
+function exportRisk() {
+  const d = DB.clientData(currentClient);
+  const client = DB.clients().find(c => c.id === currentClient);
+  const rows = [['Asset','Threat','Likelihood','Impact','Score','Annual Exposure','Owner','Treatment','Notes']];
+  d.risks.forEach(r => rows.push([r.asset,r.threat,r.likelihood,r.impact,r.likelihood*r.impact,calcExposure(r)?'$'+calcExposure(r).toLocaleString():'N/A',r.owner,r.treatment,r.notes]));
+  downloadCSV(`${client.name}-risk-register.csv`, rows);
+}
+
+// =====================================================================
+// NOTIFICATIONS
+// =====================================================================
+function notify(msg, isError = false) {
+  const n = document.getElementById('notif');
+  n.textContent = msg;
+  n.className = 'notif' + (isError ? ' error' : '');
+  n.classList.add('show');
+  setTimeout(() => n.classList.remove('show'), 2800);
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if(e.target === o) o.classList.remove('open'); });
+});
+
+// Keyboard close
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(o => o.classList.remove('open'));
+});
+</script>
+</body>
+</html>
