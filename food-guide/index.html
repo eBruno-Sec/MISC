@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Food Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f7faf8;--white:#ffffff;--border:#dde8df;
+  --green:#16a34a;--green-light:#dcfce7;--green-text:#14532d;
+  --amber:#d97706;--amber-light:#fef3c7;--amber-text:#78350f;
+  --red:#dc2626;--red-light:#fee2e2;--red-text:#7f1d1d;
+  --text:#1a2e1c;--muted:#5a7560;--card:#ffffff;
+  --accent:#16a34a;--radius:16px;--font:'Nunito',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;font-size:16px}
+
+/* ── HEADER ── */
+.header{
+  background:linear-gradient(135deg,#14532d 0%,#166534 60%,#15803d 100%);
+  color:white;padding:28px 20px 24px;text-align:center;
+  box-shadow:0 4px 20px #00000025;
+}
+.header h1{font-size:clamp(1.6rem,5vw,2.4rem);font-weight:900;letter-spacing:-.02em;line-height:1.1}
+.header h1 span{color:#86efac}
+.header p{margin-top:8px;font-size:14px;opacity:.8;font-weight:600}
+.header-stats{
+  display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px;
+}
+.hstat{
+  background:#ffffff18;border:1px solid #ffffff30;border-radius:30px;
+  padding:6px 14px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;
+}
+
+/* ── PROTOCOL LEGEND ── */
+.legend{
+  display:flex;gap:8px;justify-content:center;flex-wrap:wrap;
+  padding:14px 16px;background:var(--white);border-bottom:1px solid var(--border);
+}
+.leg-item{
+  display:flex;align-items:center;gap:7px;
+  padding:7px 14px;border-radius:30px;font-size:13px;font-weight:700;cursor:default;
+}
+.leg-green{background:var(--green-light);color:var(--green-text)}
+.leg-amber{background:var(--amber-light);color:var(--amber-text)}
+.leg-red{background:var(--red-light);color:var(--red-text)}
+.leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* ── MAIN LAYOUT ── */
+.app{max-width:900px;margin:0 auto;padding:20px 16px 40px}
+
+/* ── SEARCH ── */
+.search-box{
+  position:relative;margin-bottom:20px;
+}
+.search-box input{
+  width:100%;padding:16px 20px 16px 52px;
+  background:var(--white);border:2px solid var(--border);
+  border-radius:var(--radius);color:var(--text);
+  font-family:var(--font);font-size:17px;font-weight:600;
+  outline:none;transition:border-color .2s,box-shadow .2s;
+  box-shadow:0 2px 8px #0000000a;
+}
+.search-box input::placeholder{color:#94a89a;font-weight:500}
+.search-box input:focus{border-color:var(--accent);box-shadow:0 0 0 4px #16a34a18}
+.search-icon{
+  position:absolute;left:17px;top:50%;transform:translateY(-50%);
+  color:#94a89a;width:22px;height:22px;pointer-events:none;
+}
+.search-clear{
+  position:absolute;right:14px;top:50%;transform:translateY(-50%);
+  background:#e5ede7;border:none;border-radius:50%;
+  width:28px;height:28px;cursor:pointer;font-size:16px;
+  display:none;align-items:center;justify-content:center;color:var(--muted);
+  font-family:var(--font);line-height:1;
+}
+.search-clear.show{display:flex}
+
+/* ── SECTION LABEL ── */
+.section-lbl{
+  font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:10px;padding-left:2px;
+}
+
+/* ── CHIP GROUPS ── */
+.chip-group{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.chip{
+  padding:10px 18px;border-radius:30px;font-size:14px;font-weight:700;
+  border:2px solid var(--border);background:var(--white);color:var(--muted);
+  cursor:pointer;transition:all .15s;white-space:nowrap;font-family:var(--font);
+  display:flex;align-items:center;gap:6px;
+  box-shadow:0 1px 4px #0000000a;
+  -webkit-tap-highlight-color:transparent;
+}
+.chip:hover{border-color:#16a34a80;color:var(--green)}
+.chip.active{background:var(--green);color:white;border-color:var(--green);box-shadow:0 2px 8px #16a34a40}
+.chip .chip-count{
+  background:#ffffff30;border-radius:30px;
+  padding:1px 7px;font-size:12px;font-weight:800;
+}
+.chip.active .chip-count{background:#ffffff30}
+
+/* ── PROTOCOL CHIPS special colors ── */
+.chip.proto-green.active{background:var(--green);border-color:var(--green)}
+.chip.proto-amber.active{background:var(--amber);border-color:var(--amber)}
+.chip.proto-red.active{background:var(--red);border-color:var(--red)}
+
+/* ── ACTIVE FILTER BANNER ── */
+.filter-banner{
+  background:var(--green-light);border:1.5px solid #bbf7d0;
+  border-radius:12px;padding:12px 16px;margin-bottom:16px;
+  display:none;align-items:center;gap:10px;font-size:14px;font-weight:700;color:var(--green-text);
+}
+.filter-banner.show{display:flex}
+.filter-banner button{
+  margin-left:auto;background:transparent;border:none;cursor:pointer;
+  font-size:13px;font-weight:800;color:var(--green-text);opacity:.7;
+  font-family:var(--font);text-decoration:underline;
+}
+
+/* ── RESULTS COUNT ── */
+.results-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:14px;flex-wrap:wrap;gap:8px;
+}
+.results-count{font-size:14px;font-weight:700;color:var(--muted)}
+.results-count strong{color:var(--text);font-size:16px}
+
+.sort-wrap{display:flex;align-items:center;gap:6px}
+.sort-lbl{font-size:13px;font-weight:700;color:var(--muted)}
+.sort-sel{
+  padding:7px 12px;border-radius:10px;font-size:13px;font-weight:700;
+  border:2px solid var(--border);background:var(--white);color:var(--text);
+  font-family:var(--font);outline:none;cursor:pointer;
+}
+
+/* ── CARDS ── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+
+.card{
+  background:var(--white);border:2px solid var(--border);
+  border-radius:var(--radius);padding:16px;
+  transition:transform .15s,box-shadow .15s,border-color .15s;
+  position:relative;overflow:hidden;
+}
+.card:hover{transform:translateY(-2px);box-shadow:0 6px 20px #00000012;border-color:#c5d8c9}
+
+/* left accent stripe */
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:4px 0 0 4px}
+.card.pg::before{background:var(--green)}
+.card.pa::before{background:var(--amber)}
+.card.pr::before{background:var(--red)}
+
+/* protocol badge top-right */
+.proto-badge{
+  position:absolute;top:12px;right:12px;
+  font-size:11px;font-weight:800;padding:3px 9px;border-radius:20px;
+  letter-spacing:.03em;
+}
+.proto-badge.pg{background:var(--green-light);color:var(--green-text)}
+.proto-badge.pa{background:var(--amber-light);color:var(--amber-text)}
+.proto-badge.pr{background:var(--red-light);color:var(--red-text)}
+
+.food-name{
+  font-size:1rem;font-weight:800;color:var(--text);
+  line-height:1.3;margin-bottom:12px;padding-right:70px;
+}
+
+/* macro pills */
+.macros{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.macro{
+  flex:1;min-width:60px;
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;
+  padding:8px 6px;text-align:center;
+}
+.macro-val{font-size:1.15rem;font-weight:900;color:var(--text);line-height:1}
+.macro-lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+
+/* tags */
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:0}
+.tag{
+  font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;
+  background:#f1f5f2;color:var(--muted);border:1px solid var(--border);
+}
+.tag.fish{color:#0369a1;border-color:#bae6fd;background:#f0f9ff}
+.tag.merc-low{color:#15803d;border-color:#bbf7d0;background:#f0fdf4}
+.tag.merc-med{color:#b45309;border-color:#fde68a;background:#fffbeb}
+.tag.merc-high{color:#b91c1c;border-color:#fecaca;background:#fff1f2}
+.tag.raw-tag{color:#7c3aed;border-color:#ddd6fe;background:#f5f3ff}
+.tag.gout-high{color:#b91c1c;border-color:#fecaca;background:#fff1f2}
+
+.note{
+  font-size:12px;color:var(--muted);margin-top:10px;
+  padding-top:10px;border-top:1px solid var(--border);
+  line-height:1.45;font-weight:600;
+}
+
+/* ── EMPTY ── */
+.empty{
+  grid-column:1/-1;text-align:center;padding:60px 20px;
+  background:var(--white);border:2px dashed var(--border);border-radius:var(--radius);
+}
+.empty-icon{font-size:3rem;margin-bottom:12px}
+.empty h3{font-size:1.1rem;font-weight:800;color:var(--text);margin-bottom:6px}
+.empty p{color:var(--muted);font-size:14px;font-weight:600}
+
+/* ── HOW TO USE banner ── */
+.howto{
+  background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:var(--radius);
+  padding:14px 16px;margin-bottom:20px;
+}
+.howto h3{font-size:13px;font-weight:800;color:#1e40af;margin-bottom:8px;letter-spacing:.04em;text-transform:uppercase}
+.howto-steps{display:flex;flex-wrap:wrap;gap:8px}
+.howto-step{
+  display:flex;align-items:center;gap:7px;
+  font-size:13px;font-weight:700;color:#1e40af;
+}
+.howto-num{
+  width:22px;height:22px;border-radius:50%;background:#1d4ed8;color:white;
+  font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+
+/* ── BUILT ON REQUEST FOOTER ── */
+.bor-footer{
+  text-align:center;padding:20px 16px 28px;
+  border-top:1px solid var(--border);margin-top:32px;
+}
+.bor-link{
+  font-size:12px;font-weight:800;color:var(--muted);text-decoration:none;
+  letter-spacing:.08em;text-transform:uppercase;opacity:.65;
+  transition:opacity .2s,color .2s;display:inline-flex;align-items:center;gap:5px;
+}
+.bor-link:hover{opacity:1;color:var(--green)}
+.bor-link svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#c5d8c9;border-radius:3px}
+
+/* ── RESPONSIVE ── */
+@media(max-width:600px){
+  .grid{grid-template-columns:1fr}
+  .sort-wrap .sort-lbl{display:none}
+  .howto-steps{flex-direction:column;gap:6px}
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1>🥗 My <span>Food Guide</span></h1>
+  <p>Personal Nutrition Database · USDA Verified · Per 100g cooked</p>
+  <div class="header-stats">
+    <span class="hstat">🍽️ <span id="totalCount">0</span> foods</span>
+    <span class="hstat">🐟 Fish & Seafood</span>
+    <span class="hstat">🌍 8 Cuisines</span>
+  </div>
+</header>
+
+<!-- Protocol Legend -->
+<div class="legend">
+  <div class="leg-item leg-green"><span class="leg-dot" style="background:#16a34a"></span>Core Food – Eat freely</div>
+  <div class="leg-item leg-amber"><span class="leg-dot" style="background:#d97706"></span>Occasional – Sometimes</div>
+  <div class="leg-item leg-red"><span class="leg-dot" style="background:#dc2626"></span>Limit – Rarely or avoid</div>
+</div>
+
+<main class="app">
+
+  <!-- How to use -->
+  <div class="howto">
+    <h3>💡 How to use this guide</h3>
+    <div class="howto-steps">
+      <div class="howto-step"><span class="howto-num">1</span> Type a food name to search</div>
+      <div class="howto-step"><span class="howto-num">2</span> Or tap a category below</div>
+      <div class="howto-step"><span class="howto-num">3</span> Filter by cuisine or status</div>
+      <div class="howto-step"><span class="howto-num">4</span> Green dot = safe to eat! 🟢</div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div class="search-box">
+    <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input type="text" id="srch" placeholder="Search food… e.g. salmon, adobo, steak" autocomplete="off" inputmode="search">
+    <button class="search-clear" id="clearBtn" onclick="clearSearch()" title="Clear search">✕</button>
+  </div>
+
+  <!-- Category filter -->
+  <div class="section-lbl">Filter by food type</div>
+  <div class="chip-group" id="catChips"></div>
+
+  <!-- Cuisine filter -->
+  <div class="section-lbl">Filter by cuisine</div>
+  <div class="chip-group" id="ctyChips"></div>
+
+  <!-- Protocol filter -->
+  <div class="section-lbl">Filter by status</div>
+  <div class="chip-group" id="prChips"></div>
+
+  <!-- Active filter indicator -->
+  <div class="filter-banner" id="filterBanner">
+    <span>🔍</span>
+    <span id="filterBannerText"></span>
+    <button onclick="clearAll()">Clear all filters</button>
+  </div>
+
+  <!-- Results bar -->
+  <div class="results-bar">
+    <div class="results-count" id="rc"></div>
+    <div class="sort-wrap">
+      <span class="sort-lbl">Sort:</span>
+      <select class="sort-sel" id="sortSel" onchange="render()">
+        <option value="n">A → Z</option>
+        <option value="p">Most protein</option>
+        <option value="c">Fewest calories</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Food grid -->
+  <div class="grid" id="grid"></div>
+
+</main>
+
+<!-- Built on Request -->
+<footer class="bor-footer">
+  <a href="https://ebruno-sec.github.io/MISC/" target="_blank" rel="noopener" class="bor-link">
+    Built on Request
+    <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+  </a>
+</footer>
+
+<script>
+var D=[
+{n:"Chicken thigh (boneless, skinless)",c:144,p:19,f:8,cat:"Poultry",cty:"Core Protocol",pr:"GREEN",g:"low",raw:1,note:"RAW weight — log before cooking"},
+{n:"Chicken breast (boneless, skinless)",c:106,p:23,f:2,cat:"Poultry",cty:"Core Protocol",pr:"GREEN",g:"low",raw:1,note:"RAW weight — log before cooking"},
+{n:"Ground beef 90/10 (raw)",c:159,p:17,f:10,cat:"Beef",cty:"Core Protocol",pr:"GREEN",g:"med",raw:1,note:"RAW weight — log before cooking"},
+{n:"Ground beef 80/20 (raw)",c:215,p:17,f:15,cat:"Beef",cty:"Core Protocol",pr:"AMBER",g:"med",raw:1,note:"RAW weight — log before cooking"},
+{n:"Eggs (whole, large, 1 egg)",c:70,p:6,f:5,cat:"Eggs & Dairy",cty:"Core Protocol",pr:"GREEN",g:"low"},
+{n:"Cottage cheese low-fat (1 cup)",c:220,p:25,f:5,cat:"Eggs & Dairy",cty:"Core Protocol",pr:"GREEN",g:"low"},
+{n:"Chicken breast (roasted)",c:165,p:31,f:3.6,cat:"Poultry",cty:"American",pr:"GREEN",g:"low",note:"Best protein per calorie"},
+{n:"Chicken thigh (boneless, roasted)",c:179,p:25,f:8.2,cat:"Poultry",cty:"American",pr:"GREEN",g:"low",note:"Core food"},
+{n:"Chicken thigh (bone-in, skin-on)",c:229,p:25,f:14,cat:"Poultry",cty:"American",pr:"AMBER",g:"low",note:"Remove skin before eating"},
+{n:"Chicken wings (roasted)",c:203,p:30,f:9,cat:"Poultry",cty:"American",pr:"AMBER",g:"low-med"},
+{n:"Chicken liver (simmered)",c:157,p:24,f:5.5,cat:"Poultry",cty:"American",pr:"AMBER",g:"high",note:"High cholesterol 479mg — occasional only"},
+{n:"Eye of round steak",c:170,p:28,f:5,cat:"Beef",cty:"American",pr:"GREEN",g:"med",note:"Leanest beef cut"},
+{n:"Top sirloin steak",c:149,p:26,f:6.4,cat:"Beef",cty:"American",pr:"GREEN",g:"med",note:"Best all-around steak"},
+{n:"Flank steak",c:188,p:28,f:8,cat:"Beef",cty:"American",pr:"GREEN",g:"med"},
+{n:"Tenderloin / Filet mignon",c:184,p:26,f:8.5,cat:"Beef",cty:"American",pr:"GREEN",g:"med",note:"Lean and tender"},
+{n:"Skirt steak",c:204,p:26,f:12,cat:"Beef",cty:"American",pr:"AMBER",g:"med"},
+{n:"NY strip (top loin steak)",c:214,p:25,f:12,cat:"Beef",cty:"American",pr:"AMBER",g:"med"},
+{n:"T-bone steak",c:247,p:24,f:17,cat:"Beef",cty:"American",pr:"AMBER",g:"med"},
+{n:"Ribeye steak",c:289,p:24,f:22,cat:"Beef",cty:"American",pr:"RED",g:"med",note:"High fat — limit"},
+{n:"Tri-tip steak",c:185,p:25,f:10,cat:"Beef",cty:"American",pr:"AMBER",g:"med"},
+{n:"Ground beef 90/10 (cooked)",c:217,p:26,f:13,cat:"Beef",cty:"American",pr:"GREEN",g:"med"},
+{n:"Ground beef 80/20 (cooked)",c:254,p:24,f:17,cat:"Beef",cty:"American",pr:"AMBER",g:"med"},
+{n:"Beef back ribs (lean, braised)",c:254,p:28,f:15,cat:"Beef",cty:"American",pr:"AMBER",g:"med",note:"Lean cuts only"},
+{n:"Beef short ribs (braised)",c:400,p:22,f:36,cat:"Beef",cty:"American",pr:"RED",g:"med-high",note:"Very high fat"},
+{n:"Pork tenderloin (roasted)",c:143,p:22,f:5,cat:"Pork",cty:"American",pr:"AMBER",g:"med",note:"Leanest pork option"},
+{n:"Pork chop (lean, broiled)",c:186,p:26,f:9,cat:"Pork",cty:"American",pr:"AMBER",g:"med-high"},
+{n:"Pork belly (braised)",c:518,p:9,f:53,cat:"Pork",cty:"American",pr:"RED",g:"med-high",note:"Very high fat — avoid on deficit"},
+{n:"Cod (broiled/baked)",c:105,p:23,f:1,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Leanest fish option"},
+{n:"Tilapia (baked)",c:128,p:26,f:3,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Excellent lean protein"},
+{n:"Haddock (baked)",c:112,p:24,f:1,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Sole / Flounder (baked)",c:117,p:24,f:2,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Mahi-mahi (cooked)",c:109,p:24,f:1,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Halibut (broiled)",c:140,p:27,f:3,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM"},
+{n:"Red snapper (baked)",c:128,p:26,f:2,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM"},
+{n:"Grouper (cooked)",c:118,p:25,f:1.3,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM"},
+{n:"Sea bass (cooked)",c:124,p:24,f:2.5,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM"},
+{n:"Pollock, Alaska (cooked)",c:113,p:24,f:1.3,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Bangus / Milkfish (grilled)",c:190,p:26,f:9,cat:"Fish",cty:"Filipino",pr:"GREEN",g:"low-med",m:"LOW",note:"PH favorite — USDA confirmed"},
+{n:"Pompano Florida (cooked)",c:211,p:24,f:12,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Rich and tasty"},
+{n:"Rainbow trout (broiled)",c:168,p:26,f:7,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Omega-3 rich"},
+{n:"Striped bass (cooked)",c:124,p:21,f:4,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM"},
+{n:"Yellowfin tuna (cooked)",c:139,p:30,f:1.3,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"MEDIUM",note:"Highest protein fish"},
+{n:"Bluefin tuna (cooked)",c:184,p:30,f:6,cat:"Fish",cty:"American",pr:"AMBER",g:"low-med",m:"HIGH",note:"High mercury — max 1x per week"},
+{n:"Swordfish (cooked)",c:172,p:23,f:8,cat:"Fish",cty:"American",pr:"AMBER",g:"low-med",m:"HIGH",note:"High mercury — max 1 serving per week"},
+{n:"Salmon Atlantic WILD (cooked)",c:182,p:25,f:8.7,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Best overall fish — omega-3 rich"},
+{n:"Salmon Atlantic FARMED (cooked)",c:206,p:20,f:12.4,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Higher omega-3 than wild"},
+{n:"Salmon pink canned (drained)",c:136,p:22,f:5,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Budget omega-3 option"},
+{n:"Atlantic mackerel (cooked)",c:262,p:24,f:18,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Omega-3 king — use Atlantic/Pacific chub only, NOT king mackerel"},
+{n:"Pacific mackerel / jack (broiled)",c:201,p:25,f:11,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Sardines canned in oil (drained)",c:208,p:25,f:11,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Nutrient dense — eat the bones for calcium"},
+{n:"Sardines canned in water (drained)",c:150,p:22,f:6.5,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Leaner option"},
+{n:"Anchovies canned in oil (drained)",c:210,p:29,f:10,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"High sodium — use as flavoring, not main protein"},
+{n:"Herring (pickled or kippered)",c:262,p:20,f:20,cat:"Fish",cty:"American",pr:"AMBER",g:"low-med",m:"LOW",note:"High fat and sodium"},
+{n:"Parrotfish / reef fish (loro)",c:96,p:20,f:1.5,cat:"Fish",cty:"Filipino",pr:"GREEN",g:"low-med",m:"LOW",note:"Estimated from similar reef fish — check local label"},
+{n:"Lapu-lapu / Grouper (PH)",c:118,p:25,f:1.3,cat:"Fish",cty:"Filipino",pr:"GREEN",g:"low-med",m:"MEDIUM",note:"Excellent Philippine fish"},
+{n:"Maya-maya / Red snapper (PH)",c:128,p:26,f:2,cat:"Fish",cty:"Filipino",pr:"GREEN",g:"low-med",m:"MEDIUM",note:"Philippine classic"},
+{n:"Galunggong / Round scad",c:130,p:22,f:5,cat:"Fish",cty:"Filipino",pr:"GREEN",g:"low-med",m:"LOW",note:"Budget lean fish"},
+{n:"Dilis / Dried anchovies",c:280,p:45,f:7,cat:"Fish",cty:"Filipino",pr:"AMBER",g:"low-med",m:"LOW",note:"Very high protein — but extreme sodium ~3000mg/100g"},
+{n:"Canned tuna LIGHT in water",c:86,p:19,f:1,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Best budget protein — eat freely"},
+{n:"Canned tuna LIGHT in oil",c:186,p:26,f:9,cat:"Fish",cty:"American",pr:"AMBER",g:"low-med",m:"LOW",note:"More calories — drain well"},
+{n:"Canned tuna ALBACORE in water",c:109,p:23,f:2.5,cat:"Fish",cty:"American",pr:"AMBER",g:"low-med",m:"MEDIUM",note:"Max 1x per week — higher mercury than light"},
+{n:"Canned salmon (pink, drained)",c:136,p:22,f:5,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Eat the bones — extra calcium"},
+{n:"Canned salmon (sockeye/red)",c:153,p:24,f:6,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Richer flavor"},
+{n:"Canned mackerel (Atlantic/Pacific)",c:156,p:22,f:8,cat:"Fish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Budget omega-3 — avoid king mackerel"},
+{n:"Shrimp (boiled/steamed)",c:99,p:24,f:1,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Lean powerhouse"},
+{n:"Squid / Pusit (cooked)",c:175,p:18,f:7,cat:"Shellfish",cty:"Filipino",pr:"AMBER",g:"low-med",m:"LOW",note:"High cholesterol 233mg"},
+{n:"Crab Dungeness (cooked)",c:110,p:22,f:1.5,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Mussels (steamed)",c:172,p:24,f:4.5,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Iron rich"},
+{n:"Oysters (cooked, eastern)",c:137,p:14,f:5,cat:"Shellfish",cty:"American",pr:"AMBER",g:"low-med",m:"LOW",note:"High in zinc"},
+{n:"Scallops (broiled)",c:137,p:26,f:1.5,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Clams (cooked)",c:148,p:26,f:2,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW",note:"Iron powerhouse"},
+{n:"Lobster (cooked)",c:128,p:27,f:1.2,cat:"Shellfish",cty:"American",pr:"GREEN",g:"low-med",m:"LOW"},
+{n:"Chicken adobo",c:167,p:21,f:8,cat:"Dishes",cty:"Filipino",pr:"GREEN",g:"low",note:"Best Filipino dish"},
+{n:"Pork adobo",c:200,p:17,f:14,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"med-high"},
+{n:"Sinigang na baboy (pork soup)",c:55,p:6,f:2,cat:"Soups",cty:"Filipino",pr:"GREEN",g:"med"},
+{n:"Sinigang na bangus (fish soup)",c:45,p:7,f:1.5,cat:"Soups",cty:"Filipino",pr:"GREEN",g:"low",note:"Best sinigang — very low calorie"},
+{n:"Sinigang na hipon (shrimp soup)",c:55,p:8,f:1,cat:"Soups",cty:"Filipino",pr:"GREEN",g:"low"},
+{n:"Tinola (chicken ginger soup)",c:64,p:9,f:3,cat:"Soups",cty:"Filipino",pr:"GREEN",g:"low",note:"Protocol food — anti-inflammatory"},
+{n:"Pinakbet (vegetable stew)",c:85,p:5,f:4,cat:"Vegetables",cty:"Filipino",pr:"GREEN",g:"low",note:"Best vegetable dish"},
+{n:"Kare-kare (oxtail peanut stew)",c:133,p:10,f:9,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"med"},
+{n:"Chicken sisig",c:150,p:18,f:8,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"low-med"},
+{n:"Pork sisig",c:215,p:13,f:17,cat:"Dishes",cty:"Filipino",pr:"RED",g:"med-high",note:"Treat only"},
+{n:"Dinakdakan",c:247,p:17,f:20,cat:"Dishes",cty:"Filipino",pr:"RED",g:"high",note:"Treat only — very high purine"},
+{n:"Lechon (lean meat, no skin)",c:200,p:24,f:11,cat:"Pork",cty:"Filipino",pr:"AMBER",g:"med",note:"Skip the skin"},
+{n:"Lechon kawali",c:450,p:15,f:40,cat:"Pork",cty:"Filipino",pr:"RED",g:"med-high"},
+{n:"Bicol express",c:250,p:12,f:20,cat:"Dishes",cty:"Filipino",pr:"RED",g:"med"},
+{n:"Sopas (creamy chicken noodle)",c:140,p:9,f:6,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"low"},
+{n:"Pancit bihon",c:130,p:8,f:1.5,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Dinuguan",c:100,p:8,f:6,cat:"Dishes",cty:"Filipino",pr:"AMBER",g:"high",note:"High purine"},
+{n:"Chicken isaw (grilled intestine)",c:165,p:12,f:13,cat:"Street Food",cty:"Filipino",pr:"AMBER",g:"med-high"},
+{n:"Chicken gizzard / Adidas",c:154,p:30,f:3,cat:"Poultry",cty:"Filipino",pr:"AMBER",g:"med",note:"Very high cholesterol 370mg"},
+{n:"Chicken feet",c:215,p:19,f:15,cat:"Street Food",cty:"Filipino",pr:"AMBER",g:"low-med",note:"Collagen treat"},
+{n:"Betamax (coagulated chicken blood)",c:117,p:11,f:7,cat:"Street Food",cty:"Filipino",pr:"AMBER",g:"low",note:"Watch cholesterol"},
+{n:"Pig's ear",c:230,p:17,f:18,cat:"Pork",cty:"Filipino",pr:"RED",g:"med"},
+{n:"Pork intestine (isaw baboy)",c:185,p:14,f:14,cat:"Pork",cty:"Filipino",pr:"RED",g:"high",note:"High purine + fat"},
+{n:"Jollibee Chickenjoy (1pc ~150g)",c:253,p:15,f:21,cat:"Street Food",cty:"Filipino",pr:"AMBER",g:"low"},
+{n:"Tuna sashimi (maguro)",c:108,p:23,f:1,cat:"Fish",cty:"Japanese",pr:"GREEN",g:"med"},
+{n:"Salmon sashimi (sake)",c:127,p:20,f:5,cat:"Fish",cty:"Japanese",pr:"GREEN",g:"med"},
+{n:"Yellowtail sashimi (hamachi)",c:146,p:22,f:6,cat:"Fish",cty:"Japanese",pr:"GREEN",g:"med"},
+{n:"Yakitori sasami (breast)",c:120,p:24,f:2,cat:"Poultry",cty:"Japanese",pr:"GREEN",g:"low",note:"Leanest yakitori"},
+{n:"Yakitori momo (thigh)",c:175,p:19,f:10,cat:"Poultry",cty:"Japanese",pr:"GREEN",g:"low",note:"Best yakitori"},
+{n:"Teriyaki chicken (no rice)",c:165,p:25,f:6,cat:"Poultry",cty:"Japanese",pr:"GREEN",g:"low",note:"Protocol pick"},
+{n:"Grilled salmon shioyaki",c:182,p:25,f:8.7,cat:"Fish",cty:"Japanese",pr:"GREEN",g:"med"},
+{n:"Shabu-shabu beef (lean sirloin)",c:160,p:25,f:7,cat:"Beef",cty:"Japanese",pr:"GREEN",g:"med"},
+{n:"Miso soup (plain)",c:15,p:1,f:0.5,cat:"Soups",cty:"Japanese",pr:"GREEN",g:"low",note:"Nearly calorie free — drink freely"},
+{n:"Edamame (shelled, boiled)",c:122,p:11,f:5,cat:"Vegetables",cty:"Japanese",pr:"GREEN",g:"low",note:"Best snack"},
+{n:"Firm tofu",c:76,p:8,f:4,cat:"Vegetables",cty:"Japanese",pr:"GREEN",g:"low",note:"Underrated protein source"},
+{n:"Natto (fermented soybeans)",c:190,p:17,f:10,cat:"Vegetables",cty:"Japanese",pr:"GREEN",g:"med",note:"Protein + probiotics"},
+{n:"Chawanmushi (steamed egg custard)",c:65,p:6,f:3,cat:"Eggs & Dairy",cty:"Japanese",pr:"GREEN",g:"low"},
+{n:"Tamago yaki (Japanese omelette)",c:130,p:8,f:8,cat:"Eggs & Dairy",cty:"Japanese",pr:"GREEN",g:"low"},
+{n:"Seaweed salad (wakame)",c:45,p:2,f:1,cat:"Vegetables",cty:"Japanese",pr:"GREEN",g:"low",note:"Great for micronutrients"},
+{n:"Karaage (Japanese fried chicken)",c:250,p:20,f:16,cat:"Poultry",cty:"Japanese",pr:"AMBER",g:"low"},
+{n:"Chicken katsu",c:240,p:22,f:13,cat:"Poultry",cty:"Japanese",pr:"AMBER",g:"low"},
+{n:"Tonkatsu (pork cutlet)",c:282,p:20,f:18,cat:"Pork",cty:"Japanese",pr:"AMBER",g:"med-high"},
+{n:"Gyoza (pan-fried)",c:150,p:8,f:8,cat:"Dishes",cty:"Japanese",pr:"AMBER",g:"low-med"},
+{n:"Tonkotsu ramen",c:95,p:8,f:5,cat:"Dishes",cty:"Japanese",pr:"AMBER",g:"med",note:"High sodium"},
+{n:"Japanese curry rice (chicken)",c:155,p:7,f:5,cat:"Dishes",cty:"Japanese",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Soba (buckwheat noodles)",c:99,p:5,f:0.5,cat:"Dishes",cty:"Japanese",pr:"AMBER",g:"low",note:"Lower glycemic index"},
+{n:"Bulgogi (marinated beef sirloin)",c:160,p:22,f:7,cat:"Beef",cty:"Korean",pr:"GREEN",g:"med",note:"Best Korean BBQ"},
+{n:"Dak galbi (spicy grilled chicken)",c:155,p:22,f:6,cat:"Poultry",cty:"Korean",pr:"GREEN",g:"low"},
+{n:"Chadolbaegi (thin beef brisket)",c:175,p:20,f:10,cat:"Beef",cty:"Korean",pr:"GREEN",g:"med",note:"Lean KBBQ"},
+{n:"Kimchi (napa cabbage)",c:18,p:1,f:0,cat:"Vegetables",cty:"Korean",pr:"GREEN",g:"low",note:"Eat freely — great probiotic"},
+{n:"Doenjang jjigae (soybean stew)",c:60,p:5,f:3,cat:"Soups",cty:"Korean",pr:"GREEN",g:"low"},
+{n:"Sundubu jjigae (soft tofu stew)",c:75,p:6,f:4,cat:"Soups",cty:"Korean",pr:"GREEN",g:"low"},
+{n:"Gyeran-jjim (steamed egg)",c:90,p:7,f:5,cat:"Eggs & Dairy",cty:"Korean",pr:"GREEN",g:"low"},
+{n:"Bibimbap (rice+veg+beef+egg)",c:130,p:7,f:4,cat:"Dishes",cty:"Korean",pr:"AMBER",g:"med",note:"Balanced bowl"},
+{n:"Kimbap (seaweed rice roll)",c:140,p:5,f:4,cat:"Dishes",cty:"Korean",pr:"AMBER",g:"low",note:"Low protein"},
+{n:"Tteokbokki (spicy rice cakes)",c:140,p:3,f:2,cat:"Dishes",cty:"Korean",pr:"RED",g:"low",note:"Almost pure carb — spikes blood sugar"},
+{n:"Samgyeopsal (pork belly grilled)",c:295,p:15,f:26,cat:"Pork",cty:"Korean",pr:"RED",g:"med-high",note:"Very high fat"},
+{n:"Pho ga (chicken pho)",c:70,p:8,f:1.5,cat:"Soups",cty:"Vietnamese",pr:"GREEN",g:"low",note:"Best pho"},
+{n:"Pho bo (beef pho)",c:80,p:7,f:2,cat:"Soups",cty:"Vietnamese",pr:"GREEN",g:"med"},
+{n:"Goi cuon (fresh spring roll, 1pc)",c:75,p:5,f:1,cat:"Dishes",cty:"Vietnamese",pr:"GREEN",g:"low"},
+{n:"Goi ga (Vietnamese chicken salad)",c:100,p:14,f:5,cat:"Dishes",cty:"Vietnamese",pr:"GREEN",g:"low"},
+{n:"Bun bo hue (spicy beef noodle)",c:90,p:8,f:3,cat:"Soups",cty:"Vietnamese",pr:"GREEN",g:"med",note:"Lean soup"},
+{n:"Thit nuong (grilled pork)",c:175,p:20,f:10,cat:"Pork",cty:"Vietnamese",pr:"AMBER",g:"med-high"},
+{n:"Com tam (broken rice + pork)",c:150,p:10,f:5,cat:"Dishes",cty:"Vietnamese",pr:"AMBER",g:"med",note:"Carb-heavy"},
+{n:"Banh mi (pork/chicken)",c:190,p:10,f:7,cat:"Dishes",cty:"Vietnamese",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Cha gio (fried spring roll, 1pc)",c:85,p:4,f:5,cat:"Dishes",cty:"Vietnamese",pr:"AMBER",g:"low"},
+{n:"Chicken + broccoli stir fry",c:88,p:11,f:3,cat:"Dishes",cty:"Chinese",pr:"GREEN",g:"low",note:"Best Chinese dish"},
+{n:"Beef + broccoli stir fry",c:95,p:9,f:4,cat:"Dishes",cty:"Chinese",pr:"GREEN",g:"med"},
+{n:"Kung pao chicken",c:130,p:10,f:7,cat:"Dishes",cty:"Chinese",pr:"GREEN",g:"low"},
+{n:"Mapo tofu",c:100,p:6,f:7,cat:"Dishes",cty:"Chinese",pr:"GREEN",g:"low"},
+{n:"Egg drop soup",c:35,p:3,f:1,cat:"Soups",cty:"Chinese",pr:"GREEN",g:"low",note:"Nearly calorie free"},
+{n:"Steamed dumplings",c:144,p:8,f:5,cat:"Dishes",cty:"Chinese",pr:"AMBER",g:"low"},
+{n:"Peking duck (meat only, no skin)",c:195,p:22,f:12,cat:"Poultry",cty:"Chinese",pr:"AMBER",g:"med"},
+{n:"Fried rice (chicken)",c:175,p:7,f:6,cat:"Dishes",cty:"Chinese",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Chow mein (chicken)",c:155,p:8,f:5,cat:"Dishes",cty:"Chinese",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Sweet and sour pork",c:210,p:9,f:10,cat:"Pork",cty:"Chinese",pr:"RED",g:"med",note:"Fried and sugary"},
+{n:"General Tso's chicken",c:245,p:14,f:12,cat:"Poultry",cty:"Chinese",pr:"RED",g:"low",note:"Heavy sauce"},
+{n:"Carne asada (grilled steak)",c:175,p:25,f:8,cat:"Beef",cty:"Mexican",pr:"GREEN",g:"med",note:"Best Mexican protein"},
+{n:"Ceviche (fish or shrimp)",c:80,p:12,f:1,cat:"Fish",cty:"Mexican",pr:"GREEN",g:"low",note:"Lean and excellent"},
+{n:"Chicken taco (corn tortilla, 1pc)",c:130,p:8,f:5,cat:"Poultry",cty:"Mexican",pr:"GREEN",g:"low"},
+{n:"Grilled chicken fajitas (no tortilla)",c:130,p:18,f:5,cat:"Poultry",cty:"Mexican",pr:"GREEN",g:"low",note:"High protein"},
+{n:"Black beans (cooked)",c:132,p:9,f:0.5,cat:"Vegetables",cty:"Mexican",pr:"GREEN",g:"low",note:"Fiber + protein combo"},
+{n:"Salsa (tomato-based)",c:20,p:1,f:0,cat:"Vegetables",cty:"Mexican",pr:"GREEN",g:"low",note:"Essentially calorie free"},
+{n:"Guacamole",c:160,p:2,f:15,cat:"Vegetables",cty:"Mexican",pr:"AMBER",g:"low",note:"Healthy fat — watch portions"},
+{n:"Carnitas (braised pork)",c:250,p:22,f:17,cat:"Pork",cty:"Mexican",pr:"AMBER",g:"med-high",note:"High fat"},
+{n:"Chicken burrito",c:175,p:10,f:6,cat:"Dishes",cty:"Mexican",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Nachos with cheese",c:310,p:7,f:17,cat:"Dishes",cty:"Mexican",pr:"RED",g:"low",note:"High fat and fried"},
+{n:"Chimichanga (fried burrito)",c:290,p:12,f:14,cat:"Dishes",cty:"Mexican",pr:"RED",g:"low",note:"Deep fried"},
+{n:"Grilled chicken paillard",c:165,p:31,f:3.6,cat:"Poultry",cty:"Italian",pr:"GREEN",g:"low",note:"Leanest Italian option"},
+{n:"Sea bass al forno (baked)",c:140,p:22,f:5,cat:"Fish",cty:"Italian",pr:"GREEN",g:"med"},
+{n:"Chicken piccata (no breading)",c:160,p:24,f:7,cat:"Poultry",cty:"Italian",pr:"GREEN",g:"low"},
+{n:"Minestrone soup",c:55,p:3,f:1.5,cat:"Soups",cty:"Italian",pr:"GREEN",g:"low",note:"Low calorie"},
+{n:"Pasta plain cooked",c:158,p:5.8,f:0.9,cat:"Dishes",cty:"Italian",pr:"AMBER",g:"low",note:"USDA: 158 cal / 5.8g protein / 30.9g carbs"},
+{n:"Pasta bolognese",c:185,p:10,f:7,cat:"Dishes",cty:"Italian",pr:"AMBER",g:"med"},
+{n:"Pasta arrabiata",c:140,p:5,f:4,cat:"Dishes",cty:"Italian",pr:"AMBER",g:"low",note:"Lower fat pasta"},
+{n:"Pasta carbonara",c:230,p:11,f:13,cat:"Dishes",cty:"Italian",pr:"RED",g:"low",note:"High fat and calories"},
+{n:"Lasagna beef",c:165,p:9,f:7,cat:"Dishes",cty:"Italian",pr:"AMBER",g:"med",note:"Watch portion size"},
+{n:"Margherita pizza",c:220,p:9,f:7,cat:"Dishes",cty:"Italian",pr:"AMBER",g:"low",note:"Carb-heavy"},
+{n:"Osso buco (braised veal shank)",c:180,p:22,f:9,cat:"Beef",cty:"Italian",pr:"AMBER",g:"med"},
+{n:"Tiramisu",c:280,p:5,f:17,cat:"Dishes",cty:"Italian",pr:"RED",g:"low",note:"Dessert — occasional treat"}
+];
+
+// ── State ──
+var ST={q:'',cat:'all',cty:'all',pr:'all'};
+
+// ── Count per filter ──
+function countFor(key,val){
+  return D.filter(function(f){return val==='all'||f[key]===val}).length;
+}
+
+// ── Build chips ──
+function makeChips(elId,vals,labelFn,key,extraClass){
+  var el=document.getElementById(elId);
+  vals.forEach(function(v,i){
+    var count=countFor(key,v);
+    var b=document.createElement('button');
+    b.className='chip'+(i===0?' active':'')+(extraClass?' '+extraClass:'');
+    b.innerHTML=labelFn(v)+'<span class="chip-count">'+count+'</span>';
+    b.dataset.val=v;
+    b.addEventListener('click',function(){
+      el.querySelectorAll('.chip').forEach(function(x){x.classList.remove('active')});
+      b.classList.add('active');
+      ST[key]=v;
+      render();
+    });
+    el.appendChild(b);
+  });
+}
+
+// Category emojis
+var catEmoji={
+  'all':'🍽️','Fish':'🐟','Shellfish':'🦐','Poultry':'🍗','Beef':'🥩',
+  'Pork':'🐷','Dishes':'🍲','Soups':'🍜','Vegetables':'🥦',
+  'Eggs & Dairy':'🥚','Street Food':'🍢'
+};
+var ctyEmoji={
+  'all':'🌍','Filipino':'🇵🇭','Japanese':'🇯🇵','Korean':'🇰🇷','Vietnamese':'🇻🇳',
+  'Chinese':'🇨🇳','Mexican':'🇲🇽','Italian':'🇮🇹','American':'🇺🇸','Core Protocol':'⭐'
+};
+var prInfo={
+  'all':['🍽️','All',''],
+  'GREEN':['🟢','Core Foods','proto-green'],
+  'AMBER':['🟡','Occasional','proto-amber'],
+  'RED':['🔴','Limit / Avoid','proto-red']
+};
+
+var cats=['all'].concat(D.map(function(f){return f.cat}).filter(function(v,i,a){return a.indexOf(v)===i}).sort());
+var ctys=['all','Core Protocol','Filipino','Japanese','Korean','Vietnamese','Chinese','Mexican','Italian','American'];
+
+makeChips('catChips',cats,function(v){return(catEmoji[v]||'')+(v==='all'?'All Categories':v)+' '},'cat','');
+makeChips('ctyChips',ctys,function(v){return(ctyEmoji[v]||'')+(v==='all'?'All Cuisines':v)+' '},'cty','');
+
+// Protocol chips manually
+(function(){
+  var el=document.getElementById('prChips');
+  ['all','GREEN','AMBER','RED'].forEach(function(v,i){
+    var info=prInfo[v];
+    var b=document.createElement('button');
+    b.className='chip'+(i===0?' active':'')+' '+(info[2]||'');
+    b.innerHTML=info[0]+' '+info[1]+'<span class="chip-count">'+countFor('pr',v)+'</span>';
+    b.dataset.val=v;
+    b.addEventListener('click',function(){
+      el.querySelectorAll('.chip').forEach(function(x){x.classList.remove('active')});
+      b.classList.add('active');
+      ST.pr=v;
+      render();
+    });
+    el.appendChild(b);
+  });
+})();
+
+// Total count
+document.getElementById('totalCount').textContent=D.length;
+
+// Clear
+function clearSearch(){
+  var si=document.getElementById('srch');
+  si.value='';ST.q='';
+  document.getElementById('clearBtn').classList.remove('show');
+  render();
+  si.focus();
+}
+function clearAll(){
+  clearSearch();
+  ['catChips','ctyChips','prChips'].forEach(function(id){
+    var el=document.getElementById(id);
+    var first=el.querySelector('.chip');
+    el.querySelectorAll('.chip').forEach(function(b){b.classList.remove('active')});
+    if(first)first.classList.add('active');
+  });
+  ST.cat=ST.cty=ST.pr='all';
+  render();
+}
+window.clearSearch=clearSearch;
+window.clearAll=clearAll;
+
+document.getElementById('srch').addEventListener('input',function(e){
+  ST.q=e.target.value;
+  document.getElementById('clearBtn').classList[ST.q?'add':'remove']('show');
+  render();
+});
+
+// ── Render ──
+function render(){
+  var q=ST.q.toLowerCase().trim();
+  var sort=document.getElementById('sortSel').value;
+
+  var items=D.filter(function(f){
+    if(q){
+      var h=(f.n+' '+f.cat+' '+f.cty+' '+(f.note||'')).toLowerCase();
+      if(h.indexOf(q)<0)return false;
+    }
+    if(ST.cat!=='all'&&f.cat!==ST.cat)return false;
+    if(ST.cty!=='all'&&f.cty!==ST.cty)return false;
+    if(ST.pr!=='all'&&f.pr!==ST.pr)return false;
+    return true;
+  });
+
+  if(sort==='p')items.sort(function(a,b){return b.p-a.p});
+  else if(sort==='c')items.sort(function(a,b){return a.c-b.c});
+  else items.sort(function(a,b){return a.n.localeCompare(b.n)});
+
+  // Filter banner
+  var active=[];
+  if(q)active.push('Search: "'+q+'"');
+  if(ST.cat!=='all')active.push((catEmoji[ST.cat]||'')+' '+ST.cat);
+  if(ST.cty!=='all')active.push((ctyEmoji[ST.cty]||'')+' '+ST.cty);
+  if(ST.pr!=='all')active.push(prInfo[ST.pr][0]+' '+prInfo[ST.pr][1]);
+  var banner=document.getElementById('filterBanner');
+  if(active.length){
+    document.getElementById('filterBannerText').textContent='Filtering by: '+active.join(' · ');
+    banner.classList.add('show');
+  }else{banner.classList.remove('show')}
+
+  // Count
+  document.getElementById('rc').innerHTML='Showing <strong>'+items.length+'</strong> of '+D.length+' foods';
+
+  var g=document.getElementById('grid');
+  g.innerHTML='';
+
+  if(!items.length){
+    g.innerHTML='<div class="empty"><div class="empty-icon">🔍</div><h3>No foods found</h3><p>Try a different search term or clear your filters.</p></div>';
+    return;
+  }
+
+  var frag=document.createDocumentFragment();
+  items.forEach(function(f){frag.appendChild(mkCard(f))});
+  g.appendChild(frag);
+}
+
+function mkCard(f){
+  var pc=f.pr==='GREEN'?'pg':f.pr==='AMBER'?'pa':'pr';
+  var pLabel=f.pr==='GREEN'?'✅ Core':f.pr==='AMBER'?'⚠️ Occasional':'🚫 Limit';
+
+  // Mercury
+  var mt='';
+  if(f.m){
+    var mc=f.m==='LOW'?'merc-low':f.m==='MEDIUM'?'merc-med':'merc-high';
+    var mi=f.m==='LOW'?'🟢':f.m==='MEDIUM'?'🟡':'🔴';
+    mt='<span class="tag fish '+mc+'">'+mi+' '+f.m+' Mercury</span>';
+  }
+
+  var rt=f.raw?'<span class="tag raw-tag">📊 RAW weight</span>':'';
+  var gh=(f.g||'').indexOf('high')>=0?'gout-high':'';
+  var gt=f.g?'<span class="tag '+gh+'">'+(gh?'⚠️':'✓')+' '+f.g+' purine</span>':'';
+  var nt=f.note?'<div class="note">💡 '+f.note+'</div>':'';
+
+  var d=document.createElement('div');
+  d.className='card '+pc;
+  d.innerHTML=
+    '<div class="proto-badge '+pc+'">'+pLabel+'</div>'+
+    '<div class="food-name">'+f.n+'</div>'+
+    '<div class="macros">'+
+      '<div class="macro"><div class="macro-val">'+f.c+'</div><div class="macro-lbl">Calories</div></div>'+
+      '<div class="macro"><div class="macro-val">'+f.p+'g</div><div class="macro-lbl">Protein</div></div>'+
+      '<div class="macro"><div class="macro-val">'+f.f+'g</div><div class="macro-lbl">Fat</div></div>'+
+    '</div>'+
+    '<div class="tags">'+
+      '<span class="tag">'+(catEmoji[f.cat]||'')+(f.cat)+'</span>'+
+      '<span class="tag">'+(ctyEmoji[f.cty]||'')+f.cty+'</span>'+
+      mt+gt+rt+
+    '</div>'+nt;
+  return d;
+}
+
+render();
+</script>
+</body>
+</html>
