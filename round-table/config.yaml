@@ -1,0 +1,37 @@
+# ══════════════════════════════════════════════════════
+# ROUND TABLE  //  config.yaml
+# ══════════════════════════════════════════════════════
+#
+# SETUP:
+#   1. Get a free OpenRouter key at https://openrouter.ai/keys
+#   2. Paste it below replacing YOUR_KEY_HERE
+#   3. Choose a model (free options marked with :free)
+#   4. Run: python3 merlin.py -t target.com
+#
+# FREE MODELS (good for general use):
+#   meta-llama/llama-3.3-70b-instruct:free   (recommended free)
+#   google/gemini-2.0-flash-exp:free
+#   mistralai/mistral-7b-instruct:free
+#
+# PAID MODELS (better triage quality, ~$0.01-0.05 per scan):
+#   anthropic/claude-sonnet-4-6
+#   openai/gpt-4o
+#   google/gemini-2.5-pro
+#
+# NOTE: Free models may use your prompts for training.
+# For real bug bounty targets, a paid model keeps data private.
+# ══════════════════════════════════════════════════════
+
+ai:
+  api_key: "YOUR_KEY_HERE"
+  model: "meta-llama/llama-3.3-70b-instruct:free"
+  timeout: 60
+
+scan:
+  threads: 10
+  timeout: 8
+  passive_only: false
+  checkpoint: true
+  wordlist: "wordlists/common.txt"
+  nuclei_severity: "medium,high,critical"
+  ports: "80,443,8080,8443,8888,3000,5000,9090,9200,27017"
