@@ -927,15 +927,21 @@ function renderDashboard() {
     const score = getComplianceScore(c.id);
     const scoreClass = score >= 70 ? 'green' : score >= 40 ? 'gold' : 'red';
     const val = c.value ? '$' + Number(c.value).toLocaleString() + '/mo' : '';
-    return `<div class="client-card" onclick="goToClient('${c.id}')">
-      <div class="cc-name">${c.name}</div>
-      <div class="cc-type">${c.industry} &middot; ${c.type}${val ? ' &middot; ' + val : ''}</div>
-      <div class="cc-stats">
+    return `<div class="client-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.1rem">
+        <div class="cc-name" onclick="goToClient('${c.id}')" style="cursor:pointer;flex:1">${c.name}</div>
+        <div style="display:flex;gap:0.25rem;flex-shrink:0">
+          <button class="icon-btn" onclick="editClient('${c.id}')" title="Edit client" style="font-size:0.75rem">✎</button>
+          <button class="icon-btn del" onclick="deleteClient('${c.id}')" title="Delete client" style="font-size:0.75rem">✕</button>
+        </div>
+      </div>
+      <div class="cc-type" onclick="goToClient('${c.id}')" style="cursor:pointer">${c.industry} &middot; ${c.type}${val ? ' &middot; ' + val : ''}</div>
+      <div class="cc-stats" onclick="goToClient('${c.id}')" style="cursor:pointer">
         <div><div class="cc-stat-val ${crit > 0 ? 'red' : ''}">${crit}</div><div class="cc-stat-lbl">Critical</div></div>
         <div><div class="cc-stat-val ${open > 0 ? 'gold' : 'green'}">${open}</div><div class="cc-stat-lbl">Open</div></div>
         <div><div class="cc-stat-val ${scoreClass}">${score}%</div><div class="cc-stat-lbl">Compliance</div></div>
       </div>
-      <div class="progress-wrap"><div class="progress-bar ${scoreClass === 'green' ? 'pb-green' : scoreClass === 'gold' ? 'pb-gold' : 'pb-red'}" style="width:${score}%"></div></div>
+      <div class="progress-wrap" onclick="goToClient('${c.id}')" style="cursor:pointer"><div class="progress-bar ${scoreClass === 'green' ? 'pb-green' : scoreClass === 'gold' ? 'pb-gold' : 'pb-red'}" style="width:${score}%"></div></div>
     </div>`;
   }).join('');
 }
@@ -1173,7 +1179,7 @@ function renderControlsList() {
         <div class="control-id">${c.id}</div>
         <div class="control-name">${c.name}${entry.note ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + entry.note + '</span>' : ''}</div>
         <button class="control-status-btn badge ${statusColors[entry.status]}" onclick="cycleControlStatus('${fw}','${c.id}','${nextStatus[entry.status]}')">${entry.status}</button>
-        <button class="control-note-btn" title="Add note" onclick="openControlNote('${fw}','${c.id}','${(entry.note||'').replace(/'/g,'&#39;')}')">✎</button>
+        <button class="control-note-btn" title="Add note" data-fw="${fw}" data-id="${c.id}" onclick="openControlNoteFromBtn(this)">✎</button>
       </div>`;
     }).join('');
     const groupCompliant = g.controls.filter(c => { const k=`${fw}_${c.id}`; return ctrls[k] && ctrls[k].status==='Compliant'; }).length;
@@ -1202,6 +1208,15 @@ function cycleControlStatus(fw, id, newStatus) {
   DB.saveClientData(currentClient, d);
   renderControlsList();
   renderSidebar();
+}
+
+function openControlNoteFromBtn(btn) {
+  const fw = btn.dataset.fw;
+  const id = btn.dataset.id;
+  const d = DB.clientData(currentClient);
+  const key = fw + '_' + id;
+  const existingNote = (d.controls[key] && d.controls[key].note) ? d.controls[key].note : '';
+  openControlNote(fw, id, existingNote);
 }
 
 function openControlNote(fw, id, existingNote) {
@@ -1374,7 +1389,9 @@ function openPOAMModal(editIdx = null) {
     document.getElementById('poam-resources').value = p.resources || '';
     document.getElementById('poam-notes').value = p.notes || '';
   } else {
-    ['poam-weakness','poam-owner','poam-date','poam-resources','poam-notes'].forEach(id => document.getElementById(id).value = '');
+    ['poam-weakness','poam-owner','poam-resources','poam-notes'].forEach(id => document.getElementById(id).value = '');
+    const d30 = new Date(); d30.setDate(d30.getDate() + 30);
+    document.getElementById('poam-date').value = d30.toISOString().split('T')[0];
     document.getElementById('poam-status').value = 'Open';
   }
   openModal('poam-modal');
@@ -1457,10 +1474,10 @@ function renderRisk() {
 }
 
 function calcExposure(r) {
-  if (!r.assetValue) return 0;
+  const av = parseFloat(r.assetValue); if (!av || isNaN(av)) return 0;
   const likelihoodPct = [0, 0.05, 0.1, 0.25, 0.5, 0.9][parseInt(r.likelihood)];
   const impactPct = [0, 0.05, 0.15, 0.3, 0.6, 1.0][parseInt(r.impact)];
-  return Math.round(Number(r.assetValue) * likelihoodPct * impactPct * 12);
+  return Math.round(av * likelihoodPct * impactPct * 12);
 }
 
 function openRiskModal(editIdx = null) {
@@ -1521,8 +1538,44 @@ function deleteRisk(i) {
 // =====================================================================
 // CLIENT CRUD
 // =====================================================================
-function openModal(id) { document.getElementById(id).classList.add('open'); }
+function openModal(id) {
+  if (id === 'client-modal' && !document.getElementById('client-edit-id').value) {
+    document.getElementById('client-modal-title').textContent = 'New Client';
+  }
+  document.getElementById(id).classList.add('open');
+}
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function editClient(id) {
+  const clients = DB.clients();
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('client-modal-title').textContent = 'Edit Client';
+  document.getElementById('client-edit-id').value = c.id;
+  document.getElementById('client-name').value = c.name;
+  document.getElementById('client-industry').value = c.industry;
+  document.getElementById('client-size').value = c.size;
+  document.getElementById('client-contact').value = c.contact || '';
+  document.getElementById('client-email').value = c.email || '';
+  document.getElementById('client-type').value = c.type;
+  document.getElementById('client-value').value = c.value || '';
+  document.getElementById('client-notes').value = c.notes || '';
+  openModal('client-modal');
+}
+
+function deleteClient(id) {
+  const clients = DB.clients();
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  if (!confirm('Delete ' + c.name + '? This will permanently remove all their data.')) return;
+  const remaining = clients.filter(x => x.id !== id);
+  DB.saveClients(remaining);
+  localStorage.removeItem('apx_cd_' + id);
+  if (currentClient === id) currentClient = null;
+  renderSidebar();
+  renderDashboard();
+  notify('Client deleted');
+}
 
 function saveClient() {
   const name = document.getElementById('client-name').value.trim();
@@ -1555,6 +1608,10 @@ function saveClient() {
 // =====================================================================
 // EXPORTS
 // =====================================================================
+function slugify(str) {
+  return str.replace(/[^a-z0-9]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+}
+
 function downloadCSV(filename, rows) {
   const csv = rows.map(r => r.map(cell => `"${String(cell||'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
@@ -1573,7 +1630,7 @@ function exportControls() {
     const entry = d.controls[key] || {};
     rows.push([c.id, c.name, entry.status || 'Not Assessed', entry.note || '', fw.toUpperCase()]);
   }));
-  downloadCSV(`${client.name}-controls-${fw}.csv`, rows);
+  downloadCSV(`${slugify(client.name)}-controls-${fw}.csv`, rows);
 }
 
 function exportFindings() {
@@ -1581,7 +1638,7 @@ function exportFindings() {
   const client = DB.clients().find(c => c.id === currentClient);
   const rows = [['ID','Title','Severity','Status','Asset','Framework','Description','Recommendation','Date']];
   d.findings.forEach((f,i) => rows.push([`F-${String(i+1).padStart(3,'0')}`,f.title,f.severity,f.status,f.asset,f.framework,f.description,f.recommendation,f.date]));
-  downloadCSV(`${client.name}-findings.csv`, rows);
+  downloadCSV(`${slugify(client.name)}-findings.csv`, rows);
 }
 
 function exportPOAM() {
@@ -1589,7 +1646,7 @@ function exportPOAM() {
   const client = DB.clients().find(c => c.id === currentClient);
   const rows = [['ID','Weakness','Responsible Party','Milestone Date','Status','Resources','Notes']];
   d.poam.forEach((p,i) => rows.push([`PM-${String(i+1).padStart(3,'0')}`,p.weakness,p.owner,p.date,p.status,p.resources,p.notes]));
-  downloadCSV(`${client.name}-poam.csv`, rows);
+  downloadCSV(`${slugify(client.name)}-poam.csv`, rows);
 }
 
 function exportRisk() {
@@ -1597,7 +1654,7 @@ function exportRisk() {
   const client = DB.clients().find(c => c.id === currentClient);
   const rows = [['Asset','Threat','Likelihood','Impact','Score','Annual Exposure','Owner','Treatment','Notes']];
   d.risks.forEach(r => rows.push([r.asset,r.threat,r.likelihood,r.impact,r.likelihood*r.impact,calcExposure(r)?'$'+calcExposure(r).toLocaleString():'N/A',r.owner,r.treatment,r.notes]));
-  downloadCSV(`${client.name}-risk-register.csv`, rows);
+  downloadCSV(`${slugify(client.name)}-risk-register.csv`, rows);
 }
 
 // =====================================================================
