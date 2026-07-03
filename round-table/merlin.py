@@ -44,7 +44,7 @@ BANNER = f"""
   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝        ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
 {RST}
 {DIM}  Knights of the Round Table  //  Bug Bounty Intelligence Suite{RST}
-{DIM}  MERLIN orchestrates: Percival -> Galahad -> Lancelot -> Excalibur{RST}
+{DIM}  MERLIN orchestrates: Percival -> Galahad -> Lancelot -> Gawain -> Excalibur{RST}
 """
 
 BASE_DIR   = Path(__file__).parent.resolve()
@@ -386,6 +386,7 @@ def main():
     parser.add_argument("--model",        default=None, help="Override AI model (e.g. openai/gpt-4o)")
     parser.add_argument("--skip-update",  action="store_true", help="Skip apt/brew system update")
     parser.add_argument("--no-checkpoint",action="store_true", help="Skip confirmation between phases")
+    parser.add_argument("--no-playbook",  action="store_true", help="Skip Gawain manual hunting playbook")
     parser.add_argument("--setup-only",   action="store_true", help="Bootstrap environment only, no scan")
     args = parser.parse_args()
 
@@ -419,6 +420,7 @@ def main():
     from percival  import run_percival
     from galahad   import run_galahad
     from lancelot  import run_lancelot
+    from gawain    import run_gawain
     from excalibur import run_excalibur
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -471,6 +473,14 @@ def main():
     p3 = run_lancelot(target, results, cfg)
     results["lancelot"] = p3
     ok(f"Lancelot complete in {time.time()-t2:.1f}s")
+
+    # ── GAWAIN — Phase 3.5 (manual hunting playbook) ──
+    if not args.no_playbook:
+        hdr("GAWAIN  //  PHASE 3.5 — MANUAL HUNTING PLAYBOOK")
+        t25 = time.time()
+        p35 = run_gawain(target, results, cfg)
+        results["gawain"] = p35
+        ok(f"Gawain complete in {time.time()-t25:.1f}s")
 
     # ── EXCALIBUR — Phase 4 ──
     hdr("EXCALIBUR  //  PHASE 4 — REPORT GENERATION")
