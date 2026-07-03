@@ -1,61 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="./style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Gochi+Hand&family=Quicksand:wght@473&display=swap" rel="stylesheet">
-    <title>Fruity Lemons</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&family=Gochi+Hand&family=Quicksand:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <title>Franchise — Fruity Lemons</title>
 </head>
-<body >
-    <nav class="navbar navbar-expand-lg gradient-background">
-        <div class="container-fluid">
-          <a class="navbar-brand gochi-hand-regular" href="./index.html">Fruity Lemons</a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
-          <div class="collapse navbar-collapse" id="navbarSupportedContent">
-            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-              <li class="nav-item">
-                <li><a href="./index.html" class="nav-link px-2 link-body-emphasis">Home</a></li>
-                <li><a href="./menu.html" class="nav-link px-2 link-body-emphasis">Menu</a></li>
-                <li><a href="./order.html" class="nav-link px-2 link-body-emphasis">Order Now</a></li>
-                <li><a href="./contact.html" class="nav-link px-2 link-body-emphasis">Contact Us</a></li>
-                <li><a href="./career.html" class="nav-link px-2 link-body-emphasis">Career</a></li>
-                <li><a href="./franchise.html" class="btn btn-outline-dark" role="button">Franchise Now</a></li>
-              </li>
-
-            </ul>
-            <form class="d-flex" role="search">
-              <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search">
-              <button class="btn btn-outline-success" type="submit">Search</button>
-            </form>
-          </div>
-        </div>
-      </nav>
-
-      <div class="row py-5 px-5">
-        <div class="col-sm-6 mb-3 mb-sm-0">
-          <div class="card">
-            <div class="card-body text-center">
-              <h5 class="card-title">Contact us</h5>
-              <p class="card-text">info@freshproenterprise.com</p>
-              <p class="card-text">0917 801 5474</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-sm-6">
-          <div class="card">
-            <div class="card-body text-center">
-              <h5 class="card-title">Hours of operation</h5>
-              <p class="card-text">Monday to Friday - 10:00 am to 08:30 pm</p>
-              <p class="card-text">Weekends - 10:00 am to 08:30 pm</p>
- 
-            </div>
-          </div>
-        </div>
-      </div>
+<body><nav class="site-nav gradient-background">
+  <a class="nav-brand" href="./index.html">Fruity Lemons</a>
+  <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+    <span></span><span></span><span></span>
+  </button>
+  <ul class="nav-links" id="navLinks">
+    <li><a href="./index.html" >Home</a></li>
+    <li><a href="./menu.html" >Menu</a></li>
+    <li><a href="./order.html" >Order Now</a></li>
+    <li><a href="./contact.html" >Contact Us</a></li>
+    <li><a href="./career.html" >Career</a></li>
+    <li><a href="./franchise.html" class='active'>Franchise</a></li>
+  </ul>
+</nav>
+<section class="page-hero">
+  <div class="bubble-wrap" aria-hidden="true">
+    <div class="bubble" style="left:18%;width:65px;height:65px;--dur:24s"></div>
+    <div class="bubble" style="left:78%;width:45px;height:45px;--dur:20s;animation-delay:2s"></div>
+  </div>
+  <h1>Franchise Now 🤝</h1>
+  <p>Own a Fruity Lemons branch and be your own boss</p>
+</section>
+<div class="section">
+  <div class="info-grid">
+    <div class="info-card">
+      <h3>Get Started</h3>
+      <p>Reach out to our franchise team:<br><a href="mailto:info@freshproenterprise.com">info@freshproenterprise.com</a></p>
+      <p style="margin-top:.75rem"><a href="tel:+639178015474">0917 801 5474</a></p>
+    </div>
+    <div class="info-card">
+      <h3>Why Franchise With Us?</h3>
+      <p>28+ locations and growing. Proven brand, low overhead, high demand for fresh natural drinks. Full support from Fresh Pro Enterprise.</p>
+    </div>
+    <div class="info-card">
+      <h3>Franchise Hours</h3>
+      <p>Inquiries accepted:<br>Monday to Friday<br>10:00 am – 8:30 pm</p>
+    </div>
+  </div>
+</div>
+<footer class="gradient-background">
+  <p><a href="https://facebook.com/realfruitylemons" target="_blank" rel="noopener">facebook.com/realfruitylemons</a>
+  &nbsp;|&nbsp;
+  <a href="mailto:info@freshproenterprise.com">info@freshproenterprise.com</a></p>
+</footer><script>
+  const t=document.getElementById('navToggle'),l=document.getElementById('navLinks');
+  t.addEventListener('click',()=>l.classList.toggle('open'));
+  l.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>l.classList.remove('open')));
+</script></body></html>
