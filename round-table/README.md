@@ -9,10 +9,11 @@ python merlin.py -t target.com
 Merlin orchestrates the full pipeline:
 
 ```
-Percival  (Phase 1)  Passive recon      DNS, WHOIS, crt.sh, HTTP headers, SSL, tech stack
-Galahad   (Phase 2)  Active enumeration subfinder, amass, httpx, nmap, ffuf, nuclei
-Lancelot  (Phase 3)  AI triage          OpenRouter (Claude, GPT-4o, Llama, Gemini)
-Excalibur (Phase 4)  Report engine      TXT + DOCX + JSON output
+Percival  (Phase 1)   Passive recon      DNS, WHOIS, crt.sh, HTTP headers, SSL, tech stack
+Galahad   (Phase 2)   Active enumeration subfinder, amass, httpx, nmap, ffuf, nuclei
+Lancelot  (Phase 3)   AI triage          Ranked findings, attack chains, PoC priorities
+Gawain    (Phase 3.5) Manual playbook    Step-by-step hunting guide, you run each step by hand
+Excalibur (Phase 4)   Report engine      TXT + DOCX + JSON output
 ```
 
 ---
@@ -171,6 +172,12 @@ python3 merlin.py -t target.com --skip-update
 python3 merlin.py -t target.com --no-checkpoint
 ```
 
+### Skip the Gawain manual playbook
+
+```bash
+python3 merlin.py -t target.com --no-playbook
+```
+
 ### Bootstrap environment only (no scan)
 
 ```bash
@@ -244,6 +251,7 @@ Google DNS over HTTPS, crt.sh certificate transparency, RDAP WHOIS, HTTP HEAD re
 | Percival | Passive Recon | Google DoH, crt.sh, RDAP, HTTP |
 | Galahad | Active Enumeration | subfinder, amass, httpx, nmap, ffuf, gobuster, nuclei |
 | Lancelot | AI Triage | OpenRouter (any model) |
+| Gawain | Manual Playbook | OpenRouter (any model), passive |
 | Excalibur | Reporting | TXT, DOCX, JSON |
 
 ---
