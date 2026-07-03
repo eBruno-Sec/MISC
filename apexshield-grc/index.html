@@ -388,8 +388,9 @@ input, select, textarea { font-family: var(--mono); }
             <div style="display:flex;gap:0.75rem;align-items:center">
               <div class="fw-tabs" id="fw-tabs">
                 <button class="fw-tab active" data-fw="cis" onclick="switchFramework(this)">CIS v8</button>
-                <button class="fw-tab" data-fw="cmmc" onclick="switchFramework(this)">CMMC L1</button>
                 <button class="fw-tab" data-fw="nist" onclick="switchFramework(this)">NIST CSF</button>
+                <button class="fw-tab" data-fw="hipaa" onclick="switchFramework(this)">HIPAA</button>
+                <button class="fw-tab" data-fw="cppa" onclick="switchFramework(this)">CPPA</button>
               </div>
             </div>
             <div style="display:flex;gap:0.5rem;align-items:center">
@@ -564,7 +565,7 @@ input, select, textarea { font-family: var(--mono); }
           <select class="form-select" id="client-type">
             <option>Discovery / Gap Assessment</option>
             <option>Monthly Retainer</option>
-            <option>CMMC Prep</option>
+            <option>HIPAA Risk Assessment</option>
             <option>Penetration Test</option>
             <option>Incident Response</option>
           </select>
@@ -627,8 +628,8 @@ input, select, textarea { font-family: var(--mono); }
           <label class="form-label">Framework Reference</label>
           <select class="form-select" id="finding-framework">
             <option>CIS v8</option>
-            <option>CMMC L1</option>
-            <option>CMMC L2</option>
+            <option>HIPAA</option>
+            <option>CPPA</option>
             <option>NIST CSF</option>
             <option>NIST 800-53</option>
             <option>Other</option>
@@ -1005,37 +1006,6 @@ const FRAMEWORKS = {
       { id: '12.6', name: 'Use of Secure Network Management and Communication Protocols' },
     ]}
   ],
-  cmmc: [
-    { group: 'Access Control (AC)', controls: [
-      { id: 'AC.1.001', name: 'Limit system access to authorized users' },
-      { id: 'AC.1.002', name: 'Limit system access to authorized transactions and functions' },
-      { id: 'AC.1.003', name: 'Verify and control external system connections' },
-      { id: 'AC.1.004', name: 'Control information posted or processed on publicly accessible systems' },
-    ]},
-    { group: 'Identification & Authentication (IA)', controls: [
-      { id: 'IA.1.076', name: 'Identify information system users and processes' },
-      { id: 'IA.1.077', name: 'Authenticate users, processes, or devices before system access' },
-    ]},
-    { group: 'Media Protection (MP)', controls: [
-      { id: 'MP.1.118', name: 'Sanitize or destroy media before disposal or reuse' },
-    ]},
-    { group: 'Physical Protection (PE)', controls: [
-      { id: 'PE.1.131', name: 'Limit physical access to organizational systems' },
-      { id: 'PE.1.132', name: 'Escort visitors and monitor visitor activity' },
-      { id: 'PE.1.133', name: 'Maintain audit logs of physical access' },
-      { id: 'PE.1.134', name: 'Control and manage physical access devices' },
-    ]},
-    { group: 'System & Communications Protection (SC)', controls: [
-      { id: 'SC.1.175', name: 'Monitor, control, and protect communications at external boundaries' },
-      { id: 'SC.1.176', name: 'Implement subnetworks for publicly accessible system components' },
-    ]},
-    { group: 'System & Information Integrity (SI)', controls: [
-      { id: 'SI.1.210', name: 'Identify, report, and correct system flaws in a timely manner' },
-      { id: 'SI.1.211', name: 'Provide protection from malicious code' },
-      { id: 'SI.1.212', name: 'Update malicious code protection mechanisms' },
-      { id: 'SI.1.213', name: 'Perform periodic scans and real-time scans of files' },
-    ]}
-  ],
   nist: [
     { group: 'Identify (ID)', controls: [
       { id: 'ID.AM-1', name: 'Physical devices and systems inventoried' },
@@ -1072,9 +1042,89 @@ const FRAMEWORKS = {
       { id: 'RC.RP-1', name: 'Recovery plan executed during or after a cybersecurity incident' },
       { id: 'RC.IM-1', name: 'Recovery plans incorporate lessons learned' },
     ]}
+  ],
+  hipaa: [
+    { group: 'Administrative Safeguards (§164.308)', controls: [
+      { id: 'A.1', name: 'Security Officer designated and documented' },
+      { id: 'A.2', name: 'Risk analysis performed and documented' },
+      { id: 'A.3', name: 'Risk management plan implemented' },
+      { id: 'A.4', name: 'Sanction policy for workforce violations in place' },
+      { id: 'A.5', name: 'Information system activity review procedures implemented' },
+      { id: 'A.6', name: 'Workforce clearance and authorization procedures documented' },
+      { id: 'A.7', name: 'Access authorization procedures established' },
+      { id: 'A.8', name: 'Access establishment and modification procedures in place' },
+      { id: 'A.9', name: 'Security awareness and training program implemented' },
+      { id: 'A.10', name: 'Security incident response procedures documented and tested' },
+      { id: 'A.11', name: 'Contingency plan established (backup, DR, emergency access)' },
+      { id: 'A.12', name: 'Business Associate Agreements (BAAs) executed with all applicable vendors' },
+    ]},
+    { group: 'Physical Safeguards (§164.310)', controls: [
+      { id: 'P.1', name: 'Facility access controls implemented' },
+      { id: 'P.2', name: 'Workstation use policies defined and enforced' },
+      { id: 'P.3', name: 'Workstation security controls in place (locks, screens, positioning)' },
+      { id: 'P.4', name: 'Device and media disposal procedures implemented' },
+      { id: 'P.5', name: 'Media reuse procedures (sanitization before reassignment)' },
+      { id: 'P.6', name: 'Hardware and media movement tracked and logged' },
+    ]},
+    { group: 'Technical Safeguards (§164.312)', controls: [
+      { id: 'T.1', name: 'Unique user identification for all ePHI system access' },
+      { id: 'T.2', name: 'Automatic logoff enabled on systems with ePHI' },
+      { id: 'T.3', name: 'Encryption and decryption of ePHI implemented' },
+      { id: 'T.4', name: 'Audit controls implemented to record ePHI access activity' },
+      { id: 'T.5', name: 'Integrity controls to protect ePHI from improper alteration' },
+      { id: 'T.6', name: 'Authentication mechanisms verify persons seeking ePHI access' },
+      { id: 'T.7', name: 'Transmission security (encryption) for ePHI in transit' },
+    ]},
+    { group: 'Organizational & Policy Requirements', controls: [
+      { id: 'O.1', name: 'HIPAA Privacy and Security policies documented and current' },
+      { id: 'O.2', name: 'Breach notification procedures documented (72-hour rule)' },
+      { id: 'O.3', name: 'Annual HIPAA training completed by all workforce members' },
+      { id: 'O.4', name: 'Minimum necessary standard applied to ePHI access and sharing' },
+      { id: 'O.5', name: 'Patient rights procedures in place (access, amendment, accounting)' },
+    ]}
+  ],
+  cppa: [
+    { group: 'Consumer Rights (CCPA/CPRA §1798.100-125)', controls: [
+      { id: 'CR.1', name: 'Right to Know: procedures to respond to consumer data requests within 45 days' },
+      { id: 'CR.2', name: 'Right to Delete: verified deletion process implemented across all systems' },
+      { id: 'CR.3', name: 'Right to Opt-Out: "Do Not Sell or Share My Personal Information" mechanism in place' },
+      { id: 'CR.4', name: 'Right to Correct: process to correct inaccurate personal information' },
+      { id: 'CR.5', name: 'Right to Limit: process to limit use of sensitive personal information' },
+      { id: 'CR.6', name: 'Non-discrimination policy: consumers not penalized for exercising rights' },
+      { id: 'CR.7', name: 'Right to Data Portability: personal data provided in portable format on request' },
+    ]},
+    { group: 'Privacy Notice & Disclosure', controls: [
+      { id: 'PN.1', name: 'Privacy Policy posted and accessible at point of collection' },
+      { id: 'PN.2', name: 'Privacy Policy discloses categories of personal information collected' },
+      { id: 'PN.3', name: 'Privacy Policy discloses purposes for collection and use' },
+      { id: 'PN.4', name: 'Privacy Policy discloses third parties with whom data is shared or sold' },
+      { id: 'PN.5', name: 'Privacy Policy updated within 12 months of any material change' },
+      { id: 'PN.6', name: 'Notice at collection provided at or before point of data collection' },
+      { id: 'PN.7', name: 'Financial incentive notices provided with clear disclosure of value exchange' },
+    ]},
+    { group: 'Data Inventory & Governance', controls: [
+      { id: 'DG.1', name: 'Personal information inventory (data map) documented and maintained' },
+      { id: 'DG.2', name: 'Sensitive personal information identified and separately tracked' },
+      { id: 'DG.3', name: 'Data retention schedules defined and enforced per category' },
+      { id: 'DG.4', name: 'Service provider contracts include required CPPA data restrictions' },
+      { id: 'DG.5', name: 'Third-party data sharing agreements reviewed and documented' },
+      { id: 'DG.6', name: 'Purpose limitation enforced: data used only for disclosed purposes' },
+    ]},
+    { group: 'Security & Risk', controls: [
+      { id: 'SR.1', name: 'Reasonable security measures implemented proportionate to data sensitivity' },
+      { id: 'SR.2', name: 'Risk assessment (cybersecurity audit) conducted for high-risk processing' },
+      { id: 'SR.3', name: 'Data breach response plan documented and tested' },
+      { id: 'SR.4', name: 'Employee access to personal information limited to need-to-know' },
+      { id: 'SR.5', name: 'Vendor security assessments conducted before sharing personal information' },
+    ]},
+    { group: 'Opt-Out & Consent Mechanisms', controls: [
+      { id: 'OC.1', name: 'Global Privacy Control (GPC) signal honored automatically' },
+      { id: 'OC.2', name: 'Opt-out requests processed within 15 business days' },
+      { id: 'OC.3', name: 'Parental consent obtained for consumers under 16 (opt-in required)' },
+      { id: 'OC.4', name: 'Re-engagement for opt-out consumers requires 12-month waiting period' },
+    ]}
   ]
 };
-
 // =====================================================================
 // CONTROLS
 // =====================================================================
