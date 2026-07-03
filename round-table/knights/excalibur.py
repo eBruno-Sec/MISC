@@ -43,6 +43,19 @@ def build_txt(target, results):
     else:
         lines += ["SECTION 1  //  AI TRIAGE: Not available (no API key or error)", ""]
 
+    # ── GAWAIN MANUAL PLAYBOOK ──
+    gaw = results.get("gawain", {})
+    if gaw.get("playbook"):
+        lines += [
+            "SECTION 1B  //  MANUAL HUNTING PLAYBOOK (GAWAIN)",
+            SEP2,
+            f"Model : {gaw.get('model','?')}",
+            "Execute one step at a time. The tool sends nothing.",
+            "",
+            gaw["playbook"],
+            "",
+        ]
+
     # ── PERCIVAL ──
     p = results.get("percival", {})
     lines += ["SECTION 2  //  PASSIVE RECON (PERCIVAL)", SEP2, ""]
@@ -250,6 +263,16 @@ def build_docx(target, results, out_path):
     else:
         mono("AI triage not available (no API key or error)")
 
+    # Gawain manual playbook
+    gaw = results.get("gawain", {})
+    if gaw.get("playbook"):
+        h2("MANUAL HUNTING PLAYBOOK (GAWAIN)")
+        mono(f"Model: {gaw.get('model','?')}")
+        mono("Execute one step at a time. The tool sends nothing.")
+        doc.add_paragraph()
+        for line in gaw["playbook"].split("\n"):
+            mono(line)
+
     # Percival
     p = results.get("percival", {})
     h2("PASSIVE RECON (PERCIVAL)")
@@ -349,5 +372,7 @@ def run_excalibur(target, results, run_dir, cfg):
         print(f"  Takeover Cands   : {len([t for t in g.get('takeover_candidates',[]) if t.get('severity')=='CRITICAL'])}")
         print(f"  CORS/VCS Issues  : {len(g.get('misc',[]))}")
     print(f"  AI Triage        : {'complete' if lance.get('triage') else 'skipped'}")
+    gaw = results.get("gawain", {})
+    print(f"  Manual Playbook  : {'complete' if gaw.get('playbook') else 'skipped'}")
     print(f"  Reports          : {txt_path.name} | {docx_path.name}")
     print(f"  Output Dir       : {run_dir}")
