@@ -40,11 +40,15 @@ Optionally:
 
 ## HOW TO GET DOCKER
 
-Go to website. Download thing. Click install. Done.
+You don't have to. The script installs it for you.
 
+Run `./setup.sh`. It will ask: "Install Docker now?" Say Y. It downloads, installs, and sets everything up.
+
+If you are on a Mac or Windows, you still need Docker Desktop (the script will tell you):
 - Mac: https://docs.docker.com/desktop/mac/install/
 - Windows: https://docs.docker.com/desktop/windows/install/
-- Linux (one command): `curl -fsSL https://get.docker.com | sh`
+
+If you are on Kali Linux or any Linux: just say Y and wait.
 
 ---
 
@@ -64,7 +68,8 @@ cd MISC/olympus
 ```
 
 Script will:
-- Check you have Docker
+- Check if Docker is installed. If not, ask to install it. Say Y.
+- Check if Docker Compose is installed. If not, ask to install it. Say Y.
 - Ask for your Anthropic API key (or press Enter to skip)
 - Download and build everything
 - Open the website for you
@@ -168,6 +173,21 @@ lsof -Pi :3000
 
 **AI features not working:**
 Make sure your API key is in the `.env` file. Open `.env` with any text editor. Find the line that says `ANTHROPIC_API_KEY=`. Put your key after the equals sign.
+
+**Docker install fails with "kali-rolling Release" error (Kali Linux):**
+```bash
+sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc
+git pull
+./setup.sh
+```
+Old broken file. Delete it. Pull new script. Run again.
+
+**Frontend build fails (npm error about lockfile):**
+```bash
+git pull
+docker compose up --build -d
+```
+Old code had a bug. New code is fixed. Pull and rebuild.
 
 **Everything is broken and you don't know why:**
 ```bash
