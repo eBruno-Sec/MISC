@@ -1,5 +1,6 @@
-import anthropic
-from core.config import settings
+import json
+import os
+from core.ai_client import complete
 from .base import BaseAgent
 
 
@@ -25,14 +26,14 @@ class Athena(BaseAgent):
             "ai_available": False,
         }
 
-        if not settings.anthropic_api_key:
-            await self.log("No Anthropic API key configured. AI analysis skipped.", "warn")
+        api_key = os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            await self.log("No AI API key configured. AI analysis skipped.", "warn")
             result["mission_summary"] = f"Manual assessment of {target} in {mode} mode."
             result["key_areas"] = ["DNS infrastructure", "Email security posture", "Certificate transparency"]
             return result
 
         try:
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
             prompt = f"""You are ATHENA, the strategy module of OLYMPUS autonomous security platform.
 Analyze this authorized security assessment mission and return a JSON object.
 
@@ -48,20 +49,13 @@ Return JSON with these fields:
 
 Only return valid JSON, no markdown, no preamble."""
 
-            response = await client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=800,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            import json
-            text = response.content[0].text.strip()
-            parsed = json.loads(text)
-            result.update(parsed)
-            result["ai_available"] = True
-
-            await self.log(f"Mission profile: {parsed.get('risk_profile', 'unknown').upper()} risk", "info")
-            await self.log(f"Summary: {parsed.get('mission_summary', '')}", "info")
+            text = await complete(prompt, max_tokens=800)
+            if text:
+                parsed = json.loads(text)
+                result.update(parsed)
+                result["ai_available"] = True
+                await self.log(f"Mission profile: {parsed.get('risk_profile', 'unknown').upper()} risk", "info")
+                await self.log(f"Summary: {parsed.get('mission_summary', '')}", "info")
 
         except Exception as e:
             await self.log(f"AI analysis failed ({e}). Proceeding with standard assessment.", "warn")

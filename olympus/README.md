@@ -25,20 +25,15 @@ OLYMPUS is a self-hosted, Docker-native security assessment platform built aroun
 ## Quick Start
 
 ```bash
-# Clone olympus only (no other MISC projects)
+# Recommended: clone olympus only
 git clone --filter=blob:none --sparse https://github.com/eBruno-Sec/MISC.git
 cd MISC && git sparse-checkout set olympus && cd olympus
 ./setup.sh
 ```
 
-```bash
-# Or clone the full MISC repo if you want everything
-git clone https://github.com/eBruno-Sec/MISC.git
-cd MISC/olympus
-./setup.sh
-```
+`setup.sh` handles Docker install, Compose install, `.env` creation, build, and browser open automatically.
 
-The script handles everything else.
+> Full repo clone (includes 25+ other projects): `git clone https://github.com/eBruno-Sec/MISC.git && cd MISC/olympus`
 
 ---
 
@@ -118,6 +113,44 @@ Edit `.env` before starting. All values have safe defaults for local use.
 
 ---
 
+
+## AI Configuration
+
+OLYMPUS supports Anthropic directly or any OpenRouter model. Edit `.env` to switch.
+
+**Anthropic (default):**
+```env
+AI_PROVIDER=anthropic
+AI_API_KEY=sk-ant-...
+AI_MODEL=claude-sonnet-4-6
+```
+
+**OpenRouter** (access Claude, GPT-4o, Gemini, Llama, Mistral, and 200+ models with one key):
+```env
+AI_PROVIDER=openrouter
+AI_API_KEY=sk-or-...
+AI_MODEL=anthropic/claude-sonnet-4-6
+```
+
+Popular OpenRouter model strings: `anthropic/claude-opus-4`, `openai/gpt-4o`, `google/gemini-pro`, `meta-llama/llama-3.1-70b-instruct`
+
+Full model list: https://openrouter.ai/models
+
+**Self-hosted / proxy** (any OpenAI-compatible endpoint):
+```env
+AI_PROVIDER=openrouter
+AI_API_KEY=your-key
+AI_MODEL=your-model
+AI_BASE_URL=http://localhost:11434/v1
+```
+
+AI is optional. If `AI_API_KEY` is blank, ATHENA and APOLLO AI summaries are skipped but all recon and scanning runs normally.
+
+After editing `.env`, restart the backend:
+```bash
+docker compose restart backend
+```
+
 ## Scope Upload
 
 OLYMPUS accepts program scope files from bug bounty platforms directly in the mission launch form. In-scope and out-of-scope rules are enforced inside HERMES (subdomain filtering) and ARES (target filtering before scanning).
@@ -128,8 +161,24 @@ OLYMPUS accepts program scope files from bug bounty platforms directly in the mi
 |---|---|---|
 | HackerOne | CSV with `asset_identifier` and `eligible_for_bounty` columns | Auto |
 | Bugcrowd | CSV with `target` and `category` columns | Auto |
-| Generic | Plain text, one target per line. Prefix `-` to exclude | Auto |
+| Burp Suite | JSON scope export (`target.scope.include/exclude`) | Auto |
+| Plain text / TXT | One target per line, section headers, or `-` prefix to exclude | Auto |
 | Generic CSV | Two columns: `scope_marker, target` | Auto |
+
+Section headers are detected automatically:
+```
+# IN-SCOPE (Eligible)
+*.example.com
+example.com
+# OUT-OF-SCOPE (Ineligible)
+internal.example.com
+```
+
+Markdown links (`[label](https://domain.com)`) and mobile app identifiers (`com.package.name (Android)`, `123456789 (iOS)`) are parsed and classified correctly.
+
+**Where to upload:** Mission launch form → SCOPE RULES section → click **UPLOAD CSV** (drag-and-drop) or **PASTE** to type/paste directly.
+
+After parsing, a preview shows green in-scope and red out-of-scope targets. Review before launching.
 
 **HackerOne export:** Program page → Scope → Export CSV → upload to OLYMPUS.
 

@@ -38,6 +38,32 @@ Optionally:
 
 ---
 
+## WHERE DO I PUT THE API KEY AND ENGINE
+
+Open the `.env` file in the olympus folder. It looks like this:
+
+```
+AI_PROVIDER=anthropic
+AI_API_KEY=sk-ant-your-key-here
+AI_MODEL=claude-sonnet-4-6
+```
+
+**Want to use OpenRouter instead?** (cheaper, access to more models)
+
+```
+AI_PROVIDER=openrouter
+AI_API_KEY=sk-or-your-key-here
+AI_MODEL=anthropic/claude-sonnet-4-6
+```
+
+Get OpenRouter key at https://openrouter.ai/keys
+
+After changing: run `docker compose restart backend`
+
+No key? That is fine. Recon and scanning still work. You just don't get the AI summaries.
+
+---
+
 ## HOW TO GET DOCKER
 
 You don't have to. The script installs it for you.
@@ -80,24 +106,29 @@ Script will:
 
 ## SCOPE UPLOAD
 
+**WHERE DO I PUT THE CSV OR TXT FILE:**
+
+In the launch screen, scroll down. Look for SCOPE RULES. Click UPLOAD CSV. Drop your file. Done.
+
+Or click PASTE and type/paste your list directly.
+
+**FORMATS THAT WORK:**
+- HackerOne CSV export: yes
+- Bugcrowd CSV export: yes
+- Burp Suite JSON scope export: yes
+- Plain TXT file, one domain per line: yes
+- Section headers like `# IN-SCOPE` and `# OUT-OF-SCOPE`: yes
+- Markdown links like `[name](https://domain.com)`: yes
+- Mobile apps like `com.package.name (Android)`: yes
+
+After you upload, you see green list (allowed) and red list (not allowed). That is your scope.
+
+---
+
+
 You have a list from HackerOne or Bugcrowd that says what is allowed and what is not. You can upload it.
 
-**Step 1:** In the launch screen, look for the SCOPE RULES section.
-
-**Step 2:** Click UPLOAD CSV and drop your file. Or click PASTE and type targets yourself.
-
-**Step 3:** You will see a green list (allowed) and red list (not allowed).
-
-**Step 4:** Launch mission. OLYMPUS will only touch the green targets.
-
-**Plain text format if you do it manually:**
-```
-example.com
-*.example.com
-- do-not-touch.example.com
-```
-
-Lines starting with `-` are excluded. Everything else is fair game.
+See above for where to upload and what formats work.
 
 ---
 

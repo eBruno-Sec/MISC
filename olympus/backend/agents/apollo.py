@@ -1,8 +1,7 @@
 import os
 import json
 from datetime import datetime
-import anthropic
-from core.config import settings
+from core.ai_client import complete
 from core.models import Finding
 from sqlalchemy import select
 from .base import BaseAgent
@@ -63,24 +62,22 @@ class Apollo(BaseAgent):
         }
 
     async def _ai_summary(self, target: str, findings: list, context: dict, stats: dict) -> str:
-        if not settings.anthropic_api_key:
+        api_key = os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
             return self._default_summary(target, stats, context)
 
         try:
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
             mode = (context or {}).get("athena", {}).get("mode", "passive")
-
             top_findings = [
-                f"{f.title} ({f.severity.upper()}) - {f.description[:100]}"
-                for f in sorted(findings, key=lambda x: CVSS_MAP.get(x.severity, 0), reverse=True)[:10]
+                f"{fnd.title} ({fnd.severity.upper()}) - {(fnd.description or '')[:100]}"
+                for fnd in sorted(findings, key=lambda x: CVSS_MAP.get(x.severity, 0), reverse=True)[:10]
             ]
-
             prompt = f"""You are APOLLO, the reporting module of the OLYMPUS security assessment platform.
 Write a concise executive summary (3-4 paragraphs) for this authorized security assessment.
 
 Target: {target}
 Mode: {mode}
-Findings: {stats['critical']} critical, {stats['high']} high, {stats['medium']} medium, {stats['low']} low
+Findings: {stats["critical"]} critical, {stats["high"]} high, {stats["medium"]} medium, {stats["low"]} low
 
 Top findings:
 {chr(10).join(top_findings)}
@@ -93,12 +90,8 @@ Write as a professional security engineer reporting to a CISO. Focus on:
 
 Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
 
-            response = await client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=600,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.content[0].text.strip()
+            text = await complete(prompt, max_tokens=600)
+            return text if text else self._default_summary(target, stats, context)
         except Exception as e:
             await self.log(f"AI summary failed: {e}. Using template summary.", "warn")
             return self._default_summary(target, stats, context)
