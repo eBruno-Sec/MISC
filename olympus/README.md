@@ -118,6 +118,44 @@ Edit `.env` before starting. All values have safe defaults for local use.
 
 OLYMPUS supports Anthropic directly or any OpenRouter model. Edit `.env` to switch.
 
+### Adding your API key (step by step)
+
+**1. Open the `.env` file:**
+
+The file lives in the same directory as `docker-compose.yml`:
+
+```bash
+cd ~/Desktop/Olympus/MISC/olympus   # or wherever you cloned
+nano .env
+```
+
+If `.env` does not exist yet (you skipped `setup.sh`):
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+**2. Find and replace the placeholder:**
+
+```env
+# Change this line:
+AI_API_KEY=sk-ant-your-key-here
+
+# To your actual key:
+AI_API_KEY=sk-ant-api03-...
+```
+
+Save: `Ctrl+O` → `Enter` → `Ctrl+X`
+
+**3. Apply the change:**
+
+```bash
+docker compose restart backend
+```
+
+Done. No rebuild needed, just a restart.
+
 **Anthropic (default):**
 ```env
 AI_PROVIDER=anthropic

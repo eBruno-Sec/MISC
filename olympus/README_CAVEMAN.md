@@ -40,27 +40,62 @@ Optionally:
 
 ## WHERE DO I PUT THE API KEY AND ENGINE
 
-Open the `.env` file in the olympus folder. It looks like this:
+**WHERE IS THE .env FILE:**
+
+Same folder as `docker-compose.yml`. If you are on Kali and cloned to the Desktop:
 
 ```
-AI_PROVIDER=anthropic
+~/Desktop/Olympus/MISC/olympus/.env
+```
+
+**HOW TO ADD YOUR API KEY:**
+
+Step 1: Open the file
+
+```bash
+cd ~/Desktop/Olympus/MISC/olympus
+nano .env
+```
+
+If file does not exist:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Step 2: Find this line and replace the placeholder
+
+```
 AI_API_KEY=sk-ant-your-key-here
-AI_MODEL=claude-sonnet-4-6
 ```
 
-**Want to use OpenRouter instead?** (cheaper, access to more models)
+Put your real key there. Get Anthropic key: https://console.anthropic.com/
+
+Step 3: Save and restart
+
+```
+Ctrl+O  →  Enter  →  Ctrl+X
+```
+
+```bash
+docker compose restart backend
+```
+
+Done.
+
+**Want OpenRouter instead?** (one key, 200+ models)
+
+Change these two lines in `.env`:
 
 ```
 AI_PROVIDER=openrouter
 AI_API_KEY=sk-or-your-key-here
-AI_MODEL=anthropic/claude-sonnet-4-6
 ```
 
-Get OpenRouter key at https://openrouter.ai/keys
+Get key: https://openrouter.ai/keys
 
-After changing: run `docker compose restart backend`
-
-No key? That is fine. Recon and scanning still work. You just don't get the AI summaries.
+**No key at all?** That is fine. Recon and scanning still run. You just do not get AI summaries.
 
 ---
 
