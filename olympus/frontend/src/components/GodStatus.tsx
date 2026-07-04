@@ -8,19 +8,22 @@ interface GodDef {
 }
 
 const GODS: GodDef[] = [
-  { key: 'zeus', name: 'ZEUS', symbol: '⚡', role: 'Orchestrator' },
-  { key: 'athena', name: 'ATHENA', symbol: '🦉', role: 'AI Strategy' },
-  { key: 'hermes', name: 'HERMES', symbol: '☿', role: 'OSINT / Recon' },
-  { key: 'ares', name: 'ARES', symbol: '⚔', role: 'Active Scanning' },
-  { key: 'hephaestus', name: 'HEPHAESTUS', symbol: '🔥', role: 'Payload Forge' },
-  { key: 'hades', name: 'HADES', symbol: '💀', role: 'Post-Exploit' },
-  { key: 'apollo', name: 'APOLLO', symbol: '☀', role: 'Reporting' },
+  { key: 'zeus',        name: 'ZEUS',       symbol: '⚡', role: 'Orchestrator' },
+  { key: 'athena',      name: 'ATHENA',     symbol: '🦉', role: 'AI Strategy' },
+  { key: 'hermes',      name: 'HERMES',     symbol: '☿',  role: 'OSINT / Recon' },
+  { key: 'ares',        name: 'ARES',       symbol: '⚔',  role: 'Active Scanning' },
+  { key: 'hephaestus',  name: 'HEPHAESTUS', symbol: '🔥', role: 'Payload Forge' },
+  { key: 'hades',       name: 'HADES',      symbol: '💀', role: 'Post-Exploit' },
+  { key: 'apollo',      name: 'APOLLO',     symbol: '☀',  role: 'Reporting' },
 ]
+
+const RERUNNABLE = new Set(['hermes', 'ares', 'hephaestus', 'hades', 'apollo', 'athena'])
 
 interface Props {
   currentPhase: string | null
   status: string
   completedPhases: Set<string>
+  onRerun?: (god: GodDef) => void
 }
 
 function godState(key: string, currentPhase: string | null, missionStatus: string, completedPhases: Set<string>): GodState {
@@ -30,45 +33,50 @@ function godState(key: string, currentPhase: string | null, missionStatus: strin
   return 'idle'
 }
 
-export default function GodStatus({ currentPhase, status, completedPhases }: Props) {
+export default function GodStatus({ currentPhase, status, completedPhases, onRerun }: Props) {
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-      gap: '1px', background: 'var(--border)',
-    }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--border)' }}>
       {GODS.map(g => {
         const state = godState(g.key, currentPhase, status, completedPhases)
         const color = state === 'active' ? 'var(--accent)'
           : state === 'complete' ? 'var(--accent3)'
           : state === 'failed' ? 'var(--crit)'
           : 'var(--text-dim)'
+        const canRerun = state === 'complete' && RERUNNABLE.has(g.key) && !!onRerun
 
         return (
-          <div key={g.key} style={{
-            background: state === 'active' ? 'rgba(0,229,255,0.05)' : 'var(--surface)',
-            padding: '1rem 0.75rem',
-            borderBottom: `2px solid ${state === 'idle' ? 'transparent' : color}`,
-            textAlign: 'center',
-            transition: 'all 0.25s',
-          }}>
+          <div
+            key={g.key}
+            title={canRerun ? `Re-run ${g.name}` : undefined}
+            onClick={canRerun ? () => onRerun!(g) : undefined}
+            style={{
+              background: state === 'active' ? 'rgba(0,229,255,0.05)' : 'var(--surface)',
+              padding: '0.85rem 0.5rem',
+              borderBottom: `2px solid ${state === 'idle' ? 'transparent' : color}`,
+              textAlign: 'center',
+              transition: 'all 0.2s',
+              cursor: canRerun ? 'pointer' : 'default',
+              position: 'relative',
+            }}
+            onMouseEnter={canRerun ? e => { e.currentTarget.style.background = 'rgba(57,255,20,0.05)' } : undefined}
+            onMouseLeave={canRerun ? e => { e.currentTarget.style.background = state === 'active' ? 'rgba(0,229,255,0.05)' : 'var(--surface)' } : undefined}
+          >
             <div style={{
-              fontSize: '1.4rem', marginBottom: '0.35rem',
+              fontSize: '1.3rem', marginBottom: '0.3rem',
               filter: state === 'active' ? `drop-shadow(0 0 8px ${color})` : 'none',
               animation: state === 'active' ? 'pulse-border 2s ease infinite' : 'none',
             }}>
               {g.symbol}
             </div>
-            <div style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.12em', color, marginBottom: '0.2rem' }}>
+            <div style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', color, marginBottom: '0.15rem' }}>
               {g.name}
             </div>
-            <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', lineHeight: 1.3 }}>
-              {g.role}
-            </div>
-            <div style={{ marginTop: '0.4rem', fontSize: '0.58rem', letterSpacing: '0.1em', color }}>
-              {state === 'active' && '● RUNNING'}
-              {state === 'complete' && '✓ DONE'}
-              {state === 'idle' && '○ IDLE'}
-              {state === 'failed' && '✕ ERR'}
+            <div style={{ fontSize: '0.55rem', color: 'var(--text-dim)', lineHeight: 1.3 }}>{g.role}</div>
+            <div style={{ marginTop: '0.35rem', fontSize: '0.55rem', letterSpacing: '0.08em', color }}>
+              {state === 'active'   && '● RUNNING'}
+              {state === 'complete' && (canRerun ? '↺ RE-RUN' : '✓ DONE')}
+              {state === 'idle'     && '○ IDLE'}
+              {state === 'failed'   && '✕ ERR'}
             </div>
           </div>
         )

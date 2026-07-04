@@ -1,6 +1,7 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 export type MissionMode = 'passive' | 'active' | 'full'
 export type LogLevel = 'info' | 'warn' | 'error' | 'success'
+export type FindingTag = 'confirmed' | 'false_positive' | 'reported' | 'fixed' | null
 
 export type MissionStatus =
   | 'pending' | 'planning' | 'recon' | 'scanning'
@@ -16,6 +17,9 @@ export interface Finding {
   cvss_score: number | null
   remediation: string | null
   found_by: string | null
+  tag: FindingTag
+  is_manual: boolean
+  analyst_notes: string | null
   timestamp: string
 }
 
@@ -36,6 +40,20 @@ export interface ApprovalRequest {
   created_at: string
 }
 
+export interface MissionNote {
+  id: string
+  content: string
+  timestamp: string
+}
+
+export interface LiveHost {
+  host: string
+  url: string
+  status_code: number | null
+  server: string
+  manually_added?: boolean
+}
+
 export interface Mission {
   id: string
   target: string
@@ -43,12 +61,14 @@ export interface Mission {
   mode: MissionMode
   status: MissionStatus
   current_phase: string | null
+  scope_rules: { in_scope: ScopeRule[]; out_of_scope: ScopeRule[] } | null
   created_at: string
   completed_at: string | null
   findings: Finding[]
   logs: LogEntry[]
   pending_approvals: ApprovalRequest[]
-  scope_rules: { in_scope: ScopeRule[]; out_of_scope: ScopeRule[] } | null
+  notes: MissionNote[]
+  context: Record<string, any>
 }
 
 export interface MissionSummary {
@@ -60,7 +80,6 @@ export interface MissionSummary {
   created_at: string
   completed_at: string | null
 }
-
 
 export interface ScopeRule {
   identifier: string
@@ -75,12 +94,16 @@ export interface ParsedScope {
   total_out: number
 }
 
-// WebSocket event types
 export type WSEvent =
   | { type: 'log'; agent: string; symbol: string; display_name: string; level: LogLevel; message: string; timestamp: string }
   | { type: 'finding'; severity: Severity; title: string; found_by: string; display_name: string; timestamp: string }
+  | { type: 'finding_updated'; finding_id: string; tag: FindingTag; severity: Severity; timestamp: string }
+  | { type: 'finding_deleted'; finding_id: string }
   | { type: 'status_change'; status: MissionStatus; phase: string | null; timestamp: string }
   | { type: 'approval_required'; approval_id: string; agent: string; display_name: string; symbol: string; action: string; description: string; timestamp: string }
   | { type: 'approval_resolved'; approval_id: string; approved: boolean; timestamp: string }
   | { type: 'mission_complete'; report_path: string; stats: Record<Severity, number>; timestamp: string }
   | { type: 'mission_failed'; error: string; timestamp: string }
+  | { type: 'agent_rerun'; agent: string; symbol: string; timestamp: string }
+  | { type: 'targets_added'; targets: string[]; timestamp: string }
+  | { type: 'note_added'; note: MissionNote }

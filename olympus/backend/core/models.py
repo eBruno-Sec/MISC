@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, Float, JSON, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, Float, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -23,6 +23,14 @@ class MissionStatus:
     FAILED = "failed"
 
 
+class FindingTag:
+    NONE = None
+    CONFIRMED = "confirmed"
+    FALSE_POSITIVE = "false_positive"
+    REPORTED = "reported"
+    FIXED = "fixed"
+
+
 class Mission(Base):
     __tablename__ = "missions"
 
@@ -33,7 +41,7 @@ class Mission(Base):
     mode = Column(String, default="passive")
     current_phase = Column(String, nullable=True)
     context = Column(JSON, default=dict)
-    scope_rules = Column(JSON, default=dict)  # {"in_scope": [...], "out_of_scope": [...]}
+    scope_rules = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -41,6 +49,7 @@ class Mission(Base):
     logs = relationship("AgentLog", back_populates="mission", cascade="all, delete-orphan")
     findings = relationship("Finding", back_populates="mission", cascade="all, delete-orphan")
     approvals = relationship("ApprovalRequest", back_populates="mission", cascade="all, delete-orphan")
+    notes = relationship("MissionNote", back_populates="mission", cascade="all, delete-orphan")
 
 
 class AgentLog(Base):
@@ -69,9 +78,24 @@ class Finding(Base):
     cvss_score = Column(Float, nullable=True)
     remediation = Column(Text, nullable=True)
     found_by = Column(String, nullable=True)
+    # Pentester workflow fields
+    tag = Column(String, nullable=True)           # confirmed | false_positive | reported | fixed
+    is_manual = Column(Boolean, default=False)    # added manually by user
+    analyst_notes = Column(Text, nullable=True)   # inline analyst commentary
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     mission = relationship("Mission", back_populates="findings")
+
+
+class MissionNote(Base):
+    __tablename__ = "mission_notes"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    mission = relationship("Mission", back_populates="notes")
 
 
 class ApprovalRequest(Base):
