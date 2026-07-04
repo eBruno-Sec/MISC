@@ -1,0 +1,90 @@
+:root {
+  --bg: #020608;
+  --surface: #080e12;
+  --surface2: #0c1820;
+  --surface3: #102030;
+  --border: #0e2535;
+  --border2: #142d42;
+  --accent: #00e5ff;
+  --accent-dim: rgba(0, 229, 255, 0.12);
+  --accent2: #ff3d6b;
+  --accent2-dim: rgba(255, 61, 107, 0.12);
+  --accent3: #39ff14;
+  --accent3-dim: rgba(57, 255, 20, 0.1);
+  --gold: #f59e0b;
+  --text: #c8dde6;
+  --text-dim: #4d7a8a;
+  --text-bright: #f0f8fc;
+  --mono: 'Share Tech Mono', 'Courier New', monospace;
+  --display: 'Syne', sans-serif;
+  --crit: #ff0040;
+  --high: #ff3d6b;
+  --med: #f59e0b;
+  --low: #00e5ff;
+  --info: #4d7a8a;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border2); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  font-family: var(--mono);
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input, textarea, select {
+  font-family: var(--mono);
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text-bright);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(0, 229, 255, 0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in { animation: fade-in-up 0.25s ease forwards; }

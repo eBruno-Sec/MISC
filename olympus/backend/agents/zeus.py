@@ -1,0 +1,151 @@
+from datetime import datetime
+from sqlalchemy import update
+from core.models import Mission, MissionStatus
+from .base import BaseAgent
+
+
+class Zeus(BaseAgent):
+    name = "zeus"
+    symbol = "⚡"
+    display_name = "ZEUS"
+    role = "Mission Orchestrator"
+
+    def _spawn(self, AgentClass):
+        return AgentClass(
+            session=self.session,
+            mission_id=self.mission_id,
+            ws_manager=self.ws_manager,
+            approval_gates=self.approval_gates,
+            approval_results=self.approval_results,
+        )
+
+    async def _set_phase(self, status: str, phase: str = None):
+        values = {"status": status}
+        if phase:
+            values["current_phase"] = phase
+        if status in (MissionStatus.COMPLETE, MissionStatus.FAILED):
+            values["completed_at"] = datetime.utcnow()
+        await self.session.execute(
+            update(Mission).where(Mission.id == self.mission_id).values(**values)
+        )
+        await self.session.commit()
+
+        if self.ws_manager:
+            await self.ws_manager.broadcast(self.mission_id, {
+                "type": "status_change",
+                "status": status,
+                "phase": phase,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+
+    async def execute(self, target: str, context: dict = None) -> dict:
+        mode = (context or {}).get("mode", "passive")
+        scope = (context or {}).get("scope", "")
+        ctx = {}
+
+        await self._set_phase(MissionStatus.PLANNING, "zeus")
+        await self.log(f"⚡ OLYMPUS ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
+
+        sequences = {
+            "passive": "ATHENA → HERMES → APOLLO",
+            "active": "ATHENA → HERMES → [GATE] → ARES → APOLLO",
+            "full": "ATHENA → HERMES → [GATE] → ARES → HEPHAESTUS → [GATE] → HADES → [GATE] → APOLLO",
+        }
+        await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
+
+        # ── ATHENA ──
+        from .athena import Athena
+        await self._set_phase(MissionStatus.PLANNING, "athena")
+        athena = self._spawn(Athena)
+        ctx["athena"] = await athena.execute(target, {"mode": mode, "scope": scope})
+
+        # ── HERMES ──
+        from .hermes import Hermes
+        await self._set_phase(MissionStatus.RECON, "hermes")
+        hermes = self._spawn(Hermes)
+        ctx["hermes"] = await hermes.execute(target, ctx)
+
+        if mode == "passive":
+            return await self._finalize(target, ctx)
+
+        # ── APPROVAL GATE: ARES ──
+        await self.log("Requesting authorization for active scanning phase", "warn")
+        live = ctx["hermes"].get("live_hosts", [])
+        host_preview = ", ".join(h["host"] for h in live[:5])
+        more = f" (+{len(live)-5} more)" if len(live) > 5 else ""
+        approved = await self.request_approval(
+            action="Active Port Scanning & Vulnerability Assessment",
+            description=f"Ares will run Nmap and Nuclei against {len(live)} live targets: {host_preview}{more}",
+        )
+        if not approved:
+            await self.log("Active scanning denied. Generating passive report.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── ARES ──
+        from .ares import Ares
+        await self._set_phase(MissionStatus.SCANNING, "ares")
+        ares = self._spawn(Ares)
+        ctx["ares"] = await ares.execute(target, ctx)
+
+        if mode == "active":
+            return await self._finalize(target, ctx)
+
+        # ── APPROVAL GATE: HEPHAESTUS ──
+        vuln_count = len(ctx["ares"].get("vulnerabilities", []))
+        approved = await self.request_approval(
+            action="Exploitation Phase — Payload Preparation",
+            description=f"Hephaestus will prepare targeted payloads for {vuln_count} identified vulnerabilities. "
+                        "Exploitation only on authorized targets.",
+        )
+        if not approved:
+            await self.log("Exploitation phase denied.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── HEPHAESTUS ──
+        from .hephaestus import Hephaestus
+        await self._set_phase(MissionStatus.EXPLOITING, "hephaestus")
+        heph = self._spawn(Hephaestus)
+        ctx["hephaestus"] = await heph.execute(target, ctx)
+
+        # ── APPROVAL GATE: HADES ──
+        exploit_count = len(ctx["hephaestus"].get("exploitable_targets", []))
+        if exploit_count == 0:
+            await self.log("No exploitable targets confirmed. Skipping Hades.", "info")
+            return await self._finalize(target, ctx)
+
+        approved = await self.request_approval(
+            action="Post-Exploitation Analysis",
+            description=f"Hades will analyze {exploit_count} confirmed exploitable targets for credential access, "
+                        "persistence mechanisms, and lateral movement paths.",
+        )
+        if not approved:
+            await self.log("Post-exploitation phase denied.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── HADES ──
+        from .hades import Hades
+        await self._set_phase(MissionStatus.POST_EXPLOIT, "hades")
+        hades = self._spawn(Hades)
+        ctx["hades"] = await hades.execute(target, ctx)
+
+        return await self._finalize(target, ctx)
+
+    async def _finalize(self, target: str, ctx: dict) -> dict:
+        from .apollo import Apollo
+        await self._set_phase(MissionStatus.REPORTING, "apollo")
+        apollo = self._spawn(Apollo)
+        ctx["apollo"] = await apollo.execute(target, ctx)
+
+        await self._set_phase(MissionStatus.COMPLETE)
+        await self.log("⚡ OLYMPUS MISSION COMPLETE", "success")
+
+        if self.ws_manager:
+            report_path = ctx.get("apollo", {}).get("report_path", "")
+            await self.ws_manager.broadcast(self.mission_id, {
+                "type": "mission_complete",
+                "report_path": report_path,
+                "stats": ctx.get("apollo", {}).get("stats", {}),
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+
+        return ctx
