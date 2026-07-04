@@ -38,11 +38,13 @@ That is it. The script handles everything else.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Docker | 24.0+ | [Install guide](https://docs.docker.com/get-docker/) |
-| Docker Compose | 2.20+ | Included with Docker Desktop. Linux: `sudo apt install docker-compose-plugin` |
+| Docker | 24.0+ | Auto-installed by `setup.sh` if missing |
+| Docker Compose | 2.20+ | Auto-installed as part of Docker CE (`docker-compose-plugin`) |
 | Anthropic API key | Any | Optional. Enables ATHENA analysis and APOLLO AI summaries. Get one at [console.anthropic.com](https://console.anthropic.com) |
 
 No Python, Node.js, or Go required on your host machine. Everything runs inside containers.
+
+> **Kali Linux note:** `setup.sh` detects Kali and installs Docker CE from the Debian bookworm repo (Docker does not publish a `kali-rolling` release). No manual repo configuration needed.
 
 ---
 
@@ -56,13 +58,15 @@ No Python, Node.js, or Go required on your host machine. Everything runs inside 
 
 The script does the following automatically:
 
-1. Detects your OS and checks Docker and Docker Compose are installed
-2. Checks ports 3000 and 8000 are available
-3. Creates `.env` from `.env.example` if it does not exist
-4. Prompts for your Anthropic API key (skip to disable AI features)
-5. Runs `docker compose up --build -d`
-6. Polls the backend health endpoint until it responds
-7. Opens `http://localhost:3000` in your browser
+1. Detects your OS
+2. If Docker is missing, asks to install it (apt update + upgrade + Docker CE + Compose plugin in one shot)
+3. If Docker Compose is missing, asks to install it separately
+4. Checks ports 3000 and 8000 are available
+5. Creates `.env` from `.env.example` if it does not exist
+6. Prompts for your Anthropic API key (skip to disable AI features)
+7. Runs `docker compose up --build -d`
+8. Polls the backend health endpoint until it responds
+9. Opens `http://localhost:3000` in your browser
 
 **Other setup.sh flags:**
 
@@ -287,6 +291,25 @@ docker compose restart backend
 **WebSocket disconnects**
 
 The frontend reconnects automatically with 3-second backoff. If the mission control terminal feed goes blank, refresh the page. The mission state is persisted in PostgreSQL and will reload.
+
+**Docker install fails on Kali Linux with "kali-rolling Release" error**
+
+A previous failed run left a broken Docker apt source. The current `setup.sh` cleans this automatically. If you have an older version:
+
+```bash
+sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc
+git pull
+./setup.sh
+```
+
+**Frontend build fails with `npm ci` / missing lockfile error**
+
+Pull the latest version. The Dockerfile now uses `npm install` instead of `npm ci`, which does not require a committed `package-lock.json`.
+
+```bash
+git pull
+docker compose up --build -d
+```
 
 ---
 
