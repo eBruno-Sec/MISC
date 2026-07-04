@@ -333,6 +333,7 @@ input, select, textarea { font-family: var(--mono); }
           <li><a href="#" data-page="findings" onclick="nav(this)"><span class="nav-icon">⚑</span> Findings</a></li>
           <li><a href="#" data-page="poam" onclick="nav(this)"><span class="nav-icon">◷</span> POA&amp;M</a></li>
           <li><a href="#" data-page="risk" onclick="nav(this)"><span class="nav-icon">◈</span> Risk Register</a></li>
+          <li><a href="#" data-page="cppa" onclick="nav(this)"><span class="nav-icon">⚖</span> CPPA Audit</a></li>
         </ul>
       </div>
       <div class="sidebar-section" style="flex:1">
@@ -500,6 +501,219 @@ input, select, textarea { font-family: var(--mono); }
             </thead>
             <tbody id="risk-tbody"></tbody>
           </table>
+        </div>
+      </div>
+
+
+      <!-- CPPA AUDIT PAGE -->
+      <div class="page" id="page-cppa">
+        <div class="page-hd">
+          <div class="page-eyebrow">Cal. Code Regs. tit. 11 §§7120-7124</div>
+          <div class="page-title">CPPA Cybersecurity Audit</div>
+          <div class="page-sub">CCPA/CPRA — Effective January 1, 2026</div>
+        </div>
+
+        <!-- SUB-NAV TABS -->
+        <div class="fw-tabs" id="cppa-tabs" style="margin-bottom:1.5rem">
+          <button class="fw-tab active" data-ctab="screener" onclick="switchCPPATab(this)">Eligibility</button>
+          <button class="fw-tab" data-ctab="assessment" onclick="switchCPPATab(this)">Assessment</button>
+          <button class="fw-tab" data-ctab="scoring" onclick="switchCPPATab(this)">Scoring</button>
+        </div>
+
+        <!-- TAB: ELIGIBILITY SCREENER -->
+        <div id="cppa-tab-screener">
+          <div class="section-hd">
+            <div class="section-title">Section 7120 Eligibility Screener</div>
+            <button class="section-action" onclick="resetScreener()">Reset</button>
+          </div>
+          <div style="max-width:680px">
+            <div id="screener-form">
+              <div class="form-field" style="margin-bottom:1.4rem">
+                <label class="form-label">1. Annual gross revenue</label>
+                <select class="form-select" id="sq1">
+                  <option value="">Select...</option>
+                  <option value="under">Under $26.6M</option>
+                  <option value="26to50">$26.6M to $50M</option>
+                  <option value="50to100">$50M to $100M</option>
+                  <option value="over100">Over $100M</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:1.4rem">
+                <label class="form-label">2. California consumers' personal information processed per year</label>
+                <select class="form-select" id="sq2">
+                  <option value="">Select...</option>
+                  <option value="under50k">Under 50,000</option>
+                  <option value="50to250k">50,000 to 250,000</option>
+                  <option value="over250k">Over 250,000</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:1.4rem">
+                <label class="form-label">3. California consumers' sensitive personal information processed per year</label>
+                <select class="form-select" id="sq3">
+                  <option value="">Select...</option>
+                  <option value="under10k">Under 10,000</option>
+                  <option value="10to50k">10,000 to 50,000</option>
+                  <option value="over50k">Over 50,000</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:1.4rem">
+                <label class="form-label">4. Percentage of annual revenue from selling or sharing personal information</label>
+                <select class="form-select" id="sq4">
+                  <option value="">Select...</option>
+                  <option value="zero">0%</option>
+                  <option value="under25">Under 25%</option>
+                  <option value="25to50">25% to 50%</option>
+                  <option value="over50">Over 50%</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:1.4rem">
+                <label class="form-label">5. Does the business process personal information of California residents?</label>
+                <select class="form-select" id="sq5">
+                  <option value="">Select...</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <button class="section-action primary" onclick="runScreener()">Run Eligibility Check</button>
+            </div>
+            <div id="screener-result" style="display:none;margin-top:1.5rem;border:1px solid var(--border);padding:1.5rem"></div>
+          </div>
+        </div>
+
+        <!-- TAB: ASSESSMENT -->
+        <div id="cppa-tab-assessment" style="display:none">
+          <div id="cppa-no-client" class="empty-state">
+            <div class="es-icon">◫</div>
+            <div class="es-title">No client selected</div>
+            <div class="es-sub">Select a client from the sidebar to begin the audit</div>
+          </div>
+          <div id="cppa-assessment-content" style="display:none">
+            <div class="section-hd">
+              <div class="section-title" id="cppa-client-label"></div>
+              <div style="display:flex;gap:0.5rem;align-items:center">
+                <span id="cppa-progress-label" style="font-size:0.75rem;color:var(--text-dim)"></span>
+                <button class="export-btn" onclick="exportCPPACSV()">Export CSV</button>
+              </div>
+            </div>
+
+            <!-- Component Nav -->
+            <div id="cppa-component-nav" style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:1.5rem"></div>
+
+            <!-- Component Workspace -->
+            <div id="cppa-workspace" style="border:1px solid var(--border)">
+              <!-- Applicability Gate -->
+              <div id="cppa-gate" style="padding:1.5rem;border-bottom:1px solid var(--border);background:var(--surface2)">
+                <div style="font-size:0.72rem;color:var(--accent2);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:0.5rem">Applicability Gate — §7123(b)(2)</div>
+                <div id="cppa-gate-question" style="font-size:0.9rem;color:var(--text-bright);margin-bottom:1rem"></div>
+                <div style="display:flex;gap:0.75rem">
+                  <button class="section-action primary" id="cppa-gate-yes" onclick="setApplicability(true)">Applicable</button>
+                  <button class="section-action" id="cppa-gate-no" onclick="setApplicability(false)">Not Applicable</button>
+                </div>
+                <div id="cppa-gate-na-reason" style="display:none;margin-top:1rem">
+                  <label class="form-label">Reason for Not Applicable (required)</label>
+                  <textarea class="form-textarea" id="cppa-na-reason-text" style="min-height:60px" placeholder="Explain why this component does not apply..."></textarea>
+                  <button class="section-action primary" style="margin-top:0.5rem" onclick="saveNADecision()">Save &amp; Continue</button>
+                </div>
+              </div>
+
+              <!-- Component Body (hidden until applicable confirmed) -->
+              <div id="cppa-component-body" style="display:none">
+                <!-- Action Tabs -->
+                <div style="display:flex;border-bottom:1px solid var(--border)">
+                  <button class="fw-tab active" data-atab="questions" onclick="switchActionTab(this)" style="border-radius:0">Questions</button>
+                  <button class="fw-tab" data-atab="evidence" onclick="switchActionTab(this)" style="border-radius:0">Action A — Evidence</button>
+                  <button class="fw-tab" data-atab="testing" onclick="switchActionTab(this)" style="border-radius:0">Action B — Testing</button>
+                  <button class="fw-tab" data-atab="interview" onclick="switchActionTab(this)" style="border-radius:0">Action C — Interview</button>
+                </div>
+
+                <!-- Questions Tab -->
+                <div id="action-tab-questions" style="padding:1.5rem">
+                  <div id="cppa-questions-list"></div>
+                </div>
+
+                <!-- Evidence Tab -->
+                <div id="action-tab-evidence" style="display:none;padding:1.5rem">
+                  <div class="section-hd">
+                    <div class="section-title">Evidence Locker</div>
+                    <button class="section-action primary" onclick="openModal('evidence-modal')">+ Add Evidence</button>
+                  </div>
+                  <table class="tbl" id="evidence-table">
+                    <thead><tr><th>Type</th><th>Document / Reference</th><th>Note</th><th>Logged</th><th></th></tr></thead>
+                    <tbody id="evidence-tbody"></tbody>
+                  </table>
+                </div>
+
+                <!-- Testing Tab -->
+                <div id="action-tab-testing" style="display:none;padding:1.5rem">
+                  <div class="section-hd">
+                    <div class="section-title">Testing Log <span style="color:var(--accent2);font-size:0.7rem">(Required — hard gate)</span></div>
+                    <button class="section-action primary" onclick="openModal('testing-modal')">+ Add Test</button>
+                  </div>
+                  <table class="tbl" id="testing-table">
+                    <thead><tr><th>Test Name</th><th>Methodology</th><th>Result</th><th>Date</th><th>Findings</th><th></th></tr></thead>
+                    <tbody id="testing-tbody"></tbody>
+                  </table>
+                </div>
+
+                <!-- Interview Tab -->
+                <div id="action-tab-interview" style="display:none;padding:1.5rem">
+                  <div class="section-hd">
+                    <div class="section-title">Interview Log <span style="color:var(--text-dim);font-size:0.7rem">(Optional)</span></div>
+                    <button class="section-action primary" onclick="openModal('interview-modal')">+ Add Interview</button>
+                  </div>
+                  <table class="tbl" id="interview-table">
+                    <thead><tr><th>Interviewee Title</th><th>Date</th><th>Topics</th><th>Findings</th><th></th></tr></thead>
+                    <tbody id="interview-tbody"></tbody>
+                  </table>
+                </div>
+
+                <!-- Mark Complete -->
+                <div style="padding:1.25rem 1.5rem;border-top:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:space-between">
+                  <div id="cppa-complete-gate-msg" style="font-size:0.78rem;color:var(--accent2)"></div>
+                  <button id="cppa-mark-complete-btn" class="section-action" onclick="markComponentComplete()" disabled style="opacity:0.4">Mark Complete</button>
+                </div>
+              </div>
+
+              <!-- N/A State -->
+              <div id="cppa-na-state" style="display:none;padding:2rem;text-align:center;color:var(--text-dim)">
+                <div style="font-size:1.5rem;margin-bottom:0.5rem">○</div>
+                <div style="font-size:0.85rem;color:var(--text-bright);margin-bottom:0.35rem">Not Applicable</div>
+                <div id="cppa-na-reason-display" style="font-size:0.78rem"></div>
+                <button class="section-action" style="margin-top:1rem" onclick="resetApplicability()">Change Decision</button>
+              </div>
+            </div>
+
+            <!-- ADMT Gate (shows after all 18 complete) -->
+            <div id="cppa-admt-gate" style="display:none;margin-top:1.5rem;border:1px solid var(--border);padding:1.5rem;background:var(--surface2)">
+              <div style="font-size:0.72rem;color:var(--accent2);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:0.5rem">ADMT Gate — §§7200-7222</div>
+              <div style="font-size:0.9rem;color:var(--text-bright);margin-bottom:1rem">Does the business use Automated Decisionmaking Technology (ADMT) to make a significant decision concerning a consumer?</div>
+              <div style="display:flex;gap:0.75rem" id="cppa-admt-btns">
+                <button class="section-action primary" onclick="setADMT(true)">Yes — Surface ADMT Questions</button>
+                <button class="section-action" onclick="setADMT(false)">No — Proceed to Scoring</button>
+              </div>
+              <div id="cppa-admt-questions" style="display:none;margin-top:1.5rem"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: SCORING -->
+        <div id="cppa-tab-scoring" style="display:none">
+          <div id="cppa-scoring-no-client" class="empty-state">
+            <div class="es-icon">◫</div>
+            <div class="es-title">No client selected</div>
+            <div class="es-sub">Select a client to view scoring</div>
+          </div>
+          <div id="cppa-scoring-content" style="display:none">
+            <div class="grid-3" style="margin-bottom:1.5rem">
+              <div class="card"><div class="card-label">Overall Score</div><div class="card-value accent" id="cppa-overall-score">--</div></div>
+              <div class="card"><div class="card-label">Est. Penalty Exposure</div><div class="card-value red" id="cppa-penalty">--</div></div>
+              <div class="card"><div class="card-label">Components Complete</div><div class="card-value green" id="cppa-complete-count">0 / 18</div></div>
+            </div>
+            <div class="section-hd"><div class="section-title">Component Traffic Lights</div></div>
+            <div id="cppa-traffic-lights" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);margin-bottom:1.5rem"></div>
+            <div class="section-hd"><div class="section-title">Top 5 Gaps by Risk Weight</div></div>
+            <div id="cppa-top5-gaps" style="display:flex;flex-direction:column;gap:0.5rem"></div>
+          </div>
         </div>
       </div>
 
@@ -795,7 +1009,784 @@ input, select, textarea { font-family: var(--mono); }
   </div>
 </div>
 
+
+<!-- EVIDENCE MODAL -->
+<div class="modal-overlay" id="evidence-modal">
+  <div class="modal">
+    <div class="modal-hd"><div class="modal-title">Add Evidence (Action A)</div><button class="modal-close" onclick="closeModal('evidence-modal')">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="ev-edit-id">
+      <div class="form-field">
+        <label class="form-label">Entry Type</label>
+        <select class="form-select" id="ev-type">
+          <option value="document_reference">Document Reference</option>
+          <option value="external_pointer">External URL / File Path</option>
+          <option value="in_person_note">In-Person Review Note</option>
+        </select>
+      </div>
+      <div class="form-field"><label class="form-label">Document Name / Title</label><input class="form-input" id="ev-name" placeholder="System Security Plan v2.1"></div>
+      <div class="form-field"><label class="form-label">Version (if applicable)</label><input class="form-input" id="ev-version" placeholder="v2.1"></div>
+      <div class="form-field"><label class="form-label">URL or File Path (if applicable)</label><input class="form-input" id="ev-url" placeholder="/shared/docs/ssp.pdf or https://..."></div>
+      <div class="form-field"><label class="form-label">Review Note</label><textarea class="form-textarea" id="ev-note" placeholder="Describe what was reviewed and findings..."></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('evidence-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveEvidence()">Save Evidence</button>
+    </div>
+  </div>
+</div>
+
+<!-- TESTING MODAL -->
+<div class="modal-overlay" id="testing-modal">
+  <div class="modal">
+    <div class="modal-hd"><div class="modal-title">Add Test (Action B)</div><button class="modal-close" onclick="closeModal('testing-modal')">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="test-edit-id">
+      <div class="form-field"><label class="form-label">Test Name *</label><input class="form-input" id="test-name" placeholder="MFA Configuration Review"></div>
+      <div class="form-field"><label class="form-label">Methodology</label><input class="form-input" id="test-methodology" placeholder="Configuration inspection, screenshot evidence"></div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label">Result</label>
+          <select class="form-select" id="test-result">
+            <option value="pass">Pass</option>
+            <option value="fail">Fail</option>
+            <option value="partial">Partial</option>
+          </select>
+        </div>
+        <div class="form-field"><label class="form-label">Date Conducted</label><input class="form-input" id="test-date" type="date"></div>
+      </div>
+      <div class="form-field"><label class="form-label">Findings</label><textarea class="form-textarea" id="test-findings" placeholder="Describe what was found..."></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('testing-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveTesting()">Save Test</button>
+    </div>
+  </div>
+</div>
+
+<!-- INTERVIEW MODAL -->
+<div class="modal-overlay" id="interview-modal">
+  <div class="modal">
+    <div class="modal-hd"><div class="modal-title">Add Interview (Action C)</div><button class="modal-close" onclick="closeModal('interview-modal')">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="int-edit-id">
+      <div class="form-row">
+        <div class="form-field"><label class="form-label">Interviewee Title (not name)</label><input class="form-input" id="int-title" placeholder="CISO, IT Manager..."></div>
+        <div class="form-field"><label class="form-label">Interview Date</label><input class="form-input" id="int-date" type="date"></div>
+      </div>
+      <div class="form-field"><label class="form-label">Topics Covered</label><textarea class="form-textarea" id="int-topics" placeholder="Topics discussed during the interview..."></textarea></div>
+      <div class="form-field"><label class="form-label">Findings</label><textarea class="form-textarea" id="int-findings" placeholder="What did you learn..."></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('interview-modal')">Cancel</button>
+      <button class="btn-save" onclick="saveInterview()">Save Interview</button>
+    </div>
+  </div>
+</div>
+
 <script>
+
+// =====================================================================
+// CPPA AUDIT MODULE
+// =====================================================================
+
+// ── QUESTION BANK (38 + ADMT per handoff v3.0) ──────────────────────
+const CPPA_COMPONENTS = [
+  { id:1, name:'Authentication', questions:['Q-01','Q-02'] },
+  { id:2, name:'Encryption', questions:['Q-03','Q-04'] },
+  { id:3, name:'Account Management & Access Controls', questions:['Q-05','Q-06','Q-07','Q-08'] },
+  { id:4, name:'Inventory & Management of PI', questions:['Q-09','Q-10'] },
+  { id:5, name:'Secure Configuration', questions:['Q-11','Q-12'] },
+  { id:6, name:'Vulnerability Management', questions:['Q-13','Q-14','Q-15'] },
+  { id:7, name:'Audit-Log Management', questions:['Q-16'] },
+  { id:8, name:'Network Monitoring & Defenses', questions:['Q-17'] },
+  { id:9, name:'Antivirus & Anti-Malware', questions:['Q-18'] },
+  { id:10, name:'Network Segmentation', questions:['Q-19'] },
+  { id:11, name:'Ports, Services & Protocols', questions:['Q-20'] },
+  { id:12, name:'Cybersecurity Awareness', questions:['Q-21'] },
+  { id:13, name:'Cybersecurity Training', questions:['Q-22'] },
+  { id:14, name:'Secure Development', questions:['Q-23'] },
+  { id:15, name:'Oversight of Service Providers', questions:['Q-24','Q-25'] },
+  { id:16, name:'Retention & Disposal of PI', questions:['Q-26'] },
+  { id:17, name:'Incident Response', questions:['Q-27','Q-28'] },
+  { id:18, name:'Business Continuity & DR', questions:['Q-29'] }
+];
+
+const CPPA_QUESTIONS = {
+  'Q-01': { text:'Does the business enforce MFA for all individuals with access to personal information?', risk:'Critical', branch:{condition:['Partial','No'], surface:['Q-01a','Q-01b']} },
+  'Q-01a': { text:'Which user groups are not covered by MFA?', risk:'Critical', conditional:true, answerType:'text' },
+  'Q-01b': { text:'Is the MFA implementation phishing-resistant (e.g., FIDO2, hardware keys)?', risk:'High', conditional:true },
+  'Q-02': { text:'Does the business use passwords or passphrases as an authentication mechanism?', risk:'High', branch:{condition:['Yes'], surface:['Q-02a','Q-02b','Q-02c']} },
+  'Q-02a': { text:'Does the business enforce a minimum password length of at least 15 characters?', risk:'High', conditional:true },
+  'Q-02b': { text:'Does the business maintain a list of known compromised passwords and prevent their use?', risk:'High', conditional:true },
+  'Q-02c': { text:'Does the business implement account lockout after a defined number of failed attempts?', risk:'Medium', conditional:true },
+  'Q-03': { text:'Does the business encrypt all personal information at rest using an industry-standard encryption algorithm?', risk:'Critical' },
+  'Q-04': { text:'Does the business encrypt all personal information in transit using TLS 1.2 or higher?', risk:'Critical' },
+  'Q-05': { text:'Does the business enforce least-privilege access to systems processing personal information?', risk:'High' },
+  'Q-06': { text:'Does the business implement privileged access management (PAM) controls for elevated accounts?', risk:'High' },
+  'Q-07': { text:'Does the business have a documented process for provisioning and deprovisioning user accounts, including timely removal for terminated employees?', risk:'Medium' },
+  'Q-08': { text:'Does the business control and log physical access to systems and facilities that store or process personal information?', risk:'Medium' },
+  'Q-09': { text:'Does the business maintain a documented inventory of all personal information it processes, including classification, data flows, and data owners?', risk:'High' },
+  'Q-10': { text:'Does the business maintain an inventory of hardware and software assets authorized to process personal information?', risk:'Medium' },
+  'Q-11': { text:'Does the business maintain a documented patch management process ensuring updates are applied in a timely manner?', risk:'High' },
+  'Q-12': { text:'Does the business apply hardening standards and secure baseline configurations to all systems that process personal information?', risk:'Medium' },
+  'Q-13': { text:'Does the business conduct internal and external vulnerability scans regularly and remediate identified vulnerabilities according to defined SLAs?', risk:'High' },
+  'Q-14': { text:'Does the business conduct penetration testing and document the results and remediation activities?', risk:'High' },
+  'Q-15': { text:'Does the business maintain a vulnerability disclosure or bug bounty program?', risk:'Medium' },
+  'Q-16': { text:'Does the business collect, centrally store, and monitor audit logs from all systems that process personal information, with a defined retention period?', risk:'High' },
+  'Q-17': { text:'Does the business deploy and maintain network monitoring tools including IDS/IPS, bot detection, and anomaly detection?', risk:'High' },
+  'Q-18': { text:'Does the business deploy and maintain antivirus and anti-malware protections on all endpoints, with automatic signature updates?', risk:'High' },
+  'Q-19': { text:'Does the business segment its information systems to isolate systems that process personal information from other network zones?', risk:'High' },
+  'Q-20': { text:'Does the business maintain an inventory of open ports, running services, and active protocols, and disable those not necessary for business operations?', risk:'Medium' },
+  'Q-21': { text:'Does the business have a formal process for maintaining current knowledge of cybersecurity threats and communicating threat intelligence to appropriate personnel?', risk:'Medium' },
+  'Q-22': { text:'Does the business provide cybersecurity training to all employees, independent contractors, and other personnel with access to its information system?', risk:'High', branch:{condition:['Yes','Partial'], surface:['Q-22a','Q-22b','Q-22c']} },
+  'Q-22a': { text:'Does the business provide cybersecurity training at onboarding (start of employment or contract)?', risk:'High', conditional:true },
+  'Q-22b': { text:'Does the business provide cybersecurity training annually to all personnel with system access?', risk:'High', conditional:true },
+  'Q-22c': { text:'Does the business provide cybersecurity training after a personal information security breach (Civil Code §1798.150)?', risk:'High', conditional:true, answerOptions:['Yes','No','No breach occurred during audit period'] },
+  'Q-23': { text:'Does the business follow secure development and coding best practices, including code reviews and security testing as part of its SDLC?', risk:'High' },
+  'Q-24': { text:'Does the business maintain oversight of service providers, contractors, and third parties including written contracts and periodic vendor risk assessments?', risk:'High' },
+  'Q-25': { text:'Does the business maintain documented data processing agreements (DPAs) with all third parties that process personal information and review vendor access controls annually?', risk:'Medium' },
+  'Q-26': { text:'Does the business maintain a documented retention schedule for personal information and dispose of PI no longer required to be retained?', risk:'Medium', branch:{condition:['Yes','Partial'], surface:['Q-26a']} },
+  'Q-26a': { text:'What disposal method does the business use: (A) shredding, (B) erasing, or (C) rendering the information unreadable or undecipherable? Confirm the method makes recovery impossible.', risk:'High', conditional:true, answerOptions:['Shredding','Erasing','Rendering Unreadable','Combination'] },
+  'Q-27': { text:'Does the business have a documented incident response plan with predetermined procedures for detecting, responding to, limiting consequences of, and recovering from malicious attacks?', risk:'Critical' },
+  'Q-28': { text:'Does the business test its incident response capabilities (e.g., tabletop exercises, simulations) and document the results?', risk:'High' },
+  'Q-29': { text:'Does the business have documented, tested business-continuity and disaster-recovery plans including backup procedures and defined RTO and RPO targets?', risk:'High' }
+};
+
+const ADMT_QUESTIONS = {
+  'A-01': { text:'Does the business use Automated Decisionmaking Technology (ADMT) to make a significant decision concerning a consumer (e.g., financial services, housing, insurance, education, employment, healthcare)?', risk:'Critical', answerOptions:['Yes','No'] },
+  'A-02': { text:'Does the business provide consumers with a Pre-use Notice before or at the point of collecting PI that will be processed using ADMT, in plain language?', risk:'High' },
+  'A-03': { text:'Does the Pre-use Notice include a plain language explanation of the specific purpose for ADMT use, not generic terms?', risk:'High' },
+  'A-04': { text:'Does the business provide consumers the ability to opt-out of ADMT for significant decisions, or does it qualify for a recognized exception?', risk:'Critical', answerOptions:['Opt-out provided','Exception claimed','Neither'], branch:{condition:['Exception claimed'], surface:['A-04a']} },
+  'A-04a': { text:'If claiming the human appeal exception: has the business designated a human reviewer with authority to overturn the ADMT decision, and does it provide consumers a clear appeal process?', risk:'Critical', conditional:true },
+  'A-05': { text:'When a consumer requests access to ADMT, does the business provide plain language explanations of the specific ADMT purpose, the logic, and the outcome for that consumer?', risk:'High' },
+  'A-06': { text:'Does the business disclose the categories of PI affecting the ADMT output, the type of output generated, and how that output is used to make a significant decision?', risk:'High' },
+  'A-07': { text:'Where human involvement exists in ADMT: does the human reviewer have the ability to interpret the output, access to review it, and actual authority to change the decision?', risk:'High' },
+  'A-08': { text:'Does the business document and disclose the alternative process for making a significant decision for consumers who opt out of ADMT?', risk:'High' }
+};
+
+const NIST_CROSSWALK = {
+  'Q-01':{ csf:'PR.AA-01, PR.AA-03', nist:'IA-2, IA-2(1), IA-2(6)' },
+  'Q-02':{ csf:'PR.AA-01', nist:'IA-5, IA-5(1)' },
+  'Q-03':{ csf:'PR.DS-01', nist:'SC-28, SC-28(1)' },
+  'Q-04':{ csf:'PR.DS-02', nist:'SC-8, SC-8(1)' },
+  'Q-05':{ csf:'PR.AA-05', nist:'AC-2, AC-3, AC-6' },
+  'Q-06':{ csf:'PR.AA-05', nist:'AC-2(1), AC-6(1), AC-6(5)' },
+  'Q-07':{ csf:'PR.AA-05', nist:'AC-2(2), AC-2(3)' },
+  'Q-08':{ csf:'PR.AA-05', nist:'PE-2, PE-3, PE-6' },
+  'Q-09':{ csf:'ID.AM-01, ID.AM-05', nist:'CM-8, RA-2' },
+  'Q-10':{ csf:'ID.AM-01, ID.AM-02', nist:'CM-7, CM-8(1)' },
+  'Q-11':{ csf:'PR.PS-01, PR.PS-02', nist:'CM-2, CM-6, SI-2' },
+  'Q-12':{ csf:'PR.PS-01', nist:'CM-6, CM-7, SC-7' },
+  'Q-13':{ csf:'ID.RA-01', nist:'RA-5, RA-5(1)' },
+  'Q-14':{ csf:'ID.RA-01', nist:'CA-8, CA-8(1)' },
+  'Q-15':{ csf:'ID.RA-01', nist:'SA-15(9)' },
+  'Q-16':{ csf:'DE.CM-01, DE.CM-03', nist:'AU-2, AU-3, AU-9, AU-12' },
+  'Q-17':{ csf:'DE.CM-01, DE.CM-04', nist:'SI-3, SI-4, SI-4(2)' },
+  'Q-18':{ csf:'PR.PS-05', nist:'SI-3, SI-3(1), SI-3(2)' },
+  'Q-19':{ csf:'PR.IR-01', nist:'SC-7, SC-7(5), SC-32' },
+  'Q-20':{ csf:'PR.PS-01', nist:'CM-7, CM-7(1), SC-7(8)' },
+  'Q-21':{ csf:'ID.RA-02', nist:'PM-15, SI-5' },
+  'Q-22':{ csf:'PR.AT-01', nist:'AT-2, AT-2(2), AT-3' },
+  'Q-23':{ csf:'PR.PS-04', nist:'SA-8, SA-11, SA-15' },
+  'Q-24':{ csf:'GV.SC-01, GV.SC-04', nist:'SA-9, SR-1, SR-3' },
+  'Q-25':{ csf:'GV.SC-06', nist:'SA-9(1), SA-9(2)' },
+  'Q-26':{ csf:'PR.DS-05', nist:'MP-6, SI-12' },
+  'Q-27':{ csf:'RS.MA-01, RS.CO-02', nist:'IR-1, IR-8' },
+  'Q-28':{ csf:'RS.MA-01', nist:'IR-3, IR-3(2)' },
+  'Q-29':{ csf:'RC.RP-01, RC.RP-02', nist:'CP-1, CP-2, CP-9' }
+};
+
+const RISK_SCORE = { Critical:{ No:-20, Partial:-10 }, High:{ No:-15, Partial:-7 }, Medium:{ No:-10, Partial:-5 }, Low:{ No:-5, Partial:-2 } };
+
+// ── STATE ───────────────────────────────────────────────────────────
+let cppaActiveComponent = 1;
+let cppaActiveActionTab = 'questions';
+let cppaADMTActive = false;
+
+function getCPPAData(clientId) {
+  return DB.get('cppa_' + clientId) || {
+    applicability: {},   // {1: {applicable:bool, reason:str}}
+    answers: {},         // {'Q-01': {response:'Yes', notes:''}}
+    evidence: {},        // {1: [{...}]}
+    testing: {},         // {1: [{...}]}
+    interviews: {},      // {1: [{...}]}
+    complete: {},        // {1: true}
+    admt: null,          // null | {answered:bool, yes:bool, answers:{}}
+    screener: null
+  };
+}
+function saveCPPAData(clientId, d) { DB.set('cppa_' + clientId, d); }
+
+// ── SCREENER ────────────────────────────────────────────────────────
+function runScreener() {
+  const sq1 = document.getElementById('sq1').value;
+  const sq2 = document.getElementById('sq2').value;
+  const sq3 = document.getElementById('sq3').value;
+  const sq4 = document.getElementById('sq4').value;
+  const sq5 = document.getElementById('sq5').value;
+  if (!sq1||!sq2||!sq3||!sq4||!sq5) { notify('Please answer all 5 questions', true); return; }
+
+  const meetsGeneral = sq1 !== 'under' && sq5 === 'yes';
+  const triggers = [];
+  if (sq2 === 'over250k') triggers.push('Processes PI of 250,000+ CA consumers (§7120(b)(2))');
+  if (sq3 === 'over50k') triggers.push('Processes sensitive PI of 50,000+ CA consumers (§7120(b)(3))');
+  if (sq4 === 'over50') triggers.push('50%+ of annual revenue from selling/sharing PI (§7120(b)(1))');
+
+  const covered = meetsGeneral && triggers.length > 0;
+  const deadline = sq1 === 'over100' ? 'April 1, 2028 (first audit period: 2027)'
+    : sq1 === '50to100' ? 'April 1, 2029 (first audit period: 2028)'
+    : sq1 === '26to50' ? 'April 1, 2030 (first audit period: 2029)'
+    : 'Below CCPA revenue threshold — not currently subject';
+
+  const res = document.getElementById('screener-result');
+  res.style.display = 'block';
+  if (!covered) {
+    res.innerHTML = \`<div style="color:var(--green);font-family:var(--sans);font-weight:800;font-size:1.1rem;margin-bottom:0.75rem">Not Currently Subject to Cybersecurity Audit Requirement</div>
+    <div style="font-size:0.82rem;color:var(--text);line-height:2">\${!meetsGeneral ? 'Business does not meet the general CCPA threshold (§7120(a)).' : 'No significant-risk trigger met (§7120(b)).'} Reassess annually as revenue and data volumes change.</div>\`;
+  } else {
+    res.innerHTML = \`<div style="color:var(--accent2);font-family:var(--sans);font-weight:800;font-size:1.1rem;margin-bottom:0.75rem">COVERED — Cybersecurity Audit Required</div>
+    <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:0.75rem;letter-spacing:0.1em;text-transform:uppercase">Triggers Fired</div>
+    \${triggers.map(t => \`<div style="font-size:0.82rem;color:var(--accent);margin-bottom:0.4rem">▸ \${t}</div>\`).join('')}
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.82rem;color:var(--text)"><span style="color:var(--text-dim)">Submission deadline:</span> <strong style="color:var(--gold)">\${deadline}</strong></div>
+    <div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-dim)">Penalty exposure: $2,663 to $7,988 per violation · per consumer record · per day</div>\`;
+  }
+  if (currentClient) { const d=getCPPAData(currentClient); d.screener={sq1,sq2,sq3,sq4,sq5,covered,triggers,deadline,ts:new Date().toISOString()}; saveCPPAData(currentClient,d); }
+}
+
+function resetScreener() {
+  ['sq1','sq2','sq3','sq4','sq5'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('screener-result').style.display='none';
+}
+
+// ── CPPA TAB SWITCHING ──────────────────────────────────────────────
+function switchCPPATab(el) {
+  document.querySelectorAll('#cppa-tabs .fw-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const tab = el.dataset.ctab;
+  ['screener','assessment','scoring'].forEach(t => {
+    document.getElementById('cppa-tab-'+t).style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'assessment') renderCPPAAssessment();
+  if (tab === 'scoring') renderCPPAScoring();
+}
+
+function switchActionTab(el) {
+  document.querySelectorAll('[data-atab]').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  cppaActiveActionTab = el.dataset.atab;
+  ['questions','evidence','testing','interview'].forEach(t => {
+    const el2 = document.getElementById('action-tab-'+t);
+    if (el2) el2.style.display = t === cppaActiveActionTab ? '' : 'none';
+  });
+  if (cppaActiveActionTab === 'evidence') renderEvidenceTable();
+  if (cppaActiveActionTab === 'testing') renderTestingTable();
+  if (cppaActiveActionTab === 'interview') renderInterviewTable();
+  updateMarkCompleteButton();
+}
+
+// ── ASSESSMENT RENDER ───────────────────────────────────────────────
+function renderCPPAAssessment() {
+  if (!currentClient) {
+    document.getElementById('cppa-no-client').style.display='block';
+    document.getElementById('cppa-assessment-content').style.display='none';
+    return;
+  }
+  document.getElementById('cppa-no-client').style.display='none';
+  document.getElementById('cppa-assessment-content').style.display='block';
+  const client = DB.clients().find(c=>c.id===currentClient);
+  document.getElementById('cppa-client-label').textContent = client ? client.name : '';
+  renderComponentNav();
+  loadComponent(cppaActiveComponent);
+  updateProgressLabel();
+  checkADMTGate();
+}
+
+function renderComponentNav() {
+  const d = getCPPAData(currentClient);
+  const nav = document.getElementById('cppa-component-nav');
+  nav.innerHTML = CPPA_COMPONENTS.map(comp => {
+    const app = d.applicability[comp.id];
+    const complete = d.complete[comp.id];
+    let bg = 'var(--border)'; let color = 'var(--text-dim)';
+    if (complete) { bg='rgba(0,230,118,0.15)'; color='var(--green)'; }
+    else if (app && app.applicable === false) { bg='rgba(74,122,144,0.1)'; color='var(--text-dim)'; }
+    else if (app && app.applicable === true) { bg='rgba(0,200,255,0.08)'; color='var(--accent)'; }
+    const active = cppaActiveComponent === comp.id;
+    return \`<button onclick="loadComponent(\${comp.id})" style="background:\${active?'var(--accent)':bg};color:\${active?'var(--bg)':color};border:1px solid \${active?'var(--accent)':bg};padding:0.3rem 0.7rem;font-size:0.68rem;font-family:var(--mono);letter-spacing:0.06em;cursor:pointer;transition:all 0.15s">\${comp.id}. \${comp.name.split(' ').slice(0,2).join(' ')}\${complete?' ✓':''}</button>\`;
+  }).join('');
+}
+
+function loadComponent(id) {
+  cppaActiveComponent = id;
+  cppaActiveActionTab = 'questions';
+  const comp = CPPA_COMPONENTS.find(c=>c.id===id);
+  const d = getCPPAData(currentClient);
+  const app = d.applicability[id];
+
+  // Reset action tabs to questions
+  document.querySelectorAll('[data-atab]').forEach(t=>{ t.classList.remove('active'); if(t.dataset.atab==='questions') t.classList.add('active'); });
+  ['questions','evidence','testing','interview'].forEach(t=>{
+    const el=document.getElementById('action-tab-'+t);
+    if(el) el.style.display = t==='questions'?'':'none';
+  });
+
+  document.getElementById('cppa-gate-question').textContent = \`Is Component \${id} — \${comp.name} applicable to this business's information system?\`;
+  document.getElementById('cppa-gate-na-reason').style.display='none';
+  document.getElementById('cppa-na-reason-text').value='';
+
+  if (!app) {
+    // Not yet decided
+    document.getElementById('cppa-gate').style.display='';
+    document.getElementById('cppa-component-body').style.display='none';
+    document.getElementById('cppa-na-state').style.display='none';
+    document.getElementById('cppa-gate-yes').style.background='';
+    document.getElementById('cppa-gate-no').style.background='';
+  } else if (app.applicable === false) {
+    document.getElementById('cppa-gate').style.display='none';
+    document.getElementById('cppa-component-body').style.display='none';
+    document.getElementById('cppa-na-state').style.display='';
+    document.getElementById('cppa-na-reason-display').textContent = 'Reason: ' + (app.reason||'Not provided');
+  } else {
+    document.getElementById('cppa-gate').style.display='none';
+    document.getElementById('cppa-component-body').style.display='';
+    document.getElementById('cppa-na-state').style.display='none';
+    renderQuestionsForComponent(comp, d);
+    renderEvidenceTable();
+    updateMarkCompleteButton();
+  }
+  renderComponentNav();
+}
+
+function setApplicability(isApplicable) {
+  if (!isApplicable) {
+    document.getElementById('cppa-gate-na-reason').style.display='';
+    return;
+  }
+  const d = getCPPAData(currentClient);
+  d.applicability[cppaActiveComponent] = { applicable:true, ts:new Date().toISOString() };
+  saveCPPAData(currentClient, d);
+  loadComponent(cppaActiveComponent);
+  notify('Component marked Applicable');
+}
+
+function saveNADecision() {
+  const reason = document.getElementById('cppa-na-reason-text').value.trim();
+  if (!reason) { notify('Reason is required for Not Applicable', true); return; }
+  const d = getCPPAData(currentClient);
+  d.applicability[cppaActiveComponent] = { applicable:false, reason, ts:new Date().toISOString() };
+  saveCPPAData(currentClient, d);
+  loadComponent(cppaActiveComponent);
+  updateProgressLabel();
+  notify('Component marked Not Applicable');
+}
+
+function resetApplicability() {
+  const d = getCPPAData(currentClient);
+  delete d.applicability[cppaActiveComponent];
+  delete d.complete[cppaActiveComponent];
+  saveCPPAData(currentClient, d);
+  loadComponent(cppaActiveComponent);
+}
+
+function renderQuestionsForComponent(comp, d) {
+  const qList = document.getElementById('cppa-questions-list');
+  const allQids = getAllQidsForComponent(comp, d);
+  qList.innerHTML = allQids.map(qid => renderQuestion(qid, d)).join('');
+}
+
+function getAllQidsForComponent(comp, d) {
+  const baseQids = comp.questions;
+  const all = [...baseQids];
+  baseQids.forEach(qid => {
+    const q = CPPA_QUESTIONS[qid];
+    if (q && q.branch) {
+      const ans = d.answers[qid];
+      if (ans && q.branch.condition.includes(ans.response)) {
+        all.push(...q.branch.surface);
+      }
+    }
+  });
+  return all;
+}
+
+function renderQuestion(qid, d) {
+  const q = CPPA_QUESTIONS[qid];
+  if (!q) return '';
+  const ans = d.answers[qid] || {};
+  const nist = NIST_CROSSWALK[qid];
+  const riskColor = { Critical:'var(--accent2)', High:'#ff9800', Medium:'var(--gold)', Low:'var(--green)' }[q.risk] || 'var(--text-dim)';
+  const opts = q.answerOptions || ['Yes','Partial','No','Not Applicable'];
+  const optBtns = opts.map(opt => {
+    const active = ans.response === opt;
+    const bg = active ? (opt==='Yes'?'var(--green)':opt==='No'?'var(--accent2)':opt==='Partial'?'var(--gold)':'var(--text-dim)') : 'transparent';
+    const col = active ? 'var(--bg)' : 'var(--text-dim)';
+    return \`<button onclick="recordCPPAAnswer('\${qid}','\${opt.replace(/'/g,\"\'\")}')" style="background:\${bg};color:\${col};border:1px solid var(--border);padding:0.3rem 0.8rem;font-size:0.7rem;font-family:var(--mono);cursor:pointer;transition:all 0.15s">\${opt}</button>\`;
+  }).join('');
+
+  return \`<div style="border:1px solid var(--border);margin-bottom:0.75rem;overflow:hidden">
+    <div style="padding:0.85rem 1rem;display:flex;align-items:flex-start;gap:1rem;background:\${ans.response?'var(--surface2)':'var(--surface)'}">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+          <span style="font-size:0.68rem;color:var(--accent);font-weight:700">\${qid}</span>
+          <span style="font-size:0.62rem;padding:0.1rem 0.4rem;border:1px solid \${riskColor};color:\${riskColor}">\${q.risk}</span>
+          \${nist ? \`<span style="font-size:0.62rem;color:var(--text-dim)">\${nist.nist}</span>\` : ''}
+        </div>
+        <div style="font-size:0.85rem;color:var(--text-bright);line-height:1.65;margin-bottom:0.75rem">\${q.text}</div>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem">\${optBtns}</div>
+        \${ans.response ? \`<textarea onchange="recordCPPANote('\${qid}',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;font-size:0.78rem;font-family:var(--mono);resize:vertical;min-height:48px;margin-top:0.25rem" placeholder="Auditor notes (max 2000 chars)..." maxlength="2000">\${ans.notes||''}</textarea>\` : ''}
+      </div>
+    </div>
+  </div>\`;
+}
+
+function recordCPPAAnswer(qid, response) {
+  const d = getCPPAData(currentClient);
+  if (!d.answers[qid]) d.answers[qid] = {};
+  d.answers[qid].response = response;
+  d.answers[qid].ts = new Date().toISOString();
+  saveCPPAData(currentClient, d);
+  const comp = CPPA_COMPONENTS.find(c=>c.questions.includes(qid));
+  if (comp) renderQuestionsForComponent(comp, d);
+  updateMarkCompleteButton();
+  renderCPPAScoring();
+}
+
+function recordCPPANote(qid, val) {
+  const d = getCPPAData(currentClient);
+  if (!d.answers[qid]) d.answers[qid] = {};
+  d.answers[qid].notes = val.substring(0,2000);
+  saveCPPAData(currentClient, d);
+}
+
+// ── MARK COMPLETE ───────────────────────────────────────────────────
+function updateMarkCompleteButton() {
+  const btn = document.getElementById('cppa-mark-complete-btn');
+  const msg = document.getElementById('cppa-complete-gate-msg');
+  if (!btn) return;
+  const d = getCPPAData(currentClient);
+  const tests = (d.testing[cppaActiveComponent] || []);
+  const hasTest = tests.length > 0;
+  const alreadyDone = d.complete[cppaActiveComponent];
+  if (alreadyDone) {
+    btn.textContent = '✓ Complete'; btn.style.opacity='1'; btn.disabled=true;
+    btn.style.background='var(--green)'; btn.style.color='var(--bg)'; btn.style.borderColor='var(--green)';
+    msg.textContent=''; return;
+  }
+  if (!hasTest) {
+    btn.disabled=true; btn.style.opacity='0.4'; btn.style.background=''; btn.style.color=''; btn.style.borderColor='';
+    msg.textContent='Action B required: add at least one test before marking complete.';
+  } else {
+    btn.disabled=false; btn.style.opacity='1';
+    msg.textContent='';
+  }
+}
+
+function markComponentComplete() {
+  const d = getCPPAData(currentClient);
+  const tests = (d.testing[cppaActiveComponent]||[]);
+  if (!tests.length) { notify('Add at least one Action B test log first', true); return; }
+  d.complete[cppaActiveComponent] = true;
+  saveCPPAData(currentClient, d);
+  updateMarkCompleteButton();
+  renderComponentNav();
+  updateProgressLabel();
+  checkADMTGate();
+  notify(\`Component \${cppaActiveComponent} marked complete\`);
+}
+
+function updateProgressLabel() {
+  const d = getCPPAData(currentClient);
+  const done = Object.values(d.complete).filter(Boolean).length;
+  const naCount = Object.values(d.applicability).filter(a=>a.applicable===false).length;
+  document.getElementById('cppa-progress-label').textContent = \`\${done} complete · \${naCount} N/A · \${18-done-naCount} remaining\`;
+}
+
+// ── ADMT GATE ───────────────────────────────────────────────────────
+function checkADMTGate() {
+  if (!currentClient) return;
+  const d = getCPPAData(currentClient);
+  const allHandled = CPPA_COMPONENTS.every(c => d.complete[c.id] || (d.applicability[c.id] && d.applicability[c.id].applicable===false));
+  const gate = document.getElementById('cppa-admt-gate');
+  if (!gate) return;
+  if (allHandled && !d.admt) gate.style.display='';
+  else gate.style.display='none';
+}
+
+function setADMT(yes) {
+  const d = getCPPAData(currentClient);
+  d.admt = { answered:true, yes, answers:{}, ts:new Date().toISOString() };
+  saveCPPAData(currentClient, d);
+  document.getElementById('cppa-admt-btns').style.display='none';
+  if (!yes) {
+    document.getElementById('cppa-admt-questions').innerHTML='<div style="color:var(--green);font-size:0.82rem;padding:0.5rem 0">No ADMT use confirmed. Assessment complete. Proceed to Scoring.</div>';
+  } else {
+    const qHtml = Object.entries(ADMT_QUESTIONS).filter(([id])=>id!=='A-01').map(([id,q])=>renderADMTQuestion(id,q,d)).join('');
+    document.getElementById('cppa-admt-questions').innerHTML=qHtml;
+  }
+  document.getElementById('cppa-admt-questions').style.display='';
+  notify(yes ? 'ADMT sub-assessment activated' : 'ADMT not applicable — assessment complete');
+}
+
+function renderADMTQuestion(qid, q, d) {
+  const ans = d.admt && d.admt.answers ? d.admt.answers[qid] || {} : {};
+  const opts = q.answerOptions || ['Yes','Partial','No','Not Applicable'];
+  const riskColor = { Critical:'var(--accent2)', High:'#ff9800', Medium:'var(--gold)', Low:'var(--green)' }[q.risk];
+  const optBtns = opts.map(opt => {
+    const active = ans.response === opt;
+    const bg = active ? (opt==='Yes'?'var(--green)':opt==='No'?'var(--accent2)':opt==='Partial'?'var(--gold)':'var(--text-dim)') : 'transparent';
+    return \`<button onclick="recordADMTAnswer('\${qid}','\${opt}')" style="background:\${bg};color:\${active?'var(--bg)':'var(--text-dim)'};border:1px solid var(--border);padding:0.3rem 0.8rem;font-size:0.7rem;font-family:var(--mono);cursor:pointer">\${opt}</button>\`;
+  }).join('');
+  return \`<div style="border:1px solid var(--border);margin-bottom:0.75rem;padding:0.85rem 1rem;background:var(--surface)">
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem"><span style="font-size:0.68rem;color:var(--accent);font-weight:700">\${qid}</span><span style="font-size:0.62rem;padding:0.1rem 0.4rem;border:1px solid \${riskColor};color:\${riskColor}">\${q.risk}</span></div>
+    <div style="font-size:0.85rem;color:var(--text-bright);line-height:1.65;margin-bottom:0.75rem">\${q.text}</div>
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap">\${optBtns}</div>
+  </div>\`;
+}
+
+function recordADMTAnswer(qid, response) {
+  const d = getCPPAData(currentClient);
+  if (!d.admt) d.admt={answered:true,yes:true,answers:{}};
+  if (!d.admt.answers) d.admt.answers={};
+  d.admt.answers[qid]={response, ts:new Date().toISOString()};
+  saveCPPAData(currentClient, d);
+  notify('Answer saved');
+}
+
+// ── EVIDENCE / TESTING / INTERVIEW ──────────────────────────────────
+function saveEvidence() {
+  const name = document.getElementById('ev-name').value.trim();
+  if (!name) { notify('Document name is required', true); return; }
+  const d = getCPPAData(currentClient);
+  if (!d.evidence[cppaActiveComponent]) d.evidence[cppaActiveComponent]=[];
+  d.evidence[cppaActiveComponent].push({
+    type: document.getElementById('ev-type').value,
+    name, version: document.getElementById('ev-version').value,
+    url: document.getElementById('ev-url').value,
+    note: document.getElementById('ev-note').value,
+    ts: new Date().toISOString()
+  });
+  saveCPPAData(currentClient, d);
+  ['ev-name','ev-version','ev-url','ev-note'].forEach(id=>document.getElementById(id).value='');
+  closeModal('evidence-modal');
+  renderEvidenceTable();
+  notify('Evidence logged');
+}
+
+function renderEvidenceTable() {
+  if (!currentClient) return;
+  const d = getCPPAData(currentClient);
+  const items = d.evidence[cppaActiveComponent] || [];
+  const tbody = document.getElementById('evidence-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = items.length ? items.map((e,i)=>`<tr>
+    <td><span class="badge b-info" style="font-size:0.6rem">\${e.type.replace('_',' ')}</span></td>
+    <td><strong style="color:var(--text-bright)">\${e.name}</strong>\${e.version?' v'+e.version:''}</td>
+    <td style="font-size:0.78rem">\${e.note||''}</td>
+    <td style="font-size:0.72rem;color:var(--text-dim)">\${e.ts.split('T')[0]}</td>
+    <td><button class="icon-btn del" onclick="deleteEvidence(\${i})">✕</button></td>
+  </tr>`).join('') : '<tr><td colspan="5" class="tbl-empty">No evidence logged yet.</td></tr>';
+}
+
+function deleteEvidence(i) {
+  if (!confirm('Delete this evidence entry?')) return;
+  const d = getCPPAData(currentClient);
+  d.evidence[cppaActiveComponent].splice(i,1);
+  saveCPPAData(currentClient, d);
+  renderEvidenceTable();
+}
+
+function saveTesting() {
+  const name = document.getElementById('test-name').value.trim();
+  if (!name) { notify('Test name is required', true); return; }
+  const d = getCPPAData(currentClient);
+  if (!d.testing[cppaActiveComponent]) d.testing[cppaActiveComponent]=[];
+  d.testing[cppaActiveComponent].push({
+    name, methodology: document.getElementById('test-methodology').value,
+    result: document.getElementById('test-result').value,
+    date: document.getElementById('test-date').value,
+    findings: document.getElementById('test-findings').value,
+    ts: new Date().toISOString()
+  });
+  saveCPPAData(currentClient, d);
+  ['test-name','test-methodology','test-date','test-findings'].forEach(id=>document.getElementById(id).value='');
+  closeModal('testing-modal');
+  renderTestingTable();
+  updateMarkCompleteButton();
+  notify('Test logged');
+}
+
+function renderTestingTable() {
+  if (!currentClient) return;
+  const d = getCPPAData(currentClient);
+  const items = d.testing[cppaActiveComponent] || [];
+  const tbody = document.getElementById('testing-tbody');
+  if (!tbody) return;
+  const resultClass = {pass:'b-compliant', fail:'b-noncompliant', partial:'b-medium'};
+  tbody.innerHTML = items.length ? items.map((t,i)=>`<tr>
+    <td><strong style="color:var(--text-bright)">\${t.name}</strong></td>
+    <td style="font-size:0.78rem">\${t.methodology||''}</td>
+    <td><span class="badge \${resultClass[t.result]||'b-info'}">\${t.result}</span></td>
+    <td style="font-size:0.72rem">\${t.date||''}</td>
+    <td style="font-size:0.78rem">\${t.findings||''}</td>
+    <td><button class="icon-btn del" onclick="deleteTest(\${i})">✕</button></td>
+  </tr>`).join('') : '<tr><td colspan="6" class="tbl-empty">No tests logged. At least one test required to mark complete.</td></tr>';
+}
+
+function deleteTest(i) {
+  if (!confirm('Delete this test entry?')) return;
+  const d = getCPPAData(currentClient);
+  d.testing[cppaActiveComponent].splice(i,1);
+  saveCPPAData(currentClient, d);
+  renderTestingTable();
+  updateMarkCompleteButton();
+}
+
+function saveInterview() {
+  const title = document.getElementById('int-title').value.trim();
+  if (!title) { notify('Interviewee title is required', true); return; }
+  const d = getCPPAData(currentClient);
+  if (!d.interviews[cppaActiveComponent]) d.interviews[cppaActiveComponent]=[];
+  d.interviews[cppaActiveComponent].push({
+    title, date: document.getElementById('int-date').value,
+    topics: document.getElementById('int-topics').value,
+    findings: document.getElementById('int-findings').value,
+    ts: new Date().toISOString()
+  });
+  saveCPPAData(currentClient, d);
+  ['int-title','int-date','int-topics','int-findings'].forEach(id=>document.getElementById(id).value='');
+  closeModal('interview-modal');
+  renderInterviewTable();
+  notify('Interview logged');
+}
+
+function renderInterviewTable() {
+  if (!currentClient) return;
+  const d = getCPPAData(currentClient);
+  const items = d.interviews[cppaActiveComponent] || [];
+  const tbody = document.getElementById('interview-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = items.length ? items.map((iv,i)=>`<tr>
+    <td><strong style="color:var(--text-bright)">\${iv.title}</strong></td>
+    <td style="font-size:0.72rem">\${iv.date||''}</td>
+    <td style="font-size:0.78rem">\${iv.topics||''}</td>
+    <td style="font-size:0.78rem">\${iv.findings||''}</td>
+    <td><button class="icon-btn del" onclick="deleteInterview(\${i})">✕</button></td>
+  </tr>`).join('') : '<tr><td colspan="5" class="tbl-empty">No interviews logged.</td></tr>';
+}
+
+function deleteInterview(i) {
+  if (!confirm('Delete this interview entry?')) return;
+  const d = getCPPAData(currentClient);
+  d.interviews[cppaActiveComponent].splice(i,1);
+  saveCPPAData(currentClient, d);
+  renderInterviewTable();
+}
+
+// ── SCORING ─────────────────────────────────────────────────────────
+function calcCPPAComponentScore(compId, d) {
+  const comp = CPPA_COMPONENTS.find(c=>c.id===compId);
+  if (!comp) return {score:0, status:'red', gaps:[]};
+  const app = d.applicability[compId];
+  if (app && app.applicable===false) return {score:null, status:'na', gaps:[]};
+  let score = 100;
+  const gaps = [];
+  comp.questions.forEach(qid => {
+    const q = CPPA_QUESTIONS[qid];
+    if (!q) return;
+    const ans = d.answers[qid];
+    if (!ans || !ans.response) return;
+    const impact = RISK_SCORE[q.risk];
+    if (!impact) return;
+    if (ans.response === 'No') { score += impact.No; gaps.push({qid, risk:q.risk, text:q.text, response:'No'}); }
+    else if (ans.response === 'Partial') { score += impact.Partial; gaps.push({qid, risk:q.risk, text:q.text, response:'Partial'}); }
+  });
+  score = Math.max(0, score);
+  const status = score>=80?'green':score>=50?'yellow':'red';
+  return {score, status, gaps};
+}
+
+function renderCPPAScoring() {
+  if (!currentClient) {
+    document.getElementById('cppa-scoring-no-client').style.display='block';
+    document.getElementById('cppa-scoring-content').style.display='none';
+    return;
+  }
+  document.getElementById('cppa-scoring-no-client').style.display='none';
+  document.getElementById('cppa-scoring-content').style.display='block';
+  const d = getCPPAData(currentClient);
+  let totalScore=0, scoredCount=0, allGaps=[];
+  const completeCount = Object.values(d.complete).filter(Boolean).length;
+  const trafficHtml = CPPA_COMPONENTS.map(comp=>{
+    const {score, status, gaps} = calcCPPAComponentScore(comp.id, d);
+    if (score !== null) { totalScore+=score; scoredCount++; }
+    allGaps.push(...gaps);
+    const color = status==='green'?'var(--green)':status==='yellow'?'var(--gold)':status==='red'?'var(--accent2)':'var(--text-dim)';
+    const scoreDisplay = score===null?'N/A':score;
+    const done = d.complete[comp.id];
+    return \`<div style="background:var(--surface);padding:1.25rem;border-right:1px solid var(--border);border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.4rem">
+        <div style="font-size:0.72rem;color:var(--text-dim)">\${comp.id}. \${comp.name}</div>
+        \${done?'<span style="color:var(--green);font-size:0.7rem">✓</span>':''}
+      </div>
+      <div style="font-family:var(--sans);font-weight:800;font-size:1.4rem;color:\${color}">\${scoreDisplay}</div>
+      <div style="margin-top:0.4rem;height:3px;background:var(--border);border-radius:2px"><div style="height:100%;width:\${score===null?0:score}%;background:\${color};border-radius:2px;transition:width 0.4s"></div></div>
+    </div>\`;
+  }).join('');
+
+  const overallScore = scoredCount ? Math.round(totalScore/scoredCount) : 0;
+  const overallColor = overallScore>=80?'var(--green)':overallScore>=50?'var(--gold)':'var(--accent2)';
+  document.getElementById('cppa-overall-score').textContent = overallScore + '%';
+  document.getElementById('cppa-overall-score').style.color = overallColor;
+  document.getElementById('cppa-complete-count').textContent = completeCount + ' / 18';
+
+  // Penalty estimate: each open gap = 1 violation, assume 1000 consumer records, mid-range $5,000/violation
+  const critGaps = allGaps.filter(g=>g.risk==='Critical').length;
+  const highGaps = allGaps.filter(g=>g.risk==='High').length;
+  const penaltyEst = (critGaps * 7988 + highGaps * 5000) * 1000;
+  document.getElementById('cppa-penalty').textContent = penaltyEst > 0 ? '$' + penaltyEst.toLocaleString() + '+' : '$0';
+
+  document.getElementById('cppa-traffic-lights').innerHTML = trafficHtml;
+
+  // Top 5 gaps
+  const riskOrder = {Critical:4, High:3, Medium:2, Low:1};
+  const sorted = allGaps.sort((a,b)=>(riskOrder[b.risk]||0)-(riskOrder[a.risk]||0)).slice(0,5);
+  const riskColor2 = { Critical:'var(--accent2)', High:'#ff9800', Medium:'var(--gold)', Low:'var(--green)' };
+  document.getElementById('cppa-top5-gaps').innerHTML = sorted.length ? sorted.map(g=>{
+    const nist = NIST_CROSSWALK[g.qid];
+    return \`<div style="border:1px solid var(--border);padding:1rem 1.25rem;background:var(--surface);display:grid;grid-template-columns:auto 1fr auto;gap:1rem;align-items:center">
+      <span class="badge" style="border:1px solid \${riskColor2[g.risk]};color:\${riskColor2[g.risk]}">\${g.risk}</span>
+      <div>
+        <div style="font-size:0.82rem;color:var(--text-bright)">\${g.qid}: \${g.text.substring(0,80)}...</div>
+        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.2rem">\${nist?'NIST: '+nist.nist:''}</div>
+      </div>
+      <span class="badge \${g.response==='No'?'b-noncompliant':'b-medium'}">\${g.response}</span>
+    </div>\`;
+  }).join('') : '<div style="color:var(--text-dim);font-size:0.82rem;padding:1rem">No gaps recorded yet.</div>';
+}
+
+// ── EXPORT ──────────────────────────────────────────────────────────
+function exportCPPACSV() {
+  if (!currentClient) return;
+  const d = getCPPAData(currentClient);
+  const client = DB.clients().find(c=>c.id===currentClient);
+  const rows = [['Component','Question ID','Question','Risk Weight','Response','NIST CSF','NIST 800-53','Auditor Notes']];
+  CPPA_COMPONENTS.forEach(comp=>{
+    const app = d.applicability[comp.id];
+    if (app && app.applicable===false) {
+      rows.push([comp.name,'N/A','Not Applicable','','',app.reason||'','','']);
+      return;
+    }
+    comp.questions.forEach(qid=>{
+      const q = CPPA_QUESTIONS[qid];
+      const ans = d.answers[qid]||{};
+      const nist = NIST_CROSSWALK[qid]||{};
+      rows.push([comp.name, qid, q?q.text:'', q?q.risk:'', ans.response||'', nist.csf||'', nist.nist||'', ans.notes||'']);
+    });
+  });
+  downloadCSV(slugify(client.name)+'-cppa-audit.csv', rows);
+}
+
 // =====================================================================
 // DATA STORE
 // =====================================================================
