@@ -68,8 +68,27 @@ install_docker() {
         info "Updating system packages (this may take a minute)..."
         sudo apt-get update -y
         sudo apt-get upgrade -y
-        info "Installing Docker via get.docker.com..."
-        curl -fsSL https://get.docker.com | sudo sh
+
+        # Detect distro — get.docker.com breaks on Kali (kali-rolling has no Docker CE release)
+        local distro=""
+        if [[ -f /etc/os-release ]]; then
+            distro=$(. /etc/os-release && echo "${ID:-}")
+        fi
+
+        if [[ "$distro" == "kali" ]]; then
+            info "Kali Linux detected — installing docker.io from Kali repos..."
+            sudo apt-get install -y docker.io
+        elif command -v apt-get &>/dev/null; then
+            info "Installing Docker via get.docker.com..."
+            curl -fsSL https://get.docker.com | sudo sh
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y docker
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y docker
+        else
+            die "Unsupported package manager. Install Docker manually: https://docs.docker.com/get-docker/"
+        fi
+
         info "Enabling Docker service..."
         sudo systemctl enable --now docker
         info "Adding $USER to docker group..."
@@ -77,7 +96,6 @@ install_docker() {
         ok "Docker installed."
         echo ""
         info "Re-launching with docker group active..."
-        # Re-exec this script inside the docker group so permissions apply immediately
         SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
         exec sg docker -c "export OLYMPUS_DOCKER_READY=1; exec bash '$SCRIPT_PATH'"
     elif [[ "$OS" == "macos" ]]; then
@@ -142,14 +160,19 @@ check_docker() {
 # ── Docker Compose Installation ──────────────────────────────
 install_compose() {
     echo ""
-    info "Installing Docker Compose plugin..."
+    info "Installing Docker Compose..."
     if command -v apt-get &>/dev/null; then
         sudo apt-get update -y
-        sudo apt-get install -y docker-compose-plugin
-    elif command -v yum &>/dev/null; then
-        sudo yum install -y docker-compose-plugin
+        # docker-compose-plugin exists on Docker CE; docker.io (Kali) uses standalone docker-compose
+        if apt-cache show docker-compose-plugin &>/dev/null 2>&1; then
+            sudo apt-get install -y docker-compose-plugin
+        else
+            sudo apt-get install -y docker-compose
+        fi
     elif command -v dnf &>/dev/null; then
         sudo dnf install -y docker-compose-plugin
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y docker-compose-plugin
     else
         # Fallback: install standalone binary
         info "Downloading Docker Compose binary..."
