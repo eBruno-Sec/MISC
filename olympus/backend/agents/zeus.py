@@ -41,7 +41,8 @@ class Zeus(BaseAgent):
     async def execute(self, target: str, context: dict = None) -> dict:
         mode = (context or {}).get("mode", "passive")
         scope = (context or {}).get("scope", "")
-        ctx = {}
+        scope_rules = (context or {}).get("scope_rules", {})
+        ctx = {"scope_rules": scope_rules}
 
         await self._set_phase(MissionStatus.PLANNING, "zeus")
         await self.log(f"⚡ OLYMPUS ONLINE — Target: {target} | Mode: {mode.upper()}", "info")

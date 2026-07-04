@@ -25,12 +25,20 @@ OLYMPUS is a self-hosted, Docker-native security assessment platform built aroun
 ## Quick Start
 
 ```bash
+# Clone olympus only (no other MISC projects)
+git clone --filter=blob:none --sparse https://github.com/eBruno-Sec/MISC.git
+cd MISC && git sparse-checkout set olympus && cd olympus
+./setup.sh
+```
+
+```bash
+# Or clone the full MISC repo if you want everything
 git clone https://github.com/eBruno-Sec/MISC.git
 cd MISC/olympus
 ./setup.sh
 ```
 
-That is it. The script handles everything else.
+The script handles everything else.
 
 ---
 
@@ -107,6 +115,33 @@ Edit `.env` before starting. All values have safe defaults for local use.
 | `SECRET_KEY` | `change-me-in-production` | **Yes, change for production** | FastAPI session secret |
 
 > **Security note:** The default DB password and secret key are fine for local use. Change them before exposing OLYMPUS to any network.
+
+---
+
+## Scope Upload
+
+OLYMPUS accepts program scope files from bug bounty platforms directly in the mission launch form. In-scope and out-of-scope rules are enforced inside HERMES (subdomain filtering) and ARES (target filtering before scanning).
+
+**Supported formats:**
+
+| Platform | Format | Detection |
+|---|---|---|
+| HackerOne | CSV with `asset_identifier` and `eligible_for_bounty` columns | Auto |
+| Bugcrowd | CSV with `target` and `category` columns | Auto |
+| Generic | Plain text, one target per line. Prefix `-` to exclude | Auto |
+| Generic CSV | Two columns: `scope_marker, target` | Auto |
+
+**HackerOne export:** Program page → Scope → Export CSV → upload to OLYMPUS.
+
+**Plain text example:**
+```
+example.com
+*.example.com
+- internal.example.com
+- staging.example.com
+```
+
+Parsed scope is shown as a preview before launch so you can confirm what is in and out before the mission starts.
 
 ---
 

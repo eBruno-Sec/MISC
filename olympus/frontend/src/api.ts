@@ -19,10 +19,10 @@ export const api = {
 
   getMission: (id: string) => req<Mission>(`/missions/${id}`),
 
-  createMission: (target: string, mode: MissionMode, scope: string) =>
+  createMission: (target: string, mode: MissionMode, scope: string, scope_rules?: object) =>
     req<{ id: string; target: string; status: string }>('/missions', {
       method: 'POST',
-      body: JSON.stringify({ target, mode, scope }),
+      body: JSON.stringify({ target, mode, scope, scope_rules: scope_rules ?? {} }),
     }),
 
   deleteMission: (id: string) =>
@@ -33,6 +33,19 @@ export const api = {
       `/missions/${missionId}/approvals/${approvalId}/resolve`,
       { method: 'POST', body: JSON.stringify({ approved }) }
     ),
+
+
+  parseScope: async (input: File | string): Promise<import('./types').ParsedScope> => {
+    const form = new FormData()
+    if (typeof input === 'string') {
+      form.append('text', input)
+    } else {
+      form.append('file', input)
+    }
+    const res = await fetch(`${BASE}/scope/parse`, { method: 'POST', body: form })
+    if (!res.ok) throw new Error('Scope parse failed')
+    return res.json()
+  },
 
   getReportUrl: (missionId: string) => `${BASE}/missions/${missionId}/report`,
 }

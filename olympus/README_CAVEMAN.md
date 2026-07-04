@@ -78,6 +78,29 @@ Script will:
 
 ---
 
+## SCOPE UPLOAD
+
+You have a list from HackerOne or Bugcrowd that says what is allowed and what is not. You can upload it.
+
+**Step 1:** In the launch screen, look for the SCOPE RULES section.
+
+**Step 2:** Click UPLOAD CSV and drop your file. Or click PASTE and type targets yourself.
+
+**Step 3:** You will see a green list (allowed) and red list (not allowed).
+
+**Step 4:** Launch mission. OLYMPUS will only touch the green targets.
+
+**Plain text format if you do it manually:**
+```
+example.com
+*.example.com
+- do-not-touch.example.com
+```
+
+Lines starting with `-` are excluded. Everything else is fair game.
+
+---
+
 ## HOW TO USE
 
 **Step 1:** Go to http://localhost:3000

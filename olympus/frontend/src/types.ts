@@ -48,6 +48,7 @@ export interface Mission {
   findings: Finding[]
   logs: LogEntry[]
   pending_approvals: ApprovalRequest[]
+  scope_rules: { in_scope: ScopeRule[]; out_of_scope: ScopeRule[] } | null
 }
 
 export interface MissionSummary {
@@ -58,6 +59,20 @@ export interface MissionSummary {
   current_phase: string | null
   created_at: string
   completed_at: string | null
+}
+
+
+export interface ScopeRule {
+  identifier: string
+  type: string
+}
+
+export interface ParsedScope {
+  in_scope: ScopeRule[]
+  out_of_scope: ScopeRule[]
+  format_detected: string
+  total_in: number
+  total_out: number
 }
 
 // WebSocket event types

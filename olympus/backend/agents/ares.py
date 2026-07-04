@@ -19,10 +19,39 @@ class Ares(BaseAgent):
     display_name = "ARES"
     role = "Active Scanning & Vuln Assessment"
 
+
+    def _scope_filter(self, hosts: list, scope_rules: dict) -> list:
+        in_rules = scope_rules.get("in_scope", [])
+        out_rules = scope_rules.get("out_of_scope", [])
+
+        def matches(host: str, rules: list) -> bool:
+            h = host.lower()
+            for rule in rules:
+                rid = rule.get("identifier", "").lower().lstrip("*.")
+                if not rid:
+                    continue
+                if h == rid or h.endswith("." + rid):
+                    return True
+            return False
+
+        result = []
+        for h in hosts:
+            host = h if isinstance(h, str) else h.get("host", "")
+            if out_rules and matches(host, out_rules):
+                continue
+            if in_rules and not matches(host, in_rules):
+                continue
+            result.append(h)
+        return result
+
     async def execute(self, target: str, context: dict = None) -> dict:
         hermes = (context or {}).get("hermes", {})
         live_hosts = hermes.get("live_hosts", [])
         domain = hermes.get("domain", target)
+        scope_rules = (context or {}).get("scope_rules", {})
+        if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+            live_hosts = self._scope_filter(live_hosts, scope_rules)
+            await self.log(f"Scope enforced: {len(live_hosts)} targets in scope", "info")
 
         if not live_hosts:
             await self.log("No live hosts from Hermes. Scanning primary target only.", "warn")

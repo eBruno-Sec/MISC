@@ -15,6 +15,7 @@ class MissionCreate(BaseModel):
     target: str
     scope: str = ""
     mode: str = "passive"
+    scope_rules: dict = {}
 
 
 class ApprovalResolve(BaseModel):
@@ -33,6 +34,7 @@ async def create_mission(
         scope=body.scope,
         mode=body.mode,
         status=MissionStatus.PENDING,
+        scope_rules=body.scope_rules,
     )
     session.add(mission)
     await session.commit()
@@ -44,6 +46,7 @@ async def create_mission(
         body.target.strip(),
         body.mode,
         body.scope,
+        body.scope_rules,
         request.app.state.approval_gates,
         request.app.state.approval_results,
     )
@@ -200,6 +203,7 @@ async def _run_mission(
     target: str,
     mode: str,
     scope: str,
+    scope_rules: dict,
     approval_gates: dict,
     approval_results: dict,
 ):
@@ -213,7 +217,7 @@ async def _run_mission(
             approval_results=approval_results,
         )
         try:
-            await zeus.execute(target, {"mode": mode, "scope": scope})
+            await zeus.execute(target, {"mode": mode, "scope": scope, "scope_rules": scope_rules})
         except Exception as e:
             from sqlalchemy import update
             await session.execute(

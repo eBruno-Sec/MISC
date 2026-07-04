@@ -33,6 +33,7 @@ class Mission(Base):
     mode = Column(String, default="passive")
     current_phase = Column(String, nullable=True)
     context = Column(JSON, default=dict)
+    scope_rules = Column(JSON, default=dict)  # {"in_scope": [...], "out_of_scope": [...]}
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)

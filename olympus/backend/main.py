@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.database import engine, Base
-from routers import missions, ws
+from routers import missions, ws, scope
 
 
 @asynccontextmanager
@@ -37,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(missions.router, prefix="/api/missions", tags=["missions"])
+app.include_router(scope.router, prefix="/api/scope", tags=["scope"])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
 
 

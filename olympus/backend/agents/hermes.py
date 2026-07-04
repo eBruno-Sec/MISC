@@ -56,6 +56,37 @@ class Hermes(BaseAgent):
         target = target.split("/")[0].split(":")[0]
         return target.lower().strip()
 
+
+    def _apply_scope(self, hosts: list, scope_rules: dict) -> list:
+        """Filter a list of hostnames/dicts against scope_rules."""
+        in_rules = scope_rules.get("in_scope", [])
+        out_rules = scope_rules.get("out_of_scope", [])
+        if not in_rules and not out_rules:
+            return hosts
+
+        def matches(host: str, rules: list) -> bool:
+            h = host.lower().lstrip("*.")
+            for rule in rules:
+                rid = rule.get("identifier", "").lower().lstrip("*.")
+                rtype = rule.get("type", "")
+                if not rid:
+                    continue
+                if rtype in ("url",):
+                    rid = rid.split("//", 1)[-1].split("/")[0]
+                if h == rid or h.endswith("." + rid) or rid.endswith("." + h):
+                    return True
+            return False
+
+        result = []
+        for host in hosts:
+            h = host if isinstance(host, str) else host.get("host", "")
+            if out_rules and matches(h, out_rules):
+                continue
+            if in_rules and not matches(h, in_rules):
+                continue
+            result.append(host)
+        return result
+
     async def execute(self, target: str, context: dict = None) -> dict:
         domain = self._extract_domain(target)
         await self.log(f"Passive recon initiated on {domain}", "info")
@@ -80,6 +111,16 @@ class Hermes(BaseAgent):
         result["subdomains"] = subs
         await self.log(f"{len(subs)} unique subdomains discovered via CT logs", "success" if subs else "warn")
 
+        # Apply scope rules if provided
+        scope_rules = (context or {}).get("scope_rules", {})
+        if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+            filtered = self._apply_scope(subs, scope_rules)
+            removed = len(subs) - len(filtered)
+            if removed:
+                await self.log(f"Scope filter: removed {removed} out-of-scope subdomains", "info")
+            subs = filtered
+            result["subdomains"] = subs
+
         if subs:
             result["subdomain_categories"] = self._categorize_subdomains(subs)
             await self._flag_sensitive_subdomains(domain, result["subdomain_categories"])
@@ -90,8 +131,11 @@ class Hermes(BaseAgent):
         all_hosts = list(set(subs + [domain]))
         if all_hosts:
             await self.log(f"Probing {len(all_hosts)} hosts for liveness", "info")
-            result["live_hosts"] = await self._live_detection(all_hosts[:150])
-            await self.log(f"{len(result['live_hosts'])} live hosts confirmed", "success")
+            live = await self._live_detection(all_hosts[:150])
+            if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+                live = self._apply_scope(live, scope_rules)
+            result["live_hosts"] = live
+            await self.log(f"{len(result['live_hosts'])} live hosts confirmed (scope-filtered)", "success")
 
         if result["live_hosts"]:
             await self.log("Technology fingerprinting on live hosts", "info")
