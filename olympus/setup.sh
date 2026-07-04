@@ -65,26 +65,44 @@ detect_os() {
 install_docker() {
     echo ""
     if [[ "$OS" == "linux" ]]; then
-        info "Updating system packages (this may take a minute)..."
+        # Remove any stale/broken Docker apt source a previous failed run may have left.
+        # get.docker.com writes kali-rolling into docker.list which does not exist upstream.
+        sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc 2>/dev/null || true
+
+        info "Updating system packages..."
         sudo apt-get update -y
         sudo apt-get upgrade -y
 
-        # Detect distro — get.docker.com breaks on Kali (kali-rolling has no Docker CE release)
-        local distro=""
-        if [[ -f /etc/os-release ]]; then
-            distro=$(. /etc/os-release && echo "${ID:-}")
-        fi
-
-        if [[ "$distro" == "kali" ]]; then
-            info "Kali Linux detected — installing docker.io from Kali repos..."
-            sudo apt-get install -y docker.io
-        elif command -v apt-get &>/dev/null; then
-            info "Installing Docker via get.docker.com..."
-            curl -fsSL https://get.docker.com | sudo sh
+        if command -v apt-get &>/dev/null; then
+            # Determine distro and codename for the Docker CE apt repo.
+            local distro="" codename=""
+            if [[ -f /etc/os-release ]]; then
+                distro=$(. /etc/os-release && echo "${ID:-debian}")
+                codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")
+            fi
+            # Kali has ID=kali and no VERSION_CODENAME.
+            # Docker does not publish a kali-rolling release.
+            # Kali is based on Debian bookworm — point at that instead.
+            if [[ "$distro" == "kali" || -z "$codename" ]]; then
+                distro="debian"
+                codename="bookworm"
+                info "Kali Linux detected — using Debian bookworm Docker CE repo..."
+            fi
+            info "Installing Docker CE + Compose plugin (${distro} / ${codename})..."
+            sudo install -m 0755 -d /etc/apt/keyrings
+            sudo curl -fsSL "https://download.docker.com/linux/${distro}/gpg"                 -o /etc/apt/keyrings/docker.asc
+            sudo chmod a+r /etc/apt/keyrings/docker.asc
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${distro} ${codename} stable"                 | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -y
+            sudo apt-get install -y                 docker-ce docker-ce-cli containerd.io                 docker-buildx-plugin docker-compose-plugin
         elif command -v dnf &>/dev/null; then
-            sudo dnf install -y docker
+            sudo dnf install -y dnf-plugins-core
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         elif command -v yum &>/dev/null; then
-            sudo yum install -y docker
+            sudo yum install -y yum-utils
+            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         else
             die "Unsupported package manager. Install Docker manually: https://docs.docker.com/get-docker/"
         fi
