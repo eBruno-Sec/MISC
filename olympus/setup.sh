@@ -13,6 +13,9 @@ die()   { echo -e "${RED}  ✕ ${NC}$*"; exit 1; }
 sep()   { echo -e "${DIM}  $(printf '─%.0s' {1..60})${NC}"; }
 COMPOSE_CMD=""
 
+# Guard: set by install_docker() re-exec to skip re-prompt
+OLYMPUS_DOCKER_READY="${OLYMPUS_DOCKER_READY:-0}"
+
 banner() {
 cat << 'BANNER'
 
@@ -58,33 +61,108 @@ detect_os() {
     fi
 }
 
+# ── Docker Installation ──────────────────────────────────────
+install_docker() {
+    echo ""
+    if [[ "$OS" == "linux" ]]; then
+        info "Updating system packages (this may take a minute)..."
+        sudo apt-get update -y
+        sudo apt-get upgrade -y
+        info "Installing Docker via get.docker.com..."
+        curl -fsSL https://get.docker.com | sudo sh
+        info "Enabling Docker service..."
+        sudo systemctl enable --now docker
+        info "Adding $USER to docker group..."
+        sudo usermod -aG docker "$USER"
+        ok "Docker installed."
+        echo ""
+        info "Re-launching with docker group active..."
+        # Re-exec this script inside the docker group so permissions apply immediately
+        SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+        exec sg docker -c "export OLYMPUS_DOCKER_READY=1; exec bash '$SCRIPT_PATH'"
+    elif [[ "$OS" == "macos" ]]; then
+        if command -v brew &>/dev/null; then
+            info "Installing Docker Desktop via Homebrew..."
+            brew install --cask docker
+            echo ""
+            warn "Docker Desktop installed. Launch Docker.app, wait for it to start, then re-run:"
+            echo "       ./setup.sh"
+            exit 0
+        else
+            echo ""
+            echo "  Install Docker Desktop for Mac:"
+            echo "    https://docs.docker.com/desktop/mac/install/"
+            die "Install Docker Desktop and re-run this script."
+        fi
+    else
+        echo ""
+        echo "  Install Docker Desktop for Windows:"
+        echo "    https://docs.docker.com/desktop/windows/install/"
+        die "Auto-install not supported on Windows. Install Docker Desktop and re-run."
+    fi
+}
+
 # ── Docker Check ─────────────────────────────────────────────
 check_docker() {
     if ! command -v docker &>/dev/null; then
         warn "Docker not found."
         echo ""
-        case $OS in
-            linux)
-                echo "  Install Docker on Linux:"
-                echo "    curl -fsSL https://get.docker.com | sh"
-                echo "    sudo usermod -aG docker \$USER && newgrp docker"
-                ;;
-            macos)
-                echo "  Install Docker Desktop for Mac:"
-                echo "    https://docs.docker.com/desktop/mac/install/"
-                ;;
-            windows)
-                echo "  Install Docker Desktop for Windows:"
-                echo "    https://docs.docker.com/desktop/windows/install/"
-                echo "  (Requires WSL2 enabled)"
-                ;;
-        esac
-        echo ""
-        die "Install Docker and re-run this script."
+        read -rp "  Install Docker now? System will update + upgrade + install. [Y/n]: " ans
+        ans="${ans:-Y}"
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+            install_docker
+        else
+            echo ""
+            case $OS in
+                linux)
+                    echo "  Manual install:"
+                    echo "    curl -fsSL https://get.docker.com | sh"
+                    echo "    sudo usermod -aG docker \$USER && newgrp docker"
+                    ;;
+                macos)
+                    echo "  https://docs.docker.com/desktop/mac/install/"
+                    ;;
+                *)
+                    echo "  https://docs.docker.com/get-docker/"
+                    ;;
+            esac
+            echo ""
+            die "Install Docker and re-run this script."
+        fi
     fi
     local ver
-    ver=$(docker --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
-    ok "Docker $ver"
+    ver=$(docker --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    if [[ "$OLYMPUS_DOCKER_READY" == "1" ]]; then
+        ok "Docker $ver (just installed)"
+    else
+        ok "Docker $ver"
+    fi
+}
+
+# ── Docker Compose Installation ──────────────────────────────
+install_compose() {
+    echo ""
+    info "Installing Docker Compose plugin..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -y
+        sudo apt-get install -y docker-compose-plugin
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y docker-compose-plugin
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y docker-compose-plugin
+    else
+        # Fallback: install standalone binary
+        info "Downloading Docker Compose binary..."
+        local compose_ver="v2.27.0"
+        local arch
+        arch=$(uname -m)
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        sudo curl -SL \
+            "https://github.com/docker/compose/releases/download/${compose_ver}/docker-compose-linux-${arch}" \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    fi
+    ok "Docker Compose installed."
 }
 
 # ── Docker Compose Check ─────────────────────────────────────
@@ -96,9 +174,23 @@ detect_compose() {
     else
         warn "Docker Compose not found."
         echo ""
-        echo "  Install: https://docs.docker.com/compose/install/"
-        echo ""
-        die "Install Docker Compose and re-run this script."
+        read -rp "  Install Docker Compose now? [Y/n]: " ans
+        ans="${ans:-Y}"
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+            install_compose
+            # Re-check
+            if docker compose version &>/dev/null 2>&1; then
+                COMPOSE_CMD="docker compose"
+            elif command -v docker-compose &>/dev/null; then
+                COMPOSE_CMD="docker-compose"
+            else
+                die "Docker Compose install failed. Check errors above."
+            fi
+        else
+            echo ""
+            echo "  Install: https://docs.docker.com/compose/install/"
+            die "Docker Compose required. Install it and re-run."
+        fi
     fi
     local ver
     ver=$($COMPOSE_CMD version --short 2>/dev/null || echo "unknown")
@@ -107,7 +199,6 @@ detect_compose() {
 
 # ── Resource Check ───────────────────────────────────────────
 check_resources() {
-    # Docker memory (warn if <2GB available)
     local mem_gb
     mem_gb=$(docker system info --format '{{.MemTotal}}' 2>/dev/null || echo 0)
     mem_gb=$(( mem_gb / 1073741824 ))
@@ -115,7 +206,6 @@ check_resources() {
         warn "Docker has only ${mem_gb}GB RAM. Recommend 2GB+."
     fi
 
-    # Disk space (warn if <4GB)
     local free_gb
     free_gb=$(df -BG . 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G' || echo 99)
     if [[ $free_gb -lt 4 ]]; then
@@ -157,7 +247,6 @@ setup_env() {
         echo ""
         read -rp "  Enter API key (sk-ant-...) or Enter to skip AI features: " api_key
         if [[ -n "$api_key" ]]; then
-            # Cross-platform sed
             if sed --version &>/dev/null 2>&1; then
                 sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$api_key|" .env
             else
@@ -185,7 +274,6 @@ start_containers() {
     fi
 
     $COMPOSE_CMD up --build -d
-
     ok "Containers started"
 }
 
