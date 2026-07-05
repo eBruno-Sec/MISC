@@ -1620,7 +1620,7 @@ function renderEvidenceTable() {
   tbody.innerHTML = items.map(function(e, i) {
     return '<tr>'
       + '<td><span class="badge b-info" style="font-size:0.6rem">' + esc(e.type.replace(/_/g,' ')) + '</span></td>'
-      + '<td><strong style="color:var(--text-bright)">' + esc(e.name) + '</strong>' + (e.version ? ' v' + e.version : '') + '</td>'
+      + '<td><strong style="color:var(--text-bright)">' + esc(e.name) + '</strong>' + (e.version ? ' v' + esc(e.version) : '') + '</td>'
       + '<td style="font-size:0.78rem">' + esc(e.note || '') + '</td>'
       + '<td style="font-size:0.72rem;color:var(--text-dim)">' + e.ts.split('T')[0] + '</td>'
       + '<td><button class="icon-btn del" onclick="deleteEvidence(' + i + ')">&#10005;</button></td>'
