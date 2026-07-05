@@ -640,7 +640,7 @@ input, select, textarea { font-family: var(--mono); }
                     <button class="section-action primary" onclick="openModal('evidence-modal')">+ Add Evidence</button>
                   </div>
                   <table class="tbl" id="evidence-table">
-                    <thead><tr><th>Type</th><th>Document / Reference</th><th>Note</th><th>Logged</th><th></th></tr></thead>
+                    <thead><tr><th>Type</th><th>Document / Reference</th><th>Location</th><th>Note</th><th>Logged</th><th></th></tr></thead>
                     <tbody id="evidence-tbody"></tbody>
                   </table>
                 </div>
@@ -1038,7 +1038,7 @@ input, select, textarea { font-family: var(--mono); }
       </div>
       <div class="form-field"><label class="form-label">Document Name / Title</label><input class="form-input" id="ev-name" placeholder="System Security Plan v2.1"></div>
       <div class="form-field"><label class="form-label">Version (if applicable)</label><input class="form-input" id="ev-version" placeholder="v2.1"></div>
-      <div class="form-field"><label class="form-label">URL or File Path (if applicable)</label><input class="form-input" id="ev-url" placeholder="/shared/docs/ssp.pdf or https://..."></div>
+      <div class="form-field"><label class="form-label">Location (page/line, URL, or file path)</label><input class="form-input" id="ev-url" placeholder="/shared/docs/ssp.pdf or https://..."></div>
       <div class="form-field"><label class="form-label">Review Note</label><textarea class="form-textarea" id="ev-note" placeholder="Describe what was reviewed and findings..."></textarea></div>
     </div>
     <div class="modal-footer">
@@ -1643,11 +1643,12 @@ function renderEvidenceTable() {
   var items = d.evidence[cppaActiveComponent] || [];
   var tbody = document.getElementById('evidence-tbody');
   if (!tbody) return;
-  if (!items.length) { tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">No evidence logged yet.</td></tr>'; return; }
+  if (!items.length) { tbody.innerHTML = '<tr><td colspan="6" class="tbl-empty">No evidence logged yet.</td></tr>'; return; }
   tbody.innerHTML = items.map(function(e, i) {
     return '<tr>'
       + '<td><span class="badge b-info" style="font-size:0.6rem">' + esc(e.type.replace(/_/g,' ')) + '</span></td>'
       + '<td><strong style="color:var(--text-bright)">' + esc(e.name) + '</strong>' + (e.version ? ' v' + esc(e.version) : '') + '</td>'
+      + '<td style="font-size:0.73rem;color:var(--accent)">' + esc(e.url || '') + '</td>'
       + '<td style="font-size:0.78rem">' + esc(e.note || '') + '</td>'
       + '<td style="font-size:0.72rem;color:var(--text-dim)">' + e.ts.split('T')[0] + '</td>'
       + '<td><button class="icon-btn del" onclick="deleteEvidence(' + i + ')">&#10005;</button></td>'
