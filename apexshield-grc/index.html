@@ -1730,14 +1730,16 @@ function calcCPPAComponentScore(compId, d) {
   if (app && app.applicable === false) return { score:null, status:'na', gaps:[] };
   var score = 100;
   var gaps  = [];
-  comp.questions.forEach(function(qid) {
+  // Include base questions AND any surfaced branch questions
+  var allQids = getAllQidsForComponent(comp, d);
+  allQids.forEach(function(qid) {
     var q   = CPPA_QUESTIONS[qid];
     if (!q) return;
     var ans = d.answers[qid];
     if (!ans || !ans.response) return;
     var impact = RISK_SCORE[q.risk];
     if (!impact) return;
-    if (ans.response === 'No')      { score += impact.No;      gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'No' }); }
+    if (ans.response === 'No')           { score += impact.No;      gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'No' }); }
     else if (ans.response === 'Partial') { score += impact.Partial; gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'Partial' }); }
   });
   score = Math.max(0, score);
