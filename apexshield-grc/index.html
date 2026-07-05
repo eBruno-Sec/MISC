@@ -1728,21 +1728,27 @@ function calcCPPAComponentScore(compId, d) {
   if (!comp) return { score:0, status:'red', gaps:[] };
   var app = d.applicability[compId];
   if (app && app.applicable === false) return { score:null, status:'na', gaps:[] };
-  var score = 100;
-  var gaps  = [];
-  // Include base questions AND any surfaced branch questions
+  var weights = { Critical:10, High:7, Medium:5, Low:3 };
+  var possible = 0;
+  var earned   = 0;
+  var gaps     = [];
+  var answered = 0;
   var allQids = getAllQidsForComponent(comp, d);
   allQids.forEach(function(qid) {
     var q   = CPPA_QUESTIONS[qid];
     if (!q) return;
     var ans = d.answers[qid];
     if (!ans || !ans.response) return;
-    var impact = RISK_SCORE[q.risk];
-    if (!impact) return;
-    if (ans.response === 'No')           { score += impact.No;      gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'No' }); }
-    else if (ans.response === 'Partial') { score += impact.Partial; gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'Partial' }); }
+    if (ans.response === 'Not Applicable') return;
+    var w = weights[q.risk] || 5;
+    possible += w;
+    answered++;
+    if (ans.response === 'No')           { gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'No' }); }
+    else if (ans.response === 'Partial') { earned += w * 0.5; gaps.push({ qid:qid, risk:q.risk, text:q.text, response:'Partial' }); }
+    else                                 { earned += w; }
   });
-  score = Math.max(0, score);
+  if (answered === 0) return { score:null, status:'unscored', gaps:[] };
+  var score  = possible > 0 ? Math.round((earned / possible) * 100) : 0;
   var status = score >= 80 ? 'green' : score >= 50 ? 'yellow' : 'red';
   return { score:score, status:status, gaps:gaps };
 }
