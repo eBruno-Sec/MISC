@@ -1440,7 +1440,7 @@ function renderQuestion(qid, d) {
   var nistBadge  = nist ? '<span style="font-size:0.62rem;color:var(--text-dim)">' + nist.nist + '</span>' : '';
   var notesHtml  = '';
   if (ans.response) {
-    notesHtml = '<textarea onchange="recordCPPANote(\'' + qid + '\',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;font-size:0.78rem;font-family:var(--mono);resize:vertical;min-height:48px;margin-top:0.25rem" placeholder="Auditor notes (max 2000 chars)" maxlength="2000">' + (ans.notes || '') + '</textarea>';
+    notesHtml = '<textarea onchange="recordCPPANote(\'' + qid + '\',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;font-size:0.78rem;font-family:var(--mono);resize:vertical;min-height:48px;margin-top:0.25rem" placeholder="Auditor notes (max 2000 chars)" maxlength="2000">' + esc(ans.notes || '') + '</textarea>';
   }
   return '<div style="border:1px solid var(--border);margin-bottom:0.75rem;overflow:hidden">'
     + '<div style="padding:0.85rem 1rem;background:' + (ans.response ? 'var(--surface2)' : 'var(--surface)') + '">'
@@ -1610,9 +1610,9 @@ function renderEvidenceTable() {
   if (!items.length) { tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">No evidence logged yet.</td></tr>'; return; }
   tbody.innerHTML = items.map(function(e, i) {
     return '<tr>'
-      + '<td><span class="badge b-info" style="font-size:0.6rem">' + e.type.replace(/_/g,' ') + '</span></td>'
-      + '<td><strong style="color:var(--text-bright)">' + e.name + '</strong>' + (e.version ? ' v' + e.version : '') + '</td>'
-      + '<td style="font-size:0.78rem">' + (e.note || '') + '</td>'
+      + '<td><span class="badge b-info" style="font-size:0.6rem">' + esc(e.type.replace(/_/g,' ')) + '</span></td>'
+      + '<td><strong style="color:var(--text-bright)">' + esc(e.name) + '</strong>' + (e.version ? ' v' + e.version : '') + '</td>'
+      + '<td style="font-size:0.78rem">' + esc(e.note || '') + '</td>'
       + '<td style="font-size:0.72rem;color:var(--text-dim)">' + e.ts.split('T')[0] + '</td>'
       + '<td><button class="icon-btn del" onclick="deleteEvidence(' + i + ')">&#10005;</button></td>'
       + '</tr>';
@@ -1658,11 +1658,11 @@ function renderTestingTable() {
   if (!items.length) { tbody.innerHTML = '<tr><td colspan="6" class="tbl-empty">No tests logged. At least one test required to mark complete.</td></tr>'; return; }
   tbody.innerHTML = items.map(function(t, i) {
     return '<tr>'
-      + '<td><strong style="color:var(--text-bright)">' + t.name + '</strong></td>'
-      + '<td style="font-size:0.78rem">' + (t.methodology || '') + '</td>'
+      + '<td><strong style="color:var(--text-bright)">' + esc(t.name) + '</strong></td>'
+      + '<td style="font-size:0.78rem">' + esc(t.methodology || '') + '</td>'
       + '<td><span class="badge ' + (rc[t.result] || 'b-info') + '">' + t.result + '</span></td>'
       + '<td style="font-size:0.72rem">' + (t.date || '') + '</td>'
-      + '<td style="font-size:0.78rem">' + (t.findings || '') + '</td>'
+      + '<td style="font-size:0.78rem">' + esc(t.findings || '') + '</td>'
       + '<td><button class="icon-btn del" onclick="deleteTest(' + i + ')">&#10005;</button></td>'
       + '</tr>';
   }).join('');
@@ -1705,10 +1705,10 @@ function renderInterviewTable() {
   if (!items.length) { tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">No interviews logged.</td></tr>'; return; }
   tbody.innerHTML = items.map(function(iv, i) {
     return '<tr>'
-      + '<td><strong style="color:var(--text-bright)">' + iv.title + '</strong></td>'
+      + '<td><strong style="color:var(--text-bright)">' + esc(iv.title) + '</strong></td>'
       + '<td style="font-size:0.72rem">' + (iv.date || '') + '</td>'
-      + '<td style="font-size:0.78rem">' + (iv.topics || '') + '</td>'
-      + '<td style="font-size:0.78rem">' + (iv.findings || '') + '</td>'
+      + '<td style="font-size:0.78rem">' + esc(iv.topics || '') + '</td>'
+      + '<td style="font-size:0.78rem">' + esc(iv.findings || '') + '</td>'
       + '<td><button class="icon-btn del" onclick="deleteInterview(' + i + ')">&#10005;</button></td>'
       + '</tr>';
   }).join('');
@@ -1850,6 +1850,17 @@ const DB = {
   saveClientData(id, d) { this.set('cd_' + id, d); }
 };
 
+// HTML-escape user input before injecting into innerHTML (XSS prevention)
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // =====================================================================
 // AUTH
 // =====================================================================
@@ -1933,7 +1944,7 @@ function renderSidebar() {
     const score = getComplianceScore(c.id);
     const cls = score >= 70 ? 'score-green' : score >= 40 ? 'score-gold' : 'score-red';
     return `<li data-id="${c.id}" onclick="selectClient('${c.id}')" ${currentClient===c.id?'class="active-client"':''}>
-      <span class="client-name">${c.name}</span>
+      <span class="client-name">${esc(c.name)}</span>
       <span class="client-score ${cls}">${score}%</span>
     </li>`;
   }).join('');
@@ -1971,13 +1982,13 @@ function renderDashboard() {
     const val = c.value ? '$' + Number(c.value).toLocaleString() + '/mo' : '';
     return `<div class="client-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.1rem">
-        <div class="cc-name" onclick="goToClient('${c.id}')" style="cursor:pointer;flex:1">${c.name}</div>
+        <div class="cc-name" onclick="goToClient('${c.id}')" style="cursor:pointer;flex:1">${esc(c.name)}</div>
         <div style="display:flex;gap:0.25rem;flex-shrink:0">
           <button class="icon-btn" onclick="editClient('${c.id}')" title="Edit client" style="font-size:0.75rem">✎</button>
           <button class="icon-btn del" onclick="deleteClient('${c.id}')" title="Delete client" style="font-size:0.75rem">✕</button>
         </div>
       </div>
-      <div class="cc-type" onclick="goToClient('${c.id}')" style="cursor:pointer">${c.industry} &middot; ${c.type}${val ? ' &middot; ' + val : ''}</div>
+      <div class="cc-type" onclick="goToClient('${c.id}')" style="cursor:pointer">${esc(c.industry)} &middot; ${esc(c.type)}${val ? ' &middot; ' + val : ''}</div>
       <div class="cc-stats" onclick="goToClient('${c.id}')" style="cursor:pointer">
         <div><div class="cc-stat-val ${crit > 0 ? 'red' : ''}">${crit}</div><div class="cc-stat-lbl">Critical</div></div>
         <div><div class="cc-stat-val ${open > 0 ? 'gold' : 'green'}">${open}</div><div class="cc-stat-lbl">Open</div></div>
@@ -2219,7 +2230,7 @@ function renderControlsList() {
       const nextStatus = { 'Not Assessed': 'Compliant', 'Compliant': 'Non-Compliant', 'Non-Compliant': 'N/A', 'N/A': 'Not Assessed' };
       return `<div class="control-row">
         <div class="control-id">${c.id}</div>
-        <div class="control-name">${c.name}${entry.note ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + entry.note + '</span>' : ''}</div>
+        <div class="control-name">${c.name}${entry.note ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + esc(entry.note) + '</span>' : ''}</div>
         <button class="control-status-btn badge ${statusColors[entry.status]}" onclick="cycleControlStatus('${fw}','${c.id}','${nextStatus[entry.status]}')">${entry.status}</button>
         <button class="control-note-btn" title="Add note" data-fw="${fw}" data-id="${c.id}" onclick="openControlNoteFromBtn(this)">✎</button>
       </div>`;
@@ -2307,9 +2318,9 @@ function renderFindings() {
   if (!f.length) { tbody.innerHTML = '<tr><td colspan="7" class="tbl-empty">No findings yet. Add your first finding.</td></tr>'; return; }
   tbody.innerHTML = f.map((item, i) => `<tr>
     <td style="color:var(--text-dim);font-size:0.72rem">F-${String(i+1).padStart(3,'0')}</td>
-    <td><strong style="color:var(--text-bright)">${item.title}</strong>${item.description ? '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + item.description.substring(0,80) + (item.description.length>80?'...':'') + '</span>' : ''}</td>
+    <td><strong style="color:var(--text-bright)">${esc(item.title)}</strong>${item.description ? '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + esc(item.description.substring(0,80)) + (item.description.length>80?'...':'') + '</span>' : ''}</td>
     <td><span class="badge b-${item.severity.toLowerCase()}">${item.severity}</span></td>
-    <td>${item.asset || ''}</td>
+    <td>${esc(item.asset) || ''}</td>
     <td><span class="badge b-${item.status.toLowerCase().replace(' ','')}">${item.status}</span></td>
     <td style="font-size:0.75rem;color:var(--text-dim)">${item.framework || ''}</td>
     <td style="white-space:nowrap">
@@ -2406,8 +2417,8 @@ function renderPOAM() {
     }
     return `<tr>
       <td style="color:var(--text-dim);font-size:0.72rem">PM-${String(i+1).padStart(3,'0')}</td>
-      <td><strong style="color:var(--text-bright)">${item.weakness}</strong>${item.notes ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + item.notes.substring(0,60) + '</span>' : ''}</td>
-      <td>${item.owner || ''}</td>
+      <td><strong style="color:var(--text-bright)">${esc(item.weakness)}</strong>${item.notes ? '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + esc(item.notes.substring(0,60)) + '</span>' : ''}</td>
+      <td>${esc(item.owner) || ''}</td>
       <td style="font-size:0.75rem">${item.date || ''}</td>
       <td><span class="poam-days ${daysCls}">${daysTxt}</span></td>
       <td><span class="badge b-${item.status.toLowerCase().replace(' ','')}">${item.status}</span></td>
@@ -2500,13 +2511,13 @@ function renderRisk() {
     const scoreColor = score >= 16 ? 'var(--accent2)' : score >= 9 ? '#ff9800' : score >= 4 ? 'var(--gold)' : 'var(--green)';
     const exposure = calcExposure(r);
     return `<tr>
-      <td><strong style="color:var(--text-bright)">${r.asset}</strong></td>
-      <td>${r.threat}</td>
+      <td><strong style="color:var(--text-bright)">${esc(r.asset)}</strong></td>
+      <td>${esc(r.threat)}</td>
       <td style="text-align:center">${r.likelihood}</td>
       <td style="text-align:center">${r.impact}</td>
       <td style="text-align:center"><strong style="color:${scoreColor};font-family:var(--sans);font-weight:800">${score}</strong></td>
       <td><strong style="color:${exposure>10000?'var(--accent2)':exposure>5000?'var(--gold)':'var(--green)'}">${exposure ? '$' + exposure.toLocaleString() : 'N/A'}</strong></td>
-      <td>${r.owner || ''}</td>
+      <td>${esc(r.owner) || ''}</td>
       <td style="white-space:nowrap">
         <button class="icon-btn" onclick="editRisk(${r._i})">✎</button>
         <button class="icon-btn del" onclick="deleteRisk(${r._i})">✕</button>
