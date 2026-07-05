@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://cdnjs.cloudflare.com; object-src 'none'; worker-src 'self' blob: https://cdnjs.cloudflare.com; base-uri 'self'; frame-ancestors 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ApexShield GRC Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -593,6 +593,7 @@ input, select, textarea { font-family: var(--mono); }
               <div class="section-title" id="cppa-client-label"></div>
               <div style="display:flex;gap:0.5rem;align-items:center">
                 <span id="cppa-progress-label" style="font-size:0.75rem;color:var(--text-dim)"></span>
+                <button class="export-btn" onclick="openDocScan()" style="border-color:var(--accent);color:var(--accent)">Scan Documents</button>
                 <button class="export-btn" onclick="exportCPPACSV()">Export CSV</button>
               </div>
             </div>
@@ -1091,6 +1092,31 @@ input, select, textarea { font-family: var(--mono); }
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('interview-modal')">Cancel</button>
       <button class="btn-save" onclick="saveInterview()">Save Interview</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- DOCUMENT SCAN MODAL -->
+<div class="modal-overlay" id="docscan-modal">
+  <div class="modal" style="width:640px;max-width:96vw">
+    <div class="modal-hd">
+      <div class="modal-title">Scan Cybersecurity Documentation</div>
+      <button class="modal-close" onclick="closeModal('docscan-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:0.78rem;color:var(--text-dim);line-height:1.6;margin-bottom:1rem">Upload a policy, SSP, or security document (PDF, DOCX, or TXT). The scan matches its text against all 38 controls and proposes answers with the matched sentence and page or line as evidence. Nothing is finalized. You review every suggestion. Files never leave your browser.</div>
+      <div id="docscan-drop" style="border:1px dashed var(--border);padding:1.5rem;text-align:center;cursor:pointer;transition:border-color 0.2s">
+        <input type="file" id="docscan-file" accept=".pdf,.docx,.txt" style="display:none" multiple>
+        <div style="font-size:0.85rem;color:var(--text-bright);margin-bottom:0.3rem">Drop files here or click to browse</div>
+        <div style="font-size:0.72rem;color:var(--text-dim)">PDF, DOCX, TXT &middot; up to 20MB each</div>
+      </div>
+      <div id="docscan-status" style="margin-top:1rem;font-size:0.8rem;color:var(--accent);display:none"></div>
+      <div id="docscan-results" style="margin-top:1rem;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('docscan-modal')">Close</button>
+      <button class="btn-save" id="docscan-apply" onclick="applyScanSuggestions()" style="display:none">Apply Selected</button>
     </div>
   </div>
 </div>
@@ -1980,6 +2006,289 @@ function exportCPPACSV() {
   });
   downloadCSV(slugify(client ? client.name : 'client') + '-cppa-audit.csv', rows);
 }
+
+
+// ── DOCUMENT SCAN ENGINE ───────────────────────────────────────────────────
+// Client-side only. pdf.js + mammoth loaded lazily from cdnjs on first use.
+
+var DOCSCAN_LIBS = { pdfjs: false, mammoth: false };
+var docScanSuggestions = [];
+
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
+    var s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = function () { reject(new Error('failed to load ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureScanLibs() {
+  if (!DOCSCAN_LIBS.pdfjs) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      DOCSCAN_LIBS.pdfjs = true;
+    }
+  }
+  if (!DOCSCAN_LIBS.mammoth) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+    if (window.mammoth) DOCSCAN_LIBS.mammoth = true;
+  }
+}
+
+// Keyword phrases per question. A match requires a "must" term plus at least one "signal".
+// Negation nearby ("not", "no ", "lack", "without", "do not") downgrades a Yes to a flag.
+var SCAN_KEYWORDS = {
+  'Q-01': { must: ['multi-factor','multifactor','mfa','two-factor','2fa','second factor'], signal: ['authentication','login','sign-in','access','remote','vpn'] },
+  'Q-02': { must: ['password','passphrase'], signal: ['minimum','length','character','complexity','policy','rotate','expire'] },
+  'Q-03': { must: ['encrypt'], signal: ['at rest','database','storage','aes','stored data','disk'] },
+  'Q-04': { must: ['encrypt','tls','transport layer','https','ssl'], signal: ['in transit','transmission','transmit','tls 1.2','tls 1.3','network'] },
+  'Q-05': { must: ['least privilege','least-privilege','minimum necessary','role-based','rbac'], signal: ['access','permission','privilege','authorization'] },
+  'Q-06': { must: ['privileged access','privileged account','pam','admin account','administrative access'], signal: ['elevated','superuser','root','domain admin','vault'] },
+  'Q-07': { must: ['provisioning','deprovisioning','onboarding','offboarding','account lifecycle'], signal: ['terminate','termination','disable account','remove access','joiner','leaver'] },
+  'Q-08': { must: ['physical access','facility access','badge','keycard'], signal: ['server room','data center','datacenter','premises','building','visitor log'] },
+  'Q-09': { must: ['data inventory','data map','information inventory','data flow','records of processing'], signal: ['personal information','classification','data owner','catalog'] },
+  'Q-10': { must: ['asset inventory','hardware inventory','software inventory','asset management'], signal: ['authorized','catalog','cmdb','endpoint','device list'] },
+  'Q-11': { must: ['patch','patching','update management'], signal: ['timely','critical','vulnerability','sla','monthly','security update'] },
+  'Q-12': { must: ['hardening','secure configuration','secure baseline','baseline configuration','cis benchmark','stig'] , signal: ['standard','image','gold image','configuration'] },
+  'Q-13': { must: ['vulnerability scan','vulnerability scanning','vulnerability management'], signal: ['internal','external','remediate','remediation','nessus','qualys','sla'] },
+  'Q-14': { must: ['penetration test','pen test','pentest','red team'], signal: ['annual','remediation','report','findings','ethical hacking'] },
+  'Q-15': { must: ['vulnerability disclosure','bug bounty','responsible disclosure'], signal: ['program','report','researcher','security.txt'] },
+  'Q-16': { must: ['audit log','logging','log management','event log','siem'], signal: ['centralize','retention','monitor','collect','splunk','log review'] },
+  'Q-17': { must: ['intrusion detection','intrusion prevention','ids','ips','network monitoring','anomaly detection'], signal: ['bot','traffic','network','alert','detect'] },
+  'Q-18': { must: ['antivirus','anti-virus','anti-malware','antimalware','endpoint protection','edr'], signal: ['signature','endpoint','malware','defender','crowdstrike','sentinelone'] },
+  'Q-19': { must: ['segmentation','network segment','vlan','subnet','microsegment','zero trust network'], signal: ['isolate','isolation','zone','separate network','dmz'] },
+  'Q-20': { must: ['open port','running service','ports and services','protocol','firewall rule'], signal: ['disable','unnecessary','inventory','close port','least functionality'] },
+  'Q-21': { must: ['threat intelligence','threat awareness','threat feed','cyber threat'], signal: ['current','monitor','advisory','intelligence','emerging threat'] },
+  'Q-22': { must: ['security awareness','security training','cybersecurity training','phishing training'], signal: ['employee','staff','annual','onboarding','workforce','simulation'] },
+  'Q-23': { must: ['secure development','sdlc','secure coding','code review','application security'], signal: ['owasp','static analysis','sast','testing','pipeline'] },
+  'Q-24': { must: ['vendor','third party','third-party','service provider','supplier'], signal: ['oversight','contract','risk assessment','due diligence','review'] },
+  'Q-25': { must: ['data processing agreement','dpa','business associate agreement','baa','vendor contract'], signal: ['third party','service provider','clause','annual review','access control'] },
+  'Q-26': { must: ['retention','data disposal','disposal','destruction','records retention'], signal: ['schedule','purge','delete','shred','sanitize','no longer'] },
+  'Q-27': { must: ['incident response','incident response plan','irp','security incident'], signal: ['plan','procedure','detect','contain','recover','playbook'] },
+  'Q-28': { must: ['tabletop','incident response test','ir exercise','simulation','breach exercise'], signal: ['test','exercise','drill','annual','document result'] },
+  'Q-29': { must: ['business continuity','disaster recovery','bcp','dr plan','backup'], signal: ['rto','rpo','recovery','continuity','failover','restore test'] },
+  // Branch questions
+  'Q-01a': { must: ['mfa','multi-factor'], signal: ['not all','exception','excluded','legacy','some users'] },
+  'Q-01b': { must: ['phishing-resistant','fido2','fido','hardware key','yubikey','webauthn','passkey'], signal: ['mfa','authentication'] },
+  'Q-02a': { must: ['15 character','fifteen character','minimum length','password length'], signal: ['password','minimum','character'] },
+  'Q-02b': { must: ['compromised password','breached password','known password','haveibeenpwned','password blocklist'], signal: ['prevent','check','block'] },
+  'Q-02c': { must: ['account lockout','lockout','failed attempt','failed login'], signal: ['threshold','lock','attempt'] },
+  'Q-22a': { must: ['onboarding training','training at hire','new hire training','orientation'], signal: ['security','onboard','start'] },
+  'Q-22b': { must: ['annual training','yearly training','annual security'], signal: ['training','refresher','annual'] },
+  'Q-22c': { must: ['post-breach training','training after breach','additional training'], signal: ['breach','incident','remedial'] },
+  'Q-26a': { must: ['shred','erase','wipe','degauss','cryptographic erasure','render unreadable'], signal: ['dispose','destruction','media','sanitize'] }
+};
+
+var NEG_TERMS = ['not ', 'no ', 'lack', 'without', 'do not', "don't", 'absence of', 'fails to', 'unable to', 'never', 'missing', 'not yet', 'to be implemented', 'planned', 'currently do not'];
+
+function splitSentences(text) {
+  // keep offsets so we can report location
+  var out = [];
+  var re = /[^.!?\n]+[.!?]?/g; var m;
+  while ((m = re.exec(text)) !== null) {
+    var s = m[0].trim();
+    if (s.length > 8) out.push({ text: s, index: m.index });
+  }
+  return out;
+}
+
+function scanText(pages) {
+  // pages: [{page:1, text:'...'}]  (line-based docs use page:null, we track line no)
+  var results = {}; // qid -> best match
+  Object.keys(SCAN_KEYWORDS).forEach(function (qid) {
+    var kw = SCAN_KEYWORDS[qid];
+    var best = null;
+    pages.forEach(function (pg) {
+      var sentences = splitSentences(pg.text);
+      sentences.forEach(function (sent, si) {
+        var low = ' ' + sent.text.toLowerCase() + ' ';
+        var hasMust = kw.must.some(function (t) { return low.indexOf(t) !== -1; });
+        if (!hasMust) return;
+        var signalHits = kw.signal.filter(function (t) { return low.indexOf(t) !== -1; }).length;
+        var mustHits = kw.must.filter(function (t) { return low.indexOf(t) !== -1; }).length;
+        var negated = NEG_TERMS.some(function (n) { return low.indexOf(n) !== -1; });
+        // Corroboration: need a signal or a second must-term. Exception: an explicit
+        // negation of a must-term ("we do not perform penetration testing") is definitive
+        // evidence the control is absent, so a single must-hit qualifies when negated.
+        if (signalHits === 0 && mustHits < 2 && !negated) return;
+        var score = mustHits * 2 + signalHits;
+        if (!best || score > best.score) {
+          best = {
+            qid: qid, score: score, negated: negated,
+            sentence: sent.text.replace(/\s+/g, ' ').trim(),
+            page: pg.page, line: pg.page === null ? (pg.lineBase + si + 1) : null
+          };
+        }
+      });
+    });
+    if (best) results[qid] = best;
+  });
+  return results;
+}
+
+async function parseFile(file) {
+  var name = file.name.toLowerCase();
+  if (name.endsWith('.txt')) {
+    var txt = await file.text();
+    // line-based: chunk into pseudo-pages of ~40 lines for location reporting
+    var lines = txt.split('\n');
+    var pages = [];
+    for (var i = 0; i < lines.length; i += 40) {
+      pages.push({ page: null, lineBase: i, text: lines.slice(i, i + 40).join('\n') });
+    }
+    return pages.length ? pages : [{ page: null, lineBase: 0, text: txt }];
+  }
+  if (name.endsWith('.docx')) {
+    var buf = await file.arrayBuffer();
+    var res = await window.mammoth.extractRawText({ arrayBuffer: buf });
+    var lines2 = res.value.split('\n');
+    var pages2 = [];
+    for (var j = 0; j < lines2.length; j += 40) {
+      pages2.push({ page: null, lineBase: j, text: lines2.slice(j, j + 40).join('\n') });
+    }
+    return pages2.length ? pages2 : [{ page: null, lineBase: 0, text: res.value }];
+  }
+  if (name.endsWith('.pdf')) {
+    var ab = await file.arrayBuffer();
+    var pdf = await window.pdfjsLib.getDocument({ data: ab }).promise;
+    var pages3 = [];
+    for (var p = 1; p <= pdf.numPages; p++) {
+      var page = await pdf.getPage(p);
+      var content = await page.getTextContent();
+      var text = content.items.map(function (it) { return it.str; }).join(' ');
+      pages3.push({ page: p, text: text });
+    }
+    return pages3;
+  }
+  throw new Error('unsupported file type');
+}
+
+function openDocScan() {
+  if (!currentClient) { notify('Select a client first', true); return; }
+  docScanSuggestions = [];
+  document.getElementById('docscan-status').style.display = 'none';
+  document.getElementById('docscan-results').style.display = 'none';
+  document.getElementById('docscan-results').innerHTML = '';
+  document.getElementById('docscan-apply').style.display = 'none';
+  openModal('docscan-modal');
+}
+
+async function handleScanFiles(files) {
+  var status = document.getElementById('docscan-status');
+  status.style.display = 'block';
+  status.textContent = 'Loading parser libraries...';
+  try {
+    await ensureScanLibs();
+  } catch (e) {
+    status.style.color = 'var(--accent2)';
+    status.textContent = 'Could not load parser libraries. Check network and retry.';
+    return;
+  }
+  var merged = {};
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    if (f.size > 20 * 1024 * 1024) { notify(f.name + ' exceeds 20MB, skipped', true); continue; }
+    status.textContent = 'Scanning ' + f.name + ' (' + (i + 1) + '/' + files.length + ')...';
+    try {
+      var pages = await parseFile(f);
+      var res = scanText(pages);
+      Object.keys(res).forEach(function (qid) {
+        res[qid].file = f.name;
+        if (!merged[qid] || res[qid].score > merged[qid].score) merged[qid] = res[qid];
+      });
+    } catch (e) {
+      notify('Failed to parse ' + f.name, true);
+    }
+  }
+  renderScanResults(merged);
+}
+
+function renderScanResults(merged) {
+  var status = document.getElementById('docscan-status');
+  var box = document.getElementById('docscan-results');
+  var qids = Object.keys(merged).sort(function (a, b) { return merged[b].score - merged[a].score; });
+  docScanSuggestions = qids.map(function (qid) { return merged[qid]; });
+
+  if (!qids.length) {
+    status.style.color = 'var(--text-dim)';
+    status.textContent = 'No control evidence matched. The document may use different terminology, or cover controls not in this framework.';
+    box.style.display = 'none';
+    document.getElementById('docscan-apply').style.display = 'none';
+    return;
+  }
+  status.style.color = 'var(--green)';
+  status.textContent = qids.length + ' control' + (qids.length > 1 ? 's' : '') + ' matched. Review and select which to apply.';
+  box.style.display = 'block';
+  document.getElementById('docscan-apply').style.display = '';
+
+  box.innerHTML = qids.map(function (qid, idx) {
+    var m = merged[qid];
+    var q = CPPA_QUESTIONS[qid];
+    var comp = CPPA_COMPONENTS.find(function (c) { return c.questions.indexOf(qid) !== -1; })
+             || CPPA_COMPONENTS.find(function (c) { return getAllQidsForComponent(c, getCPPAData(currentClient)).indexOf(qid) !== -1; });
+    var proposed = m.negated ? 'Partial' : 'Yes';
+    var propColor = m.negated ? 'var(--gold)' : 'var(--green)';
+    var loc = m.page !== null ? ('p.' + m.page) : ('line ' + m.line);
+    var snippet = m.sentence.length > 200 ? m.sentence.slice(0, 200) + '...' : m.sentence;
+    return '<div style="border:1px solid var(--border);padding:0.85rem 1rem;margin-bottom:0.6rem;background:var(--surface)">'
+      + '<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.45rem">'
+      + '<input type="checkbox" id="scan-ck-' + idx + '" checked style="accent-color:var(--accent);width:15px;height:15px">'
+      + '<span style="font-size:0.68rem;color:var(--accent);font-weight:700">' + qid + '</span>'
+      + '<span style="font-size:0.66rem;color:var(--text-dim)">' + esc(comp ? comp.name : '') + '</span>'
+      + '<span style="font-size:0.62rem;color:var(--text-dim);margin-left:auto">proposes</span>'
+      + '<span class="badge" style="border:1px solid ' + propColor + ';color:' + propColor + '">' + proposed + '</span>'
+      + '</div>'
+      + '<div style="font-size:0.74rem;color:var(--text);line-height:1.5;margin-bottom:0.4rem">' + esc(q ? q.text : '') + '</div>'
+      + '<div style="font-size:0.73rem;color:var(--text-dim);border-left:2px solid var(--border);padding-left:0.6rem;line-height:1.5">'
+      + '&ldquo;' + esc(snippet) + '&rdquo; <span style="color:var(--accent);white-space:nowrap">[' + esc(m.file) + ', ' + loc + ']</span>'
+      + (m.negated ? '<div style="color:var(--gold);margin-top:0.3rem">Negation detected near match. Proposed as Partial for review.</div>' : '')
+      + '</div></div>';
+  }).join('');
+}
+
+function applyScanSuggestions() {
+  var d = getCPPAData(currentClient);
+  if (!d.remediation) d.remediation = {};
+  var applied = 0;
+  docScanSuggestions.forEach(function (m, idx) {
+    var ck = document.getElementById('scan-ck-' + idx);
+    if (!ck || !ck.checked) return;
+    var qid = m.qid;
+    var proposed = m.negated ? 'Partial' : 'Yes';
+    // set the answer (unconfirmed suggestion; auditor can change)
+    if (!d.answers[qid]) d.answers[qid] = {};
+    d.answers[qid].response = proposed;
+    d.answers[qid].suggested = true;
+    d.answers[qid].ts = new Date().toISOString();
+    // attach evidence to the component's locker
+    var comp = CPPA_COMPONENTS.find(function (c) { return c.questions.indexOf(qid) !== -1; });
+    if (!comp) {
+      comp = CPPA_COMPONENTS.find(function (c) { return getAllQidsForComponent(c, d).indexOf(qid) !== -1; });
+    }
+    if (comp) {
+      if (!d.applicability[comp.id]) d.applicability[comp.id] = { applicable: true, ts: new Date().toISOString() };
+      if (!d.evidence[comp.id]) d.evidence[comp.id] = [];
+      var loc = m.page !== null ? ('page ' + m.page) : ('line ' + m.line);
+      d.evidence[comp.id].push({
+        type: 'document_reference',
+        name: 'Auto-matched: ' + m.file,
+        version: '',
+        url: loc,
+        note: 'UNCONFIRMED auto-match for ' + qid + '. Source text: "' + m.sentence + '"',
+        suggested: true,
+        ts: new Date().toISOString()
+      });
+    }
+    applied++;
+  });
+  saveCPPAData(currentClient, d);
+  closeModal('docscan-modal');
+  notify(applied + ' suggestion' + (applied !== 1 ? 's' : '') + ' applied. Review and confirm each in the assessment.');
+  renderCPPAAssessment();
+  renderCPPAScoring();
+}
+
 
 
 // =====================================================================
@@ -2874,6 +3183,22 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(o => o.classList.remove('open'));
 });
+
+// docscan wiring
+(function(){
+  function wire(){
+    var drop = document.getElementById('docscan-drop');
+    var input = document.getElementById('docscan-file');
+    if (!drop || !input) return;
+    drop.addEventListener('click', function(){ input.click(); });
+    input.addEventListener('change', function(){ if (input.files.length) handleScanFiles(input.files); });
+    drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.style.borderColor='var(--accent)'; });
+    drop.addEventListener('dragleave', function(){ drop.style.borderColor='var(--border)'; });
+    drop.addEventListener('drop', function(e){ e.preventDefault(); drop.style.borderColor='var(--border)'; if (e.dataTransfer.files.length) handleScanFiles(e.dataTransfer.files); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+})();
+
 </script>
 </body>
 </html>
