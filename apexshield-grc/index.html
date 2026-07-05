@@ -1802,8 +1802,24 @@ function renderCPPAScoring() {
 
   var critGaps   = allGaps.filter(function(g) { return g.risk === 'Critical'; }).length;
   var highGaps   = allGaps.filter(function(g) { return g.risk === 'High'; }).length;
-  var penaltyEst = (critGaps * 7988 + highGaps * 5000) * 1000;
-  document.getElementById('cppa-penalty').textContent = penaltyEst > 0 ? '$' + penaltyEst.toLocaleString() + '+' : '$0';
+  // Penalty exposure is only meaningful if the business is actually subject to the audit mandate.
+  // Scale the per-violation estimate by the screener's consumer-volume tier, not a flat guess.
+  var sc = d.screener;
+  var penaltyEl = document.getElementById('cppa-penalty');
+  if (sc && sc.covered === false) {
+    penaltyEl.textContent = '$0';
+    penaltyEl.style.color = 'var(--green)';
+    penaltyEl.title = 'Business is not currently subject to the CPPA cybersecurity audit requirement (per eligibility screener). No statutory penalty exposure.';
+  } else {
+    var records = 1000; // conservative default when screener not run
+    if (sc && sc.sq2) {
+      records = sc.sq2 === 'over250k' ? 250000 : sc.sq2 === '50to250k' ? 50000 : 25000;
+    }
+    var penaltyEst = (critGaps * 7988 + highGaps * 5000) * records;
+    penaltyEl.textContent = penaltyEst > 0 ? '$' + penaltyEst.toLocaleString() + '+' : '$0';
+    penaltyEl.style.color = 'var(--accent2)';
+    penaltyEl.title = 'Estimated maximum statutory exposure: (Critical x $7,988 + High x $5,000) x affected records. Records derived from eligibility screener.';
+  }
 
   document.getElementById('cppa-traffic-lights').innerHTML = trafficHtml;
 
