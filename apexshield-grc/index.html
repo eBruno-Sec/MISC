@@ -713,6 +713,15 @@ input, select, textarea { font-family: var(--mono); }
             <div id="cppa-traffic-lights" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);margin-bottom:1.5rem"></div>
             <div class="section-hd"><div class="section-title">Top 5 Gaps by Risk Weight</div></div>
             <div id="cppa-top5-gaps" style="display:flex;flex-direction:column;gap:0.5rem"></div>
+
+            <div class="section-hd" style="margin-top:2rem">
+              <div>
+                <div class="section-title">Remediation Plan &mdash; §7123(e)(3)</div>
+                <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.25rem">Every gap requires a documented timeline and status. The audit cannot mark items compliant without supporting remediation detail.</div>
+              </div>
+              <div id="cppa-remediation-readiness" style="font-size:0.75rem;font-weight:700"></div>
+            </div>
+            <div id="cppa-remediation-list" style="display:flex;flex-direction:column;gap:0.5rem"></div>
           </div>
         </div>
       </div>
@@ -1813,25 +1822,143 @@ function renderCPPAScoring() {
           + '</div>';
       }).join('')
     : '<div style="color:var(--text-dim);font-size:0.82rem;padding:1rem">No gaps recorded yet.</div>';
+
+  renderRemediationPlan(d);
 }
+
+// ── REMEDIATION PLAN (section 7123(e)(3)) ──────────────────────────────────
+function collectAllGaps(d) {
+  var gaps = [];
+  CPPA_COMPONENTS.forEach(function(comp) {
+    var app = d.applicability[comp.id];
+    if (app && app.applicable === false) return;
+    var allQids = getAllQidsForComponent(comp, d);
+    allQids.forEach(function(qid) {
+      var q = CPPA_QUESTIONS[qid];
+      if (!q) return;
+      var ans = d.answers[qid];
+      if (!ans || !ans.response) return;
+      if (ans.response === 'No' || ans.response === 'Partial') {
+        gaps.push({ compId: comp.id, compName: comp.name, qid: qid, risk: q.risk, text: q.text, response: ans.response });
+      }
+    });
+  });
+  var order = { Critical: 4, High: 3, Medium: 2, Low: 1 };
+  gaps.sort(function(a, b) { return (order[b.risk] || 0) - (order[a.risk] || 0); });
+  return gaps;
+}
+
+function getRemediation(d, qid) {
+  return (d.remediation && d.remediation[qid]) ? d.remediation[qid] : { timeline: '', status: 'Open', owner: '' };
+}
+
+function renderRemediationPlan(d) {
+  var list = document.getElementById('cppa-remediation-list');
+  var readiness = document.getElementById('cppa-remediation-readiness');
+  if (!list) return;
+  var gaps = collectAllGaps(d);
+
+  if (!gaps.length) {
+    list.innerHTML = '<div style="color:var(--green);font-size:0.82rem;padding:1rem;border:1px solid var(--border);background:var(--surface)">No gaps identified. All applicable controls are compliant.</div>';
+    if (readiness) { readiness.textContent = 'Report ready'; readiness.style.color = 'var(--green)'; }
+    return;
+  }
+
+  var riskColors = { Critical: 'var(--accent2)', High: '#ff9800', Medium: 'var(--gold)', Low: 'var(--green)' };
+  var statusOpts = ['Open', 'In Progress', 'Remediated', 'Risk Accepted'];
+  var documented = 0;
+
+  list.innerHTML = gaps.map(function(g) {
+    var rem = getRemediation(d, g.qid);
+    var rc = riskColors[g.risk] || 'var(--text-dim)';
+    var respBadge = g.response === 'No' ? 'b-noncompliant' : 'b-medium';
+    var hasTimeline = rem.timeline && rem.timeline.trim().length > 0;
+    if (hasTimeline) documented++;
+
+    var statusBtns = statusOpts.map(function(opt) {
+      var active = rem.status === opt;
+      var bg = 'transparent', col = 'var(--text-dim)';
+      if (active) {
+        if (opt === 'Remediated') { bg = 'var(--green)'; }
+        else if (opt === 'Open') { bg = 'var(--accent2)'; }
+        else if (opt === 'In Progress') { bg = 'var(--gold)'; }
+        else { bg = 'var(--text-dim)'; }
+        col = 'var(--bg)';
+      }
+      return '<button onclick="setRemediationStatus(\'' + g.qid + '\',\'' + opt + '\')" style="background:' + bg + ';color:' + col + ';border:1px solid var(--border);padding:0.25rem 0.6rem;font-size:0.65rem;font-family:var(--mono);cursor:pointer">' + opt + '</button>';
+    }).join('');
+
+    var flag = hasTimeline ? '' : '<span style="color:var(--accent2);font-size:0.65rem;margin-left:0.5rem">\u25B2 timeline required</span>';
+
+    return '<div style="border:1px solid ' + (hasTimeline ? 'var(--border)' : 'rgba(255,61,107,0.35)') + ';padding:1rem 1.25rem;background:var(--surface)">'
+      + '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.6rem">'
+      + '<span class="badge" style="border:1px solid ' + rc + ';color:' + rc + '">' + g.risk + '</span>'
+      + '<span style="font-size:0.7rem;color:var(--accent);font-weight:700">' + g.qid + '</span>'
+      + '<span style="font-size:0.68rem;color:var(--text-dim)">' + esc(g.compName) + '</span>'
+      + '<span class="badge ' + respBadge + '">' + g.response + '</span>'
+      + flag
+      + '</div>'
+      + '<div style="font-size:0.8rem;color:var(--text);line-height:1.5;margin-bottom:0.75rem">' + esc(g.text) + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.6rem">'
+      + '<div><label style="font-size:0.62rem;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;display:block;margin-bottom:0.3rem">Remediation Timeline *</label>'
+      + '<input type="text" value="' + esc(rem.timeline) + '" onchange="setRemediationField(\'' + g.qid + '\',\'timeline\',this.value)" placeholder="e.g. Q3 2027, 90 days, by 2027-09-30" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text-bright);padding:0.5rem 0.7rem;font-size:0.78rem;font-family:var(--mono)"></div>'
+      + '<div><label style="font-size:0.62rem;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;display:block;margin-bottom:0.3rem">Responsible Party</label>'
+      + '<input type="text" value="' + esc(rem.owner) + '" onchange="setRemediationField(\'' + g.qid + '\',\'owner\',this.value)" placeholder="e.g. IT Manager, CISO" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text-bright);padding:0.5rem 0.7rem;font-size:0.78rem;font-family:var(--mono)"></div>'
+      + '</div>'
+      + '<div style="display:flex;gap:0.35rem;flex-wrap:wrap">' + statusBtns + '</div>'
+      + '</div>';
+  }).join('');
+
+  if (readiness) {
+    if (documented === gaps.length) {
+      readiness.textContent = documented + '/' + gaps.length + ' documented \u2713';
+      readiness.style.color = 'var(--green)';
+    } else {
+      readiness.textContent = documented + '/' + gaps.length + ' gaps have timelines';
+      readiness.style.color = 'var(--accent2)';
+    }
+  }
+}
+
+function setRemediationField(qid, field, val) {
+  var d = getCPPAData(currentClient);
+  if (!d.remediation) d.remediation = {};
+  if (!d.remediation[qid]) d.remediation[qid] = { timeline: '', status: 'Open', owner: '' };
+  d.remediation[qid][field] = val;
+  saveCPPAData(currentClient, d);
+  renderRemediationPlan(getCPPAData(currentClient));
+}
+
+function setRemediationStatus(qid, status) {
+  var d = getCPPAData(currentClient);
+  if (!d.remediation) d.remediation = {};
+  if (!d.remediation[qid]) d.remediation[qid] = { timeline: '', status: 'Open', owner: '' };
+  d.remediation[qid].status = status;
+  saveCPPAData(currentClient, d);
+  renderRemediationPlan(getCPPAData(currentClient));
+}
+
 
 // ── EXPORT ─────────────────────────────────────────────────────────────────
 function exportCPPACSV() {
   if (!currentClient) return;
   var d      = getCPPAData(currentClient);
   var client = DB.clients().find(function(c) { return c.id === currentClient; });
-  var rows   = [['Component','Question ID','Question','Risk Weight','Response','NIST CSF 2.0','NIST 800-53','Auditor Notes']];
+  var rows   = [['Component','Question ID','Question','Risk Weight','Response','NIST CSF 2.0','NIST 800-53','Auditor Notes','Remediation Timeline','Remediation Owner','Remediation Status']];
   CPPA_COMPONENTS.forEach(function(comp) {
     var app = d.applicability[comp.id];
     if (app && app.applicable === false) {
-      rows.push([comp.name,'N/A','Not Applicable','','',app.reason || '','','']);
+      rows.push([comp.name,'N/A','Not Applicable','','',app.reason || '','','','','','']);
       return;
     }
-    comp.questions.forEach(function(qid) {
+    var allQids = getAllQidsForComponent(comp, d);
+    allQids.forEach(function(qid) {
       var q    = CPPA_QUESTIONS[qid];
       var ans  = d.answers[qid] || {};
       var nist = NIST_CROSSWALK[qid] || {};
-      rows.push([comp.name, qid, q ? q.text : '', q ? q.risk : '', ans.response || '', nist.csf || '', nist.nist || '', ans.notes || '']);
+      var rem  = (d.remediation && d.remediation[qid]) ? d.remediation[qid] : {};
+      var isGap = ans.response === 'No' || ans.response === 'Partial';
+      rows.push([comp.name, qid, q ? q.text : '', q ? q.risk : '', ans.response || '', nist.csf || '', nist.nist || '', ans.notes || '', isGap ? (rem.timeline || '') : '', isGap ? (rem.owner || '') : '', isGap ? (rem.status || 'Open') : '']);
     });
   });
   downloadCSV(slugify(client ? client.name : 'client') + '-cppa-audit.csv', rows);
