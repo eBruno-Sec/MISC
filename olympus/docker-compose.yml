@@ -31,7 +31,13 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-olympus}:${DB_PASSWORD:-olympus_secret}@postgres:5432/olympus
       REDIS_URL: redis://redis:6379
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # AI provider (anthropic or openrouter). All optional; blank disables AI.
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      # Backward-compat: still forwarded if set
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       OLYMPUS_API_KEY: ${OLYMPUS_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
