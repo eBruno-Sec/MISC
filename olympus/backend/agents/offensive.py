@@ -19,7 +19,10 @@ import re
 import tempfile
 from urllib.parse import urlparse, parse_qs
 
+# Curated wordlists first (fast, fetched at build time), full SecLists as fallback.
 SECLISTS_DIRS = [
+    "/opt/wordlists/raft-medium-directories.txt",
+    "/opt/wordlists/common.txt",
     "/opt/seclists/Discovery/Web-Content/raft-medium-directories.txt",
     "/opt/seclists/Discovery/Web-Content/common.txt",
 ]
@@ -319,32 +322,43 @@ class OffensiveEngine:
         return findings
 
     # ── Content discovery with a real wordlist ───────────────────
-    async def content_discovery(self, base_url: str) -> list:
-        wordlist = next((w for w in SECLISTS_DIRS if os.path.exists(w)), None)
-        if not wordlist:
-            await self.log("SecLists not present; skipping deep content discovery", "warn")
+    async def content_discovery(self, base_url: str, extra_wordlists: list = None) -> list:
+        # Priority: generated/selected lists passed in, then first existing curated list.
+        lists = list(extra_wordlists or [])
+        curated = next((w for w in SECLISTS_DIRS if os.path.exists(w)), None)
+        if curated and curated not in lists:
+            lists.append(curated)
+        lists = [w for w in lists if w and os.path.exists(w)]
+        if not lists:
+            await self.log("No wordlists present; skipping deep content discovery", "warn")
             return []
-        await self.log("Content discovery with SecLists (ffuf)", "info")
-        found = []
-        stdout, _, rc = await self.run_command(
-            ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
-             "-mc", "200,204,301,302,307,401,403", "-json", "-s",
-             "-t", "40", "-timeout", "8"],
-            timeout=300,
-        )
-        if rc == 127:
-            return []
-        for line in stdout.splitlines():
-            try:
-                hit = json.loads(line)
-                found.append({"url": hit.get("url", ""), "status": hit.get("status", 0)})
-            except json.JSONDecodeError:
-                continue
-        await self.log(f"Content discovery: {len(found)} paths", "success" if found else "info")
-        return found
+
+        await self.log(f"Content discovery with {len(lists)} wordlist(s) (ffuf)", "info")
+        found = {}
+        for wordlist in lists:
+            stdout, _, rc = await self.run_command(
+                ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
+                 "-mc", "200,204,301,302,307,401,403", "-json", "-s",
+                 "-t", "40", "-timeout", "8"],
+                timeout=300,
+            )
+            if rc == 127:
+                await self.log("ffuf not available; content discovery skipped", "warn")
+                return []
+            for line in stdout.splitlines():
+                try:
+                    hit = json.loads(line)
+                    url = hit.get("url", "")
+                    if url and url not in found:
+                        found[url] = {"url": url, "status": hit.get("status", 0)}
+                except json.JSONDecodeError:
+                    continue
+        results = list(found.values())
+        await self.log(f"Content discovery: {len(results)} paths", "success" if results else "info")
+        return results
 
     # ── Orchestrate the offensive phase ──────────────────────────
-    async def run_offensive(self, base_url: str) -> dict:
+    async def run_offensive(self, base_url: str, extra_wordlists: list = None) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
         urls = await self.crawl(base_url)
 
@@ -354,7 +368,7 @@ class OffensiveEngine:
             self.test_xss(urls),
             self.nuclei_dast(urls),
             self.test_auth(base_url, urls),
-            self.content_discovery(base_url),
+            self.content_discovery(base_url, extra_wordlists),
             return_exceptions=True,
         )
 

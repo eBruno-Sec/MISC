@@ -10,6 +10,7 @@ import ApprovalGate from './ApprovalGate'
 import TargetsPanel from './TargetsPanel'
 import NotesPanel from './NotesPanel'
 import RerunModal from './RerunModal'
+import WordlistsPanel from './WordlistsPanel'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--text-dim)', planning: 'var(--accent)', recon: 'var(--accent)',
@@ -18,7 +19,7 @@ const STATUS_COLOR: Record<string, string> = {
   awaiting_approval: 'var(--gold)', failed: 'var(--crit)',
 }
 
-type Tab = 'terminal' | 'targets' | 'notes'
+type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists'
 
 interface GodDef { key: string; name: string; symbol: string; role: string }
 
@@ -234,6 +235,7 @@ export default function MissionControl() {
               <TabBtn id="terminal" label="TERMINAL" />
               <TabBtn id="targets" label="TARGETS" count={liveHosts.length} />
               <TabBtn id="notes" label="NOTES" count={notes.length || undefined} />
+              <TabBtn id="wordlists" label="WORDLISTS" />
             </div>
 
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -254,6 +256,11 @@ export default function MissionControl() {
                   notes={notes}
                   onDelete={noteId => setNotes(prev => prev.filter(n => n.id !== noteId))}
                 />
+              )}
+              {tab === 'wordlists' && (
+                <div style={{ overflow: 'auto' }}>
+                  <WordlistsPanel missionId={mission.id} />
+                </div>
               )}
             </div>
           </div>

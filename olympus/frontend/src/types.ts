@@ -107,3 +107,55 @@ export type WSEvent =
   | { type: 'agent_rerun'; agent: string; symbol: string; timestamp: string }
   | { type: 'targets_added'; targets: string[]; timestamp: string }
   | { type: 'note_added'; note: MissionNote }
+
+// ── Wordlists ────────────────────────────────────────────────
+export type WordlistKind = 'curated' | 'generated'
+
+export interface Wordlist {
+  id: string
+  name: string
+  category: string
+  source: string
+  desc: string
+  kind: WordlistKind
+  path: string
+  exists: boolean
+  count: number
+  size: number
+}
+
+export interface WordlistCatalog {
+  wordlists: Wordlist[]
+  default_content_ids: string[]
+  total: number
+  available: number
+}
+
+// ── Oracle (PortSwigger lab solver) ──────────────────────────
+export interface OraclePayload {
+  label: string
+  value: string
+}
+
+export interface OraclePlan {
+  vulnerability: string
+  summary: string
+  difficulty: string
+  steps: string[]
+  payloads: OraclePayload[]
+  request: string | null
+  success_indicator: string
+  notes: string
+  raw?: string
+}
+
+export interface OracleAI {
+  provider: string
+  model: string
+  configured: boolean
+}
+
+export interface OracleResponse {
+  plan: OraclePlan
+  ai: OracleAI
+}

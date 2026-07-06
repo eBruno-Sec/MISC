@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import type { MissionMode, ParsedScope, ScopeRule } from '../types'
+import type { MissionMode, ParsedScope, ScopeRule, Wordlist } from '../types'
 
 const MODES: { id: MissionMode; label: string; desc: string; gates: string[] }[] = [
   {
@@ -73,6 +73,21 @@ export default function MissionLaunch() {
 
   const navigate = useNavigate()
 
+  const [wordlists, setWordlists] = useState<Wordlist[]>([])
+  const [selectedWl, setSelectedWl] = useState<string[]>([])
+
+  useEffect(() => {
+    api.listWordlists()
+      .then(c => {
+        setWordlists(c.wordlists.filter(w => ['content', 'api', 'fuzz'].includes(w.category)))
+        setSelectedWl(c.default_content_ids)
+      })
+      .catch(() => {})
+  }, [])
+
+  const toggleWl = (id: string) =>
+    setSelectedWl(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
   const handleParse = useCallback(async (input: File | string) => {
     setParseError('')
     setParseLoading(true)
@@ -103,9 +118,10 @@ export default function MissionLaunch() {
     setError('')
     setLoading(true)
     try {
-      const scope_rules = parsedScope
+      const scope_rules: Record<string, any> = parsedScope
         ? { in_scope: parsedScope.in_scope, out_of_scope: parsedScope.out_of_scope }
         : {}
+      if (selectedWl.length) scope_rules.wordlist_ids = selectedWl
       const { id } = await api.createMission(target.trim(), mode, scope, scope_rules)
       navigate(`/mission/${id}`)
     } catch (e: any) {
@@ -275,6 +291,40 @@ export default function MissionLaunch() {
           </div>
         )}
       </div>
+
+      {/* Wordlists */}
+      {wordlists.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--text-dim)', marginBottom: '0.75rem' }}>
+            CONTENT-DISCOVERY WORDLISTS
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+            {wordlists.map(w => {
+              const on = selectedWl.includes(w.id)
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => toggleWl(w.id)}
+                  title={w.exists ? `${w.count.toLocaleString()} entries` : 'not present on server'}
+                  style={{
+                    fontSize: '0.7rem', letterSpacing: '0.05em', padding: '0.3rem 0.7rem',
+                    border: `1px solid ${on ? 'var(--accent)' : 'var(--border2)'}`,
+                    background: on ? 'var(--accent-dim)' : 'var(--surface)',
+                    color: on ? 'var(--accent)' : 'var(--text-dim)',
+                    opacity: w.exists ? 1 : 0.5, cursor: 'pointer', transition: 'all 0.1s',
+                  }}
+                >
+                  {on ? '✓ ' : ''}{w.name}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.5rem', lineHeight: 1.6 }}>
+            ARES pairs these with a target-specific list HEPHAESTUS generates from recon. Defaults preselected.
+          </div>
+        </div>
+      )}
 
       {/* Authorization warning */}
       <div style={{

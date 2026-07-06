@@ -1,4 +1,7 @@
-import type { Mission, MissionSummary, MissionMode, ParsedScope, FindingTag, Severity, Finding } from './types'
+import type {
+  Mission, MissionSummary, MissionMode, ParsedScope, Severity, Finding,
+  WordlistCatalog, Wordlist, OracleResponse, OracleAI,
+} from './types'
 
 const BASE = '/api'
 
@@ -84,4 +87,31 @@ export const api = {
     if (!res.ok) throw new Error('Scope parse failed')
     return res.json()
   },
+
+  // Wordlists
+  listWordlists: () => req<WordlistCatalog>('/wordlists'),
+  generateWordlist: (missionId: string, extraPaths: string[] = []) =>
+    req<{ generated: Wordlist }>(`/wordlists/generate/${missionId}`, {
+      method: 'POST', body: JSON.stringify({ extra_paths: extraPaths }),
+    }),
+  wordlistPreviewUrl: (id: string, lines = 50) =>
+    `${BASE}/wordlists/${encodeURIComponent(id)}/preview?lines=${lines}`,
+  wordlistDownloadUrl: (id: string) =>
+    `${BASE}/wordlists/${encodeURIComponent(id)}/download`,
+  previewWordlist: async (id: string, lines = 50): Promise<string> => {
+    const res = await fetch(`${BASE}/wordlists/${encodeURIComponent(id)}/preview?lines=${lines}`)
+    if (!res.ok) throw new Error('Preview failed')
+    return res.text()
+  },
+
+  // Oracle (PortSwigger lab solver)
+  oracleStatus: () => req<OracleAI>('/oracle/status'),
+  oracleSolve: (body: {
+    lab_title?: string; description?: string; lab_url?: string;
+    category?: string; captured_request?: string; captured_response?: string;
+  }) => req<OracleResponse>('/oracle/solve', { method: 'POST', body: JSON.stringify(body) }),
+  oracleFollowup: (body: {
+    lab_title?: string; description?: string; prior?: object;
+    what_happened?: string; captured_response?: string;
+  }) => req<OracleResponse>('/oracle/followup', { method: 'POST', body: JSON.stringify(body) }),
 }

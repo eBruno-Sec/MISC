@@ -37,14 +37,33 @@ RUN git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git /opt/sqlmap 
     && printf '#!/bin/sh\npython3 /opt/sqlmap/sqlmap.py "$@"\n' > /usr/local/bin/sqlmap \
     && chmod +x /usr/local/bin/sqlmap || echo "sqlmap skipped"
 
-# ── SecLists (real wordlists) ────────────────────────────────────
-RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /opt/seclists || echo "seclists skipped"
+# ── Curated wordlists ────────────────────────────────────────────
+# A hand-picked, verified subset (~660KB) instead of the full 1GB+ SecLists
+# clone. Fast build, high signal. Each fetch degrades gracefully.
+RUN mkdir -p /opt/wordlists && cd /opt/wordlists && \
+    SL="https://raw.githubusercontent.com/danielmiessler/SecLists/master" && \
+    wget -q "$SL/Discovery/Web-Content/raft-medium-directories.txt" -O raft-medium-directories.txt || echo "raft-dirs skipped" ; \
+    wget -q "$SL/Discovery/Web-Content/raft-medium-files.txt"       -O raft-medium-files.txt       || echo "raft-files skipped" ; \
+    wget -q "$SL/Discovery/Web-Content/common.txt"                  -O common.txt                  || echo "common skipped" ; \
+    wget -q "$SL/Discovery/Web-Content/api/api-endpoints.txt"       -O api-endpoints.txt           || echo "api skipped" ; \
+    wget -q "$SL/Discovery/DNS/subdomains-top1million-20000.txt"    -O subdomains-top20000.txt     || echo "dns skipped" ; \
+    wget -q "$SL/Fuzzing/LFI/LFI-Jhaddix.txt"                       -O lfi.txt                     || echo "lfi skipped" ; \
+    wget -q "$SL/Usernames/top-usernames-shortlist.txt"            -O usernames.txt               || echo "users skipped" ; \
+    echo "curated wordlists staged"
+
+# To add the full SecLists for deeper coverage, uncomment:
+# RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /opt/seclists || echo "seclists skipped"
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Built-in payload lists (SQLi / XSS / passwords) shipped with the repo so the
+# curated catalog is complete even if a remote fetch is blocked.
+RUN cp -n seed_wordlists/*.txt /opt/wordlists/ 2>/dev/null || true
+
 RUN mkdir -p /app/reports /app/wordlists
 
 EXPOSE 8000
