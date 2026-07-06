@@ -342,7 +342,7 @@ wait_for_backend() {
     local attempts=0
     local max=45
     while [[ $attempts -lt $max ]]; do
-        if curl -sf http://localhost:8000/api/health &>/dev/null; then
+        if curl -sf http://localhost:3000/api/health &>/dev/null; then
             echo ""
             ok "Backend healthy"
             return 0
@@ -392,8 +392,8 @@ print_summary() {
     echo -e "  ${GREEN}${BOLD}OLYMPUS is online.${NC}"
     echo ""
     echo -e "  ${BOLD}UI:${NC}      http://localhost:3000"
-    echo -e "  ${BOLD}API:${NC}     http://localhost:8000/api/docs"
-    echo -e "  ${BOLD}Reports:${NC} http://localhost:8000/api/missions/{id}/report"
+    echo -e "  ${BOLD}API:${NC}     http://localhost:3000/api/docs"
+    echo -e "  ${BOLD}Reports:${NC} http://localhost:3000/api/missions/{id}/report"
     echo ""
     sep
     echo ""
@@ -436,8 +436,8 @@ main() {
     echo ""
 
     start_containers
-    wait_for_backend
     wait_for_frontend
+    wait_for_backend
     open_browser
     print_summary
 }
