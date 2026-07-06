@@ -56,6 +56,15 @@ class Hermes(BaseAgent):
         target = target.split("/")[0].split(":")[0]
         return target.lower().strip()
 
+    def _extract_host_port(self, target: str):
+        """Return (host, port|None) preserving an explicit :port."""
+        t = re.sub(r"^https?://", "", target).split("/")[0]
+        if ":" in t and t.count(":") == 1:
+            host, _, port = t.rpartition(":")
+            if port.isdigit():
+                return host.lower().strip(), int(port)
+        return t.lower().strip(), None
+
 
     def _apply_scope(self, hosts: list, scope_rules: dict) -> list:
         """Filter a list of hostnames/dicts against scope_rules."""
@@ -89,6 +98,7 @@ class Hermes(BaseAgent):
 
     async def execute(self, target: str, context: dict = None) -> dict:
         domain = self._extract_domain(target)
+        _host, _port = self._extract_host_port(target)
         await self.log(f"Passive recon initiated on {domain}", "info")
 
         result = {
@@ -131,7 +141,7 @@ class Hermes(BaseAgent):
         all_hosts = list(set(subs + [domain]))
         if all_hosts:
             await self.log(f"Probing {len(all_hosts)} hosts for liveness", "info")
-            live = await self._live_detection(all_hosts[:150])
+            live = await self._live_detection(all_hosts[:150], explicit_port=_port)
             if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
                 live = self._apply_scope(live, scope_rules)
             result["live_hosts"] = live
@@ -355,17 +365,26 @@ class Hermes(BaseAgent):
                 remediation="Scope PCI DSS cardholder data environment. Review CT log exposure.",
             )
 
-    async def _live_detection(self, hosts: list) -> list:
+    async def _live_detection(self, hosts: list, explicit_port: int = None) -> list:
         live = []
 
         async def probe(host: str):
-            for scheme in ("https", "http"):
+            # If the user gave an explicit port, hit exactly that with both schemes.
+            targets = []
+            if explicit_port:
+                targets = [
+                    ("http", f"{host}:{explicit_port}"),
+                    ("https", f"{host}:{explicit_port}"),
+                ]
+            else:
+                targets = [("https", host), ("http", host)]
+            for scheme, netloc in targets:
                 try:
                     async with httpx.AsyncClient(timeout=7, follow_redirects=True, verify=False) as c:
-                        r = await c.get(f"{scheme}://{host}")
+                        r = await c.get(f"{scheme}://{netloc}")
                         return {
-                            "host": host,
-                            "url": f"{scheme}://{host}",
+                            "host": host if not explicit_port else f"{host}:{explicit_port}",
+                            "url": f"{scheme}://{netloc}",
                             "status_code": r.status_code,
                             "server": r.headers.get("server", ""),
                             "x_powered_by": r.headers.get("x-powered-by", ""),

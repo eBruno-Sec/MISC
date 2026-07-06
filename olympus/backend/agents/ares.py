@@ -89,13 +89,32 @@ class Ares(BaseAgent):
         await self.log(f"Active assessment complete. {total_vulns} vulnerabilities identified.", "success")
         return result
 
+    def _split_hp(self, hp: str):
+        if ":" in hp and hp.count(":") == 1:
+            h, _, p = hp.rpartition(":")
+            if p.isdigit():
+                return h, p
+        return hp, None
+
     async def _nmap_scan(self, hosts: list) -> dict:
         port_results = {}
-        host_args = [h["host"] for h in hosts]
+        # Separate bare hosts from host:port. If any host carries an explicit port,
+        # scan exactly that port (fast + correct for app targets like Juice Shop).
+        bare_hosts = []
+        explicit_ports = set()
+        for h in hosts:
+            host, port = self._split_hp(h["host"])
+            bare_hosts.append(host)
+            if port:
+                explicit_ports.add(port)
+        host_args = list(dict.fromkeys(bare_hosts))  # dedupe, keep order
 
+        if explicit_ports:
+            port_flag = ["-p", ",".join(sorted(explicit_ports))]
+        else:
+            port_flag = ["--top-ports", "1000"]
         stdout, stderr, rc = await self.run_command(
-            ["nmap", "-sV", "-sC", "--top-ports", "1000", "-T4",
-             "--open", "-oG", "-"] + host_args,
+            ["nmap", "-sV", "-sC", "-T4", "--open", "-oG", "-"] + port_flag + host_args,
             timeout=300,
         )
 
