@@ -56,6 +56,10 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    # Lets the backend reach services on the host (e.g. a local Juice Shop
+    # at host.docker.internal:42000). Works on Docker Desktop and Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:

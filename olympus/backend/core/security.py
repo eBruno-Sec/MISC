@@ -52,23 +52,40 @@ async def check_ws_key(websocket: WebSocket) -> bool:
 
 
 def is_valid_target(value: str) -> bool:
-    """True only for a bare hostname, IPv4, or IPv4 CIDR. Blocks leading '-'."""
+    """True for a hostname, 'localhost', IPv4, IPv4 CIDR, or any of these with a :port.
+    Blocks leading '-' (argument-injection guard) and shell characters."""
     if not value or value.startswith("-"):
         return False
     value = value.strip()
-    if len(value) > 253:
+    if len(value) > 261:  # 253 host + ':' + 5 port + slack
         return False
+    # reject shell metacharacters outright
+    if any(c in value for c in (";", "&", "|", "$", "`", " ", "\t", "\n", "'", '"', "\\", "<", ">")):
+        return False
+
+    # split optional :port (but not for CIDR, and not for bare IPv6 which we do not accept)
+    host = value
+    if "/" not in value and value.count(":") == 1:
+        host, _, port = value.rpartition(":")
+        if not (port.isdigit() and 1 <= int(port) <= 65535):
+            return False
+
+    # localhost is explicitly allowed (local testing)
+    if host == "localhost":
+        return True
+
     # IPv4 or CIDR
     try:
-        if "/" in value:
-            ipaddress.ip_network(value, strict=False)
+        if "/" in host:
+            ipaddress.ip_network(host, strict=False)
             return True
-        ipaddress.ip_address(value)
+        ipaddress.ip_address(host)
         return True
     except ValueError:
         pass
+
     # hostname or single-wildcard hostname
-    return bool(_HOSTNAME_RE.match(value) or _WILDCARD_RE.match(value))
+    return bool(_HOSTNAME_RE.match(host) or _WILDCARD_RE.match(host))
 
 
 def validate_targets(values: list[str]) -> tuple[list[str], list[str]]:
