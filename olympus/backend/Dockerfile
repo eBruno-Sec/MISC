@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap whois curl wget unzip dnsutils netcat-openbsd jq procps \
-    git python3-pip nikto \
+    git python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ProjectDiscovery + fuzzing binaries ──────────────────────────
