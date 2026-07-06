@@ -31,7 +31,7 @@ async def complete(prompt: str, max_tokens: int = 800, system: Optional[str] = N
             return await _anthropic(prompt, api_key, max_tokens, system)
     except Exception as e:
         # Non-fatal: AI features degrade gracefully
-        print(f"[ai_client] {provider} error: {e}")
+        print(f"[ai_client] {provider} error: {type(e).__name__}: {e}", flush=True)
         return ""
 
 
@@ -70,5 +70,23 @@ async def _openrouter(prompt: str, api_key: str, max_tokens: int, system: Option
             },
             json={"model": model, "max_tokens": max_tokens, "messages": messages},
         )
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
+
+    # Surface the real reason instead of a cryptic JSON parse error.
+    if r.status_code != 200:
+        raise RuntimeError(f"OpenRouter HTTP {r.status_code}: {r.text[:300]}")
+
+    try:
+        data = r.json()
+    except Exception:
+        raise RuntimeError(f"OpenRouter returned non-JSON: {r.text[:300]}")
+
+    # OpenRouter can return a 200 with an error envelope instead of choices.
+    if "error" in data:
+        msg = data["error"].get("message", str(data["error"])) if isinstance(data["error"], dict) else str(data["error"])
+        raise RuntimeError(f"OpenRouter error: {msg}")
+
+    choices = data.get("choices")
+    if not choices:
+        raise RuntimeError(f"OpenRouter returned no choices: {str(data)[:300]}")
+
+    return choices[0]["message"]["content"].strip()
