@@ -84,6 +84,12 @@ export default function MissionControl() {
         break
       case 'status_change':
         setStatus(event.status)
+        if (event.status === 'complete' || event.status === 'failed') {
+          // Terminal state: clear the active phase so no god card stays stuck on RUNNING
+          setCurrentPhase(null)
+          load()
+          break
+        }
         if (event.phase) {
           setCurrentPhase(event.phase)
           const phaseOrder = ['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']
@@ -92,9 +98,6 @@ export default function MissionControl() {
             phaseOrder.slice(0, phaseOrder.indexOf(event.phase!)).forEach(p => n.add(p))
             return n
           })
-        }
-        if (event.status === 'complete') {
-          load()
         }
         break
       case 'approval_required':

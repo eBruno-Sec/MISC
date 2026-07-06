@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 from core.ai_client import complete
+from core.config import settings
 from core.models import Finding
 from sqlalchemy import select
 from .base import BaseAgent
