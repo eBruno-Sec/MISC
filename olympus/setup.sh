@@ -273,6 +273,24 @@ setup_env() {
         if [[ -f .env.example ]]; then
             cp .env.example .env
             info "Created .env from .env.example"
+            # Generate strong secrets so no deployment ships with defaults (OPTEST OLY-03)
+            if command -v openssl &>/dev/null; then
+                _sk=$(openssl rand -hex 32)
+                _db=$(openssl rand -hex 16)
+                _ak=$(openssl rand -hex 32)
+                _sed() { if sed --version &>/dev/null 2>&1; then sed -i "$1" .env; else sed -i '' "$1" .env; fi; }
+                _sed "s|^SECRET_KEY=.*|SECRET_KEY=${_sk}|"
+                _sed "s|^DB_PASSWORD=.*|DB_PASSWORD=${_db}|"
+                _sed "s|^OLYMPUS_API_KEY=.*|OLYMPUS_API_KEY=${_ak}|"
+                ok "Generated SECRET_KEY, DB_PASSWORD, and OLYMPUS_API_KEY"
+                echo ""
+                echo -e "  ${YELLOW}Your API key (needed by the browser/API client):${NC}"
+                echo -e "  ${CYAN}${_ak}${NC}"
+                echo -e "  ${DIM}Saved in .env as OLYMPUS_API_KEY. Send it as the X-API-Key header.${NC}"
+                echo ""
+            else
+                warn "openssl not found — .env kept default secrets. Change SECRET_KEY, DB_PASSWORD, OLYMPUS_API_KEY manually."
+            fi
         else
             die ".env.example not found. Run this script from the olympus/ directory."
         fi

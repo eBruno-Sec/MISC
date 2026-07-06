@@ -33,9 +33,13 @@ services:
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      OLYMPUS_API_KEY: ${OLYMPUS_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       REPORTS_DIR: /app/reports
-    ports:
-      - "8000:8000"
+    # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
+    # No host port is published, reducing the unauthenticated attack surface.
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy

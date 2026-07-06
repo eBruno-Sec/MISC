@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_session, AsyncSessionLocal
 from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote
 from routers.ws import manager
+from core.security import is_valid_target, validate_targets
 
 router = APIRouter()
 
@@ -100,8 +101,11 @@ async def create_mission(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
+    _target = body.target.strip()
+    if not is_valid_target(_target):
+        raise HTTPException(400, "Invalid target. Use a bare hostname, IPv4, or CIDR (no schemes, flags, or shell characters).")
     mission = Mission(
-        target=body.target.strip(),
+        target=_target,
         scope=body.scope,
         mode=body.mode,
         status=MissionStatus.PENDING,
@@ -370,9 +374,9 @@ async def add_targets(
     if not mission:
         raise HTTPException(404, "Mission not found")
 
-    targets = [t.strip() for t in body.targets if t.strip()]
+    targets, rejected = validate_targets(body.targets)
     if not targets:
-        raise HTTPException(400, "No valid targets provided")
+        raise HTTPException(400, f"No valid targets. Rejected: {rejected}. Use bare hostnames, IPv4, or CIDR only.")
 
     # Merge into mission context
     ctx = mission.context or {}
@@ -400,7 +404,7 @@ async def add_targets(
             request.app.state.approval_results,
         )
 
-    return {"added": targets, "scan_triggered": body.run_scan}
+    return {"added": targets, "rejected": rejected, "scan_triggered": body.run_scan}
 
 
 # ── Re-run individual agent ───────────────────────────────────

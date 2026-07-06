@@ -1,4 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from core.security import check_ws_key
 
 router = APIRouter()
 
@@ -38,6 +39,9 @@ manager = ConnectionManager()
 
 @router.websocket("/{mission_id}")
 async def websocket_endpoint(websocket: WebSocket, mission_id: str):
+    if not await check_ws_key(websocket):
+        await websocket.close(code=4401)
+        return
     await manager.connect(websocket, mission_id)
     try:
         while True:
