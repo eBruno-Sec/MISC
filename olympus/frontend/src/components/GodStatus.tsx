@@ -59,7 +59,7 @@ export default function GodStatus({ currentPhase, status, completedPhases, onRer
               position: 'relative',
             }}
             onMouseEnter={canRerun ? e => { e.currentTarget.style.background = 'rgba(57,255,20,0.05)' } : undefined}
-            onMouseLeave={canRerun ? e => { e.currentTarget.style.background = state === 'active' ? 'rgba(0,229,255,0.05)' : 'var(--surface)' } : undefined}
+            onMouseLeave={canRerun ? e => { e.currentTarget.style.background = 'var(--surface)' } : undefined}
           >
             <div style={{
               fontSize: '1.3rem', marginBottom: '0.3rem',

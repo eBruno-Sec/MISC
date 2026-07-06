@@ -1,4 +1,4 @@
-import type { Mission, MissionSummary, MissionMode, ParsedScope, FindingTag, Severity } from './types'
+import type { Mission, MissionSummary, MissionMode, ParsedScope, FindingTag, Severity, Finding } from './types'
 
 const BASE = '/api'
 
@@ -40,10 +40,7 @@ export const api = {
   }) =>
     req(`/missions/${missionId}/findings`, { method: 'POST', body: JSON.stringify(data) }),
 
-  updateFinding: (missionId: string, findingId: string, data: {
-    title?: string; severity?: Severity; description?: string; evidence?: string;
-    cvss_score?: number; remediation?: string; tag?: FindingTag; analyst_notes?: string;
-  }) =>
+  updateFinding: (missionId: string, findingId: string, data: Partial<Finding>) =>
     req(`/missions/${missionId}/findings/${findingId}`, {
       method: 'PATCH', body: JSON.stringify(data),
     }),
