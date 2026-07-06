@@ -45,13 +45,21 @@ class Apollo(BaseAgent):
 
         await self.log(f"Findings: {stats['critical']} CRITICAL | {stats['high']} HIGH | {stats['medium']} MEDIUM | {stats['low']} LOW", "info")
 
-        # AI executive summary
-        exec_summary = await self._ai_summary(target, findings, context, stats)
+        # AI executive summary (never fatal)
+        try:
+            exec_summary = await self._ai_summary(target, findings, context, stats)
+        except Exception as e:
+            await self.log(f"Executive summary generation failed: {e}. Using template.", "warn")
+            exec_summary = self._default_summary(target, stats, context)
 
-        # Generate report
-        report_path = await self._generate_html_report(target, findings, stats, exec_summary, context)
+        # Generate report (never fatal — a render error must not fail a completed mission)
+        report_path = ""
+        try:
+            report_path = await self._generate_html_report(target, findings, stats, exec_summary, context)
+            await self.log(f"Report saved: {report_path}", "success")
+        except Exception as e:
+            await self.log(f"Report generation failed: {e}. Findings are preserved and exportable.", "error")
 
-        await self.log(f"Report saved: {report_path}", "success")
         await self.log(f"Mission assessment complete for {target}", "success")
 
         return {
@@ -126,7 +134,10 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         findings_html = ""
         for i, fnd in enumerate(sorted_findings):
             color = SEVERITY_COLORS.get(fnd.severity.lower(), "#6a8a9a")
-            cvss = fnd.cvss_score or CVSS_MAP.get(fnd.severity.lower(), 0)
+            try:
+                cvss = float(fnd.cvss_score) if fnd.cvss_score is not None else CVSS_MAP.get(fnd.severity.lower(), 0)
+            except (TypeError, ValueError):
+                cvss = CVSS_MAP.get(fnd.severity.lower(), 0)
             evidence_block = (
                 '<div class="field"><span class="field-label">EVIDENCE</span><pre>'
                 + (fnd.evidence or "")
@@ -168,7 +179,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             _host_items = ""
             for h in live_hosts[:50]:
                 hhost = h.get("host", "")
-                hcode = h.get("status_code", "")
+                hcode = h.get("status_code") or ""
                 _host_items += f'<div class="host-item"><span>{hhost}</span><span class="status-ok">{hcode}</span></div>'
             _host_section = (
                 f'<div class="section"><h2>Live Hosts ({len(live_hosts)})</h2>'
