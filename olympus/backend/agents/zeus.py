@@ -75,8 +75,11 @@ class Zeus(BaseAgent):
         host_preview = ", ".join(h["host"] for h in live[:5])
         more = f" (+{len(live)-5} more)" if len(live) > 5 else ""
         approved = await self.request_approval(
-            action="Active Port Scanning & Vulnerability Assessment",
-            description=f"Ares will run Nmap and Nuclei against {len(live)} live targets: {host_preview}{more}",
+            action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, IDOR/auth probes)",
+            description=f"Ares will run Nmap and Nuclei, then engage the offensive engine "
+                        f"(crawl + active SQL injection, XSS, DAST, IDOR and sensitive-endpoint checks) "
+                        f"against {len(live)} live target(s): {host_preview}{more}. "
+                        f"This performs real, non-destructive injection testing. Authorized targets only.",
         )
         if not approved:
             await self.log("Active scanning denied. Generating passive report.", "warn")

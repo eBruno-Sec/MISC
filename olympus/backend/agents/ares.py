@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 from .base import BaseAgent
+from .offensive import OffensiveEngine
 
 SEVERITY_MAP = {
     "critical": ("critical", 9.5),
@@ -13,7 +14,7 @@ SEVERITY_MAP = {
 }
 
 
-class Ares(BaseAgent):
+class Ares(BaseAgent, OffensiveEngine):
     name = "ares"
     symbol = "⚔"
     display_name = "ARES"
@@ -83,10 +84,23 @@ class Ares(BaseAgent):
 
         # Directory enumeration on primary target
         await self.log(f"Directory enumeration on {domain}", "info")
-        result["directories"] = await self._dir_enum(live_hosts[0]["url"] if live_hosts else f"https://{domain}")
+        primary_url = live_hosts[0]["url"] if live_hosts else f"https://{domain}"
+        result["directories"] = await self._dir_enum(primary_url)
+
+        # ── Offensive engine: active injection + access-control testing ──
+        # Only run when we actually reached a live web host.
+        if live_hosts:
+            try:
+                result["offensive"] = await self.run_offensive(primary_url)
+            except Exception as e:
+                await self.log(f"Offensive engine error: {e}", "warn")
+                result["offensive"] = {}
+        else:
+            await self.log("No live web host reached; offensive engine skipped", "warn")
+            result["offensive"] = {}
 
         total_vulns = len(result["vulnerabilities"])
-        await self.log(f"Active assessment complete. {total_vulns} vulnerabilities identified.", "success")
+        await self.log(f"Active assessment complete. {total_vulns} nuclei findings + offensive engine results.", "success")
         return result
 
     def _split_hp(self, hp: str):

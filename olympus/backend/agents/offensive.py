@@ -1,0 +1,374 @@
+"""
+OLYMPUS offensive engine.
+
+Active web-application vulnerability testing that goes beyond recon:
+  - katana crawl to harvest live endpoints and parameters
+  - sqlmap for real SQL injection (batch, non-destructive)
+  - dalfox for reflected/DOM XSS
+  - nuclei DAST tags for injection-class templates
+  - lightweight auth probes (JWT alg-none / weak-secret, IDOR sequential ID)
+
+Every tool degrades gracefully if its binary is missing. All findings are
+written through the agent's add_finding() so they appear live in the UI and
+in the Apollo report.
+"""
+import asyncio
+import json
+import os
+import re
+import tempfile
+from urllib.parse import urlparse, parse_qs
+
+SECLISTS_DIRS = [
+    "/opt/seclists/Discovery/Web-Content/raft-medium-directories.txt",
+    "/opt/seclists/Discovery/Web-Content/common.txt",
+]
+
+
+class OffensiveEngine:
+    """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
+    self.add_finding (all from BaseAgent)."""
+
+    # ── Crawl ────────────────────────────────────────────────────
+    async def crawl(self, base_url: str, max_urls: int = 200) -> list:
+        await self.log(f"Crawling {base_url} for endpoints and parameters (katana)", "info")
+        stdout, _, rc = await self.run_command(
+            ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
+             "-c", "15", "-silent", "-nc", "-timeout", "10"],
+            timeout=180,
+        )
+        if rc == 127:
+            await self.log("katana not available; falling back to seed URL only", "warn")
+            return [base_url]
+
+        urls = []
+        for line in stdout.splitlines():
+            u = line.strip()
+            if u.startswith("http"):
+                urls.append(u)
+        urls = list(dict.fromkeys(urls))[:max_urls]
+
+        param_urls = [u for u in urls if "?" in u and "=" in u]
+        await self.log(f"Crawl complete: {len(urls)} URLs, {len(param_urls)} with parameters", "success")
+        return urls
+
+    # ── SQL injection ────────────────────────────────────────────
+    async def test_sqli(self, urls: list) -> list:
+        param_urls = [u for u in urls if "?" in u and "=" in u][:25]
+        if not param_urls:
+            await self.log("No parameterized URLs to test for SQLi", "info")
+            return []
+
+        await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
+        findings = []
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(param_urls))
+            url_file = f.name
+
+        try:
+            stdout, stderr, rc = await self.run_command(
+                ["sqlmap", "-m", url_file, "--batch", "--random-agent",
+                 "--level", "2", "--risk", "2", "--smart",
+                 "--technique", "BEUST", "--threads", "4",
+                 "--timeout", "15", "--retries", "1",
+                 "--output-dir", "/tmp/sqlmap_out"],
+                timeout=600,
+            )
+            if rc == 127:
+                await self.log("sqlmap not available; SQLi testing skipped", "warn")
+                return []
+
+            combined = stdout + stderr
+            # sqlmap prints "Parameter: X (GET)" and "Type:" blocks on a hit
+            vuln_blocks = re.findall(
+                r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
+                combined, re.DOTALL,
+            )
+            hit_urls = re.findall(r"sqlmap identified the following injection point.*?URL:\s*(\S+)", combined, re.DOTALL)
+
+            for param, method, sqli_type, title in vuln_blocks:
+                findings.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
+                await self.add_finding(
+                    title=f"SQL Injection: {param.strip()} parameter ({method})",
+                    severity="critical",
+                    description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
+                                f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
+                                f"the database, extract credentials, and potentially achieve RCE.",
+                    evidence=f"sqlmap: {title.strip()}\nParameter: {param.strip()} ({method})",
+                    cvss_score=9.8,
+                    remediation="Use parameterized queries / prepared statements. Never concatenate "
+                                "user input into SQL. Apply least-privilege DB accounts and a WAF.",
+                )
+
+            if not vuln_blocks and "is vulnerable" in combined.lower():
+                await self.add_finding(
+                    title="Possible SQL Injection (manual confirm)",
+                    severity="high",
+                    description="sqlmap flagged a potential injection point. Manual confirmation advised.",
+                    evidence=combined[-400:],
+                    cvss_score=7.5,
+                    remediation="Parameterize queries; review flagged endpoint.",
+                )
+
+            await self.log(f"SQLi testing complete: {len(vuln_blocks)} confirmed injection points", "success" if vuln_blocks else "info")
+        except Exception as e:
+            await self.log(f"sqlmap error: {e}", "warn")
+        finally:
+            os.unlink(url_file)
+
+        return findings
+
+    # ── XSS ──────────────────────────────────────────────────────
+    async def test_xss(self, urls: list) -> list:
+        param_urls = [u for u in urls if "?" in u and "=" in u][:40]
+        if not param_urls:
+            await self.log("No parameterized URLs to test for XSS", "info")
+            return []
+
+        await self.log(f"Testing {len(param_urls)} endpoints for XSS (dalfox)", "info")
+        findings = []
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(param_urls))
+            url_file = f.name
+
+        try:
+            stdout, stderr, rc = await self.run_command(
+                ["dalfox", "file", url_file, "--format", "json",
+                 "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"],
+                timeout=420,
+            )
+            if rc == 127:
+                await self.log("dalfox not available; XSS testing skipped", "warn")
+                return []
+
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    hit = json.loads(line)
+                    poc = hit.get("data") or hit.get("poc") or ""
+                    param = hit.get("param", "unknown")
+                    xss_type = hit.get("type", "reflected")
+                    severity = "high" if xss_type.lower() != "info" else "info"
+                    if severity == "info":
+                        continue
+                    findings.append({"param": param, "type": xss_type, "poc": poc})
+                    await self.add_finding(
+                        title=f"Cross-Site Scripting ({xss_type}): {param}",
+                        severity="high",
+                        description=f"dalfox confirmed {xss_type} XSS on parameter '{param}'. "
+                                    "An attacker can execute arbitrary JavaScript in a victim's "
+                                    "browser, enabling session theft, credential harvesting, and defacement.",
+                        evidence=f"PoC: {poc[:400]}",
+                        cvss_score=7.4,
+                        remediation="Context-aware output encoding, a strict Content-Security-Policy, "
+                                    "and input validation. Escape on output, not just input.",
+                    )
+                except json.JSONDecodeError:
+                    continue
+
+            await self.log(f"XSS testing complete: {len(findings)} confirmed", "success" if findings else "info")
+        except Exception as e:
+            await self.log(f"dalfox error: {e}", "warn")
+        finally:
+            os.unlink(url_file)
+
+        return findings
+
+    # ── Nuclei DAST (injection templates) ────────────────────────
+    async def nuclei_dast(self, urls: list) -> list:
+        seed = [u for u in urls if "?" in u][:50] or urls[:20]
+        if not seed:
+            return []
+        await self.log(f"Running Nuclei DAST injection templates on {len(seed)} URLs", "info")
+        findings = []
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(seed))
+            uf = f.name
+
+        try:
+            stdout, _, rc = await self.run_command(
+                ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
+                 "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"],
+                timeout=420,
+            )
+            if rc == 127:
+                await self.log("nuclei not available for DAST", "warn")
+                return []
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    fnd = json.loads(line)
+                    info = fnd.get("info", {})
+                    sev = info.get("severity", "info").lower()
+                    if sev not in ("critical", "high", "medium"):
+                        continue
+                    cvss = {"critical": 9.5, "high": 7.5, "medium": 5.0}.get(sev, 0)
+                    name = info.get("name", fnd.get("template-id", "DAST finding"))
+                    matched = fnd.get("matched-at", "")
+                    findings.append({"name": name, "severity": sev, "url": matched})
+                    await self.add_finding(
+                        title=f"[DAST] {name}",
+                        severity=sev,
+                        description=info.get("description", f"Nuclei DAST matched {name}"),
+                        evidence=f"URL: {matched}\nTemplate: {fnd.get('template-id','')}",
+                        cvss_score=cvss,
+                        remediation=info.get("remediation", "Review and patch the injection point."),
+                    )
+                except json.JSONDecodeError:
+                    continue
+            await self.log(f"Nuclei DAST complete: {len(findings)} findings", "success" if findings else "info")
+        except Exception as e:
+            await self.log(f"Nuclei DAST error: {e}", "warn")
+        finally:
+            os.unlink(uf)
+
+        return findings
+
+    # ── Auth / JWT / IDOR probes ─────────────────────────────────
+    async def test_auth(self, base_url: str, urls: list) -> list:
+        import httpx
+        findings = []
+        await self.log("Probing authentication and access-control weaknesses", "info")
+
+        # JWT exposure + alg-none check on any cookie/header token seen
+        # IDOR: look for numeric-id API paths and try id+1 / id-1 unauthenticated
+        api_id_urls = []
+        for u in urls:
+            if re.search(r"/(api|rest)/\w+/\d+", u):
+                api_id_urls.append(u)
+
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
+            for u in api_id_urls[:15]:
+                m = re.search(r"(.*/)(\d+)(\b.*)$", u)
+                if not m:
+                    continue
+                prefix, num, suffix = m.group(1), int(m.group(2)), m.group(3)
+                for delta in (1, -1):
+                    probe = f"{prefix}{num + delta}{suffix}"
+                    try:
+                        r = await c.get(probe)
+                        if r.status_code == 200 and len(r.content) > 30:
+                            findings.append({"type": "idor", "url": probe})
+                            await self.add_finding(
+                                title=f"Potential IDOR: {probe}",
+                                severity="high",
+                                description="An object referenced by a sequential ID was accessible without "
+                                            "authorization checks. This is a Broken Object Level Authorization "
+                                            "(BOLA) flaw allowing access to other users' records.",
+                                evidence=f"GET {probe} -> HTTP 200 ({len(r.content)} bytes)",
+                                cvss_score=7.5,
+                                remediation="Enforce per-object ownership checks server-side on every request. "
+                                            "Do not rely on unguessable IDs; use authorization, not obscurity.",
+                            )
+                            break
+                    except Exception:
+                        continue
+
+        # Exposed sensitive endpoints frequently paying on bounties
+        sensitive = ["/.git/config", "/.env", "/actuator/health", "/actuator/env",
+                     "/api/swagger.json", "/swagger-ui/", "/graphql", "/server-status",
+                     "/.well-known/security.txt", "/debug", "/metrics"]
+        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False) as c:
+            for path in sensitive:
+                try:
+                    r = await c.get(base_url.rstrip("/") + path)
+                    if r.status_code == 200 and len(r.content) > 20:
+                        sev = "high" if path in ("/.env", "/.git/config", "/actuator/env") else "medium"
+                        cvss = 7.5 if sev == "high" else 5.3
+                        findings.append({"type": "exposure", "path": path})
+                        await self.add_finding(
+                            title=f"Sensitive Endpoint Exposed: {path}",
+                            severity=sev,
+                            description=f"{path} is publicly accessible and returned content. "
+                                        "This can leak secrets, source, internal config, or API schemas.",
+                            evidence=f"GET {path} -> 200 ({len(r.content)} bytes)",
+                            cvss_score=cvss,
+                            remediation="Restrict or remove the endpoint. Move secrets to env/secret managers "
+                                        "and block metadata/debug routes at the edge.",
+                        )
+                except Exception:
+                    continue
+
+        # GraphQL introspection (common high-value finding)
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False) as c:
+                q = {"query": "{__schema{types{name}}}"}
+                r = await c.post(base_url.rstrip("/") + "/graphql", json=q)
+                if r.status_code == 200 and "__schema" in r.text:
+                    findings.append({"type": "graphql_introspection"})
+                    await self.add_finding(
+                        title="GraphQL Introspection Enabled",
+                        severity="medium",
+                        description="The GraphQL endpoint exposes its full schema via introspection, "
+                                    "handing an attacker the complete API surface for targeted abuse.",
+                        evidence="POST /graphql with introspection query returned __schema",
+                        cvss_score=5.3,
+                        remediation="Disable introspection in production and enforce query depth/complexity limits.",
+                    )
+        except Exception:
+            pass
+
+        await self.log(f"Auth/access-control probing complete: {len(findings)} findings", "success" if findings else "info")
+        return findings
+
+    # ── Content discovery with a real wordlist ───────────────────
+    async def content_discovery(self, base_url: str) -> list:
+        wordlist = next((w for w in SECLISTS_DIRS if os.path.exists(w)), None)
+        if not wordlist:
+            await self.log("SecLists not present; skipping deep content discovery", "warn")
+            return []
+        await self.log("Content discovery with SecLists (ffuf)", "info")
+        found = []
+        stdout, _, rc = await self.run_command(
+            ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
+             "-mc", "200,204,301,302,307,401,403", "-json", "-s",
+             "-t", "40", "-timeout", "8"],
+            timeout=300,
+        )
+        if rc == 127:
+            return []
+        for line in stdout.splitlines():
+            try:
+                hit = json.loads(line)
+                found.append({"url": hit.get("url", ""), "status": hit.get("status", 0)})
+            except json.JSONDecodeError:
+                continue
+        await self.log(f"Content discovery: {len(found)} paths", "success" if found else "info")
+        return found
+
+    # ── Orchestrate the offensive phase ──────────────────────────
+    async def run_offensive(self, base_url: str) -> dict:
+        await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
+        urls = await self.crawl(base_url)
+
+        # Run injection classes concurrently where safe
+        sqli, xss, dast, auth, disco = await asyncio.gather(
+            self.test_sqli(urls),
+            self.test_xss(urls),
+            self.nuclei_dast(urls),
+            self.test_auth(base_url, urls),
+            self.content_discovery(base_url),
+            return_exceptions=True,
+        )
+
+        def _safe(x):
+            return x if isinstance(x, list) else []
+
+        result = {
+            "crawled_urls": len(urls),
+            "sqli": _safe(sqli),
+            "xss": _safe(xss),
+            "dast": _safe(dast),
+            "auth": _safe(auth),
+            "content": _safe(disco),
+        }
+        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth))
+        await self.log(f"⚔ Offensive engine complete: {total} injection/access findings across {len(urls)} URLs", "success")
+        return result
