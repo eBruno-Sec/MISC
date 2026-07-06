@@ -4,6 +4,21 @@ from core.ai_client import complete
 from .base import BaseAgent
 
 
+def _extract_json(text: str):
+    """Pull a JSON object from an LLM response that may wrap it in prose or ```json fences."""
+    import re
+    t = text.strip()
+    # strip code fences
+    t = re.sub(r"^```(?:json)?\s*", "", t)
+    t = re.sub(r"\s*```$", "", t)
+    # if there's surrounding prose, grab the outermost {...}
+    start = t.find("{")
+    end = t.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        t = t[start:end + 1]
+    return json.loads(t)
+
+
 class Athena(BaseAgent):
     name = "athena"
     symbol = "🦉"
@@ -51,7 +66,7 @@ Only return valid JSON, no markdown, no preamble."""
 
             text = await complete(prompt, max_tokens=800)
             if text:
-                parsed = json.loads(text)
+                parsed = _extract_json(text)
                 result.update(parsed)
                 result["ai_available"] = True
                 await self.log(f"Mission profile: {parsed.get('risk_profile', 'unknown').upper()} risk", "info")

@@ -49,7 +49,8 @@ export default function MissionControl() {
       setApprovals(m.pending_approvals)
       setNotes(m.notes || [])
       setStatus(m.status as MissionStatus)
-      setCurrentPhase(m.current_phase)
+      const terminal = m.status === 'complete' || m.status === 'failed'
+      setCurrentPhase(terminal ? null : m.current_phase)
 
       const hosts: LiveHost[] = m.context?.hermes?.live_hosts || []
       setLiveHosts(hosts)
@@ -118,6 +119,8 @@ export default function MissionControl() {
         break
       case 'mission_complete':
       case 'mission_failed':
+        setCurrentPhase(null)
+        setCompletedPhases(new Set(['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']))
         load()
         break
     }
