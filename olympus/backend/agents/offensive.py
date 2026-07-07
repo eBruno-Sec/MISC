@@ -449,6 +449,122 @@ class OffensiveEngine:
                        "success" if findings else "info")
         return findings
 
+    # ── OWASP ZAP active scan (full DAST) ────────────────────────
+    async def zap_active_scan(self, base_url: str) -> list:
+        import httpx
+
+        zap_url = os.getenv("ZAP_URL", "http://zap:8090").rstrip("/")
+        api_key = os.getenv("ZAP_API_KEY", "")
+        if not zap_url:
+            return []
+
+        def _p(params):
+            p = dict(params)
+            if api_key:
+                p["apikey"] = api_key
+            return p
+
+        async def _get(c, path, params):
+            r = await c.get(f"{zap_url}{path}", params=_p(params))
+            r.raise_for_status()
+            return r.json()
+
+        findings = []
+        try:
+            async with httpx.AsyncClient(timeout=30, verify=False) as c:
+                # ZAP may still be booting when the first mission runs.
+                ready = False
+                for _ in range(6):
+                    try:
+                        await _get(c, "/JSON/core/view/version/", {})
+                        ready = True
+                        break
+                    except Exception:
+                        await asyncio.sleep(5)
+                if not ready:
+                    await self.log("OWASP ZAP not reachable; skipping ZAP active scan", "warn")
+                    return []
+
+                ver = (await _get(c, "/JSON/core/view/version/", {})).get("version", "?")
+                await self.log(f"OWASP ZAP {ver} online; seeding target", "info")
+
+                await _get(c, "/JSON/core/action/accessUrl/", {"url": base_url, "followRedirects": "true"})
+
+                # Spider to build the site tree.
+                spider_id = (await _get(c, "/JSON/spider/action/scan/", {"url": base_url, "recurse": "true"})).get("scan")
+                await self.log("ZAP spider crawling", "info")
+                for _ in range(40):
+                    await asyncio.sleep(5)
+                    st = (await _get(c, "/JSON/spider/view/status/", {"scanId": spider_id})).get("status", "0")
+                    if int(st) >= 100:
+                        break
+
+                # Let the passive scanner drain the spidered records.
+                for _ in range(12):
+                    recs = (await _get(c, "/JSON/pscan/view/recordsToScan/", {})).get("recordsToScan", "0")
+                    if int(recs) == 0:
+                        break
+                    await asyncio.sleep(5)
+
+                # Active scan: the real DAST work.
+                ascan_id = (await _get(c, "/JSON/ascan/action/scan/",
+                                       {"url": base_url, "recurse": "true", "inScopeOnly": "false"})).get("scan")
+                if ascan_id is None:
+                    await self.log("ZAP active scan could not start", "warn")
+                else:
+                    await self.log("ZAP active scan running (slow phase)", "info")
+                    last = -1
+                    for _ in range(150):
+                        await asyncio.sleep(5)
+                        sti = int((await _get(c, "/JSON/ascan/view/status/", {"scanId": ascan_id})).get("status", "0"))
+                        if sti >= last + 25 and sti < 100:
+                            await self.log(f"ZAP active scan {sti}%", "info")
+                            last = sti
+                        if sti >= 100:
+                            break
+
+                raw = await _get(c, "/JSON/core/view/alerts/",
+                                 {"baseurl": base_url, "start": "0", "count": "1000"})
+                alerts = raw.get("alerts", [])
+
+            RISK = {"High": ("high", 8.0), "Medium": ("medium", 5.5), "Low": ("low", 3.5)}
+            seen = set()
+            for a in alerts:
+                risk = a.get("risk", "")
+                if risk not in RISK:
+                    continue
+                name = a.get("alert") or a.get("name", "ZAP alert")
+                url = a.get("url", "")
+                param = a.get("param", "")
+                key = (name, url, param)
+                if key in seen:
+                    continue
+                seen.add(key)
+                sev, cvss = RISK[risk]
+                cwe = a.get("cweid", "")
+                evidence = a.get("evidence", "")
+                attack = a.get("attack", "")
+                findings.append({"name": name, "risk": risk, "url": url, "param": param})
+                await self.add_finding(
+                    title=f"[ZAP] {name}" + (f": {param}" if param else ""),
+                    severity=sev,
+                    description=(a.get("description") or f"OWASP ZAP flagged {name}.")[:1200],
+                    evidence=(f"URL: {url}\n"
+                              + (f"Parameter: {param}\n" if param else "")
+                              + (f"Attack: {attack}\n" if attack else "")
+                              + (f"Evidence: {evidence}\n" if evidence else "")
+                              + (f"CWE-{cwe}" if cwe else "")).strip()[:1000],
+                    cvss_score=cvss,
+                    remediation=(a.get("solution") or "Review the ZAP alert and apply the recommended fix.")[:800],
+                )
+
+            await self.log(f"OWASP ZAP scan complete: {len(findings)} alerts (High/Med/Low)",
+                           "success" if findings else "info")
+        except Exception as e:
+            await self.log(f"ZAP active scan error: {e}", "warn")
+
+        return findings
+
     async def run_offensive(self, base_url: str, extra_wordlists: list = None) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
         urls = await self.crawl(base_url)
@@ -467,6 +583,9 @@ class OffensiveEngine:
         def _safe(x):
             return x if isinstance(x, list) else []
 
+        # OWASP ZAP full active scan: heavy, runs after the fast probes.
+        zap = await self.zap_active_scan(base_url)
+
         result = {
             "crawled_urls": len(urls),
             "sqli": _safe(sqli),
@@ -474,8 +593,9 @@ class OffensiveEngine:
             "dast": _safe(dast),
             "auth": _safe(auth),
             "traversal": _safe(trav),
+            "zap": _safe(zap),
             "content": _safe(disco),
         }
-        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth, trav))
-        await self.log(f"⚔ Offensive engine complete: {total} injection/access findings across {len(urls)} URLs", "success")
+        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth, trav, zap))
+        await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

@@ -23,6 +23,20 @@ services:
       timeout: 3s
       retries: 5
 
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    restart: unless-stopped
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8090
+      -config api.key=${ZAP_API_KEY:-olympus-zap}
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    expose:
+      - "8090"
+    # ZAP needs to reach the target too (e.g. host.docker.internal:42000).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   backend:
     build:
       context: ./backend
@@ -42,6 +56,9 @@ services:
       OLYMPUS_API_KEY: ${OLYMPUS_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       REPORTS_DIR: /app/reports
+      # OWASP ZAP daemon (active DAST). Runs as the `zap` service below.
+      ZAP_URL: http://zap:8090
+      ZAP_API_KEY: ${ZAP_API_KEY:-olympus-zap}
     # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
     # No host port is published, reducing the unauthenticated attack surface.
     expose:
@@ -51,6 +68,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      zap:
+        condition: service_started
     volumes:
       - reports:/app/reports
     cap_add:
