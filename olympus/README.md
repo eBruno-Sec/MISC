@@ -194,6 +194,16 @@ docker compose restart backend
 
 OLYMPUS accepts program scope files from bug bounty platforms directly in the mission launch form. In-scope and out-of-scope rules are enforced inside HERMES (subdomain filtering) and ARES (target filtering before scanning).
 
+### How scope is resolved
+
+There are three ways scope is set, in priority order:
+
+1. **Structured scope file** (upload/paste in the launch form). Parsed deterministically and enforced as-is. Always authoritative.
+2. **Free-text scope notes** (the notes box). When AI is enabled, ATHENA interprets the notes into in-scope / out-of-scope host rules. The model only *proposes*: every derived host is validated (hostname, wildcard, IPv4, or CIDR) and anything malformed is dropped, and derived rules can only narrow the target's own discovered subdomains, never add an unrelated target. Adopted only when no structured file was provided. Review the derived scope in the terminal feed, and (in Active/Full mode) at the approval gate before any scanning.
+3. **No scope at all.** OLYMPUS spiders the target and every discovered live host, and runs the full OWASP/injection suite against each endpoint and URL found. Nothing is filtered.
+
+> Without an AI key, free-text notes are **not** auto-enforced (there is no interpreter). Use a structured scope file when you need hard enforcement offline.
+
 **Supported formats:**
 
 | Platform | Format | Detection |

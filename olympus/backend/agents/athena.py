@@ -77,5 +77,73 @@ Only return valid JSON, no markdown, no preamble."""
             result["mission_summary"] = f"Security assessment of {target} in {mode} mode."
             result["key_areas"] = ["DNS infrastructure", "Email security", "Web surface", "Certificate transparency"]
 
+        # Turn free-text scope notes into enforceable, validated scope rules.
+        try:
+            derived = await self._derive_scope(target, scope)
+            if derived:
+                result["scope_rules"] = derived
+        except Exception as e:
+            await self.log(f"Scope note interpretation error ({e}); notes not auto-enforced", "warn")
+
         await self.log("Mission parameters locked. Handing off to HERMES.", "success")
         return result
+
+    async def _derive_scope(self, target: str, scope: str) -> dict:
+        """Convert free-text scope notes into structured in/out-of-scope rules the
+        platform can enforce. The model only *proposes*; is_valid_target disposes,
+        so a hallucinated or malformed host is dropped. Rules can only narrow the
+        set of already-discovered subdomains of the authorized target, never add a
+        new external target, which bounds the blast radius of a bad suggestion."""
+        import re as _re
+        from core.security import is_valid_target
+
+        notes = (scope or "").strip()
+        if not notes:
+            return {}
+
+        prompt = f"""You convert authorized-penetration-test scope notes into strict JSON.
+Target: {target}
+Notes: {notes}
+
+Return ONLY JSON: {{"in_scope": ["..."], "out_of_scope": ["..."]}}
+Rules:
+- Each array item is a bare hostname, wildcard host (*.example.com), IPv4, or IPv4 CIDR.
+- Hosts the notes say to test/include go in in_scope.
+- Hosts the notes say to avoid/exclude/never-touch go in out_of_scope.
+- Only include hosts explicitly named or clearly implied for {target}. Never invent hosts.
+- If the notes name no specific hosts, return empty arrays.
+No prose, no markdown."""
+
+        text = await complete(prompt, max_tokens=400)
+        if not text:
+            return {}
+        parsed = _extract_json(text)
+
+        def _classify(v: str) -> str:
+            if "/" in v:
+                return "cidr"
+            if v.startswith("*."):
+                return "wildcard"
+            if _re.match(r"^\d{1,3}(\.\d{1,3}){3}$", v):
+                return "ip"
+            return "domain"
+
+        def _rules(items) -> list:
+            out, seen = [], set()
+            for it in items or []:
+                v = str(it).strip().lower()
+                if not v or v in seen or not is_valid_target(v):
+                    continue
+                seen.add(v)
+                out.append({"identifier": v, "type": _classify(v)})
+            return out
+
+        in_rules = _rules(parsed.get("in_scope"))
+        out_rules = _rules(parsed.get("out_of_scope"))
+        if not (in_rules or out_rules):
+            return {}
+        await self.log(
+            f"Interpreted scope notes into {len(in_rules)} in-scope / {len(out_rules)} out-of-scope rule(s)",
+            "info",
+        )
+        return {"in_scope": in_rules, "out_of_scope": out_rules, "source": "ai_notes"}

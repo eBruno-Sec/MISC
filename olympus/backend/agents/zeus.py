@@ -61,6 +61,19 @@ class Zeus(BaseAgent):
         athena = self._spawn(Athena)
         ctx["athena"] = await athena.execute(target, {"mode": mode, "scope": scope})
 
+        # If the operator wrote free-text scope notes but uploaded no structured
+        # scope rules, enforce the validated rules ATHENA derived from those notes.
+        # Structured rules (from a scope file) always win and are never overridden.
+        if not (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+            ai_rules = (ctx.get("athena") or {}).get("scope_rules") or {}
+            if ai_rules.get("in_scope") or ai_rules.get("out_of_scope"):
+                ctx["scope_rules"] = ai_rules
+                await self.log(
+                    f"Enforcing AI-derived scope from notes: "
+                    f"{len(ai_rules.get('in_scope', []))} in / {len(ai_rules.get('out_of_scope', []))} out",
+                    "info",
+                )
+
         # ── HERMES ──
         from .hermes import Hermes
         await self._set_phase(MissionStatus.RECON, "hermes")

@@ -1,6 +1,7 @@
 import os
 import json
 import html as _html
+import secrets
 from datetime import datetime
 from core.ai_client import complete
 from core.config import settings
@@ -126,6 +127,9 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         subdomains = (context or {}).get("hermes", {}).get("subdomains", [])
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        # Per-report nonce so the report's own script runs while any injected
+        # inline script is blocked (defense in depth behind the html escaping).
+        nonce = secrets.token_urlsafe(16)
 
         sorted_findings = sorted(
             findings,
@@ -226,16 +230,18 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         }
         report_json = json.dumps(report_payload, ensure_ascii=False).replace("</", "<\\/")
 
+        # No inline onclick handlers: they are wired via addEventListener in the
+        # nonce'd script below so the report can run under a strict CSP.
         toolbar_html = (
             '<div class="export-bar">'
-            '<button onclick="olyPrint()">Print / PDF</button>'
-            '<button onclick="olyExport(\'md\')">Markdown</button>'
-            '<button onclick="olyExport(\'txt\')">TXT</button>'
-            '<button onclick="olyExport(\'json\')">JSON</button>'
+            '<button id="oly-print">Print / PDF</button>'
+            '<button id="oly-md">Markdown</button>'
+            '<button id="oly-txt">TXT</button>'
+            '<button id="oly-json">JSON</button>'
             '</div>'
         )
 
-        export_script = """<script>
+        export_script = """<script nonce="__NONCE__">
 const REPORT = __REPORT_JSON__;
 function olyPrint(){ window.print(); }
 function dl(name, mime, text){
@@ -314,7 +320,14 @@ function olyExport(kind){
   if (kind === 'md') return dl(fname('md'), 'text/markdown', toMd());
   return dl(fname('txt'), 'text/plain', toTxt());
 }
+document.getElementById('oly-print').addEventListener('click', olyPrint);
+document.getElementById('oly-md').addEventListener('click', function(){ olyExport('md'); });
+document.getElementById('oly-txt').addEventListener('click', function(){ olyExport('txt'); });
+document.getElementById('oly-json').addEventListener('click', function(){ olyExport('json'); });
 </script>"""
+        # Nonce first (touches only the template's script tag), then inject the
+        # findings JSON so finding text can never collide with a placeholder.
+        export_script = export_script.replace("__NONCE__", nonce)
         export_script = export_script.replace("__REPORT_JSON__", report_json)
 
         # Escaped header/summary values. target is already validated (no angle
@@ -330,6 +343,7 @@ function olyExport(kind){
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{nonce}'; object-src 'none'; base-uri 'none'">
 <title>OLYMPUS Report — {esc_target}</title>
 <style>
 :root {{
