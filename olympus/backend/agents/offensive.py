@@ -32,6 +32,14 @@ SECLISTS_DIRS = [
 # root. Kept bounded so seeding does not dwarf the scan itself.
 MAX_ZAP_SEED = 200
 
+# Static assets to drop from archive parameter discovery: they rarely carry an
+# injectable parameter and would only dilute the test pool.
+ARCHIVE_SKIP_EXT = (
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".ico", ".webp", ".bmp",
+    ".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".mp4", ".webm", ".mp3", ".pdf", ".zip", ".gz", ".tar", ".rar",
+)
+
 
 class OffensiveEngine:
     """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
@@ -59,6 +67,68 @@ class OffensiveEngine:
         param_urls = [u for u in urls if "?" in u and "=" in u]
         await self.log(f"Crawl complete: {len(urls)} URLs, {len(param_urls)} with parameters", "success")
         return urls
+
+    # ── Passive parameter discovery (ParamSpider / gau style) ────
+    async def gather_archive_urls(self, base_url: str, cap: int = 2500) -> list:
+        """Harvest historical URLs and hidden parameters from web archives.
+
+        Queries the Wayback Machine CDX API for every URL ever archived for the
+        host and keeps the parameterized ones. These are endpoints/params that
+        are no longer linked on the live site, so an active crawler never finds
+        them. No traffic hits the target (fully passive)."""
+        import httpx
+
+        host = urlparse(base_url).netloc.split(":")[0]
+        if not host:
+            return []
+        await self.log(f"Archive parameter discovery for {host} (Wayback CDX)", "info")
+
+        found = set()
+        cdx = ("http://web.archive.org/cdx/search/cdx"
+               f"?url={host}/*&output=text&fl=original&collapse=urlkey&limit=15000")
+        try:
+            async with httpx.AsyncClient(timeout=45, follow_redirects=True) as c:
+                r = await c.get(cdx, headers={"User-Agent": "OLYMPUS-recon/1.0"})
+                if r.status_code == 200:
+                    for line in r.text.splitlines():
+                        u = line.strip()
+                        if not u.startswith("http"):
+                            continue
+                        path = u.lower().split("?", 1)[0]
+                        if path.endswith(ARCHIVE_SKIP_EXT):
+                            continue
+                        found.add(u)
+        except Exception as e:
+            await self.log(f"Archive discovery failed ({e}); continuing without it", "warn")
+            return []
+
+        urls = list(found)
+        param_urls = [u for u in urls if "?" in u and "=" in u]
+        await self.log(
+            f"Archive discovery: {len(urls)} archived URLs, {len(param_urls)} with parameters",
+            "success" if param_urls else "info",
+        )
+        # Parameterized URLs first (highest test value), then the rest, capped.
+        ordered = param_urls + [u for u in urls if not ("?" in u and "=" in u)]
+        return ordered[:cap]
+
+    def _dedupe_by_params(self, urls: list) -> list:
+        """Collapse URLs that hit the same endpoint with the same parameter names
+        (e.g. id=1 and id=2 -> one), so each param set is tested once. This is
+        what makes archive discovery usable instead of thousands of near-dupes."""
+        seen, out = set(), []
+        for u in urls:
+            p = urlparse(u)
+            if "?" in u and "=" in u:
+                names = tuple(sorted(parse_qs(p.query, keep_blank_values=True).keys()))
+                key = (p.netloc, p.path, names)
+            else:
+                key = (p.netloc, p.path, ())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(u)
+        return out
 
     # ── SQL injection ────────────────────────────────────────────
     async def test_sqli(self, urls: list) -> list:
@@ -636,7 +706,15 @@ class OffensiveEngine:
             await self.log(
                 f"⚠ Authenticated scanning requested but login failed on {base_url}; "
                 f"testing the UNAUTHENTICATED surface only", "warn")
-        urls = await self.crawl(base_url)
+        # Active crawl (katana) + passive archive discovery (Wayback), then
+        # collapse duplicate parameter sets so each endpoint+params is tested once.
+        crawled = await self.crawl(base_url)
+        archived = await self.gather_archive_urls(base_url)
+        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived)))
+        params = len([u for u in urls if "?" in u and "=" in u])
+        await self.log(
+            f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
+            f"from crawl + archives", "info")
 
         # Run injection classes concurrently where safe
         sqli, xss, dast, auth, trav, disco = await asyncio.gather(
