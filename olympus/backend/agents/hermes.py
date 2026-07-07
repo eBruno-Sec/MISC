@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 from datetime import date, datetime
 import httpx
@@ -116,10 +117,17 @@ class Hermes(BaseAgent):
         await self.log("WHOIS / RDAP lookup", "info")
         result["whois"] = await self._rdap(domain)
 
-        await self.log("Certificate transparency enumeration via crt.sh", "info")
-        subs = await self._cert_transparency(domain)
+        await self.log("Subdomain enumeration: crt.sh + subfinder (OSINT) + DNS brute", "info")
+        ct_subs = await self._cert_transparency(domain)
+        osint_subs = await self._subfinder(domain)
+        brute_subs = await self._dns_bruteforce(domain)
+        subs = sorted(set(ct_subs) | set(osint_subs) | set(brute_subs))
         result["subdomains"] = subs
-        await self.log(f"{len(subs)} unique subdomains discovered via CT logs", "success" if subs else "warn")
+        await self.log(
+            f"{len(subs)} unique subdomains "
+            f"(crt.sh {len(ct_subs)}, subfinder {len(osint_subs)}, brute {len(brute_subs)})",
+            "success" if subs else "warn",
+        )
 
         # Apply scope rules if provided
         scope_rules = (context or {}).get("scope_rules", {})
@@ -138,10 +146,16 @@ class Hermes(BaseAgent):
         await self.log("DNS record enumeration (A, MX, TXT, NS, SOA)", "info")
         result["dns_records"] = await self._dns_enum(domain)
 
-        all_hosts = list(set(subs + [domain]))
+        all_hosts = list(dict.fromkeys(subs + [domain]))
         if all_hosts:
             await self.log(f"Probing {len(all_hosts)} hosts for liveness", "info")
-            live = await self._live_detection(all_hosts[:150], explicit_port=_port)
+            if _port:
+                # Preserve the explicit host:port probe path (e.g. local Juice Shop).
+                live = await self._live_detection(all_hosts[:150], explicit_port=_port)
+            else:
+                live = await self._httpx_probe(all_hosts[:2000])
+                if not live:
+                    live = await self._live_detection(all_hosts[:150])
             if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
                 live = self._apply_scope(live, scope_rules)
             result["live_hosts"] = live
@@ -150,6 +164,7 @@ class Hermes(BaseAgent):
         if result["live_hosts"]:
             await self.log("Technology fingerprinting on live hosts", "info")
             result["technologies"] = await self._fingerprint(result["live_hosts"])
+            await self._check_takeovers([h.get("host", "") for h in result["live_hosts"]])
 
         result["vendors"] = self._extract_vendors(result["dns_records"].get("TXT", []))
         if result["vendors"]:
@@ -231,6 +246,170 @@ class Hermes(BaseAgent):
         except Exception as e:
             await self.log(f"crt.sh query failed: {e}", "warn")
         return sorted(list(subs))
+
+    async def _subfinder(self, domain: str) -> list:
+        """Multi-source passive subdomain enumeration (30+ OSINT sources)."""
+        stdout, _, rc = await self.run_command(
+            ["subfinder", "-d", domain, "-silent", "-all"], timeout=180
+        )
+        if rc == 127:
+            await self.log("subfinder not installed; OSINT enum skipped", "warn")
+            return []
+        subs = set()
+        for line in stdout.splitlines():
+            s = line.strip().lower().lstrip("*.")
+            if s and "*" not in s and len(s) < 253 and (s == domain or s.endswith(f".{domain}")):
+                subs.add(s)
+        if subs:
+            await self.log(f"subfinder: {len(subs)} subdomains from OSINT sources", "info")
+        return sorted(subs)
+
+    async def _dns_bruteforce(self, domain: str, cap: int = 1500) -> list:
+        """Resolve a capped slice of the DNS wordlist to surface hosts no OSINT
+        source knows about. Wildcard-DNS aware so it does not flood false hits."""
+        import secrets as _secrets
+
+        wl = "/opt/wordlists/subdomains-top20000.txt"
+        if not os.path.exists(wl):
+            return []
+        try:
+            with open(wl, "r", errors="replace") as f:
+                words = [w.strip() for w in f if w.strip() and not w.startswith("#")][:cap]
+        except OSError:
+            return []
+        if not words:
+            return []
+
+        loop = asyncio.get_running_loop()
+        # Wildcard guard: if a random label resolves, only accept hits that
+        # resolve to a different address than the wildcard.
+        wildcard_ips = set()
+        try:
+            res = await loop.getaddrinfo(f"{_secrets.token_hex(6)}.{domain}", None)
+            wildcard_ips = {r[4][0] for r in res}
+        except Exception:
+            pass
+
+        sem = asyncio.Semaphore(100)
+
+        async def resolve(w):
+            host = f"{w}.{domain}"
+            async with sem:
+                try:
+                    res = await loop.getaddrinfo(host, None)
+                except Exception:
+                    return None
+            ips = {r[4][0] for r in res}
+            return host if ips and not ips.issubset(wildcard_ips) else None
+
+        results = await asyncio.gather(*[resolve(w) for w in words], return_exceptions=True)
+        found = [r for r in results if isinstance(r, str)]
+        if found:
+            await self.log(f"DNS brute: {len(found)} resolvable subdomains from {len(words)} candidates", "info")
+        return found
+
+    async def _httpx_probe(self, hosts: list) -> list:
+        """Liveness + fingerprint via the httpx binary: status, title, tech, CDN."""
+        import json as _json
+        import tempfile
+
+        if not hosts:
+            return []
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(hosts))
+            tmp = f.name
+        live = []
+        try:
+            stdout, _, rc = await self.run_command(
+                ["httpx", "-l", tmp, "-json", "-silent", "-follow-redirects",
+                 "-title", "-tech-detect", "-cdn", "-timeout", "8", "-rl", "150", "-nc"],
+                timeout=300,
+            )
+            if rc == 127:
+                await self.log("httpx binary not available; using library probe", "warn")
+                return []
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    j = _json.loads(line)
+                except Exception:
+                    continue
+                host = re.sub(r"^https?://", "", (j.get("input") or j.get("host") or "")).split("/")[0]
+                if not host:
+                    continue
+                live.append({
+                    "host": host,
+                    "url": j.get("url") or f"https://{host}",
+                    "status_code": j.get("status_code"),
+                    "server": j.get("webserver", ""),
+                    "x_powered_by": "",
+                    "content_length": j.get("content_length", 0),
+                    "final_url": j.get("url") or "",
+                    "title": j.get("title", ""),
+                    "tech": j.get("tech", []) or [],
+                    "cdn": j.get("cdn_name", ""),
+                    "headers": {},
+                })
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if live:
+            await self.log(f"httpx: {len(live)} live hosts fingerprinted", "info")
+        return live
+
+    async def _check_takeovers(self, hosts: list) -> None:
+        """Flag dangling subdomains (CNAME to an unclaimed service) via nuclei."""
+        import json as _json
+        import tempfile
+
+        hosts = [h for h in hosts if h][:200]
+        if not hosts:
+            return
+        await self.log(f"Checking {len(hosts)} hosts for subdomain takeover", "info")
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(hosts))
+            tmp = f.name
+        count = 0
+        try:
+            stdout, _, rc = await self.run_command(
+                ["nuclei", "-l", tmp, "-tags", "takeover", "-jsonl", "-silent",
+                 "-timeout", "10", "-rl", "50", "-nc"],
+                timeout=240,
+            )
+            if rc == 127:
+                await self.log("nuclei not available; takeover check skipped", "warn")
+                return
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    j = _json.loads(line)
+                except Exception:
+                    continue
+                info = j.get("info", {})
+                matched = j.get("matched-at") or j.get("host", "")
+                count += 1
+                await self.add_finding(
+                    title=f"Subdomain Takeover: {matched}",
+                    severity="high",
+                    description=(info.get("description")
+                                 or "A subdomain points via CNAME to an unclaimed third-party service. "
+                                    "An attacker can register that resource and serve content under your domain."),
+                    evidence=f"Host: {matched}\nTemplate: {j.get('template-id', '')}",
+                    cvss_score=8.1,
+                    remediation="Remove the dangling DNS record or reclaim the third-party resource it points to.",
+                )
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        await self.log(f"Takeover check complete: {count} finding(s)", "success" if count else "info")
 
     async def _dns_enum(self, domain: str) -> dict:
         records = {}
@@ -418,7 +597,7 @@ class Hermes(BaseAgent):
     async def _fingerprint(self, live_hosts: list) -> dict:
         tech_map = {}
         for h in live_hosts:
-            techs = []
+            techs = list(h.get("tech", []) or [])  # from httpx tech-detect
             if h.get("server"):
                 techs.append(h["server"])
             if h.get("x_powered_by"):
