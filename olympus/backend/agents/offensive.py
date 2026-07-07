@@ -40,11 +40,11 @@ class OffensiveEngine:
     # ── Crawl ────────────────────────────────────────────────────
     async def crawl(self, base_url: str, max_urls: int = 200) -> list:
         await self.log(f"Crawling {base_url} for endpoints and parameters (katana)", "info")
-        stdout, _, rc = await self.run_command(
-            ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
-             "-c", "15", "-silent", "-nc", "-timeout", "10"],
-            timeout=180,
-        )
+        cmd = ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
+               "-c", "15", "-silent", "-nc", "-timeout", "10"]
+        if self._cookie():
+            cmd += ["-H", f"Cookie: {self._cookie()}"]
+        stdout, _, rc = await self.run_command(cmd, timeout=180)
         if rc == 127:
             await self.log("katana not available; falling back to seed URL only", "warn")
             return [base_url]
@@ -75,14 +75,14 @@ class OffensiveEngine:
             url_file = f.name
 
         try:
-            stdout, stderr, rc = await self.run_command(
-                ["sqlmap", "-m", url_file, "--batch", "--random-agent",
-                 "--level", "2", "--risk", "2", "--smart",
-                 "--technique", "BEUST", "--threads", "4",
-                 "--timeout", "15", "--retries", "1",
-                 "--output-dir", "/tmp/sqlmap_out"],
-                timeout=600,
-            )
+            sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch", "--random-agent",
+                          "--level", "2", "--risk", "2", "--smart",
+                          "--technique", "BEUST", "--threads", "4",
+                          "--timeout", "15", "--retries", "1",
+                          "--output-dir", "/tmp/sqlmap_out"]
+            if self._cookie():
+                sqlmap_cmd += ["--cookie", self._cookie()]
+            stdout, stderr, rc = await self.run_command(sqlmap_cmd, timeout=600)
             if rc == 127:
                 await self.log("sqlmap not available; SQLi testing skipped", "warn")
                 return []
@@ -142,11 +142,11 @@ class OffensiveEngine:
             url_file = f.name
 
         try:
-            stdout, stderr, rc = await self.run_command(
-                ["dalfox", "file", url_file, "--format", "json",
-                 "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"],
-                timeout=420,
-            )
+            dalfox_cmd = ["dalfox", "file", url_file, "--format", "json",
+                          "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"]
+            if self._cookie():
+                dalfox_cmd += ["-C", self._cookie()]
+            stdout, stderr, rc = await self.run_command(dalfox_cmd, timeout=420)
             if rc == 127:
                 await self.log("dalfox not available; XSS testing skipped", "warn")
                 return []
@@ -199,11 +199,11 @@ class OffensiveEngine:
             uf = f.name
 
         try:
-            stdout, _, rc = await self.run_command(
-                ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
-                 "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"],
-                timeout=420,
-            )
+            nuclei_cmd = ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
+                          "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"]
+            if self._cookie():
+                nuclei_cmd += ["-H", f"Cookie: {self._cookie()}"]
+            stdout, _, rc = await self.run_command(nuclei_cmd, timeout=420)
             if rc == 127:
                 await self.log("nuclei not available for DAST", "warn")
                 return []
@@ -252,7 +252,7 @@ class OffensiveEngine:
             if re.search(r"/(api|rest)/\w+/\d+", u):
                 api_id_urls.append(u)
 
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True, headers=self._auth_headers()) as c:
             for u in api_id_urls[:15]:
                 m = re.search(r"(.*/)(\d+)(\b.*)$", u)
                 if not m:
@@ -283,7 +283,7 @@ class OffensiveEngine:
         sensitive = ["/.git/config", "/.env", "/actuator/health", "/actuator/env",
                      "/api/swagger.json", "/swagger-ui/", "/graphql", "/server-status",
                      "/.well-known/security.txt", "/debug", "/metrics"]
-        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False) as c:
+        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False, headers=self._auth_headers()) as c:
             for path in sensitive:
                 try:
                     r = await c.get(base_url.rstrip("/") + path)
@@ -306,7 +306,7 @@ class OffensiveEngine:
 
         # GraphQL introspection (common high-value finding)
         try:
-            async with httpx.AsyncClient(timeout=8, verify=False) as c:
+            async with httpx.AsyncClient(timeout=8, verify=False, headers=self._auth_headers()) as c:
                 q = {"query": "{__schema{types{name}}}"}
                 r = await c.post(base_url.rstrip("/") + "/graphql", json=q)
                 if r.status_code == 200 and "__schema" in r.text:
@@ -341,12 +341,12 @@ class OffensiveEngine:
         await self.log(f"Content discovery with {len(lists)} wordlist(s) (ffuf)", "info")
         found = {}
         for wordlist in lists:
-            stdout, _, rc = await self.run_command(
-                ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
-                 "-mc", "200,204,301,302,307,401,403", "-json", "-s",
-                 "-t", "40", "-timeout", "8"],
-                timeout=300,
-            )
+            ffuf_cmd = ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
+                        "-mc", "200,204,301,302,307,401,403", "-json", "-s",
+                        "-t", "40", "-timeout", "8"]
+            if self._cookie():
+                ffuf_cmd += ["-H", f"Cookie: {self._cookie()}"]
+            stdout, _, rc = await self.run_command(ffuf_cmd, timeout=300)
             if rc == 127:
                 await self.log("ffuf not available; content discovery skipped", "warn")
                 return []
@@ -399,7 +399,7 @@ class OffensiveEngine:
         seen = set()
         budget = 350
 
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True, headers=self._auth_headers()) as c:
             for u in param_urls:
                 parsed = urlparse(u)
                 params = parse_qs(parsed.query, keep_blank_values=True)
@@ -492,6 +492,18 @@ class OffensiveEngine:
 
                 ver = (await _get(c, "/JSON/core/view/version/", {})).get("version", "?")
                 await self.log(f"OWASP ZAP {ver} online; seeding target", "info")
+
+                # Authenticated scan: inject the session cookie on every ZAP request.
+                if self._cookie():
+                    try:
+                        await _get(c, "/JSON/replacer/action/addRule/", {
+                            "description": "olympus-auth-cookie", "enabled": "true",
+                            "matchType": "REQ_HEADER", "matchString": "Cookie",
+                            "matchRegex": "false", "replacement": self._cookie(),
+                        })
+                        await self.log("ZAP: authenticated session cookie applied to all requests", "info")
+                    except Exception:
+                        await self.log("ZAP: could not apply auth cookie (replacer add-on missing?)", "warn")
 
                 await _get(c, "/JSON/core/action/accessUrl/", {"url": base_url, "followRedirects": "true"})
 
@@ -615,8 +627,15 @@ class OffensiveEngine:
 
         return findings
 
-    async def run_offensive(self, base_url: str, extra_wordlists: list = None) -> dict:
+    async def run_offensive(self, base_url: str, extra_wordlists: list = None, credentials: dict = None) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
+        # Authenticate first (when creds are supplied) so the crawl and every
+        # scanner reuse the session. Any failure degrades to unauthenticated.
+        self._auth_cookie = await self.authenticate(base_url, credentials) if credentials else None
+        if credentials and not self._auth_cookie:
+            await self.log(
+                f"⚠ Authenticated scanning requested but login failed on {base_url}; "
+                f"testing the UNAUTHENTICATED surface only", "warn")
         urls = await self.crawl(base_url)
 
         # Run injection classes concurrently where safe

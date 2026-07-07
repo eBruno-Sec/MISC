@@ -85,8 +85,62 @@ Only return valid JSON, no markdown, no preamble."""
         except Exception as e:
             await self.log(f"Scope note interpretation error ({e}); notes not auto-enforced", "warn")
 
+        # Extract test credentials from scope notes for authenticated scanning.
+        try:
+            creds = await self._derive_credentials(scope)
+            if creds:
+                result["_credentials"] = creds
+        except Exception as e:
+            await self.log(f"Credential extraction error ({e})", "warn")
+
         await self.log("Mission parameters locked. Handing off to HERMES.", "success")
         return result
+
+    async def _derive_credentials(self, scope: str) -> list:
+        """Pull test credentials out of free-text scope notes for authenticated
+        scanning. Returns a list of {username, password, login_url?, role?}.
+        Passwords are never written to logs."""
+        notes = (scope or "").strip()
+        if not notes:
+            return []
+        low = notes.lower()
+        if not any(k in low for k in ("cred", "login", "user", "pass", "account", "sign in", "sign-in", "log in")):
+            return []
+
+        prompt = f"""Extract any test credentials from these AUTHORIZED-pentest scope notes.
+Notes:
+{notes}
+
+Return ONLY JSON: {{"credentials": [{{"username": "...", "password": "...", "login_url": "<optional>", "role": "<optional>"}}]}}
+Only include explicit username/password pairs actually present in the notes. If none, return {{"credentials": []}}.
+No prose."""
+        text = await complete(prompt, max_tokens=400)
+        if not text:
+            return []
+        parsed = _extract_json(text)
+        items = parsed.get("credentials") if isinstance(parsed, dict) else None
+        if not isinstance(items, list):
+            return []
+
+        creds = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            u = str(it.get("username", "")).strip()
+            p = str(it.get("password", "")).strip()
+            if not u or not p:
+                continue
+            entry = {"username": u, "password": p}
+            if it.get("login_url"):
+                entry["login_url"] = str(it.get("login_url")).strip()
+            if it.get("role"):
+                entry["role"] = str(it.get("role")).strip()
+            creds.append(entry)
+        if creds:
+            await self.log(
+                f"Extracted {len(creds)} credential set(s) for authenticated scanning "
+                f"(user: {creds[0]['username']})", "info")
+        return creds
 
     async def _derive_scope(self, target: str, scope: str) -> dict:
         """Convert free-text scope notes into structured in/out-of-scope rules the

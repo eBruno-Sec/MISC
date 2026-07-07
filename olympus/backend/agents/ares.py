@@ -4,6 +4,7 @@ import os
 import re
 from .base import BaseAgent
 from .offensive import OffensiveEngine
+from .auth import AuthEngine
 
 SEVERITY_MAP = {
     "critical": ("critical", 9.5),
@@ -15,7 +16,7 @@ SEVERITY_MAP = {
 }
 
 
-class Ares(BaseAgent, OffensiveEngine):
+class Ares(BaseAgent, OffensiveEngine, AuthEngine):
     name = "ares"
     symbol = "⚔"
     display_name = "ARES"
@@ -126,6 +127,14 @@ class Ares(BaseAgent, OffensiveEngine):
                 f"Offensive engine: spider + OWASP scan across {len(offensive_targets)} "
                 f"live host(s) of {len(live_hosts)} (cap {max_hosts})", "info")
 
+            # Credentials for authenticated scanning (ATHENA extracts these from scope notes).
+            creds_list = (context or {}).get("_credentials") or []
+            credentials = creds_list[0] if isinstance(creds_list, list) and creds_list else (
+                creds_list if isinstance(creds_list, dict) else None)
+            if credentials:
+                await self.log(
+                    f"Authenticated scanning enabled (user: {credentials.get('username', '?')})", "info")
+
             per_host = {}
             agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap", "content")}
             total_urls = 0
@@ -134,7 +143,7 @@ class Ares(BaseAgent, OffensiveEngine):
                 await self.log(
                     f"[{idx}/{len(offensive_targets)}] Offensive pass on {host_url}", "info")
                 try:
-                    r = await self.run_offensive(host_url, content_lists)
+                    r = await self.run_offensive(host_url, content_lists, credentials)
                 except Exception as e:
                     await self.log(f"Offensive engine error on {host_url}: {e}", "warn")
                     continue

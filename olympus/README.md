@@ -15,7 +15,7 @@ OLYMPUS is a self-hosted, Docker-native security assessment platform built aroun
 | ZEUS | ⚡ | Orchestrator and state machine | Coordinates all agents, manages HITL gates |
 | ATHENA | 🦉 | AI strategy and intent parsing | Claude API, threat modeling |
 | HERMES | ☿ | OSINT and passive recon | subfinder (multi-source), crt.sh, DNS brute-force, httpx fingerprint (title/tech/CDN), subdomain-takeover detection, RDAP/WHOIS, DNS, vendor fingerprinting |
-| ARES | ⚔ | Active scanning and vuln assessment | Nmap, Nuclei, ffuf |
+| ARES | ⚔ | Active scanning and vuln assessment | Nmap, Nuclei, ffuf, katana, sqlmap, dalfox, OWASP ZAP, authenticated scanning (AI login) |
 | HEPHAESTUS | 🔥 | Payload forge and exploit prep | Custom wordlists, vuln-class payloads |
 | HADES | 💀 | Post-exploitation analysis | Lateral movement mapping, persistence vectors, blast radius scoring |
 | METIS | ⚖ | AI triage and correlation | Cross-tool false-positive suppression, CWE/OWASP mapping, attack-path chaining (AI, optional) |
@@ -204,6 +204,18 @@ There are three ways scope is set, in priority order:
 3. **No scope at all.** OLYMPUS spiders the target and every discovered live host, and runs the full OWASP/injection suite against each endpoint and URL found. Nothing is filtered.
 
 > Without an AI key, free-text notes are **not** auto-enforced (there is no interpreter). Use a structured scope file when you need hard enforcement offline.
+
+### Authenticated scanning
+
+Put test credentials in the scope notes and OLYMPUS tests the authenticated surface. ATHENA extracts them, then ARES logs in and shares the session cookie with the crawler and every scanner (katana, sqlmap, dalfox, nuclei, ffuf, the httpx probes, and OWASP ZAP).
+
+```
+login creds: alice@example.com / hunter2, login at /account/login
+```
+
+The AI reads the login form (action, field names, CSRF token) and submits it; a deterministic parser is the fallback. If the login cannot be verified, the scan continues unauthenticated with a warning rather than guessing. Requires an AI key.
+
+> Credentials placed in scope notes are stored in the mission record. Rotate test accounts after the engagement.
 
 **Supported formats:**
 

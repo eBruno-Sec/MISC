@@ -74,6 +74,12 @@ class Zeus(BaseAgent):
                     "info",
                 )
 
+        # Move extracted credentials to a transient key so ARES can authenticate.
+        # Kept out of ctx["athena"] and never persisted; passwords are not logged.
+        creds = (ctx.get("athena") or {}).pop("_credentials", None)
+        if creds:
+            ctx["_credentials"] = creds
+
         # ── HERMES ──
         from .hermes import Hermes
         await self._set_phase(MissionStatus.RECON, "hermes")
@@ -93,14 +99,19 @@ class Zeus(BaseAgent):
         except ValueError:
             max_hosts = 5
         covered = min(len(live), max_hosts)
+        auth_note = ""
+        _creds = ctx.get("_credentials")
+        if isinstance(_creds, list) and _creds:
+            auth_note = (f" Authenticated scanning is ENABLED: OLYMPUS will log in as "
+                         f"'{_creds[0].get('username', '?')}' and test the authenticated surface.")
         approved = await self.request_approval(
             action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, OWASP ZAP, IDOR/auth probes)",
             description=f"Ares will run Nmap and Nuclei, then engage the offensive engine on the "
                         f"first {covered} of {len(live)} live host(s): {host_preview}{more}. "
                         f"Per host it spiders for endpoints, then runs active SQL injection, XSS, "
                         f"path traversal, DAST, IDOR/sensitive-endpoint checks and a full OWASP ZAP "
-                        f"active scan against each discovered URL. Real, non-destructive injection "
-                        f"testing. Authorized targets only.",
+                        f"active scan against each discovered URL.{auth_note} Real, non-destructive "
+                        f"injection testing. Authorized targets only.",
         )
         if not approved:
             await self.log("Active scanning denied. Generating passive report.", "warn")
