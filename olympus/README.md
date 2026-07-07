@@ -108,6 +108,7 @@ Edit `.env` before starting. All values have safe defaults for local use.
 | `DB_USER` | `olympus` | No | PostgreSQL username |
 | `DB_PASSWORD` | `olympus_secret` | **Yes, change for production** | PostgreSQL password |
 | `SECRET_KEY` | `change-me-in-production` | **Yes, change for production** | FastAPI session secret |
+| `OLYMPUS_OFFENSIVE_MAX_HOSTS` | `5` | No | How many live hosts get the full spider + OWASP ZAP active scan per mission. Each host is a heavy active scan; raise only when you have time. |
 
 > **Security note:** The default DB password and secret key are fine for local use. Change them before exposing OLYMPUS to any network.
 

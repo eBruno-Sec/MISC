@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from sqlalchemy import update
 from core.models import Mission, MissionStatus
@@ -74,12 +75,19 @@ class Zeus(BaseAgent):
         live = ctx["hermes"].get("live_hosts", [])
         host_preview = ", ".join(h["host"] for h in live[:5])
         more = f" (+{len(live)-5} more)" if len(live) > 5 else ""
+        try:
+            max_hosts = max(1, int(os.getenv("OLYMPUS_OFFENSIVE_MAX_HOSTS", "5")))
+        except ValueError:
+            max_hosts = 5
+        covered = min(len(live), max_hosts)
         approved = await self.request_approval(
-            action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, IDOR/auth probes)",
-            description=f"Ares will run Nmap and Nuclei, then engage the offensive engine "
-                        f"(crawl + active SQL injection, XSS, DAST, IDOR and sensitive-endpoint checks) "
-                        f"against {len(live)} live target(s): {host_preview}{more}. "
-                        f"This performs real, non-destructive injection testing. Authorized targets only.",
+            action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, OWASP ZAP, IDOR/auth probes)",
+            description=f"Ares will run Nmap and Nuclei, then engage the offensive engine on the "
+                        f"first {covered} of {len(live)} live host(s): {host_preview}{more}. "
+                        f"Per host it spiders for endpoints, then runs active SQL injection, XSS, "
+                        f"path traversal, DAST, IDOR/sensitive-endpoint checks and a full OWASP ZAP "
+                        f"active scan against each discovered URL. Real, non-destructive injection "
+                        f"testing. Authorized targets only.",
         )
         if not approved:
             await self.log("Active scanning denied. Generating passive report.", "warn")

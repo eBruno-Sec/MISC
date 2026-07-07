@@ -59,6 +59,8 @@ services:
       # OWASP ZAP daemon (active DAST). Runs as the `zap` service below.
       ZAP_URL: http://zap:8090
       ZAP_API_KEY: ${ZAP_API_KEY:-olympus-zap}
+      # Spider + OWASP scan breadth: number of live hosts covered per mission.
+      OLYMPUS_OFFENSIVE_MAX_HOSTS: ${OLYMPUS_OFFENSIVE_MAX_HOSTS:-5}
     # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
     # No host port is published, reducing the unauthenticated attack surface.
     expose:

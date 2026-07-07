@@ -27,6 +27,11 @@ SECLISTS_DIRS = [
     "/opt/seclists/Discovery/Web-Content/common.txt",
 ]
 
+# Max number of spider-discovered endpoints we import into ZAP's site tree per
+# host so the active scanner covers each URL/parameter katana found, not just the
+# root. Kept bounded so seeding does not dwarf the scan itself.
+MAX_ZAP_SEED = 200
+
 
 class OffensiveEngine:
     """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
@@ -450,7 +455,7 @@ class OffensiveEngine:
         return findings
 
     # ── OWASP ZAP active scan (full DAST) ────────────────────────
-    async def zap_active_scan(self, base_url: str) -> list:
+    async def zap_active_scan(self, base_url: str, seed_urls: list = None) -> list:
         import httpx
 
         zap_url = os.getenv("ZAP_URL", "http://zap:8090").rstrip("/")
@@ -489,6 +494,30 @@ class OffensiveEngine:
                 await self.log(f"OWASP ZAP {ver} online; seeding target", "info")
 
                 await _get(c, "/JSON/core/action/accessUrl/", {"url": base_url, "followRedirects": "true"})
+
+                # Import the endpoints our own crawl already found (same host) into
+                # ZAP's site tree. accessUrl fetches each so its params land in the
+                # tree and the active scanner tests every discovered URL, including
+                # JS/SPA routes the ZAP spider alone would miss.
+                base_host = urlparse(base_url).netloc
+                if seed_urls:
+                    same_host = [u for u in dict.fromkeys(seed_urls)
+                                 if u.startswith("http") and urlparse(u).netloc == base_host
+                                 and u.rstrip("/") != base_url.rstrip("/")]
+                    # Parameterized endpoints first — those are what the active
+                    # scanner actually exercises for injection.
+                    same_host.sort(key=lambda u: 0 if ("?" in u and "=" in u) else 1)
+                    seeds = same_host[:MAX_ZAP_SEED]
+                    seeded = 0
+                    for u in seeds:
+                        try:
+                            await _get(c, "/JSON/core/action/accessUrl/",
+                                       {"url": u, "followRedirects": "true"})
+                            seeded += 1
+                        except Exception:
+                            continue
+                    if seeded:
+                        await self.log(f"Seeded {seeded} discovered endpoints into ZAP tree", "info")
 
                 # Spider to build the site tree.
                 spider_id = (await _get(c, "/JSON/spider/action/scan/", {"url": base_url, "recurse": "true"})).get("scan")
@@ -604,8 +633,9 @@ class OffensiveEngine:
         def _safe(x):
             return x if isinstance(x, list) else []
 
-        # OWASP ZAP full active scan: heavy, runs after the fast probes.
-        zap = await self.zap_active_scan(base_url)
+        # OWASP ZAP full active scan: heavy, runs after the fast probes. Seed it
+        # with every endpoint our crawl found so ZAP scans each URL, not just root.
+        zap = await self.zap_active_scan(base_url, seed_urls=urls)
 
         result = {
             "crawled_urls": len(urls),

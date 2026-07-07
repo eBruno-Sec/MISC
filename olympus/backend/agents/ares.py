@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 from .base import BaseAgent
 from .offensive import OffensiveEngine
@@ -99,17 +100,57 @@ class Ares(BaseAgent, OffensiveEngine):
         except Exception as e:
             await self.log(f"Wordlist prep failed ({e}); using engine defaults", "warn")
 
-        # ── Offensive engine: active injection + access-control testing ──
-        # Only run when we actually reached a live web host.
+        # ── Offensive engine: spider + OWASP testing on each live host ──
+        # Crawl, injection/access-control probes and a full OWASP ZAP active scan
+        # run per host. Full active scans are heavy, so cap how many hosts we hit
+        # (OLYMPUS_OFFENSIVE_MAX_HOSTS, default 5). Runs sequentially — ZAP is a
+        # single shared daemon and concurrent active scans would contend.
+        result["offensive"] = {}
         if live_hosts:
             try:
-                result["offensive"] = await self.run_offensive(primary_url, content_lists)
-            except Exception as e:
-                await self.log(f"Offensive engine error: {e}", "warn")
-                result["offensive"] = {}
+                max_hosts = max(1, int(os.getenv("OLYMPUS_OFFENSIVE_MAX_HOSTS", "5")))
+            except ValueError:
+                max_hosts = 5
+
+            seen_hosts = set()
+            offensive_targets = []
+            for h in live_hosts:
+                hk = h.get("host", "")
+                if hk and hk not in seen_hosts:
+                    seen_hosts.add(hk)
+                    offensive_targets.append(h)
+                if len(offensive_targets) >= max_hosts:
+                    break
+
+            await self.log(
+                f"Offensive engine: spider + OWASP scan across {len(offensive_targets)} "
+                f"live host(s) of {len(live_hosts)} (cap {max_hosts})", "info")
+
+            per_host = {}
+            agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap", "content")}
+            total_urls = 0
+            for idx, h in enumerate(offensive_targets, 1):
+                host_url = h.get("url") or f"https://{h.get('host')}"
+                await self.log(
+                    f"[{idx}/{len(offensive_targets)}] Offensive pass on {host_url}", "info")
+                try:
+                    r = await self.run_offensive(host_url, content_lists)
+                except Exception as e:
+                    await self.log(f"Offensive engine error on {host_url}: {e}", "warn")
+                    continue
+                per_host[h.get("host", host_url)] = r
+                total_urls += r.get("crawled_urls", 0)
+                for k in agg:
+                    agg[k].extend(r.get(k, []) or [])
+
+            result["offensive"] = {
+                "hosts_scanned": len(per_host),
+                "crawled_urls": total_urls,
+                "per_host": per_host,
+                **agg,
+            }
         else:
             await self.log("No live web host reached; offensive engine skipped", "warn")
-            result["offensive"] = {}
 
         total_vulns = len(result["vulnerabilities"])
         await self.log(f"Active assessment complete. {total_vulns} nuclei findings + offensive engine results.", "success")
