@@ -128,11 +128,23 @@ class Zeus(BaseAgent):
             return await self._finalize(target, ctx)
 
         # ── APPROVAL GATE: HEPHAESTUS ──
-        vuln_count = len(ctx["ares"].get("vulnerabilities", []))
+        # Count real findings from the DB. ares["vulnerabilities"] is only the
+        # nuclei template hits; the offensive engine (SQLi/XSS/SSRF/SSTI/ZAP/...)
+        # writes straight to the findings table.
+        from sqlalchemy import select, func, or_
+        from core.models import Finding
+        _c = await self.session.execute(
+            select(func.count()).select_from(Finding).where(
+                Finding.mission_id == self.mission_id,
+                Finding.severity.in_(("critical", "high")),
+                or_(Finding.tag.is_(None), Finding.tag != "false_positive"),
+            )
+        )
+        vuln_count = _c.scalar() or 0
         approved = await self.request_approval(
             action="Exploitation Phase — Payload Preparation",
-            description=f"Hephaestus will prepare targeted payloads for {vuln_count} identified vulnerabilities. "
-                        "Exploitation only on authorized targets.",
+            description=f"Hephaestus will forge targeted payloads for {vuln_count} high/critical "
+                        f"finding(s). Exploitation only on authorized targets.",
         )
         if not approved:
             await self.log("Exploitation phase denied.", "warn")

