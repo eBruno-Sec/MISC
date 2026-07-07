@@ -124,7 +124,14 @@ def catalog() -> list:
 
 def path_for_id(wid: str) -> str | None:
     if wid.startswith("gen:"):
-        p = os.path.join(wl_dir(), wid[4:] + ".txt")
+        base = os.path.realpath(wl_dir())
+        # A generated id is a bare slug. Re-slugify to strip any path separators
+        # or traversal (../, %2f) an attacker could sneak through the URL, then
+        # confirm the resolved path stays inside the wordlists dir.
+        name = slugify(wid[4:])
+        p = os.path.realpath(os.path.join(base, name + ".txt"))
+        if os.path.dirname(p) != base:
+            return None
         return p if os.path.exists(p) else None
     for e in CURATED:
         if e["id"] == wid:

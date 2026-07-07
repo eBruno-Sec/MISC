@@ -175,6 +175,13 @@ class Ares(BaseAgent, OffensiveEngine):
             if port:
                 explicit_ports.add(port)
         host_args = list(dict.fromkeys(bare_hosts))  # dedupe, keep order
+        # Defense-in-depth: an enumerated host (crt.sh SAN, scope file) must never
+        # be parsed as an nmap flag. Drop anything starting with '-'. Real hosts
+        # never do; is_valid_target already blocks this for user-supplied targets.
+        host_args = [h for h in host_args if h and not h.startswith("-")]
+        if not host_args:
+            await self.log("No scannable hosts after argument-safety filter", "warn")
+            return port_results
 
         if explicit_ports:
             port_flag = ["-p", ",".join(sorted(explicit_ports))]

@@ -1,5 +1,6 @@
 import os
 import json
+import html as _html
 from datetime import datetime
 from core.ai_client import complete
 from core.config import settings
@@ -139,30 +140,37 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                 cvss = float(fnd.cvss_score) if fnd.cvss_score is not None else CVSS_MAP.get(fnd.severity.lower(), 0)
             except (TypeError, ValueError):
                 cvss = CVSS_MAP.get(fnd.severity.lower(), 0)
+            # Escape every finding field before it enters the HTML. Evidence,
+            # titles and descriptions can carry attacker-controlled scan content
+            # (XSS PoC payloads, response snippets, ZAP alert text, matched URLs).
+            sev = _html.escape((fnd.severity or "info").upper())
+            title = _html.escape(fnd.title or "")
+            found_by = _html.escape((fnd.found_by or "unknown").upper())
+            description = _html.escape(fnd.description or "No description")
             evidence_block = (
                 '<div class="field"><span class="field-label">EVIDENCE</span><pre>'
-                + (fnd.evidence or "")
+                + _html.escape(fnd.evidence)
                 + "</pre></div>"
             ) if fnd.evidence else ""
             remediation_block = (
                 '<div class="field"><span class="field-label">REMEDIATION</span><p>'
-                + (fnd.remediation or "")
+                + _html.escape(fnd.remediation)
                 + "</p></div>"
             ) if fnd.remediation else ""
             findings_html += f"""
             <div class="finding" id="finding-{i}">
                 <div class="finding-header">
                     <div>
-                        <span class="sev-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{fnd.severity.upper()}</span>
-                        <span class="finding-title">{fnd.title}</span>
+                        <span class="sev-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{sev}</span>
+                        <span class="finding-title">{title}</span>
                     </div>
                     <div class="finding-meta">
                         <span class="cvss">CVSS {cvss:.1f}</span>
-                        <span class="found-by">⊕ {(fnd.found_by or "unknown").upper()}</span>
+                        <span class="found-by">⊕ {found_by}</span>
                     </div>
                 </div>
                 <div class="finding-body">
-                    <div class="field"><span class="field-label">DESCRIPTION</span><p>{fnd.description or "No description"}</p></div>
+                    <div class="field"><span class="field-label">DESCRIPTION</span><p>{description}</p></div>
                     {evidence_block}
                     {remediation_block}
                 </div>
@@ -170,8 +178,8 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
 
         vendor_html = ""
         for v in vendors:
-            vname = v.get("vendor", "")
-            vcat = v.get("category", "")
+            vname = _html.escape(v.get("vendor", ""))
+            vcat = _html.escape(v.get("category", ""))
             vendor_html += f'<span class="vendor-tag">{vname} <span class="vendor-cat">{vcat}</span></span>'
 
         # Build host section outside f-string: Python 3.11 cannot use dict["key"] syntax
@@ -179,8 +187,8 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         if live_hosts:
             _host_items = ""
             for h in live_hosts[:50]:
-                hhost = h.get("host", "")
-                hcode = h.get("status_code") or ""
+                hhost = _html.escape(h.get("host", ""))
+                hcode = _html.escape(str(h.get("status_code") or ""))
                 _host_items += f'<div class="host-item"><span>{hhost}</span><span class="status-ok">{hcode}</span></div>'
             _host_section = (
                 f'<div class="section"><h2>Live Hosts ({len(live_hosts)})</h2>'
@@ -309,11 +317,20 @@ function olyExport(kind){
 </script>"""
         export_script = export_script.replace("__REPORT_JSON__", report_json)
 
+        # Escaped header/summary values. target is already validated (no angle
+        # brackets), but escape for defense in depth; exec_summary is model/text
+        # output and must be treated as untrusted before rendering.
+        esc_target = _html.escape(target)
+        esc_mode = _html.escape(mode.upper())
+        summary_html = chr(10).join(
+            f'<p>{_html.escape(p)}</p>' for p in exec_summary.split(chr(10)) if p.strip()
+        )
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>OLYMPUS Report — {target}</title>
+<title>OLYMPUS Report — {esc_target}</title>
 <style>
 :root {{
   --bg: #020608; --surface: #080e12; --surface2: #0c1820;
@@ -369,10 +386,10 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 <div class="report-header">
   <div class="classification">AUTHORIZED SECURITY ASSESSMENT — OLYMPUS PLATFORM</div>
   <h1>Security Assessment Report</h1>
-  <div class="subtitle">{target} — {mode.upper()} MODE — {now}</div>
+  <div class="subtitle">{esc_target} — {esc_mode} MODE — {now}</div>
   <div class="meta-grid">
-    <div class="meta-cell"><div class="meta-label">Target</div><div class="meta-value">{target}</div></div>
-    <div class="meta-cell"><div class="meta-label">Assessment Mode</div><div class="meta-value">{mode.upper()}</div></div>
+    <div class="meta-cell"><div class="meta-label">Target</div><div class="meta-value">{esc_target}</div></div>
+    <div class="meta-cell"><div class="meta-label">Assessment Mode</div><div class="meta-value">{esc_mode}</div></div>
     <div class="meta-cell"><div class="meta-label">Live Hosts</div><div class="meta-value">{len(live_hosts)}</div></div>
     <div class="meta-cell"><div class="meta-label">Subdomains</div><div class="meta-value">{len(subdomains)}</div></div>
     <div class="meta-cell"><div class="meta-label">Vendors Identified</div><div class="meta-value">{len(vendors)}</div></div>
@@ -382,7 +399,7 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 
 <div class="section">
   <h2>Executive Summary</h2>
-  <div class="exec-summary">{chr(10).join(f'<p>{p}</p>' for p in exec_summary.split(chr(10)) if p.strip())}</div>
+  <div class="exec-summary">{summary_html}</div>
 </div>
 
 <div class="section">

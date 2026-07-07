@@ -5,10 +5,18 @@ import type {
 
 const BASE = '/api'
 
+// Optional API key. When OLYMPUS_API_KEY is enabled server-side, set it once in
+// the browser: localStorage.setItem('olympus_api_key', '<key>'). With no key set
+// (the localhost default) this returns {} and request behavior is unchanged.
+function authHeaders(): Record<string, string> {
+  const k = (typeof localStorage !== 'undefined' && localStorage.getItem('olympus_api_key')) || ''
+  return k ? { 'X-API-Key': k } : {}
+}
+
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
@@ -83,7 +91,7 @@ export const api = {
     const form = new FormData()
     if (typeof input === 'string') form.append('text', input)
     else form.append('file', input)
-    const res = await fetch(`${BASE}/scope/parse`, { method: 'POST', body: form })
+    const res = await fetch(`${BASE}/scope/parse`, { method: 'POST', body: form, headers: authHeaders() })
     if (!res.ok) throw new Error('Scope parse failed')
     return res.json()
   },
@@ -99,7 +107,7 @@ export const api = {
   wordlistDownloadUrl: (id: string) =>
     `${BASE}/wordlists/${encodeURIComponent(id)}/download`,
   previewWordlist: async (id: string, lines = 50): Promise<string> => {
-    const res = await fetch(`${BASE}/wordlists/${encodeURIComponent(id)}/preview?lines=${lines}`)
+    const res = await fetch(`${BASE}/wordlists/${encodeURIComponent(id)}/preview?lines=${lines}`, { headers: authHeaders() })
     if (!res.ok) throw new Error('Preview failed')
     return res.text()
   },
