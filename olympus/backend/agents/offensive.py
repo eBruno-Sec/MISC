@@ -528,34 +528,55 @@ class OffensiveEngine:
                 alerts = raw.get("alerts", [])
 
             RISK = {"High": ("high", 8.0), "Medium": ("medium", 5.5), "Low": ("low", 3.5)}
-            seen = set()
+            # Consolidate by alert type. ZAP fires the same rule on every URL, so
+            # one missing header becomes 100+ rows. Group them into one finding
+            # and keep every affected URL listed as a PoC target underneath.
+            groups = {}
             for a in alerts:
                 risk = a.get("risk", "")
                 if risk not in RISK:
                     continue
                 name = a.get("alert") or a.get("name", "ZAP alert")
-                url = a.get("url", "")
-                param = a.get("param", "")
-                key = (name, url, param)
-                if key in seen:
-                    continue
-                seen.add(key)
+                g = groups.setdefault((name, risk), {
+                    "urls": [], "params": set(),
+                    "cwe": a.get("cweid", ""),
+                    "description": a.get("description", ""),
+                    "solution": a.get("solution", ""),
+                    "evidence": a.get("evidence", ""),
+                    "attack": a.get("attack", ""),
+                })
+                u = a.get("url", "")
+                if u and u not in g["urls"]:
+                    g["urls"].append(u)
+                if a.get("param"):
+                    g["params"].add(a["param"])
+
+            order = {"High": 0, "Medium": 1, "Low": 2}
+            for (name, risk), g in sorted(groups.items(),
+                                          key=lambda kv: (order[kv[0][1]], -len(kv[1]["urls"]))):
                 sev, cvss = RISK[risk]
-                cwe = a.get("cweid", "")
-                evidence = a.get("evidence", "")
-                attack = a.get("attack", "")
-                findings.append({"name": name, "risk": risk, "url": url, "param": param})
+                urls = g["urls"]
+                count = len(urls)
+                shown = urls[:40]
+                findings.append({"name": name, "risk": risk, "instances": count, "urls": urls})
+                ev = [f"Affected instances: {count}"]
+                if g["params"]:
+                    ev.append("Parameters: " + ", ".join(sorted(g["params"])[:25]))
+                if g["attack"]:
+                    ev.append("Attack: " + g["attack"])
+                if g["evidence"]:
+                    ev.append("Sample evidence: " + g["evidence"])
+                if g["cwe"]:
+                    ev.append("CWE-" + str(g["cwe"]))
+                ev.append("Affected URLs" + (f" (first 40 of {count})" if count > 40 else "") + ":")
+                ev.extend("  " + u for u in shown)
                 await self.add_finding(
-                    title=f"[ZAP] {name}" + (f": {param}" if param else ""),
+                    title=f"[ZAP] {name}" + (f" ({count} instances)" if count > 1 else ""),
                     severity=sev,
-                    description=(a.get("description") or f"OWASP ZAP flagged {name}.")[:1200],
-                    evidence=(f"URL: {url}\n"
-                              + (f"Parameter: {param}\n" if param else "")
-                              + (f"Attack: {attack}\n" if attack else "")
-                              + (f"Evidence: {evidence}\n" if evidence else "")
-                              + (f"CWE-{cwe}" if cwe else "")).strip()[:1000],
+                    description=(g["description"] or f"OWASP ZAP flagged {name}.")[:1500],
+                    evidence="\n".join(ev)[:4000],
                     cvss_score=cvss,
-                    remediation=(a.get("solution") or "Review the ZAP alert and apply the recommended fix.")[:800],
+                    remediation=(g["solution"] or "Review the ZAP alert and apply the recommended fix.")[:900],
                 )
 
             await self.log(f"OWASP ZAP scan complete: {len(findings)} alerts (High/Med/Low)",

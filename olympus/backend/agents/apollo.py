@@ -189,6 +189,126 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         else:
             _host_section = ""
 
+        report_payload = {
+            "target": target,
+            "mode": mode.upper(),
+            "date": now,
+            "mission_id": self.mission_id,
+            "summary": exec_summary,
+            "stats": {
+                "critical": stats.get("critical", 0),
+                "high": stats.get("high", 0),
+                "medium": stats.get("medium", 0),
+                "low": stats.get("low", 0),
+                "info": stats.get("info", 0),
+                "total": len(findings),
+            },
+            "findings": [
+                {
+                    "title": fnd.title,
+                    "severity": fnd.severity,
+                    "cvss": fnd.cvss_score,
+                    "found_by": fnd.found_by,
+                    "description": fnd.description or "",
+                    "evidence": fnd.evidence or "",
+                    "remediation": fnd.remediation or "",
+                }
+                for fnd in sorted_findings
+            ],
+        }
+        report_json = json.dumps(report_payload, ensure_ascii=False).replace("</", "<\\/")
+
+        toolbar_html = (
+            '<div class="export-bar">'
+            '<button onclick="olyPrint()">Print / PDF</button>'
+            '<button onclick="olyExport(\'md\')">Markdown</button>'
+            '<button onclick="olyExport(\'txt\')">TXT</button>'
+            '<button onclick="olyExport(\'json\')">JSON</button>'
+            '</div>'
+        )
+
+        export_script = """<script>
+const REPORT = __REPORT_JSON__;
+function olyPrint(){ window.print(); }
+function dl(name, mime, text){
+  const b = new Blob([text], {type: mime});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a');
+  a.href = u; a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(u); }, 1000);
+}
+function fname(ext){
+  const t = (REPORT.target || 'report').replace(/[^a-z0-9.-]+/gi, '_');
+  return 'olympus_' + t + '_' + (REPORT.mission_id || '').slice(0, 8) + '.' + ext;
+}
+function sevTag(x){ return (x || 'info').toUpperCase(); }
+function toTxt(){
+  const s = REPORT.stats, L = [];
+  L.push('OLYMPUS SECURITY ASSESSMENT');
+  L.push('Target: ' + REPORT.target);
+  L.push('Mode: ' + REPORT.mode);
+  L.push('Date: ' + REPORT.date);
+  L.push('Report ID: ' + (REPORT.mission_id || ''));
+  L.push('');
+  L.push('FINDINGS: ' + s.critical + ' Critical, ' + s.high + ' High, ' + s.medium + ' Medium, ' + s.low + ' Low, ' + s.info + ' Info (Total ' + s.total + ')');
+  L.push('');
+  L.push('EXECUTIVE SUMMARY');
+  L.push(REPORT.summary || '');
+  L.push('');
+  L.push('FINDINGS DETAIL');
+  L.push('');
+  REPORT.findings.forEach(function(f, i){
+    L.push((i + 1) + '. [' + sevTag(f.severity) + '] ' + f.title);
+    if (f.cvss !== null && f.cvss !== undefined) L.push('   CVSS: ' + f.cvss);
+    if (f.found_by) L.push('   Source: ' + f.found_by);
+    if (f.description) L.push('   Description: ' + f.description);
+    if (f.evidence) { L.push('   Evidence:'); f.evidence.split('\n').forEach(function(e){ L.push('     ' + e); }); }
+    if (f.remediation) L.push('   Remediation: ' + f.remediation);
+    L.push('');
+  });
+  return L.join('\n');
+}
+function toMd(){
+  const s = REPORT.stats, L = [];
+  L.push('# OLYMPUS Security Assessment');
+  L.push('');
+  L.push('- **Target:** ' + REPORT.target);
+  L.push('- **Mode:** ' + REPORT.mode);
+  L.push('- **Date:** ' + REPORT.date);
+  L.push('- **Report ID:** ' + (REPORT.mission_id || ''));
+  L.push('');
+  L.push('| Critical | High | Medium | Low | Info | Total |');
+  L.push('|---|---|---|---|---|---|');
+  L.push('| ' + s.critical + ' | ' + s.high + ' | ' + s.medium + ' | ' + s.low + ' | ' + s.info + ' | ' + s.total + ' |');
+  L.push('');
+  L.push('## Executive Summary');
+  L.push('');
+  L.push(REPORT.summary || '');
+  L.push('');
+  L.push('## Findings');
+  L.push('');
+  REPORT.findings.forEach(function(f, i){
+    L.push('### ' + (i + 1) + '. ' + f.title);
+    L.push('');
+    var meta = '**Severity:** ' + sevTag(f.severity);
+    if (f.cvss !== null && f.cvss !== undefined) meta += '  |  **CVSS:** ' + f.cvss;
+    if (f.found_by) meta += '  |  **Source:** ' + f.found_by;
+    L.push(meta);
+    L.push('');
+    if (f.description) { L.push(f.description); L.push(''); }
+    if (f.evidence) { L.push('```'); L.push(f.evidence); L.push('```'); L.push(''); }
+    if (f.remediation) { L.push('**Remediation:** ' + f.remediation); L.push(''); }
+  });
+  return L.join('\n');
+}
+function olyExport(kind){
+  if (kind === 'json') return dl(fname('json'), 'application/json', JSON.stringify(REPORT, null, 2));
+  if (kind === 'md') return dl(fname('md'), 'text/markdown', toMd());
+  return dl(fname('txt'), 'text/plain', toTxt());
+}
+</script>"""
+        export_script = export_script.replace("__REPORT_JSON__", report_json)
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -238,9 +358,14 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 .host-item {{ background: var(--surface2); border: 1px solid var(--border); padding: .75rem 1rem; font-size: .82rem; display: flex; justify-content: space-between; }}
 .status-ok {{ color: var(--accent3); }}
 .footer {{ padding: 2rem 3rem; text-align: center; font-size: .72rem; color: var(--text-dim); border-top: 1px solid var(--border); }}
+.export-bar {{ position: fixed; top: 1rem; right: 1rem; display: flex; gap: .5rem; z-index: 50; }}
+.export-bar button {{ font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; padding: .5rem .9rem; background: var(--surface2); color: var(--accent); border: 1px solid var(--accent); cursor: pointer; }}
+.export-bar button:hover {{ background: var(--accent); color: var(--bg); }}
+@media print {{ .export-bar {{ display: none; }} body {{ background: #fff; color: #000; }} .report-header, .section, .finding {{ break-inside: avoid; }} }}
 </style>
 </head>
 <body>
+{toolbar_html}
 <div class="report-header">
   <div class="classification">AUTHORIZED SECURITY ASSESSMENT — OLYMPUS PLATFORM</div>
   <h1>Security Assessment Report</h1>
@@ -283,6 +408,7 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 <div class="footer">
   OLYMPUS Security Platform — Authorized Testing Only — Report ID: {self.mission_id[:8].upper()}
 </div>
+{export_script}
 </body>
 </html>"""
 
