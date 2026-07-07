@@ -40,13 +40,6 @@ class Apollo(BaseAgent):
             select(Finding).where(Finding.mission_id == self.mission_id).order_by(Finding.timestamp)
         )
         findings = result_db.scalars().all()
-        # Honor triage: findings tagged false positive (by METIS or the analyst)
-        # are excluded from the report body and severity counts.
-        _all = len(findings)
-        findings = [f for f in findings if (f.tag or "").lower() != "false_positive"]
-        _suppressed = _all - len(findings)
-        if _suppressed:
-            await self.log(f"Report excludes {_suppressed} finding(s) tagged false positive", "info")
 
         stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
         for f in findings:

@@ -16,7 +16,6 @@ adds synthesized Attack Path findings. With no AI key it is a no-op.
 """
 import json
 import os
-from datetime import datetime
 
 from sqlalchemy import select
 
@@ -33,7 +32,7 @@ class Metis(BaseAgent):
     role = "AI Triage & Correlation"
 
     async def execute(self, target: str, context: dict = None) -> dict:
-        result = {"suppressed": 0, "mapped": 0, "chains": 0, "summary": ""}
+        result = {"flagged": 0, "mapped": 0, "chains": 0, "summary": ""}
 
         api_key = os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
         if not api_key:
@@ -99,17 +98,21 @@ Rules:
         mappings = data.get("mappings") if isinstance(data.get("mappings"), dict) else {}
         paths = data.get("attack_paths") if isinstance(data.get("attack_paths"), list) else []
 
-        # ── False positives (only untagged, non-manual agent findings) ──
-        suppressed = 0
+        # ── Possible false positives: ADVISORY ONLY ──
+        # Never auto-hide findings from the report. A scanner finding is the
+        # analyst's call, not the model's; METIS only annotates a suspicion so
+        # nothing is silently dropped. (An earlier version tagged these
+        # false_positive, which let the model gut whole reports.)
+        flagged = 0
         for fid in fp_list:
             f = by_id.get(fid)
             if not f or f.is_manual or f.tag:
                 continue
-            f.tag = "false_positive"
-            note = "METIS: flagged as a likely false positive during cross-tool correlation."
+            note = "METIS: possible false positive — analyst should verify."
+            if f.analyst_notes and "possible false positive" in f.analyst_notes:
+                continue
             f.analyst_notes = (f.analyst_notes + "\n" + note) if f.analyst_notes else note
-            suppressed += 1
-            await self._broadcast_update(f)
+            flagged += 1
 
         # ── CWE / OWASP mapping (append to notes, never overwrite) ──
         mapped = 0
@@ -159,19 +162,9 @@ Rules:
         if summary:
             await self.log(f"Triage verdict: {summary}", "info")
         await self.log(
-            f"Triage complete: {suppressed} false positive(s) suppressed, "
+            f"Triage complete: {flagged} possible false positive(s) flagged (advisory, none hidden), "
             f"{mapped} finding(s) mapped to CWE/OWASP, {chains} attack path(s) synthesized",
             "success",
         )
-        result.update({"suppressed": suppressed, "mapped": mapped, "chains": chains, "summary": summary})
+        result.update({"flagged": flagged, "mapped": mapped, "chains": chains, "summary": summary})
         return result
-
-    async def _broadcast_update(self, f: Finding) -> None:
-        if self.ws_manager:
-            await self.ws_manager.broadcast(self.mission_id, {
-                "type": "finding_updated",
-                "finding_id": f.id,
-                "tag": f.tag,
-                "severity": f.severity,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
