@@ -20,7 +20,7 @@ router = APIRouter()
 
 AGENT_SYMBOL = {
     "zeus": "⚡", "athena": "🦉", "hermes": "☿", "ares": "⚔",
-    "hephaestus": "🔥", "hades": "💀", "apollo": "☀",
+    "hephaestus": "🔥", "hades": "💀", "apollo": "☀", "metis": "⚖",
 }
 
 VALID_AGENTS = {"hermes", "ares", "hephaestus", "hades", "apollo", "athena"}

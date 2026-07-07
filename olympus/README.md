@@ -2,13 +2,13 @@
 
 **Autonomous AI Security Platform**
 
-OLYMPUS is a self-hosted, Docker-native security assessment platform built around seven AI agents named after Greek gods. Give it a target domain and an assessment mode, and the gods run in sequence, each passing intelligence to the next, until APOLLO generates a full dark-themed HTML report. Every active phase requires your explicit approval through a real-time web UI.
+OLYMPUS is a self-hosted, Docker-native security assessment platform built around eight AI agents named after Greek gods. Give it a target domain and an assessment mode, and the gods run in sequence, each passing intelligence to the next, until APOLLO generates a full dark-themed HTML report. Every active phase requires your explicit approval through a real-time web UI.
 
 > **Authorized testing only.** Unauthorized scanning may violate the CFAA, ECPA, and equivalent laws in your jurisdiction. By using OLYMPUS you confirm you have written authorization to test the specified target.
 
 ---
 
-## The Seven Gods
+## The Eight Gods
 
 | God | Symbol | Role | Tools |
 |---|---|---|---|
@@ -18,6 +18,7 @@ OLYMPUS is a self-hosted, Docker-native security assessment platform built aroun
 | ARES | ⚔ | Active scanning and vuln assessment | Nmap, Nuclei, ffuf |
 | HEPHAESTUS | 🔥 | Payload forge and exploit prep | Custom wordlists, vuln-class payloads |
 | HADES | 💀 | Post-exploitation analysis | Lateral movement mapping, persistence vectors, blast radius scoring |
+| METIS | ⚖ | AI triage and correlation | Cross-tool false-positive suppression, CWE/OWASP mapping, attack-path chaining (AI, optional) |
 | APOLLO | ☀ | Reporting | Claude API, styled HTML report |
 
 ---
@@ -254,9 +255,11 @@ Parsed scope is shown as a preview before launch so you can confirm what is in a
 
 | Mode | Sequence | HITL Gates |
 |---|---|---|
-| **Passive** | ATHENA → HERMES → APOLLO | None. Fully automated. |
-| **Active** | ATHENA → HERMES → ARES → APOLLO | 1 gate before ARES activates |
-| **Full** | ATHENA → HERMES → ARES → HEPHAESTUS → HADES → APOLLO | 3 gates |
+| **Passive** | ATHENA → HERMES → METIS → APOLLO | None. Fully automated. |
+| **Active** | ATHENA → HERMES → ARES → METIS → APOLLO | 1 gate before ARES activates |
+| **Full** | ATHENA → HERMES → ARES → HEPHAESTUS → HADES → METIS → APOLLO | 3 gates |
+
+> METIS is the AI triage pass (false-positive suppression, CWE/OWASP mapping, attack-path chaining). It runs before APOLLO in every mode and is skipped automatically when no AI key is set.
 
 5. Add optional scope notes (exclusions, focus areas)
 6. Click **LAUNCH MISSION**
@@ -302,6 +305,7 @@ olympus/
 │   │   ├── ares.py          Nmap, Nuclei, ffuf
 │   │   ├── hephaestus.py    Payload forge and wordlist builder
 │   │   ├── hades.py         Post-exploitation analysis
+│   │   ├── metis.py         AI triage, correlation, attack-path chaining
 │   │   └── apollo.py        Report generation
 │   ├── core/                Config, database, models
 │   └── routers/             REST endpoints and WebSocket

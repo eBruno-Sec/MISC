@@ -49,9 +49,9 @@ class Zeus(BaseAgent):
         await self.log(f"⚡ OLYMPUS ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
 
         sequences = {
-            "passive": "ATHENA → HERMES → APOLLO",
-            "active": "ATHENA → HERMES → [GATE] → ARES → APOLLO",
-            "full": "ATHENA → HERMES → [GATE] → ARES → HEPHAESTUS → [GATE] → HADES → [GATE] → APOLLO",
+            "passive": "ATHENA → HERMES → METIS → APOLLO",
+            "active": "ATHENA → HERMES → [GATE] → ARES → METIS → APOLLO",
+            "full": "ATHENA → HERMES → [GATE] → ARES → HEPHAESTUS → [GATE] → HADES → [GATE] → METIS → APOLLO",
         }
         await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
 
@@ -156,8 +156,18 @@ class Zeus(BaseAgent):
         return await self._finalize(target, ctx)
 
     async def _finalize(self, target: str, ctx: dict) -> dict:
-        from .apollo import Apollo
         await self._set_phase(MissionStatus.REPORTING, "apollo")
+
+        # ── METIS: AI triage + correlation before the report (no-op without AI key) ──
+        try:
+            from .metis import Metis
+            metis = self._spawn(Metis)
+            ctx["metis"] = await metis.execute(target, ctx)
+        except Exception as e:
+            await self.log(f"METIS triage error: {e}", "warn")
+            ctx["metis"] = {}
+
+        from .apollo import Apollo
         apollo = self._spawn(Apollo)
         ctx["apollo"] = await apollo.execute(target, ctx)
 
