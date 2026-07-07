@@ -136,7 +136,8 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                     f"Authenticated scanning enabled (user: {credentials.get('username', '?')})", "info")
 
             per_host = {}
-            agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap", "content")}
+            agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap",
+                                   "content", "ssrf", "ssti", "open_redirect", "cors", "host_header")}
             total_urls = 0
             for idx, h in enumerate(offensive_targets, 1):
                 host_url = h.get("url") or f"https://{h.get('host')}"
@@ -273,9 +274,11 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
 
         findings = []
         try:
+            # interactsh (OAST) left ENABLED so nuclei catches blind/out-of-band
+            # bugs (blind SSRF, blind SQLi, log4j-style RCE) via callback detection.
             stdout, stderr, rc = await self.run_command(
                 ["nuclei", "-l", tmpfile, "-severity", "critical,high,medium",
-                 "-json", "-silent", "-no-interactsh", "-timeout", "10"],
+                 "-json", "-silent", "-timeout", "10"],
                 timeout=300,
             )
 

