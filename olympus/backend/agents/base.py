@@ -130,10 +130,25 @@ class BaseAgent(ABC):
         event = asyncio.Event()
         self.approval_gates[approval.id] = event
 
+        # Hold here until a human authorizes or denies — by default, forever.
+        # The mission must not proceed (or auto-deny) just because the operator
+        # hasn't gotten to the screen yet. Set OLYMPUS_APPROVAL_TIMEOUT to a
+        # positive number of seconds to auto-deny after that long instead (0 or
+        # unset = wait indefinitely).
         try:
-            await asyncio.wait_for(event.wait(), timeout=600)
+            timeout = float(os.getenv("OLYMPUS_APPROVAL_TIMEOUT", "0"))
+        except ValueError:
+            timeout = 0.0
+
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(event.wait(), timeout=timeout)
+            else:
+                await event.wait()
         except asyncio.TimeoutError:
-            await self.log("Approval gate timed out (10 min). Phase skipped.", "warn")
+            await self.log(
+                f"Approval gate timed out ({int(timeout)}s). Phase skipped.", "warn"
+            )
             self.approval_gates.pop(approval.id, None)
             return False
 

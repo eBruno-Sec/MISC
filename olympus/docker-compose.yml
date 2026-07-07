@@ -61,6 +61,9 @@ services:
       ZAP_API_KEY: ${ZAP_API_KEY:-olympus-zap}
       # Spider + OWASP scan breadth: number of live hosts covered per mission.
       OLYMPUS_OFFENSIVE_MAX_HOSTS: ${OLYMPUS_OFFENSIVE_MAX_HOSTS:-5}
+      # HITL approval gate timeout in seconds. 0 = wait forever for the operator
+      # to click AUTHORIZE/DENY (never auto-deny). Set a positive value to expire.
+      OLYMPUS_APPROVAL_TIMEOUT: ${OLYMPUS_APPROVAL_TIMEOUT:-0}
     # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
     # No host port is published, reducing the unauthenticated attack surface.
     expose:

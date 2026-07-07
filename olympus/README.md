@@ -261,7 +261,9 @@ Once launched, the Mission Control view shows:
 
 ### Human-in-the-Loop (HITL) Gates
 
-In Active and Full modes, OLYMPUS pauses before each offensive phase and shows an approval modal. You review the exact action being requested (which hosts, which tools, scope) and click **AUTHORIZE** or **DENY**. Denying routes directly to APOLLO for a report on what was gathered so far. Gates time out after 10 minutes and auto-deny to prevent zombie missions.
+In Active and Full modes, OLYMPUS pauses before each offensive phase and shows an approval modal. You review the exact action being requested (which hosts, which tools, scope) and click **AUTHORIZE** or **DENY**. Denying routes directly to APOLLO for a report on what was gathered so far. By default a gate **waits indefinitely** — the mission stays paused until you click, however long that takes, even if you close the tab and come back later (reopen the mission and the gate is still there). To make gates auto-deny after a set time instead, set `OLYMPUS_APPROVAL_TIMEOUT` to a number of seconds.
+
+> **Note:** A paused mission is held in the live backend process. If you restart or rebuild the backend container while a mission is waiting at a gate, that mission cannot resume (its approval stays pending but nothing is listening). Finish or deny open gates before running `docker compose up --build`.
 
 ### Viewing Reports
 
