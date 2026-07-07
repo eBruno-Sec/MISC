@@ -26,6 +26,22 @@ export default function MissionList() {
   const [missions, setMissions] = useState<MissionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  const [relaunching, setRelaunching] = useState<string | null>(null)
+
+  const relaunch = async (e: React.MouseEvent, m: MissionSummary) => {
+    e.stopPropagation()
+    if (relaunching) return
+    setRelaunching(m.id)
+    try {
+      const full = await api.getMission(m.id).catch(() => null)
+      const scope_rules = full?.scope_rules ?? {}
+      const res = await api.createMission(m.target, m.mode, '', scope_rules)
+      navigate(`/mission/${res.id}`)
+    } catch (err) {
+      alert('Relaunch failed: ' + (err as Error).message)
+      setRelaunching(null)
+    }
+  }
 
   const load = () =>
     api.listMissions()
@@ -79,7 +95,7 @@ export default function MissionList() {
             onClick={() => navigate(`/mission/${m.id}`)}
             style={{
               background: 'var(--surface)', padding: '1.1rem 1.5rem',
-              display: 'grid', gridTemplateColumns: '1fr auto auto auto',
+              display: 'grid', gridTemplateColumns: '1fr auto auto auto auto',
               alignItems: 'center', gap: '1.5rem',
               cursor: 'pointer', transition: 'background 0.1s',
             }}
@@ -108,6 +124,18 @@ export default function MissionList() {
               )}
               {m.status.toUpperCase().replace('_', ' ')}
             </span>
+            <button
+              onClick={(e) => relaunch(e, m)}
+              disabled={relaunching === m.id}
+              style={{
+                fontSize: '0.68rem', letterSpacing: '0.12em', padding: '0.3rem 0.75rem',
+                border: '1px solid var(--accent)', color: 'var(--accent)',
+                background: 'var(--accent-dim)',
+                cursor: relaunching === m.id ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+              title="Relaunch as a new mission with the same target, mode, and scope"
+            >{relaunching === m.id ? '...' : '↻ RELAUNCH'}</button>
             <button
               onClick={(e) => del(e, m.id)}
               style={{ fontSize: '0.75rem', color: 'var(--text-dim)', padding: '0.25rem 0.5rem' }}
