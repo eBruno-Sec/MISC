@@ -1,6 +1,6 @@
 import type {
   Mission, MissionSummary, MissionMode, ParsedScope, Severity, Finding,
-  WordlistCatalog, Wordlist, OracleResponse, OracleAI,
+  WordlistCatalog, Wordlist, OracleResponse, OracleAI, SurfaceInventory,
 } from './types'
 
 const BASE = '/api'
@@ -84,6 +84,9 @@ export const api = {
   // Export
   exportUrl: (missionId: string, format: 'csv' | 'json') =>
     `${BASE}/missions/${missionId}/export?format=${format}`,
+
+  // Attack surface inventory
+  getSurface: (missionId: string) => req<SurfaceInventory>(`/missions/${missionId}/surface`),
 
   // Report + scope parse
   getReportUrl: (missionId: string) => `${BASE}/missions/${missionId}/report`,

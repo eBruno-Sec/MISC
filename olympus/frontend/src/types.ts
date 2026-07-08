@@ -159,3 +159,26 @@ export interface OracleResponse {
   plan: OraclePlan
   ai: OracleAI
 }
+
+export interface SurfaceEndpoint {
+  host: string
+  path: string
+  params: string[]
+  parameterized: boolean
+  example: string
+}
+
+export interface SurfaceCoverage {
+  subdomains?: number
+  live_hosts?: number
+  hosts_scanned?: number
+  crawled_urls?: number
+  content_paths?: number
+}
+
+export interface SurfaceInventory {
+  coverage: SurfaceCoverage
+  endpoints: SurfaceEndpoint[]
+  total: number
+  parameterized: number
+}
