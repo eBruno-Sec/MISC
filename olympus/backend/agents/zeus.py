@@ -24,6 +24,7 @@ class Zeus(BaseAgent):
         values = {"status": status}
         if phase:
             values["current_phase"] = phase
+            self.current_phase_label = phase   # read by the mission heartbeat
         if status in (MissionStatus.COMPLETE, MissionStatus.FAILED):
             values["completed_at"] = datetime.utcnow()
         await self.session.execute(

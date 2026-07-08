@@ -919,6 +919,7 @@ async def _run_mission(
             approval_gates=approval_gates,
             approval_results=approval_results,
         )
+        hb_task = asyncio.create_task(_mission_heartbeat(mission_id, zeus))
         try:
             await zeus.execute(target, {"mode": mode, "scope": scope, "scope_rules": scope_rules})
         except Exception as e:
@@ -931,6 +932,46 @@ async def _run_mission(
                 "type": "mission_failed", "error": str(e),
                 "timestamp": datetime.utcnow().isoformat(),
             })
+        finally:
+            hb_task.cancel()
+            try:
+                await hb_task
+            except BaseException:
+                pass
+
+
+async def _mission_heartbeat(mission_id: str, zeus):
+    """Periodic 'still working' pulse to the live terminal so a long-running phase
+    (nmap / nuclei / ZAP / sqlmap) never looks frozen. Broadcast-only (no DB write,
+    so it can't contend with the mission's async session). Interval via
+    OLYMPUS_HEARTBEAT_SECONDS (default 300s / 5 min; 0 disables)."""
+    import os
+    import time
+    try:
+        interval = float(os.getenv("OLYMPUS_HEARTBEAT_SECONDS", "300"))
+    except ValueError:
+        interval = 300.0
+    if interval <= 0:
+        return
+    start = time.monotonic()
+    while True:
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
+        elapsed = int(time.monotonic() - start)
+        mm, ss = divmod(elapsed, 60)
+        phase = str(getattr(zeus, "current_phase_label", "working")).upper()
+        try:
+            await manager.broadcast(mission_id, {
+                "type": "log", "agent": "zeus", "symbol": "⚡",
+                "display_name": "ZEUS", "level": "info",
+                "message": (f"⏳ Heartbeat — still working. Phase: {phase}. "
+                            f"Elapsed {mm}m{ss:02d}s. A long-running step is in progress; hang tight."),
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
 
 
 async def _run_single_agent(
