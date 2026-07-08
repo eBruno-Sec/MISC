@@ -15,7 +15,7 @@ from core.database import get_session, AsyncSessionLocal
 from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
-from core import poc
+from core import poc, replay
 
 router = APIRouter()
 
@@ -72,6 +72,35 @@ class AddTargetsBody(BaseModel):
 class AgentRunBody(BaseModel):
     targets: Optional[List[str]] = None  # override targets; None = use mission context
     options: dict = {}                   # e.g. {"nmap_flags": "-p 80,443", "nuclei_tags": "cve"}
+
+
+class ReplayBody(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: dict = {}
+    body: Optional[str] = None
+    follow_redirects: bool = False
+    save: bool = True                    # persist as HttpExchange evidence
+    finding_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class FuzzBody(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: dict = {}
+    body: Optional[str] = None
+    param: str
+    param_in: str = "query"              # query | body | header
+    payloads: Optional[List[str]] = None
+    wordlist_id: Optional[str] = None    # e.g. "sqli", "xss", "lfi" (curated lists)
+    follow_redirects: bool = False
+    max_payloads: int = 200
+
+
+class DiffBody(BaseModel):
+    a_id: str
+    b_id: str
 
 
 # ── Helper: serialise findings ────────────────────────────────
@@ -589,6 +618,129 @@ async def list_exchanges(mission_id: str, session: AsyncSession = Depends(get_se
         select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(HttpExchange.created_at)
     )).scalars().all()
     return {"exchanges": [_exchange_dict(e) for e in rows], "total": len(rows)}
+
+
+# ── Request workbench (replay / fuzz / diff) ──────────────────────
+
+def _host_in_scope(mission: Mission, url: str) -> bool:
+    """Keep the workbench scoped to the mission's target (and its subdomains) so
+    it cannot be used as an open request relay against arbitrary hosts."""
+    from urllib.parse import urlparse
+    import re as _re
+    parsed = urlparse(url if "://" in url else "http://" + url)
+    host = parsed.netloc.split(":")[0].lower()
+    if not host or not is_valid_target(host):
+        return False
+    th = _re.sub(r"^https?://", "", (mission.target or "").lower()).split("/")[0].split(":")[0]
+    if not th:
+        return True
+    return host == th or host.endswith("." + th) or th.endswith("." + host)
+
+
+@router.post("/{mission_id}/replay")
+async def replay_request(
+    mission_id: str,
+    body: ReplayBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Repeater: send an analyst-crafted request, capture the response, and (by
+    default) store it as PoC evidence."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
+
+    try:
+        async with replay.client(follow_redirects=body.follow_redirects) as c:
+            res = await replay.send(c, body.method, body.url, body.headers, body.body)
+    except Exception as e:
+        raise HTTPException(502, f"Request failed: {e}")
+
+    exchange_id = None
+    if body.save:
+        ex = HttpExchange(
+            mission_id=mission_id, finding_id=body.finding_id,
+            method=body.method.upper(), url=body.url,
+            request_headers=poc.redact_headers(body.headers or {}),
+            request_body=body.body,
+            status_code=res["status"],
+            response_headers=poc.redact_headers(res["headers"]),
+            response_body=((res["body"] or "")[:4000] or None),
+            duration_ms=res["duration_ms"], source="replay",
+            notes=body.notes, redacted=True,
+        )
+        session.add(ex)
+        await session.commit()
+        exchange_id = ex.id
+
+    return {
+        "exchange_id": exchange_id,
+        "status": res["status"],
+        "length": res["length"],
+        "duration_ms": res["duration_ms"],
+        "headers": res["headers"],
+        "body": (res["body"] or "")[:8000],
+    }
+
+
+@router.post("/{mission_id}/fuzz")
+async def fuzz_param(
+    mission_id: str,
+    body: FuzzBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Intruder: fire a payload list at one parameter and rank by anomaly."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
+
+    payloads = list(body.payloads or [])
+    if not payloads and body.wordlist_id:
+        from core import wordlists as wl
+        path = wl.path_for_id(body.wordlist_id)
+        if path:
+            try:
+                with open(path, "r", errors="replace") as f:
+                    payloads = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            except OSError:
+                payloads = []
+    if not payloads:
+        raise HTTPException(400, "Provide payloads or a valid wordlist_id")
+    payloads = payloads[: max(1, min(body.max_payloads, replay.MAX_PAYLOADS))]
+
+    if body.param_in not in ("query", "body", "header"):
+        raise HTTPException(400, "param_in must be query, body, or header")
+
+    try:
+        async with replay.client(follow_redirects=body.follow_redirects) as c:
+            out = await replay.fuzz(c, body.method, body.url, body.headers, body.body,
+                                    body.param, body.param_in, payloads)
+    except Exception as e:
+        raise HTTPException(502, f"Fuzz run failed: {e}")
+    return out
+
+
+@router.post("/{mission_id}/diff")
+async def diff_exchanges(
+    mission_id: str,
+    body: DiffBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Diff two captured exchanges: status / length / header / body deltas."""
+    a = await session.get(HttpExchange, body.a_id)
+    b = await session.get(HttpExchange, body.b_id)
+    if not a or not b or a.mission_id != mission_id or b.mission_id != mission_id:
+        raise HTTPException(404, "Exchange not found")
+
+    def _summary(ex):
+        return {"status": ex.status_code, "length": len(ex.response_body or ""),
+                "duration_ms": ex.duration_ms, "headers": ex.response_headers or {},
+                "body": ex.response_body or ""}
+
+    return replay.diff_responses(_summary(a), _summary(b))
 
 
 # ── Report ────────────────────────────────────────────────────
