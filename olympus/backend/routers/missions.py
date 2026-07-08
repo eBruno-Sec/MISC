@@ -8,7 +8,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session, AsyncSessionLocal
@@ -213,12 +213,27 @@ async def list_missions(session: AsyncSession = Depends(get_session)):
     rows = (await session.execute(
         select(Mission).order_by(desc(Mission.created_at)).limit(100)
     )).scalars().all()
+
+    # Severity counts per mission (for the list "peek" badges). One grouped query,
+    # scoped to just the listed missions so it stays bounded.
+    counts: dict = {}
+    ids = [m.id for m in rows]
+    if ids:
+        count_rows = (await session.execute(
+            select(Finding.mission_id, Finding.severity, func.count())
+            .where(Finding.mission_id.in_(ids))
+            .group_by(Finding.mission_id, Finding.severity)
+        )).all()
+        for mid, sev, n in count_rows:
+            counts.setdefault(mid, {})[sev or "info"] = n
+
     return [
         {
             "id": m.id, "target": m.target, "mode": m.mode,
             "status": m.status, "current_phase": m.current_phase,
             "created_at": m.created_at.isoformat(),
             "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+            "severity_counts": counts.get(m.id, {}),
         }
         for m in rows
     ]

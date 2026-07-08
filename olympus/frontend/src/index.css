@@ -26,7 +26,9 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { font-size: 14px; scroll-behavior: smooth; }
+/* Base rem size. Everything in the app is sized in rem, so this one knob scales
+   the whole UI. Bumped 14 -> 15px for readability without touching every component. */
+html { font-size: 15px; scroll-behavior: smooth; }
 
 body {
   background: var(--bg);

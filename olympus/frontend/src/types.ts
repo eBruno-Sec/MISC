@@ -79,6 +79,7 @@ export interface MissionSummary {
   current_phase: string | null
   created_at: string
   completed_at: string | null
+  severity_counts?: Partial<Record<Severity, number>>
 }
 
 export interface ScopeRule {

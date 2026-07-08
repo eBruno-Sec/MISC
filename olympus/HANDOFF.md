@@ -79,9 +79,13 @@ apollo (report).
   `/replay` `/fuzz` `/diff` `/profiles` `/access-check` `/surface`.
 - **Report (APOLLO):** escaped + nonce-CSP HTML, coverage panel, attack surface,
   discovered paths, manual-test candidates.
-- **UI (frontend, 4 tabs):** SURFACE (inventory), WORKBENCH (Repeater+Intruder), ACCESS
-  (cross-role IDOR/BOLA), TOPOLOGY (site-map tree, rounded rects + curved edges +
-  dashed redirect arrows).
+- **UI (frontend, 4 tabs):** SURFACE (inventory + AI/LLM endpoints), WORKBENCH
+  (Repeater+Intruder), ACCESS (cross-role IDOR/BOLA), TOPOLOGY (site-map tree, rounded
+  rects + curved edges + dashed redirect arrows).
+- **Mission archive list UX:** per-mission severity "peek" badges (C·H·M·L·I — from
+  `GET /missions` `severity_counts`, one grouped query), **favorites** (star, pinned to
+  top, persisted in `localStorage['olympus_favorites']` — no DB), and a target/id search
+  filter. Global base font is `html{font-size}` in `index.css` (one knob scales all rem).
 - **Workflow:** pre-authorize/autonomous gate toggle at launch (or env
   `OLYMPUS_AUTO_APPROVE=1`), **mission heartbeat** (`OLYMPUS_HEARTBEAT_SECONDS`, default
   300s), scope-file upload, wordlists, PortSwigger-lab Oracle.
