@@ -14,6 +14,7 @@ import WordlistsPanel from './WordlistsPanel'
 import SurfacePanel from './SurfacePanel'
 import WorkbenchPanel from './WorkbenchPanel'
 import AccessCheckPanel from './AccessCheckPanel'
+import TopologyPanel from './TopologyPanel'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--text-dim)', planning: 'var(--accent)', recon: 'var(--accent)',
@@ -22,7 +23,7 @@ const STATUS_COLOR: Record<string, string> = {
   awaiting_approval: 'var(--gold)', failed: 'var(--crit)',
 }
 
-type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface' | 'workbench' | 'access'
+type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface' | 'workbench' | 'access' | 'topology'
 
 interface GodDef { key: string; name: string; symbol: string; role: string }
 
@@ -242,6 +243,7 @@ export default function MissionControl() {
               <TabBtn id="surface" label="SURFACE" />
               <TabBtn id="workbench" label="WORKBENCH" />
               <TabBtn id="access" label="ACCESS" />
+              <TabBtn id="topology" label="TOPOLOGY" />
             </div>
 
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -281,6 +283,11 @@ export default function MissionControl() {
               {tab === 'access' && (
                 <div style={{ overflow: 'auto' }}>
                   <AccessCheckPanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'topology' && (
+                <div style={{ overflow: 'auto' }}>
+                  <TopologyPanel target={mission.target} liveHosts={liveHosts} findings={findings} />
                 </div>
               )}
             </div>
