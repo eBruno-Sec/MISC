@@ -70,9 +70,8 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             "service_findings": [],
         }
 
-        # Nmap port scan
-        await self.log("Running Nmap service detection (-sV --top-ports 1000)", "info")
-        hosts_str = " ".join(h["host"] for h in live_hosts[:20])
+        # Nmap port scan (truthful scan log emitted inside _nmap_scan once the port
+        # selection — explicit :port vs --top-ports 1000 — is actually known)
         result["port_results"] = await self._nmap_scan(live_hosts[:20])
 
         # Nuclei vulnerability scan
@@ -200,8 +199,13 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
 
         if explicit_ports:
             port_flag = ["-p", ",".join(sorted(explicit_ports))]
+            scan_desc = f"port(s) {','.join(sorted(explicit_ports))}"
         else:
             port_flag = ["--top-ports", "1000"]
+            scan_desc = "top 1000 ports"
+        await self.log(
+            f"Running Nmap service detection (-sV -sC) on {len(host_args)} host(s), {scan_desc}",
+            "info")
         stdout, stderr, rc = await self.run_command(
             ["nmap", "-sV", "-sC", "-T4", "--open", "-oG", "-"] + port_flag + host_args,
             timeout=300,
