@@ -287,7 +287,7 @@ export default function MissionControl() {
               )}
               {tab === 'topology' && (
                 <div style={{ overflow: 'auto' }}>
-                  <TopologyPanel target={mission.target} liveHosts={liveHosts} findings={findings} />
+                  <TopologyPanel missionId={mission.id} target={mission.target} findings={findings} />
                 </div>
               )}
             </div>

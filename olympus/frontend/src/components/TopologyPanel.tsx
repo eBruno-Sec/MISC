@@ -1,8 +1,10 @@
-import type { LiveHost, Finding, Severity } from '../types'
+import { useState, useEffect, useCallback } from 'react'
+import { api } from '../api'
+import type { Finding, Severity, SurfaceEndpoint } from '../types'
 
-// Lightweight 2D network topology (hand-rolled SVG — no external graph lib, so it
-// stays inside the CSP with no new dependency). Target at the centre, live hosts
-// on a ring, severity tallies up top. Fills in as HERMES confirms hosts.
+// Website topology as a site-map tree: the discovered directories and endpoints,
+// connected parent -> child. Rounded-rectangle nodes, smooth curved edges. Nodes
+// with parameters (testable input) are marked. Built from the attack surface.
 
 const SEV_COLOR: Record<string, string> = {
   critical: 'var(--crit)', high: 'var(--high)', medium: 'var(--med)',
@@ -10,66 +12,143 @@ const SEV_COLOR: Record<string, string> = {
 }
 const SEV_ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 
+interface TNode {
+  name: string
+  path: string
+  children: TNode[]
+  parameterized: boolean
+  x: number   // depth (column)
+  y: number   // leaf-order row
+}
+
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
+function layout(node: TNode, depth: number, counter: { n: number }): void {
+  node.x = depth
+  if (node.children.length === 0) {
+    node.y = counter.n++
+  } else {
+    node.children.forEach(c => layout(c, depth + 1, counter))
+    const ys = node.children.map(c => c.y)
+    node.y = (Math.min(...ys) + Math.max(...ys)) / 2
+  }
+}
+
+function collect(node: TNode, nodes: TNode[], edges: Array<[TNode, TNode]>): void {
+  nodes.push(node)
+  for (const c of node.children) {
+    edges.push([node, c])
+    collect(c, nodes, edges)
+  }
+}
+
 export default function TopologyPanel(
-  { target, liveHosts, findings }: { target: string; liveHosts: LiveHost[]; findings: Finding[] }
+  { missionId, target, findings }: { missionId: string; target: string; findings: Finding[] }
 ) {
+  const [endpoints, setEndpoints] = useState<SurfaceEndpoint[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    try {
+      const s = await api.getSurface(missionId)
+      setEndpoints(s.endpoints || [])
+    } catch {
+      /* surface may not exist until a mission has crawled */
+    } finally {
+      setLoading(false)
+    }
+  }, [missionId])
+  useEffect(() => { load() }, [load])
+
   const counts: Record<string, number> = {}
   findings.forEach(f => { counts[f.severity] = (counts[f.severity] || 0) + 1 })
 
-  const W = 640, H = 460, cx = W / 2, cy = H / 2
-  const hosts = liveHosts.slice(0, 16)
-  const R = Math.min(W, H) / 2 - 70
+  // Build the tree (root = target host, then one node per path segment).
+  const CAP = 70
+  const root: TNode = { name: truncate(target, 20), path: '/', children: [], parameterized: false, x: 0, y: 0 }
+  for (const ep of endpoints.slice(0, CAP)) {
+    const segs = ep.path.split('/').filter(Boolean)
+    let node = root
+    let acc = ''
+    for (const seg of segs) {
+      acc += '/' + seg
+      let child = node.children.find(c => c.name === seg)
+      if (!child) {
+        child = { name: seg, path: acc, children: [], parameterized: false, x: 0, y: 0 }
+        node.children.push(child)
+      }
+      node = child
+    }
+    if (ep.parameterized) node.parameterized = true
+  }
 
-  const nodes = hosts.map((h, i) => {
-    const theta = (2 * Math.PI * i) / Math.max(hosts.length, 1) - Math.PI / 2
-    return { host: h, x: cx + R * Math.cos(theta), y: cy + R * Math.sin(theta) }
-  })
+  const counter = { n: 0 }
+  layout(root, 0, counter)
+  const nodes: TNode[] = []
+  const edges: Array<[TNode, TNode]> = []
+  collect(root, nodes, edges)
+
+  const leaves = Math.max(counter.n, 1)
+  const maxDepth = nodes.reduce((m, n) => Math.max(m, n.x), 0)
+  const COL = 158, ROWH = 34, NODEW = 132, NODEH = 24, PADX = 14, PADY = 18
+  const px = (n: TNode) => PADX + n.x * COL
+  const py = (n: TNode) => PADY + n.y * ROWH
+  const W = PADX * 2 + (maxDepth + 1) * COL
+  const H = PADY * 2 + leaves * ROWH
 
   return (
     <div style={{ padding: '0.75rem 1rem 1.5rem', overflow: 'auto' }}>
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.6rem' }}>
         {SEV_ORDER.map(s => (
-          <span key={s} style={{ fontSize: '0.66rem', padding: '0.2rem 0.5rem', border: `1px solid ${SEV_COLOR[s]}`, color: SEV_COLOR[s] }}>
+          <span key={s} style={{ fontSize: '0.66rem', padding: '0.2rem 0.5rem', border: `1px solid ${SEV_COLOR[s]}`, color: SEV_COLOR[s], borderRadius: 4 }}>
             {counts[s] || 0} {s.toUpperCase()}
           </span>
         ))}
       </div>
 
-      {hosts.length === 0 ? (
+      {loading ? (
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '1rem 0' }}>Loading site map…</div>
+      ) : endpoints.length === 0 ? (
         <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '1rem 0', lineHeight: 1.7 }}>
-          No live hosts to map yet. The topology fills in once HERMES confirms live hosts for this mission.
+          No site map yet. It builds from the attack surface once a mission has crawled the target.
         </div>
       ) : (
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', border: '1px solid var(--border)', background: 'var(--bg)' }}>
-          {nodes.map((n, i) => (
-            <line key={`l${i}`} x1={cx} y1={cy} x2={n.x} y2={n.y} stroke="var(--border2)" strokeWidth={1} />
-          ))}
-          <circle cx={cx} cy={cy} r={34} fill="var(--surface2)" stroke="var(--accent)" strokeWidth={2} />
-          <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={11} fill="var(--text-bright)" fontFamily="var(--mono)">
-            {truncate(target, 16)}
-          </text>
-          {nodes.map((n, i) => {
-            const up = n.host.status_code !== null
-            const col = up ? 'var(--accent3)' : 'var(--text-dim)'
-            return (
-              <g key={`n${i}`}>
-                <circle cx={n.x} cy={n.y} r={9} fill="var(--surface)" stroke={col} strokeWidth={2} />
-                <text x={n.x} y={n.y + 22} textAnchor="middle" fontSize={9} fill="var(--text-dim)" fontFamily="var(--mono)">
-                  {truncate(n.host.host, 18)}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
+        <div style={{ overflow: 'auto', border: '1px solid var(--border)', background: 'var(--bg)' }}>
+          <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block', maxWidth: 'none' }}>
+            {edges.map(([a, b], i) => {
+              const x1 = px(a) + NODEW, y1 = py(a) + NODEH / 2
+              const x2 = px(b), y2 = py(b) + NODEH / 2
+              const mx = (x1 + x2) / 2
+              return (
+                <path key={`e${i}`} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+                  fill="none" stroke="var(--border2)" strokeWidth={1.2} />
+              )
+            })}
+            {nodes.map((n, i) => {
+              const isRoot = n === root
+              const stroke = isRoot ? 'var(--accent)' : n.parameterized ? 'var(--gold)' : 'var(--border2)'
+              return (
+                <g key={`n${i}`}>
+                  <rect x={px(n)} y={py(n)} width={NODEW} height={NODEH} rx={7} ry={7}
+                    fill={isRoot ? 'var(--surface2)' : 'var(--surface)'} stroke={stroke}
+                    strokeWidth={isRoot ? 2 : 1.2} />
+                  <text x={px(n) + 9} y={py(n) + NODEH / 2} dominantBaseline="middle" fontSize={10.5}
+                    fill={isRoot ? 'var(--text-bright)' : 'var(--text)'} fontFamily="var(--mono)">
+                    {truncate((isRoot ? '' : '/') + n.name, 17)}{n.parameterized ? ' ◆' : ''}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+        </div>
       )}
 
-      <div style={{ fontSize: '0.66rem', color: 'var(--text-dim)', marginTop: '0.5rem' }}>
-        {hosts.length} live host{hosts.length === 1 ? '' : 's'} mapped
-        {liveHosts.length > hosts.length ? ` (of ${liveHosts.length})` : ''}. Green = responded, grey = unverified.
+      <div style={{ fontSize: '0.66rem', color: 'var(--text-dim)', marginTop: '0.5rem', lineHeight: 1.6 }}>
+        Site map of {endpoints.length} discovered endpoint{endpoints.length === 1 ? '' : 's'}
+        {endpoints.length > CAP ? ` (first ${CAP} shown)` : ''}.{' '}
+        <span style={{ color: 'var(--gold)' }}>◆</span> = has parameters (testable input).
       </div>
     </div>
   )
