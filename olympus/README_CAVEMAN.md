@@ -192,6 +192,45 @@ FULL       look, poke, AND shake. most findings. most dangerous.
 
 **Step 8:** When APOLLO finishes, click `VIEW REPORT` button. Pretty report appears with all the problems organized by how bad they are.
 
+**Step 9 (optional):** Want to hunt MORE bugs by hand? Inside the mission, click the tabs near the top — `SURFACE`, `WORKBENCH`, `ACCESS`, `TOPOLOGY`. See **POWER TOOLS** further down for what each one does.
+
+---
+
+## TEST A WEBSITE ON YOUR OWN COMPUTER (LIKE JUICE SHOP)
+
+Juice Shop is a practice website that is FULL of bugs on purpose. Great for learning. Here is how to point OLYMPUS at it.
+
+**CAVEMAN TRUTH:** the word "localhost" on your screen is NOT the same "localhost" inside OLYMPUS's box. So we put the practice website in the SAME box-network and call it by its name.
+
+**Step 1 — Start Juice Shop.** Copy-paste this line EXACTLY, press Enter:
+
+```bash
+docker run -d --name juice-shop --network olympus_default -p 42000:3000 bkimminich/juice-shop
+```
+
+**Step 2 — Wait 30 seconds.** The website is waking up. Count to 30. Slowly.
+
+**Step 3 — Check OLYMPUS can see it.** Copy-paste this EXACTLY, press Enter:
+
+```bash
+docker compose exec backend curl -sm5 -o /dev/null -w "%{http_code}\n" http://juice-shop:3000
+```
+
+- ✅ YOU SHOULD SEE: `200`  → good, keep going.
+- ❌ IF YOU SEE `000` → website not awake yet. Wait longer. Do Step 3 again.
+
+**Step 4 — Make a mission.** Go to `http://localhost:3000`. Click `+ NEW MISSION`. In the target box, type this EXACTLY:
+
+```
+juice-shop:3000
+```
+
+Do NOT type `host.docker.internal`. Do NOT type `localhost`. Only type `juice-shop:3000`.
+
+**Step 5 — Scan.** Pick `FULL`. Click `LAUNCH MISSION`. Watch the terminal find bugs.
+
+**Want to see Juice Shop in your own browser too?** Open `http://localhost:42000`.
+
 ---
 
 ## WHAT THE COLORS MEAN
@@ -208,26 +247,29 @@ GREY       information. just telling you stuff.
 
 ## ME WANT POKE BY HAND (POWER TOOLS)
 
-Robot find bugs. But BEST bugs found by caveman hand. OLYMPUS give you hand tools. **No AI key needed for these. All free.**
+Robot finds bugs by itself. But the BEST bugs are found by caveman hand. OLYMPUS gives you hand tools. **No AI key needed. All free.**
 
-Where the pokey tools live: go to `http://localhost:8000/api/docs`. Big list of buttons. Try them.
+These are BUTTONS now. Open a mission. Near the top is a row of tabs. Click them:
 
-**THROW MANY STICKS AT ONE SPOT** (`/fuzz`)
-You give it one web address and one spot to poke. It throws many sticks (payloads) at that spot. It tells you which stick made the website cry (error, weird answer, slow answer). The loud one is your bug.
+**SURFACE tab — SHOW ME ALL THE DOORS**
+The robot found lots of doors and windows (web addresses + input boxes). This lists them all. Click `COPY` on one. Now go to WORKBENCH and poke it.
 
-**SAME POKE OVER AND OVER** (`/replay`)
-Send one poke. Change one thing. Send again. See what changes. Like Burp Repeater but caveman.
+**WORKBENCH tab — POKE ONE SPOT MANY TIMES**
+- Paste a web address. Click `REPLAY`. See what the website says back.
+- Type one spot to poke (like `q`). Pick a stick-bundle (`sqli`, `xss`, ...). Click `FUZZ`.
+- It throws many sticks and shows a list. The TOP row, colored red, is your bug.
 
-**CAN USER-A SEE USER-B SECRET STUFF?** (`/access-check`)
-Give it TWO logins (user A, user B). It asks the website for user A's secret stuff while pretending to be user B. If website says "here you go" — BIG BUG. Big money. (Bug name: IDOR / BOLA.) One login works too. Zero logins checks if strangers can see secret stuff.
+**ACCESS tab — CAN USER-A SEE USER-B SECRET STUFF?**
+Add two logins (two roles). Mark one as `owner`. Click `RUN ACCESS CHECK`.
+If a different user — or a stranger — can see the owner's stuff, that is a BIG BUG. Big money. (Bug name: IDOR / BOLA.) One login works too. Zero logins checks if strangers can peek.
 
-**SHOW ME ALL THE DOORS** (SURFACE tab / `/surface`)
-Robot found lots of doors and windows (web addresses + inputs) while looking around. This shows them all in one list. Click COPY, then go poke that door by hand.
+**TOPOLOGY tab — PICTURE OF THE NETWORK**
+A little map. Middle dot = the website. Dots around it = its computers. Green dot = alive.
 
-**PROOF FOR THE REPORT** (`/exchanges`, `/poc`)
-Every bug comes with the exact `curl` command that proves it. Copy it. Paste in report. Show client. Client can't argue. You get paid.
+**PROOF FOR THE REPORT**
+Every bug comes with the exact `curl` command that proves it. Copy it. Paste in report. Show client. Client cannot argue. You get paid.
 
-> The SURFACE tab (button in mission screen) is on a side branch called `feat/workbench-ui`. Build it first: `cd frontend && npm run build`. If it works, you keep it. If it breaks, tell Claude, he fix. Main is safe either way.
+> Like typing commands instead of clicking? The same tools live at `http://localhost:8000/api/docs`.
 
 ---
 
@@ -303,6 +345,16 @@ git pull
 docker compose up --build -d
 ```
 Old code had a bug. New code is fixed. Pull and rebuild.
+
+**`tsc: not found` when you run `npm run build`:**
+You tried to build on your own computer without the tools installed. Do NOT build by hand. Let Docker do it:
+```bash
+docker compose up --build -d
+```
+Docker installs everything inside the box for you. That is the easy way.
+
+**Report says `0 live hosts` but the website is up:**
+OLYMPUS could not reach the target from inside its box. It is NOT a clean website — it is a plumbing problem. If the target is on your own computer, see **TEST A WEBSITE ON YOUR OWN COMPUTER** above and use the `juice-shop:3000` name trick.
 
 **Everything is broken and you don't know why:**
 ```bash

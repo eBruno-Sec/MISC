@@ -328,6 +328,8 @@ POST /api/missions/{id}/diff     Diff two captured exchanges (status / length / 
 
 `/fuzz` scores each response by status change, error signatures (SQL / stack traces), payload reflection, and time delay (blind SQLi / SSRF) — the top-ranked row is your bug.
 
+During an Active or Full mission an **auto-fuzz** pass runs this same engine automatically against every discovered parameter, raising findings for server-error signatures, unencoded reflection, and file-read markers — so you get injection signals with no manual step.
+
 ### Cross-role access control (IDOR / BOLA / BFLA)
 
 Register named sessions (roles), then send the same request as each and let OLYMPUS flag broken access control. Works with 0, 1, or 2+ accounts — **2 gives definitive cross-user proof**. Session headers are always redacted when read back, and detections stay analyst-confirmed (reported as candidates, never auto-tagged).
@@ -341,13 +343,38 @@ POST   /api/missions/{id}/access-check    Replay a request as each role + anon; 
 
 ### Attack-surface inventory
 
-The offensive pass (katana crawl + Wayback archives + parameter mining) is consolidated into a deduped endpoint/parameter catalog you can browse and pivot into the workbench.
+The offensive pass consolidates everything it discovers — katana crawl, Wayback archives, active parameter mining, common **API/SPA endpoint seeding** (single-page apps hide their real surface in a REST/GraphQL API a crawler never sees), and any exposed **OpenAPI/Swagger spec** — into a deduped endpoint/parameter catalog.
 
 ```
 GET /api/missions/{id}/surface   Deduped endpoints + parameters + coverage counts
 ```
 
-A **SURFACE** tab in Mission Control renders this browsable and filterable, with COPY to drop an endpoint straight into the workbench. The UI panel ships on the `feat/workbench-ui` branch — verify `cd frontend && npm run build` before merging it to `main`.
+### Mission Control tabs
+
+All of the above is clickable in the mission view — no curl required:
+
+| Tab | What it does |
+|---|---|
+| **SURFACE** | Browse/filter discovered endpoints + params; COPY drops one into the workbench |
+| **WORKBENCH** | Repeater (replay → captured as evidence) + Intruder (fuzz one parameter → anomaly-ranked table) |
+| **ACCESS** | Register roles, run the cross-role IDOR/BOLA/BFLA check, read the verdict matrix |
+| **TOPOLOGY** | 2D map of the target and its live hosts, with severity tallies |
+
+### Testing a local target (e.g. OWASP Juice Shop)
+
+OLYMPUS runs inside Docker, so `localhost` **in your browser is not the same** as `localhost` **inside the scanner container**. To test an app running on your own machine, put it on OLYMPUS's Docker network and target it by **container name**:
+
+```bash
+# Start the target on OLYMPUS's network (also published to your browser on :42000)
+docker run -d --name juice-shop --network olympus_default -p 42000:3000 bkimminich/juice-shop
+
+# Confirm the backend can reach it — you want 200
+docker compose exec backend curl -sm5 -o /dev/null -w "%{http_code}\n" http://juice-shop:3000
+```
+
+Then launch a mission with target **`juice-shop:3000`** (container name + internal port), and open the app in your browser at `http://localhost:42000`.
+
+> Do **not** use `host.docker.internal:<port>` for a container target — that points at the Docker host, not your container, and silently finds nothing. A report showing **`0 live hosts`** means "unreachable from the scanner," not "the target is clean."
 
 ---
 
