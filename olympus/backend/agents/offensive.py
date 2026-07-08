@@ -48,6 +48,14 @@ COMMON_ENDPOINTS = [
     "/?file=test", "/?url=http://test", "/?redirect=/test", "/?page=1",
 ]
 
+# Where OpenAPI / Swagger specs commonly live. A machine-readable spec is the
+# richest surface source there is — every path + parameter, no crawling.
+SPEC_PATHS = [
+    "/openapi.json", "/swagger.json", "/v2/api-docs", "/api-docs",
+    "/swagger/v1/swagger.json", "/api/swagger.json", "/api-docs/swagger.json",
+    "/openapi.yaml", "/api/openapi.json",
+]
+
 # Static assets to drop from archive parameter discovery: they rarely carry an
 # injectable parameter and would only dilute the test pool.
 ARCHIVE_SKIP_EXT = (
@@ -156,6 +164,37 @@ class OffensiveEngine:
         if found:
             await self.log(f"Seeded {len(found)} common API/SPA endpoint(s) crawlers miss", "info")
         return found
+
+    async def import_api_specs(self, base_url: str) -> list:
+        """Discover an OpenAPI/Swagger spec and fold its endpoints into the surface.
+
+        A machine-readable spec hands us every path + parameter with zero crawling —
+        the single best surface source for API targets. Scope-safe (endpoints are
+        anchored to the target host); degrades to [] when no spec is exposed."""
+        from core.surface import endpoints_from_openapi
+        import httpx
+        base = base_url.rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for sp in SPEC_PATHS:
+                    try:
+                        r = await c.get(base + sp)
+                    except Exception:
+                        continue
+                    if r.status_code != 200:
+                        continue
+                    try:
+                        spec = r.json()
+                    except Exception:
+                        continue
+                    eps = endpoints_from_openapi(spec, base_url)
+                    if eps:
+                        await self.log(f"Imported {len(eps)} endpoints from API spec {sp}", "success")
+                        return eps[:500]
+        except Exception as e:
+            await self.log(f"API spec import skipped: {e}", "warn")
+        return []
 
     # ── Passive parameter discovery (ParamSpider / gau style) ────
     async def gather_archive_urls(self, base_url: str, cap: int = 2500) -> list:
@@ -669,6 +708,61 @@ class OffensiveEngine:
                             break
         return findings
 
+    # ── Auto-fuzz: fast deterministic injection-signal sweep ─────
+    async def auto_fuzz(self, urls: list) -> list:
+        """Fire a small curated payload set at every parameter and flag error
+        signatures, unencoded reflection, and file-read markers.
+
+        Turns the discovered/seeded surface into findings without a binary, and
+        catches signals sqlmap/dalfox miss or that show up when those tools are
+        absent. Reuses _param_probe (per-param mutation + evidence capture)."""
+        from core.replay import ERROR_SIGNATURES
+
+        payloads = [
+            "'", '"', "')", "';",              # SQL/quote syntax breakers
+            "1' OR '1'='1", "' OR 1=1-- -",    # SQLi
+            "<olymxss>",                        # unencoded-reflection canary
+            "../../../../etc/passwd",          # path traversal
+        ]
+
+        def detect(pl, r):
+            try:
+                body = r.text or ""
+            except Exception:
+                body = ""
+            low = body.lower()
+            errs = [s for s in ERROR_SIGNATURES if s in low]
+            if errs:
+                return {
+                    "title": "Parameter Injection Signal (server error)",
+                    "severity": "medium", "cvss": 5.3,
+                    "description": ("A crafted value triggered a server-side error signature "
+                                    f"('{errs[0]}'), indicating the parameter is not safely handled "
+                                    "(possible SQL/command injection). Confirm with the workbench."),
+                    "evidence": f"Error signature: {errs[0]} | HTTP {r.status_code}",
+                    "remediation": "Use parameterized queries / safe APIs and validate input.",
+                }
+            if pl == "<olymxss>" and "<olymxss>" in body:
+                return {
+                    "title": "Reflected Input (possible reflected XSS)",
+                    "severity": "low", "cvss": 4.0,
+                    "description": ("The parameter value is reflected unencoded in the response — "
+                                    "the prerequisite for reflected XSS. Confirm the injection context."),
+                    "evidence": f"Canary '<olymxss>' reflected unencoded | HTTP {r.status_code}",
+                    "remediation": "Context-encode all output; apply a strict CSP.",
+                }
+            if "etc/passwd" in pl and "root:x:0:0" in body:
+                return {
+                    "title": "Path Traversal (arbitrary file read)",
+                    "severity": "high", "cvss": 7.5,
+                    "description": "The parameter allowed reading /etc/passwd via directory traversal.",
+                    "evidence": "Response contains /etc/passwd contents (root:x:0:0:)",
+                    "remediation": "Never build file paths from user input; use an allowlist / canonicalize.",
+                }
+            return None
+
+        return await self._param_probe(urls, payloads, detect, cap=25, per_params=4)
+
     # ── SSRF (in-band: cloud metadata / file read) ───────────────
     async def test_ssrf(self, urls: list) -> list:
         await self.log("Probing parameters for SSRF (cloud metadata / file read)", "info")
@@ -1056,16 +1150,18 @@ class OffensiveEngine:
         crawled = await self.crawl(base_url)
         archived = await self.gather_archive_urls(base_url)
         mined = await self.mine_params(base_url)
-        seeded = await self.seed_endpoints(base_url)   # API/SPA endpoints crawlers miss
-        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived + mined + seeded)))
+        seeded = await self.seed_endpoints(base_url)     # API/SPA endpoints crawlers miss
+        spec_urls = await self.import_api_specs(base_url)  # OpenAPI/Swagger, if exposed
+        urls = self._dedupe_by_params(
+            list(dict.fromkeys(crawled + archived + mined + seeded + spec_urls)))
         params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
-            f"from crawl + archives + param mining + API/SPA seeding", "info")
+            f"from crawl + archives + param mining + API/SPA seeding + specs", "info")
 
         # Run injection / access-control classes concurrently where safe.
         (sqli, xss, dast, auth, trav, disco,
-         ssrf, ssti, oredir, cors, hosthdr) = await asyncio.gather(
+         ssrf, ssti, oredir, cors, hosthdr, fuzz) = await asyncio.gather(
             self.test_sqli(urls),
             self.test_xss(urls),
             self.nuclei_dast(urls),
@@ -1077,6 +1173,7 @@ class OffensiveEngine:
             self.test_open_redirect(urls),
             self.test_cors(base_url, urls),
             self.test_host_header(base_url),
+            self.auto_fuzz(urls),
             return_exceptions=True,
         )
 
@@ -1102,8 +1199,9 @@ class OffensiveEngine:
             "open_redirect": _safe(oredir),
             "cors": _safe(cors),
             "host_header": _safe(hosthdr),
+            "fuzz": _safe(fuzz),
         }
         total = sum(len(_safe(v)) for v in
-                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr))
+                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

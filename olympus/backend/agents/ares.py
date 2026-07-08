@@ -138,7 +138,7 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             per_host = {}
             agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap",
                                    "content", "ssrf", "ssti", "open_redirect", "cors",
-                                   "host_header", "endpoints")}
+                                   "host_header", "fuzz", "endpoints")}
             total_urls = 0
             for idx, h in enumerate(offensive_targets, 1):
                 host_url = h.get("url") or f"https://{h.get('host')}"

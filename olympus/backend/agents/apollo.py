@@ -128,7 +128,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         ("open_redirect", "Open Redirect"), ("cors", "CORS Misconfiguration"),
         ("host_header", "Host-Header Injection"), ("auth", "Access Control / Auth"),
         ("dast", "DAST (dalfox)"), ("zap", "OWASP ZAP Active Scan"),
-        ("content", "Content Discovery"),
+        ("content", "Content Discovery"), ("fuzz", "Parameter Auto-Fuzz"),
     ]
     # Discovered paths worth a manual look (candidates, never auto-confirmed).
     _INTERESTING = (
