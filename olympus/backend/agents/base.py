@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import asyncio
 import os
 from datetime import datetime
-from core.models import AgentLog, Finding, ApprovalRequest, Mission, MissionStatus
+from core.models import AgentLog, Finding, ApprovalRequest, Mission, MissionStatus, HttpExchange
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
 
@@ -80,6 +80,70 @@ class BaseAgent(ABC):
                 "display_name": self.display_name,
                 "timestamp": datetime.utcnow().isoformat(),
             })
+        return finding
+
+    async def add_exchange(
+        self,
+        method: str,
+        url: str,
+        *,
+        finding_id: str = None,
+        request_headers: dict = None,
+        request_body: str = None,
+        status_code: int = None,
+        response_headers: dict = None,
+        response_body: str = None,
+        duration_ms: int = None,
+        source: str = None,
+        notes: str = None,
+    ):
+        """Persist a captured HTTP request/response as first-class PoC evidence.
+        Credential-bearing headers are redacted at rest."""
+        from core.poc import redact_headers
+        ex = HttpExchange(
+            mission_id=self.mission_id,
+            finding_id=finding_id,
+            method=(method or "GET").upper(),
+            url=url,
+            request_headers=redact_headers(request_headers or {}),
+            request_body=(request_body or None),
+            status_code=status_code,
+            response_headers=redact_headers(response_headers or {}),
+            response_body=((response_body or "")[:4000] or None),
+            duration_ms=duration_ms,
+            source=source or self.name,
+            notes=notes,
+            redacted=True,
+        )
+        self.session.add(ex)
+        await self.session.commit()
+        return ex
+
+    async def capture(self, response, *, finding_id: str = None, source: str = None, notes: str = None):
+        """Capture an httpx Response (and its request) as an HttpExchange.
+        Never raises: evidence capture must not break a scan."""
+        try:
+            req = response.request
+            try:
+                resp_body = response.text[:4000]
+            except Exception:
+                resp_body = ""
+            try:
+                req_body = req.content.decode("utf-8", "replace")[:2000] if req.content else None
+            except Exception:
+                req_body = None
+            try:
+                dur = int(response.elapsed.total_seconds() * 1000)
+            except Exception:
+                dur = None
+            return await self.add_exchange(
+                method=req.method, url=str(req.url), finding_id=finding_id,
+                request_headers=dict(req.headers), request_body=req_body,
+                status_code=response.status_code, response_headers=dict(response.headers),
+                response_body=resp_body, duration_ms=dur, source=source, notes=notes,
+            )
+        except Exception:
+            return None
 
     async def run_command(self, cmd: list, timeout: int = 300) -> tuple:
         try:

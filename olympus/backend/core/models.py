@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, Float, JSON, Boolean, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, Float, Integer, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -50,6 +50,7 @@ class Mission(Base):
     findings = relationship("Finding", back_populates="mission", cascade="all, delete-orphan")
     approvals = relationship("ApprovalRequest", back_populates="mission", cascade="all, delete-orphan")
     notes = relationship("MissionNote", back_populates="mission", cascade="all, delete-orphan")
+    exchanges = relationship("HttpExchange", back_populates="mission", cascade="all, delete-orphan")
 
 
 class AgentLog(Base):
@@ -85,6 +86,36 @@ class Finding(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     mission = relationship("Mission", back_populates="findings")
+    exchanges = relationship("HttpExchange", back_populates="finding", cascade="all, delete-orphan")
+
+
+class HttpExchange(Base):
+    """A captured HTTP request/response pair — first-class PoC evidence.
+
+    The scanners already issue the request that proves a finding; we persist it
+    here (linked to the finding) so the analyst gets reproducible curl / raw HTTP
+    and a copy-ready report block. Sensitive request/response headers are redacted
+    at rest (see BaseAgent.add_exchange)."""
+    __tablename__ = "http_exchanges"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False)
+    finding_id = Column(String, ForeignKey("findings.id"), nullable=True)
+    method = Column(String, default="GET")
+    url = Column(Text, nullable=False)
+    request_headers = Column(JSON, default=dict)
+    request_body = Column(Text, nullable=True)
+    status_code = Column(Integer, nullable=True)
+    response_headers = Column(JSON, default=dict)
+    response_body = Column(Text, nullable=True)     # snippet, capped
+    duration_ms = Column(Integer, nullable=True)
+    source = Column(String, nullable=True)          # tool/agent that produced it
+    notes = Column(Text, nullable=True)
+    redacted = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    mission = relationship("Mission", back_populates="exchanges")
+    finding = relationship("Finding", back_populates="exchanges")
 
 
 class MissionNote(Base):

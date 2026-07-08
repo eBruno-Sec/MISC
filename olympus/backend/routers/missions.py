@@ -12,9 +12,10 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session, AsyncSessionLocal
-from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote
+from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
+from core import poc
 
 router = APIRouter()
 
@@ -90,6 +91,35 @@ def _finding_dict(f: Finding) -> dict:
         "analyst_notes": f.analyst_notes,
         "timestamp": f.timestamp.isoformat(),
     }
+
+
+def _exchange_dict(ex: HttpExchange) -> dict:
+    return {
+        "id": ex.id,
+        "finding_id": ex.finding_id,
+        "method": ex.method,
+        "url": ex.url,
+        "request_headers": ex.request_headers or {},
+        "request_body": ex.request_body,
+        "status_code": ex.status_code,
+        "response_headers": ex.response_headers or {},
+        "response_body": ex.response_body,
+        "duration_ms": ex.duration_ms,
+        "source": ex.source,
+        "notes": ex.notes,
+        "redacted": ex.redacted,
+        "created_at": ex.created_at.isoformat(),
+    }
+
+
+async def _exchanges_by_finding(session: AsyncSession, mission_id: str) -> dict:
+    rows = (await session.execute(
+        select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(HttpExchange.created_at)
+    )).scalars().all()
+    grouped: dict = {}
+    for ex in rows:
+        grouped.setdefault(ex.finding_id, []).append(_exchange_dict(ex))
+    return grouped
 
 
 # ── Mission CRUD ──────────────────────────────────────────────
@@ -170,6 +200,8 @@ async def get_mission(mission_id: str, session: AsyncSession = Depends(get_sessi
         select(MissionNote).where(MissionNote.mission_id == mission_id).order_by(MissionNote.timestamp)
     )).scalars().all()
 
+    ex_by_finding = await _exchanges_by_finding(session, mission_id)
+
     return {
         "id": mission.id, "target": mission.target, "scope": mission.scope,
         "mode": mission.mode, "status": mission.status,
@@ -177,7 +209,7 @@ async def get_mission(mission_id: str, session: AsyncSession = Depends(get_sessi
         "scope_rules": mission.scope_rules,
         "created_at": mission.created_at.isoformat(),
         "completed_at": mission.completed_at.isoformat() if mission.completed_at else None,
-        "findings": [_finding_dict(f) for f in findings],
+        "findings": [{**_finding_dict(f), "exchanges": ex_by_finding.get(f.id, [])} for f in findings],
         "logs": [
             {
                 "id": l.id, "agent": l.agent,
@@ -449,6 +481,7 @@ async def rerun_agent(
 async def export_findings(
     mission_id: str,
     format: str = "json",
+    redact: bool = True,
     session: AsyncSession = Depends(get_session),
 ):
     mission = await session.get(Mission, mission_id)
@@ -488,6 +521,22 @@ async def export_findings(
             headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
         )
 
+    if format in ("md", "markdown"):
+        # Copy-ready PoC report: findings + captured request/response, curl and
+        # raw HTTP repro. Sensitive headers redacted unless redact=false.
+        ex_by_finding = await _exchanges_by_finding(session, mission_id)
+        md = poc.mission_markdown(
+            mission.target,
+            [_finding_dict(f) for f in findings],
+            ex_by_finding,
+            redact=redact,
+        )
+        return StreamingResponse(
+            iter([md]),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.md"'},
+        )
+
     # JSON default
     payload = {
         "mission_id": mission_id,
@@ -502,6 +551,44 @@ async def export_findings(
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}.json"'},
     )
+
+
+@router.get("/{mission_id}/findings/{finding_id}/poc")
+async def finding_poc(
+    mission_id: str,
+    finding_id: str,
+    redact: bool = True,
+    session: AsyncSession = Depends(get_session),
+):
+    """Copy-ready Markdown PoC for a single finding (curl + raw HTTP + evidence)."""
+    finding = await session.get(Finding, finding_id)
+    if not finding or finding.mission_id != mission_id:
+        raise HTTPException(404, "Finding not found")
+    exchanges = (await session.execute(
+        select(HttpExchange).where(HttpExchange.finding_id == finding_id).order_by(HttpExchange.created_at)
+    )).scalars().all()
+    md = poc.finding_markdown(
+        _finding_dict(finding),
+        [_exchange_dict(e) for e in exchanges],
+        redact=redact,
+    )
+    return StreamingResponse(
+        iter([md]),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="poc_{finding_id[:8]}.md"'},
+    )
+
+
+@router.get("/{mission_id}/exchanges")
+async def list_exchanges(mission_id: str, session: AsyncSession = Depends(get_session)):
+    """All captured HTTP request/response evidence for a mission."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    rows = (await session.execute(
+        select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(HttpExchange.created_at)
+    )).scalars().all()
+    return {"exchanges": [_exchange_dict(e) for e in rows], "total": len(rows)}
 
 
 # ── Report ────────────────────────────────────────────────────

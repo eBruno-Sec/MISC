@@ -360,7 +360,7 @@ class OffensiveEngine:
                         r = await c.get(probe)
                         if r.status_code == 200 and len(r.content) > 30:
                             findings.append({"type": "idor", "url": probe})
-                            await self.add_finding(
+                            _f = await self.add_finding(
                                 title=f"Potential IDOR: {probe}",
                                 severity="high",
                                 description="An object referenced by a sequential ID was accessible without "
@@ -371,6 +371,8 @@ class OffensiveEngine:
                                 remediation="Enforce per-object ownership checks server-side on every request. "
                                             "Do not rely on unguessable IDs; use authorization, not obscurity.",
                             )
+                            await self.capture(r, finding_id=(_f.id if _f else None),
+                                               notes="Sequential object id accessible")
                             break
                     except Exception:
                         continue
@@ -387,7 +389,7 @@ class OffensiveEngine:
                         sev = "high" if path in ("/.env", "/.git/config", "/actuator/env") else "medium"
                         cvss = 7.5 if sev == "high" else 5.3
                         findings.append({"type": "exposure", "path": path})
-                        await self.add_finding(
+                        _f = await self.add_finding(
                             title=f"Sensitive Endpoint Exposed: {path}",
                             severity=sev,
                             description=f"{path} is publicly accessible and returned content. "
@@ -397,6 +399,8 @@ class OffensiveEngine:
                             remediation="Restrict or remove the endpoint. Move secrets to env/secret managers "
                                         "and block metadata/debug routes at the edge.",
                         )
+                        await self.capture(r, finding_id=(_f.id if _f else None),
+                                           notes=f"Sensitive endpoint {path} publicly accessible")
                 except Exception:
                     continue
 
@@ -407,7 +411,7 @@ class OffensiveEngine:
                 r = await c.post(base_url.rstrip("/") + "/graphql", json=q)
                 if r.status_code == 200 and "__schema" in r.text:
                     findings.append({"type": "graphql_introspection"})
-                    await self.add_finding(
+                    _f = await self.add_finding(
                         title="GraphQL Introspection Enabled",
                         severity="medium",
                         description="The GraphQL endpoint exposes its full schema via introspection, "
@@ -416,6 +420,8 @@ class OffensiveEngine:
                         cvss_score=5.3,
                         remediation="Disable introspection in production and enforce query depth/complexity limits.",
                     )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes="GraphQL introspection returned __schema")
         except Exception:
             pass
 
@@ -529,7 +535,7 @@ class OffensiveEngine:
                     if hit:
                         label, pl, sev, cvss, snippet = hit
                         findings.append({"param": pname, "payload": pl, "url": u, "file": label})
-                        await self.add_finding(
+                        _f = await self.add_finding(
                             title=f"Path Traversal / LFI: {pname}",
                             severity=sev,
                             description=(f"Parameter '{pname}' is vulnerable to path traversal. Injecting a "
@@ -542,6 +548,8 @@ class OffensiveEngine:
                                          "base directory. Prefer an allowlist of identifiers mapped "
                                          "server-side to filenames."),
                         )
+                        await self.capture(r, finding_id=(_f.id if _f else None),
+                                           notes=f"Confirmed path traversal on parameter '{pname}' ({label})")
                     if budget <= 0:
                         await self.log("Path traversal request budget reached; stopping early", "warn")
                         break
@@ -585,7 +593,7 @@ class OffensiveEngine:
                         verdict = detector(pl, r)
                         if verdict:
                             findings.append({"param": pname, "url": u, "payload": pl})
-                            await self.add_finding(
+                            f = await self.add_finding(
                                 title=f"{verdict['title']}: {pname}",
                                 severity=verdict["severity"],
                                 description=verdict["description"],
@@ -593,6 +601,8 @@ class OffensiveEngine:
                                 cvss_score=verdict["cvss"],
                                 remediation=verdict["remediation"],
                             )
+                            await self.capture(r, finding_id=(f.id if f else None),
+                                               notes=f"Confirmed {verdict['title']} on parameter '{pname}'")
                             break
         return findings
 
@@ -700,7 +710,7 @@ class OffensiveEngine:
                     sev = "high" if acac == "true" else "medium"
                     cvss = 7.4 if acac == "true" else 5.3
                     findings.append({"url": u, "creds": acac == "true"})
-                    await self.add_finding(
+                    _f = await self.add_finding(
                         title=f"CORS Misconfiguration (reflected origin{' + credentials' if acac == 'true' else ''})",
                         severity=sev,
                         description="The server reflects an arbitrary Origin in Access-Control-Allow-Origin"
@@ -713,6 +723,8 @@ class OffensiveEngine:
                         remediation="Reflect only an allowlist of trusted origins; never combine a reflected "
                                     "origin with credentials; avoid dynamic ACAO based on the Origin header.",
                     )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes=f"Arbitrary Origin {evil} reflected in ACAO")
         await self.log(f"CORS testing complete: {len(findings)} misconfiguration(s)",
                        "success" if findings else "info")
         return findings
@@ -734,7 +746,7 @@ class OffensiveEngine:
                 body = (r.text or "")[:4000]
                 if evil in loc or evil in body:
                     findings.append({"header": hdr})
-                    await self.add_finding(
+                    _f = await self.add_finding(
                         title=f"Host Header Injection ({hdr})",
                         severity="medium",
                         description="A spoofed host header was reflected into a redirect or the response body. "
@@ -745,6 +757,8 @@ class OffensiveEngine:
                         remediation="Validate the Host header against an allowlist; build absolute URLs from a "
                                     "configured canonical hostname, never from the request Host/X-Forwarded-Host.",
                     )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes=f"Spoofed {hdr}: {evil} reflected")
                     break
         await self.log(f"Host-header testing complete: {len(findings)} finding(s)",
                        "success" if findings else "info")
