@@ -298,7 +298,56 @@ When APOLLO completes, a **VIEW REPORT** button appears in the mission header. R
 http://localhost:8000/api/missions/{mission-id}/report
 ```
 
-Reports are standalone dark-themed HTML files. They include the executive summary, finding statistics, vendor stack intelligence, full findings detail with evidence and remediation, and live host inventory.
+Reports are standalone dark-themed HTML files. They include the executive summary, finding statistics, an **assessment coverage panel** (recon counts plus which OWASP test modules ran and their hit counts), the **attack surface** (discovered endpoints and parameters), **discovered content paths**, **manual test candidates** (interesting paths flagged for review, kept separate from confirmed findings), vendor stack intelligence, full findings detail with evidence and remediation, and live host inventory.
+
+---
+
+## Manual Testing & Evidence
+
+Beyond the automated god sequence, OLYMPUS ships a deterministic **request workbench** and **evidence system** for the manual, high-value work that finds business-logic and access-control bugs. No AI key required — these are pure HTTP tooling. Every request is scoped to the mission's target host (and its subdomains) and gated by the optional API key; payload runs are capped.
+
+### PoC evidence
+
+The scanners capture the exact request/response that proves each finding as a first-class `HttpExchange`, with sensitive headers (Cookie, Authorization, API tokens) redacted at rest. Export reproducible proof:
+
+```
+GET  /api/missions/{id}/exchanges                     All captured request/response evidence
+GET  /api/missions/{id}/findings/{fid}/poc            One finding's PoC as copy-ready Markdown (curl + raw HTTP)
+GET  /api/missions/{id}/export?format=md&redact=true  Full mission report as Markdown with PoC blocks
+```
+
+### Request workbench (Repeater + Intruder)
+
+Craft, replay, fuzz, and diff requests. Replay and fuzz hits are captured as evidence and flow into the PoC export.
+
+```
+POST /api/missions/{id}/replay   Send one crafted request, capture the response as evidence
+POST /api/missions/{id}/fuzz     Fire a payload list (inline, or a wordlist_id) at one parameter, ranked by anomaly
+POST /api/missions/{id}/diff     Diff two captured exchanges (status / length / headers / body)
+```
+
+`/fuzz` scores each response by status change, error signatures (SQL / stack traces), payload reflection, and time delay (blind SQLi / SSRF) — the top-ranked row is your bug.
+
+### Cross-role access control (IDOR / BOLA / BFLA)
+
+Register named sessions (roles), then send the same request as each and let OLYMPUS flag broken access control. Works with 0, 1, or 2+ accounts — **2 gives definitive cross-user proof**. Session headers are always redacted when read back, and detections stay analyst-confirmed (reported as candidates, never auto-tagged).
+
+```
+POST   /api/missions/{id}/profiles        Register a role (name, role label, auth headers)
+GET    /api/missions/{id}/profiles        List roles (headers redacted)
+DELETE /api/missions/{id}/profiles/{pid}  Remove a role
+POST   /api/missions/{id}/access-check    Replay a request as each role + anon; flag who reached the owner's data
+```
+
+### Attack-surface inventory
+
+The offensive pass (katana crawl + Wayback archives + parameter mining) is consolidated into a deduped endpoint/parameter catalog you can browse and pivot into the workbench.
+
+```
+GET /api/missions/{id}/surface   Deduped endpoints + parameters + coverage counts
+```
+
+A **SURFACE** tab in Mission Control renders this browsable and filterable, with COPY to drop an endpoint straight into the workbench. The UI panel ships on the `feat/workbench-ui` branch — verify `cd frontend && npm run build` before merging it to `main`.
 
 ---
 
@@ -400,6 +449,16 @@ GET    /api/missions/{id}/report  Download the HTML report
 DELETE /api/missions/{id}         Delete a mission
 GET    /ws/{mission_id}           WebSocket for real-time updates
 GET    /api/health                Health check
+
+# Manual testing & evidence (see the "Manual Testing & Evidence" section above)
+GET    /api/missions/{id}/exchanges                 Captured request/response evidence
+GET    /api/missions/{id}/findings/{fid}/poc        Finding PoC as Markdown (curl + raw HTTP)
+GET    /api/missions/{id}/surface                   Attack-surface inventory (endpoints + params)
+POST   /api/missions/{id}/replay                    Repeater: send + capture a crafted request
+POST   /api/missions/{id}/fuzz                      Intruder: fuzz one parameter, ranked by anomaly
+POST   /api/missions/{id}/diff                      Diff two captured exchanges
+POST   /api/missions/{id}/profiles                  Register an auth role for cross-role testing
+POST   /api/missions/{id}/access-check              Cross-role IDOR/BOLA/BFLA check
 ```
 
 ---
