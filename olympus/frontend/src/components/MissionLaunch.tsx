@@ -58,6 +58,7 @@ function ScopeRuleList({ rules, label, color }: { rules: ScopeRule[]; label: str
 export default function MissionLaunch() {
   const [target, setTarget] = useState('')
   const [mode, setMode] = useState<MissionMode>('passive')
+  const [autoApprove, setAutoApprove] = useState(false)
   const [scope, setScope] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -122,7 +123,7 @@ export default function MissionLaunch() {
         ? { in_scope: parsedScope.in_scope, out_of_scope: parsedScope.out_of_scope }
         : {}
       if (selectedWl.length) scope_rules.wordlist_ids = selectedWl
-      const { id } = await api.createMission(target.trim(), mode, scope, scope_rules)
+      const { id } = await api.createMission(target.trim(), mode, scope, scope_rules, autoApprove)
       navigate(`/mission/${id}`)
     } catch (e: any) {
       setError(e.message || 'Launch failed')
@@ -200,6 +201,25 @@ export default function MissionLaunch() {
           ))}
         </div>
       </div>
+
+      {/* Autonomous mode: pre-authorize HITL gates (only meaningful when gates exist) */}
+      {selectedMode.gates.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={autoApprove} onChange={e => setAutoApprove(e.target.checked)}
+              style={{ marginTop: '0.2rem' }} />
+            <span>
+              <span style={{ fontSize: '0.82rem', color: autoApprove ? 'var(--accent2)' : 'var(--text-bright)' }}>
+                Autonomous run — pre-authorize all HITL gates
+              </span>
+              <span style={{ display: 'block', fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '0.2rem', lineHeight: 1.5 }}>
+                Skips the approve/deny prompts and lets {selectedMode.gates.join(', ')} run without stopping.
+                Every gate is still logged. Only for targets you are authorized to test.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Scope notes */}
       <div style={{ marginBottom: '1.5rem' }}>

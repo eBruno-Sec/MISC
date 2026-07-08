@@ -30,10 +30,10 @@ export const api = {
   // Missions
   listMissions: () => req<MissionSummary[]>('/missions'),
   getMission: (id: string) => req<Mission>(`/missions/${id}`),
-  createMission: (target: string, mode: MissionMode, scope: string, scope_rules?: object) =>
+  createMission: (target: string, mode: MissionMode, scope: string, scope_rules?: object, autoApprove = false) =>
     req<{ id: string; target: string; status: string }>('/missions', {
       method: 'POST',
-      body: JSON.stringify({ target, mode, scope, scope_rules: scope_rules ?? {} }),
+      body: JSON.stringify({ target, mode, scope, scope_rules: scope_rules ?? {}, auto_approve: autoApprove }),
     }),
   deleteMission: (id: string) =>
     req<{ deleted: boolean }>(`/missions/${id}`, { method: 'DELETE' }),

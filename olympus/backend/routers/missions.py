@@ -34,6 +34,7 @@ class MissionCreate(BaseModel):
     scope: str = ""
     mode: str = "passive"
     scope_rules: dict = {}
+    auto_approve: bool = False   # pre-authorize all HITL gates (autonomous run)
 
 
 class ApprovalResolve(BaseModel):
@@ -187,6 +188,7 @@ async def create_mission(
         mode=body.mode,
         status=MissionStatus.PENDING,
         scope_rules=body.scope_rules,
+        context={"auto_approve": bool(body.auto_approve)},  # pre-authorize gates (no schema change)
     )
     session.add(mission)
     await session.commit()

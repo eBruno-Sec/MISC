@@ -164,6 +164,28 @@ class BaseAgent(ABC):
             return "", str(e), -1
 
     async def request_approval(self, action: str, description: str) -> bool:
+        # Pre-authorized (autonomous) mission: the operator consented to every gate
+        # at launch, so auto-approve without pausing — but still record and log each
+        # gate for the audit trail. Toggled per-mission (auto_approve) or globally
+        # via OLYMPUS_AUTO_APPROVE=1.
+        mission = await self.session.get(Mission, self.mission_id)
+        mission_auto = bool(mission and (mission.context or {}).get("auto_approve"))
+        env_auto = os.getenv("OLYMPUS_AUTO_APPROVE", "").strip().lower() in ("1", "true", "yes")
+        if mission_auto or env_auto:
+            approval = ApprovalRequest(
+                mission_id=self.mission_id, agent=self.name, action=action,
+                description=description, status="approved", resolved_at=datetime.utcnow(),
+            )
+            self.session.add(approval)
+            await self.session.commit()
+            await self.log(f"Auto-authorized (pre-approved at launch): {action}", "info")
+            if self.ws_manager:
+                await self.ws_manager.broadcast(self.mission_id, {
+                    "type": "approval_resolved", "approval_id": approval.id,
+                    "approved": True, "timestamp": datetime.utcnow().isoformat(),
+                })
+            return True
+
         approval = ApprovalRequest(
             mission_id=self.mission_id,
             agent=self.name,
