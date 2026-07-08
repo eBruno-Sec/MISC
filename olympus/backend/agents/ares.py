@@ -163,12 +163,56 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             result["offensive"]["endpoints"] = list(
                 dict.fromkeys(result["offensive"].get("endpoints", []))
             )[:3000]
+
+            # AI/LLM attack-surface tagging (deterministic, no requests): mark chat/
+            # completion/embedding/tool-call/MCP/vector-DB endpoints so the operator
+            # knows where to run manual LLM red-teaming.
+            try:
+                from core import surface as _surface, ai_surface as _ai
+                inv = _surface.build_inventory(result["offensive"]["endpoints"])
+                ai_eps = _ai.build_ai_surface(inv)
+                result["offensive"]["ai_surface"] = ai_eps
+                if ai_eps:
+                    await self._report_ai_surface(ai_eps)
+            except Exception as e:
+                await self.log(f"AI-surface tagging skipped: {e}", "warn")
         else:
             await self.log("No live web host reached; offensive engine skipped", "warn")
 
         total_vulns = len(result["vulnerabilities"])
         await self.log(f"Active assessment complete. {total_vulns} nuclei findings + offensive engine results.", "success")
         return result
+
+    async def _report_ai_surface(self, ai_eps: list) -> None:
+        """One advisory finding for the discovered AI/LLM endpoints (candidates for
+        manual prompt-injection / jailbreak / data-exfil testing). Advisory only."""
+        by_tag: dict = {}
+        for e in ai_eps:
+            for t in e.get("tags", []):
+                by_tag.setdefault(t, 0)
+                by_tag[t] += 1
+        tag_summary = ", ".join(f"{t}×{n}" for t, n in sorted(by_tag.items()))
+        lines = []
+        for e in ai_eps[:60]:
+            row = f"{e.get('host', '')}{e.get('path', '')}  [{','.join(e.get('tags', []))}]"
+            if e.get("params"):
+                row += f"  params: {', '.join(e['params'])}"
+            lines.append(row)
+        await self.log(f"AI/LLM attack surface: {len(ai_eps)} endpoint(s) ({tag_summary})", "info")
+        await self.add_finding(
+            title=f"AI / LLM Attack Surface Detected ({len(ai_eps)} endpoint(s))",
+            severity="info",
+            description=(
+                "Endpoints matching AI/LLM patterns (chat, completion, embedding, tool-call, "
+                "MCP, vector-DB) were discovered. These are prime candidates for manual LLM "
+                "red-teaming: prompt injection, jailbreak, system-prompt extraction, and "
+                f"context/training-data exfiltration. Categories: {tag_summary}."),
+            evidence="\n".join(lines),
+            remediation=(
+                "Apply input/output guardrails, isolate the system prompt, enforce rate limits "
+                "and per-user quotas on AI endpoints, and validate against the OWASP LLM Top 10 "
+                "(LLM01 prompt injection, LLM06 sensitive information disclosure)."),
+        )
 
     def _split_hp(self, hp: str):
         if ":" in hp and hp.count(":") == 1:

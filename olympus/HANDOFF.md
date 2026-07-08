@@ -68,6 +68,11 @@ apollo (report).
   SSRF/SSTI/CORS/open-redirect/host-header probes, **auto-fuzz**, ffuf, OWASP ZAP,
   authenticated scanning (AI login via auth.py), **redirect mapping**.
 - **AI triage (METIS):** FP flag (advisory), CWE/OWASP mapping, **attack-path chaining**.
+- **AI/LLM surface detection (`core/ai_surface.py`):** deterministic (no requests, no
+  LLM) classifier tags discovered endpoints as chat / completion / embedding / tool-call
+  / MCP / vector-DB. ARES emits an advisory finding; `/surface` returns `ai_surface[]` +
+  `coverage.ai_endpoints`; SURFACE tab lists them as manual LLM-red-team candidates.
+  (Concept borrowed from RedAmon's AI Gauntlet — this is the map; active LLM probing TBD.)
 - **Evidence/PoC:** `HttpExchange` model + `core/poc.py` (curl / raw-HTTP / Markdown,
   header redaction) + export endpoints.
 - **Manual workbench:** `core/replay.py` (send/fuzz/diff/score/access_verdict) + endpoints
@@ -80,8 +85,8 @@ apollo (report).
 - **Workflow:** pre-authorize/autonomous gate toggle at launch (or env
   `OLYMPUS_AUTO_APPROVE=1`), **mission heartbeat** (`OLYMPUS_HEARTBEAT_SECONDS`, default
   300s), scope-file upload, wordlists, PortSwigger-lab Oracle.
-- **Tests:** `backend/tests/` — poc, replay, surface, forms, security, network-sweep.
-  Run: `docker compose exec backend python -m pytest tests/ -q`.
+- **Tests:** `backend/tests/` — poc, replay, surface, forms, security, network-sweep,
+  ai-surface. Run: `docker compose exec backend python -m pytest tests/ -q`.
 
 ---
 
@@ -100,6 +105,10 @@ apollo (report).
 ---
 
 ## Not built yet (candidate next steps)
+- **Active LLM red-teaming module.** AI *surface detection* is in (`core/ai_surface.py`);
+  the next step is active probing of the tagged endpoints (prompt-injection / jailbreak /
+  system-prompt-extraction payloads, ASR scoring), RedAmon-AI-Gauntlet style but lighter.
+  Keep it deterministic + scope-safe; gate it behind the approval flow.
 - **APOLLO/UI panel for `network_hosts`.** The CIDR nmap network sweep now populates
   `hermes["network_hosts"]` (`[{ip,status,ports:[{port,proto,service,version}]}]`) and
   a coverage count (`surface.coverage.network_hosts`), but there's no dedicated report

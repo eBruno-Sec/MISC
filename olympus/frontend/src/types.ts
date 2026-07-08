@@ -175,6 +175,7 @@ export interface SurfaceCoverage {
   hosts_scanned?: number
   crawled_urls?: number
   content_paths?: number
+  ai_endpoints?: number
 }
 
 export interface RedirectEdge {
@@ -183,9 +184,18 @@ export interface RedirectEdge {
   status: number
 }
 
+export interface AiEndpoint {
+  host: string
+  path: string
+  example: string
+  params: string[]
+  tags: string[]
+}
+
 export interface SurfaceInventory {
   coverage: SurfaceCoverage
   endpoints: SurfaceEndpoint[]
+  ai_surface?: AiEndpoint[]
   redirects?: RedirectEdge[]
   total: number
   parameterized: number

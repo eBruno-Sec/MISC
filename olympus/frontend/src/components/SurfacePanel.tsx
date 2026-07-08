@@ -26,6 +26,7 @@ export default function SurfacePanel({ missionId }: { missionId: string }) {
   if (loading) return <div style={{ padding: '1.5rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>Loading attack surface...</div>
 
   const endpoints = inv?.endpoints ?? []
+  const aiEps = inv?.ai_surface ?? []
   const cov = inv?.coverage
   const needle = q.trim().toLowerCase()
   const filtered = needle
@@ -60,7 +61,22 @@ export default function SurfacePanel({ missionId }: { missionId: string }) {
             {stat('Hosts scanned', cov?.hosts_scanned)}
             {stat('Subdomains', cov?.subdomains)}
             {(cov?.network_hosts ?? 0) > 0 && stat('Network hosts', cov?.network_hosts)}
+            {(cov?.ai_endpoints ?? 0) > 0 && stat('AI endpoints', cov?.ai_endpoints)}
           </div>
+
+          {aiEps.length > 0 && (
+            <div style={{ margin: '0.25rem 0 0.75rem', border: '1px solid var(--gold)', padding: '0.6rem 0.75rem' }}>
+              <div style={{ fontSize: '0.6rem', letterSpacing: '0.2em', color: 'var(--gold)', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                AI / LLM Surface · {aiEps.length} · prompt-injection / jailbreak candidates
+              </div>
+              {aiEps.slice(0, 40).map((e, i) => (
+                <div key={i} style={{ fontSize: '0.72rem', fontFamily: 'var(--mono)', color: 'var(--text-bright)', padding: '0.2rem 0', wordBreak: 'break-all' }}>
+                  {e.path}
+                  <span style={{ color: 'var(--gold)', marginLeft: '0.5rem', fontSize: '0.6rem', letterSpacing: '0.05em' }}>{e.tags.join(' · ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <input
             value={q}

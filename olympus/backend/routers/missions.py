@@ -648,11 +648,16 @@ async def get_surface(mission_id: str, session: AsyncSession = Depends(get_sessi
     if not mission:
         raise HTTPException(404, "Mission not found")
     from core.surface import build_inventory
+    from core.ai_surface import build_ai_surface
     surface = (mission.context or {}).get("surface", {}) or {}
     inventory = build_inventory(surface.get("endpoints", []) or [])
+    ai_eps = build_ai_surface(inventory)
+    coverage = dict(surface.get("coverage", {}) or {})
+    coverage["ai_endpoints"] = len(ai_eps)
     return {
-        "coverage": surface.get("coverage", {}),
+        "coverage": coverage,
         "endpoints": inventory,
+        "ai_surface": ai_eps,
         "redirects": surface.get("redirects", []),
         "total": len(inventory),
         "parameterized": sum(1 for e in inventory if e["parameterized"]),
