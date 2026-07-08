@@ -12,6 +12,8 @@ import NotesPanel from './NotesPanel'
 import RerunModal from './RerunModal'
 import WordlistsPanel from './WordlistsPanel'
 import SurfacePanel from './SurfacePanel'
+import WorkbenchPanel from './WorkbenchPanel'
+import AccessCheckPanel from './AccessCheckPanel'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--text-dim)', planning: 'var(--accent)', recon: 'var(--accent)',
@@ -20,7 +22,7 @@ const STATUS_COLOR: Record<string, string> = {
   awaiting_approval: 'var(--gold)', failed: 'var(--crit)',
 }
 
-type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface'
+type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface' | 'workbench' | 'access'
 
 interface GodDef { key: string; name: string; symbol: string; role: string }
 
@@ -238,6 +240,8 @@ export default function MissionControl() {
               <TabBtn id="notes" label="NOTES" count={notes.length || undefined} />
               <TabBtn id="wordlists" label="WORDLISTS" />
               <TabBtn id="surface" label="SURFACE" />
+              <TabBtn id="workbench" label="WORKBENCH" />
+              <TabBtn id="access" label="ACCESS" />
             </div>
 
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -267,6 +271,16 @@ export default function MissionControl() {
               {tab === 'surface' && (
                 <div style={{ overflow: 'auto' }}>
                   <SurfacePanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'workbench' && (
+                <div style={{ overflow: 'auto' }}>
+                  <WorkbenchPanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'access' && (
+                <div style={{ overflow: 'auto' }}>
+                  <AccessCheckPanel missionId={mission.id} />
                 </div>
               )}
             </div>

@@ -182,3 +182,60 @@ export interface SurfaceInventory {
   total: number
   parameterized: number
 }
+
+// ── Request workbench ────────────────────────────────────────
+export interface ReplayResult {
+  exchange_id: string | null
+  status: number
+  length: number
+  duration_ms: number
+  headers: Record<string, string>
+  body: string
+}
+
+export interface FuzzHit {
+  payload: string
+  status?: number
+  length?: number
+  duration_ms?: number
+  reflected?: boolean
+  error_signatures?: string[]
+  score: number
+  error?: string
+}
+
+export interface FuzzResult {
+  baseline: { status: number; length: number; duration_ms: number }
+  param: string
+  param_in: string
+  count: number
+  results: FuzzHit[]
+}
+
+// ── Cross-role access control ────────────────────────────────
+export interface AuthProfile {
+  id: string
+  name: string
+  role: string | null
+  headers: Record<string, string>
+  created_at: string | null
+}
+
+export interface AccessRow {
+  role: string
+  status?: number
+  length?: number
+  duration_ms?: number
+  is_owner?: boolean
+  is_anon?: boolean
+  flag?: string
+  error?: string
+}
+
+export interface AccessResult {
+  request: { method: string; url: string }
+  results: AccessRow[]
+  flags: string[]
+  verdict: string
+  anomaly: boolean
+}

@@ -1,6 +1,7 @@
 import type {
   Mission, MissionSummary, MissionMode, ParsedScope, Severity, Finding,
   WordlistCatalog, Wordlist, OracleResponse, OracleAI, SurfaceInventory,
+  ReplayResult, FuzzResult, AuthProfile, AccessResult,
 } from './types'
 
 const BASE = '/api'
@@ -87,6 +88,29 @@ export const api = {
 
   // Attack surface inventory
   getSurface: (missionId: string) => req<SurfaceInventory>(`/missions/${missionId}/surface`),
+
+  // Request workbench (Repeater + Intruder)
+  replay: (missionId: string, body: {
+    method: string; url: string; headers?: Record<string, string>;
+    body?: string | null; follow_redirects?: boolean; save?: boolean;
+  }) => req<ReplayResult>(`/missions/${missionId}/replay`, { method: 'POST', body: JSON.stringify(body) }),
+
+  fuzz: (missionId: string, body: {
+    method: string; url: string; headers?: Record<string, string>; body?: string | null;
+    param: string; param_in: string; payloads?: string[]; wordlist_id?: string; max_payloads?: number;
+  }) => req<FuzzResult>(`/missions/${missionId}/fuzz`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // Cross-role access control
+  listProfiles: (missionId: string) =>
+    req<{ profiles: AuthProfile[]; total: number }>(`/missions/${missionId}/profiles`),
+  createProfile: (missionId: string, body: { name: string; role?: string; headers: Record<string, string> }) =>
+    req<AuthProfile>(`/missions/${missionId}/profiles`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteProfile: (missionId: string, profileId: string) =>
+    req<{ deleted: string }>(`/missions/${missionId}/profiles/${profileId}`, { method: 'DELETE' }),
+  accessCheck: (missionId: string, body: {
+    method: string; url: string; profile_ids: string[];
+    owner_profile_id?: string; include_anon?: boolean;
+  }) => req<AccessResult>(`/missions/${missionId}/access-check`, { method: 'POST', body: JSON.stringify(body) }),
 
   // Report + scope parse
   getReportUrl: (missionId: string) => `${BASE}/missions/${missionId}/report`,
