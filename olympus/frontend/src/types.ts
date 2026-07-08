@@ -171,6 +171,7 @@ export interface SurfaceEndpoint {
 export interface SurfaceCoverage {
   subdomains?: number
   live_hosts?: number
+  network_hosts?: number
   hosts_scanned?: number
   crawled_urls?: number
   content_paths?: number

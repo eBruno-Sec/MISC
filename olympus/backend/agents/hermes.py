@@ -46,6 +46,77 @@ SUBDOMAIN_CATEGORIES = {
     "api": ["api", "api-", "graphql", "rest", "gateway", "backend"],
 }
 
+# Curated port set for the CIDR network sweep: remote-access, file/DB, and web
+# services worth surfacing on a red-team host-discovery pass. Web ports are here
+# too so a host running only, say, 8080 still shows as alive.
+NETWORK_SWEEP_PORTS = (
+    "21,22,23,25,53,80,110,111,135,139,143,389,443,445,993,995,"
+    "1433,1521,2049,2375,3306,3389,5432,5900,5985,6379,8000,8080,8443,9200,11211,27017"
+)
+
+# Non-web services that matter on a network sweep. severity=info means "reachable,
+# worth noting" (e.g. SSH); higher severities are genuine exposure risk. Web ports
+# (80/443/8080/8443/8000) are intentionally absent — those flow through the normal
+# web pipeline (httpx liveness → ARES), so we don't double-report them here.
+NETWORK_SERVICE_RISK = {
+    21: ("FTP", "medium", 5.3, "FTP transmits credentials and data in plaintext."),
+    22: ("SSH", "info", 0.0, "SSH remote administration is reachable on this host."),
+    23: ("Telnet", "high", 7.5, "Telnet is unencrypted remote access; credentials are exposed."),
+    25: ("SMTP", "info", 0.0, "SMTP service reachable; check for open relay / user enumeration."),
+    111: ("rpcbind", "low", 3.7, "ONC RPC portmapper reachable; can enumerate RPC services (NFS, etc.)."),
+    135: ("MSRPC", "medium", 5.0, "Windows RPC endpoint mapper exposed."),
+    139: ("NetBIOS", "medium", 5.3, "NetBIOS session service exposed."),
+    389: ("LDAP", "medium", 5.3, "LDAP directory service reachable; may permit anonymous bind."),
+    445: ("SMB", "high", 8.1, "SMB exposed — EternalBlue / ransomware / null-session surface."),
+    1433: ("MSSQL", "high", 7.5, "Microsoft SQL Server port publicly accessible."),
+    1521: ("Oracle DB", "high", 7.5, "Oracle database listener publicly accessible."),
+    2049: ("NFS", "medium", 5.3, "NFS export service reachable; may allow unauthenticated mounts."),
+    2375: ("Docker API", "critical", 10.0, "Unauthenticated Docker daemon API — full host compromise."),
+    3306: ("MySQL", "high", 7.5, "MySQL/MariaDB port publicly accessible."),
+    3389: ("RDP", "critical", 9.8, "RDP publicly exposed — brute-force / BlueKeep risk."),
+    5432: ("PostgreSQL", "high", 7.5, "PostgreSQL port publicly accessible."),
+    5900: ("VNC", "high", 8.1, "VNC remote desktop exposed; often weak/no authentication."),
+    5985: ("WinRM", "medium", 5.9, "Windows Remote Management (WinRM) exposed."),
+    6379: ("Redis", "critical", 9.8, "Redis exposed — often unauthenticated, full data access."),
+    9200: ("Elasticsearch", "high", 8.1, "Elasticsearch port accessible; often unauthenticated."),
+    11211: ("Memcached", "medium", 5.3, "Memcached exposed; UDP amplification / data leakage risk."),
+    27017: ("MongoDB", "critical", 9.8, "MongoDB port accessible; often unauthenticated."),
+}
+
+
+def parse_nmap_greppable(stdout: str) -> dict:
+    """Parse nmap -oG output into {ip: {"status": "up", "ports": [ {port, proto,
+    service, version} ]}}. Pure (no I/O) so it can be unit-tested without nmap.
+
+    A host appears if nmap marked it Up (Status line) OR reported any open port.
+    Only open ports are kept."""
+    hosts: dict = {}
+    for line in (stdout or "").splitlines():
+        if not line.startswith("Host:"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        ip = parts[1]
+        entry = hosts.setdefault(ip, {"status": "unknown", "ports": []})
+        if "Status: Up" in line:
+            entry["status"] = "up"
+        elif "Status: Down" in line and entry["status"] == "unknown":
+            entry["status"] = "down"
+        if "Ports:" in line:
+            port_section = line.split("Ports:", 1)[1].split("Ignored State:")[0].strip()
+            for port_info in port_section.split(","):
+                fields = port_info.strip().split("/")
+                if len(fields) >= 7 and fields[1] == "open" and fields[0].isdigit():
+                    entry["status"] = "up"
+                    entry["ports"].append({
+                        "port": int(fields[0]),
+                        "proto": fields[2],
+                        "service": fields[4] or "unknown",
+                        "version": fields[6],
+                    })
+    return hosts
+
 
 class Hermes(BaseAgent):
     name = "hermes"
@@ -123,6 +194,7 @@ class Hermes(BaseAgent):
             "technologies": {},
             "vendors": [],
             "subdomain_categories": {},
+            "network_hosts": [],
         }
 
         scope_rules = (context or {}).get("scope_rules", {})
@@ -215,6 +287,14 @@ class Hermes(BaseAgent):
             await self.log("Technology fingerprinting on live hosts", "info")
             result["technologies"] = await self._fingerprint(result["live_hosts"])
             await self._check_takeovers([h.get("host", "") for h in result["live_hosts"]])
+
+        # Network sweep: for a CIDR range, the web-liveness probe above only sees
+        # HTTP/S hosts. Run an nmap host-discovery + light service scan so boxes that
+        # expose only SSH/RDP/SMB/a database (no web server) are still found + reported.
+        if cidr_hosts:
+            result["network_hosts"] = await self._nmap_network_sweep(
+                cidr_hosts, target, web_live=result["live_hosts"]
+            )
 
         result["vendors"] = self._extract_vendors(result["dns_records"].get("TXT", []))
         if result["vendors"]:
@@ -410,6 +490,104 @@ class Hermes(BaseAgent):
         if live:
             await self.log(f"httpx: {len(live)} live hosts fingerprinted", "info")
         return live
+
+    async def _nmap_network_sweep(self, hosts: list, target: str, web_live: list = None) -> list:
+        """nmap host discovery + curated service scan across a CIDR's IPs. Surfaces
+        non-web hosts (SSH/RDP/SMB/DB) the web-liveness probe never sees, and flags
+        exposed remote-access / database services. Returns an inventory list of
+        {ip, status, ports:[...]}. Service findings for web-host IPs are left to ARES
+        (which deep-scans them) to avoid double-reporting; the inventory lists them."""
+        # Arg-safety: IPs from expand_cidr never start with '-', but filter anyway so
+        # nothing can be parsed as an nmap flag.
+        host_args = [h for h in dict.fromkeys(hosts) if h and not h.startswith("-")]
+        if not host_args:
+            return []
+
+        await self.log(
+            f"Network sweep: nmap host discovery + service scan across {len(host_args)} IP(s) "
+            f"in {target} (finds SSH/RDP/SMB/DB, not just web)", "info")
+
+        # -sT (TCP connect) needs no root; -sV --version-light grabs service banners;
+        # default host discovery still marks a host Up even with no open port in our
+        # set; --host-timeout stops a firewalled host from stalling the whole sweep.
+        stdout, stderr, rc = await self.run_command(
+            ["nmap", "-sT", "-sV", "--version-light", "-T4", "-n", "--open",
+             "--host-timeout", "60s", "-oG", "-", "-p", NETWORK_SWEEP_PORTS] + host_args,
+            timeout=900,
+        )
+        if rc == 127:
+            await self.log(
+                "nmap not available; network sweep skipped (web hosts already covered)", "warn")
+            return []
+        if not stdout:
+            await self.log(f"Network sweep produced no output ({stderr[:160]})", "warn")
+            return []
+
+        parsed = parse_nmap_greppable(stdout)
+        inventory = [
+            {"ip": ip, "status": "up", "ports": sorted(d.get("ports", []), key=lambda p: p["port"])}
+            for ip, d in sorted(parsed.items()) if d.get("status") == "up"
+        ]
+        if not inventory:
+            await self.log("Network sweep: no additional live hosts found", "info")
+            return []
+
+        with_ports = sum(1 for h in inventory if h["ports"])
+        await self.log(
+            f"Network sweep: {len(inventory)} live host(s), {with_ports} exposing scanned services",
+            "success")
+        await self._report_network_services(inventory, target, web_live or [])
+        return inventory
+
+    async def _report_network_services(self, inventory: list, target: str, web_live: list) -> None:
+        """Emit grouped findings for exposed non-web services + one inventory summary.
+        Web-host IPs are excluded from the service findings (ARES reports those); the
+        inventory summary still lists every discovered host for completeness."""
+        web_ips = {(h.get("host", "") or "").split(":")[0] for h in web_live}
+
+        # Group risky services across non-web hosts: one finding per service type, not
+        # one per host — a /24 sweep must not spawn hundreds of near-identical findings.
+        by_service: dict = {}   # port -> list[ip]
+        for host in inventory:
+            if host["ip"] in web_ips:
+                continue
+            for p in host["ports"]:
+                if p["port"] in NETWORK_SERVICE_RISK:
+                    by_service.setdefault(p["port"], []).append(host["ip"])
+
+        for port in sorted(by_service):
+            ips = by_service[port]
+            name, sev, cvss, desc = NETWORK_SERVICE_RISK[port]
+            verb = "Reachable" if sev == "info" else "Exposed"
+            await self.add_finding(
+                title=f"{name} {verb} on {len(ips)} host(s) ({target})",
+                severity=sev,
+                description=f"{desc} Found on port {port}/tcp during the network sweep.",
+                evidence=", ".join(f"{ip}:{port}" for ip in ips[:25]),
+                cvss_score=cvss if cvss else None,
+                remediation=(
+                    f"Confirm {name} exposure is intended; restrict port {port} to trusted "
+                    "management networks / VPN and require authentication."),
+            )
+
+        # Inventory summary so every discovered host lands in the report even if its
+        # services aren't individually risk-flagged (never hide recon results).
+        lines = []
+        for host in inventory:
+            if host["ports"]:
+                svc = ", ".join(f"{p['port']}/{p['service']}" for p in host["ports"][:12])
+            else:
+                svc = "up (no scanned service ports open)"
+            lines.append(f"{host['ip']}: {svc}")
+        await self.add_finding(
+            title=f"Network Sweep Inventory — {len(inventory)} live host(s) in {target}",
+            severity="info",
+            description=(
+                f"nmap host discovery across {target} found {len(inventory)} live host(s). "
+                "This is the network-layer attack surface; web hosts are also assessed by ARES."),
+            evidence="\n".join(lines[:100]),
+            remediation="Review each exposed service; decommission or firewall anything not required.",
+        )
 
     async def _check_takeovers(self, hosts: list) -> None:
         """Flag dangling subdomains (CNAME to an unclaimed service) via nuclei."""

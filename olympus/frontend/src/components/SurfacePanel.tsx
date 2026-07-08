@@ -59,6 +59,7 @@ export default function SurfacePanel({ missionId }: { missionId: string }) {
             {stat('Content paths', cov?.content_paths)}
             {stat('Hosts scanned', cov?.hosts_scanned)}
             {stat('Subdomains', cov?.subdomains)}
+            {(cov?.network_hosts ?? 0) > 0 && stat('Network hosts', cov?.network_hosts)}
           </div>
 
           <input

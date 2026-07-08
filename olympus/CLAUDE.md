@@ -31,4 +31,4 @@ session.
 
 ## Verify
 `docker compose exec backend python -m pytest tests/ -q` (poc, replay, surface, forms,
-security). Frontend is verified by the Docker build.
+security, network-sweep). Frontend is verified by the Docker build.

@@ -59,7 +59,9 @@ apollo (report).
 ## What's built (all on `main`)
 - **Recon (HERMES):** subfinder/crt.sh/DNS-brute, httpx fingerprint, subdomain-takeover,
   explicit `host:port` scanning, **CIDR subnet sweep** (`x.x.x.x/24`, web-liveness,
-  cap `OLYMPUS_CIDR_MAX_HOSTS`).
+  cap `OLYMPUS_CIDR_MAX_HOSTS`) + **nmap network sweep** on CIDR ranges (host discovery
+  + curated service scan → finds non-web boxes: SSH/RDP/SMB/DB/Redis/Docker; grouped
+  exposure findings + an inventory summary; result key `network_hosts`).
 - **Active (ARES + offensive.py):** nmap, nuclei (+OAST), katana crawl, Wayback archive
   params, arjun-style param mining, **API/SPA endpoint seeding**, **OpenAPI/Swagger
   import**, **form/POST discovery + injection**, sqlmap (GET + `--forms`), dalfox,
@@ -78,8 +80,8 @@ apollo (report).
 - **Workflow:** pre-authorize/autonomous gate toggle at launch (or env
   `OLYMPUS_AUTO_APPROVE=1`), **mission heartbeat** (`OLYMPUS_HEARTBEAT_SECONDS`, default
   300s), scope-file upload, wordlists, PortSwigger-lab Oracle.
-- **Tests:** `backend/tests/` — poc, replay, surface, forms, security. Run:
-  `docker compose exec backend python -m pytest tests/ -q`.
+- **Tests:** `backend/tests/` — poc, replay, surface, forms, security, network-sweep.
+  Run: `docker compose exec backend python -m pytest tests/ -q`.
 
 ---
 
@@ -98,8 +100,15 @@ apollo (report).
 ---
 
 ## Not built yet (candidate next steps)
-- **nmap ping-sweep host discovery** so CIDR finds non-web hosts (SSH/RDP/DB) — full
-  network red-team sweep (currently CIDR is web-liveness only).
+- **APOLLO/UI panel for `network_hosts`.** The CIDR nmap network sweep now populates
+  `hermes["network_hosts"]` (`[{ip,status,ports:[{port,proto,service,version}]}]`) and
+  a coverage count (`surface.coverage.network_hosts`), but there's no dedicated report
+  section or TOPOLOGY rendering yet — results surface only via findings + the SURFACE
+  stat tile. A "Network Hosts" table in APOLLO/SURFACE is the natural next step.
+- **Promote nonstandard web ports into `live_hosts`.** The network sweep may find a web
+  server on a port httpx missed (e.g. 8080); those aren't yet fed to ARES for web scans.
+- **UDP / full-range sweep.** Network sweep is TCP-connect (`-sT`) over a curated port
+  set (`NETWORK_SWEEP_PORTS` in `hermes.py`); no UDP, no full 1-65535.
 - Screenshots/artifacts (needs a headless-chromium/Playwright dependency — not installed).
 - Redirect edges only cover same-host hops between two *discovered* endpoints.
 

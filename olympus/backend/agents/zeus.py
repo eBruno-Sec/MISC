@@ -209,6 +209,7 @@ class Zeus(BaseAgent):
                 "coverage": {
                     "subdomains": len(hermes.get("subdomains", []) or []),
                     "live_hosts": len(hermes.get("live_hosts", []) or []),
+                    "network_hosts": len(hermes.get("network_hosts", []) or []),
                     "hosts_scanned": off.get("hosts_scanned", ares.get("targets_scanned", 0)),
                     "crawled_urls": off.get("crawled_urls", 0),
                     "content_paths": len(ares.get("directories", []) or []),
