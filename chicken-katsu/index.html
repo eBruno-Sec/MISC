@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Katsu Kitchen — Golden Crispy Chicken</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- MOBILE DRAWER -->
+  <div class="nav-drawer" id="navDrawer" aria-hidden="true">
+    <a href="#menu">Menu</a>
+    <a href="#craft">Our Craft</a>
+    <a href="#order">Order</a>
+    <a href="#order" class="drawer-cta">Order Now</a>
+  </div>
+
+  <!-- NAV -->
+  <nav id="mainNav" role="navigation" aria-label="Main navigation">
+    <a href="#hero" class="nav-logo">
+      <span class="nav-logo-icon" aria-hidden="true">🍱</span>
+      Katsu Kitchen
+    </a>
+    <ul class="nav-links">
+      <li><a href="#menu">Menu</a></li>
+      <li><a href="#craft">Our Craft</a></li>
+      <li><a href="#order">Order</a></li>
+    </ul>
+    <a href="#order" class="nav-cta">Order Now</a>
+    <button class="nav-burger" id="navBurger"
+            aria-label="Toggle menu" aria-expanded="false" aria-controls="navDrawer">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero-left">
+      <div class="hero-eyebrow">🌟 Family Favourite Since 2018</div>
+      <h1 class="hero-title">
+        Golden<br>Crispy<br><em>Chicken Katsu</em>
+      </h1>
+      <p class="hero-jp">チキンカツ</p>
+      <p class="hero-desc">
+        Hand-pounded chicken breast, double-coated in crunchy Japanese panko,
+        fried golden and served with our house tonkatsu sauce, fresh shredded
+        cabbage, and fluffy steamed rice. The whole family will love it.
+      </p>
+      <div class="hero-ctas">
+        <a href="#order" class="btn-amber">Order Now →</a>
+        <a href="#menu" class="btn-ghost">See the menu →</a>
+      </div>
+    </div>
+
+    <div class="hero-right">
+      <!-- Drop images/hero.jpg to replace the illustration below -->
+      <img class="hero-photo" src="images/hero.jpg"
+           alt="Golden chicken katsu served on a plate with rice and cabbage">
+
+      <!-- CSS illustration — fallback when hero.jpg is absent -->
+      <div class="katsu-visual" aria-hidden="true">
+        <div class="steam">
+          <div class="steam-wisp"></div>
+          <div class="steam-wisp"></div>
+          <div class="steam-wisp"></div>
+        </div>
+        <div class="plate"></div>
+        <div class="sauce"></div>
+        <div class="cutlet"></div>
+        <div class="rice"></div>
+        <div class="cabbage">
+          <div class="cabbage-strand" style="width:72px;top:7px;left:4px;transform:rotate(-8deg)"></div>
+          <div class="cabbage-strand" style="width:58px;top:16px;left:10px;transform:rotate(5deg)"></div>
+          <div class="cabbage-strand" style="width:66px;top:25px;left:2px;transform:rotate(-3deg)"></div>
+          <div class="cabbage-strand" style="width:52px;top:34px;left:8px;transform:rotate(10deg)"></div>
+        </div>
+        <div class="lemon"></div>
+      </div>
+
+      <div class="price-tag" aria-label="Starting from $12.90">
+        <span class="from">From</span>
+        <span class="amount">$12<span class="cents">.90</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURE STRIP -->
+  <div class="features" aria-hidden="true">
+    <div class="marquee-track">
+      <div class="feature-item"><span class="feature-icon">🌾</span><span class="feature-text">Japanese Panko Breadcrumbs</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🐔</span><span class="feature-text">Free-Range Chicken</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🥢</span><span class="feature-text">House Tonkatsu Sauce</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🚚</span><span class="feature-text">30-Min Delivery</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">👨‍👩‍👧‍👦</span><span class="feature-text">Family Friendly</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🌾</span><span class="feature-text">Japanese Panko Breadcrumbs</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🐔</span><span class="feature-text">Free-Range Chicken</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🥢</span><span class="feature-text">House Tonkatsu Sauce</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">🚚</span><span class="feature-text">30-Min Delivery</span></div>
+      <div class="feature-divider"></div>
+      <div class="feature-item"><span class="feature-icon">👨‍👩‍👧‍👦</span><span class="feature-text">Family Friendly</span></div>
+      <div class="feature-divider"></div>
+    </div>
+  </div>
+
+  <!-- MENU -->
+  <section class="menu" id="menu">
+    <p class="eyebrow reveal">Our Menu</p>
+    <h2 class="section-title reveal">Something for<br>Everyone</h2>
+    <div class="menu-grid">
+
+      <!-- images/menu-classic.jpg -->
+      <div class="menu-item reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-classic.jpg" alt="Classic Chicken Katsu">
+        </div>
+        <span class="item-tag">Classic</span>
+        <h3 class="item-name">Classic Chicken Katsu</h3>
+        <p class="item-jp">クラシックチキンカツ</p>
+        <p class="item-desc">Our signature. Hand-pounded 200g chicken breast, double-panko coated, fried to golden perfection. Served with tonkatsu sauce, shredded cabbage and steamed rice.</p>
+        <div class="item-footer">
+          <span class="item-price">$12.90</span>
+          <button type="button" class="item-add" aria-label="Add Classic Chicken Katsu to order">+</button>
+        </div>
+      </div>
+
+      <!-- images/menu-curry.jpg -->
+      <div class="menu-item reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-curry.jpg" alt="Katsu Curry Bowl">
+        </div>
+        <span class="item-tag">Fan Favourite</span>
+        <h3 class="item-name">Katsu Curry Bowl</h3>
+        <p class="item-jp">カツカレー</p>
+        <p class="item-desc">Sliced chicken katsu over fluffy Japanese short-grain rice, smothered in our slow-cooked golden curry sauce with pickled daikon on the side.</p>
+        <div class="item-footer">
+          <span class="item-price">$15.50</span>
+          <button type="button" class="item-add" aria-label="Add Katsu Curry Bowl to order">+</button>
+        </div>
+      </div>
+
+      <!-- images/menu-sando.jpg -->
+      <div class="menu-item reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-sando.jpg" alt="Katsu Sando">
+        </div>
+        <span class="item-tag">Lunchbox</span>
+        <h3 class="item-name">Katsu Sando</h3>
+        <p class="item-jp">カツサンド</p>
+        <p class="item-desc">Japanese milk bread, lightly toasted. Layered with crispy katsu, fine-shredded cabbage and our house Kewpie mayo-tonkatsu blend. Served with chips.</p>
+        <div class="item-footer">
+          <span class="item-price">$14.00</span>
+          <button type="button" class="item-add" aria-label="Add Katsu Sando to order">+</button>
+        </div>
+      </div>
+
+      <!-- images/menu-spicy.jpg -->
+      <div class="menu-item reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-spicy.jpg" alt="Spicy Katsu Don">
+        </div>
+        <span class="item-tag">Spicy</span>
+        <h3 class="item-name">Spicy Katsu Don</h3>
+        <p class="item-jp">スパイシーカツ丼</p>
+        <p class="item-desc">Katsu rice bowl with simmered egg, onion and a spicy dashi-mirin glaze. Finished with togarashi, spring onion and toasted sesame.</p>
+        <div class="item-footer">
+          <span class="item-price">$16.00</span>
+          <button type="button" class="item-add" aria-label="Add Spicy Katsu Don to order">+</button>
+        </div>
+      </div>
+
+      <!-- images/menu-set.jpg -->
+      <div class="menu-item reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-set.jpg" alt="Katsu Set Meal">
+        </div>
+        <span class="item-tag">Full Meal</span>
+        <h3 class="item-name">Katsu Set Meal</h3>
+        <p class="item-jp">カツ定食</p>
+        <p class="item-desc">The full experience. Classic katsu with rice, miso soup, pickled vegetables, shredded cabbage and a small side of house potato salad.</p>
+        <div class="item-footer">
+          <span class="item-price">$19.90</span>
+          <button type="button" class="item-add" aria-label="Add Katsu Set Meal to order">+</button>
+        </div>
+      </div>
+
+      <!-- images/menu-kids.jpg -->
+      <div class="menu-item kids reveal">
+        <div class="item-photo-wrap">
+          <img class="item-photo" src="images/menu-kids.jpg" alt="Kids' Mini Katsu">
+        </div>
+        <span class="item-tag">Kids' Pick 🌟</span>
+        <h3 class="item-name">Kids' Mini Katsu</h3>
+        <p class="item-jp">子供カツ</p>
+        <p class="item-desc">A smaller, perfectly crispy chicken katsu with steamed rice, mild sauce and sweet corn. Great for little ones who want to try something new.</p>
+        <div class="item-footer">
+          <span class="item-price">$9.50</span>
+          <button type="button" class="item-add" aria-label="Add Kids' Mini Katsu to order">+</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- CRAFT -->
+  <section class="craft" id="craft">
+    <div class="craft-left">
+      <p class="eyebrow reveal">How We Make It</p>
+      <h2 class="section-title reveal">Made Fresh,<br>Every Order</h2>
+      <div class="craft-steps">
+        <div class="craft-step reveal">
+          <div class="step-icon" aria-hidden="true">🥩</div>
+          <div>
+            <p class="step-title">Select &amp; Pound</p>
+            <p class="step-desc">Free-range chicken breast, tenderised to an even 1.5 cm for a consistent crunch in every single bite.</p>
+          </div>
+        </div>
+        <div class="craft-step reveal">
+          <div class="step-icon" aria-hidden="true">🌾</div>
+          <div>
+            <p class="step-title">Double Coat</p>
+            <p class="step-desc">Flour, beaten egg, then hand-pressed Japanese panko. The double coat locks in the juices and builds that signature golden crunch.</p>
+          </div>
+        </div>
+        <div class="craft-step reveal">
+          <div class="step-icon" aria-hidden="true">🍳</div>
+          <div>
+            <p class="step-title">Fry at Precision</p>
+            <p class="step-desc">Into 180 °C canola oil for exactly 5 minutes. A probe confirms 74 °C internal before every plate leaves the kitchen.</p>
+          </div>
+        </div>
+        <div class="craft-step reveal">
+          <div class="step-icon" aria-hidden="true">🍽️</div>
+          <div>
+            <p class="step-title">Rest &amp; Plate</p>
+            <p class="step-desc">Rested 90 seconds on a wire rack, sliced on the bias, and served straight to you. Never held under a lamp.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="craft-right">
+      <div class="craft-stat-grid reveal">
+        <div class="craft-stat">
+          <span class="stat-num">180<span class="stat-unit">°C</span></span>
+          <span class="stat-label">Fry Temp</span>
+        </div>
+        <div class="craft-stat">
+          <span class="stat-num">5<span class="stat-unit">min</span></span>
+          <span class="stat-label">Cook Time</span>
+        </div>
+        <div class="craft-stat">
+          <span class="stat-num">200<span class="stat-unit">g</span></span>
+          <span class="stat-label">Serving Size</span>
+        </div>
+        <div class="craft-stat">
+          <span class="stat-num">2<span class="stat-unit">×</span></span>
+          <span class="stat-label">Panko Coated</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ORDER CTA -->
+  <section class="order-cta" id="order">
+    <h2 class="order-tagline reveal">Ready to dig in?</h2>
+    <p class="order-sub reveal">Order for delivery or swing by for pickup. Fresh from the fryer to your table in under 30 minutes.</p>
+    <div class="order-buttons reveal">
+      <a href="#" class="btn-white">Order for Delivery</a>
+      <a href="#" class="btn-outline-white">Pickup Menu</a>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <span class="footer-logo">
+      <span class="footer-logo-icon" aria-hidden="true">🍱</span>
+      Katsu Kitchen
+    </span>
+    <span class="footer-note">© 2025 Katsu Kitchen. All rights reserved.</span>
+    <span class="footer-note">チキンカツ専門店</span>
+  </footer>
+
+  <script src="js/main.js" defer></script>
+</body>
+</html>
