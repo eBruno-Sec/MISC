@@ -88,6 +88,33 @@ def is_valid_target(value: str) -> bool:
     return bool(_HOSTNAME_RE.match(host) or _WILDCARD_RE.match(host))
 
 
+def expand_cidr(target: str, cap: int = 1024):
+    """If target is an IPv4 CIDR (e.g. 10.0.0.0/24), return its host IPs as strings,
+    capped at `cap`. Returns None for any non-CIDR target so callers fall back to
+    normal hostname handling.
+
+    /32 -> the single host; /31 -> both hosts (RFC 3021); otherwise the usable host
+    range (network + broadcast excluded), capped."""
+    t = re.sub(r"^https?://", "", (target or "").strip())
+    t = t.split()[0] if t else ""      # first token; keep the /mask intact
+    if "/" not in t:
+        return None
+    try:
+        net = ipaddress.ip_network(t, strict=False)
+    except ValueError:
+        return None
+    if net.version != 4:
+        return None
+    if net.prefixlen == 32:
+        return [str(net.network_address)]
+    ips = []
+    for i, ip in enumerate(net.hosts()):
+        if i >= max(1, cap):
+            break
+        ips.append(str(ip))
+    return ips or None
+
+
 def validate_targets(values: list[str]) -> tuple[list[str], list[str]]:
     """Split a list into (valid, rejected)."""
     valid, rejected = [], []

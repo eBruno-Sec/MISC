@@ -4,6 +4,7 @@ import re
 from datetime import date, datetime
 import httpx
 from .base import BaseAgent
+from core.security import expand_cidr
 
 VENDOR_TXT_PATTERNS = {
     "google-site-verification": ("Google Workspace", "Productivity"),
@@ -100,7 +101,17 @@ class Hermes(BaseAgent):
     async def execute(self, target: str, context: dict = None) -> dict:
         domain = self._extract_domain(target)
         _host, _port = self._extract_host_port(target)
-        await self.log(f"Passive recon initiated on {domain}", "info")
+        try:
+            cidr_cap = max(1, int(os.getenv("OLYMPUS_CIDR_MAX_HOSTS", "1024")))
+        except ValueError:
+            cidr_cap = 1024
+        cidr_hosts = expand_cidr(target, cap=cidr_cap)
+        if cidr_hosts:
+            await self.log(
+                f"CIDR target {target}: sweeping {len(cidr_hosts)} host(s) for live web services "
+                f"(cap {cidr_cap}; raise OLYMPUS_CIDR_MAX_HOSTS for bigger ranges)", "info")
+        else:
+            await self.log(f"Passive recon initiated on {domain}", "info")
 
         result = {
             "target": target,
@@ -114,42 +125,53 @@ class Hermes(BaseAgent):
             "subdomain_categories": {},
         }
 
-        await self.log("WHOIS / RDAP lookup", "info")
-        result["whois"] = await self._rdap(domain)
-
-        await self.log("Subdomain enumeration: crt.sh + subfinder (OSINT) + DNS brute", "info")
-        ct_subs = await self._cert_transparency(domain)
-        osint_subs = await self._subfinder(domain)
-        brute_subs = await self._dns_bruteforce(domain)
-        subs = sorted(set(ct_subs) | set(osint_subs) | set(brute_subs))
-        result["subdomains"] = subs
-        await self.log(
-            f"{len(subs)} unique subdomains "
-            f"(crt.sh {len(ct_subs)}, subfinder {len(osint_subs)}, brute {len(brute_subs)})",
-            "success" if subs else "warn",
-        )
-
-        # Apply scope rules if provided
         scope_rules = (context or {}).get("scope_rules", {})
-        if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
-            filtered = self._apply_scope(subs, scope_rules)
-            removed = len(subs) - len(filtered)
-            if removed:
-                await self.log(f"Scope filter: removed {removed} out-of-scope subdomains", "info")
-            subs = filtered
+        subs = []
+
+        if cidr_hosts:
+            # Network sweep: no subdomain / DNS / WHOIS recon makes sense for an IP range.
+            all_hosts = cidr_hosts
+        else:
+            await self.log("WHOIS / RDAP lookup", "info")
+            result["whois"] = await self._rdap(domain)
+
+            await self.log("Subdomain enumeration: crt.sh + subfinder (OSINT) + DNS brute", "info")
+            ct_subs = await self._cert_transparency(domain)
+            osint_subs = await self._subfinder(domain)
+            brute_subs = await self._dns_bruteforce(domain)
+            subs = sorted(set(ct_subs) | set(osint_subs) | set(brute_subs))
             result["subdomains"] = subs
+            await self.log(
+                f"{len(subs)} unique subdomains "
+                f"(crt.sh {len(ct_subs)}, subfinder {len(osint_subs)}, brute {len(brute_subs)})",
+                "success" if subs else "warn",
+            )
 
-        if subs:
-            result["subdomain_categories"] = self._categorize_subdomains(subs)
-            await self._flag_sensitive_subdomains(domain, result["subdomain_categories"])
+            # Apply scope rules if provided
+            if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+                filtered = self._apply_scope(subs, scope_rules)
+                removed = len(subs) - len(filtered)
+                if removed:
+                    await self.log(f"Scope filter: removed {removed} out-of-scope subdomains", "info")
+                subs = filtered
+                result["subdomains"] = subs
 
-        await self.log("DNS record enumeration (A, MX, TXT, NS, SOA)", "info")
-        result["dns_records"] = await self._dns_enum(domain)
+            if subs:
+                result["subdomain_categories"] = self._categorize_subdomains(subs)
+                await self._flag_sensitive_subdomains(domain, result["subdomain_categories"])
 
-        all_hosts = list(dict.fromkeys(subs + [domain]))
+            await self.log("DNS record enumeration (A, MX, TXT, NS, SOA)", "info")
+            result["dns_records"] = await self._dns_enum(domain)
+
+            all_hosts = list(dict.fromkeys(subs + [domain]))
         if all_hosts:
             await self.log(f"Probing {len(all_hosts)} hosts for liveness", "info")
-            if _port:
+            if cidr_hosts:
+                # Sweep the whole range (no [:150] cap — the operator asked for it).
+                live = await self._httpx_probe(all_hosts)
+                if not live:
+                    live = await self._live_detection(all_hosts)
+            elif _port:
                 # Preserve the explicit host:port probe path (e.g. local Juice Shop).
                 live = await self._live_detection(all_hosts[:150], explicit_port=_port)
             else:
@@ -161,7 +183,7 @@ class Hermes(BaseAgent):
             # liveness probe could not confirm it. Pointing OLYMPUS at host:port must
             # test host:port on the right scheme — never silently drop the port and
             # fall back to https://host, which is how a live app reads as "0 hosts".
-            if _port:
+            if _port and not cidr_hosts:
                 netloc = f"{_host}:{_port}"
                 if not any(h.get("host") == netloc for h in live):
                     scheme = "https" if _port in (443, 8443) else "http"
@@ -179,6 +201,10 @@ class Hermes(BaseAgent):
             result["live_hosts"] = live
             if result["live_hosts"]:
                 await self.log(f"{len(result['live_hosts'])} live hosts confirmed", "success")
+            elif cidr_hosts:
+                await self.log(
+                    f"No live web hosts found across {target} ({len(all_hosts)} IPs swept). "
+                    "The range may have no HTTP/S services, or they are firewalled.", "warn")
             else:
                 await self.log(
                     "⚠ 0 live hosts confirmed — target appears unreachable from the scanner "
