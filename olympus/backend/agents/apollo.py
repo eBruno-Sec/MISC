@@ -120,12 +120,115 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             f"Full finding details, evidence, and remediation guidance are documented in this report."
         )
 
+    # OWASP probe modules the offensive engine runs (context["ares"]["offensive"]).
+    _MODULES = [
+        ("sqli", "SQL Injection"), ("xss", "Cross-Site Scripting"), ("ssrf", "SSRF"),
+        ("ssti", "Template Injection"), ("traversal", "Path Traversal"),
+        ("open_redirect", "Open Redirect"), ("cors", "CORS Misconfiguration"),
+        ("host_header", "Host-Header Injection"), ("auth", "Access Control / Auth"),
+        ("dast", "DAST (dalfox)"), ("zap", "OWASP ZAP Active Scan"),
+        ("content", "Content Discovery"),
+    ]
+    # Discovered paths worth a manual look (candidates, never auto-confirmed).
+    _INTERESTING = (
+        "admin", "login", "api", "graphql", "upload", "debug", "backup",
+        ".git", ".env", "config", "actuator", "swagger", "console",
+        "dashboard", "manager", "phpmyadmin", "wp-admin", "setup", "install",
+    )
+
+    def _recon_sections(self, context: dict, subdomains: list, live_hosts: list):
+        """Coverage panel, discovered content paths, and manual-test candidates —
+        all derived from REAL recon data (never fabricated). Returns three HTML
+        fragments (each may be ''). This is the coverage transparency Yggdrasil
+        won on, kept honest: it only reports numbers the agents actually produced."""
+        ares = (context or {}).get("ares", {}) or {}
+        if not ares:
+            return "", "", ""
+        offensive = ares.get("offensive", {}) or {}
+        directories = ares.get("directories", []) or []
+        nuclei_hits = len(ares.get("vulnerabilities", []) or [])
+        ran = bool(offensive)
+
+        # 1) Coverage metrics + OWASP module matrix
+        metrics = [
+            ("Subdomains discovered", len(subdomains or [])),
+            ("Live hosts", len(live_hosts or [])),
+            ("Hosts actively scanned", offensive.get("hosts_scanned", ares.get("targets_scanned", 0))),
+            ("URLs crawled", offensive.get("crawled_urls", 0)),
+            ("Content paths found", len(directories)),
+            ("Nuclei findings", nuclei_hits),
+        ]
+        metric_cells = "".join(
+            f'<div class="cov-cell"><div class="cov-num">{_html.escape(str(v))}</div>'
+            f'<div class="cov-label">{_html.escape(label)}</div></div>'
+            for label, v in metrics
+        )
+        rows = ""
+        for key, label in self._MODULES:
+            hits = len(offensive.get(key, []) or [])
+            state = "tested" if ran else "not run"
+            state_cls = "mod-ok" if ran else "mod-skip"
+            rows += (f'<tr><td>{_html.escape(label)}</td>'
+                     f'<td class="{state_cls}">{state}</td>'
+                     f'<td class="mod-hits">{hits if ran else "—"}</td></tr>')
+        coverage_html = (
+            '<div class="section"><h2>Assessment Coverage</h2>'
+            f'<div class="cov-grid">{metric_cells}</div>'
+            '<table class="cov-table"><thead><tr><th>OWASP Test Module</th>'
+            '<th>Status</th><th>Hits</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+        )
+
+        # 2) Discovered content paths (real ffuf/crawl results)
+        paths_html = ""
+        if directories:
+            prows = ""
+            for d in directories[:250]:
+                st = d.get("status", 0)
+                cls = ("st-200" if st == 200 else "st-redir" if st in (301, 302)
+                       else "st-403" if st == 403 else "st-other")
+                prows += (f'<tr><td class="path-url">{_html.escape(d.get("url", ""))}</td>'
+                          f'<td class="{cls}">{_html.escape(str(st))}</td>'
+                          f'<td class="path-note">{_html.escape(d.get("note", "") or "")}</td></tr>')
+            paths_html = (
+                f'<div class="section"><h2>Discovered Content Paths ({len(directories)})</h2>'
+                '<table class="path-table"><thead><tr><th>Path</th><th>Status</th>'
+                f'<th>Note</th></tr></thead><tbody>{prows}</tbody></table></div>'
+            )
+
+        # 3) Manual test candidates (interesting paths -> manual review, NOT confirmed)
+        seen, cands = set(), []
+        for d in directories:
+            u = d.get("url", "")
+            low = u.lower()
+            kw = next((k for k in self._INTERESTING if k in low), None)
+            if kw and u not in seen:
+                seen.add(u)
+                cands.append((u, d.get("status", 0), kw))
+        candidates_html = ""
+        if cands:
+            items = "".join(
+                f'<li><input type="checkbox"> <span class="cand-url">{_html.escape(u)}</span>'
+                f' <span class="cand-kw">{_html.escape(kw)}</span>'
+                f' <span class="cand-st">HTTP {_html.escape(str(st))}</span></li>'
+                for u, st, kw in cands[:80]
+            )
+            candidates_html = (
+                '<div class="section"><h2>Manual Test Candidates</h2>'
+                '<p class="cand-note">Interesting paths surfaced by recon that warrant manual '
+                'review. These are <strong>candidates, not confirmed findings</strong>.</p>'
+                f'<ul class="cand-list">{items}</ul></div>'
+            )
+        return coverage_html, paths_html, candidates_html
+
     async def _generate_html_report(self, target: str, findings: list, stats: dict, exec_summary: str, context: dict) -> str:
         mode = (context or {}).get("athena", {}).get("mode", "passive")
         mission_summary = (context or {}).get("athena", {}).get("mission_summary", "")
         vendors = (context or {}).get("hermes", {}).get("vendors", [])
         subdomains = (context or {}).get("hermes", {}).get("subdomains", [])
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
+        # Coverage transparency panels (real recon numbers only; empty in passive runs).
+        coverage_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
         # inline script is blocked (defense in depth behind the html escaping).
@@ -392,6 +495,29 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 .export-bar {{ position: fixed; top: 1rem; right: 1rem; display: flex; gap: .5rem; z-index: 50; }}
 .export-bar button {{ font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; padding: .5rem .9rem; background: var(--surface2); color: var(--accent); border: 1px solid var(--accent); cursor: pointer; }}
 .export-bar button:hover {{ background: var(--accent); color: var(--bg); }}
+.cov-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }}
+.cov-cell {{ background: var(--surface); padding: 1.25rem; text-align: center; }}
+.cov-num {{ font-size: 1.8rem; font-weight: 900; color: var(--accent); line-height: 1; margin-bottom: .35rem; }}
+.cov-label {{ font-size: .62rem; letter-spacing: .12em; color: var(--text-dim); text-transform: uppercase; }}
+.cov-table, .path-table {{ width: 100%; border-collapse: collapse; font-size: .8rem; }}
+.cov-table th, .path-table th {{ text-align: left; padding: .6rem .8rem; color: var(--text-dim); font-size: .62rem; letter-spacing: .15em; text-transform: uppercase; border-bottom: 1px solid var(--border); }}
+.cov-table td, .path-table td {{ padding: .5rem .8rem; border-bottom: 1px solid var(--border); }}
+.mod-ok {{ color: var(--accent3); }}
+.mod-skip {{ color: var(--text-dim); }}
+.mod-hits {{ color: var(--gold); text-align: right; }}
+.path-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
+.path-note {{ color: var(--text-dim); font-size: .72rem; }}
+.st-200 {{ color: var(--accent3); }}
+.st-redir {{ color: var(--accent); }}
+.st-403 {{ color: var(--gold); }}
+.st-other {{ color: var(--text-dim); }}
+.cand-note {{ font-size: .82rem; color: var(--text-dim); margin-bottom: 1rem; }}
+.cand-note strong {{ color: var(--accent2); }}
+.cand-list {{ list-style: none; display: flex; flex-direction: column; gap: .4rem; }}
+.cand-list li {{ background: var(--surface2); border: 1px solid var(--border); padding: .55rem .8rem; font-size: .8rem; }}
+.cand-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
+.cand-kw {{ color: var(--accent2); font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; margin-left: .4rem; }}
+.cand-st {{ color: var(--text-dim); font-size: .7rem; margin-left: .4rem; }}
 @media print {{ .export-bar {{ display: none; }} body {{ background: #fff; color: #000; }} .report-header, .section, .finding {{ break-inside: avoid; }} }}
 </style>
 </head>
@@ -427,12 +553,18 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
   </div>
 </div>
 
+{coverage_html}
+
 {'<div class="section"><h2>Vendor Stack (Passive Intelligence)</h2>' + vendor_html + '</div>' if vendors else ''}
 
 <div class="section">
   <h2>Findings Detail ({len(sorted_findings)} total)</h2>
   {findings_html or '<p style="color:var(--text-dim)">No findings recorded.</p>'}
 </div>
+
+{paths_html}
+
+{candidates_html}
 
 {_host_section}
 
