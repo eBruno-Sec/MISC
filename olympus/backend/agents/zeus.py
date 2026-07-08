@@ -204,6 +204,7 @@ class Zeus(BaseAgent):
             hermes = ctx.get("hermes", {}) or {}
             summary = {
                 "endpoints": [str(u) for u in (off.get("endpoints") or []) if isinstance(u, str)][:3000],
+                "redirects": [r for r in (off.get("redirects") or []) if isinstance(r, dict)][:300],
                 "coverage": {
                     "subdomains": len(hermes.get("subdomains", []) or []),
                     "live_hosts": len(hermes.get("live_hosts", []) or []),

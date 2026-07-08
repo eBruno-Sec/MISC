@@ -1290,6 +1290,45 @@ class OffensiveEngine:
 
         return findings
 
+    async def map_redirects(self, base_url: str, urls: list, cap: int = 40) -> list:
+        """Record same-host redirect edges (3xx Location) across discovered URLs so
+        the topology can draw how endpoints hop to each other. Returns a list of
+        {from, to, status} (path -> path). Fast: no-follow GETs, capped."""
+        import httpx
+        base_host = urlparse(base_url).netloc
+        targets = list(dict.fromkeys([base_url] + list(urls)))[:cap]
+        seen, edges = set(), []
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                         headers=self._auth_headers()) as c:
+                for u in targets:
+                    try:
+                        r = await c.get(u)
+                    except Exception:
+                        continue
+                    if r.status_code not in (301, 302, 303, 307, 308):
+                        continue
+                    loc = r.headers.get("location", "")
+                    if not loc:
+                        continue
+                    dest = urlparse(urljoin(u, loc))
+                    if dest.netloc and dest.netloc != base_host:
+                        continue  # off-host redirect: not a tree node, keep it out
+                    frm = urlparse(u).path or "/"
+                    to = dest.path or "/"
+                    if frm == to:
+                        continue
+                    key = (frm, to)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    edges.append({"from": frm, "to": to, "status": r.status_code})
+        except Exception as e:
+            await self.log(f"Redirect mapping skipped: {e}", "warn")
+        if edges:
+            await self.log(f"Redirect map: {len(edges)} redirect edge(s)", "info")
+        return edges
+
     async def run_offensive(self, base_url: str, extra_wordlists: list = None, credentials: dict = None) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
         # Authenticate first (when creds are supplied) so the crawl and every
@@ -1316,6 +1355,7 @@ class OffensiveEngine:
         # Form/POST attack surface (logins, searches, checkout) — the inputs a
         # URL crawler never exposes, and where auth-bypass SQLi / stored XSS live.
         forms = await self.discover_forms([base_url] + urls)
+        redirects = await self.map_redirects(base_url, urls)  # endpoint->endpoint hops
 
         # Run injection / access-control classes concurrently where safe.
         (sqli, xss, dast, auth, trav, disco,
@@ -1346,6 +1386,7 @@ class OffensiveEngine:
         result = {
             "crawled_urls": len(urls),
             "endpoints": urls[:2000],   # real attack surface for the inventory
+            "redirects": redirects,     # same-host redirect edges for the topology
             "sqli": _safe(sqli),
             "xss": _safe(xss),
             "dast": _safe(dast),

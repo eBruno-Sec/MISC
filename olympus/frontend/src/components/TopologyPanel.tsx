@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api'
-import type { Finding, Severity, SurfaceEndpoint } from '../types'
+import type { Finding, Severity, SurfaceEndpoint, RedirectEdge } from '../types'
 
 // Website topology as a site-map tree: the discovered directories and endpoints,
 // connected parent -> child. Rounded-rectangle nodes, smooth curved edges. Nodes
@@ -48,12 +48,14 @@ export default function TopologyPanel(
   { missionId, target, findings }: { missionId: string; target: string; findings: Finding[] }
 ) {
   const [endpoints, setEndpoints] = useState<SurfaceEndpoint[]>([])
+  const [redirects, setRedirects] = useState<RedirectEdge[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     try {
       const s = await api.getSurface(missionId)
       setEndpoints(s.endpoints || [])
+      setRedirects(s.redirects || [])
     } catch {
       /* surface may not exist until a mission has crawled */
     } finally {
@@ -90,6 +92,16 @@ export default function TopologyPanel(
   const edges: Array<[TNode, TNode]> = []
   collect(root, nodes, edges)
 
+  // Redirect edges: dashed cross-links between two nodes that both exist in the tree.
+  const byPath = new Map<string, TNode>()
+  for (const n of nodes) byPath.set(n.path, n)
+  const redEdges: Array<[TNode, TNode]> = []
+  for (const r of redirects) {
+    const a = byPath.get(r.from)
+    const b = byPath.get(r.to)
+    if (a && b && a !== b) redEdges.push([a, b])
+  }
+
   const leaves = Math.max(counter.n, 1)
   const maxDepth = nodes.reduce((m, n) => Math.max(m, n.x), 0)
   const COL = 158, ROWH = 34, NODEW = 132, NODEH = 24, PADX = 14, PADY = 18
@@ -117,6 +129,11 @@ export default function TopologyPanel(
       ) : (
         <div style={{ overflow: 'auto', border: '1px solid var(--border)', background: 'var(--bg)' }}>
           <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block', maxWidth: 'none' }}>
+            <defs>
+              <marker id="oly-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="var(--accent2)" />
+              </marker>
+            </defs>
             {edges.map(([a, b], i) => {
               const x1 = px(a) + NODEW, y1 = py(a) + NODEH / 2
               const x2 = px(b), y2 = py(b) + NODEH / 2
@@ -141,6 +158,16 @@ export default function TopologyPanel(
                 </g>
               )
             })}
+            {redEdges.map(([a, b], i) => {
+              const x1 = px(a) + NODEW / 2, y1 = py(a) + NODEH / 2
+              const x2 = px(b) + NODEW / 2, y2 = py(b) + NODEH / 2
+              const mx = (x1 + x2) / 2
+              return (
+                <path key={`r${i}`} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+                  fill="none" stroke="var(--accent2)" strokeWidth={1.3} strokeDasharray="4 3"
+                  markerEnd="url(#oly-arrow)" opacity={0.85} />
+              )
+            })}
           </svg>
         </div>
       )}
@@ -148,7 +175,8 @@ export default function TopologyPanel(
       <div style={{ fontSize: '0.66rem', color: 'var(--text-dim)', marginTop: '0.5rem', lineHeight: 1.6 }}>
         Site map of {endpoints.length} discovered endpoint{endpoints.length === 1 ? '' : 's'}
         {endpoints.length > CAP ? ` (first ${CAP} shown)` : ''}.{' '}
-        <span style={{ color: 'var(--gold)' }}>◆</span> = has parameters (testable input).
+        <span style={{ color: 'var(--gold)' }}>◆</span> = has parameters.{' '}
+        {redEdges.length > 0 && <><span style={{ color: 'var(--accent2)' }}>– – ▶</span> = redirect ({redEdges.length}).</>}
       </div>
     </div>
   )

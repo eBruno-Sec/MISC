@@ -653,6 +653,7 @@ async def get_surface(mission_id: str, session: AsyncSession = Depends(get_sessi
     return {
         "coverage": surface.get("coverage", {}),
         "endpoints": inventory,
+        "redirects": surface.get("redirects", []),
         "total": len(inventory),
         "parameterized": sum(1 for e in inventory if e["parameterized"]),
     }

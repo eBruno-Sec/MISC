@@ -176,9 +176,16 @@ export interface SurfaceCoverage {
   content_paths?: number
 }
 
+export interface RedirectEdge {
+  from: string
+  to: string
+  status: number
+}
+
 export interface SurfaceInventory {
   coverage: SurfaceCoverage
   endpoints: SurfaceEndpoint[]
+  redirects?: RedirectEdge[]
   total: number
   parameterized: number
 }
