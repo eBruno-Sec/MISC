@@ -156,10 +156,34 @@ class Hermes(BaseAgent):
                 live = await self._httpx_probe(all_hosts[:2000])
                 if not live:
                     live = await self._live_detection(all_hosts[:150])
+
+            # Explicit host:port target: always scan exactly that URL, even if the
+            # liveness probe could not confirm it. Pointing OLYMPUS at host:port must
+            # test host:port on the right scheme — never silently drop the port and
+            # fall back to https://host, which is how a live app reads as "0 hosts".
+            if _port:
+                netloc = f"{_host}:{_port}"
+                if not any(h.get("host") == netloc for h in live):
+                    scheme = "https" if _port in (443, 8443) else "http"
+                    live.insert(0, {
+                        "host": netloc, "url": f"{scheme}://{netloc}",
+                        "status_code": None, "server": "", "unverified": True,
+                    })
+                    await self.log(
+                        f"⚠ Liveness unconfirmed for {netloc} — scanning it anyway over "
+                        f"{scheme}. If the report stays empty the scanner container cannot "
+                        f"reach it (app bound to localhost? different Docker network?).", "warn")
+
             if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
                 live = self._apply_scope(live, scope_rules)
             result["live_hosts"] = live
-            await self.log(f"{len(result['live_hosts'])} live hosts confirmed (scope-filtered)", "success")
+            if result["live_hosts"]:
+                await self.log(f"{len(result['live_hosts'])} live hosts confirmed", "success")
+            else:
+                await self.log(
+                    "⚠ 0 live hosts confirmed — target appears unreachable from the scanner "
+                    "container. The report will be near-empty; this is a connectivity problem, "
+                    "not a clean target.", "warn")
 
         if result["live_hosts"]:
             await self.log("Technology fingerprinting on live hosts", "info")

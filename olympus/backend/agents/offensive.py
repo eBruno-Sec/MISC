@@ -32,6 +32,22 @@ SECLISTS_DIRS = [
 # root. Kept bounded so seeding does not dwarf the scan itself.
 MAX_ZAP_SEED = 200
 
+# Common API / SPA endpoints a JS crawler misses. Single-page apps (Angular/React,
+# e.g. OWASP Juice Shop) render routes client-side and keep the real attack surface
+# in a REST/GraphQL API that never appears in the page HTML. We probe these directly;
+# the parameterized ones give the injection probes actual parameters to attack.
+COMMON_ENDPOINTS = [
+    # API / SPA roots + docs
+    "/api", "/api/v1", "/api/v2", "/rest", "/graphql",
+    "/swagger.json", "/openapi.json", "/api-docs", "/v2/api-docs",
+    # Common REST resources
+    "/api/users", "/api/products", "/api/orders", "/rest/user/whoami",
+    "/rest/products/search?q=test",
+    # Generic parameterized probes (hand the fuzzers params on the app root)
+    "/?q=test", "/?s=test", "/?id=1", "/?search=test",
+    "/?file=test", "/?url=http://test", "/?redirect=/test", "/?page=1",
+]
+
 # Static assets to drop from archive parameter discovery: they rarely carry an
 # injectable parameter and would only dilute the test pool.
 ARCHIVE_SKIP_EXT = (
@@ -93,6 +109,53 @@ class OffensiveEngine:
         param_urls = [u for u in urls if "?" in u and "=" in u]
         await self.log(f"Crawl complete: {len(urls)} URLs, {len(param_urls)} with parameters", "success")
         return urls
+
+    async def seed_endpoints(self, base_url: str) -> list:
+        """Probe a curated set of common API/SPA endpoints that JS crawlers miss.
+
+        SPAs (Juice Shop et al.) serve the same index for every route, so a crawl
+        finds ~nothing and the app looks clean. We hit the likely API/REST/GraphQL
+        paths directly and keep the ones that actually exist, always keeping the
+        parameterized probes so the injection tests have parameters to attack.
+        Additive to the crawl surface; degrades to [] on any error."""
+        import httpx
+        base = base_url.rstrip("/")
+        found = []
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                try:
+                    root = await c.get(base + "/")
+                    root_len = len(root.content)
+                except Exception:
+                    root_len = -1
+
+                async def probe(path: str):
+                    url = base + path
+                    try:
+                        r = await c.get(url)
+                    except Exception:
+                        return None
+                    if r.status_code in (400, 404):
+                        return None
+                    # SPA catch-all: a non-parameterized path whose body matches the
+                    # root is just index.html — noise. Parameterized probes are always
+                    # kept (the fuzzers need the parameter).
+                    if "?" not in path and root_len >= 0 and abs(len(r.content) - root_len) < 32:
+                        return None
+                    return url
+
+                results = await asyncio.gather(*[probe(p) for p in COMMON_ENDPOINTS],
+                                               return_exceptions=True)
+            for r in results:
+                if isinstance(r, str) and r:
+                    found.append(r)
+        except Exception as e:
+            await self.log(f"Endpoint seeding skipped: {e}", "warn")
+            return []
+        if found:
+            await self.log(f"Seeded {len(found)} common API/SPA endpoint(s) crawlers miss", "info")
+        return found
 
     # ── Passive parameter discovery (ParamSpider / gau style) ────
     async def gather_archive_urls(self, base_url: str, cap: int = 2500) -> list:
@@ -993,11 +1056,12 @@ class OffensiveEngine:
         crawled = await self.crawl(base_url)
         archived = await self.gather_archive_urls(base_url)
         mined = await self.mine_params(base_url)
-        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived + mined)))
+        seeded = await self.seed_endpoints(base_url)   # API/SPA endpoints crawlers miss
+        urls = self._dedupe_by_params(list(dict.fromkeys(crawled + archived + mined + seeded)))
         params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
-            f"from crawl + archives + param mining", "info")
+            f"from crawl + archives + param mining + API/SPA seeding", "info")
 
         # Run injection / access-control classes concurrently where safe.
         (sqli, xss, dast, auth, trav, disco,
