@@ -638,6 +638,24 @@ async def list_exchanges(mission_id: str, session: AsyncSession = Depends(get_se
     return {"exchanges": [_exchange_dict(e) for e in rows], "total": len(rows)}
 
 
+@router.get("/{mission_id}/surface")
+async def get_surface(mission_id: str, session: AsyncSession = Depends(get_session)):
+    """Attack-surface inventory: deduped endpoints + params discovered during the
+    run (crawl + archives + param mining). Pivot each into /fuzz or /access-check."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    from core.surface import build_inventory
+    surface = (mission.context or {}).get("surface", {}) or {}
+    inventory = build_inventory(surface.get("endpoints", []) or [])
+    return {
+        "coverage": surface.get("coverage", {}),
+        "endpoints": inventory,
+        "total": len(inventory),
+        "parameterized": sum(1 for e in inventory if e["parameterized"]),
+    }
+
+
 # ── Request workbench (replay / fuzz / diff) ──────────────────────
 
 def _host_in_scope(mission: Mission, url: str) -> bool:

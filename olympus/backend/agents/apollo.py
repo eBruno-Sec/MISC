@@ -6,6 +6,7 @@ from datetime import datetime
 from core.ai_client import complete
 from core.config import settings
 from core.models import Finding
+from core.surface import build_inventory
 from sqlalchemy import select
 from .base import BaseAgent
 
@@ -143,7 +144,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         won on, kept honest: it only reports numbers the agents actually produced."""
         ares = (context or {}).get("ares", {}) or {}
         if not ares:
-            return "", "", ""
+            return "", "", "", ""
         offensive = ares.get("offensive", {}) or {}
         directories = ares.get("directories", []) or []
         nuclei_hits = len(ares.get("vulnerabilities", []) or [])
@@ -178,6 +179,26 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             '<th>Status</th><th>Hits</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>'
         )
+
+        # 1b) Attack-surface inventory (deduped endpoints + params)
+        surface_html = ""
+        inventory = build_inventory(offensive.get("endpoints", []) or [])
+        if inventory:
+            param_eps = sum(1 for e in inventory if e["parameterized"])
+            erows = ""
+            for e in inventory[:200]:
+                params = ", ".join(e["params"][:12])
+                if len(e["params"]) > 12:
+                    params += f' +{len(e["params"]) - 12}'
+                erows += (f'<tr><td class="path-url">{_html.escape(e["path"])}</td>'
+                          f'<td class="surf-host">{_html.escape(e["host"])}</td>'
+                          f'<td class="surf-params">{_html.escape(params)}</td></tr>')
+            surface_html = (
+                f'<div class="section"><h2>Attack Surface ({len(inventory)} endpoints, '
+                f'{param_eps} parameterized)</h2>'
+                '<table class="path-table"><thead><tr><th>Path</th><th>Host</th>'
+                f'<th>Parameters</th></tr></thead><tbody>{erows}</tbody></table></div>'
+            )
 
         # 2) Discovered content paths (real ffuf/crawl results)
         paths_html = ""
@@ -219,7 +240,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                 'review. These are <strong>candidates, not confirmed findings</strong>.</p>'
                 f'<ul class="cand-list">{items}</ul></div>'
             )
-        return coverage_html, paths_html, candidates_html
+        return coverage_html, surface_html, paths_html, candidates_html
 
     async def _generate_html_report(self, target: str, findings: list, stats: dict, exec_summary: str, context: dict) -> str:
         mode = (context or {}).get("athena", {}).get("mode", "passive")
@@ -228,7 +249,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         subdomains = (context or {}).get("hermes", {}).get("subdomains", [])
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
         # Coverage transparency panels (real recon numbers only; empty in passive runs).
-        coverage_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
+        coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
         # inline script is blocked (defense in depth behind the html escaping).
@@ -507,6 +528,8 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 .mod-hits {{ color: var(--gold); text-align: right; }}
 .path-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
 .path-note {{ color: var(--text-dim); font-size: .72rem; }}
+.surf-host {{ color: var(--text-dim); font-size: .72rem; }}
+.surf-params {{ color: var(--accent); font-size: .72rem; word-break: break-all; }}
 .st-200 {{ color: var(--accent3); }}
 .st-redir {{ color: var(--accent); }}
 .st-403 {{ color: var(--gold); }}
@@ -554,6 +577,8 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 </div>
 
 {coverage_html}
+
+{surface_html}
 
 {'<div class="section"><h2>Vendor Stack (Passive Intelligence)</h2>' + vendor_html + '</div>' if vendors else ''}
 

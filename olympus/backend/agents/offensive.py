@@ -1025,6 +1025,7 @@ class OffensiveEngine:
 
         result = {
             "crawled_urls": len(urls),
+            "endpoints": urls[:2000],   # real attack surface for the inventory
             "sqli": _safe(sqli),
             "xss": _safe(xss),
             "dast": _safe(dast),

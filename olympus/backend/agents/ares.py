@@ -137,7 +137,8 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
 
             per_host = {}
             agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap",
-                                   "content", "ssrf", "ssti", "open_redirect", "cors", "host_header")}
+                                   "content", "ssrf", "ssti", "open_redirect", "cors",
+                                   "host_header", "endpoints")}
             total_urls = 0
             for idx, h in enumerate(offensive_targets, 1):
                 host_url = h.get("url") or f"https://{h.get('host')}"
@@ -159,6 +160,10 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                 "per_host": per_host,
                 **agg,
             }
+            # Deduplicated attack-surface inventory across all offensive hosts.
+            result["offensive"]["endpoints"] = list(
+                dict.fromkeys(result["offensive"].get("endpoints", []))
+            )[:3000]
         else:
             await self.log("No live web host reached; offensive engine skipped", "warn")
 

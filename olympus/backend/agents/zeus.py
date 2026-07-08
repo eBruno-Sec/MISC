@@ -195,6 +195,32 @@ class Zeus(BaseAgent):
         apollo = self._spawn(Apollo)
         ctx["apollo"] = await apollo.execute(target, ctx)
 
+        # Persist a small, secret-free surface/coverage summary so the attack-surface
+        # inventory is queryable after the run. Deliberately NOT the whole ctx: that
+        # holds _credentials (a password) and set() objects that aren't JSON-safe.
+        try:
+            ares = ctx.get("ares", {}) or {}
+            off = ares.get("offensive", {}) or {}
+            hermes = ctx.get("hermes", {}) or {}
+            summary = {
+                "endpoints": [str(u) for u in (off.get("endpoints") or []) if isinstance(u, str)][:3000],
+                "coverage": {
+                    "subdomains": len(hermes.get("subdomains", []) or []),
+                    "live_hosts": len(hermes.get("live_hosts", []) or []),
+                    "hosts_scanned": off.get("hosts_scanned", ares.get("targets_scanned", 0)),
+                    "crawled_urls": off.get("crawled_urls", 0),
+                    "content_paths": len(ares.get("directories", []) or []),
+                },
+            }
+            fresh = await self.session.get(Mission, self.mission_id)
+            if fresh:
+                merged = dict(fresh.context or {})
+                merged["surface"] = summary
+                fresh.context = merged
+                await self.session.commit()
+        except Exception as e:
+            await self.log(f"Surface summary persist skipped: {e}", "warn")
+
         await self._set_phase(MissionStatus.COMPLETE)
         await self.log("⚡ OLYMPUS MISSION COMPLETE", "success")
 
