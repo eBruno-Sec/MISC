@@ -46,3 +46,43 @@ def test_skips_junk_and_respects_cap():
 def test_empty_input():
     assert surface.build_inventory([]) == []
     assert surface.build_inventory(None) == []
+
+
+# ── OpenAPI / Swagger import ─────────────────────────────────────
+def test_openapi3_paths_params_and_templates():
+    spec = {
+        "openapi": "3.0.0",
+        "servers": [{"url": "/api/v1"}],
+        "paths": {
+            "/products/{id}": {"get": {}},
+            "/search": {"get": {"parameters": [
+                {"in": "query", "name": "q"}, {"in": "query", "name": "limit"},
+                {"in": "header", "name": "X-Trace"},  # ignored (not query)
+            ]}},
+        },
+    }
+    eps = surface.endpoints_from_openapi(spec, "http://t.example")
+    assert "http://t.example/api/v1/products/1" in eps      # {id} -> 1
+    hit = [e for e in eps if e.startswith("http://t.example/api/v1/search?")]
+    assert hit and "q=test" in hit[0] and "limit=test" in hit[0] and "X-Trace" not in hit[0]
+
+
+def test_swagger2_basepath():
+    spec = {"swagger": "2.0", "basePath": "/v2", "paths": {"/pet": {"post": {}}}}
+    eps = surface.endpoints_from_openapi(spec, "http://t.example")
+    assert eps == ["http://t.example/v2/pet"]
+
+
+def test_openapi_anchors_to_target_not_foreign_host():
+    # A spec that declares an absolute foreign server must NOT redirect scanning there.
+    spec = {"openapi": "3.0.0", "servers": [{"url": "http://evil.internal/api"}],
+            "paths": {"/x": {"get": {}}}}
+    eps = surface.endpoints_from_openapi(spec, "http://t.example")
+    assert eps == ["http://t.example/api/x"]
+    assert all("evil.internal" not in e for e in eps)
+
+
+def test_openapi_rejects_junk():
+    assert surface.endpoints_from_openapi({}, "http://t.example") == []
+    assert surface.endpoints_from_openapi({"paths": "nope"}, "http://t.example") == []
+    assert surface.endpoints_from_openapi(None, "http://t.example") == []

@@ -12,7 +12,7 @@ ME USE OLYMPUS.
 
 You give it a website. It looks at website. It finds problems with website. It shows you what it found. You fix problems or tell client to fix problems.
 
-Seven helpers. Named after old gods. They each do one job.
+Eight helpers. Named after old gods. They each do one job.
 
 ```
 ZEUS        boss. tells everyone what to do
@@ -21,6 +21,7 @@ HERMES      sneaky one. looks around quietly
 ARES        fighter. pokes website with sticks
 HEPHAESTUS  builder. makes tools for poking
 HADES       death god. finds how bad the damage is
+METIS       wise one. AI brain checks the findings, throws out fake ones
 APOLLO      artist. makes pretty report
 ```
 
@@ -202,6 +203,31 @@ YELLOW     medium problem. fix eventually.
 BLUE       small problem. nice to fix.
 GREY       information. just telling you stuff.
 ```
+
+---
+
+## ME WANT POKE BY HAND (POWER TOOLS)
+
+Robot find bugs. But BEST bugs found by caveman hand. OLYMPUS give you hand tools. **No AI key needed for these. All free.**
+
+Where the pokey tools live: go to `http://localhost:8000/api/docs`. Big list of buttons. Try them.
+
+**THROW MANY STICKS AT ONE SPOT** (`/fuzz`)
+You give it one web address and one spot to poke. It throws many sticks (payloads) at that spot. It tells you which stick made the website cry (error, weird answer, slow answer). The loud one is your bug.
+
+**SAME POKE OVER AND OVER** (`/replay`)
+Send one poke. Change one thing. Send again. See what changes. Like Burp Repeater but caveman.
+
+**CAN USER-A SEE USER-B SECRET STUFF?** (`/access-check`)
+Give it TWO logins (user A, user B). It asks the website for user A's secret stuff while pretending to be user B. If website says "here you go" — BIG BUG. Big money. (Bug name: IDOR / BOLA.) One login works too. Zero logins checks if strangers can see secret stuff.
+
+**SHOW ME ALL THE DOORS** (SURFACE tab / `/surface`)
+Robot found lots of doors and windows (web addresses + inputs) while looking around. This shows them all in one list. Click COPY, then go poke that door by hand.
+
+**PROOF FOR THE REPORT** (`/exchanges`, `/poc`)
+Every bug comes with the exact `curl` command that proves it. Copy it. Paste in report. Show client. Client can't argue. You get paid.
+
+> The SURFACE tab (button in mission screen) is on a side branch called `feat/workbench-ui`. Build it first: `cd frontend && npm run build`. If it works, you keep it. If it breaks, tell Claude, he fix. Main is safe either way.
 
 ---
 
