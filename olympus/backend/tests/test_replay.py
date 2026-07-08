@@ -68,3 +68,48 @@ def test_diff_responses_reports_deltas():
 def test_header_diff_case_insensitive_change():
     d = replay._header_diff({"Content-Type": "text/html"}, {"content-type": "application/json"})
     assert "content-type" in d["changed"]
+
+
+# ── cross-role access control ────────────────────────────────────
+def test_access_verdict_flags_bola():
+    results = [
+        {"role": "user-a", "status": 200, "length": 1500, "is_owner": True, "is_anon": False},
+        {"role": "user-b", "status": 200, "length": 1490, "is_owner": False, "is_anon": False},
+        {"role": "anon", "status": 401, "length": 20, "is_owner": False, "is_anon": True},
+    ]
+    v = replay.access_verdict(results)
+    assert v["anomaly"] is True
+    assert "user-b" in v["flags"]
+    assert "anon" not in v["flags"]          # 401 => access control working for anon
+    assert any("BROKEN_ACCESS_CONTROL" in r.get("flag", "") for r in results if r["role"] == "user-b")
+
+
+def test_access_verdict_clean_when_others_denied():
+    results = [
+        {"role": "user-a", "status": 200, "length": 1500, "is_owner": True, "is_anon": False},
+        {"role": "user-b", "status": 403, "length": 15, "is_owner": False, "is_anon": False},
+        {"role": "anon", "status": 302, "length": 0, "is_owner": False, "is_anon": True},
+    ]
+    v = replay.access_verdict(results)
+    assert v["anomaly"] is False
+    assert v["flags"] == []
+
+
+def test_access_verdict_unauthenticated_access_without_owner():
+    results = [
+        {"role": "anon", "status": 200, "length": 3000, "is_owner": False, "is_anon": True},
+    ]
+    v = replay.access_verdict(results)
+    assert v["anomaly"] is True
+    assert "anon" in v["flags"]
+    assert "UNAUTHENTICATED_ACCESS" in results[0]["flag"]
+
+
+def test_access_verdict_length_mismatch_not_flagged():
+    # user-b gets 200 but a tiny error page, not the owner's object -> no flag
+    results = [
+        {"role": "user-a", "status": 200, "length": 1500, "is_owner": True, "is_anon": False},
+        {"role": "user-b", "status": 200, "length": 80, "is_owner": False, "is_anon": False},
+    ]
+    v = replay.access_verdict(results)
+    assert v["anomaly"] is False

@@ -51,6 +51,7 @@ class Mission(Base):
     approvals = relationship("ApprovalRequest", back_populates="mission", cascade="all, delete-orphan")
     notes = relationship("MissionNote", back_populates="mission", cascade="all, delete-orphan")
     exchanges = relationship("HttpExchange", back_populates="mission", cascade="all, delete-orphan")
+    auth_profiles = relationship("AuthProfile", back_populates="mission", cascade="all, delete-orphan")
 
 
 class AgentLog(Base):
@@ -116,6 +117,24 @@ class HttpExchange(Base):
 
     mission = relationship("Mission", back_populates="exchanges")
     finding = relationship("Finding", back_populates="exchanges")
+
+
+class AuthProfile(Base):
+    """A named session/role used for cross-role access-control testing (IDOR/BOLA).
+
+    Holds the auth headers (Cookie / Authorization / ...) that authenticate one
+    account. Values are stored as supplied so the workbench can replay a request
+    as that role; the API always redacts them on read (see routers._profile_dict)."""
+    __tablename__ = "auth_profiles"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False)
+    name = Column(String, nullable=False)
+    role = Column(String, nullable=True)
+    headers = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    mission = relationship("Mission", back_populates="auth_profiles")
 
 
 class MissionNote(Base):

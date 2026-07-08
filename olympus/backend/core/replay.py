@@ -112,6 +112,45 @@ def score_result(baseline: dict, res: dict) -> int:
     return score
 
 
+# ── Cross-role access control (IDOR / BOLA / BFLA) ───────────────
+def _similar(a: int, b: int, tol: float = 0.15) -> bool:
+    a, b = a or 0, b or 0
+    if a == 0 and b == 0:
+        return True
+    return abs(a - b) / (max(a, b) or 1) <= tol
+
+
+def access_verdict(results: list) -> dict:
+    """Compare the same request sent under different roles and flag broken access
+    control. `results` items: {role, status, length, is_owner, is_anon}.
+
+    Strong signal (annotates the offending entry with a `flag`):
+      - a NON-owner role gets the SAME 2xx and a response ~as large as the owner's
+        -> it reached the owner's object/function (BOLA / BFLA);
+      - with no owner designated, an anonymous role getting a 2xx with real content
+        -> unauthenticated access.
+    Access control looks intact when other roles get 401/403 or empty bodies."""
+    owner = next((r for r in results if r.get("is_owner")), None)
+    flags = []
+    for r in results:
+        if r.get("is_owner") or r.get("error"):
+            continue
+        status = r.get("status") or 0
+        ok = 200 <= status < 300
+        if owner:
+            o_status = owner.get("status") or 0
+            if ok and 200 <= o_status < 300 and _similar(r.get("length"), owner.get("length")):
+                r["flag"] = (f"BROKEN_ACCESS_CONTROL: '{r.get('role')}' received the owner's "
+                             f"response (status {status}, ~{r.get('length')}B)")
+                flags.append(r.get("role"))
+        elif r.get("is_anon") and ok and (r.get("length") or 0) > 200:
+            r["flag"] = f"UNAUTHENTICATED_ACCESS: '{r.get('role')}' received a {status} with content"
+            flags.append(r.get("role"))
+    verdict = ("Possible broken access control — " + ", ".join(str(f) for f in flags)) if flags \
+        else "No cross-role access-control anomaly detected"
+    return {"flags": flags, "verdict": verdict, "anomaly": bool(flags)}
+
+
 async def fuzz(c, method: str, url: str, headers: dict, body: str,
                param: str, param_in: str, payloads: list, baseline: dict = None) -> dict:
     """Fire each payload at one parameter, rank results by anomaly score."""

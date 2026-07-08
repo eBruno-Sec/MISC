@@ -12,7 +12,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session, AsyncSessionLocal
-from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange
+from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange, AuthProfile
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
 from core import poc, replay
@@ -101,6 +101,24 @@ class FuzzBody(BaseModel):
 class DiffBody(BaseModel):
     a_id: str
     b_id: str
+
+
+class ProfileBody(BaseModel):
+    name: str                            # unique label, e.g. "user-a"
+    role: Optional[str] = None           # human role, e.g. "standard user", "admin"
+    headers: dict = {}                   # auth headers for this session (Cookie / Authorization / ...)
+
+
+class AccessCheckBody(BaseModel):
+    method: str = "GET"
+    url: str
+    body: Optional[str] = None
+    extra_headers: dict = {}             # non-auth headers common to every role
+    profile_ids: List[str] = []          # roles to test the request as
+    owner_profile_id: Optional[str] = None   # the account that legitimately owns the object
+    include_anon: bool = True            # also send with no auth (control)
+    follow_redirects: bool = False
+    save: bool = True                    # capture each role's response as evidence
 
 
 # ── Helper: serialise findings ────────────────────────────────
@@ -741,6 +759,116 @@ async def diff_exchanges(
                 "body": ex.response_body or ""}
 
     return replay.diff_responses(_summary(a), _summary(b))
+
+
+# ── Auth profiles + cross-role access control (IDOR / BOLA / BFLA) ─
+
+def _profile_dict(p: AuthProfile) -> dict:
+    """Never echo raw session material back over the API — redact header values."""
+    return {
+        "id": p.id, "name": p.name, "role": p.role,
+        "headers": poc.redact_headers(p.headers or {}),
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+@router.post("/{mission_id}/profiles")
+async def create_profile(
+    mission_id: str,
+    body: ProfileBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Register a named session/role (its auth headers) for cross-role testing."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    p = AuthProfile(mission_id=mission_id, name=body.name, role=body.role,
+                    headers=body.headers or {})
+    session.add(p)
+    await session.commit()
+    return _profile_dict(p)
+
+
+@router.get("/{mission_id}/profiles")
+async def list_profiles(mission_id: str, session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(
+        select(AuthProfile).where(AuthProfile.mission_id == mission_id).order_by(AuthProfile.created_at)
+    )).scalars().all()
+    return {"profiles": [_profile_dict(p) for p in rows], "total": len(rows)}
+
+
+@router.delete("/{mission_id}/profiles/{profile_id}")
+async def delete_profile(mission_id: str, profile_id: str, session: AsyncSession = Depends(get_session)):
+    p = await session.get(AuthProfile, profile_id)
+    if not p or p.mission_id != mission_id:
+        raise HTTPException(404, "Profile not found")
+    await session.delete(p)
+    await session.commit()
+    return {"deleted": profile_id}
+
+
+@router.post("/{mission_id}/access-check")
+async def access_check(
+    mission_id: str,
+    body: AccessCheckBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Send the SAME request as each role (+ anon) and flag broken access control.
+
+    Point this at a request that returns one account's object/function. If another
+    role — or anon — gets the owner's response, that's a candidate IDOR/BOLA/BFLA.
+    Every response is captured as evidence; findings stay analyst-confirmed."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
+
+    # Build the roster of (label, headers, is_owner, is_anon) to test.
+    roster = []
+    if body.include_anon:
+        roster.append(("anon (no auth)", dict(body.extra_headers or {}), False, True))
+    for pid in body.profile_ids:
+        p = await session.get(AuthProfile, pid)
+        if not p or p.mission_id != mission_id:
+            continue
+        h = dict(body.extra_headers or {})
+        h.update(p.headers or {})
+        roster.append((p.role or p.name, h, pid == body.owner_profile_id, not (p.headers or {})))
+    if not roster:
+        raise HTTPException(400, "Provide profile_ids (and/or include_anon) to test")
+
+    results = []
+    async with replay.client(follow_redirects=body.follow_redirects) as c:
+        for label, headers, is_owner, is_anon in roster:
+            try:
+                r = await replay.send(c, body.method, body.url, headers, body.body)
+            except Exception as e:
+                results.append({"role": label, "error": str(e), "is_owner": is_owner})
+                continue
+            entry = {"role": label, "status": r["status"], "length": r["length"],
+                     "duration_ms": r["duration_ms"], "is_owner": is_owner, "is_anon": is_anon}
+            results.append(entry)
+            if body.save:
+                ex = HttpExchange(
+                    mission_id=mission_id, method=body.method.upper(), url=body.url,
+                    request_headers=poc.redact_headers(headers),
+                    request_body=body.body, status_code=r["status"],
+                    response_headers=poc.redact_headers(r["headers"]),
+                    response_body=((r["body"] or "")[:4000] or None),
+                    duration_ms=r["duration_ms"], source="access-check",
+                    notes=f"role={label}" + (" (owner)" if is_owner else ""), redacted=True,
+                )
+                session.add(ex)
+    if body.save:
+        await session.commit()
+
+    verdict = replay.access_verdict(results)
+    return {
+        "request": {"method": body.method.upper(), "url": body.url},
+        "results": results,
+        **verdict,
+    }
 
 
 # ── Report ────────────────────────────────────────────────────
