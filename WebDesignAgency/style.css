@@ -164,6 +164,9 @@ ul { list-style: none; }
 .work-grid      .work-card:nth-child(1)    { transition-delay: .05s; }
 .work-grid      .work-card:nth-child(2)    { transition-delay: .15s; }
 .work-grid      .work-card:nth-child(3)    { transition-delay: .25s; }
+.work-grid      .work-card:nth-child(4)    { transition-delay: .05s; }
+.work-grid      .work-card:nth-child(5)    { transition-delay: .15s; }
+.work-grid      .work-card:nth-child(6)    { transition-delay: .25s; }
 .testimonial-grid .testimonial-card:nth-child(1) { transition-delay: .05s; }
 .testimonial-grid .testimonial-card:nth-child(2) { transition-delay: .15s; }
 .testimonial-grid .testimonial-card:nth-child(3) { transition-delay: .25s; }
@@ -903,6 +906,10 @@ ul { list-style: none; }
 .work-v1 { background: linear-gradient(145deg, #160a30, #2a1868, #0d3f72); }
 .work-v2 { background: linear-gradient(145deg, #0a1f12, #123824, #0a4c34); }
 .work-v3 { background: linear-gradient(145deg, #230808, #4a1010, #6e1a1a); }
+.work-v4 { background: linear-gradient(145deg, #1c1100, #3a2800, #553c00); }
+.work-v5 { background: linear-gradient(145deg, #0d0825, #1a1048, #251668); }
+.work-v6 { background: linear-gradient(145deg, #011408, #033018, #054a22); }
+.work-v7 { background: linear-gradient(145deg, #1a0000, #330606, #4d0b0b); }
 
 /* Subtle grid pattern on work visuals */
 .work-visual::before {
@@ -1056,7 +1063,10 @@ ul { list-style: none; }
   font-weight: 600;
   color: var(--primary-l);
   cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
+.work-link:hover { text-decoration: underline; }
 
 /* ============================================================
    TESTIMONIALS
@@ -1288,7 +1298,6 @@ ul { list-style: none; }
   .stat-item + .stat-item::before { display: none; }
 
   .work-grid { grid-template-columns: repeat(2, 1fr); }
-  .work-grid .work-card:last-child { grid-column: span 2; }
 
   .testimonial-grid { grid-template-columns: repeat(2, 1fr); }
   .testimonial-grid .testimonial-card:last-child { grid-column: span 2; }
@@ -1324,7 +1333,6 @@ ul { list-style: none; }
   .step-num { font-size: 34px; flex-shrink: 0; margin-bottom: 0; }
 
   .work-grid               { grid-template-columns: 1fr; }
-  .work-grid .work-card:last-child { grid-column: span 1; }
   .testimonial-grid        { grid-template-columns: 1fr; }
   .testimonial-grid .testimonial-card:last-child { grid-column: span 1; }
 
