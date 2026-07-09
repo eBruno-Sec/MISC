@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Little Seeds – Bedtime Stories for Growing Minds</title>
+  <meta name="description" content="20 magical bedtime stories that plant courage, kindness, and wonder — one quiet night at a time. Free for families." />
+  <meta property="og:title" content="Little Seeds – Bedtime Stories for Growing Minds" />
+  <meta property="og:description" content="20 magical bedtime stories that plant courage, kindness, and wonder — one quiet night at a time." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
@@ -65,60 +70,91 @@
     nav {
       position: sticky;
       top: 0;
-      z-index: 100;
-      background: rgba(26, 16, 64, 0.92);
-      backdrop-filter: blur(12px);
-      border-bottom: 2px solid rgba(255,224,102,0.2);
-      padding: 0.75rem 1.5rem;
+      z-index: 200;
+      background: rgba(15,10,46,0.96);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(255,224,102,0.12);
+    }
+    .nav-main {
       display: flex;
       align-items: center;
-      gap: 1rem;
-      flex-wrap: wrap;
-      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.75rem 1.5rem;
     }
     .nav-brand {
       font-family: var(--font-h);
       font-size: 1.5rem;
       color: var(--moon);
       text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
       letter-spacing: 0.02em;
+      flex-shrink: 0;
     }
-    .nav-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      align-items: center;
-    }
-    .nav-links a {
+    .nav-stories-btn {
+      background: rgba(255,255,255,0.07);
+      border: 1.5px solid rgba(255,255,255,0.14);
       color: var(--cream);
-      text-decoration: none;
-      font-weight: 700;
-      font-size: 0.82rem;
-      padding: 0.3rem 0.7rem;
-      border-radius: 20px;
-      border: 1.5px solid rgba(255,255,255,0.12);
-      transition: background 0.2s, color 0.2s, border-color 0.2s;
-    }
-    .nav-links a:hover {
-      background: var(--moon);
-      color: var(--sky);
-      border-color: var(--moon);
-    }
-    .nav-toggle {
-      display: none;
-      background: transparent;
-      border: 2px solid var(--moon);
-      color: var(--moon);
-      font-size: 1.2rem;
-      border-radius: 8px;
-      padding: 0.3rem 0.6rem;
-      cursor: pointer;
       font-family: var(--font-b);
+      font-size: 0.78rem;
       font-weight: 800;
+      padding: 0.45rem 0.9rem;
+      border-radius: 8px;
+      cursor: pointer;
+      min-height: 44px;
+      transition: background 0.18s, border-color 0.18s, color 0.18s;
+      margin-left: auto;
+      white-space: nowrap;
     }
+    .nav-stories-btn:hover {
+      background: rgba(255,224,102,0.1);
+      border-color: rgba(255,224,102,0.35);
+      color: var(--moon);
+    }
+    /* ── STORIES DRAWER ── */
+    .stories-drawer {
+      position: fixed; top: 0; right: 0;
+      width: min(400px, 100vw); height: 100dvh;
+      background: #0F0A2E;
+      border-left: 1px solid rgba(255,224,102,0.12);
+      z-index: 400;
+      transform: translateX(100%);
+      transition: transform 0.28s ease;
+      overflow-y: auto; overscroll-behavior: contain;
+    }
+    .stories-drawer.open { transform: translateX(0); }
+    .drawer-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 399; opacity: 0; pointer-events: none;
+      transition: opacity 0.28s ease;
+    }
+    .drawer-overlay.open { opacity: 1; pointer-events: all; }
+    .drawer-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      position: sticky; top: 0; background: #0F0A2E; z-index: 1;
+    }
+    .drawer-title { font-family: var(--font-h); font-size: 1.15rem; color: var(--moon); }
+    .drawer-close {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--cream); font-size: 1rem; border-radius: 8px;
+      width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .drawer-close:hover { background: rgba(255,255,255,0.12); }
+    .drawer-grid { padding: 1rem 0.9rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .drawer-story-link {
+      display: flex; align-items: center; gap: 0.7rem;
+      padding: 0.65rem 0.85rem; border-radius: 10px;
+      text-decoration: none; color: var(--cream);
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.03);
+      transition: background 0.15s, border-color 0.15s; min-height: 48px;
+    }
+    .drawer-story-link:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.14); }
+    .drawer-emoji { font-size: 1.35rem; flex-shrink: 0; }
+    .drawer-meta-day { font-size: 0.6rem; color: rgba(255,248,240,0.4); text-transform: uppercase; letter-spacing: 0.1em; display: block; margin-bottom: 0.1rem; }
+    .drawer-meta-title { font-size: 0.82rem; font-weight: 700; line-height: 1.3; display: block; }
 
     /* ── HERO ── */
     .hero {
@@ -284,7 +320,7 @@
     }
     .story-card .story-theme {
       font-size: 0.78rem;
-      color: rgba(255,248,240,0.6);
+      color: rgba(255,248,240,0.75);
       font-weight: 600;
     }
 
@@ -295,7 +331,7 @@
       text-align: center;
       padding: 2rem 1rem;
       border-top: 1px solid rgba(255,255,255,0.08);
-      color: rgba(255,248,240,0.4);
+      color: rgba(255,248,240,0.72);
       font-size: 0.85rem;
       font-weight: 600;
     }
@@ -303,45 +339,31 @@
 
     /* ── RESPONSIVE ── */
     @media (max-width: 640px) {
-      .nav-links { display: none; flex-direction: column; width: 100%; }
-      .nav-links.show { display: flex; }
-      .nav-toggle { display: block; }
-      nav { flex-wrap: wrap; }
+      .story-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
     }
   </style>
 </head>
 <body>
 
   <!-- STAR FIELD -->
-  <div class="stars-layer" id="stars"></div>
+  <div class="stars-layer" id="stars" aria-hidden="true"></div>
 
   <!-- NAV -->
   <nav>
-    <a href="./index.html" class="nav-brand">🌱 Little Seeds</a>
-    <button class="nav-toggle" onclick="toggleNav()">☰ Stories</button>
-    <div class="nav-links" id="navLinks">
-      <a href="./Story/Day1.html">Day 1</a>
-      <a href="./Story/Day2.html">Day 2</a>
-      <a href="./Story/Day3.html">Day 3</a>
-      <a href="./Story/Day4.html">Day 4</a>
-      <a href="./Story/Day5.html">Day 5</a>
-      <a href="./Story/Day6.html">Day 6</a>
-      <a href="./Story/Day7.html">Day 7</a>
-      <a href="./Story/Day8.html">Day 8</a>
-      <a href="./Story/Day9.html">Day 9</a>
-      <a href="./Story/Day10.html">Day 10</a>
-      <a href="./Story/Day11.html">Day 11</a>
-      <a href="./Story/Day12.html">Day 12</a>
-      <a href="./Story/Day13.html">Day 13</a>
-      <a href="./Story/Day14.html">Day 14</a>
-      <a href="./Story/Day15.html">Day 15</a>
-      <a href="./Story/Day16.html">Day 16</a>
-      <a href="./Story/Day17.html">Day 17</a>
-      <a href="./Story/Day18.html">Day 18</a>
-      <a href="./Story/Day19.html">Day 19</a>
-      <a href="./Story/Day20.html">Day 20</a>
+    <div class="nav-main">
+      <a href="./index.html" class="nav-brand">🌱 Little Seeds</a>
+      <button class="nav-stories-btn" id="drawerToggle" onclick="toggleDrawer()" aria-label="Browse all stories" aria-expanded="false" aria-controls="storiesDrawer">All Stories ☰</button>
     </div>
   </nav>
+
+  <div class="stories-drawer" id="storiesDrawer" aria-hidden="true">
+    <div class="drawer-head">
+      <span class="drawer-title">📚 All Stories</span>
+      <button class="drawer-close" onclick="toggleDrawer()" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-grid" id="drawerGrid"></div>
+  </div>
+  <div class="drawer-overlay" id="drawerOverlay" onclick="toggleDrawer()"></div>
 
   <!-- HERO -->
   <section class="hero">
@@ -416,9 +438,17 @@
       }
     })();
 
-    // Nav toggle
-    function toggleNav() {
-      document.getElementById('navLinks').classList.toggle('show');
+    // Nav drawer
+    function toggleDrawer() {
+      const drawer = document.getElementById('storiesDrawer');
+      const overlay = document.getElementById('drawerOverlay');
+      const btn = document.getElementById('drawerToggle');
+      if (!drawer) return;
+      const isOpen = drawer.classList.toggle('open');
+      if (overlay) overlay.classList.toggle('open', isOpen);
+      if (btn) btn.setAttribute('aria-expanded', isOpen);
+      drawer.setAttribute('aria-hidden', !isOpen);
+      document.body.style.overflow = isOpen ? 'hidden' : '';
     }
 
     // Story data
@@ -458,6 +488,15 @@
         <span class="story-theme">${s.theme}</span>
       `;
       grid.appendChild(a);
+    });
+
+    const drawerGrid = document.getElementById('drawerGrid');
+    stories.forEach(s => {
+      const a = document.createElement('a');
+      a.href = `./Story/Day${s.day}.html`;
+      a.className = 'drawer-story-link';
+      a.innerHTML = `<span class="drawer-emoji">${s.emoji}</span><span><span class="drawer-meta-day">Day ${s.day}</span><span class="drawer-meta-title">${s.title}</span></span>`;
+      drawerGrid.appendChild(a);
     });
   </script>
 </body>
