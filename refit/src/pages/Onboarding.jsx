@@ -10,7 +10,7 @@ const CLASSES = [
 export default function Onboarding({ userId, onComplete }) {
   const [step, setStep] = useState(0)
   const [cls, setCls] = useState(null)
-  const [form, setForm] = useState({ username: '', height: '', weight: '', age: '', gender: 'Other' })
+  const [form, setForm] = useState({ username: '', heightFt: '', heightIn: '', weightLbs: '', age: '', gender: 'Other' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -21,14 +21,19 @@ export default function Onboarding({ userId, onComplete }) {
     setLoading(true)
     setError(null)
 
+    const ft = parseInt(form.heightFt) || 0
+    const inches = parseInt(form.heightIn) || 0
+    const height_cm = (ft || inches) ? Math.round(ft * 30.48 + inches * 2.54) : null
+    const weight_kg = parseFloat(form.weightLbs) ? parseFloat((form.weightLbs * 0.453592).toFixed(1)) : null
+
     const { data, error: err } = await supabase
       .from('users')
       .insert({
         user_id: userId,
         username: form.username.trim(),
         class_archetype: cls,
-        height_cm: parseInt(form.height) || null,
-        weight_kg: parseFloat(form.weight) || null,
+        height_cm,
+        weight_kg,
         age: parseInt(form.age) || null,
         gender: form.gender,
       })
@@ -75,8 +80,11 @@ export default function Onboarding({ userId, onComplete }) {
           <p className="body-text onboard-sub">The Goddess records your baseline stats.</p>
           {error && <p className="msg error">{error}</p>}
           <input className="rpg-input" placeholder="Hero Name *" value={form.username} onChange={e => set('username', e.target.value)} />
-          <input className="rpg-input" type="number" placeholder="Height (cm)" value={form.height} onChange={e => set('height', e.target.value)} />
-          <input className="rpg-input" type="number" placeholder="Weight (kg)" value={form.weight} onChange={e => set('weight', e.target.value)} />
+          <div className="input-row">
+            <input className="rpg-input" type="number" placeholder="Height (ft)" min="0" max="8" value={form.heightFt} onChange={e => set('heightFt', e.target.value)} />
+            <input className="rpg-input" type="number" placeholder="in" min="0" max="11" value={form.heightIn} onChange={e => set('heightIn', e.target.value)} />
+          </div>
+          <input className="rpg-input" type="number" placeholder="Weight (lbs)" min="0" value={form.weightLbs} onChange={e => set('weightLbs', e.target.value)} />
           <input className="rpg-input" type="number" placeholder="Age" value={form.age} onChange={e => set('age', e.target.value)} />
           <select className="rpg-input" value={form.gender} onChange={e => set('gender', e.target.value)}>
             <option>Male</option>

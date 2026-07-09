@@ -215,7 +215,9 @@ button { cursor: pointer; font-family: inherit; }
   border-radius: 4px;
   font-family: var(--font-px);
 }
-.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.input-row { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
+.input-row .rpg-input { margin-bottom: 0; }
 
 /* ─── NavBar ─────────────────────────────────────────────── */
 .nav-bar {
