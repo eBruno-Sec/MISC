@@ -371,20 +371,36 @@ nav.scrolled {
 /* ═══════════════════════════════════════════════
    FEATURE STRIP
    ═══════════════════════════════════════════════ */
-.features {
-  background: var(--amber); padding: 14px 24px;
-  display: flex; justify-content: center; align-items: center;
-  flex-wrap: wrap; gap: 0;
+/* ═══════════════════════════════════════════════
+   CREDIBILITY BAND
+   ═══════════════════════════════════════════════ */
+.cred-band {
+  background: #1C0A02;
+  border-top: 1px solid rgba(232,150,10,.22);
+  border-bottom: 1px solid rgba(232,150,10,.22);
+  padding: 28px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
-.feature-item {
-  display: flex; align-items: center; gap: 9px;
-  white-space: nowrap; padding: 4px 28px;
+.cred-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 5px; padding: 0 44px;
 }
-.feature-icon { font-size: 17px; }
-.feature-text { font-size: 12.5px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
-.feature-divider {
-  width: 4px; height: 4px;
-  background: rgba(255,255,255,0.45); border-radius: 50%; flex-shrink: 0;
+.cred-num {
+  font-family: "Trebuchet MS", system-ui, sans-serif;
+  font-size: 2rem; font-weight: 900;
+  color: var(--amber); line-height: 1; letter-spacing: -1px;
+}
+.cred-unit { font-size: 1.1rem; font-weight: 700; letter-spacing: 0; }
+.cred-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1.8px;
+  color: rgba(255,255,255,.42);
+}
+.cred-sep {
+  width: 1px; height: 44px; flex-shrink: 0;
+  background: rgba(255,255,255,.1);
 }
 
 
@@ -804,9 +820,18 @@ body, .nav-links a, .nav-cta, .hero-eyebrow, .hero-desc,
 }
 .nav-cta:hover { background: linear-gradient(135deg, var(--amber-lite), var(--amber)); transform: translateY(-1px); }
 
-/* --- Feature strip: static pill row --- */
-.features { padding: 14px 24px; }
-.feature-text { font-size: 12.5px; letter-spacing: 0.4px; }
+/* --- Cred band: mobile 2×2 --- */
+@media (max-width: 560px) {
+  .cred-band { flex-wrap: wrap; padding: 0; }
+  .cred-sep  { display: none; }
+  .cred-item {
+    width: 50%; padding: 20px 0;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .cred-item:nth-child(odd)  { border-right: 1px solid rgba(255,255,255,.06); }
+  .cred-item:nth-child(7),
+  .cred-item:nth-child(8)    { border-bottom: none; }
+}
 
 /* --- Section titles: bigger + tighter --- */
 .section-title {
