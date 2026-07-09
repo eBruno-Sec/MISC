@@ -588,6 +588,67 @@ td{ color:var(--ink-dim); }
 .grid .card:nth-child(6) { animation-delay:.40s; }
 
 @media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+
+/* ============================================================
+   REPORT — Inline full quiz result
+   ============================================================ */
+section:has(.signup){ display:none; }
+
+.report-profile{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:28px 0;
+}
+@media(max-width:640px){ .report-profile{ grid-template-columns:1fr; } }
+
+.report-block{
+  background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:22px; display:flex; flex-direction:column; gap:8px;
+}
+.report-block h4{ margin:0; }
+.report-block p{ margin:0; font-size:.93rem; }
+
+.report-scores{
+  background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:28px; margin:28px 0;
+}
+.report-scores h3{ margin-bottom:20px; }
+
+.score-bars{ display:flex; flex-direction:column; gap:11px; }
+
+.score-bar-item{
+  display:grid; grid-template-columns:78px 1fr 28px;
+  align-items:center; gap:12px;
+}
+.score-bar-label{
+  font-family:var(--mono); font-size:.72rem; color:var(--ink-dim);
+  text-align:right; white-space:nowrap;
+}
+.score-bar-item.primary .score-bar-label{ color:var(--gold); font-weight:700; }
+
+.score-bar-track{
+  height:7px; background:var(--line); border-radius:4px; overflow:hidden;
+}
+.score-bar-fill{
+  height:100%; border-radius:4px;
+  background:rgba(201,162,75,.22);
+  transition:width .5s ease;
+}
+.score-bar-item.primary .score-bar-fill{
+  background:linear-gradient(90deg,var(--gold),var(--gold-bright));
+}
+
+.score-bar-value{
+  font-family:var(--mono); font-size:.7rem; color:var(--ink-faint); text-align:right;
+}
+.score-bar-item.primary .score-bar-value{ color:var(--gold); }
+
+.report-secondary{
+  background:linear-gradient(135deg,rgba(201,162,75,.06),transparent),var(--bg-1);
+  border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:28px; margin:0 0 28px;
+}
+.report-secondary .eyebrow{ margin-bottom:10px; }
+.report-secondary h3{ margin-bottom:.4em; font-size:1.1rem; }
+.report-secondary p{ margin:0; font-size:.95rem; color:var(--ink-dim); }
 </style>
 </head>
 <body>
@@ -2493,7 +2554,6 @@ td{ color:var(--ink-dim); }
 
 document.addEventListener('DOMContentLoaded', () => {
   initNav();
-  initSignupForms();
   initContactForm();
   initFilters();
   initQuiz();
@@ -2511,27 +2571,6 @@ function initNav(){
   links.querySelectorAll('a').forEach(a => a.addEventListener('click', () => links.classList.remove('open')));
 }
 
-/* ---------------- email signup (lead capture) ---------------- */
-function initSignupForms(){
-  document.querySelectorAll('[data-signup-form]').forEach(form => {
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const input = form.querySelector('input[type="email"]');
-      const success = form.parentElement.querySelector('.form-success');
-      if(!input || !input.checkValidity()){
-        input && input.reportValidity();
-        return;
-      }
-      form.style.display = 'none';
-      if(success){
-        success.textContent = `Sent. Check ${input.value} for your guide.`;
-        success.classList.add('show');
-      }
-      // Production note: wire this submit to your email provider
-      // (Resend, ConvertKit, Mailchimp) via a serverless endpoint.
-    });
-  });
-}
 
 /* ---------------- contact form ---------------- */
 function initContactForm(){
@@ -2657,16 +2696,16 @@ const QUIZ_QUESTIONS = [
 ];
 
 const ANIMAL_RESULTS = {
-  wolf: { name: "Wolf", traits: "Loyalty, instinct, protection, pack-mindedness.", growth: "Loosen your grip on control inside the group you protect. Not everyone needs guarding, some just need trust.", shadow: "Watch for over-identifying with the pack at the cost of your own needs." },
-  bear: { name: "Bear", traits: "Strength, solitude, grounded power, patience.", growth: "Your strength is real, but isolation isn't the same as peace. Let a few people closer.", shadow: "Withdrawal can tip into avoidance. Notice when solitude becomes hiding." },
-  lion: { name: "Lion", traits: "Courage, leadership, pride, visibility.", growth: "Leadership that listens lasts longer than leadership that performs.", shadow: "Pride curdles into defensiveness when you can't tolerate being questioned." },
-  fox: { name: "Fox", traits: "Strategy, adaptability, cleverness.", growth: "Cleverness is a tool, not an identity. Let yourself be direct sometimes.", shadow: "Constant maneuvering can read as untrustworthy, even when your intentions are good." },
-  eagle: { name: "Eagle", traits: "Vision, freedom, high standards.", growth: "The view from above is useful, but people live on the ground. Come down more often.", shadow: "High standards aimed at others can isolate you from the people trying to keep up." },
-  snake: { name: "Snake", traits: "Transformation, renewal, healthy fear of stagnation.", growth: "You're built for change. Let some things stay the same long enough to matter.", shadow: "Reinventing yourself can become a way of running from unresolved patterns." },
-  dog: { name: "Dog", traits: "Loyalty, service, companionship.", growth: "Service is a gift, not an obligation. Make sure you're choosing it, not defaulting to it.", shadow: "Constant giving without receiving breeds quiet resentment." },
-  owl: { name: "Owl", traits: "Wisdom, observation, hidden knowledge.", growth: "Observation is only useful if it eventually turns into action.", shadow: "Watching from a distance can become a way of avoiding the risk of participating." },
-  raven: { name: "Raven", traits: "Mystery, intelligence, transformation, uncomfortable truths.", growth: "Your honesty is valuable. Pair it with timing so it lands instead of wounding.", shadow: "Truth-telling without compassion is just cruelty with good aim." },
-  tiger: { name: "Tiger", traits: "Power, independence, intensity.", growth: "Your intensity is a strength when it's aimed at something. Find the target.", shadow: "Independence taken too far can read as an unwillingness to need anyone." }
+  wolf:  { name: "Wolf",  traits: "Loyalty · Instinct · Protection · Pack-mindedness",   description: "You orient your identity around the people you're responsible for — fiercely protective, guided by instinct over calculation, and at your best when the stakes are real and the circle is tight.",                                                                          growth: "Loosen your grip on control inside the group you protect. Not everyone needs guarding; some just need trust.",                                        shadow: "Over-identifying with the pack costs you. Watch for moments when protecting others becomes a way of avoiding your own needs." },
+  bear:  { name: "Bear",  traits: "Strength · Solitude · Grounded power · Patience",      description: "You carry real power quietly. Stillness is your default, not weakness — you recharge alone, stay unbothered under pressure others can't handle, and when you do act, it lands decisively.",                                                                             growth: "Your strength is real, but isolation isn't the same as peace. Let a few people closer than feels comfortable.",                                       shadow: "Withdrawal can tip into avoidance. Notice when solitude becomes hiding from something that needs confronting." },
+  lion:  { name: "Lion",  traits: "Courage · Leadership · Pride · Visibility",            description: "You're comfortable being seen and leading from the front. Visibility isn't performance for you — it's where you operate best. Your presence sets a standard, and people feel it before you say a word.",                                                                 growth: "Leadership that listens lasts longer than leadership that performs. Ask more, declare less.",                                                          shadow: "Pride curdles into defensiveness the moment you can't tolerate being questioned. That's the signal." },
+  fox:   { name: "Fox",   traits: "Strategy · Adaptability · Cleverness",                 description: "You read situations faster than most people realize and find routes others miss entirely. Cleverness is your natural currency, and you'd rather solve a problem elegantly than overpower it.",                                                                            growth: "Cleverness is a tool, not an identity. Let yourself be direct sometimes — it's faster and earns more trust.",                                         shadow: "Constant maneuvering reads as untrustworthy even when your intentions are good. Transparency costs less than you think." },
+  eagle: { name: "Eagle", traits: "Vision · Freedom · High standards",                    description: "You see the longer arc before others do. Your instinct is to step back, find the real pattern, and hold standards that can feel distant to people still figuring out the ground level.",                                                                                  growth: "The view from above is useful. Come down more often — people live on the ground and they need you there.",                                            shadow: "High standards aimed at others without empathy for their position isolates you from the people trying to keep up." },
+  snake: { name: "Snake", traits: "Transformation · Renewal · Resistance to stagnation",  description: "You're built for transformation — shedding what no longer serves and emerging changed. Stagnation is your deepest fear. When something is over, you're usually the first to know it and the first to move.",                                                             growth: "You're built for change. Let some things stay the same long enough to matter before you shed them.",                                                  shadow: "Reinventing yourself can become a way of running from unresolved patterns instead of working through them." },
+  dog:   { name: "Dog",   traits: "Loyalty · Service · Companionship",                    description: "Your identity is built around genuine relationship. Loyalty isn't strategic for you — it's structural. You're at your best when you're part of something real, with people who actually matter.",                                                                         growth: "Service is a gift, not an obligation. Make sure you're choosing it consciously, not defaulting to it out of habit.",                                  shadow: "Constant giving without receiving breeds quiet resentment that surfaces sideways. Notice when that's happening." },
+  owl:   { name: "Owl",   traits: "Wisdom · Observation · Hidden knowledge",              description: "You observe before you act, gather more than you reveal, and carry knowledge others don't see until you choose to share it. Patience is how you build precision.",                                                                                                        growth: "Observation is only useful if it eventually turns into action. You already know enough — move.",                                                      shadow: "Watching from a distance can become a way of avoiding the risk of actually participating in your own life." },
+  raven: { name: "Raven", traits: "Intelligence · Mystery · Uncomfortable truths",        description: "You're sharp, pattern-reading, and willing to name the thing everyone else is carefully avoiding. Intelligence paired with a tolerance for discomfort gives you access to truths most people sidestep entirely.",                                                          growth: "Your honesty is valuable. Pair it with timing so it lands where it's useful instead of just landing hard.",                                           shadow: "Truth-telling without compassion is cruelty with good aim. The distinction matters and you know it." },
+  tiger: { name: "Tiger", traits: "Power · Independence · Intensity",                     description: "You're self-sufficient by nature — territorial, intense, unwilling to dilute yourself to fit someone else's comfort. Your power is real and you don't need an audience to prove it.",                                                                                     growth: "Your intensity is a strength when it's aimed at something specific. Find the target before the energy dissipates.",                                   shadow: "Independence taken too far reads as an unwillingness to need anyone — which is its own kind of vulnerability." }
 };
 
 function initQuiz(){
@@ -2737,40 +2776,73 @@ function initQuiz(){
         totalScores[animal] = (totalScores[animal] || 0) + pts;
       });
     });
-    const winner = Object.entries(totalScores).sort((a, b) => b[1] - a[1])[0][0];
-    const result = ANIMAL_RESULTS[winner];
-    const animalLink = document.querySelector('.page-section') ? '#animal-archetypes' : 'animal-archetypes.html';
+
+    const sorted = Object.entries(totalScores).sort((a, b) => b[1] - a[1]);
+    const [winnerKey, winnerScore] = sorted[0];
+    const [secondKey, secondScore] = sorted[1];
+    const result = ANIMAL_RESULTS[winnerKey];
+    const second = ANIMAL_RESULTS[secondKey];
+    const maxScore = winnerScore || 1;
+
     progressFill.style.width = '100%';
     formEl.style.display = 'none';
+
+    const scoreBarsHTML = sorted.map(([animal, score]) => {
+      const pct = Math.round((score / maxScore) * 100);
+      const primary = animal === winnerKey;
+      return `<div class="score-bar-item${primary ? ' primary' : ''}">
+        <span class="score-bar-label">${ANIMAL_RESULTS[animal].name}</span>
+        <div class="score-bar-track"><div class="score-bar-fill" data-w="${pct}%" style="width:0%"></div></div>
+        <span class="score-bar-value">${score}</span>
+      </div>`;
+    }).join('');
+
+    const secondaryHTML = (secondKey && secondScore > 0) ? `
+      <div class="report-secondary">
+        <div class="eyebrow">Secondary Pattern</div>
+        <h3>Also expressed: The ${second.name}</h3>
+        <p>${second.description}</p>
+      </div>` : '';
+
     resultEl.innerHTML = `
       <div class="result-card">
-        <div class="eyebrow">Your result</div>
+        <div class="eyebrow" style="justify-content:center;">Your animal archetype</div>
         <h2>The ${result.name}</h2>
-        <p class="lead">${result.traits}</p>
-        <div class="result-stats">
-          <div>
-            <h4>Growth edge</h4>
-            <p>${result.growth}</p>
-          </div>
-          <div>
-            <h4>Shadow warning</h4>
-            <p>${result.shadow}</p>
-          </div>
-        </div>
+        <p class="lead">${result.description}</p>
       </div>
-      <form class="signup-form" data-signup-form aria-label="Email me my full archetype report">
-        <input type="email" placeholder="you@email.com" required aria-label="Email address">
-        <button type="submit" class="btn btn-primary">Email me the full report</button>
-      </form>
-      <p class="form-success" aria-live="polite"></p>
-      <p class="center"><a href="${animalLink}" class="btn btn-outline" style="margin-top:18px;">Read about every animal archetype</a></p>
+      <div class="report-profile">
+        <div class="report-block"><h4>Core Traits</h4><p>${result.traits}</p></div>
+        <div class="report-block"><h4>Growth Edge</h4><p>${result.growth}</p></div>
+        <div class="report-block"><h4>Shadow Warning</h4><p>${result.shadow}</p></div>
+      </div>
+      <div class="report-scores">
+        <div class="eyebrow">Full Profile Breakdown</div>
+        <h3>Your scores across all 10 archetypes</h3>
+        <div class="score-bars">${scoreBarsHTML}</div>
+      </div>
+      ${secondaryHTML}
+      <p class="center"><a href="#animal-archetypes" class="btn btn-outline">Explore all 10 animal archetypes</a></p>
     `;
     resultEl.classList.add('show');
-    initSignupForms();
+
+    requestAnimationFrame(() => {
+      resultEl.querySelectorAll('.score-bar-fill').forEach((el, i) => {
+        setTimeout(() => { el.style.width = el.dataset.w; }, i * 55);
+      });
+    });
   }
 
   if(restartBtn){
-    restartBtn.addEventListener('click', () => location.reload());
+    restartBtn.addEventListener('click', () => {
+      answered.fill(null);
+      resultEl.classList.remove('show');
+      resultEl.innerHTML = '';
+      formEl.style.display = '';
+      progressFill.style.width = '0%';
+      qContainer.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
+      qContainer.querySelectorAll('.quiz-next').forEach(b => b.disabled = true);
+      goTo(0);
+    });
   }
 }
 
