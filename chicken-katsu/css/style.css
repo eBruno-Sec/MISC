@@ -371,17 +371,20 @@ nav.scrolled {
 /* ═══════════════════════════════════════════════
    FEATURE STRIP
    ═══════════════════════════════════════════════ */
-.features { background: var(--amber); padding: 16px 0; overflow: hidden; }
-.marquee-track { display: flex; width: max-content; }
-.feature-item {
-  display: flex; align-items: center; gap: 11px;
-  white-space: nowrap; flex-shrink: 0; padding: 0 36px;
+.features {
+  background: var(--amber); padding: 14px 24px;
+  display: flex; justify-content: center; align-items: center;
+  flex-wrap: wrap; gap: 0;
 }
-.feature-icon { font-size: 19px; }
-.feature-text { font-size: 13px; font-weight: 700; color: #fff; }
+.feature-item {
+  display: flex; align-items: center; gap: 9px;
+  white-space: nowrap; padding: 4px 28px;
+}
+.feature-icon { font-size: 17px; }
+.feature-text { font-size: 12.5px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
 .feature-divider {
-  width: 5px; height: 5px;
-  background: rgba(255, 255, 255, 0.4); border-radius: 50%; flex-shrink: 0;
+  width: 4px; height: 4px;
+  background: rgba(255,255,255,0.45); border-radius: 50%; flex-shrink: 0;
 }
 
 
@@ -801,13 +804,8 @@ body, .nav-links a, .nav-cta, .hero-eyebrow, .hero-desc,
 }
 .nav-cta:hover { background: linear-gradient(135deg, var(--amber-lite), var(--amber)); transform: translateY(-1px); }
 
-/* --- Feature strip: CSS auto-scroll marquee --- */
-.features { padding: 20px 0; }
-@keyframes marqueeAuto {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
-}
-.marquee-track { animation: marqueeAuto 34s linear infinite; }
+/* --- Feature strip: static pill row --- */
+.features { padding: 14px 24px; }
 .feature-text { font-size: 12.5px; letter-spacing: 0.4px; }
 
 /* --- Section titles: bigger + tighter --- */
