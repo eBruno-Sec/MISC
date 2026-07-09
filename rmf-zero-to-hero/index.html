@@ -10,6 +10,119 @@
     />
     <script type="module" crossorigin src="/MISC/rmf-zero-to-hero/assets/index-DHF5qDdC.js"></script>
     <link rel="stylesheet" crossorigin href="/MISC/rmf-zero-to-hero/assets/index-DhmsFd_Q.css">
+    <style>
+      /* ── RMF BEAUTY PASS ────────────────────────────────────── */
+
+      /* Animated gradient accent on dark-navy sections */
+      @keyframes gradDrift {
+        0%   { background-position: 0% 50%; }
+        50%  { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+
+      /* Subtle dot-grid on cream body */
+      body::before {
+        content: "";
+        position: fixed; inset: 0; pointer-events: none; z-index: 0;
+        background-image: radial-gradient(circle, rgba(11,18,32,.055) 1px, transparent 1px);
+        background-size: 28px 28px;
+      }
+      #root { position: relative; z-index: 1; }
+
+      /* Dark nav/hero: richer gradient + animated grain */
+      .bg-ink-950 {
+        background: linear-gradient(160deg, #0f1830 0%, #0b1220 55%, #0e1628 100%) !important;
+        background-size: 200% 200% !important;
+        animation: gradDrift 20s ease infinite !important;
+      }
+      .bg-ink-900 {
+        background: linear-gradient(135deg, #111d38 0%, #0f1830 100%) !important;
+      }
+
+      /* Bottom accent line under nav */
+      header, nav:first-of-type {
+        position: relative;
+      }
+      header::after, nav:first-of-type::after {
+        content: "";
+        position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(217,119,6,.6) 30%, rgba(217,119,6,.35) 70%, transparent);
+        pointer-events: none;
+      }
+
+      /* Signal/amber buttons: gradient + glow */
+      .bg-signal {
+        background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%) !important;
+        box-shadow: 0 4px 18px rgba(217,119,6,.32) !important;
+        transition: transform .18s ease, box-shadow .18s ease !important;
+      }
+      .bg-signal:hover, .hover\:bg-signal-dim:hover {
+        background: linear-gradient(135deg, #B45309 0%, #D97706 100%) !important;
+        box-shadow: 0 6px 26px rgba(217,119,6,.48) !important;
+        transform: translateY(-1px) !important;
+      }
+
+      /* White cards: hover lift + amber top-border */
+      .bg-white {
+        transition: transform .22s ease, box-shadow .22s ease !important;
+        border-top: 2px solid transparent !important;
+      }
+      .bg-white:hover {
+        transform: translateY(-4px) !important;
+        box-shadow: 0 12px 36px rgba(11,18,32,.12), 0 2px 8px rgba(11,18,32,.06) !important;
+        border-top-color: rgba(217,119,6,.5) !important;
+      }
+
+      /* Rounded-xl cards: slight glow on hover */
+      .rounded-xl {
+        transition: box-shadow .22s ease, transform .22s ease;
+      }
+
+      /* Hero heading: gradient text */
+      .text-4xl, .sm\:text-5xl {
+        background: linear-gradient(135deg, #f7f5f0 0%, rgba(247,245,240,.8) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        display: inline-block;
+        line-height: 1.15;
+      }
+
+      /* Signal text: slightly brighter */
+      .text-signal {
+        color: #F59E0B !important;
+      }
+
+      /* Progress bars / fill elements */
+      .bg-signal.h-4, [class*="bg-signal"][class*="h-"] {
+        background: linear-gradient(90deg, #D97706, #F59E0B, #D97706) !important;
+        background-size: 200% 100% !important;
+        animation: gradDrift 3s linear infinite !important;
+      }
+
+      /* Amber-50 callout: warmer left border */
+      .bg-amber-50 {
+        border-left: 3px solid #D97706 !important;
+        border-radius: 0 .5rem .5rem 0 !important;
+      }
+
+      /* Emerald-50 callout: green left border */
+      .bg-emerald-50 {
+        border-left: 3px solid #059669 !important;
+        border-radius: 0 .5rem .5rem 0 !important;
+      }
+
+      /* Focus ring: amber glow */
+      :focus-visible {
+        outline: 2px solid #F59E0B !important;
+        outline-offset: 3px !important;
+        box-shadow: 0 0 0 4px rgba(217,119,6,.18) !important;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
