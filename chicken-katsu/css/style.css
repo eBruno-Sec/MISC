@@ -697,3 +697,213 @@ footer {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* ═══════════════════════════════════════════════
+   BEAUTY PASS — PREMIUM UPGRADE
+   ═══════════════════════════════════════════════ */
+
+/* --- Fonts --- */
+.hero-title, .section-title, .nav-logo, .item-name,
+.stat-num, .order-tagline, .footer-logo, .price-tag .amount,
+.step-title, .nav-drawer a {
+  font-family: 'Playfair Display', Georgia, "Times New Roman", serif;
+}
+body, .nav-links a, .nav-cta, .hero-eyebrow, .hero-desc,
+.item-desc, .item-tag, .eyebrow, .step-desc, .footer-note,
+.btn-amber, .btn-ghost, .btn-white, .btn-outline-white,
+.feature-text, .hero-jp, .stat-label {
+  font-family: 'Inter', "Segoe UI", system-ui, sans-serif;
+}
+
+/* --- Hero title: bigger + gradient italic --- */
+.hero-title {
+  font-size: clamp(56px, 6.5vw, 104px);
+  letter-spacing: -2.5px;
+  line-height: 0.92;
+}
+.hero-title em {
+  font-style: italic;
+  color: var(--amber);
+  background: linear-gradient(135deg, var(--amber-lite) 0%, var(--amber) 40%, var(--rust) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: block;
+}
+
+/* --- Hero left: richer bg + vertical separator --- */
+.hero-left {
+  background: linear-gradient(165deg, var(--cream) 0%, var(--cream-alt) 100%);
+}
+.hero-left::after {
+  content: '';
+  position: absolute; top: 15%; right: 0; height: 70%; width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(232,150,10,0.25), transparent);
+  pointer-events: none;
+}
+
+/* --- Hero right: denser dot pattern + concentric ring --- */
+.hero-right::before {
+  background-image: radial-gradient(circle, var(--amber) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
+  opacity: 0.13;
+}
+.hero-right::after {
+  content: '';
+  position: absolute; bottom: -100px; right: -100px;
+  width: 360px; height: 360px;
+  border: 1.5px solid rgba(232,150,10,0.14);
+  border-radius: 50%; pointer-events: none; z-index: 0;
+  box-shadow: 0 0 0 44px rgba(232,150,10,0.04), 0 0 0 88px rgba(232,150,10,0.02);
+}
+
+/* --- Hero eyebrow pill --- */
+.hero-eyebrow {
+  border: 1px solid rgba(232,150,10,0.28);
+  font-size: 12px; letter-spacing: 0.4px;
+}
+
+/* --- Hero desc --- */
+.hero-desc { font-size: 17px; line-height: 1.9; }
+
+/* --- Primary buttons --- */
+.btn-amber {
+  background: linear-gradient(135deg, var(--amber-lite) 0%, var(--amber) 55%, var(--rust) 100%);
+  padding: 17px 42px;
+  box-shadow: 0 6px 28px rgba(232,150,10,0.38);
+  letter-spacing: 0.2px;
+  border: none;
+}
+.btn-amber:hover {
+  background: linear-gradient(135deg, var(--amber-lite) 0%, var(--amber-lite) 100%);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 36px rgba(232,150,10,0.5);
+}
+
+/* --- Price tag: richer gradient --- */
+.price-tag {
+  background: linear-gradient(135deg, var(--rust) 0%, #9A2600 100%);
+  padding: 16px 22px; border-radius: 18px;
+  box-shadow: 0 8px 32px rgba(196,72,24,0.44);
+}
+.price-tag .amount { font-size: 34px; }
+
+/* --- Nav: Playfair logo + gradient cta --- */
+.nav-logo { font-size: 22px; letter-spacing: -0.3px; }
+.nav-logo-icon {
+  background: linear-gradient(135deg, var(--amber), var(--rust));
+  border-radius: 10px;
+}
+.nav-cta {
+  background: linear-gradient(135deg, var(--amber), var(--rust));
+  font-size: 14px; letter-spacing: 0.2px;
+}
+.nav-cta:hover { background: linear-gradient(135deg, var(--amber-lite), var(--amber)); transform: translateY(-1px); }
+
+/* --- Feature strip: CSS auto-scroll marquee --- */
+.features { padding: 20px 0; }
+@keyframes marqueeAuto {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track { animation: marqueeAuto 34s linear infinite; }
+.feature-text { font-size: 12.5px; letter-spacing: 0.4px; }
+
+/* --- Section titles: bigger + tighter --- */
+.section-title {
+  font-size: clamp(36px, 4.8vw, 62px);
+  letter-spacing: -1.5px; line-height: 1.04;
+  margin-bottom: 56px;
+}
+.eyebrow { font-size: 11px; letter-spacing: 2px; }
+
+/* --- Menu: more spacing --- */
+.menu { padding: 112px 80px; }
+
+/* --- Menu cards: premium shadows + stagger --- */
+.menu-item {
+  border-radius: 22px; border-width: 1px;
+  box-shadow: 0 2px 16px var(--shadow);
+  transition: box-shadow 0.28s, transform 0.28s, border-color 0.28s;
+}
+.menu-item:hover {
+  transform: translateY(-8px) scale(1.01);
+  box-shadow: 0 28px 64px rgba(80,40,0,0.18), 0 0 0 1.5px var(--amber);
+}
+.menu-grid .menu-item:nth-child(1) { transition-delay: 0.04s; }
+.menu-grid .menu-item:nth-child(2) { transition-delay: 0.09s; }
+.menu-grid .menu-item:nth-child(3) { transition-delay: 0.14s; }
+.menu-grid .menu-item:nth-child(4) { transition-delay: 0.19s; }
+.menu-grid .menu-item:nth-child(5) { transition-delay: 0.24s; }
+.menu-grid .menu-item:nth-child(6) { transition-delay: 0.29s; }
+
+.item-name { font-size: 21px; letter-spacing: -0.3px; }
+.item-price { font-size: 26px; letter-spacing: -0.5px; }
+.item-add {
+  width: 44px; height: 44px; font-size: 22px;
+  background: linear-gradient(135deg, var(--amber), var(--rust));
+  box-shadow: 0 4px 16px rgba(232,150,10,0.4);
+}
+.item-add:hover { background: linear-gradient(135deg, var(--amber-lite), var(--amber)); }
+
+/* --- Craft step icons --- */
+.step-icon {
+  width: 48px; height: 48px; border-radius: 14px; font-size: 22px;
+  background: linear-gradient(135deg, var(--amber-pale), rgba(232,150,10,0.12));
+  border: 1px solid rgba(232,150,10,0.22);
+}
+.craft-step:nth-child(1) { transition-delay: 0.05s; }
+.craft-step:nth-child(2) { transition-delay: 0.12s; }
+.craft-step:nth-child(3) { transition-delay: 0.19s; }
+.craft-step:nth-child(4) { transition-delay: 0.26s; }
+
+/* --- Stat cards: larger + better hover --- */
+.craft-stat {
+  border-radius: 22px; padding: 40px 16px;
+  box-shadow: 0 4px 24px var(--shadow);
+  transition: transform 0.28s, box-shadow 0.28s, border-color 0.28s;
+}
+.craft-stat:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 52px rgba(80,40,0,0.22);
+  border-color: var(--amber);
+}
+.stat-num { font-size: 54px; letter-spacing: -3px; }
+.stat-unit { font-size: 22px; }
+
+/* --- Order CTA: amber-to-rust gradient --- */
+.order-cta {
+  background: linear-gradient(150deg, var(--amber-lite) 0%, var(--amber) 40%, var(--rust) 100%);
+  padding: 112px 80px;
+}
+.order-cta::before {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.15) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.order-tagline {
+  font-size: clamp(40px, 5.5vw, 78px);
+  letter-spacing: -2px; line-height: 1.04;
+}
+
+/* --- Footer: amber top accent --- */
+footer {
+  padding: 44px 80px;
+  border-top: 3px solid var(--amber);
+}
+.footer-logo { font-size: 20px; letter-spacing: -0.2px; }
+.footer-logo-icon {
+  background: linear-gradient(135deg, var(--amber), var(--rust));
+  border-radius: 9px;
+}
+
+/* --- Scrollbar: amber tinted --- */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--cream-alt); }
+::-webkit-scrollbar-thumb { background: rgba(232,150,10,0.5); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--rust); }
+
+/* --- Kids variant: sage gradient --- */
+.menu-item.kids .item-add {
+  background: linear-gradient(135deg, var(--sage), #4A7A38);
+}

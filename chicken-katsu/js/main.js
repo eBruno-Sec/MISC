@@ -5,9 +5,7 @@ const nav          = document.getElementById('mainNav');
 const marqueeTrack = document.querySelector('.marquee-track');
 
 window.addEventListener('scroll', () => {
-  const y = window.scrollY;
-  nav.classList.toggle('scrolled', y > 40);
-  if (marqueeTrack) marqueeTrack.style.transform = `translateX(${-(y * 0.3)}px)`;
+  nav.classList.toggle('scrolled', window.scrollY > 40);
 }, { passive: true });
 
 
@@ -58,6 +56,14 @@ const revealObserver = new IntersectionObserver(entries => {
 }, { threshold: 0.12, rootMargin: '0px 0px -32px 0px' });
 
 document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// Stagger transition delays for grouped reveals
+document.querySelectorAll('.menu-item.reveal').forEach((el, i) => {
+  el.style.transitionDelay = `${i * 0.08}s`;
+});
+document.querySelectorAll('.craft-step.reveal').forEach((el, i) => {
+  el.style.transitionDelay = `${i * 0.1}s`;
+});
 
 
 /* ═══════════════════════════════════════════════
