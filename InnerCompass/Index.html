@@ -490,6 +490,104 @@ td{ color:var(--ink-dim); }
 
 .page-section{ display:none; }
 .page-section.active{ display:block; }
+
+/* ============================================================
+   BEAUTY PASS — enhanced visual polish
+   ============================================================ */
+
+/* Glyph slow spin on hero */
+@keyframes glyphSpin { to { transform: rotate(360deg); } }
+.hero-glyph svg { animation: glyphSpin 60s linear infinite; transform-origin: center; }
+
+/* Richer hero gradient + dot grid overlay */
+.hero {
+  background:
+    radial-gradient(ellipse 1100px 560px at -5% -10%, rgba(201,162,75,.10), transparent 60%),
+    radial-gradient(ellipse 700px 480px at 105% 25%,  rgba(44,74,55,.14),   transparent 60%),
+    radial-gradient(ellipse 500px 300px at 50% 110%,  rgba(201,162,75,.06), transparent 55%),
+    var(--bg);
+}
+.hero::before {
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background-image: radial-gradient(circle, rgba(201,162,75,.08) 1px, transparent 1px);
+  background-size: 38px 38px; background-position: 19px 19px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 0%, transparent 100%);
+}
+
+/* Gradient primary button + glow */
+.btn-primary { background: linear-gradient(135deg, var(--gold) 0%, var(--gold-bright) 100%); box-shadow: 0 4px 18px rgba(201,162,75,.25); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--gold-bright) 0%, #f0d68a 100%); box-shadow: 0 6px 28px rgba(201,162,75,.40); }
+
+/* Nav: gold gradient accent line */
+.site-header { overflow: visible; }
+.site-header::after {
+  content:""; position:absolute; bottom:0; left:0; right:0; height:1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(201,162,75,.55) 30%, rgba(201,162,75,.3) 70%, transparent 100%);
+}
+
+/* Eyebrow brightness */
+.eyebrow { color: var(--gold-bright); }
+
+/* Card: gradient sheen + stronger glow */
+.card { position: relative; overflow: hidden; }
+.card::before {
+  content:""; position:absolute; inset:0; border-radius:var(--radius-lg); pointer-events:none;
+  background: linear-gradient(135deg, rgba(201,162,75,.14) 0%, transparent 60%);
+  opacity:0; transition: opacity .2s ease;
+}
+.card:hover::before { opacity:1; }
+.card:hover { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 0 1px var(--gold), 0 0 32px rgba(201,162,75,.12); }
+
+/* Section h2 gold underline tick */
+.section-head h2::after {
+  content:""; display:block; width:40px; height:2px; margin-top:14px;
+  background: linear-gradient(90deg, var(--gold), var(--gold-bright)); border-radius: 2px;
+}
+
+/* Quote: gradient left border */
+.quote { position:relative; border-left:none; padding-left:32px; color: var(--ink); }
+.quote::before {
+  content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-bright) 100%); border-radius:2px;
+}
+
+/* Stat numbers: gradient gold */
+.stat .num {
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-bright) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* Signup glow */
+.signup { border-color: rgba(201,162,75,.35); box-shadow: 0 0 60px rgba(201,162,75,.08), inset 0 1px 0 rgba(201,162,75,.12); }
+
+/* Result card pulsing glow */
+@keyframes goldPulse {
+  0%,100% { box-shadow: 0 0 48px rgba(201,162,75,.12); }
+  50%      { box-shadow: 0 0 72px rgba(201,162,75,.24), 0 0 120px rgba(201,162,75,.08); }
+}
+.result-card { animation: goldPulse 4s ease-in-out infinite; }
+
+/* Progress bar animated gradient */
+@keyframes gradShift { from { background-position: 0% 0%; } to { background-position: 200% 0%; } }
+.progress-fill {
+  background: linear-gradient(90deg, var(--gold), var(--gold-bright), var(--gold));
+  background-size: 200% 100%; animation: gradShift 2s linear infinite;
+}
+
+/* Active pill: gradient border */
+.pill.active { background: linear-gradient(135deg, rgba(201,162,75,.12) 0%, rgba(201,162,75,.05) 100%); border-color: var(--gold-bright); }
+
+/* Card stagger reveal */
+@keyframes cardReveal { from { opacity:0; transform: translateY(14px); } to { opacity:1; transform: none; } }
+.grid .card { animation: cardReveal .45s ease both; }
+.grid .card:nth-child(2) { animation-delay:.08s; }
+.grid .card:nth-child(3) { animation-delay:.16s; }
+.grid .card:nth-child(4) { animation-delay:.24s; }
+.grid .card:nth-child(5) { animation-delay:.32s; }
+.grid .card:nth-child(6) { animation-delay:.40s; }
+
+@media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
 </style>
 </head>
 <body>
