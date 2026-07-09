@@ -1,0 +1,11 @@
+services:
+  refit:
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_BASE_URL: /
+    ports:
+      - "3000:80"
+    restart: unless-stopped
