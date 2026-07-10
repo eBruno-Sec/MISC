@@ -798,6 +798,134 @@ section:has(.signup){ display:none; }
   .en-triad-tag{ background:#eee!important; border-color:#999!important; color:#444!important; }
   .pq-result-grid{ grid-template-columns:1fr!important; }
   a.btn{ display:none!important; }
+  .archetype-reveal{ background:#fff!important; border:none!important; padding:0 0 24px!important; }
+  .animal-sil svg,.reveal-animal-name,.reveal-badges,.reveal-scroll-hint{ color:#111!important; }
+  .reveal-badge{ border-color:#999!important; color:#444!important; background:#f0f0f0!important; }
+}
+
+/* ============================================================
+   FRIENDLINESS PASS — warmer, breathing, alive
+   ============================================================ */
+
+/* Looser line-height everywhere */
+body{ line-height: 1.85; }
+p{ line-height: 1.9; }
+.article p{ font-size:1.04rem; line-height:1.95; }
+.split .col p, .glossary-item p{ line-height:1.9; }
+
+/* Warm secondary accent */
+:root{
+  --rose: #d9735e;
+  --rose-glow: rgba(217,115,94,0.12);
+}
+
+/* Pull-quote callout for long-form content */
+.callout-text{
+  margin: 40px 0;
+  padding: 26px 32px;
+  background: linear-gradient(135deg, rgba(201,162,75,.08), transparent);
+  border-left: 3px solid var(--gold-bright);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: clamp(1.1rem, 2vw, 1.4rem);
+  color: var(--ink);
+  line-height: 1.65;
+}
+.callout-text strong{ font-style:normal; color:var(--gold-bright); }
+
+/* Mid-quiz nudge message */
+.quiz-nudge{
+  text-align:center; padding:14px 16px 6px;
+  font-family:var(--mono); font-size:.78rem; color:var(--gold);
+  letter-spacing:.07em; opacity:.9;
+  animation: nudgePop .5s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes nudgePop{
+  from{ opacity:0; transform:scale(.92) translateY(-6px); }
+  to  { opacity:.9; transform:none; }
+}
+
+/* Quiz option micro-interaction upgrade */
+.quiz-option:hover{ transform:translateX(4px) scale(1.01); }
+.quiz-option.selected{ transform:translateX(4px); border-color:var(--gold-bright); }
+
+/* ---- Archetype Reveal ---- */
+.archetype-reveal{
+  text-align:center;
+  padding: 56px 24px 44px;
+  margin-bottom: 36px;
+  background:
+    radial-gradient(ellipse 700px 440px at 50% 0%, rgba(201,162,75,.14), transparent 65%),
+    var(--bg-1);
+  border:1px solid rgba(201,162,75,.22);
+  border-radius: var(--radius-lg);
+  position:relative; overflow:hidden;
+  animation: revealIn .7s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes revealIn{
+  from{ opacity:0; transform:translateY(28px) scale(.97); }
+  to  { opacity:1; transform:none; }
+}
+.archetype-reveal::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background-image: radial-gradient(circle, rgba(201,162,75,.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 30%, black 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 30%, black 0%, transparent 100%);
+}
+
+.animal-sil{
+  width:148px; height:148px; margin:0 auto 28px;
+  background: radial-gradient(circle at 45% 40%, rgba(201,162,75,.22), rgba(201,162,75,.04) 70%);
+  border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  position:relative;
+  box-shadow: 0 0 48px rgba(201,162,75,.18), 0 0 80px rgba(201,162,75,.08);
+  animation: silFloat 5s ease-in-out infinite;
+}
+@keyframes silFloat{
+  0%,100%{ transform:translateY(0) scale(1); }
+  50%    { transform:translateY(-7px) scale(1.02); }
+}
+.animal-sil svg{
+  width:88px; height:88px; color:var(--gold);
+  filter: drop-shadow(0 0 14px rgba(201,162,75,.6));
+}
+
+.reveal-eyebrow{
+  font-family:var(--mono); font-size:.7rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--gold); margin-bottom:10px;
+}
+.reveal-animal-name{
+  font-family:var(--display);
+  font-size: clamp(2.4rem, 7vw, 4.4rem);
+  color:var(--gold-bright); line-height:1;
+  letter-spacing:-.02em; margin:0 0 20px;
+  text-shadow: 0 0 40px rgba(201,162,75,.35);
+}
+.reveal-badges{
+  display:flex; gap:8px; flex-wrap:wrap; justify-content:center;
+  margin:0 0 24px;
+}
+.reveal-badge{
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.07em;
+  padding:6px 14px; border-radius:var(--radius-pill);
+  border:1px solid rgba(201,162,75,.38);
+  color:var(--gold); background:rgba(201,162,75,.1);
+}
+.reveal-desc{
+  max-width:54ch; margin:0 auto 28px;
+  font-size:1.02rem; color:var(--ink); line-height:1.88;
+}
+.reveal-scroll-hint{
+  font-family:var(--mono); font-size:.7rem;
+  color:var(--ink-faint); letter-spacing:.08em;
+  animation: scrollBounce 2.2s ease-in-out infinite;
+}
+@keyframes scrollBounce{
+  0%,100%{ transform:translateY(0); opacity:.7; }
+  50%    { transform:translateY(6px); opacity:1; }
 }
 </style>
 </head>
@@ -955,6 +1083,8 @@ section:has(.signup){ display:none; }
     <h2>The short biography</h2>
     <p>Carl Gustav Jung was born July 26, 1875, in Kesswil, Switzerland, and died June 6, 1961, in Küsnacht. He trained as a psychiatrist, earning his medical degree from the University of Basel in 1900, then joined the Burghölzli psychiatric hospital in Zürich under Eugen Bleuler, where his word-association experiments led him to coin the term &ldquo;complex.&rdquo;</p>
     <p>From 1907 to 1913 he worked closely with Sigmund Freud and was seen as his probable successor. They split over a genuine theoretical disagreement, Freud's insistence that neuroses were fundamentally sexual in origin went further than Jung was willing to follow. After the split, Jung built his own framework, naming it analytical psychology specifically to distinguish it from Freud's psychoanalysis. He married Emma Rauschenbach in 1903; they had five children and remained married until her death in 1955. Jung continued writing and practicing until his own death in 1961.</p>
+
+    <div class="callout-text">The goal isn't to become a better version of your persona — it's to discover <strong>who you actually are</strong> underneath the one you've been performing.</div>
 
     <div class="notice info"><strong>A note on method</strong><p>Jung explicitly warned against using fixed symbol dictionaries to interpret dreams or archetypes the same way for everyone. His own method treated each person's material as specific to them. Keep that in mind as you read general explanations on this site, including this one.</p></div>
   </div>
@@ -1801,6 +1931,8 @@ section:has(.signup){ display:none; }
   <div class="container container-narrow">
     <h2>What the Shadow is</h2>
     <p>The Shadow is the part of your personality your conscious mind has rejected, usually because it was unacceptable somewhere along the way: to your family, your culture, or your own self-image. Jung's claim was specific: what you don't consciously own about yourself doesn't disappear, it goes underground, and finds its way back out through projection onto other people.</p>
+
+    <div class="callout-text">What you refuse to look at doesn't go away — it <strong>comes back as other people</strong> until you're willing to see it in yourself.</div>
 
     <h2>What it isn't</h2>
     <div class="notice info"><strong>Common misconception</strong><p>The Shadow isn't a secret evil twin, and it isn't always negative. People often repress positive traits, like ambition or creativity, because expressing them wasn't safe in their family or culture. It's also not something you defeat once. Shadow work is an ongoing practice, not a single breakthrough.</p></div>
@@ -3061,6 +3193,19 @@ const QUIZ_QUESTIONS = [
   }
 ];
 
+const ANIMAL_SILHOUETTES = {
+  wolf:  `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M50,80 Q24,80 16,62 Q10,46 18,32 Q22,18 20,8 L34,26 Q42,20 50,20 Q58,20 66,26 L80,8 Q78,18 82,32 Q90,46 84,62 Q76,80 50,80Z"/><ellipse cx="50" cy="63" rx="13" ry="8" fill="rgba(0,0,0,.28)"/></svg>`,
+  bear:  `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="64" rx="30" ry="28"/><circle cx="27" cy="37" r="14"/><circle cx="73" cy="37" r="14"/><ellipse cx="50" cy="72" rx="12" ry="8" fill="rgba(0,0,0,.28)"/></svg>`,
+  lion:  `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><polygon points="50,4 56,18 70,10 66,26 80,22 72,36 86,36 76,46 88,54 74,54 80,68 64,62 62,78 50,70 38,78 36,62 20,68 26,54 12,54 24,46 14,36 28,36 20,22 34,26 30,10 44,18"/><circle cx="50" cy="50" r="22"/></svg>`,
+  fox:   `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><polygon points="18,72 6,6 44,44"/><polygon points="82,72 94,6 56,44"/><ellipse cx="50" cy="70" rx="22" ry="24"/><ellipse cx="50" cy="76" rx="10" ry="6" fill="rgba(0,0,0,.28)"/></svg>`,
+  eagle: `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M50,54 Q32,42 10,48 Q4,56 10,62 Q22,66 40,60 L50,74 L60,60 Q78,66 90,62 Q96,56 90,48 Q68,42 50,54Z"/><circle cx="50" cy="34" r="15"/><path d="M50,49 L50,55" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,
+  snake: `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M64,8 Q82,8 88,22 Q94,38 78,48 Q62,58 50,50 Q38,42 28,52 Q18,62 28,76 Q36,88 50,84 Q42,92 30,88 Q12,80 10,64 Q8,46 24,36 Q40,26 52,36 Q66,46 72,34 Q78,22 66,14 Q65,11 64,8Z"/></svg>`,
+  dog:   `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="63" rx="30" ry="28"/><circle cx="29" cy="37" r="14"/><path d="M71,32 Q88,26 92,46 Q88,60 72,54Z"/><ellipse cx="50" cy="71" rx="12" ry="7" fill="rgba(0,0,0,.28)"/></svg>`,
+  owl:   `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="64" rx="30" ry="32"/><polygon points="28,40 20,12 44,36"/><polygon points="72,40 80,12 56,36"/><circle cx="36" cy="58" r="12" fill="rgba(0,0,0,.38)"/><circle cx="64" cy="58" r="12" fill="rgba(0,0,0,.38)"/><circle cx="36" cy="58" r="5"/><circle cx="64" cy="58" r="5"/></svg>`,
+  raven: `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><ellipse cx="44" cy="44" rx="21" ry="23"/><path d="M48,64 Q52,82 42,92 Q34,82 36,64Z"/><path d="M60,44 Q88,36 90,52 Q80,68 60,58Z"/><polygon points="26,44 8,52 14,38"/></svg>`,
+  tiger: `<svg viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="60" rx="32" ry="30"/><polygon points="26,36 14,8 40,30"/><polygon points="74,36 86,8 60,30"/><line x1="28" y1="52" x2="12" y2="46" stroke="rgba(0,0,0,.3)" stroke-width="3.5" stroke-linecap="round"/><line x1="28" y1="60" x2="10" y2="60" stroke="rgba(0,0,0,.3)" stroke-width="3.5" stroke-linecap="round"/><line x1="72" y1="52" x2="88" y2="46" stroke="rgba(0,0,0,.3)" stroke-width="3.5" stroke-linecap="round"/><line x1="72" y1="60" x2="90" y2="60" stroke="rgba(0,0,0,.3)" stroke-width="3.5" stroke-linecap="round"/></svg>`,
+};
+
 const ANIMAL_RESULTS = {
   wolf:  { name: "Wolf",  traits: "Loyalty · Instinct · Protection · Pack-mindedness",   description: "You orient your identity around the people you're responsible for — fiercely protective, guided by instinct over calculation, and at your best when the stakes are real and the circle is tight.",                                                                          growth: "Loosen your grip on control inside the group you protect. Not everyone needs guarding; some just need trust.",                                        shadow: "Over-identifying with the pack costs you. Watch for moments when protecting others becomes a way of avoiding your own needs." },
   bear:  { name: "Bear",  traits: "Strength · Solitude · Grounded power · Patience",      description: "You carry real power quietly. Stillness is your default, not weakness — you recharge alone, stay unbothered under pressure others can't handle, and when you do act, it lands decisively.",                                                                             growth: "Your strength is real, but isolation isn't the same as peace. Let a few people closer than feels comfortable.",                                       shadow: "Withdrawal can tip into avoidance. Notice when solitude becomes hiding from something that needs confronting." },
@@ -3099,7 +3244,7 @@ function initQuiz(){
       <div class="quiz-options"></div>
       <div class="quiz-nav">
         <button type="button" class="btn btn-outline quiz-back" ${i === 0 ? 'disabled style="visibility:hidden;"' : ''}>Back</button>
-        <button type="button" class="btn btn-primary quiz-next" disabled>Next</button>
+        <button type="button" class="btn btn-primary quiz-next" disabled>${i === QUIZ_QUESTIONS.length - 1 ? 'Reveal My Profile ✦' : 'Next'}</button>
       </div>
     `;
     const optWrap = block.querySelector('.quiz-options');
@@ -3121,6 +3266,11 @@ function initQuiz(){
     qContainer.appendChild(block);
   });
 
+  const NUDGES = {
+    10: '✦ One third in — you\'re doing great',
+    20: '✦ Final stretch — almost there',
+  };
+
   function goTo(index){
     if(index >= QUIZ_QUESTIONS.length){
       showResult();
@@ -3128,9 +3278,18 @@ function initQuiz(){
     }
     if(index < 0) return;
     qContainer.querySelectorAll('.quiz-q').forEach(b => b.classList.remove('active'));
-    qContainer.querySelector(`.quiz-q[data-index="${index}"]`).classList.add('active');
+    const activeQ = qContainer.querySelector(`.quiz-q[data-index="${index}"]`);
+    activeQ.classList.add('active');
     current = index;
     progressFill.style.width = `${(index / QUIZ_QUESTIONS.length) * 100}%`;
+    const old = activeQ.querySelector('.quiz-nudge');
+    if(old) old.remove();
+    if(NUDGES[index]){
+      const n = document.createElement('div');
+      n.className = 'quiz-nudge';
+      n.textContent = NUDGES[index];
+      activeQ.prepend(n);
+    }
   }
 
   function showResult(){
@@ -3223,10 +3382,18 @@ function initQuiz(){
     formEl.style.display = 'none';
 
     resultEl.innerHTML = `
-      <div class="result-card">
-        <div class="eyebrow" style="justify-content:center;">Your Complete Profile</div>
-        <h2>The ${ar.name} &middot; <span style="color:var(--gold);">${mbtiCode}</span> &middot; Enneagram ${enNum}</h2>
-        <p class="lead">${ar.description}</p>
+      <div class="archetype-reveal">
+        <div class="reveal-eyebrow">Your Animal Archetype</div>
+        <div class="animal-sil">${ANIMAL_SILHOUETTES[winner.k] || ''}</div>
+        <div class="reveal-animal-name">The ${ar.name}</div>
+        <div class="reveal-badges">
+          <span class="reveal-badge">MBTI &middot; ${mbtiCode}</span>
+          <span class="reveal-badge">Enneagram ${enNum}</span>
+          <span class="reveal-badge">${LOVE_LANGUAGES[llRanked[0].k].name}</span>
+          <span class="reveal-badge">Holland ${holland}</span>
+        </div>
+        <p class="reveal-desc">${ar.description}</p>
+        <div class="reveal-scroll-hint">&#8595; scroll for your full breakdown</div>
       </div>
 
       <div class="report-profile">
