@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -927,6 +927,73 @@ p{ line-height: 1.9; }
   0%,100%{ transform:translateY(0); opacity:.7; }
   50%    { transform:translateY(6px); opacity:1; }
 }
+
+/* ---- Onboarding ---- */
+.quiz-onboarding{ text-align:center; padding:36px 16px 28px; }
+.quiz-onboarding h2{ font-size:clamp(1.5rem,3vw,2rem); margin-bottom:.35em; }
+.quiz-onboarding > p{ color:var(--ink-dim); max-width:48ch; margin:0 auto 22px; font-size:.98rem; }
+.onboarding-rules{ display:flex; flex-direction:column; gap:10px; max-width:460px; margin:0 auto 28px; text-align:left; }
+.onboarding-rule{ display:flex; gap:14px; align-items:flex-start; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius); padding:13px 16px; font-size:.9rem; color:var(--ink-dim); }
+.onboarding-rule-icon{ font-size:1.1rem; flex-shrink:0; }
+
+/* ---- Intensity selector ---- */
+.quiz-step-meta{ font-family:var(--mono); font-size:.68rem; color:var(--gold); letter-spacing:.12em; text-transform:uppercase; margin-bottom:8px; opacity:.85; }
+.intensity-wrap{ margin-top:18px; padding:16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-lg); animation:fadein .2s ease; }
+.intensity-label{ font-family:var(--mono); font-size:.7rem; color:var(--ink-faint); letter-spacing:.08em; text-align:center; margin-bottom:10px; }
+.intensity-row{ display:flex; gap:8px; }
+.intensity-btn{ flex:1; padding:11px 6px; border-radius:var(--radius); border:1.5px solid var(--line); background:var(--bg-1); color:var(--ink-dim); font-family:var(--mono); font-size:.72rem; letter-spacing:.03em; cursor:pointer; transition:all .15s; text-align:center; min-height:44px; }
+.intensity-btn:hover{ border-color:var(--gold); color:var(--gold); background:var(--gold-glow); }
+.intensity-btn.sel{ border-color:var(--gold-bright); background:rgba(201,162,75,.12); color:var(--gold-bright); font-weight:700; }
+.intensity-btn.sel.high{ box-shadow:0 0 14px rgba(201,162,75,.25); }
+
+/* ---- Premium gate ---- */
+.premium-gate{ margin:40px 0; border:1.5px solid rgba(201,162,75,.28); border-radius:var(--radius-lg); background:linear-gradient(135deg,rgba(201,162,75,.07),transparent); overflow:hidden; }
+.premium-gate-head{ padding:26px 28px 20px; border-bottom:1px solid rgba(201,162,75,.12); }
+.premium-gate-head h3{ margin:0 0 .3em; font-size:1.2rem; }
+.premium-gate-head p{ margin:0; font-size:.93rem; color:var(--ink-dim); }
+.premium-features{ display:grid; grid-template-columns:1fr 1fr; gap:1px; background:rgba(201,162,75,.08); }
+@media(max-width:540px){ .premium-features{ grid-template-columns:1fr; } }
+.premium-feat{ background:var(--bg-1); padding:16px 18px; display:flex; gap:11px; align-items:flex-start; }
+.premium-feat-icon{ font-size:1.1rem; flex-shrink:0; }
+.premium-feat strong{ display:block; color:var(--ink); font-size:.9rem; margin-bottom:2px; }
+.premium-feat span{ color:var(--ink-dim); font-size:.82rem; }
+.premium-gate-cta{ padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.premium-price{ font-family:var(--display); font-size:1.9rem; color:var(--gold); line-height:1; }
+.premium-price small{ display:block; font-family:var(--mono); font-size:.68rem; color:var(--ink-faint); margin-top:3px; font-style:normal; }
+
+/* ---- Connection Cheat Sheet ---- */
+.cheat-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px; }
+.cheat-tab{ font-family:var(--mono); font-size:.72rem; letter-spacing:.05em; padding:8px 15px; border-radius:var(--radius-pill); border:1px solid var(--line); background:none; color:var(--ink-dim); cursor:pointer; transition:all .15s; }
+.cheat-tab:hover{ border-color:var(--gold); color:var(--gold); }
+.cheat-tab.active{ border-color:var(--gold); color:var(--gold); background:rgba(201,162,75,.1); }
+.cheat-panel{ display:none; }
+.cheat-panel.active{ display:flex; flex-direction:column; gap:10px; animation:fadein .25s ease; }
+.cheat-tip{ background:var(--bg-2); border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:0 var(--radius) var(--radius) 0; padding:13px 16px; }
+.cheat-tip-label{ font-family:var(--mono); font-size:.66rem; color:var(--gold); letter-spacing:.1em; text-transform:uppercase; margin-bottom:5px; }
+.cheat-tip p{ margin:0; font-size:.88rem; color:var(--ink-dim); line-height:1.7; }
+
+/* ---- Audit trail ---- */
+.audit-box{ border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; margin:28px 0; }
+.audit-box-head{ background:var(--bg-2); padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+.audit-box-head h4{ margin:0; font-size:.78rem; }
+.audit-body{ padding:18px; display:flex; flex-direction:column; gap:14px; }
+.audit-fw{ display:flex; flex-direction:column; gap:5px; }
+.audit-fw-name{ font-family:var(--mono); font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:var(--gold); }
+.audit-rows{ display:flex; flex-direction:column; gap:4px; }
+.audit-row{ font-size:.82rem; color:var(--ink-faint); display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.audit-row-q{ color:var(--ink-dim); }
+.audit-badge{ font-family:var(--mono); font-size:.67rem; padding:1px 8px; border-radius:var(--radius-pill); border:1px solid var(--line); color:var(--ink-faint); margin-left:auto; flex-shrink:0; }
+.audit-badge.high{ border-color:var(--gold); color:var(--gold); }
+.audit-badge.low{ opacity:.55; }
+
+/* ---- 7-Petal Career Blueprint ---- */
+.petal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:14px 0; }
+@media(max-width:580px){ .petal-grid{ grid-template-columns:1fr 1fr; } }
+.petal-card{ background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius); padding:14px 15px; display:flex; flex-direction:column; gap:5px; }
+.petal-num{ font-family:var(--mono); font-size:.62rem; color:var(--ink-faint); letter-spacing:.1em; text-transform:uppercase; }
+.petal-title{ font-size:.88rem; font-weight:600; color:var(--ink); }
+.petal-val{ font-size:.85rem; color:var(--gold); font-family:var(--mono); }
+.petal-desc{ font-size:.8rem; color:var(--ink-dim); margin:0; line-height:1.6; }
 </style>
 </head>
 <body>
@@ -2245,7 +2312,7 @@ p{ line-height: 1.9; }
   <div class="container container-narrow center">
     <div class="eyebrow" style="justify-content:center;">Complete Self-Assessment</div>
     <h1>One quiz. Every framework.</h1>
-    <p class="sub lead">30 questions that simultaneously score your animal archetype, MBTI type, Enneagram, Big Five traits, DISC profile, Love Languages, and Holland career code. About five minutes.</p>
+    <p class="sub lead">10 scenarios — each rated for intensity — that simultaneously score your animal archetype, MBTI type, Enneagram, Big Five traits, DISC profile, Love Languages, and Holland career code. About 4 minutes.</p>
   </div>
 </section>
 
@@ -2913,282 +2980,103 @@ function initFilters(){
    =========================================================== */
 const QUIZ_QUESTIONS = [
   {
-    q: "A conflict breaks out in a group you're part of. Your instinct is to:",
+    scenario: "Scenario 1 of 10 — Under pressure",
+    q: "Your team’s biggest project just collapsed — missed deadline, blame flying. What do you actually do?",
     options: [
-      { text: "Step in and settle it before it escalates.", scores: { wolf:2, bear:1, mb_T:1, di_D:2, en_8:1 } },
-      { text: "Watch closely first, then choose the right moment to act.", scores: { owl:2, fox:1, mb_N:1, di_C:1, en_6:1, bf_C_hi:1 } },
-      { text: "Say exactly what you think, even if it's unpopular.", scores: { tiger:2, lion:1, mb_T:2, en_8:2 } },
-      { text: "Step back and let it resolve on its own.", scores: { bear:2, raven:1, mb_I:1, en_9:2, bf_A_hi:1 } }
+      { text: "Take control: assign accountability, redirect the energy, get it back on track.", scores: { wolf:2, lion:2, mb_T:2, mb_E:1, di_D:3, en_8:2, en_3:1, ri_E:1 } },
+      { text: "Pull the quietest person aside, find the real story, then rebuild from there.", scores: { dog:2, wolf:1, mb_F:2, mb_E:1, di_S:2, en_2:1, en_6:2, ri_S:1, ll_time:1 } },
+      { text: "Locate the technical failure point and fix it before emotions contaminate the facts.", scores: { owl:2, eagle:1, mb_T:3, mb_I:1, di_C:3, en_5:1, en_1:2, ri_I:2, bf_C_hi:1 } },
+      { text: "Give everyone space first, then reconnect once heads are cooler.", scores: { bear:3, mb_I:2, mb_F:1, di_S:2, en_9:3, bf_A_hi:1 } }
     ]
   },
   {
-    q: "What does other people's praise of you usually mention?",
+    scenario: "Scenario 2 of 10 — Natural habitat",
+    q: "Zero obligations, no one expecting anything. You feel most like yourself when you:",
     options: [
-      { text: "That you're loyal and show up for people.", scores: { wolf:2, dog:2, mb_F:1, bf_A_hi:2, en_2:1, ll_acts:1 } },
-      { text: "That you notice things others miss.", scores: { owl:2, fox:1, mb_N:1, bf_O_hi:1, en_5:1, di_C:1 } },
-      { text: "That you're hard to rattle under pressure.", scores: { bear:2, lion:1, mb_T:1, di_S:1, en_9:1 } },
-      { text: "That you make people rethink their assumptions.", scores: { raven:2, fox:1, mb_N:1, bf_O_hi:2, en_4:1 } }
+      { text: "Lose track of time building, fixing, or making something physical.", scores: { bear:2, mb_S:2, mb_I:1, en_9:1, ri_R:3, bf_C_hi:1 } },
+      { text: "Disappear somewhere completely new — a trail, neighborhood, or country you’ve never been.", scores: { fox:2, snake:2, mb_P:2, mb_N:1, en_7:3, bf_O_hi:2, ri_A:1 } },
+      { text: "Spend the whole day in one long conversation with someone who really knows you.", scores: { dog:2, wolf:1, mb_F:2, mb_I:1, en_6:1, en_2:2, ll_time:3, bf_A_hi:1 } },
+      { text: "Go deep alone — a book, course, or problem you’ve been wanting to explore for months.", scores: { owl:2, raven:2, mb_I:2, mb_N:2, en_5:3, bf_O_hi:2, ri_I:2 } }
     ]
   },
   {
-    q: "When a plan falls apart, you tend to:",
+    scenario: "Scenario 3 of 10 — Work at its best",
+    q: "When work feels natural and electric, your environment looks like:",
     options: [
-      { text: "Improvise fast and find another way through.", scores: { fox:2, raven:1, mb_P:2, di_D:1, en_7:1 } },
-      { text: "Hold the line and absorb the disruption.", scores: { bear:2, dog:1, mb_J:1, di_S:2, en_6:1 } },
-      { text: "Rally the people around you and push forward.", scores: { lion:2, wolf:1, mb_E:2, di_I:1, en_3:1 } },
-      { text: "Step back to see the whole picture first.", scores: { eagle:2, owl:1, mb_N:2, bf_O_hi:1, en_5:1 } }
+      { text: "High-stakes and fast-moving — decisions matter and the impact is immediate.", scores: { tiger:2, lion:2, mb_E:2, mb_T:1, di_D:3, en_3:2, en_8:1, ri_E:2, bf_E_hi:1 } },
+      { text: "Deep solo focus — one complex problem, long timeline, minimal interruption.", scores: { owl:2, eagle:2, mb_I:2, mb_N:2, en_5:3, ri_I:3, bf_O_hi:1, bf_C_hi:1 } },
+      { text: "A tight team that knows each other’s rhythms and actually trusts each other.", scores: { wolf:2, dog:2, mb_E:1, mb_F:2, di_S:3, en_6:1, en_2:1, ri_S:2, bf_A_hi:2 } },
+      { text: "Creative freedom — outcome is defined but how I get there is entirely mine.", scores: { fox:2, snake:2, mb_P:2, mb_N:2, en_4:2, en_7:1, ri_A:3, bf_O_hi:2 } }
     ]
   },
   {
-    q: "Which sentence sounds most like you?",
+    scenario: "Scenario 4 of 10 — How love reaches you",
+    q: "The moment you feel most genuinely loved or valued, it usually comes through:",
     options: [
-      { text: "\"I'd rather be right than liked.\"", scores: { tiger:2, raven:1, mb_T:2, en_8:1, di_D:1 } },
-      { text: "\"I'll figure out a way around this.\"", scores: { fox:2, snake:1, mb_P:2, en_7:1, bf_O_hi:1 } },
-      { text: "\"I just want everyone to get home safe.\"", scores: { dog:2, wolf:1, mb_F:2, en_6:1, bf_A_hi:2, ll_acts:1 } },
-      { text: "\"Give me the long view before I decide.\"", scores: { eagle:2, owl:1, mb_N:2, bf_C_hi:1, en_5:1 } }
+      { text: "Something they did without being asked — they just quietly handled it.", scores: { dog:2, wolf:1, ll_acts:4, en_2:1, mb_F:1, bf_A_hi:2 } },
+      { text: "Words — actually listening, then saying the specific things that matter.", scores: { raven:1, mb_F:2, ll_words:4, en_4:1, bf_E_hi:1 } },
+      { text: "Undivided time — hours together with no agenda, just completely present.", scores: { wolf:1, dog:2, ll_time:4, mb_I:1, en_6:2, bf_A_hi:1 } },
+      { text: "Physical touch — a hand on your back, a hug that actually lasts.", scores: { ll_touch:4, mb_F:1, bf_E_hi:1, en_2:1 } }
     ]
   },
   {
-    q: "Your closest relationships are built mostly on:",
+    scenario: "Scenario 5 of 10 — The gift",
+    q: "Someone who cares about you gives you an unexpected, thoughtful gift. Your honest reaction:",
     options: [
-      { text: "Unspoken loyalty — you don't need to say it out loud.", scores: { wolf:2, dog:1, mb_F:1, en_6:2, ll_acts:2 } },
-      { text: "Mutual respect for each other's independence.", scores: { tiger:2, eagle:1, mb_T:1, en_8:1, di_D:1 } },
-      { text: "Shared history and protecting what you've built together.", scores: { bear:2, lion:1, en_6:1, di_S:1, ll_time:1 } },
-      { text: "Honest, sometimes uncomfortable truth-telling.", scores: { raven:2, snake:1, mb_T:2, en_8:1, ll_words:1 } }
+      { text: "Deeply moved — a real gift means they were thinking about me specifically.", scores: { ll_gifts:4, en_4:2, mb_F:1, bf_N_hi:1 } },
+      { text: "Touched — but a real conversation or handwritten note would have landed even harder.", scores: { ll_words:3, ll_gifts:1, en_4:1, mb_F:2 } },
+      { text: "Grateful — but I’d trade it for them showing up and helping with something real.", scores: { ll_acts:3, ll_gifts:1, en_2:1, bf_A_hi:2 } },
+      { text: "Sweet — but I’d rather they just gave me uninterrupted time with no agenda.", scores: { ll_time:3, ll_gifts:1, en_6:2, bf_A_hi:1 } }
     ]
   },
   {
-    q: "What are you most afraid of becoming?",
+    scenario: "Scenario 6 of 10 — Calling",
+    q: "The work that would make you feel like your time on earth was not wasted:",
     options: [
-      { text: "Someone who can't be trusted.", scores: { dog:2, wolf:1, mb_F:1, en_6:2, bf_N_hi:1 } },
-      { text: "Someone who never grew past their old self.", scores: { snake:2, raven:1, mb_N:1, en_4:1, bf_O_hi:1 } },
-      { text: "Someone irrelevant, ignored, overlooked.", scores: { lion:2, eagle:1, en_3:2, di_I:1 } },
-      { text: "Someone who got outsmarted because they weren't paying attention.", scores: { fox:2, owl:1, mb_N:1, en_5:1, bf_C_hi:1 } }
+      { text: "Leading people toward something bigger than what they thought was possible.", scores: { lion:2, eagle:1, ri_E:3, di_D:2, en_3:2, mb_E:2, mb_N:1 } },
+      { text: "Understanding something deeply complex that most people have not even thought to ask.", scores: { owl:2, raven:2, ri_I:3, en_5:3, bf_O_hi:2, mb_N:2 } },
+      { text: "Creating something — art, writing, design, music, or original performance.", scores: { snake:2, fox:1, ri_A:3, en_4:3, bf_O_hi:2, mb_N:1, mb_P:1 } },
+      { text: "Directly improving people’s lives through service, care, or teaching.", scores: { dog:2, wolf:1, ri_S:3, en_2:2, bf_A_hi:2, mb_F:2 } }
     ]
   },
   {
-    q: "How do you make big decisions?",
+    scenario: "Scenario 7 of 10 — Deepest fear",
+    q: "The thing underneath everything — what you work hardest to prevent:",
     options: [
-      { text: "Quietly, after a lot of private thought.", scores: { owl:2, bear:1, mb_I:2, en_5:1, bf_C_hi:1 } },
-      { text: "Quickly, by trusting your gut.", scores: { tiger:2, fox:1, mb_P:2, en_7:1, di_D:1 } },
-      { text: "By weighing how it affects the people who depend on you.", scores: { wolf:2, dog:1, mb_F:2, en_2:1, bf_A_hi:1 } },
-      { text: "By imagining how it looks five years from now.", scores: { eagle:2, snake:1, mb_N:2, bf_O_hi:1, en_1:1 } }
+      { text: "Being abandoned, unwanted, or no longer chosen by the people who matter.", scores: { en_2:2, en_6:3, ll_time:1, bf_N_hi:2, mb_F:1 } },
+      { text: "Being controlled, trapped, or overpowered by someone else.", scores: { tiger:2, en_8:3, di_D:1, mb_P:1, mb_I:1, bf_N_hi:2 } },
+      { text: "Being ordinary — invisible, forgotten, or easily replaceable.", scores: { lion:2, en_3:2, en_4:2, di_I:1, bf_N_hi:1, mb_E:1 } },
+      { text: "Losing competence, falling behind, or being exposed as incapable.", scores: { eagle:1, owl:1, en_5:2, en_1:2, bf_N_hi:1, bf_C_hi:1, mb_T:1 } }
     ]
   },
   {
-    q: "After a full day of back-to-back social events, you feel:",
+    scenario: "Scenario 8 of 10 — Identity at the core",
+    q: "The sentence that fits you most honestly when no one is watching:",
     options: [
-      { text: "Energized — social time refuels me.", scores: { lion:1, mb_E:2, bf_E_hi:2, di_I:1, en_7:1 } },
-      { text: "Satisfied but ready for some quiet.", scores: { dog:1, mb_E:1, mb_I:1, en_9:1 } },
-      { text: "Drained — I need alone time to recover.", scores: { owl:1, mb_I:2, bf_E_lo:2, en_5:1 } },
-      { text: "Relieved — I prefer small, meaningful gatherings.", scores: { wolf:1, mb_I:1, bf_E_lo:1, en_6:1, ll_time:1 } }
+      { text: "“I set my own standard and hold to it — even when no one checks.”", scores: { en_1:3, mb_J:2, bf_C_hi:2, di_C:2, ri_C:1, eagle:1 } },
+      { text: "“I am most myself when growing, changing, or shedding what I have outgrown.”", scores: { snake:3, en_4:2, en_7:1, bf_O_hi:2, mb_N:2, mb_P:2 } },
+      { text: "“My value is in what I build and accomplish — results are how I keep score.”", scores: { lion:2, eagle:1, en_3:3, di_D:2, mb_T:1, mb_J:1, ri_E:1 } },
+      { text: "“I am who I protect and who protects me — relationships are the whole point.”", scores: { wolf:3, dog:2, en_6:2, en_2:1, bf_A_hi:2, ll_time:1 } }
     ]
   },
   {
-    q: "Your preferred work environment is:",
+    scenario: "Scenario 9 of 10 — Stress response",
+    q: "When everything hits at once — your instinctive first move is:",
     options: [
-      { text: "Fast-paced, with variety and constant novelty.", scores: { fox:1, mb_P:1, bf_O_hi:1, di_I:1, en_7:1, ri_E:1 } },
-      { text: "Structured, with clear goals and high standards.", scores: { mb_J:2, bf_C_hi:2, di_C:2, en_1:1, ri_C:1 } },
-      { text: "Collaborative, team-focused, people-centered.", scores: { dog:1, di_S:2, bf_A_hi:1, en_2:1, ri_S:1 } },
-      { text: "Autonomous, where I can go deep on complex problems.", scores: { owl:1, mb_I:1, en_5:1, ri_I:2, bf_O_hi:1 } }
+      { text: "Move. Action clears the noise faster than sitting with it.", scores: { tiger:2, lion:1, di_D:3, bf_E_hi:1, en_8:2, en_7:1, ri_R:1, mb_E:1 } },
+      { text: "Analyze. Map exactly what broke and build a precise response.", scores: { owl:2, raven:1, mb_T:3, di_C:3, en_6:1, en_5:2, bf_C_hi:2 } },
+      { text: "Talk. Processing out loud with someone close resets me completely.", scores: { dog:2, mb_F:2, bf_E_hi:2, en_2:1, ll_time:1, ll_words:2, di_I:1 } },
+      { text: "Withdraw. Space and silence reset me faster than anything else.", scores: { bear:3, mb_I:2, bf_E_lo:2, en_9:2, en_5:1, di_S:1 } }
     ]
   },
   {
-    q: "Under stress, your go-to is:",
+    scenario: "Scenario 10 of 10 — How you grow",
+    q: "When you want to master something new, you naturally:",
     options: [
-      { text: "Take action — movement beats standing still.", scores: { tiger:1, lion:1, di_D:1, bf_E_hi:1, en_8:1, ri_R:1 } },
-      { text: "Analyze — figure out what went wrong and make a plan.", scores: { mb_T:2, di_C:2, en_6:1, bf_C_hi:1 } },
-      { text: "Talk — process it out loud with someone close.", scores: { dog:1, mb_F:2, bf_E_hi:1, en_2:1, ll_time:1, ll_words:1 } },
-      { text: "Withdraw — space and silence help me reset.", scores: { bear:1, owl:1, mb_I:2, bf_E_lo:1, en_5:1 } }
-    ]
-  },
-  {
-    q: "What motivates you most at work?",
-    options: [
-      { text: "Being the best at what I do — recognized excellence.", scores: { lion:1, tiger:1, en_3:2, di_D:1, bf_C_hi:1, ri_E:1 } },
-      { text: "Making a genuine difference for people.", scores: { dog:1, wolf:1, en_2:2, ri_S:2, bf_A_hi:2 } },
-      { text: "Mastering a domain and pushing its limits.", scores: { eagle:1, owl:1, en_5:2, ri_I:2, bf_O_hi:2 } },
-      { text: "Building something reliable and lasting.", scores: { bear:1, en_1:1, en_6:1, di_C:1, bf_C_hi:1, ri_C:1 } }
-    ]
-  },
-  {
-    q: "Your relationship with rules and structure:",
-    options: [
-      { text: "I follow them — they exist for good reasons.", scores: { mb_J:2, en_1:2, bf_C_hi:2, di_C:1 } },
-      { text: "I follow the ones I understand; I challenge the rest.", scores: { tiger:1, mb_T:2, mb_P:1, en_8:1 } },
-      { text: "I adapt when context demands flexibility.", scores: { fox:1, mb_P:2, bf_O_hi:1, di_D:1 } },
-      { text: "I follow them to keep things smooth, not from conviction.", scores: { dog:1, bf_A_hi:1, en_9:1, di_S:1 } }
-    ]
-  },
-  {
-    q: "Love, to you, is mainly expressed through:",
-    options: [
-      { text: "Showing up — actions speak louder than words.", scores: { wolf:1, dog:1, ll_acts:3, en_2:1, bf_A_hi:1 } },
-      { text: "Knowing me deeply and choosing me anyway.", scores: { ll_time:2, en_4:2, ll_words:1 } },
-      { text: "Physical presence — a hug that says everything.", scores: { ll_touch:3, bf_E_hi:1, en_2:1 } },
-      { text: "Saying it clearly — the words matter to me.", scores: { raven:1, ll_words:3, en_2:1 } }
-    ]
-  },
-  {
-    q: "An unexpected, thoughtful gift makes you feel:",
-    options: [
-      { text: "Deeply seen and remembered.", scores: { ll_gifts:3, en_4:1 } },
-      { text: "Appreciated, but small acts of service mean more.", scores: { ll_acts:2, ll_gifts:1, bf_A_hi:1 } },
-      { text: "Nice, but I'd trade it for genuine time together.", scores: { ll_time:2, ll_gifts:1 } },
-      { text: "More valued when words of appreciation come with it.", scores: { ll_words:2, ll_gifts:2 } }
-    ]
-  },
-  {
-    q: "The kind of work you're most drawn to:",
-    options: [
-      { text: "Hands-on — building, fixing, or making things.", scores: { ri_R:3, bf_C_hi:1, mb_S:1 } },
-      { text: "Research and analysis — understanding complex systems.", scores: { raven:1, owl:1, ri_I:3, bf_O_hi:2, mb_N:1 } },
-      { text: "Creative — art, design, writing, or performance.", scores: { snake:1, ri_A:3, bf_O_hi:2, en_4:1 } },
-      { text: "People-facing — teaching, counseling, or helping others.", scores: { dog:1, ri_S:3, bf_A_hi:2, en_2:1 } }
-    ]
-  },
-  {
-    q: "Which of these sounds most like a calling?",
-    options: [
-      { text: "Leading and growing a team or organization.", scores: { lion:1, ri_E:3, di_D:2, en_3:1 } },
-      { text: "Managing systems and data with precision.", scores: { ri_C:3, bf_C_hi:2, di_C:2, en_1:1 } },
-      { text: "Researching and pushing intellectual frontiers.", scores: { eagle:1, ri_I:2, bf_O_hi:2, en_5:1 } },
-      { text: "Making or repairing things in the physical world.", scores: { ri_R:2, bf_C_hi:1, mb_S:1 } }
-    ]
-  },
-  {
-    q: "In a disagreement, you naturally focus on:",
-    options: [
-      { text: "What's logically correct, regardless of feelings.", scores: { mb_T:3, di_D:1, en_8:1 } },
-      { text: "Finding the most fair and precise outcome.", scores: { mb_T:2, di_C:1, en_1:1, bf_C_hi:1 } },
-      { text: "How both people feel and preserving the relationship.", scores: { mb_F:3, bf_A_hi:1, en_2:1, ll_words:1 } },
-      { text: "Avoiding conflict if there's nothing worth fighting about.", scores: { mb_F:1, en_9:2, bf_A_hi:1 } }
-    ]
-  },
-  {
-    q: "When you think about the future, you tend to focus on:",
-    options: [
-      { text: "Concrete steps — what's actionable right now.", scores: { mb_S:2, mb_J:1, di_D:1 } },
-      { text: "Possibilities — what could be built or become.", scores: { eagle:1, snake:1, mb_N:2, bf_O_hi:2, en_7:1 } },
-      { text: "Risks and how to prepare for worst-case scenarios.", scores: { en_6:2, bf_N_hi:2, mb_J:1 } },
-      { text: "Ideals — how things should ideally unfold.", scores: { mb_N:1, en_1:1, en_4:1, bf_O_hi:1 } }
-    ]
-  },
-  {
-    q: "How you prefer to learn:",
-    options: [
-      { text: "Give me the big picture first — theory before details.", scores: { eagle:1, mb_N:2, bf_O_hi:2, di_C:1 } },
-      { text: "Throw me in — I figure it out by doing.", scores: { fox:1, mb_S:1, mb_P:2, bf_O_hi:1, di_D:1 } },
-      { text: "Structured courses with clear goals and milestones.", scores: { mb_S:1, mb_J:2, bf_C_hi:2, ri_C:1 } },
-      { text: "Deep independent reading — I go where curiosity leads.", scores: { raven:1, owl:1, mb_N:1, bf_O_hi:2, en_5:2, ri_I:1 } }
-    ]
-  },
-  {
-    q: "What does 'success' really mean to you?",
-    options: [
-      { text: "Reaching the top of your field — recognized excellence.", scores: { lion:1, en_3:2, di_D:2, ri_E:1 } },
-      { text: "Deep, lasting relationships with people who matter.", scores: { wolf:1, dog:1, en_2:1, en_6:1, ll_time:2, bf_A_hi:1 } },
-      { text: "A life fully aligned with your values, however quiet.", scores: { en_1:1, en_9:1, mb_F:1, bf_O_hi:1 } },
-      { text: "Creating something original no one else has done.", scores: { snake:1, raven:1, en_4:2, en_7:1, bf_O_hi:2, ri_A:1 } }
-    ]
-  },
-  {
-    q: "Your deepest fear is:",
-    options: [
-      { text: "Being abandoned or no longer wanted.", scores: { en_2:2, en_6:1, ll_time:1, bf_N_hi:1 } },
-      { text: "Being controlled, overpowered, or trapped.", scores: { tiger:1, en_8:2, di_D:1, mb_P:1, bf_N_hi:1 } },
-      { text: "Being ordinary — overlooked or replaceable.", scores: { lion:1, en_3:2, en_4:1, di_I:1 } },
-      { text: "Being unable to trust the people around you.", scores: { en_6:2, bf_N_hi:1, ll_words:1 } }
-    ]
-  },
-  {
-    q: "How dependable are you with commitments?",
-    options: [
-      { text: "Extremely — reliability is central to my identity.", scores: { wolf:1, mb_J:2, di_S:2, en_6:2, bf_C_hi:1 } },
-      { text: "I go all-in while passionate, then I move on.", scores: { fox:1, mb_P:2, en_7:1, di_D:1 } },
-      { text: "My mood affects my follow-through more than I'd like.", scores: { mb_P:1, mb_F:1, en_4:1, bf_N_hi:1 } },
-      { text: "I build systems so nothing falls through the cracks.", scores: { mb_J:2, di_C:2, bf_C_hi:2, en_1:1 } }
-    ]
-  },
-  {
-    q: "Your core identity is most tied to:",
-    options: [
-      { text: "What you've achieved.", scores: { lion:1, en_3:3, di_D:1, bf_C_hi:1 } },
-      { text: "Who you love and show up for.", scores: { wolf:1, dog:1, en_2:2, ll_time:1, bf_A_hi:2, ll_acts:1 } },
-      { text: "What you've built or created.", scores: { bear:1, en_1:2, ri_R:1, ri_A:1 } },
-      { text: "Who you're still becoming.", scores: { snake:1, en_4:2, bf_O_hi:2, mb_N:1 } }
-    ]
-  },
-  {
-    q: "You are most bothered by:",
-    options: [
-      { text: "Inefficiency and wasted effort.", scores: { en_1:2, di_D:1, bf_C_hi:2, mb_T:1 } },
-      { text: "Dishonesty and hidden agendas.", scores: { tiger:1, raven:1, en_8:2, en_6:1, mb_T:1, bf_N_hi:1 } },
-      { text: "Emotional disconnection from people who matter.", scores: { dog:1, en_2:2, en_4:1, ll_time:1, bf_A_hi:1 } },
-      { text: "Being constrained or forced to conform.", scores: { snake:1, en_4:2, mb_P:2, bf_O_hi:1 } }
-    ]
-  },
-  {
-    q: "Your relationship style is best described as:",
-    options: [
-      { text: "Independent — I need space to stay myself.", scores: { tiger:1, mb_I:1, mb_T:1, di_D:1, en_8:1 } },
-      { text: "Deeply committed once I trust — all in.", scores: { wolf:1, en_6:2, di_S:2, ll_time:1, bf_A_hi:1 } },
-      { text: "Expressive — I verbalize my feelings often.", scores: { mb_E:1, mb_F:1, ll_words:2, en_4:1, bf_E_hi:1 } },
-      { text: "Supportive — always looking for ways to help.", scores: { dog:1, en_2:2, ll_acts:2, bf_A_hi:2 } }
-    ]
-  },
-  {
-    q: "On a completely free Saturday with no obligations:",
-    options: [
-      { text: "You tackle a project you've been putting off.", scores: { mb_J:2, di_D:1, bf_C_hi:1, en_1:1 } },
-      { text: "You explore somewhere new or try something unfamiliar.", scores: { fox:1, snake:1, bf_O_hi:2, mb_P:2, en_7:2, ll_time:1 } },
-      { text: "You spend genuine, present time with people you love.", scores: { wolf:1, dog:1, ll_time:2, ll_touch:1, bf_E_hi:1, en_2:1 } },
-      { text: "You enjoy a full, unstructured day of quiet rest.", scores: { bear:1, owl:1, mb_I:2, bf_E_lo:1, en_9:1 } }
-    ]
-  },
-  {
-    q: "Your strongest asset is:",
-    options: [
-      { text: "Execution — I set a goal and get there.", scores: { mb_J:2, di_D:1, bf_C_hi:2, en_1:1 } },
-      { text: "Creativity — I see angles others miss.", scores: { raven:1, snake:1, bf_O_hi:2, ri_A:1, mb_N:2, en_4:1 } },
-      { text: "People skills — I connect with almost anyone.", scores: { lion:1, di_I:2, bf_E_hi:2, en_7:1, ll_words:1 } },
-      { text: "Analysis — I find patterns and inconsistencies fast.", scores: { owl:1, mb_T:2, di_C:2, ri_I:1, en_5:1 } }
-    ]
-  },
-  {
-    q: "At your best, you are:",
-    options: [
-      { text: "Visionary — drawing people toward a larger future.", scores: { eagle:1, en_3:1, en_7:1, di_I:2, mb_N:1, ri_E:1 } },
-      { text: "A stable anchor people can count on completely.", scores: { bear:1, wolf:1, en_6:1, en_9:1, di_S:2, bf_A_hi:1, ll_acts:1 } },
-      { text: "Precise and thorough in everything you touch.", scores: { en_1:2, di_C:2, bf_C_hi:2, ri_C:1 } },
-      { text: "Deeply compassionate — tuned into what people need.", scores: { dog:1, en_2:2, bf_A_hi:2, ll_acts:1 } }
-    ]
-  },
-  {
-    q: "When something you care about gets criticized, you:",
-    options: [
-      { text: "Want to know exactly what's wrong so you can fix it.", scores: { mb_T:2, bf_C_hi:1, en_1:1, di_C:1 } },
-      { text: "Feel it personally, even if the feedback is fair.", scores: { mb_F:2, en_4:2, bf_N_hi:2 } },
-      { text: "Defend it — you believe in it and stand your ground.", scores: { tiger:1, lion:1, mb_T:1, di_D:2, en_8:1, en_3:1 } },
-      { text: "Step back, evaluate dispassionately, and improve.", scores: { raven:1, owl:1, mb_N:1, mb_T:1, bf_O_hi:1, en_5:1, di_C:1 } }
-    ]
-  },
-  {
-    q: "When you see something unfair, you:",
-    options: [
-      { text: "Push back immediately — injustice demands a response.", scores: { tiger:1, en_8:2, di_D:2, mb_T:1, bf_N_hi:1 } },
-      { text: "Think carefully before deciding if it's worth fighting.", scores: { mb_T:2, mb_I:1, en_5:1, bf_C_hi:1 } },
-      { text: "Feel it deeply, even if you don't say anything.", scores: { mb_F:2, en_4:2, bf_N_hi:1 } },
-      { text: "Look for a constructive, peaceful way to address it.", scores: { dog:1, en_9:1, bf_A_hi:2, en_6:1 } }
-    ]
-  },
-  {
-    q: "Which belief fits you best?",
-    options: [
-      { text: "I'm capable of more than I've shown yet.", scores: { lion:1, en_3:2, en_7:1, bf_O_hi:1, di_D:1 } },
-      { text: "My value comes from showing up for the right people.", scores: { wolf:1, dog:1, en_6:1, en_9:1, di_S:1, ll_acts:1 } },
-      { text: "I carry something unique that only I can offer.", scores: { snake:1, raven:1, en_4:3, bf_O_hi:1, ri_A:1 } },
-      { text: "I have important work still left to do.", scores: { eagle:1, en_1:2, en_3:1, di_D:1, bf_C_hi:1 } }
+      { text: "Build a structured plan with milestones and track progress deliberately.", scores: { mb_J:2, mb_S:1, bf_C_hi:3, di_C:2, en_1:2, ri_C:2 } },
+      { text: "Jump straight in and figure it out — doing teaches faster than studying.", scores: { fox:2, mb_P:3, mb_S:1, di_D:2, en_7:2, ri_R:2, bf_O_hi:1 } },
+      { text: "Research exhaustively first — you want the complete picture before you touch it.", scores: { owl:2, eagle:2, mb_N:2, mb_T:2, en_5:3, ri_I:3, bf_O_hi:2 } },
+      { text: "Find a mentor, community, or partner — you learn best through people.", scores: { dog:2, mb_F:1, mb_E:2, di_S:2, en_2:1, en_6:1, ri_S:2, bf_A_hi:2 } }
     ]
   }
 ];
@@ -3219,401 +3107,631 @@ const ANIMAL_RESULTS = {
   tiger: { name: "Tiger", traits: "Power · Independence · Intensity",                     description: "You're self-sufficient by nature — territorial, intense, unwilling to dilute yourself to fit someone else's comfort. Your power is real and you don't need an audience to prove it.",                                                                                     growth: "Your intensity is a strength when it's aimed at something specific. Find the target before the energy dissipates.",                                   shadow: "Independence taken too far reads as an unwillingness to need anyone — which is its own kind of vulnerability." }
 };
 
+function buildCheatSheet(animalKey, ar, enNum, mbtiCode, E, T, J, llRanked, discP){
+  const primaryLL = llRanked[0].k;
+  const llLabels = {ll_words:'Words of Affirmation',ll_time:'Quality Time',ll_gifts:'Gifts',ll_acts:'Acts of Service',ll_touch:'Physical Touch'};
+  const introverted = !E;
+  const feeling = mbtiCode[2]==='F';
+  const judging = mbtiCode[3]==='J';
+  const animalStyle = {
+    wolf:{tone:'direct and strategic',ice:'Ask what they are currently building or working toward'},
+    bear:{tone:'warm and grounded',ice:'Ask about something they are proud of building or protecting'},
+    lion:{tone:'bold and visionary',ice:'Ask what their biggest current challenge is'},
+    fox:{tone:'playful and perceptive',ice:'Say something unexpectedly clever — they will match your energy'},
+    eagle:{tone:'precise and purposeful',ice:'Ask a specific question that shows you did your homework'},
+    snake:{tone:'calm and penetrating',ice:'Ask what most people get wrong about something they care about'},
+    dog:{tone:'genuine and caring',ice:'Ask what made them smile this week'},
+    owl:{tone:'measured and insightful',ice:'Bring an interesting observation or counterintuitive fact'},
+    raven:{tone:'sharp and unconventional',ice:'Bring up the uncomfortable obvious thing — they will respect it'},
+    tiger:{tone:'intense and authentic',ice:'Speak plainly and drop the pleasantries — they prefer it'}
+  };
+  const as = animalStyle[animalKey] || {tone:'genuine',ice:'Ask an open question'};
+  return {
+    date: [
+      {label:'Your natural tone', text:'You come across as '+as.tone+'. Lean into it rather than performing a persona — authenticity is your biggest asset on a first impression.'},
+      {label:'Opening move', text:as.ice+'.'},
+      {label:'What you need to feel comfortable', text:introverted?'Noise and crowds drain you. Choose a low-stimulation setting — coffee, a walk, somewhere with a clear end time so you can be fully present.':'You light up with novelty. Suggest something interactive or somewhere with ambient energy — you will be at your best.'},
+      {label:'Love language on a date', text:'Your primary love language is '+llLabels[primaryLL]+'. '+(primaryLL==='ll_words'?'Genuine, specific compliments land harder than big gestures. Say what you actually mean.':primaryLL==='ll_time'?'Undivided attention is the most attractive thing you can receive. Put the phone face-down.':primaryLL==='ll_gifts'?'Thoughtful, specific tokens of attention feel like real care to you. Notice what they like.':primaryLL==='ll_acts'?'Effort and follow-through impress you more than words. Notice if they do what they said they would.':'Light physical warmth early — a touch on the arm — reads as real connection to you.')},
+      {label:'Trap to avoid', text:feeling?'You can over-empathize with where you think they are and end up managing their emotions instead of enjoying the date. Let them have their own experience.':'You can default to debate or analysis mode. Leave space for feeling without needing to solve it.'}
+    ],
+    interview: [
+      {label:'Your default energy', text:'You project '+as.tone+'. In interviews, '+(discP==='D'?'lead with outcomes and impact — numbers, scope, results — not process.':discP==='I'?'lead with collaboration and relationship-building examples — they want to see how you energize others.':discP==='S'?'lead with reliability and follow-through. Show you are the person who holds things together under pressure.':'lead with precision and thoroughness. Demonstrate that you think before you act.')},
+      {label:'How to open', text:'When they ask "tell me about yourself," anchor on one specific result you produced — not a career timeline. Make it concrete.'},
+      {label:'Strengths to name', text:'Your '+ar.traits+' make you strongest at '+(discP==='D'?'driving initiatives through ambiguity.':discP==='I'?'building buy-in across teams.':discP==='S'?'stabilizing operations and maintaining quality under pressure.':'root-cause analysis and rigorous execution.')+' Name this explicitly.'},
+      {label:'Your MBTI interview edge', text:judging?'You are structured and prepared — your answers will be tight. Your risk is over-rehearsed delivery. Let one answer be spontaneous to show adaptability.':'Your adaptive thinking is visible when you think out loud. Walk them through your live reasoning on a hypothetical — you will differentiate yourself.'},
+      {label:'Close strong', text:'Ask one question that shows you have already thought beyond the job description: "What would make someone hired for this role look back in 18 months and say they made a real difference?"'}
+    ],
+    partner: [
+      {label:'How you express love', text:'Your primary language is '+llLabels[primaryLL]+'. If your partner speaks a different language, this is the source of most friction — you feel you are giving constantly; they feel something is missing. Name this conversation explicitly.'},
+      {label:'Your conflict style', text:feeling?'You go emotional when hurt and need acknowledgment before logic. Name what you feel first — it is the fastest path through.':'You go logical when hurt — which reads as cold to a feeling partner. They need to feel heard before they can hear you.'},
+      {label:'What you need but rarely ask for', text:introverted?'Quiet, unstructured time together. Not activity, not conversation — just presence. Ask for it directly; most partners cannot guess this.':'Enthusiastic engagement with your ideas. Being talked over or dismissed deflates you faster than almost anything else. Say so.'},
+      {label:'Growth edge in relationships', text:ar.growth},
+      {label:'How to repair after conflict', text:feeling?'Come back with acknowledgment, not explanation. Start with "I felt" not "I thought."':'Schedule the repair conversation rather than letting it drift. You will not bring it up organically and the unresolved charge will accumulate.'}
+    ],
+    friends: [
+      {label:'What kind of friend you are', text:'You are the '+(as.tone.includes('warm')||as.tone.includes('caring')?'one people call when things get hard — you show up':as.tone.includes('sharp')||as.tone.includes('direct')?'one who tells the truth when everyone else is being polite':as.tone.includes('playful')?'energy that makes things lighter without minimizing what is real':'one who brings precision and loyalty — you do not overpromise and you do not flake')+'.'},
+      {label:'How you want to be reached', text:introverted?'Text first, not unannounced calls. A quick "are you around?" before calling gets the best version of you.':'You prefer spontaneous plans. Last-minute invitations land better than formal calendar blocks.'},
+      {label:'What you bring to close friendships', text:ar.description.split('.')[0]+'. In friendship: '+(discP==='C'?'you remember what they said last time and show up with the right kind of support.':discP==='S'?'you are the steady calm center when everyone else is spiraling.':discP==='I'?'you are the glue — you keep the group connected and energized.':'you are the one who actually moves things forward instead of just talking about it.')},
+      {label:'Friendship maintenance style', text:judging?'You prefer quality over quantity and regular cadence over random contact. Put the important friendships on a loose calendar — you maintain best with gentle structure.':'You thrive in spontaneous closeness but can let close friends drift for months without noticing. Be intentional about initiating.'},
+      {label:'What deep friendship requires from you', text:ar.shadow}
+    ]
+  };
+}
+
+function build7Petal(animalKey, mbtiCode, enNum, discP, discS, E, T, J, holland, riRanked, g){
+  var enData = ENNEAGRAM_TYPES[enNum];
+  var riTop = riRanked.slice(0,3);
+  var bfO_hi = g('bf_O_hi')||0, bfO_lo = g('bf_O_lo')||0;
+  var openness = bfO_hi >= bfO_lo;
+  var bfA_hi = g('bf_A_hi')||0, bfA_lo = g('bf_A_lo')||0;
+  var highAgree = bfA_hi > bfA_lo;
+
+  var p1 = {
+    num:1, title:'Kinds of People', emoji:'<span aria-hidden="true">👥</span>',
+    val: holland,
+    desc: 'You do your best work around '+riTop.map(function(r){return RIASEC_DATA[r.k].desc.toLowerCase();}).join(', ')+'.'
+  };
+
+  var workCondMap = {
+    D:{val:'High-autonomy, high-stakes',desc:'You need room to move fast and make calls. Bureaucracy kills your momentum.'},
+    I:{val:'Collaborative and social',desc:'Open communication, visible recognition, and team energy are requirements — not perks.'},
+    S:{val:'Stable and predictable',desc:'Consistency, clear expectations, and low-drama environments let you do your best sustained work.'},
+    C:{val:'Structured and precise',desc:'Well-defined processes, quality standards, and the space to do things right — not just fast.'}
+  };
+  var wc = workCondMap[discP] || workCondMap['S'];
+  var p2 = {num:2, title:'Working Conditions', emoji:'<span aria-hidden="true">🏗️</span>', val:wc.val, desc:wc.desc};
+
+  var animalSkills = {
+    wolf:['Strategic leadership','Building coalitions under pressure','Clear direction-setting'],
+    bear:['Sustained reliability','Conflict de-escalation','Creating safety for others to open up'],
+    lion:['Vision articulation','Inspirational communication','Decision-making at scale'],
+    fox:['Rapid problem reframing','Reading room dynamics','Persuasion through storytelling'],
+    eagle:['Systematic planning','Long-horizon thinking','Identifying risk before it surfaces'],
+    snake:['Deep listening','Uncovering hidden motivations','Composure in tense environments'],
+    dog:['Building trust quickly','Empathetic communication','Creating loyal teams around shared purpose'],
+    owl:['Knowledge synthesis','Pattern recognition across domains','Translating complexity into clarity'],
+    raven:['Uncomfortable truth-telling','Spotting what others miss','Intellectual provocation that moves things'],
+    tiger:['Independent execution','Maintaining quality without supervision','Bringing intensity when stakes are highest']
+  };
+  var skills = animalSkills[animalKey] || ['Adaptability','Communication','Problem-solving'];
+  var p3 = {num:3, title:'Transferable Skills', emoji:'<span aria-hidden="true">🛠️</span>', val:skills[0], desc:skills.join(' · ')};
+
+  var riDomains = riTop.map(function(r){return RIASEC_DATA[r.k].name;}).join(' + ');
+  var p4 = {
+    num:4, title:'Specialized Knowledge', emoji:'<span aria-hidden="true">📚</span>',
+    val: riDomains,
+    desc: 'Your Holland code signals deep expertise potential in '+riTop.map(function(r){return RIASEC_DATA[r.k].desc.toLowerCase();}).join(' and ')+'.'
+  };
+
+  var ambition = (g('en_3')||0) + (g('di_D')||0);
+  var salLevel, salDesc;
+  if(ambition >= 6){ salLevel='Senior IC or management track'; salDesc='Your drive for achievement signals you want responsibility that matches your capability — and compensation that reflects it.'; }
+  else if(ambition >= 3){ salLevel='Mid-level specialist or team lead'; salDesc='You want ownership of your domain without necessarily managing the politics that come with senior leadership.'; }
+  else { salLevel='Individual contributor, high-craft'; salDesc='You optimize for depth and quality over title and scope. The work matters more than the org chart position.'; }
+  var p5 = {num:5, title:'Salary & Responsibility', emoji:'<span aria-hidden="true">💰</span>', val:salLevel, desc:salDesc};
+
+  var geoVal, geoDesc;
+  if(!E && !openness){ geoVal='Remote-first, fixed base'; geoDesc='You recharge in familiar environments. A permanent home base with remote work is the optimal setup for sustained output.'; }
+  else if(E && openness){ geoVal='Hub city or travel-heavy'; geoDesc='You thrive in dense, diverse environments with constant new input. Hubs and relocation are advantages, not costs.'; }
+  else if(!E && openness){ geoVal='Remote with occasional travel'; geoDesc='You need quiet for deep work but openness pulls you toward new environments periodically. Hybrid remote with occasional travel fits both.'; }
+  else { geoVal='Collaborative local or hybrid'; geoDesc='You want people-energy but the right home base matters. A strong local community or flexible hybrid role lets you move between modes.'; }
+  var p6 = {num:6, title:'Geography & Lifestyle', emoji:'<span aria-hidden="true">🗺️</span>', val:geoVal, desc:geoDesc};
+
+  var p7 = {
+    num:7, title:'Life Philosophy', emoji:'<span aria-hidden="true">🌱</span>',
+    val: enData.desire,
+    desc: 'Driven by: '+enData.desire+'. '+(highAgree?'Your natural agreeableness means you contribute to others before yourself — powerful when directed, draining when untethered.':'You hold unpopular positions to stay true to what you believe — your independence of thought is a strength when grounded.')+' Core path (En.'+enNum+'): '+enData.desc.split('.')[0]+'.'
+  };
+
+  return [p1,p2,p3,p4,p5,p6,p7].map(function(p){
+    return '<div class="petal-card"><div class="petal-num">'+p.emoji+' Petal '+p.num+'</div><div class="petal-title">'+p.title+'</div><div class="petal-val">'+p.val+'</div><div class="petal-desc">'+p.desc+'</div></div>';
+  }).join('');
+}
+
+function buildAudit(auditLog, animalKey, mbtiCode, enNum, discP){
+  var intLabel = {low:'0.5x — Sometimes',med:'1x — Mostly',high:'2x — This is me'};
+  var multMap = {low:0.5,med:1.0,high:2.0};
+  var frameworks = [
+    {key:animalKey, label:'Animal: '+ANIMAL_RESULTS[animalKey].name, skeys:[animalKey]},
+    {key:mbtiCode,  label:'MBTI: '+mbtiCode,  skeys:['mb_E','mb_I','mb_S','mb_N','mb_T','mb_F','mb_J','mb_P']},
+    {key:'en_'+enNum, label:'Enneagram: Type '+enNum, skeys:['en_'+enNum]},
+    {key:'di_'+discP, label:'DISC: '+discP, skeys:['di_D','di_I','di_S','di_C']}
+  ];
+  return frameworks.map(function(fw){
+    var rows = auditLog
+      .filter(function(e){ return fw.skeys.some(function(sk){return e.scores[sk];}); })
+      .map(function(e){
+        var pts = fw.skeys.reduce(function(s,sk){return s+(e.scores[sk]||0);},0);
+        var w = Math.round(pts*(multMap[e.intensity]||1)*10)/10;
+        return {scenario:e.scenario,answer:e.answer,intensity:e.intensity,weighted:w};
+      })
+      .sort(function(a,b){return b.weighted-a.weighted;})
+      .slice(0,4);
+    var rowsHtml = rows.map(function(c){
+      var snip = c.answer.length>90?c.answer.substring(0,90)+'…':c.answer;
+      return '<div class="audit-row"><span class="audit-badge">'+intLabel[c.intensity]+'</span> <strong>'+c.scenario+'</strong><div class="audit-row-ans">'+snip+'</div><div class="audit-row-pts">+'+c.weighted+' pts weighted</div></div>';
+    }).join('');
+    return '<div class="audit-fw"><div class="audit-fw-name">'+fw.label+'</div><div class="audit-rows">'+rowsHtml+'</div></div>';
+  }).join('');
+}
+
 function initQuiz(){
-  const root = document.querySelector('#quiz-app');
+  var root = document.querySelector('#quiz-app');
   if(!root) return;
 
-  const qContainer = root.querySelector('#quiz-questions');
-  const progressFill = root.querySelector('.progress-fill');
-  const stepLabel = root.querySelector('.quiz-step-label');
-  const resultEl = root.querySelector('#quiz-result');
-  const formEl = root.querySelector('#quiz-form-wrap');
-  const restartBtn = root.querySelector('#quiz-restart');
+  var STORAGE_KEY = 'ic_quiz_v4';
+  var INTENSITY_MULT = {low:0.5, med:1.0, high:2.0};
 
-  let current = 0;
-  const totalScores = {};
-  const answered = new Array(QUIZ_QUESTIONS.length).fill(null);
+  var qContainer = root.querySelector('#quiz-questions');
+  var progressFill = root.querySelector('.progress-fill');
+  var resultEl = root.querySelector('#quiz-result');
+  var formEl = root.querySelector('#quiz-form-wrap');
+  var restartBtn = root.querySelector('#quiz-restart');
 
-  QUIZ_QUESTIONS.forEach((item, i) => {
-    const block = document.createElement('div');
-    block.className = 'quiz-q' + (i === 0 ? ' active' : '');
+  var answered = new Array(QUIZ_QUESTIONS.length).fill(null);
+  try{
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if(saved && saved.length === QUIZ_QUESTIONS.length) answered = saved;
+  }catch(e){}
+
+  function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(answered)); }catch(e){} }
+
+  var hasSaved = answered.some(function(a){return a!==null;});
+  var onboardEl = document.createElement('div');
+  onboardEl.className = 'quiz-onboarding';
+  onboardEl.innerHTML = '<div class="eyebrow" style="justify-content:center;margin-bottom:14px;">Before You Begin</div>'
+    + '<h2 style="margin-bottom:12px;">Answer as your real self — not your ideal self</h2>'
+    + '<p style="margin-bottom:20px;">How you actually behave at home, with close friends, when no one is watching — not how you wish you were.</p>'
+    + '<div class="onboarding-rules">'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">⚡</span><span><strong style="color:var(--ink);">10 scenarios</strong> with an intensity rating each. About 4 minutes.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">🔒</span><span>Your answers stay on your device — nothing is sent anywhere.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">✦</span><span>Pick the option that fits best, then rate how strongly. That is what makes the results accurate.</span></div>'
+    + '</div>'
+    + '<button class="btn btn-primary" id="quiz-start-btn" style="margin-top:20px;">'+(hasSaved?'Continue Assessment ✦':'Start the Assessment')+'</button>'
+    + (hasSaved?'<p style="margin-top:12px;font-family:var(--mono);font-size:.72rem;color:var(--gold);letter-spacing:.06em;">✦ Progress saved — picking up where you left off</p>':'');
+
+  formEl.prepend(onboardEl);
+  qContainer.style.display = 'none';
+
+  onboardEl.querySelector('#quiz-start-btn').addEventListener('click', function(){
+    onboardEl.style.display = 'none';
+    qContainer.style.display = '';
+    var firstUnanswered = answered.findIndex(function(a){return a===null;});
+    goTo(firstUnanswered === -1 ? 0 : firstUnanswered);
+  });
+
+  var current = 0;
+
+  QUIZ_QUESTIONS.forEach(function(item, i){
+    var block = document.createElement('div');
+    block.className = 'quiz-q';
     block.setAttribute('data-index', i);
-    block.innerHTML = `
-      <div class="quiz-step-label">Question ${i + 1} of ${QUIZ_QUESTIONS.length}</div>
-      <h3>${item.q}</h3>
-      <div class="quiz-options"></div>
-      <div class="quiz-nav">
-        <button type="button" class="btn btn-outline quiz-back" ${i === 0 ? 'disabled style="visibility:hidden;"' : ''}>Back</button>
-        <button type="button" class="btn btn-primary quiz-next" disabled>${i === QUIZ_QUESTIONS.length - 1 ? 'Reveal My Profile ✦' : 'Next'}</button>
-      </div>
-    `;
-    const optWrap = block.querySelector('.quiz-options');
-    item.options.forEach((opt, oi) => {
-      const b = document.createElement('button');
+
+    var isLast = i === QUIZ_QUESTIONS.length - 1;
+    block.innerHTML = '<div class="quiz-step-meta">'+item.scenario+'</div>'
+      + '<h3>'+item.q+'</h3>'
+      + '<div class="quiz-options"></div>'
+      + '<div class="intensity-wrap" style="display:none;">'
+      +   '<div class="intensity-label">How strongly does this fit you?</div>'
+      +   '<div class="intensity-row">'
+      +     '<button type="button" class="intensity-btn low" data-val="low">Sometimes</button>'
+      +     '<button type="button" class="intensity-btn med" data-val="med">Mostly</button>'
+      +     '<button type="button" class="intensity-btn high" data-val="high">This is 100% me</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="quiz-nav">'
+      +   '<button type="button" class="btn btn-outline quiz-back"'+(i===0?' disabled style="visibility:hidden;"':'')+'>Back</button>'
+      +   '<button type="button" class="btn btn-primary quiz-next" disabled>'+(isLast?'Reveal My Profile ✦':'Next')+'</button>'
+      + '</div>';
+
+    var optWrap = block.querySelector('.quiz-options');
+    var iWrap   = block.querySelector('.intensity-wrap');
+    var nextBtn = block.querySelector('.quiz-next');
+
+    var selOpt = answered[i] ? answered[i].ci : null;
+    var selInt = answered[i] ? answered[i].intensity : null;
+
+    if(selOpt !== null){ iWrap.style.display = ''; }
+    if(selOpt !== null && selInt){ nextBtn.disabled = false; }
+
+    item.options.forEach(function(opt, oi){
+      var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'quiz-option';
+      b.className = 'quiz-option' + (selOpt === oi ? ' selected' : '');
       b.textContent = opt.text;
-      b.addEventListener('click', () => {
-        optWrap.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
+      b.addEventListener('click', function(){
+        optWrap.querySelectorAll('.quiz-option').forEach(function(o){o.classList.remove('selected');});
         b.classList.add('selected');
-        answered[i] = oi;
-        block.querySelector('.quiz-next').disabled = false;
+        selOpt = oi;
+        selInt = null;
+        iWrap.style.display = '';
+        iWrap.querySelectorAll('.intensity-btn').forEach(function(ib){ib.classList.remove('sel');});
+        nextBtn.disabled = true;
+        answered[i] = null;
+        save();
       });
       optWrap.appendChild(b);
     });
-    block.querySelector('.quiz-next').addEventListener('click', () => goTo(i + 1));
-    block.querySelector('.quiz-back').addEventListener('click', () => goTo(i - 1));
+
+    iWrap.querySelectorAll('.intensity-btn').forEach(function(ib){
+      if(selInt === ib.dataset.val) ib.classList.add('sel');
+      ib.addEventListener('click', function(){
+        iWrap.querySelectorAll('.intensity-btn').forEach(function(x){x.classList.remove('sel');});
+        ib.classList.add('sel');
+        selInt = ib.dataset.val;
+        answered[i] = {ci: selOpt, intensity: selInt};
+        save();
+        nextBtn.disabled = false;
+      });
+    });
+
+    block.querySelector('.quiz-next').addEventListener('click', function(){ goTo(i + 1); });
+    block.querySelector('.quiz-back').addEventListener('click', function(){ goTo(i - 1); });
     qContainer.appendChild(block);
   });
 
-  const NUDGES = {
-    10: '✦ One third in — you\'re doing great',
-    20: '✦ Final stretch — almost there',
-  };
-
   function goTo(index){
-    if(index >= QUIZ_QUESTIONS.length){
-      showResult();
-      return;
-    }
+    if(index >= QUIZ_QUESTIONS.length){ showResult(); return; }
     if(index < 0) return;
-    qContainer.querySelectorAll('.quiz-q').forEach(b => b.classList.remove('active'));
-    const activeQ = qContainer.querySelector(`.quiz-q[data-index="${index}"]`);
-    activeQ.classList.add('active');
+    qContainer.querySelectorAll('.quiz-q').forEach(function(b){b.classList.remove('active');});
+    var activeQ = qContainer.querySelector('.quiz-q[data-index="'+index+'"]');
+    if(activeQ) activeQ.classList.add('active');
     current = index;
-    progressFill.style.width = `${(index / QUIZ_QUESTIONS.length) * 100}%`;
-    const old = activeQ.querySelector('.quiz-nudge');
-    if(old) old.remove();
-    if(NUDGES[index]){
-      const n = document.createElement('div');
-      n.className = 'quiz-nudge';
-      n.textContent = NUDGES[index];
-      activeQ.prepend(n);
-    }
+    progressFill.style.width = (index / QUIZ_QUESTIONS.length * 100) + '%';
+    var quizTop = document.querySelector('#quiz-app');
+    if(quizTop) window.scrollTo({top: quizTop.offsetTop - 80, behavior:'smooth'});
   }
 
   function showResult(){
-    // Tally all scores across every key
-    const sc = {};
-    answered.forEach((ci, qi) => {
-      if(ci === null) return;
-      Object.entries(QUIZ_QUESTIONS[qi].options[ci].scores).forEach(([k,v]) => { sc[k]=(sc[k]||0)+v; });
+    var sc = {};
+    var auditLog = [];
+    answered.forEach(function(item, qi){
+      if(!item) return;
+      var ci = item.ci, intensity = item.intensity;
+      var mult = INTENSITY_MULT[intensity] || 1;
+      var opt = QUIZ_QUESTIONS[qi].options[ci];
+      Object.keys(opt.scores).forEach(function(k){ sc[k]=(sc[k]||0)+opt.scores[k]*mult; });
+      auditLog.push({qi:qi, ci:ci, intensity:intensity, scenario:QUIZ_QUESTIONS[qi].scenario.replace(/Scenario \d+ of 10 — /,''), answer:opt.text, scores:opt.scores});
     });
-    const g = k => sc[k] || 0;
+    function g(k){ return sc[k]||0; }
 
-    // ── Animal Archetype ──────────────────────────────────────
-    const animalKeys = Object.keys(ANIMAL_RESULTS);
-    const animalSorted = animalKeys.map(k=>({k,s:g(k)})).sort((a,b)=>b.s-a.s);
-    const winner = animalSorted[0], second = animalSorted[1];
-    const ar = ANIMAL_RESULTS[winner.k], ar2 = ANIMAL_RESULTS[second.k];
-    const maxAnimal = winner.s || 1;
-    const scoreBars = animalSorted.map(({k,s})=>{
-      const pct = Math.round(s/maxAnimal*100);
-      return `<div class="score-bar-item${k===winner.k?' primary':''}">
-        <span class="score-bar-label">${ANIMAL_RESULTS[k].name}</span>
-        <div class="score-bar-track"><div class="score-bar-fill" data-w="${pct}%" style="width:0%"></div></div>
-        <span class="score-bar-value">${s}</span>
-      </div>`;
+    /* Animal */
+    var animalKeys = Object.keys(ANIMAL_RESULTS);
+    var animalSorted = animalKeys.map(function(k){return{k:k,s:g(k)};}).sort(function(a,b){return b.s-a.s;});
+    var winner = animalSorted[0], second = animalSorted[1];
+    var ar = ANIMAL_RESULTS[winner.k], ar2 = ANIMAL_RESULTS[second.k];
+    var maxAnimal = winner.s || 1;
+    var scoreBars = animalSorted.map(function(x){
+      var pct = Math.round(x.s/maxAnimal*100);
+      return '<div class="score-bar-item'+(x.k===winner.k?' primary':'')+'"><span class="score-bar-label">'+ANIMAL_RESULTS[x.k].name+'</span><div class="score-bar-track"><div class="score-bar-fill" data-w="'+pct+'%" style="width:0%"></div></div><span class="score-bar-value">'+Math.round(x.s)+'</span></div>';
     }).join('');
 
-    // ── MBTI ──────────────────────────────────────────────────
-    const eI=g('mb_E'),iI=g('mb_I'),sI=g('mb_S'),nI=g('mb_N');
-    const tI=g('mb_T'),fI=g('mb_F'),jI=g('mb_J'),pI=g('mb_P');
-    const E=eI>=iI, S=sI>=nI, T=tI>=fI, J=jI>=pI;
-    const mbtiCode=(E?'E':'I')+(S?'S':'N')+(T?'T':'F')+(J?'J':'P');
-    const md=MBTI_TYPES[mbtiCode];
-    const ePct=Math.round(eI/(eI+iI+.01)*100), sPct=Math.round(sI/(sI+nI+.01)*100);
-    const tPct=Math.round(tI/(tI+fI+.01)*100), jPct=Math.round(jI/(jI+pI+.01)*100);
+    /* MBTI */
+    var eI=g('mb_E'),iI=g('mb_I'),sI=g('mb_S'),nI=g('mb_N'),tI=g('mb_T'),fI=g('mb_F'),jI=g('mb_J'),pI=g('mb_P');
+    var E=eI>=iI, S=sI>=nI, T=tI>=fI, J=jI>=pI;
+    var mbtiCode=(E?'E':'I')+(S?'S':'N')+(T?'T':'F')+(J?'J':'P');
+    var md=MBTI_TYPES[mbtiCode];
+    var ePct=Math.round(eI/(eI+iI+.01)*100),sPct=Math.round(sI/(sI+nI+.01)*100),tPct=Math.round(tI/(tI+fI+.01)*100),jPct=Math.round(jI/(jI+pI+.01)*100);
     function mbtiRow(L,R,pct,lWins){
-      return `<div class="mbti-row">
-        <div class="mbti-row-labels">
-          <span class="${lWins?'active':''}">${L}${lWins?' '+pct+'%':''}</span>
-          <span class="${!lWins?'active':''}">${!lWins?(100-pct)+'% ':''}${R}</span>
-        </div>
-        <div class="mbti-track"><div class="mbti-fill" data-w="${pct}%" style="width:0%"></div></div>
-      </div>`;
+      return '<div class="mbti-row"><div class="mbti-row-labels"><span class="'+(lWins?'active':'')+'">'+(lWins?L+' '+pct+'%':L)+'</span><span class="'+(!lWins?'active':'')+'">'+(R+((!lWins)?' '+(100-pct)+'%':''))+'</span></div><div class="mbti-track"><div class="mbti-fill" data-w="'+pct+'%" style="width:0%"></div></div></div>';
     }
-    const mbtiBars=mbtiRow('E','I',ePct,E)+mbtiRow('S','N',sPct,S)+mbtiRow('T','F',tPct,T)+mbtiRow('J','P',jPct,J);
+    var mbtiBars = mbtiRow('E','I',ePct,E)+mbtiRow('S','N',sPct,S)+mbtiRow('T','F',tPct,T)+mbtiRow('J','P',jPct,J);
 
-    // ── Enneagram ─────────────────────────────────────────────
-    const enRanked=[1,2,3,4,5,6,7,8,9].map(n=>({n,s:g('en_'+n)})).sort((a,b)=>b.s-a.s);
-    const enNum=enRanked[0].n, ed=ENNEAGRAM_TYPES[enNum];
+    /* Enneagram */
+    var enRanked=[1,2,3,4,5,6,7,8,9].map(function(n){return{n:n,s:g('en_'+n)};}).sort(function(a,b){return b.s-a.s;});
+    var enNum=enRanked[0].n, ed=ENNEAGRAM_TYPES[enNum];
 
-    // ── Big Five ──────────────────────────────────────────────
-    const bfBars=['O','C','E','A','N'].map(t=>{
-      const hi=g('bf_'+t+'_hi'), lo=g('bf_'+t+'_lo');
-      const pct=Math.round(hi/(hi+lo+.01)*100), d=BIG_FIVE[t];
-      return `<div class="bf-row">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;">
-          <span class="bf-name">${d.name}</span>
-          <span style="font-size:.72rem;color:var(--gold);">${pct>=50?d.hi_label:d.lo_label} ${pct>=50?pct:(100-pct)}%</span>
-        </div>
-        <div class="bf-row-labels"><span class="bf-lo-label">${d.lo_label}</span><span class="bf-hi-label">${d.hi_label}</span></div>
-        <div class="bf-track"><div class="bf-thumb-wrap" data-w="${pct}%" style="width:0%"><div class="bf-fill"></div><div class="bf-dot"></div></div></div>
-        <div style="font-size:.78rem;color:var(--ink-faint);margin-top:2px;">${pct>=50?d.desc_hi:d.desc_lo}</div>
-      </div>`;
+    /* Big Five */
+    var bfBars=['O','C','E','A','N'].map(function(t){
+      var hi=g('bf_'+t+'_hi'),lo=g('bf_'+t+'_lo');
+      var pct=Math.round(hi/(hi+lo+.01)*100),d=BIG_FIVE[t];
+      return '<div class="bf-row"><div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="bf-name">'+d.name+'</span><span style="font-size:.72rem;color:var(--gold);">'+(pct>=50?d.hi_label:d.lo_label)+' '+(pct>=50?pct:100-pct)+'%</span></div><div class="bf-row-labels"><span class="bf-lo-label">'+d.lo_label+'</span><span class="bf-hi-label">'+d.hi_label+'</span></div><div class="bf-track"><div class="bf-thumb-wrap" data-w="'+pct+'%" style="width:0%"><div class="bf-fill"></div><div class="bf-dot"></div></div></div><div style="font-size:.78rem;color:var(--ink-faint);margin-top:2px;">'+(pct>=50?d.desc_hi:d.desc_lo)+'</div></div>';
     }).join('');
 
-    // ── DISC ──────────────────────────────────────────────────
-    const discRanked=['D','I','S','C'].map(k=>({k,s:g('di_'+k)})).sort((a,b)=>b.s-a.s);
-    const discP=discRanked[0].k, discS=discRanked[1].k;
-    const discCells=['D','I','S','C'].map(k=>`<div class="disc-cell${k===discP?' primary':k===discS?' secondary':''}">
-      <div class="disc-cell-key">${k}</div><div class="disc-cell-name">${DISC_PROFILES[k].name}</div></div>`).join('');
+    /* DISC */
+    var discRanked=['D','I','S','C'].map(function(k){return{k:k,s:g('di_'+k)};}).sort(function(a,b){return b.s-a.s;});
+    var discP=discRanked[0].k,discS=discRanked[1].k;
+    var discCells=['D','I','S','C'].map(function(k){return '<div class="disc-cell'+(k===discP?' primary':k===discS?' secondary':'')+'"><div class="disc-cell-key">'+k+'</div><div class="disc-cell-name">'+DISC_PROFILES[k].name+'</div></div>';}).join('');
 
-    // ── Love Languages ────────────────────────────────────────
-    const llRanked=['ll_words','ll_time','ll_gifts','ll_acts','ll_touch'].map(k=>({k,s:g(k)})).sort((a,b)=>b.s-a.s);
-    const llItems=llRanked.map(({k},i)=>`<div class="ll-item">
-      <div class="ll-rank ${i===0?'first':i===1?'second':''}">${i+1}</div>
-      <div class="ll-label"><strong>${LOVE_LANGUAGES[k].name}</strong>${LOVE_LANGUAGES[k].desc}</div>
-    </div>`).join('');
+    /* Love Languages */
+    var llRanked=['ll_words','ll_time','ll_gifts','ll_acts','ll_touch'].map(function(k){return{k:k,s:g(k)};}).sort(function(a,b){return b.s-a.s;});
+    var llItems=llRanked.map(function(x,i){return '<div class="ll-item"><div class="ll-rank '+(i===0?'first':i===1?'second':'')+'">'+( i+1)+'</div><div class="ll-label"><strong>'+LOVE_LANGUAGES[x.k].name+'</strong>'+LOVE_LANGUAGES[x.k].desc+'</div></div>';}).join('');
 
-    // ── RIASEC ────────────────────────────────────────────────
-    const riRanked=Object.keys(RIASEC_DATA).map(k=>({k,s:g(k)})).sort((a,b)=>b.s-a.s);
-    const top3=new Set(riRanked.slice(0,3).map(x=>x.k));
-    const holland=riRanked.slice(0,3).map(x=>RIASEC_DATA[x.k].code).join('');
-    const riCells=riRanked.map(({k})=>{
-      const r=RIASEC_DATA[k];
-      return `<div class="riasec-cell${top3.has(k)?' top':''}">
-        <div class="riasec-icon">${r.emoji}</div><div class="riasec-code">${r.code}</div><div class="riasec-name">${r.name}</div></div>`;
-    }).join('');
+    /* RIASEC */
+    var riRanked=Object.keys(RIASEC_DATA).map(function(k){return{k:k,s:g(k)};}).sort(function(a,b){return b.s-a.s;});
+    var top3=new Set(riRanked.slice(0,3).map(function(x){return x.k;}));
+    var holland=riRanked.slice(0,3).map(function(x){return RIASEC_DATA[x.k].code;}).join('');
+    var riCells=riRanked.map(function(x){var r=RIASEC_DATA[x.k];return '<div class="riasec-cell'+(top3.has(x.k)?' top':'')+'"><div class="riasec-icon">'+r.emoji+'</div><div class="riasec-code">'+r.code+'</div><div class="riasec-name">'+r.name+'</div></div>';}).join('');
 
-    // ── Render ────────────────────────────────────────────────
+    /* Premium sections */
+    var cheatTips = buildCheatSheet(winner.k, ar, enNum, mbtiCode, E, T, J, llRanked, discP);
+    var petalHTML  = build7Petal(winner.k, mbtiCode, enNum, discP, discS, E, T, J, holland, riRanked, g);
+    var auditHTML  = buildAudit(auditLog, winner.k, mbtiCode, enNum, discP);
+
+    function cheatPanel(arr){
+      return arr.map(function(t){return '<div class="cheat-tip"><div class="cheat-tip-label">'+t.label+'</div><p>'+t.text+'</p></div>';}).join('');
+    }
+
+    /* Render */
     progressFill.style.width = '100%';
     formEl.style.display = 'none';
 
-    resultEl.innerHTML = `
-      <div class="archetype-reveal">
-        <div class="reveal-eyebrow">Your Animal Archetype</div>
-        <div class="animal-sil">${ANIMAL_SILHOUETTES[winner.k] || ''}</div>
-        <div class="reveal-animal-name">The ${ar.name}</div>
-        <div class="reveal-badges">
-          <span class="reveal-badge">MBTI &middot; ${mbtiCode}</span>
-          <span class="reveal-badge">Enneagram ${enNum}</span>
-          <span class="reveal-badge">${LOVE_LANGUAGES[llRanked[0].k].name}</span>
-          <span class="reveal-badge">Holland ${holland}</span>
-        </div>
-        <p class="reveal-desc">${ar.description}</p>
-        <div class="reveal-scroll-hint">&#8595; scroll for your full breakdown</div>
-      </div>
+    resultEl.innerHTML = '<div class="archetype-reveal">'
+      + '<div class="reveal-eyebrow">Your Animal Archetype</div>'
+      + '<div class="animal-sil">'+(ANIMAL_SILHOUETTES[winner.k]||'')+'</div>'
+      + '<div class="reveal-animal-name">The '+ar.name+'</div>'
+      + '<div class="reveal-badges">'
+      +   '<span class="reveal-badge">MBTI &middot; '+mbtiCode+' &middot; '+md.name+'</span>'
+      +   '<span class="reveal-badge">Enneagram '+enNum+' &middot; '+ed.name+'</span>'
+      +   '<span class="reveal-badge">'+LOVE_LANGUAGES[llRanked[0].k].name+'</span>'
+      +   '<span class="reveal-badge">Holland '+holland+'</span>'
+      + '</div>'
+      + '<p class="reveal-desc">'+ar.description+'</p>'
+      + '<div class="reveal-scroll-hint">&#8595; scroll for your full breakdown</div>'
+      + '</div>'
 
-      <div class="report-profile">
-        <div class="report-block"><h4>Core Traits</h4><p>${ar.traits}</p></div>
-        <div class="report-block"><h4>Growth Edge</h4><p>${ar.growth}</p></div>
-        <div class="report-block"><h4>Shadow Warning</h4><p>${ar.shadow}</p></div>
-      </div>
+      + '<div class="report-profile">'
+      +   '<div class="report-block"><h4>Core Traits</h4><p>'+ar.traits+'</p></div>'
+      +   '<div class="report-block"><h4>Growth Edge</h4><p>'+ar.growth+'</p></div>'
+      +   '<div class="report-block"><h4>Shadow Warning</h4><p>'+ar.shadow+'</p></div>'
+      + '</div>'
 
-      <div class="report-scores">
-        <div class="eyebrow">Animal Archetype Breakdown</div>
-        <h3>Your scores across all 10 archetypes</h3>
-        <div class="score-bars">${scoreBars}</div>
-      </div>
+      + '<div class="report-scores">'
+      +   '<div class="eyebrow">Animal Archetype Breakdown</div>'
+      +   '<h3>Your scores across all 10 archetypes</h3>'
+      +   '<div class="score-bars">'+scoreBars+'</div>'
+      + '</div>'
 
-      ${second.s > 0 ? `<div class="report-secondary">
-        <div class="eyebrow">Secondary Archetype</div>
-        <h3>Also expressed: The ${ar2.name}</h3>
-        <p>${ar2.description}</p>
-      </div>` : ''}
+      + (second.s > 0 ? '<div class="report-secondary"><div class="eyebrow">Secondary Archetype</div><h3>Also expressed: The '+ar2.name+'</h3><p>'+ar2.description+'</p></div>' : '')
 
-      <div class="pq-result-grid" style="margin-top:32px;">
+      + '<div class="pq-result-grid" style="margin-top:32px;">'
 
-        <div class="fw-card pq-result-wide">
-          <div class="fw-card-label">MBTI — Myers-Briggs Type Indicator</div>
-          <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px;">
-            <div class="fw-type-badge">${mbtiCode}</div>
-            <div><div class="fw-subtype">${md.name}</div><div style="font-size:.78rem;color:var(--ink-faint);font-family:var(--mono);margin-top:2px;">${md.functions}</div></div>
-          </div>
-          <p class="fw-desc">${md.tagline}</p>
-          <div class="mbti-bars">${mbtiBars}</div>
-        </div>
+      + '<div class="fw-card pq-result-wide">'
+      +   '<div class="fw-card-label">MBTI — Myers-Briggs</div>'
+      +   '<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px;">'
+      +     '<div class="fw-type-badge">'+mbtiCode+'</div>'
+      +     '<div><div class="fw-subtype">'+md.name+'</div><div style="font-size:.78rem;color:var(--ink-faint);font-family:var(--mono);margin-top:2px;">'+md.functions+'</div></div>'
+      +   '</div>'
+      +   '<p class="fw-desc">'+md.tagline+'</p>'
+      +   '<div class="mbti-bars">'+mbtiBars+'</div>'
+      + '</div>'
 
-        <div class="fw-card">
-          <div class="fw-card-label">Enneagram</div>
-          <div class="fw-type-badge">Type ${enNum}</div>
-          <div class="fw-subtype">${ed.name}</div>
-          <span class="en-triad-tag">${ed.triad}</span>
-          <p class="fw-desc">${ed.desc}</p>
-          <div style="display:flex;flex-direction:column;gap:5px;font-size:.81rem;color:var(--ink-faint);margin-top:2px;">
-            <div><strong style="color:var(--ink-dim);">Core fear:</strong> ${ed.fear}</div>
-            <div><strong style="color:var(--ink-dim);">Core desire:</strong> ${ed.desire}</div>
-            <div><strong style="color:var(--ink-dim);">Trap:</strong> ${ed.trap}</div>
-          </div>
-          <div class="en-paths" style="margin-top:8px;">
-            <div class="en-path"><span class="en-path-arrow">↗</span> Growth &rarr; Type ${ed.integration} · ${ENNEAGRAM_TYPES[ed.integration].name}</div>
-            <div class="en-path"><span style="color:var(--ink-faint);">↘</span> Stress &rarr; Type ${ed.disintegration} · ${ENNEAGRAM_TYPES[ed.disintegration].name}</div>
-          </div>
-        </div>
+      + '<div class="fw-card">'
+      +   '<div class="fw-card-label">Enneagram</div>'
+      +   '<div class="fw-type-badge">Type '+enNum+'</div>'
+      +   '<div class="fw-subtype">'+ed.name+'</div>'
+      +   '<span class="en-triad-tag">'+ed.triad+'</span>'
+      +   '<p class="fw-desc">'+ed.desc+'</p>'
+      +   '<div style="display:flex;flex-direction:column;gap:5px;font-size:.81rem;color:var(--ink-faint);margin-top:2px;">'
+      +     '<div><strong style="color:var(--ink-dim);">Core fear:</strong> '+ed.fear+'</div>'
+      +     '<div><strong style="color:var(--ink-dim);">Core desire:</strong> '+ed.desire+'</div>'
+      +     '<div><strong style="color:var(--ink-dim);">Trap:</strong> '+ed.trap+'</div>'
+      +   '</div>'
+      +   '<div class="en-paths" style="margin-top:8px;">'
+      +     '<div class="en-path"><span class="en-path-arrow">&#8599;</span> Growth &rarr; Type '+ed.integration+' &middot; '+ENNEAGRAM_TYPES[ed.integration].name+'</div>'
+      +     '<div class="en-path"><span style="color:var(--ink-faint);">&#8600;</span> Stress &rarr; Type '+ed.disintegration+' &middot; '+ENNEAGRAM_TYPES[ed.disintegration].name+'</div>'
+      +   '</div>'
+      + '</div>'
 
-        <div class="fw-card">
-          <div class="fw-card-label">DISC Profile</div>
-          <div class="fw-type-badge">${discP}/${discS}</div>
-          <div class="fw-subtype">${DISC_PROFILES[discP].tagline}</div>
-          <p class="fw-desc">${DISC_PROFILES[discP].desc}</p>
-          <div class="disc-quad">${discCells}</div>
-        </div>
+      + '<div class="fw-card">'
+      +   '<div class="fw-card-label">DISC Profile</div>'
+      +   '<div class="fw-type-badge">'+discP+'/'+discS+'</div>'
+      +   '<div class="fw-subtype">'+DISC_PROFILES[discP].tagline+'</div>'
+      +   '<p class="fw-desc">'+DISC_PROFILES[discP].desc+'</p>'
+      +   '<div class="disc-quad">'+discCells+'</div>'
+      + '</div>'
 
-        <div class="fw-card pq-result-wide">
-          <div class="fw-card-label">Big Five — OCEAN Model</div>
-          <div class="bf-rows">${bfBars}</div>
-        </div>
+      + '<div class="fw-card pq-result-wide">'
+      +   '<div class="fw-card-label">Big Five — OCEAN</div>'
+      +   '<div class="bf-rows">'+bfBars+'</div>'
+      + '</div>'
 
-        <div class="fw-card">
-          <div class="fw-card-label">Love Languages</div>
-          <div class="fw-type-badge" style="font-size:1.2rem;">${LOVE_LANGUAGES[llRanked[0].k].name}</div>
-          <p class="fw-desc">${LOVE_LANGUAGES[llRanked[0].k].desc}</p>
-          <div class="ll-list" style="margin-top:4px;">${llItems}</div>
-        </div>
+      + '<div class="fw-card">'
+      +   '<div class="fw-card-label">Love Languages</div>'
+      +   '<div class="fw-type-badge" style="font-size:1.2rem;">'+LOVE_LANGUAGES[llRanked[0].k].name+'</div>'
+      +   '<p class="fw-desc">'+LOVE_LANGUAGES[llRanked[0].k].desc+'</p>'
+      +   '<div class="ll-list" style="margin-top:4px;">'+llItems+'</div>'
+      + '</div>'
 
-        <div class="fw-card">
-          <div class="fw-card-label">Holland Code (RIASEC)</div>
-          <div class="fw-type-badge" style="font-size:1.8rem;letter-spacing:.14em;">${holland}</div>
-          <p class="fw-desc">Your top 3 career environments — where you do your best work.</p>
-          <div class="riasec-grid">${riCells}</div>
-        </div>
+      + '<div class="fw-card">'
+      +   '<div class="fw-card-label">Holland Code (RIASEC)</div>'
+      +   '<div class="fw-type-badge" style="font-size:1.8rem;letter-spacing:.14em;">'+holland+'</div>'
+      +   '<p class="fw-desc">Your top 3 career environments — where you do your best work.</p>'
+      +   '<div class="riasec-grid">'+riCells+'</div>'
+      + '</div>'
 
-      </div>
+      + '</div>'
 
-      <p class="center" style="margin-top:32px;"><a href="#animal-archetypes" class="btn btn-outline">Explore all 10 animal archetypes</a></p>
+      + '<div class="premium-gate">'
+      +   '<div class="premium-gate-head">'
+      +     '<div class="eyebrow" style="margin-bottom:8px;">Full Blueprint</div>'
+      +     '<h3>Unlock your complete InnerCompass report</h3>'
+      +     '<p>Your free results give you the what. The Blueprint gives you the how — personalized scripts, career roadmap, and the data trail behind every score.</p>'
+      +   '</div>'
+      +   '<div class="premium-features">'
+      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128172;</span><div><strong>Connection Cheat Sheet</strong><span>Context-specific scripts for dates, job interviews, your partner, and deep friendships — built from your exact profile.</span></div></div>'
+      +     '<div class="premium-feat"><span class="premium-feat-icon">&#127864;</span><div><strong>7-Petal Career Blueprint</strong><span>All 7 career dimensions beyond Holland Code — working conditions, skills, salary, geography, and life philosophy.</span></div></div>'
+      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128269;</span><div><strong>Why You Got This Result</strong><span>A mathematical audit trail showing exactly which scenarios drove each score — with intensity weights.</span></div></div>'
+      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128196;</span><div><strong>Print-Ready PDF Report</strong><span>A clean, ink-friendly printable report with everything included — designed for physical review.</span></div></div>'
+      +   '</div>'
+      +   '<div class="premium-gate-cta">'
+      +     '<div class="premium-price">$12<small>one-time &middot; instant access</small></div>'
+      +     '<button class="btn btn-primary pq-unlock-btn" style="font-size:.88rem;padding:14px 28px;">Unlock Full Blueprint</button>'
+      +   '</div>'
+      + '</div>'
 
-      <div class="download-bar">
-        <div class="eyebrow">Save your results</div>
-        <div class="download-options">
-          <button class="btn btn-primary pq-dl-pdf">Print / Save as PDF</button>
-          <button class="btn btn-outline pq-dl-txt">Download .txt</button>
-          <button class="btn btn-outline pq-dl-json">Download .json</button>
-        </div>
-      </div>
-    `;
+      + '<div id="premium-content" style="display:none;">'
+
+      +   '<div class="fw-card" style="margin-top:32px;">'
+      +     '<div class="fw-card-label">Connection Cheat Sheet</div>'
+      +     '<p class="fw-desc" style="margin-bottom:14px;">Personalized scripts for real-world situations — built from your '+ar.name+' + '+mbtiCode+' + '+ed.name+' profile.</p>'
+      +     '<div class="cheat-tabs">'
+      +       '<button class="cheat-tab active" data-panel="date">On a Date</button>'
+      +       '<button class="cheat-tab" data-panel="interview">Job Interview</button>'
+      +       '<button class="cheat-tab" data-panel="partner">With a Partner</button>'
+      +       '<button class="cheat-tab" data-panel="friends">Deep Friendships</button>'
+      +     '</div>'
+      +     '<div class="cheat-panel active" data-panel="date">'+cheatPanel(cheatTips.date)+'</div>'
+      +     '<div class="cheat-panel" data-panel="interview">'+cheatPanel(cheatTips.interview)+'</div>'
+      +     '<div class="cheat-panel" data-panel="partner">'+cheatPanel(cheatTips.partner)+'</div>'
+      +     '<div class="cheat-panel" data-panel="friends">'+cheatPanel(cheatTips.friends)+'</div>'
+      +   '</div>'
+
+      +   '<div class="fw-card pq-result-wide" style="margin-top:16px;">'
+      +     '<div class="fw-card-label">7-Petal Career Blueprint</div>'
+      +     '<p class="fw-desc" style="margin-bottom:14px;">All seven dimensions of career fit — beyond just Holland Code.</p>'
+      +     '<div class="petal-grid">'+petalHTML+'</div>'
+      +   '</div>'
+
+      +   '<div class="audit-box">'
+      +     '<div class="audit-box-head"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--gold);flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><h4>Why you got this result — score audit trail</h4></div>'
+      +     '<div class="audit-body">'+auditHTML+'</div>'
+      +   '</div>'
+
+      + '</div>'
+
+      + '<p class="center" style="margin-top:32px;"><a href="#animal-archetypes" class="btn btn-outline">Explore all 10 animal archetypes</a></p>'
+
+      + '<div class="download-bar">'
+      +   '<div class="eyebrow">Save your results</div>'
+      +   '<div class="download-options">'
+      +     '<button class="btn btn-primary pq-dl-pdf">Print / Save as PDF</button>'
+      +     '<button class="btn btn-outline pq-dl-txt">Download .txt</button>'
+      +     '<button class="btn btn-outline pq-dl-json">Download .json</button>'
+      +   '</div>'
+      + '</div>';
 
     resultEl.classList.add('show');
-    requestAnimationFrame(() => {
-      resultEl.querySelectorAll('.score-bar-fill').forEach((el,i)=>setTimeout(()=>{el.style.width=el.dataset.w;},i*45));
-      resultEl.querySelectorAll('.mbti-fill').forEach((el,i)=>setTimeout(()=>{el.style.width=el.dataset.w;},500+i*110));
-      resultEl.querySelectorAll('.bf-thumb-wrap').forEach((el,i)=>setTimeout(()=>{el.style.width=el.dataset.w;},900+i*100));
+    requestAnimationFrame(function(){
+      resultEl.querySelectorAll('.score-bar-fill').forEach(function(el,i){setTimeout(function(){el.style.width=el.dataset.w;},i*55);});
+      resultEl.querySelectorAll('.mbti-fill').forEach(function(el,i){setTimeout(function(){el.style.width=el.dataset.w;},600+i*110);});
+      resultEl.querySelectorAll('.bf-thumb-wrap').forEach(function(el,i){setTimeout(function(){el.style.width=el.dataset.w;},1000+i*100);});
     });
 
-    // ── Download handlers (closure over computed result vars) ─────
+    resultEl.querySelectorAll('.cheat-tab').forEach(function(tab){
+      tab.addEventListener('click', function(){
+        var panel = tab.dataset.panel;
+        resultEl.querySelectorAll('.cheat-tab').forEach(function(t){t.classList.toggle('active', t.dataset.panel===panel);});
+        resultEl.querySelectorAll('.cheat-panel').forEach(function(p){p.classList.toggle('active', p.dataset.panel===panel);});
+      });
+    });
+
+    var unlockBtn = resultEl.querySelector('.pq-unlock-btn');
+    var premiumContent = resultEl.querySelector('#premium-content');
+    if(unlockBtn && premiumContent){
+      unlockBtn.addEventListener('click', function(){
+        premiumContent.style.display = '';
+        premiumContent.style.animation = 'fadein .5s ease both';
+        unlockBtn.closest('.premium-gate').style.display = 'none';
+        premiumContent.scrollIntoView({behavior:'smooth', block:'start'});
+      });
+    }
+
     function buildText(){
-      const bfLines = ['O','C','E','A','N'].map(t => {
-        const hi=g('bf_'+t+'_hi'), lo=g('bf_'+t+'_lo');
-        const pct=Math.round(hi/(hi+lo+.01)*100), d=BIG_FIVE[t];
-        return `  ${d.name}: ${pct>=50?d.hi_label:d.lo_label} ${pct>=50?pct:(100-pct)}% — ${pct>=50?d.desc_hi:d.desc_lo}`;
+      var bfLines = ['O','C','E','A','N'].map(function(t){
+        var hi=g('bf_'+t+'_hi'),lo=g('bf_'+t+'_lo');
+        var pct=Math.round(hi/(hi+lo+.01)*100),d=BIG_FIVE[t];
+        return '  '+d.name+': '+(pct>=50?d.hi_label:d.lo_label)+' '+(pct>=50?pct:100-pct)+'%';
       });
       return [
         'INNER COMPASS — COMPLETE PERSONALITY PROFILE',
-        '='.repeat(44),
-        '',
+        '============================================','',
         'ANIMAL ARCHETYPE',
-        `Primary:   The ${ar.name}`,
-        `Secondary: The ${ar2.name}`,
-        `Traits: ${ar.traits}`,
+        'Primary:   The '+ar.name,
+        'Secondary: The '+ar2.name,
         ar.description,
-        `Growth edge:    ${ar.growth}`,
-        `Shadow warning: ${ar.shadow}`,
-        '',
-        `MBTI — ${mbtiCode} (${md.name})`,
-        md.tagline,
-        `  E/I: ${E?'Extravert':'Introvert'} ${E?ePct:100-ePct}%`,
-        `  S/N: ${S?'Sensing':'Intuitive'} ${S?sPct:100-sPct}%`,
-        `  T/F: ${T?'Thinking':'Feeling'} ${T?tPct:100-tPct}%`,
-        `  J/P: ${J?'Judging':'Perceiving'} ${J?jPct:100-jPct}%`,
-        '',
-        `ENNEAGRAM — Type ${enNum}: ${ed.name} (${ed.triad})`,
-        ed.desc,
-        `  Core fear:    ${ed.fear}`,
-        `  Core desire:  ${ed.desire}`,
-        `  Trap:         ${ed.trap}`,
-        `  Growth path:  → Type ${ed.integration} · ${ENNEAGRAM_TYPES[ed.integration].name}`,
-        `  Stress path:  → Type ${ed.disintegration} · ${ENNEAGRAM_TYPES[ed.disintegration].name}`,
-        '',
-        'BIG FIVE (OCEAN)',
-        ...bfLines,
-        '',
-        `DISC — ${discP}/${discS} · ${DISC_PROFILES[discP].name} / ${DISC_PROFILES[discS].name}`,
-        DISC_PROFILES[discP].desc,
-        '',
-        'LOVE LANGUAGES',
-        ...llRanked.map(({k},i)=>`  ${i+1}. ${LOVE_LANGUAGES[k].name}`),
-        '',
-        `HOLLAND CODE — ${holland}`,
-        ...riRanked.slice(0,3).map(({k})=>`  ${RIASEC_DATA[k].code} · ${RIASEC_DATA[k].name}: ${RIASEC_DATA[k].desc}`),
-        '',
-        'Generated by Inner Compass'
-      ].join('\n');
+        'Traits: '+ar.traits,
+        'Growth edge: '+ar.growth,
+        'Shadow:      '+ar.shadow,
+        '','MBTI — '+mbtiCode+' ('+md.name+')',md.tagline,
+        '  E/I: '+(E?'Extravert':'Introvert')+' '+(E?ePct:100-ePct)+'%',
+        '  S/N: '+(S?'Sensing':'Intuitive')+' '+(S?sPct:100-sPct)+'%',
+        '  T/F: '+(T?'Thinking':'Feeling')+' '+(T?tPct:100-tPct)+'%',
+        '  J/P: '+(J?'Judging':'Perceiving')+' '+(J?jPct:100-jPct)+'%',
+        '','ENNEAGRAM — Type '+enNum+': '+ed.name+' ('+ed.triad+')',ed.desc,
+        '  Core fear:   '+ed.fear,
+        '  Core desire: '+ed.desire,
+        '  Trap:        '+ed.trap,
+        '  Growth: Type '+ed.integration+' · '+ENNEAGRAM_TYPES[ed.integration].name,
+        '  Stress: Type '+ed.disintegration+' · '+ENNEAGRAM_TYPES[ed.disintegration].name,
+        '','BIG FIVE (OCEAN)'
+      ].concat(bfLines).concat([
+        '','DISC — '+discP+'/'+discS+' · '+DISC_PROFILES[discP].name,DISC_PROFILES[discP].desc,
+        '','LOVE LANGUAGES'
+      ]).concat(llRanked.map(function(x,i){return '  '+(i+1)+'. '+LOVE_LANGUAGES[x.k].name;})).concat([
+        '','HOLLAND CODE — '+holland
+      ]).concat(riRanked.slice(0,3).map(function(x){return '  '+RIASEC_DATA[x.k].code+' · '+RIASEC_DATA[x.k].name;})).concat([
+        '','Generated by Inner Compass'
+      ]).join('\n');
     }
 
     function buildJSON(){
       return JSON.stringify({
-        archetype: { primary: winner.k, name: ar.name, secondary: second.k,
-          scores: Object.fromEntries(animalSorted.map(({k,s})=>[k,s])) },
-        mbti: { type: mbtiCode, name: md.name, E:ePct, S:sPct, T:tPct, J:jPct },
-        enneagram: { type: enNum, name: ed.name, triad: ed.triad,
-          integration: ed.integration, disintegration: ed.disintegration },
-        big_five: Object.fromEntries(['O','C','E','A','N'].map(t=>{
-          const hi=g('bf_'+t+'_hi'), lo=g('bf_'+t+'_lo');
-          return [BIG_FIVE[t].name, Math.round(hi/(hi+lo+.01)*100)];
-        })),
-        disc: { primary: discP, secondary: discS },
-        love_languages: llRanked.map(({k,s},i)=>({ rank:i+1, name:LOVE_LANGUAGES[k].name, score:s })),
-        holland_code: { code: holland,
-          top3: riRanked.slice(0,3).map(({k,s})=>({ code:RIASEC_DATA[k].code, name:RIASEC_DATA[k].name, score:s })) }
-      }, null, 2);
+        archetype:{primary:winner.k,name:ar.name,secondary:second.k,scores:Object.fromEntries(animalSorted.map(function(x){return[x.k,Math.round(x.s*10)/10];}))},
+        mbti:{type:mbtiCode,name:md.name,E:ePct,S:sPct,T:tPct,J:jPct},
+        enneagram:{type:enNum,name:ed.name,triad:ed.triad,integration:ed.integration,disintegration:ed.disintegration},
+        big_five:Object.fromEntries(['O','C','E','A','N'].map(function(t){var hi=g('bf_'+t+'_hi'),lo=g('bf_'+t+'_lo');return[BIG_FIVE[t].name,Math.round(hi/(hi+lo+.01)*100)];})),
+        disc:{primary:discP,secondary:discS},
+        love_languages:llRanked.map(function(x,i){return{rank:i+1,name:LOVE_LANGUAGES[x.k].name,score:Math.round(x.s*10)/10};}),
+        holland_code:{code:holland,top3:riRanked.slice(0,3).map(function(x){return{code:RIASEC_DATA[x.k].code,name:RIASEC_DATA[x.k].name,score:Math.round(x.s*10)/10};})}
+      },null,2);
     }
 
     function triggerDownload(content, filename, mime){
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([content], {type: mime}));
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content],{type:mime}));
       a.download = filename;
       a.click();
     }
 
-    resultEl.querySelector('.pq-dl-pdf').addEventListener('click', () => window.print());
-    resultEl.querySelector('.pq-dl-txt').addEventListener('click', () => triggerDownload(buildText(), 'inner-compass-results.txt', 'text/plain'));
-    resultEl.querySelector('.pq-dl-json').addEventListener('click', () => triggerDownload(buildJSON(), 'inner-compass-results.json', 'application/json'));
+    resultEl.querySelector('.pq-dl-pdf').addEventListener('click', function(){ window.print(); });
+    resultEl.querySelector('.pq-dl-txt').addEventListener('click', function(){ triggerDownload(buildText(),'inner-compass-results.txt','text/plain'); });
+    resultEl.querySelector('.pq-dl-json').addEventListener('click', function(){ triggerDownload(buildJSON(),'inner-compass-results.json','application/json'); });
   }
 
   if(restartBtn){
-    restartBtn.addEventListener('click', () => {
-      answered.fill(null);
+    restartBtn.addEventListener('click', function(){
+      answered = new Array(QUIZ_QUESTIONS.length).fill(null);
+      try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
       resultEl.classList.remove('show');
       resultEl.innerHTML = '';
       formEl.style.display = '';
+      onboardEl.style.display = '';
+      qContainer.style.display = 'none';
       progressFill.style.width = '0%';
-      qContainer.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
-      qContainer.querySelectorAll('.quiz-next').forEach(b => b.disabled = true);
-      goTo(0);
     });
   }
 }
 
 const MBTI_TYPES = {
-  ISTJ: { name:"The Duty Bearer",   tagline:"Reliable, precise, and methodical — you make the world work.",                              functions:"Si · Te · Fi · Ne" },
-  ISFJ: { name:"The Protector",     tagline:"Warmth and quiet care that holds communities together.",                                    functions:"Si · Fe · Ti · Ne" },
-  INFJ: { name:"The Counselor",     tagline:"Rare and quietly powerful — deep insight paired with genuine care.",                        functions:"Ni · Fe · Ti · Se" },
-  INTJ: { name:"The Strategist",    tagline:"Independent, systematic, and always a few steps ahead.",                                    functions:"Ni · Te · Fi · Se" },
-  ISTP: { name:"The Craftsman",     tagline:"Calm, observant, and mechanically brilliant under pressure.",                               functions:"Ti · Se · Ni · Fe" },
-  ISFP: { name:"The Artist",        tagline:"Sensitive, spontaneous, and attuned to beauty in everything.",                             functions:"Fi · Se · Ni · Te" },
-  INFP: { name:"The Idealist",      tagline:"Values-driven and imaginative — always searching for meaning.",                            functions:"Fi · Ne · Si · Te" },
-  INTP: { name:"The Architect",     tagline:"Analytical, independent, and endlessly curious about how things work.",                    functions:"Ti · Ne · Si · Fe" },
-  ESTP: { name:"The Dynamo",        tagline:"Bold, observant, and gifted at reading the room in real time.",                            functions:"Se · Ti · Fe · Ni" },
-  ESFP: { name:"The Performer",     tagline:"Warm, spontaneous, and magnetic — life is meant to be experienced.",                      functions:"Se · Fi · Te · Ni" },
-  ENFP: { name:"The Champion",      tagline:"Enthusiastic, creative, and endlessly interested in people.",                              functions:"Ne · Fi · Te · Si" },
-  ENTP: { name:"The Visionary",     tagline:"Fast-thinking, debate-loving, and drawn to the edges of ideas.",                          functions:"Ne · Ti · Fe · Si" },
-  ESTJ: { name:"The Executive",     tagline:"Decisive, organized, and built to lead systems and people.",                               functions:"Te · Si · Ne · Fi" },
-  ESFJ: { name:"The Caregiver",     tagline:"Warm and organized — devoted to keeping people and systems running.",                      functions:"Fe · Si · Ne · Ti" },
-  ENFJ: { name:"The Teacher",       tagline:"Charismatic, empathic, and wired to help people grow.",                                   functions:"Fe · Ni · Se · Ti" },
-  ENTJ: { name:"The Commander",     tagline:"Strategic, decisive, and built to lead from the front.",                                   functions:"Te · Ni · Se · Fi" }
+  ISTJ: { name:"The Logistician",  tagline:"Reliable, precise, and methodical — you make the world work.",                              functions:"Si · Te · Fi · Ne" },
+  ISFJ: { name:"The Defender",     tagline:"Warmth and quiet care that holds communities together.",                                    functions:"Si · Fe · Ti · Ne" },
+  INFJ: { name:"The Advocate",     tagline:"Rare and quietly powerful — deep insight paired with genuine care.",                        functions:"Ni · Fe · Ti · Se" },
+  INTJ: { name:"The Architect",    tagline:"Independent, systematic, and always a few steps ahead.",                                    functions:"Ni · Te · Fi · Se" },
+  ISTP: { name:"The Virtuoso",     tagline:"Calm, observant, and mechanically brilliant under pressure.",                               functions:"Ti · Se · Ni · Fe" },
+  ISFP: { name:"The Adventurer",   tagline:"Sensitive, spontaneous, and attuned to beauty in everything.",                             functions:"Fi · Se · Ni · Te" },
+  INFP: { name:"The Mediator",     tagline:"Values-driven and imaginative — always searching for meaning.",                            functions:"Fi · Ne · Si · Te" },
+  INTP: { name:"The Logician",     tagline:"Analytical, independent, and endlessly curious about how things work.",                    functions:"Ti · Ne · Si · Fe" },
+  ESTP: { name:"The Entrepreneur", tagline:"Bold, observant, and gifted at reading the room in real time.",                            functions:"Se · Ti · Fe · Ni" },
+  ESFP: { name:"The Entertainer",  tagline:"Warm, spontaneous, and magnetic — life is meant to be experienced.",                      functions:"Se · Fi · Te · Ni" },
+  ENFP: { name:"The Campaigner",   tagline:"Enthusiastic, creative, and endlessly interested in people.",                              functions:"Ne · Fi · Te · Si" },
+  ENTP: { name:"The Debater",      tagline:"Fast-thinking, debate-loving, and drawn to the edges of ideas.",                          functions:"Ne · Ti · Fe · Si" },
+  ESTJ: { name:"The Executive",    tagline:"Decisive, organized, and built to lead systems and people.",                               functions:"Te · Si · Ne · Fi" },
+  ESFJ: { name:"The Consul",       tagline:"Warm and organized — devoted to keeping people and systems running.",                      functions:"Fe · Si · Ne · Ti" },
+  ENFJ: { name:"The Protagonist",  tagline:"Charismatic, empathic, and wired to help people grow.",                                   functions:"Fe · Ni · Se · Ti" },
+  ENTJ: { name:"The Commander",    tagline:"Strategic, decisive, and built to lead from the front.",                                   functions:"Te · Ni · Se · Fi" }
 };
 
 const ENNEAGRAM_TYPES = {
-  1: { name:"The Reformer",      triad:"Gut (Instinct)",  fear:"Being corrupt or defective",            desire:"To be good and have integrity",         trap:"Perfectionism",                    integration:7, disintegration:4, desc:"You are driven by an internal standard of correctness. You notice flaws early and feel a quiet pressure to improve — in yourself first, then the world around you." },
-  2: { name:"The Helper",        triad:"Heart (Feeling)", fear:"Being unloved and unwanted",            desire:"To feel loved and needed",               trap:"Pride in being indispensable",      integration:4, disintegration:8, desc:"Your identity is built around other people's wellbeing. Giving comes naturally — sometimes before you've checked whether you have anything left to give." },
-  3: { name:"The Achiever",      triad:"Heart (Feeling)", fear:"Being worthless or a failure",          desire:"To feel valuable and admirable",          trap:"Reshaping yourself to match success",integration:6, disintegration:9, desc:"Success is your language. You adapt, project confidence, and track results — which makes you effective, and also prone to mistaking performance for identity." },
-  4: { name:"The Individualist", triad:"Heart (Feeling)", fear:"Having no identity or significance",    desire:"To be uniquely themselves",              trap:"Envy — comparing and finding lack",  integration:1, disintegration:2, desc:"You orient toward authenticity and depth. The gap between who you are and who you could be is something you feel acutely — and that feeling drives your creativity." },
-  5: { name:"The Investigator",  triad:"Head (Thinking)", fear:"Being helpless or overwhelmed",         desire:"To be capable and competent",            trap:"Hoarding time and energy",          integration:8, disintegration:7, desc:"You conserve energy, gather knowledge, and build self-sufficiency. The world feels more manageable behind a framework than in the middle of it." },
-  6: { name:"The Loyalist",      triad:"Head (Thinking)", fear:"Being without support or guidance",     desire:"To have security and support",           trap:"Scanning constantly for threat",     integration:9, disintegration:3, desc:"You are alert to risk and oriented toward reliability. Loyalty is your core value, and you offer it generously — once you're sure it's warranted." },
-  7: { name:"The Enthusiast",    triad:"Head (Thinking)", fear:"Being deprived or trapped in pain",    desire:"To be satisfied and content",            trap:"Filling up to avoid emptiness",      integration:5, disintegration:1, desc:"You run toward possibility and stay in motion. There are too many good things to experience to get stuck — though the restlessness sometimes outpaces the satisfaction." },
-  8: { name:"The Challenger",    triad:"Gut (Instinct)",  fear:"Being controlled or harmed",           desire:"To protect themselves and be in control", trap:"Excess and intensity",              integration:2, disintegration:5, desc:"You are powerful, direct, and protective. Vulnerability reads as risk, and strength reads as safety — which shapes everything from your relationships to your arguments." },
-  9: { name:"The Peacemaker",    triad:"Gut (Instinct)",  fear:"Conflict and disconnection",           desire:"Inner stability and peace of mind",       trap:"Avoiding what matters to keep peace",integration:3, disintegration:6, desc:"You keep the peace — sometimes by disappearing into it. Your calm is real, but the cost is sometimes your own priorities buried under others' comfort." }
+  1: { name:"The Reformer",      triad:"Gut (Instinct)",  fear:"Being corrupt or defective",            desire:"To be good and have integrity",         trap:"Resentment",                       integration:7, disintegration:4, desc:"You are driven by an internal standard of correctness. You notice flaws early and feel a quiet pressure to improve — in yourself first, then the world around you." },
+  2: { name:"The Helper",        triad:"Heart (Feeling)", fear:"Being unloved and unwanted",            desire:"To feel loved and needed",               trap:"Pride",      integration:4, disintegration:8, desc:"Your identity is built around other people's wellbeing. Giving comes naturally — sometimes before you've checked whether you have anything left to give." },
+  3: { name:"The Achiever",      triad:"Heart (Feeling)", fear:"Being worthless or a failure",          desire:"To feel valuable and admirable",          trap:"Deceit",integration:6, disintegration:9, desc:"Success is your language. You adapt, project confidence, and track results — which makes you effective, and also prone to mistaking performance for identity." },
+  4: { name:"The Individualist", triad:"Heart (Feeling)", fear:"Having no identity or significance",    desire:"To be uniquely themselves",              trap:"Envy",  integration:1, disintegration:2, desc:"You orient toward authenticity and depth. The gap between who you are and who you could be is something you feel acutely — and that feeling drives your creativity." },
+  5: { name:"The Investigator",  triad:"Head (Thinking)", fear:"Being helpless or overwhelmed",         desire:"To be capable and competent",            trap:"Avarice",          integration:8, disintegration:7, desc:"You conserve energy, gather knowledge, and build self-sufficiency. The world feels more manageable behind a framework than in the middle of it." },
+  6: { name:"The Loyalist",      triad:"Head (Thinking)", fear:"Being without support or guidance",     desire:"To have security and support",           trap:"Cowardice",     integration:9, disintegration:3, desc:"You are alert to risk and oriented toward reliability. Loyalty is your core value, and you offer it generously — once you're sure it's warranted." },
+  7: { name:"The Enthusiast",    triad:"Head (Thinking)", fear:"Being deprived or trapped in pain",    desire:"To be satisfied and content",            trap:"Gluttony",      integration:5, disintegration:1, desc:"You run toward possibility and stay in motion. There are too many good things to experience to get stuck — though the restlessness sometimes outpaces the satisfaction." },
+  8: { name:"The Challenger",    triad:"Gut (Instinct)",  fear:"Being controlled or harmed",           desire:"To protect themselves and be in control", trap:"Lust",              integration:2, disintegration:5, desc:"You are powerful, direct, and protective. Vulnerability reads as risk, and strength reads as safety — which shapes everything from your relationships to your arguments." },
+  9: { name:"The Peacemaker",    triad:"Gut (Instinct)",  fear:"Conflict and disconnection",           desire:"Inner stability and peace of mind",       trap:"Sloth",integration:3, disintegration:6, desc:"You keep the peace — sometimes by disappearing into it. Your calm is real, but the cost is sometimes your own priorities buried under others' comfort." }
 };
 
 const BIG_FIVE = {
