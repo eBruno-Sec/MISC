@@ -4,27 +4,189 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RedFlag — Know what you're dealing with</title>
-<meta name="description" content="Identify behavioral patterns in your relationship. Free, anonymous, nothing leaves your device.">
+<meta name="description" content="A web app that identifies behavioral patterns in your relationship. Free, anonymous, nothing leaves your device.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%231A1209'/%3E%3Crect x='20' y='28' width='60' height='12' rx='6' fill='%23C0392B'/%3E%3Crect x='20' y='44' width='60' height='12' rx='6' fill='%23C0392B' opacity='.7'/%3E%3Crect x='20' y='60' width='60' height='12' rx='6' fill='%23C0392B' opacity='.4'/%3E%3C/svg%3E">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { min-height: 100vh; background: #F5F3F0; }
-  body { -webkit-font-smoothing: antialiased; }
-  #root { min-height: 100vh; }
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
+  :root {
+    --bg:#F7F5F2; --surface:#FFFFFF; --surface2:#F1EDE8; --elevate:#FFFFFF;
+    --text:#1A1614; --text2:#574F4B; --text3:#938A85;
+    --border:rgba(0,0,0,0.09); --border2:rgba(0,0,0,0.17);
+    --danger:#C0392B; --danger-soft:rgba(192,57,43,.08); --green:#2E7D46;
+    --shadow:0 1px 2px rgba(0,0,0,.04), 0 8px 28px rgba(0,0,0,.06);
+    --maxw:1120px;
+  }
+  :root[data-theme="dark"] {
+    --bg:#121110; --surface:#1C1B1A; --surface2:#262423; --elevate:#211F1E;
+    --text:#F1EDE8; --text2:#A69C95; --text3:#6E645D;
+    --border:rgba(255,255,255,0.09); --border2:rgba(255,255,255,0.17);
+    --danger:#E0655A; --danger-soft:rgba(224,101,90,.12); --green:#4CAF6E;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.4);
+  }
+  html, body { min-height:100%; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; line-height:1.6; }
+  #root { min-height:100vh; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:6px; border:3px solid var(--bg); }
+  a { color:inherit; }
 
-  /* ─── PRINTABLE REPORT (Section III: ink-saver, print-safe, 4.5:1 contrast) ─── */
-  /* The report renders as a white "paper" preview on screen (both themes) and
-     prints as pure #000 on #FFF with pattern codes + outlines instead of red ink blocks. */
-  .rf-report { background:#FFF; color:#000; font-family:Helvetica,Arial,sans-serif; line-height:1.5; }
-  .rf-report .rf-doc-title { font-size:22px; font-weight:700; margin:0 0 2px; letter-spacing:-.01em; color:#000; }
-  .rf-report .rf-doc-sub { font-size:12px; color:#000; margin:0 0 4px; }
+  /* ── App frame ── */
+  .rf-app { min-height:100vh; display:flex; flex-direction:column; }
+  .rf-main { flex:1 0 auto; width:100%; }
+  .rf-container { width:100%; max-width:var(--maxw); margin:0 auto; padding:0 28px; }
+  .rf-narrow { max-width:720px; }
+  .rf-pad { padding-top:40px; padding-bottom:56px; }
+  .rf-mt { margin-top:18px; }
+
+  /* ── Header ── */
+  .rf-header { position:sticky; top:0; z-index:50; background:color-mix(in srgb, var(--surface) 88%, transparent); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); border-bottom:1px solid var(--border); }
+  .rf-header-inner { max-width:var(--maxw); margin:0 auto; padding:12px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .rf-brand { display:flex; align-items:center; gap:9px; font-weight:700; font-size:16px; letter-spacing:-.01em; cursor:pointer; color:var(--text); background:none; border:none; }
+  .rf-nav { display:flex; align-items:center; gap:4px; }
+  .rf-navlink { background:none; border:none; color:var(--text2); font:600 14px system-ui,sans-serif; padding:9px 13px; border-radius:9px; cursor:pointer; white-space:nowrap; transition:.12s; }
+  .rf-navlink:hover { color:var(--text); background:var(--surface2); }
+  .rf-navlink.is-active { color:var(--text); background:var(--surface2); }
+  .rf-icon-btn { width:40px; height:40px; border-radius:50%; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; font-size:16px; display:inline-flex; align-items:center; justify-content:center; margin-left:6px; }
+
+  /* ── Type ── */
+  .rf-eyebrow { display:inline-block; font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--danger); margin-bottom:10px; }
+  .rf-h1 { font-family:Georgia,"Times New Roman",serif; font-weight:400; font-size:clamp(34px,4.6vw,54px); line-height:1.04; letter-spacing:-.02em; margin-bottom:18px; color:var(--text); }
+  .rf-h2big { font-family:Georgia,serif; font-weight:400; font-size:clamp(26px,3.2vw,36px); line-height:1.12; letter-spacing:-.01em; margin-bottom:12px; color:var(--text); }
+  .rf-h2 { font-family:Georgia,serif; font-weight:400; font-size:23px; line-height:1.25; margin-bottom:12px; color:var(--text); }
+  .rf-h3lab { font-size:16px; font-weight:600; margin:26px 0 12px; color:var(--text); }
+  .rf-sec-h { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); margin:0 0 14px; }
+  .rf-lead { font-size:17px; line-height:1.7; color:var(--text2); max-width:56ch; }
+  .rf-p { font-size:15px; line-height:1.7; color:var(--text2); margin-bottom:12px; }
+  .rf-hint { font-size:13px; font-style:italic; color:var(--text3); margin-bottom:16px; line-height:1.6; }
+  .rf-fineprint { font-size:12.5px; color:var(--text3); margin-top:16px; }
+  .rf-dim { color:var(--text3); font-size:12px; }
+
+  /* ── Buttons ── */
+  .rf-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; font:600 14.5px/1 system-ui,sans-serif; border-radius:11px; border:1px solid transparent; cursor:pointer; padding:0 22px; min-height:48px; transition:.14s; }
+  .rf-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .rf-btn-primary { background:var(--text); color:var(--bg); }
+  .rf-btn-primary:not(:disabled):hover { opacity:.88; }
+  .rf-btn-danger { background:var(--danger); color:#fff; }
+  .rf-btn-danger:not(:disabled):hover { filter:brightness(1.06); }
+  .rf-btn-outline { background:transparent; border-color:var(--border2); color:var(--text); }
+  .rf-btn-outline:not(:disabled):hover { background:var(--surface2); }
+  .rf-btn-ghost { background:none; border:none; color:var(--text2); min-height:40px; padding:0 6px; font:600 13.5px system-ui,sans-serif; cursor:pointer; }
+  .rf-btn-ghost:hover { color:var(--text); }
+  .rf-btn-block { width:100%; }
+
+  /* ── Hero ── */
+  .rf-hero { display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center; padding:72px 0 40px; }
+  .rf-cta-row { display:flex; gap:12px; flex-wrap:wrap; margin-top:26px; }
+  .rf-hero-visual { display:flex; justify-content:center; }
+  .rf-mockcard { width:100%; max-width:380px; background:var(--elevate); border:1px solid var(--border); border-radius:20px; padding:24px; box-shadow:var(--shadow); }
+  .rf-mockcard-top { display:flex; align-items:center; gap:8px; font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--text3); margin-bottom:18px; }
+  .rf-mockrow { display:flex; align-items:center; justify-content:space-between; font-size:13.5px; font-weight:500; color:var(--text); margin-bottom:6px; }
+  .rf-mockcode { font-family:"Courier New",monospace; font-size:11.5px; font-weight:700; color:var(--danger); letter-spacing:1px; }
+  .rf-mockbar { height:6px; background:var(--surface2); border-radius:4px; overflow:hidden; margin-bottom:16px; }
+  .rf-mockbar > i { display:block; height:100%; background:var(--danger); border-radius:4px; }
+  .rf-mockclash { margin-top:6px; padding-top:14px; border-top:1px solid var(--border); font-size:12.5px; font-style:italic; color:var(--text2); }
+
+  /* ── Feature cards ── */
+  .rf-section { padding:34px 0; }
+  .rf-grid { display:grid; gap:16px; }
+  .rf-grid-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .rf-grid-3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .rf-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:22px; }
+  .rf-feature { text-align:left; cursor:pointer; transition:.14s; }
+  .rf-feature:hover { border-color:var(--border2); transform:translateY(-2px); box-shadow:var(--shadow); }
+  .rf-feature-h { font-size:17px; font-weight:600; margin-bottom:8px; color:var(--text); }
+  .rf-feature p { font-size:14px; line-height:1.6; color:var(--text2); margin-bottom:14px; }
+  .rf-feature-go { font-size:13px; font-weight:600; color:var(--danger); }
+
+  /* ── Choice / pick cards ── */
+  .rf-choice { text-align:left; cursor:pointer; transition:.12s; border-radius:14px; }
+  .rf-choice:hover { border-color:var(--border2); }
+  .rf-choice.is-selected { background:var(--text); border-color:var(--text); color:var(--bg); }
+  .rf-choice.is-selected .rf-choice-s { color:var(--bg); opacity:.7; }
+  .rf-choice-l { font-size:15px; font-weight:600; }
+  .rf-choice-s { font-size:13px; color:var(--text2); margin-top:4px; }
+  .rf-center { display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; min-height:56px; }
+  .rf-inline-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+  .rf-summary-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom:22px; }
+  .rf-counter { flex:0 0 auto; font-size:26px; font-weight:700; color:var(--text3); line-height:1; }
+  .rf-counter span { font-size:15px; }
+  .rf-counter.is-ok { color:var(--green); }
+  .rf-counter.is-warn { color:var(--danger); }
+  .rf-pick { display:flex; gap:12px; align-items:flex-start; text-align:left; cursor:pointer; transition:.12s; }
+  .rf-pick:hover { border-color:var(--border2); }
+  .rf-pick.is-selected { background:var(--danger-soft); border-color:var(--danger); }
+  .rf-pick.is-locked { opacity:.4; cursor:not-allowed; }
+  .rf-pick-check { width:20px; height:20px; border-radius:5px; border:1.5px solid var(--border2); flex-shrink:0; margin-top:1px; display:flex; align-items:center; justify-content:center; }
+  .rf-pick.is-selected .rf-pick-check { background:var(--danger); border-color:var(--danger); }
+  .rf-pick-name { font-size:14.5px; font-weight:600; color:var(--text); line-height:1.3; }
+  .rf-pick-one { font-size:12.5px; color:var(--text2); margin-top:3px; line-height:1.5; }
+  .rf-sticky-cta { position:sticky; bottom:0; padding:16px 0 6px; margin-top:20px; background:linear-gradient(to top, var(--bg) 70%, transparent); }
+
+  /* ── Quiz ── */
+  .rf-quiz { max-width:680px; margin:0 auto; }
+  .rf-progress { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:18px; }
+  .rf-progress > i { display:block; height:100%; background:var(--danger); border-radius:3px; transition:width .3s; }
+  .rf-quiz-meta { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; font-size:12.5px; color:var(--text3); }
+  .rf-opt { display:block; width:100%; text-align:left; padding:15px 18px; border:1px solid var(--border); border-radius:12px; background:var(--surface); cursor:pointer; font:400 15px/1.5 system-ui,sans-serif; color:var(--text); margin-bottom:10px; transition:.12s; }
+  .rf-opt:hover { border-color:var(--border2); }
+  .rf-opt.is-selected { background:var(--text); color:var(--bg); border-color:var(--text); }
+
+  /* ── Results ── */
+  .rf-results { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:34px; align-items:start; }
+  .rf-side { position:sticky; top:88px; display:flex; flex-direction:column; gap:10px; }
+  .rf-side-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px; }
+  .rf-notice { padding:12px 16px; border-left:3px solid var(--border2); background:var(--surface2); font-size:13px; line-height:1.6; color:var(--text2); border-radius:0 8px 8px 0; margin-bottom:16px; }
+  .rf-notice.is-danger { border-color:var(--danger); background:var(--danger-soft); color:var(--text); }
+  .rf-combined { background:var(--danger-soft); border-radius:12px; padding:12px 16px; margin-bottom:16px; }
+  .rf-combined-l { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--danger); margin-bottom:2px; }
+  .rf-combined-v { font-size:15px; font-weight:600; color:var(--danger); }
+  .rf-arc { }
+  .rf-arc.is-clean { opacity:.55; }
+  .rf-arc.is-flagged { border-color:var(--border2); }
+  .rf-arc-top { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:8px; }
+  .rf-arc-name { font-size:15px; font-weight:600; color:var(--text); }
+  .rf-arc-clin { font-size:11.5px; color:var(--text3); margin-top:2px; }
+  .rf-arc-desc { font-size:13px; line-height:1.6; color:var(--text2); margin:0; }
+  .rf-tag-new { margin-left:8px; font-size:10px; background:var(--surface2); color:var(--text2); border-radius:50px; padding:2px 8px; font-weight:600; }
+  .rf-badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:50px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .rf-badge.is-healthy { background:#D5F5E3; color:#145A32; }
+  .rf-badge.is-watch { background:#FDEBD0; color:#7B4A0A; }
+  .rf-badge.is-address { background:#FADBD8; color:#7B1A13; }
+  .rf-badge.is-severe { background:var(--danger); color:#fff; }
+  .rf-crisisbox { background:var(--danger); color:#fff; border-radius:16px; padding:20px; text-align:center; margin-bottom:16px; }
+  .rf-crisisbox-h { font-size:14px; font-weight:600; margin-bottom:6px; }
+  .rf-crisisbox-num { font-size:24px; font-weight:800; margin-bottom:4px; }
+  .rf-affirm { background:#D5F5E3; border:1px solid #A9DFBF; border-radius:16px; padding:22px; text-align:center; margin-bottom:16px; }
+  .rf-affirm p { font-family:Georgia,serif; font-size:16px; color:#145A32; line-height:1.5; }
+
+  /* ── Chips / tabs ── */
+  .rf-chips { display:flex; flex-wrap:wrap; gap:9px; margin:16px 0 20px; }
+  .rf-chip { padding:9px 16px; min-height:44px; border-radius:50px; cursor:pointer; font:600 13.5px system-ui,sans-serif; border:1px solid var(--border2); background:transparent; color:var(--text); transition:.12s; }
+  .rf-chip:hover { background:var(--surface2); }
+  .rf-chip.is-active { background:var(--text); border-color:var(--text); color:var(--bg); }
+  .rf-tabs { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:18px; }
+  .rf-tab { flex:0 0 auto; padding:9px 16px; min-height:42px; border-radius:50px; cursor:pointer; font:600 13px system-ui,sans-serif; border:none; background:var(--surface2); color:var(--text2); white-space:nowrap; transition:.12s; }
+  .rf-tab.is-active { background:var(--text); color:var(--bg); }
+  .rf-divider { height:1px; background:var(--border); margin:22px 0; }
+  .rf-list-item { display:flex; gap:11px; padding:8px 0; }
+  .rf-list-item + .rf-list-item { border-top:1px solid var(--border); }
+  .rf-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; margin-top:8px; }
+  .rf-hang { padding-left:13px; border-left:2px solid var(--border2); margin-bottom:8px; font-size:14px; line-height:1.6; color:var(--text2); }
+  .rf-actions { display:flex; flex-direction:column; gap:10px; max-width:420px; }
+
+  /* ── Footer ── */
+  .rf-footer { flex-shrink:0; border-top:1px solid var(--border); background:var(--surface); }
+  .rf-footer-inner { max-width:var(--maxw); margin:0 auto; padding:26px 28px; display:grid; grid-template-columns:1fr auto; gap:14px 32px; font-size:12.5px; line-height:1.6; color:var(--text3); }
+  .rf-footer-inner strong { color:var(--text2); }
+
+  /* ── Printable report (Section III: ink-saver, print-safe, 4.5:1 contrast) ── */
+  .rf-report { background:#FFF; color:#000; font-family:Helvetica,Arial,sans-serif; line-height:1.5; max-width:760px; margin:0 auto; }
+  .rf-report .rf-doc-title { font-size:24px; font-weight:700; margin:0 0 2px; letter-spacing:-.01em; color:#000; }
+  .rf-report .rf-doc-sub { font-size:13px; color:#000; margin:0 0 4px; }
   .rf-report .rf-doc-meta { font-size:11px; color:#333; margin:0 0 12px; }
-  .rf-report .rf-rule { border:0; border-top:1px solid #000; margin:12px 0; }
-  .rf-report h2.rf-sec { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; margin:16px 0 8px; color:#000; }
+  .rf-report .rf-rule { border:0; border-top:1px solid #000; margin:14px 0; }
+  .rf-report h2.rf-sec { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; margin:18px 0 8px; color:#000; }
   .rf-report .rf-legend { display:flex; flex-wrap:wrap; gap:4px 16px; font-size:11px; margin:0 0 6px; }
   .rf-report .rf-legend span { white-space:nowrap; color:#000; }
   .rf-code { font-family:"Courier New",Courier,monospace; font-weight:700; font-size:12px; letter-spacing:1px; white-space:nowrap; color:#000; }
@@ -50,7 +212,7 @@
   .rf-report .rf-crisis strong { font-size:16px; }
   .rf-report .rf-foot { font-size:10.5px; color:#333; margin-top:14px; line-height:1.6; }
   @media screen {
-    .rf-paper { padding:26px 22px; border:1px solid rgba(0,0,0,.14); border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.10); }
+    .rf-paper { padding:34px 32px; border:1px solid rgba(0,0,0,.14); border-radius:14px; box-shadow:0 2px 16px rgba(0,0,0,.12); }
   }
   @media print {
     @page { margin:14mm; }
@@ -58,11 +220,33 @@
     .rf-noprint { display:none !important; }
     body * { visibility:hidden !important; }
     .rf-report, .rf-report * { visibility:visible !important; }
-    .rf-report { position:absolute; left:0; top:0; width:100%; margin:0; padding:0; box-shadow:none !important; border:0 !important; }
+    .rf-report { position:absolute; left:0; top:0; width:100%; max-width:none; margin:0; padding:0; box-shadow:none !important; border:0 !important; }
     .rf-report * { color:#000 !important; background:#FFF !important; box-shadow:none !important; }
     .rf-report .rf-summary, .rf-report .rf-block, .rf-report .rf-audit,
     .rf-report .rf-clash, .rf-report .rf-crisis { page-break-inside:avoid; border-color:#000 !important; }
     .rf-report h2.rf-sec, .rf-report .rf-block-name, .rf-report .rf-audit-h { page-break-after:avoid; }
+  }
+
+  /* ── Responsive ── */
+  @media (max-width:960px) {
+    .rf-hero { grid-template-columns:1fr; gap:30px; padding:44px 0 28px; }
+    .rf-hero-visual { justify-content:flex-start; }
+    .rf-results { grid-template-columns:1fr; gap:24px; }
+    .rf-side { position:static; flex-direction:row; flex-wrap:wrap; }
+    .rf-side-card { flex:1 1 240px; }
+    .rf-grid-3 { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:640px) {
+    .rf-container { padding:0 16px; }
+    .rf-header-inner { padding:10px 16px; }
+    .rf-navlink { padding:9px 9px; font-size:13px; }
+    .rf-grid-2, .rf-grid-3 { grid-template-columns:1fr; }
+    .rf-summary-head { flex-direction:column; gap:8px; }
+    .rf-footer-inner { grid-template-columns:1fr; }
+    .rf-side { flex-direction:column; }
+  }
+  @media (max-width:420px) {
+    .rf-nav-hide-sm { display:none; }
   }
 </style>
 </head>
@@ -78,46 +262,18 @@ const { useState, useEffect, useMemo, createContext, useContext } = React;
 
 // ─── SESSION PERSISTENCE (Section IV.1) ────────────────────────────────────────
 // Multi-stage quiz + results survive a browser reload via sessionStorage — which
-// clears when the tab closes, so nothing is left on the device afterward. This is
-// deliberate for a DV-adjacent tool: no durable record of assessing a partner.
+// clears when the tab closes, so nothing is left on the device afterward.
 const SESSION_KEY = "rf-session-v1";
-function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch { return null; } }
-function saveSession(o) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(o)); } catch {} }
-function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
+function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch (e) { return null; } }
+function saveSession(o) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(o)); } catch (e) {} }
+function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
-
-// ─── DARK MODE ────────────────────────────────────────────────────────────────
-const DarkCtx = createContext({ dark: false, toggle: () => {} });
-const LIGHT_VARS = {
-  "--rf-bg":      "#F5F3F0",
-  "--rf-surface": "#FFFFFF",
-  "--rf-surface2":"#F0EDE8",
-  "--rf-text":    "#1A1614",
-  "--rf-text2":   "#5A5250",
-  "--rf-text3":   "#9A908C",
-  "--rf-border":  "rgba(0,0,0,0.08)",
-  "--rf-border2": "rgba(0,0,0,0.16)",
-  "--rf-danger":  "#C0392B",
-};
-const DARK_VARS = {
-  "--rf-bg":      "#0F0F0F",
-  "--rf-surface": "#1A1A1A",
-  "--rf-surface2":"#242424",
-  "--rf-text":    "#F0EDE8",
-  "--rf-text2":   "#A09890",
-  "--rf-text3":   "#6B6058",
-  "--rf-border":  "rgba(255,255,255,0.08)",
-  "--rf-border2": "rgba(255,255,255,0.15)",
-  "--rf-danger":  "#E05A4E",
-};
-function DarkToggle() {
-  const { dark, toggle } = useContext(DarkCtx);
-  return (
-    <button onClick={toggle} aria-label={dark ? "Light mode" : "Dark mode"} className="rf-noprint"
-      style={{ position:"fixed", top:14, right:14, zIndex:999, background:dark?"#2A2A2A":"#F0EDE8", border:`0.5px solid ${dark?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.08)"}`, borderRadius:50, width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:16 }}>
-      {dark ? "☀" : "☾"}
-    </button>
-  );
+// ─── THEME ─────────────────────────────────────────────────────────────────────
+const ThemeCtx = createContext({ dark:false, toggle:()=>{} });
+function useThemeState() {
+  const [dark, setDark] = useState(()=>{ try { return localStorage.getItem("rf-dark")==="1"; } catch (e) { return false; } });
+  useEffect(()=>{ try { document.documentElement.setAttribute("data-theme", dark?"dark":"light"); } catch (e) {} }, [dark]);
+  return { dark, toggle:()=>setDark(d=>{ const n=!d; try { localStorage.setItem("rf-dark", n?"1":"0"); } catch (e) {} return n; }) };
 }
 
 // ─── ARCHETYPES ───────────────────────────────────────────────────────────────
@@ -472,259 +628,230 @@ function reframe(text, rt) {
   return text;
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
-const S = {
-  wrap:       { maxWidth:480, margin:"0 auto", padding:"0 0 60px", fontFamily:"system-ui,-apple-system,sans-serif", background:"var(--rf-bg)", minHeight:"100vh" },
-  screen:     { padding:"20px 16px" },
-  eyebrow:    { fontSize:11, fontWeight:500, letterSpacing:"0.1em", textTransform:"uppercase", color:"var(--rf-danger)", marginBottom:8, display:"block" },
-  h1:         { fontFamily:"Georgia,serif", fontSize:26, lineHeight:1.2, marginBottom:12, fontWeight:400, color:"var(--rf-text)" },
-  h2:         { fontFamily:"Georgia,serif", fontSize:20, lineHeight:1.25, marginBottom:10, fontWeight:400, color:"var(--rf-text)" },
-  h3:         { fontSize:12, fontWeight:500, letterSpacing:"0.07em", textTransform:"uppercase", color:"var(--rf-text2)", marginBottom:8 },
-  p:          { fontSize:14, lineHeight:1.7, color:"var(--rf-text2)", marginBottom:10 },
-  card:       { background:"var(--rf-surface)", border:"0.5px solid var(--rf-border)", borderRadius:"14px", padding:16, marginBottom:12 },
-  btnDark:    { display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontSize:14, fontWeight:500, borderRadius:50, border:"none", cursor:"pointer", padding:"12px 24px", width:"100%", marginBottom:10, fontFamily:"system-ui,-apple-system,sans-serif", background:"var(--rf-text)", color:"var(--rf-bg)" },
-  btnRed:     { display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontSize:14, fontWeight:500, borderRadius:50, border:"none", cursor:"pointer", padding:"12px 24px", width:"100%", marginBottom:10, fontFamily:"system-ui,-apple-system,sans-serif", background:"#C0392B", color:"#fff" },
-  btnOutline: { display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:500, borderRadius:50, cursor:"pointer", padding:"12px 24px", width:"100%", marginBottom:10, fontFamily:"system-ui,-apple-system,sans-serif", background:"transparent", border:"0.5px solid var(--rf-border2)", color:"var(--rf-text)" },
-  btnGhost:   { background:"none", border:"none", cursor:"pointer", fontSize:13, color:"var(--rf-text2)", padding:"6px 0", fontFamily:"system-ui,-apple-system,sans-serif" },
-  notice:     { padding:"10px 14px", borderLeft:"3px solid var(--rf-border)", background:"var(--rf-surface2)", fontSize:13, lineHeight:1.6, color:"var(--rf-text2)", marginBottom:14 },
-  meta:       { fontSize:11, color:"var(--rf-text3)", textAlign:"center", marginTop:10, lineHeight:1.6 },
-  divider:    { height:"0.5px", background:"var(--rf-border)", margin:"14px 0" },
-};
-
-function Badge({ sev }) {
-  const c = { healthy:["#D5F5E3","#145A32"], watch:["#FDEBD0","#7B4A0A"], address:["#FADBD8","#7B1A13"], severe:["#C0392B","#fff"] };
-  const [bg,fg] = c[sev.label] || c.healthy;
-  return <span style={{ display:"inline-flex", alignItems:"center", padding:"3px 10px", borderRadius:50, fontSize:11, fontWeight:500, background:bg, color:fg }}>{sev.display}</span>;
+// ─── SMALL UI ───────────────────────────────────────────────────────────────────
+function Logo({ size=22 }) {
+  return (<svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <rect x="2" y="3" width="16" height="3.2" rx="1.6" fill="var(--danger)"/>
+    <rect x="2" y="8.4" width="16" height="3.2" rx="1.6" fill="var(--danger)" opacity=".62"/>
+    <rect x="2" y="13.8" width="16" height="3.2" rx="1.6" fill="var(--danger)" opacity=".36"/>
+  </svg>);
 }
+function Check() { return (<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
 
-function CrisisBox() {
+function Header({ onNav, active }) {
+  const { dark, toggle } = useContext(ThemeCtx);
+  const link = (id, label, hideSm) => (
+    <button className={"rf-navlink" + (active===id?" is-active":"") + (hideSm?" rf-nav-hide-sm":"")} onClick={()=>onNav(id)}>{label}</button>
+  );
   return (
-    <div style={{ background:"#C0392B", color:"#fff", borderRadius:"14px", padding:18, marginBottom:14, textAlign:"center" }}>
-      <div style={{ fontSize:14, fontWeight:500, marginBottom:6 }}>Your safety matters.</div>
-      <div style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>1-800-799-7233</div>
-      <div style={{ fontSize:12, opacity:.85, marginBottom:5 }}>National Domestic Violence Hotline — 24/7, free, confidential</div>
-      <div style={{ fontSize:12, opacity:.75 }}>Text START to 88788</div>
-    </div>
+    <header className="rf-header rf-noprint">
+      <div className="rf-header-inner">
+        <button className="rf-brand" onClick={()=>onNav("home")}><Logo/><span>RedFlag</span></button>
+        <nav className="rf-nav">
+          {link("home","Home",true)}
+          {link("quiz","Take the quiz")}
+          {link("finder","Warning-Sign Finder")}
+          <button className="rf-icon-btn" aria-label={dark?"Light mode":"Dark mode"} onClick={toggle}>{dark?"☀":"☾"}</button>
+        </nav>
+      </div>
+    </header>
   );
 }
 
+function Footer() {
+  return (
+    <footer className="rf-footer rf-noprint">
+      <div className="rf-footer-inner">
+        <div><strong>RedFlag</strong> identifies patterns in behavior, not clinical conditions. For self-reflection only — not professional, medical, or legal advice. Your answers stay on your device and clear when you close the tab.</div>
+        <div>If you ever feel unsafe: <strong>1-800-799-7233</strong><br/>National DV Hotline · Text START to 88788</div>
+      </div>
+    </footer>
+  );
+}
+
+function Badge({ sev }) {
+  const cls = { healthy:"is-healthy", watch:"is-watch", address:"is-address", severe:"is-severe" }[sev.label] || "is-healthy";
+  return <span className={"rf-badge " + cls}>{sev.display}</span>;
+}
+function CrisisBox() {
+  return (<div className="rf-crisisbox">
+    <div className="rf-crisisbox-h">Your safety matters.</div>
+    <div className="rf-crisisbox-num">1-800-799-7233</div>
+    <div style={{ fontSize:12, opacity:.85 }}>National Domestic Violence Hotline — 24/7, free, confidential</div>
+    <div style={{ fontSize:12, opacity:.75, marginTop:4 }}>Text START to 88788</div>
+  </div>);
+}
 function WarmAffirmation({ part }) {
   const copy = part === 2
     ? "You went the distance and found nothing significant. Your partner sounds like one of the good ones. That's not nothing — that's everything. Appreciate them."
     : "Based on your answers, your partner doesn't show significant red flag patterns in the areas you chose to explore. That's worth recognizing — healthy behavior deserves appreciation too.";
-  return (
-    <div style={{ background:"#D5F5E3", border:"0.5px solid #A9DFBF", borderRadius:"14px", padding:20, marginBottom:16, textAlign:"center" }}>
-      <div style={{ fontSize:22, marginBottom:10 }}>&#10003;</div>
-      <p style={{ fontFamily:"Georgia,serif", fontSize:16, color:"#145A32", margin:0, lineHeight:1.5 }}>{copy}</p>
-    </div>
-  );
+  return (<div className="rf-affirm"><div style={{ fontSize:22, marginBottom:8 }}>&#10003;</div><p>{copy}</p></div>);
 }
-
 function ArchetypeCard({ arcKey, score, isNew }) {
-  const a = ARC[arcKey];
-  const flagged = score > 3;
-  const sev = getSev(score, arcKey);
-  return (
-    <div style={{ ...S.card, border:flagged?`1px solid ${sev.color}33`:"0.5px solid var(--rf-border)", opacity:flagged?1:0.5 }}>
-      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8, marginBottom:flagged?8:0 }}>
-        <div>
-          <div style={{ fontSize:flagged?15:13, fontWeight:500, color:"var(--rf-text)", marginBottom:2 }}>
-            {a.street}
-            {isNew && <span style={{ marginLeft:6, fontSize:10, background:"#EDE7F6", color:"#4A148C", borderRadius:50, padding:"1px 8px", fontWeight:500 }}>Newly discovered</span>}
-          </div>
-          <div style={{ fontSize:11, color:"var(--rf-text3)" }}>{a.clinical}</div>
-        </div>
-        {flagged ? <Badge sev={sev}/> : <span style={{ fontSize:11, color:"var(--rf-text3)", whiteSpace:"nowrap", marginTop:2 }}>Not detected</span>}
+  const a = ARC[arcKey]; const flagged = score > 3; const sev = getSev(score, arcKey);
+  return (<div className={"rf-card rf-arc " + (flagged?"is-flagged":"is-clean")}>
+    <div className="rf-arc-top">
+      <div>
+        <div className="rf-arc-name">{a.street}{isNew && <span className="rf-tag-new">Newly discovered</span>}</div>
+        <div className="rf-arc-clin">{a.clinical}</div>
       </div>
-      {flagged && <p style={{ fontSize:13, lineHeight:1.6, color:"var(--rf-text2)", margin:0 }}>{ARC_DESC[arcKey]}</p>}
+      {flagged ? <Badge sev={sev}/> : <span className="rf-dim" style={{ whiteSpace:"nowrap" }}>Not detected</span>}
     </div>
-  );
+    {flagged && <p className="rf-arc-desc">{ARC_DESC[arcKey]}</p>}
+  </div>);
 }
-
 function ResultSection({ title, scores, keys, newlyDiscovered=[], part=1 }) {
   const flagged = keys.filter(k=>(scores[k]||0)>3).sort((a,b)=>(scores[b]||0)-(scores[a]||0));
-  const rest    = keys.filter(k=>(scores[k]||0)<=3);
+  const rest = keys.filter(k=>(scores[k]||0)<=3);
   const allClean = flagged.length === 0;
-  const pk = flagged[0]||null;
-  const sk = flagged[1]||null;
+  const pk = flagged[0]||null, sk = flagged[1]||null;
   const combinedLabel = pk&&sk?((COMBINED[pk]?.[sk])||(COMBINED[sk]?.[pk])||null):null;
   const isSevere = flagged.some(k=>getSev(scores[k]||0,k).label==="severe");
   const intSevere = (scores.intimidation||0)>0 && getSev(scores.intimidation||0,"intimidation").label==="severe";
-  return (
-    <div style={{ marginBottom:8 }}>
-      <h3 style={S.h3}>{title}</h3>
-      {intSevere && <div style={{ ...S.notice, borderColor:"#C0392B", background:"#FADBD8", color:"#7B1A13", marginBottom:12 }}>Your physical safety matters. If you feel unsafe: <strong>1-800-799-7233</strong> or text START to 88788.</div>}
-      {isSevere&&!intSevere&&<CrisisBox/>}
-      {pk&&combinedLabel&&(
-        <div style={{ background:"rgba(192,57,43,.07)", borderRadius:"10px", padding:"10px 14px", marginBottom:12 }}>
-          <div style={{ fontSize:10, fontWeight:500, textTransform:"uppercase", letterSpacing:".08em", color:"#C0392B", marginBottom:2 }}>Combined pattern</div>
-          <div style={{ fontSize:14, fontWeight:500, color:"#C0392B" }}>{combinedLabel}</div>
+  return (<div style={{ marginBottom:8 }}>
+    <h3 className="rf-sec-h">{title}</h3>
+    {intSevere && <div className="rf-notice is-danger">Your physical safety matters. If you feel unsafe: <strong>1-800-799-7233</strong> or text START to 88788.</div>}
+    {isSevere && !intSevere && <CrisisBox/>}
+    {pk && combinedLabel && <div className="rf-combined"><div className="rf-combined-l">Combined pattern</div><div className="rf-combined-v">{combinedLabel}</div></div>}
+    {allClean && <WarmAffirmation part={part}/>}
+    <div className="rf-grid rf-grid-2">{[...flagged,...rest].map(k=><ArchetypeCard key={k} arcKey={k} score={scores[k]||0} isNew={newlyDiscovered.includes(k)}/>)}</div>
+  </div>);
+}
+
+// ─── SCREENS ─────────────────────────────────────────────────────────────────────
+function Landing({ onNav }) {
+  return (<div className="rf-container">
+    <section className="rf-hero">
+      <div>
+        <span className="rf-eyebrow">Relational risk, read clearly</span>
+        <h1 className="rf-h1">Know what you’re dealing with.</h1>
+        <p className="rf-lead">A structured way to spot behavioral patterns in a relationship — your partner’s, someone you’re still deciding about, or your own. Clear language, no clinical jargon. Free, anonymous, and it never leaves your device.</p>
+        <div className="rf-cta-row">
+          <button className="rf-btn rf-btn-danger" onClick={()=>onNav("quiz")}>Start the pattern quiz →</button>
+          <button className="rf-btn rf-btn-outline" onClick={()=>onNav("finder")}>Open the Warning-Sign Finder</button>
         </div>
-      )}
-      {allClean&&<WarmAffirmation part={part}/>}
-      {[...flagged,...rest].map(k=><ArchetypeCard key={k} arcKey={k} score={scores[k]||0} isNew={newlyDiscovered.includes(k)}/>)}
-    </div>
-  );
-}
-
-// ─── SCREENS ──────────────────────────────────────────────────────────────────
-function Landing({ onStart, onFinder }) {
-  return (
-    <div style={S.screen}>
-      <div style={{ width:42,height:42,background:"#C0392B",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:18 }}>
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="3" width="16" height="3" rx="1.5" fill="white"/><rect x="2" y="8.5" width="16" height="3" rx="1.5" fill="white" opacity=".7"/><rect x="2" y="14" width="16" height="3" rx="1.5" fill="white" opacity=".4"/></svg>
+        <p className="rf-fineprint">Takes about 5 minutes · No account · Nothing stored after you close the tab</p>
       </div>
-      <span style={S.eyebrow}>RedFlag</span>
-      <h1 style={S.h1}>Know what you're dealing with.</h1>
-      <p style={S.p}>A structured way to identify behavioral patterns in your relationship. Clear language, not clinical jargon. Free, anonymous — your answers stay on your device and clear when you close the tab.</p>
-      <button style={{ ...S.btnDark, marginTop:16 }} onClick={onStart}>Start the quiz →</button>
-      {onFinder && <button style={S.btnOutline} onClick={onFinder}>Just screening someone new? Open the Warning-Sign Finder →</button>}
-      <p style={S.meta}>Takes about 5 minutes · No account required</p>
-    </div>
-  );
-}
-
-function Onboarding({ onSelect }) {
-  const [rel, setRel]   = useState(null);
-  const [kids, setKids] = useState(null);
-  const opts = [
-    { k:"current", l:"My current partner",  s:"Questions in present tense" },
-    { k:"ex",      l:"An ex-partner",        s:"Questions reframed to past tense" },
-    { k:"new",     l:"Someone new",          s:"Early-stage framing" },
-    { k:"self",    l:"Myself",               s:"Am I the problem? Self-assessment mode" },
-  ];
-  return (
-    <div style={S.screen}>
-      <span style={S.eyebrow}>Step 1 of 2</span>
-      <h1 style={S.h1}>Who are you thinking about?</h1>
-      {opts.map(o=>(
-        <button key={o.k} onClick={()=>setRel(o.k)} style={{ display:"block",width:"100%",padding:"13px 16px",marginBottom:8,background:rel===o.k?"var(--rf-text)":"var(--rf-surface)",border:rel===o.k?"0.5px solid var(--rf-text)":"0.5px solid var(--rf-border)",borderRadius:"10px",cursor:"pointer",textAlign:"left",fontFamily:"system-ui,-apple-system,sans-serif",color:rel===o.k?"var(--rf-bg)":"var(--rf-text)",transition:"all .12s" }}>
-          <div style={{ fontSize:14,fontWeight:500 }}>{o.l}</div>
-          <div style={{ fontSize:12,opacity:.65,marginTop:3 }}>{o.s}</div>
-        </button>
-      ))}
-      <div style={S.divider}/>
-      <h2 style={{ ...S.h2, fontSize:16, marginBottom:12 }}>Are children involved in this relationship?</h2>
-      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
-        {[{k:true,l:"Yes"},{k:false,l:"No"}].map(o=>(
-          <button key={String(o.k)} onClick={()=>setKids(o.k)} style={{ flex:1,padding:"12px",background:kids===o.k?"var(--rf-text)":"var(--rf-surface)",border:kids===o.k?"0.5px solid var(--rf-text)":"0.5px solid var(--rf-border)",borderRadius:"10px",cursor:"pointer",fontFamily:"system-ui,-apple-system,sans-serif",fontSize:14,fontWeight:500,color:kids===o.k?"var(--rf-bg)":"var(--rf-text)",transition:"all .12s" }}>
-            {o.l}
+      <div className="rf-hero-visual">
+        <div className="rf-mockcard" aria-hidden="true">
+          <div className="rf-mockcard-top"><Logo size={15}/><span>Relational Risk Report</span></div>
+          <div className="rf-mockrow"><span>Reality distortion</span><b className="rf-mockcode">//// Severe</b></div>
+          <div className="rf-mockbar"><i style={{ width:"90%" }}/></div>
+          <div className="rf-mockrow"><span>Coercive control</span><b className="rf-mockcode">/// High</b></div>
+          <div className="rf-mockbar"><i style={{ width:"74%" }}/></div>
+          <div className="rf-mockrow"><span>Stonewalling</span><b className="rf-mockcode">// Watch</b></div>
+          <div className="rf-mockbar"><i style={{ width:"46%" }}/></div>
+          <div className="rf-mockclash">Why you clash → “Reality-Based Coercive Control”</div>
+        </div>
+      </div>
+    </section>
+    <section className="rf-section">
+      <div className="rf-grid rf-grid-3">
+        {[
+          ["Screen someone new","Map a potential partner before you’re in deep — the questions to ask and the tells to watch for.","finder","Open finder"],
+          ["Assess a relationship","Run 5–8 patterns through a real quiz and get a clear, honest read on where you stand.","quiz","Start quiz"],
+          ["Turn the lens inward","Brave enough to ask if you’re the problem? A full self-assessment mode is built in.","quiz","Start quiz"],
+        ].map((f,i)=>(
+          <button key={i} className="rf-card rf-feature" onClick={()=>onNav(f[2])}>
+            <div className="rf-feature-h">{f[0]}</div>
+            <p>{f[1]}</p>
+            <span className="rf-feature-go">{f[3]} →</span>
           </button>
         ))}
       </div>
-      <button style={{ ...S.btnDark, opacity:(rel&&kids!==null)?1:0.35 }} onClick={()=>rel&&kids!==null&&onSelect(rel,kids)} disabled={!rel||kids===null}>Continue</button>
+    </section>
+  </div>);
+}
+
+function Onboarding({ onSelect }) {
+  const [rel, setRel] = useState(null);
+  const [kids, setKids] = useState(null);
+  const opts = [
+    { k:"current", l:"My current partner", s:"Questions in present tense" },
+    { k:"ex",      l:"An ex-partner",       s:"Questions reframed to past tense" },
+    { k:"new",     l:"Someone new",         s:"Early-stage framing" },
+    { k:"self",    l:"Myself",              s:"Am I the problem? Self-assessment mode" },
+  ];
+  return (<div className="rf-container rf-narrow rf-pad">
+    <span className="rf-eyebrow">Step 1 of 2</span>
+    <h1 className="rf-h2big">Who are you thinking about?</h1>
+    <div className="rf-grid rf-grid-2" style={{ marginTop:18 }}>
+      {opts.map(o=>(
+        <button key={o.k} className={"rf-card rf-choice" + (rel===o.k?" is-selected":"")} onClick={()=>setRel(o.k)}>
+          <div className="rf-choice-l">{o.l}</div><div className="rf-choice-s">{o.s}</div>
+        </button>
+      ))}
     </div>
-  );
+    <h2 className="rf-h3lab">Are children involved in this relationship?</h2>
+    <div className="rf-inline-2">
+      {[{k:true,l:"Yes"},{k:false,l:"No"}].map(o=>(
+        <button key={String(o.k)} className={"rf-card rf-choice rf-center" + (kids===o.k?" is-selected":"")} onClick={()=>setKids(o.k)}>{o.l}</button>
+      ))}
+    </div>
+    <button className="rf-btn rf-btn-primary rf-btn-block rf-mt" disabled={!rel||kids===null} onClick={()=>rel&&kids!==null&&onSelect(rel,kids)}>Continue →</button>
+  </div>);
 }
 
 function SummaryScreen({ hasKids, isSelf, onConfirm }) {
-  const [selected, setSelected] = useState(new Set());
+  const [selected, setSelected] = useState(()=>new Set());
   const available = Object.keys(ARC).filter(k => !ARC[k].kids || hasKids);
-  const MIN=5, MAX=8;
-  const count = selected.size;
-  const canStart = count >= MIN && count <= MAX;
-
-  function toggle(k) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(k)) { next.delete(k); }
-      else if (next.size < MAX) { next.add(k); }
-      return next;
-    });
-  }
-
-  return (
-    <div style={S.screen}>
-      <span style={S.eyebrow}>Choose your focus</span>
-      <h1 style={{ ...S.h1, marginBottom:6 }}>Pick 5 to 8 patterns to explore first.</h1>
-      <p style={{ ...S.p, marginBottom:4 }}>{isSelf?"Select the ones that might describe you. Be honest.":"Select the ones that resonate. The rest become Part 2."}</p>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
-        <span style={{ fontSize:12, color:"var(--rf-text3)" }}>Tap a row to select · min 5, max 8</span>
-        <span style={{ fontSize:13, fontWeight:500, color:canStart?"#27AE60":count===0?"var(--rf-text3)":"var(--rf-danger)" }}>{count}/{MAX}</span>
+  const MIN=5, MAX=8, count=selected.size, canStart = count>=MIN && count<=MAX;
+  function toggle(k) { setSelected(prev=>{ const n=new Set(prev); if(n.has(k))n.delete(k); else if(n.size<MAX)n.add(k); return n; }); }
+  return (<div className="rf-container rf-pad">
+    <div className="rf-summary-head">
+      <div>
+        <span className="rf-eyebrow">Choose your focus</span>
+        <h1 className="rf-h2big">Pick 5 to 8 patterns to explore first.</h1>
+        <p className="rf-lead">{isSelf?"Select the ones that might describe you. Be honest.":"Select the ones that resonate. The rest become Part 2."}</p>
       </div>
-      {available.map(k=>{
-        const a = ARC[k];
-        const sel = selected.has(k);
-        const locked = !sel && count >= MAX;
-        return (
-          <button key={k} onClick={()=>!locked&&toggle(k)}
-            style={{ display:"flex", alignItems:"flex-start", gap:12, width:"100%", padding:"13px 14px", marginBottom:8,
-              background:sel?"rgba(192,57,43,0.07)":"var(--rf-surface)",
-              border:sel?"1px solid rgba(192,57,43,0.4)":"0.5px solid var(--rf-border)",
-              borderRadius:"10px", cursor:locked?"not-allowed":"pointer",
-              textAlign:"left", fontFamily:"system-ui,-apple-system,sans-serif", opacity:locked?0.4:1, transition:"all .12s" }}>
-            <div style={{ width:18,height:18,borderRadius:4,border:`1.5px solid ${sel?"#C0392B":"var(--rf-border2)"}`,background:sel?"#C0392B":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              {sel&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-            </div>
-            <div>
-              <div style={{ fontSize:14,fontWeight:500,color:"var(--rf-text)",lineHeight:1.3 }}>{a.street}</div>
-              <div style={{ fontSize:12,color:"var(--rf-text2)",marginTop:3,lineHeight:1.5 }}>{a.one}</div>
-            </div>
-          </button>
-        );
-      })}
-      <div style={{ position:"sticky", bottom:0, background:"var(--rf-bg)", paddingTop:12, paddingBottom:4, marginTop:8 }}>
-        <button style={{ ...S.btnRed, opacity:canStart?1:0.35 }} onClick={()=>{if(!canStart)return;const p1=[...selected];const p2=available.filter(k=>!selected.has(k));onConfirm(p1,p2);}} disabled={!canStart}>
-          {canStart?`Start with these ${count} →`:`Select ${Math.max(0,MIN-count)} more to continue`}
-        </button>
-        <p style={S.meta}>Unselected archetypes become Part 2.</p>
-      </div>
+      <div className={"rf-counter" + (canStart?" is-ok":count?" is-warn":"")}>{count}<span>/{MAX}</span></div>
     </div>
-  );
+    <div className="rf-grid rf-grid-3">
+      {available.map(k=>{
+        const a=ARC[k]; const sel=selected.has(k); const locked=!sel&&count>=MAX;
+        return (<button key={k} className={"rf-card rf-pick" + (sel?" is-selected":"") + (locked?" is-locked":"")} onClick={()=>!locked&&toggle(k)}>
+          <div className="rf-pick-check">{sel&&<Check/>}</div>
+          <div><div className="rf-pick-name">{a.street}</div><div className="rf-pick-one">{a.one}</div></div>
+        </button>);
+      })}
+    </div>
+    <div className="rf-sticky-cta">
+      <button className="rf-btn rf-btn-danger rf-btn-block" disabled={!canStart} onClick={()=>{ if(!canStart)return; const p1=[...selected]; const p2=available.filter(k=>!selected.has(k)); onConfirm(p1,p2); }}>
+        {canStart?`Start with these ${count} →`:`Select ${Math.max(0,MIN-count)} more to continue`}
+      </button>
+    </div>
+  </div>);
 }
 
 function QuizScreen({ questions, relType, partLabel, onComplete, onBack }) {
-  const [idx, setIdx]     = useState(0);
+  const [idx, setIdx] = useState(0);
   const [answers, setAns] = useState([]);
-  const [sel, setSel]     = useState(null);
+  const [sel, setSel] = useState(null);
   const [showSens, setShowSens] = useState(false);
-  const [sensOk, setSensOk]     = useState(false);
-  const q = questions[idx];
-  const total = questions.length;
-
+  const [sensOk, setSensOk] = useState(false);
+  const q = questions[idx]; const total = questions.length;
   if (q?.sensitive && !sensOk && !showSens) setShowSens(true);
-
   function next() {
     if (sel===null) return;
-    const newAns = [...answers, { questionId:q.id, archetype:q.a, weight:q.ans[sel].w, choice:sel }];
-    setAns(newAns); setSel(null);
-    if (idx+1>=total) { onComplete(newAns); } else { setIdx(idx+1); }
+    const na=[...answers,{ questionId:q.id, archetype:q.a, weight:q.ans[sel].w, choice:sel }];
+    setAns(na); setSel(null);
+    if (idx+1>=total) onComplete(na); else setIdx(idx+1);
   }
-  function back() {
-    if (idx===0) { onBack(); return; }
-    setAns(answers.slice(0,-1)); setSel(null); setIdx(idx-1);
-  }
-
-  if (showSens&&!sensOk) return (
-    <div style={S.screen}><div style={S.card}>
-      <h2 style={S.h2}>A moment before we continue</h2>
-      <p style={S.p}>The next questions cover sensitive topics including sexual coercion. Answer only what you feel comfortable with — it's okay to select the first option for any question you'd rather skip.</p>
-      <button style={S.btnDark} onClick={()=>{setSensOk(true);setShowSens(false);}}>I understand, continue</button>
-    </div></div>
-  );
-
-  return (
-    <div style={S.screen}>
-      <div style={{ height:3, background:"var(--rf-border)", borderRadius:2, marginBottom:18 }}>
-        <div style={{ height:"100%", width:Math.round((idx/total)*100)+"%", background:"#C0392B", borderRadius:2, transition:"width .3s" }}/>
-      </div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 }}>
-        <button style={S.btnGhost} onClick={back}>← Back</button>
-        <span style={{ fontSize:12, color:"var(--rf-text3)" }}>{partLabel} · {idx+1}/{total}</span>
-      </div>
-      <span style={S.eyebrow}>{ARC[q.a]?.street}</span>
-      <h2 style={S.h2}>{reframe(q.q, relType)}</h2>
-      {q.h&&<p style={{ fontSize:12,color:"var(--rf-text3)",fontStyle:"italic",marginBottom:14,lineHeight:1.6 }}>{q.h}</p>}
-      {q.ans.map((ans,i)=>(
-        <button key={i} onClick={()=>setSel(i)} style={{ display:"block",width:"100%",padding:"13px 16px",marginBottom:8,background:sel===i?"var(--rf-text)":"var(--rf-surface)",border:sel===i?"0.5px solid var(--rf-text)":"0.5px solid var(--rf-border)",borderRadius:"10px",cursor:"pointer",textAlign:"left",fontFamily:"system-ui,-apple-system,sans-serif",fontSize:14,lineHeight:1.5,color:sel===i?"var(--rf-bg)":"var(--rf-text)",transition:"all .12s" }}>
-          {ans.t}
-        </button>
-      ))}
-      <button style={{ ...S.btnDark, marginTop:10, opacity:sel!==null?1:0.3 }} onClick={next} disabled={sel===null}>
-        {idx+1<total?"Next":"See results"}
-      </button>
-    </div>
-  );
+  function back() { if(idx===0){onBack();return;} setAns(answers.slice(0,-1)); setSel(null); setIdx(idx-1); }
+  if (showSens && !sensOk) return (<div className="rf-container rf-quiz rf-pad"><div className="rf-card">
+    <h2 className="rf-h2">A moment before we continue</h2>
+    <p className="rf-p">The next questions cover sensitive topics including sexual coercion. Answer only what you feel comfortable with — it's okay to select the first option for any question you'd rather skip.</p>
+    <button className="rf-btn rf-btn-primary" onClick={()=>{setSensOk(true);setShowSens(false);}}>I understand, continue</button>
+  </div></div>);
+  return (<div className="rf-container rf-quiz rf-pad">
+    <div className="rf-progress"><i style={{ width:Math.round((idx/total)*100)+"%" }}/></div>
+    <div className="rf-quiz-meta"><button className="rf-btn rf-btn-ghost" onClick={back}>← Back</button><span>{partLabel} · {idx+1}/{total}</span></div>
+    <span className="rf-eyebrow">{ARC[q.a]?.street}</span>
+    <h2 className="rf-h2">{reframe(q.q, relType)}</h2>
+    {q.h && <p className="rf-hint">{q.h}</p>}
+    {q.ans.map((ans,i)=>(<button key={i} className={"rf-opt" + (sel===i?" is-selected":"")} onClick={()=>setSel(i)}>{ans.t}</button>))}
+    <button className="rf-btn rf-btn-primary rf-btn-block rf-mt" disabled={sel===null} onClick={next}>{idx+1<total?"Next":"See results"}</button>
+  </div>);
 }
 
 function WhatNow({ result, part2Result, scores, keys, onShare, onReport, onFinder, onRestart }) {
@@ -733,150 +860,124 @@ function WhatNow({ result, part2Result, scores, keys, onShare, onReport, onFinde
   const pk = flagged[0] || (part2Result||result)?.primary;
   const tabs = ["Your patterns","Scripts","Can it change?","Red vs green","Get help"];
   const scripts = SCRIPTS[pk] || DEFAULT_SCRIPTS;
-  return (
-    <div style={S.screen}>
-      <span style={S.eyebrow}>What now</span>
-      <h1 style={S.h1}>Here's where to go from here.</h1>
-      <div style={S.notice}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
-      <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:6, marginBottom:16, WebkitOverflowScrolling:"touch" }}>
-        {tabs.map((t,i)=>(
-          <button key={i} onClick={()=>setTab(i)} style={{ flex:"0 0 auto",padding:"9px 15px",minHeight:40,borderRadius:50,fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"center",border:"none",background:tab===i?"var(--rf-text)":"var(--rf-surface2)",color:tab===i?"var(--rf-bg)":"var(--rf-text2)",fontFamily:"system-ui,-apple-system,sans-serif",whiteSpace:"nowrap",transition:"all .2s" }}>{t}</button>
-        ))}
-      </div>
-      {tab===0&&(<div>
-        <h3 style={S.h3}>Patterns you flagged</h3>
-        {flagged.length===0
-          ? <p style={S.p}>You didn't cross the red-flag line on the patterns you explored. That's a real result — worth trusting, not explaining away.</p>
-          : flagged.map(k=>{ const P=PLAY[k]||{}; return (
-              <div key={k} style={S.card}>
-                <div style={{ fontSize:15,fontWeight:500,color:"var(--rf-text)" }}>{ARC[k].street}</div>
-                <div style={{ fontSize:11,color:"var(--rf-text3)",marginBottom:6 }}>{ARC[k].clinical}</div>
-                <p style={{ ...S.p, marginBottom:8 }}>{ARC_DESC[k]}</p>
-                {P.watch&&<><div style={{ ...S.h3, marginBottom:6 }}>What it looks like</div>{P.watch.map((w,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid var(--rf-border2)", marginBottom:6 }}>{w}</p>)}</>}
-                {P.ask&&<><div style={{ ...S.h3, marginTop:6, marginBottom:6 }}>What to ask or watch for</div>{P.ask.map((w,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid var(--rf-danger)", marginBottom:6 }}>{w}</p>)}</>}
-              </div>
-            ); })}
-      </div>)}
-      {tab===1&&(<div><h3 style={S.h3}>Scripts to start with</h3><p style={{ ...S.p, fontSize:12 }}>Starting points, not lines to memorize. Adapt to your voice.</p>{scripts.map((s,i)=><div key={i} style={{ background:"var(--rf-surface2)",borderRadius:"10px",padding:"12px 14px",marginBottom:8,fontSize:13,lineHeight:1.7,color:"var(--rf-text2)",fontStyle:"italic" }}>{s}</div>)}</div>)}
-      {tab===2&&(<div>
-        <h3 style={S.h3}>Can this change?</h3>
-        <p style={S.p}>Short version: change is possible, but it has to be theirs. You can set the conditions and hold the boundary — you can't do the changing for them. Watch behavior over months, not promises over dinner.</p>
-        {flagged.length===0
-          ? <p style={S.p}>Nothing here crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
-          : flagged.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
-              <div key={k} style={S.card}>
-                <div style={{ fontSize:15,fontWeight:500,color:"var(--rf-text)",marginBottom:8 }}>{ARC[k].street}</div>
-                {P.safety&&<div style={{ ...S.notice, borderColor:"#C0392B", background:"rgba(192,57,43,.07)", color:"var(--rf-text)", marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first. You are not responsible for repairing it.</div>}
-                <div style={{ ...S.h3, color:"#27AE60", marginBottom:6 }}>Signs of real change</div>
-                {(P.change?.real||[]).map((s,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #D5F5E3", marginBottom:6 }}>{s}</p>)}
-                <div style={{ ...S.h3, color:"#C0392B", marginTop:8, marginBottom:6 }}>Signs of fake change</div>
-                {(P.change?.fake||[]).map((s,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #FADBD8", marginBottom:6 }}>{s}</p>)}
-              </div>
-            ); })}
-        {flagged.length>0&&<p style={{ ...S.p, fontSize:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
-      </div>)}
-      {tab===3&&(<div>
-        <h3 style={{ ...S.h3, color:"#27AE60" }}>Signs this can be worked on</h3>
-        {["They acknowledge impact without defending intent.","They stay in hard conversations rather than shutting down.","They can say 'I was wrong' without making you feel guilty.","They celebrate your wins without redirecting to themselves."].map((g,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #D5F5E3" }}>{g}</p>)}
-        <h3 style={{ ...S.h3, marginTop:16, color:"#C0392B" }}>Signs this may be more serious</h3>
-        {["Conversations consistently end with you apologizing.","Your emotional responses are treated as weapons.","You feel less like yourself than before this relationship.","Raising issues feels more dangerous than staying silent."].map((r,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #FADBD8" }}>{r}</p>)}
-      </div>)}
-      {tab===4&&(<div>
-        <h3 style={S.h3}>You don't have to figure this out alone</h3>
-        <p style={S.p}>Therapy is not about being broken. It's about having a dedicated space to think clearly about something hard to see from the inside.</p>
-        <div style={S.card}><div style={{ fontSize:13,fontWeight:500,marginBottom:2,color:"var(--rf-text)" }}>National Domestic Violence Hotline</div><div style={{ fontSize:22,fontWeight:700,color:"#C0392B",marginBottom:2 }}>1-800-799-7233</div><div style={{ fontSize:12,color:"var(--rf-text3)" }}>24/7 · Free · Confidential · Text START to 88788</div></div>
-        <div style={S.card}><div style={{ fontSize:13,fontWeight:500,marginBottom:2,color:"var(--rf-text)" }}>Crisis Text Line</div><div style={{ fontSize:15,color:"var(--rf-text2)",marginBottom:2 }}>Text HOME to 741741</div><div style={{ fontSize:12,color:"var(--rf-text3)" }}>Free · Confidential · 24/7</div></div>
-      </div>)}
-      <div style={S.divider}/>
-      <button style={S.btnDark} onClick={onShare}>Share my results card</button>
-      {onReport && <button style={S.btnOutline} onClick={onReport}>Download printable report</button>}
-      {onFinder && <button style={S.btnOutline} onClick={onFinder}>Open the Warning-Sign Finder</button>}
-      <button style={S.btnOutline} onClick={onRestart}>Start over</button>
-      <p style={S.meta}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</p>
+  return (<div className="rf-container rf-narrow rf-pad">
+    <span className="rf-eyebrow">What now</span>
+    <h1 className="rf-h2big">Here’s where to go from here.</h1>
+    <div className="rf-notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
+    <div className="rf-tabs">
+      {tabs.map((t,i)=>(<button key={i} className={"rf-tab" + (tab===i?" is-active":"")} onClick={()=>setTab(i)}>{t}</button>))}
     </div>
-  );
+    {tab===0 && (<div>
+      <h3 className="rf-sec-h">Patterns you flagged</h3>
+      {flagged.length===0
+        ? <p className="rf-p">You didn't cross the red-flag line on the patterns you explored. That's a real result — worth trusting, not explaining away.</p>
+        : <div className="rf-grid rf-grid-2">{flagged.map(k=>{ const P=PLAY[k]||{}; return (
+            <div key={k} className="rf-card">
+              <div className="rf-arc-name">{ARC[k].street}</div>
+              <div className="rf-arc-clin" style={{ marginBottom:8 }}>{ARC[k].clinical}</div>
+              <p className="rf-p" style={{ marginBottom:10 }}>{ARC_DESC[k]}</p>
+              {P.watch && <><div className="rf-sec-h" style={{ marginBottom:6 }}>What it looks like</div>{P.watch.map((w,i)=><p key={i} className="rf-hang">{w}</p>)}</>}
+              {P.ask && <><div className="rf-sec-h" style={{ margin:"8px 0 6px" }}>What to ask or watch for</div>{P.ask.map((w,i)=><p key={i} className="rf-hang" style={{ borderColor:"var(--danger)" }}>{w}</p>)}</>}
+            </div>); })}</div>}
+    </div>)}
+    {tab===1 && (<div><h3 className="rf-sec-h">Scripts to start with</h3><p className="rf-p" style={{ fontSize:13 }}>Starting points, not lines to memorize. Adapt to your voice.</p>{scripts.map((s,i)=><div key={i} style={{ background:"var(--surface2)", borderRadius:12, padding:"13px 16px", marginBottom:10, fontSize:14, lineHeight:1.7, color:"var(--text2)", fontStyle:"italic" }}>{s}</div>)}</div>)}
+    {tab===2 && (<div>
+      <h3 className="rf-sec-h">Can this change?</h3>
+      <p className="rf-p">Short version: change is possible, but it has to be theirs. You can set the conditions and hold the boundary — you can't do the changing for them. Watch behavior over months, not promises over dinner.</p>
+      {flagged.length===0
+        ? <p className="rf-p">Nothing here crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
+        : <div className="rf-grid rf-grid-2">{flagged.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
+            <div key={k} className="rf-card">
+              <div className="rf-arc-name" style={{ marginBottom:8 }}>{ARC[k].street}</div>
+              {P.safety && <div className="rf-notice is-danger" style={{ marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first. You are not responsible for repairing it.</div>}
+              <div className="rf-sec-h" style={{ color:"var(--green)", marginBottom:6 }}>Signs of real change</div>
+              {(P.change?.real||[]).map((s,i)=><p key={i} className="rf-hang" style={{ borderColor:"#A9DFBF" }}>{s}</p>)}
+              <div className="rf-sec-h" style={{ color:"var(--danger)", margin:"8px 0 6px" }}>Signs of fake change</div>
+              {(P.change?.fake||[]).map((s,i)=><p key={i} className="rf-hang" style={{ borderColor:"#F5B7B1" }}>{s}</p>)}
+            </div>); })}</div>}
+      {flagged.length>0 && <p className="rf-p" style={{ fontSize:13, marginTop:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
+    </div>)}
+    {tab===3 && (<div>
+      <h3 className="rf-sec-h" style={{ color:"var(--green)" }}>Signs this can be worked on</h3>
+      {["They acknowledge impact without defending intent.","They stay in hard conversations rather than shutting down.","They can say 'I was wrong' without making you feel guilty.","They celebrate your wins without redirecting to themselves."].map((g,i)=><p key={i} className="rf-hang" style={{ borderColor:"#A9DFBF" }}>{g}</p>)}
+      <h3 className="rf-sec-h" style={{ marginTop:18, color:"var(--danger)" }}>Signs this may be more serious</h3>
+      {["Conversations consistently end with you apologizing.","Your emotional responses are treated as weapons.","You feel less like yourself than before this relationship.","Raising issues feels more dangerous than staying silent."].map((r,i)=><p key={i} className="rf-hang" style={{ borderColor:"#F5B7B1" }}>{r}</p>)}
+    </div>)}
+    {tab===4 && (<div>
+      <h3 className="rf-sec-h">You don't have to figure this out alone</h3>
+      <p className="rf-p">Therapy is not about being broken. It's about having a dedicated space to think clearly about something hard to see from the inside.</p>
+      <div className="rf-card" style={{ marginBottom:12 }}><div style={{ fontSize:13, fontWeight:600 }}>National Domestic Violence Hotline</div><div style={{ fontSize:22, fontWeight:800, color:"var(--danger)" }}>1-800-799-7233</div><div className="rf-dim">24/7 · Free · Confidential · Text START to 88788</div></div>
+      <div className="rf-card"><div style={{ fontSize:13, fontWeight:600 }}>Crisis Text Line</div><div style={{ fontSize:15, color:"var(--text2)" }}>Text HOME to 741741</div><div className="rf-dim">Free · Confidential · 24/7</div></div>
+    </div>)}
+    <div className="rf-divider"/>
+    <div className="rf-actions">
+      <button className="rf-btn rf-btn-primary" onClick={onShare}>Share my results card</button>
+      {onReport && <button className="rf-btn rf-btn-outline" onClick={onReport}>Download printable report</button>}
+      {onFinder && <button className="rf-btn rf-btn-outline" onClick={onFinder}>Open the Warning-Sign Finder</button>}
+      <button className="rf-btn rf-btn-outline" onClick={onRestart}>Start over</button>
+    </div>
+  </div>);
 }
 
 function ShareCard({ result, part2Result, onBack }) {
-  const finalResult = part2Result||result;
-  const pk = finalResult?.primary;
-  const p = pk ? ARC[pk] : null;
-  return (
-    <div style={S.screen}>
-      <button style={S.btnGhost} onClick={onBack}>← Back</button>
-      <div style={{ marginTop:14 }}>
-        <span style={S.eyebrow}>Share</span>
-        <h1 style={S.h1}>Your result card.</h1>
-        <div style={{ background:"#1A1209", color:"#F0EDE8", borderRadius:"14px", padding:26, textAlign:"center", marginBottom:18 }}>
-          <div style={{ fontSize:10,fontWeight:500,letterSpacing:".14em",textTransform:"uppercase",opacity:.45,marginBottom:14 }}>RedFlag Result</div>
-          {p?(<>
-            <div style={{ fontFamily:"Georgia,serif",fontSize:24,lineHeight:1.2,marginBottom:8,fontWeight:400 }}>{p.street}</div>
-            <div style={{ fontSize:12,opacity:.55,marginBottom:14 }}>{p.clinical}</div>
-            {finalResult.combinedLabel&&<div style={{ background:"rgba(192,57,43,.25)",borderRadius:8,padding:"7px 14px",marginBottom:12,fontSize:13,fontWeight:500 }}>{finalResult.combinedLabel}</div>}
-            <div style={{ display:"inline-flex",padding:"4px 14px",borderRadius:50,background:"rgba(255,255,255,.12)",fontSize:11,fontWeight:500 }}>{finalResult.severity.display}</div>
-          </>):(<>
-            <div style={{ fontFamily:"Georgia,serif",fontSize:20,marginBottom:8,fontWeight:400 }}>No significant patterns detected</div>
-            <div style={{ fontSize:13,opacity:.6 }}>Your responses reflect a healthy dynamic.</div>
-          </>)}
-          <div style={{ fontSize:10,opacity:.3,marginTop:18,letterSpacing:".06em" }}>redflag.app · Know what you're dealing with</div>
-        </div>
-        <p style={{ ...S.p, textAlign:"center", fontSize:12 }}>Save this image and share it to start a conversation. Results reflect your perception, not a clinical assessment.</p>
-      </div>
+  const finalResult = part2Result||result; const pk = finalResult?.primary; const p = pk?ARC[pk]:null;
+  return (<div className="rf-container rf-narrow rf-pad">
+    <button className="rf-btn rf-btn-ghost" onClick={onBack}>← Back</button>
+    <span className="rf-eyebrow" style={{ marginTop:14 }}>Share</span>
+    <h1 className="rf-h2big">Your result card.</h1>
+    <div style={{ background:"#1A1209", color:"#F0EDE8", borderRadius:16, padding:32, textAlign:"center", margin:"8px 0 16px", maxWidth:460 }}>
+      <div style={{ fontSize:10, fontWeight:600, letterSpacing:".14em", textTransform:"uppercase", opacity:.45, marginBottom:16 }}>RedFlag Result</div>
+      {p ? (<>
+        <div style={{ fontFamily:"Georgia,serif", fontSize:26, lineHeight:1.2, marginBottom:8 }}>{p.street}</div>
+        <div style={{ fontSize:12, opacity:.55, marginBottom:14 }}>{p.clinical}</div>
+        {finalResult.combinedLabel && <div style={{ background:"rgba(192,57,43,.25)", borderRadius:8, padding:"7px 14px", marginBottom:12, fontSize:13, fontWeight:600 }}>{finalResult.combinedLabel}</div>}
+        <div style={{ display:"inline-flex", padding:"4px 14px", borderRadius:50, background:"rgba(255,255,255,.12)", fontSize:11, fontWeight:600 }}>{finalResult.severity.display}</div>
+      </>) : (<>
+        <div style={{ fontFamily:"Georgia,serif", fontSize:20, marginBottom:8 }}>No significant patterns detected</div>
+        <div style={{ fontSize:13, opacity:.6 }}>Your responses reflect a healthy dynamic.</div>
+      </>)}
+      <div style={{ fontSize:10, opacity:.3, marginTop:18, letterSpacing:".06em" }}>redflag.app · Know what you're dealing with</div>
     </div>
-  );
+    <p className="rf-p" style={{ fontSize:12, maxWidth:460 }}>Save this image and share it to start a conversation. Results reflect your perception, not a clinical assessment.</p>
+  </div>);
 }
 
-// ─── WARNING-SIGN FINDER SCREEN (Section II.4) ──────────────────────────────────
+// ─── WARNING-SIGN FINDER (Section II.4) ─────────────────────────────────────────
 function FinderList({ heading, items, accent, quote }) {
-  return (
-    <div style={{ ...S.card }}>
-      <h3 style={{ ...S.h3, color:accent||"var(--rf-text2)", marginBottom:10 }}>{heading}</h3>
-      {items.map((t,i)=>(
-        <div key={i} style={{ display:"flex", gap:10, padding:"7px 0", borderTop:i?"0.5px solid var(--rf-border)":"none" }}>
-          <div style={{ width:6, height:6, borderRadius:"50%", background:accent||"var(--rf-text3)", flexShrink:0, marginTop:7 }}/>
-          <div style={{ fontSize:13, lineHeight:1.6, color:"var(--rf-text2)", fontStyle:quote?"italic":"normal" }}>{t}</div>
-        </div>
-      ))}
-    </div>
-  );
+  return (<div className="rf-card">
+    <h3 className="rf-sec-h" style={{ color:accent||"var(--text2)", marginBottom:10 }}>{heading}</h3>
+    {items.map((t,i)=>(<div key={i} className="rf-list-item">
+      <div className="rf-dot" style={{ background:accent||"var(--text3)" }}/>
+      <div style={{ fontSize:13.5, lineHeight:1.6, color:"var(--text2)", fontStyle:quote?"italic":"normal" }}>{t}</div>
+    </div>))}
+  </div>);
 }
-
 function FinderScreen({ onBack, onQuiz }) {
   const [phase, setPhase] = useState("dates");
-  const d = FINDER[phase];
-  const phases = Object.keys(FINDER);
-  return (
-    <div style={S.screen}>
-      <button style={S.btnGhost} onClick={onBack}>← Back</button>
-      <span style={S.eyebrow}>Warning-Sign Finder</span>
-      <h1 style={S.h1}>Map someone before you’re in deep.</h1>
-      <p style={S.p}>Pick where you are. You get questions worth asking, the green flags that mean “keep going,” the warning signs worth slowing down for, and boundary lines to say out loud.</p>
-      <div style={{ display:"flex", flexWrap:"wrap", gap:8, margin:"14px 0 16px" }}>
-        {phases.map(k=>(
-          <button key={k} onClick={()=>setPhase(k)} aria-pressed={phase===k}
-            style={{ padding:"9px 14px", minHeight:44, borderRadius:50, cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"system-ui,-apple-system,sans-serif",
-              border:phase===k?"0.5px solid var(--rf-text)":"0.5px solid var(--rf-border2)",
-              background:phase===k?"var(--rf-text)":"transparent", color:phase===k?"var(--rf-bg)":"var(--rf-text)", transition:"all .12s" }}>
-            {FINDER[k].label}
-          </button>
-        ))}
-      </div>
-      <div style={{ ...S.notice, marginBottom:16 }}>{d.intro}</div>
-      <FinderList heading="Questions worth asking" items={d.ask} accent="var(--rf-text)" quote/>
-      <FinderList heading="Green flags — keep going" items={d.green} accent="#27AE60"/>
-      <FinderList heading="Warning signs — slow down" items={d.red} accent="#C0392B"/>
-      <FinderList heading="Boundary lines to say out loud" items={d.boundary} accent="var(--rf-text2)" quote/>
-      <div style={S.divider}/>
-      <button style={S.btnRed} onClick={onQuiz}>Run the full pattern quiz →</button>
-      <p style={S.meta}>The Finder is a screening tool, not a diagnosis. Trust patterns over single moments.</p>
+  const d = FINDER[phase]; const phases = Object.keys(FINDER);
+  return (<div className="rf-container rf-pad">
+    <button className="rf-btn rf-btn-ghost" onClick={onBack}>← Back</button>
+    <span className="rf-eyebrow" style={{ marginTop:10 }}>Warning-Sign Finder</span>
+    <h1 className="rf-h2big">Map someone before you’re in deep.</h1>
+    <p className="rf-lead">Pick where you are. You get questions worth asking, the green flags that mean “keep going,” the warning signs worth slowing down for, and boundary lines to say out loud.</p>
+    <div className="rf-chips">
+      {phases.map(k=>(<button key={k} className={"rf-chip" + (phase===k?" is-active":"")} aria-pressed={phase===k} onClick={()=>setPhase(k)}>{FINDER[k].label}</button>))}
     </div>
-  );
+    <div className="rf-notice">{d.intro}</div>
+    <div className="rf-grid rf-grid-2" style={{ marginTop:16 }}>
+      <FinderList heading="Questions worth asking" items={d.ask} accent="var(--text)" quote/>
+      <FinderList heading="Green flags — keep going" items={d.green} accent="var(--green)"/>
+      <FinderList heading="Warning signs — slow down" items={d.red} accent="var(--danger)"/>
+      <FinderList heading="Boundary lines to say out loud" items={d.boundary} accent="var(--text2)" quote/>
+    </div>
+    <div className="rf-divider"/>
+    <button className="rf-btn rf-btn-danger" onClick={onQuiz}>Run the full pattern quiz →</button>
+    <p className="rf-fineprint">The Finder is a screening tool, not a diagnosis. Trust patterns over single moments.</p>
+  </div>);
 }
 
-// ─── PRINTABLE REPORT (Section III) ────────────────────────────────────────────
+// ─── PRINTABLE REPORT (Section III) ─────────────────────────────────────────────
 const REL_WHO = { current:"your current partner", ex:"your ex-partner", new:"someone new", self:"yourself" };
-// Ink-saver pattern codes — no solid red blocks; slashes + a bold outline weight
-// per severity (Section III.1). Prints as plain monospace text = minimal ink.
 function sevMeta(label) {
   return ({
     severe:  { code:"//// SEVERE",          cls:"rf-sev-severe"  },
@@ -885,141 +986,97 @@ function sevMeta(label) {
     healthy: { code:"·  CLEAR",             cls:"rf-sev-healthy" },
   })[label] || { code:"·  CLEAR", cls:"rf-sev-healthy" };
 }
-
 function ReportScreen({ rel, scores, answers, onBack }) {
   const bank = rel === "self" ? SELF_Q : PARTNER_Q;
-  const byId = useMemo(() => { const m = {}; bank.forEach(q => { m[q.id] = q; }); return m; }, [bank]);
-  const keys = Object.keys(scores).sort((a, b) => (scores[b]||0) - (scores[a]||0));
-  const flagged = keys.filter(k => (scores[k]||0) > 3);
-  const pk = flagged[0] || null;
-  const sk = flagged[1] || null;
-  const combinedLabel = pk && sk ? ((COMBINED[pk]?.[sk]) || (COMBINED[sk]?.[pk]) || null) : null;
-  const overall = pk ? getSev(scores[pk]||0, pk) : { label:"healthy", display:"No red flags" };
+  const byId = useMemo(()=>{ const m={}; bank.forEach(q=>{ m[q.id]=q; }); return m; }, [bank]);
+  const keys = Object.keys(scores).sort((a,b)=>(scores[b]||0)-(scores[a]||0));
+  const flagged = keys.filter(k=>(scores[k]||0)>3);
+  const pk = flagged[0]||null, sk = flagged[1]||null;
+  const combinedLabel = pk&&sk?((COMBINED[pk]?.[sk])||(COMBINED[sk]?.[pk])||null):null;
+  const overall = pk?getSev(scores[pk]||0,pk):{ label:"healthy", display:"No red flags" };
   const isSelf = rel === "self";
   const dateStr = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
-
-  // Deterministic audit: which answers summed into a flag, and which threshold it crossed.
   function auditFor(k) {
-    const contribs = answers.filter(a => a.archetype === k).map(a => {
-      const q = byId[a.questionId];
-      const opt = (q && typeof a.choice === "number") ? q.ans[a.choice] : null;
-      return { q: q ? q.q : "(question)", choice: opt ? opt.t : null, w: a.weight };
-    }).sort((x, y) => y.w - x.w);
-    const score = scores[k] || 0;
-    const maxPossible = contribs.length * 3;
-    const sev = getSev(score, k);
-    const severeThresh = (k === "isolation" || k === "blame") ? 5 : 9;
-    const crossed = sev.label === "severe" ? severeThresh : sev.label === "address" ? 7 : 4;
+    const contribs = answers.filter(a=>a.archetype===k).map(a=>{
+      const q=byId[a.questionId]; const opt=(q&&typeof a.choice==="number")?q.ans[a.choice]:null;
+      return { q:q?q.q:"(question)", choice:opt?opt.t:null, w:a.weight };
+    }).sort((x,y)=>y.w-x.w);
+    const score=scores[k]||0; const maxPossible=contribs.length*3; const sev=getSev(score,k);
+    const severeThresh=(k==="isolation"||k==="blame")?5:9;
+    const crossed=sev.label==="severe"?severeThresh:sev.label==="address"?7:4;
     return { contribs, score, maxPossible, sev, crossed };
   }
-
-  return (
-    <div style={S.screen}>
-      <button className="rf-noprint" style={S.btnGhost} onClick={onBack}>← Back to results</button>
-
-      <div className="rf-report rf-paper" style={{ marginTop:12 }}>
-        <div className="rf-doc-title">RedFlag — Relational Risk Report</div>
-        <div className="rf-doc-sub">A behavioral-pattern assessment of {REL_WHO[rel] || "this relationship"}.</div>
-        <div className="rf-doc-meta">Generated {dateStr} · Reflects your perception, not a clinical diagnosis · Stays on your device</div>
-        <hr className="rf-rule"/>
-
-        <div className="rf-legend">
-          <span><span className="rf-code">////</span> Severe</span>
-          <span><span className="rf-code">///</span> Worth addressing</span>
-          <span><span className="rf-code">//</span> Worth watching</span>
-          <span><span className="rf-code">·</span> Clear</span>
-        </div>
-
-        <div className={"rf-summary " + sevMeta(overall.label).cls}>
-          <div className="rf-code">{sevMeta(overall.label).code}</div>
-          {pk ? (
-            <p style={{ margin:"6px 0 0", fontSize:13 }}>
-              Strongest pattern detected: <strong>{ARC[pk].street}</strong> ({ARC[pk].clinical}).
-              {combinedLabel && <> Combined with {ARC[sk].street}, this reads as the reinforcing loop <strong>“{combinedLabel}”</strong>.</>}
-            </p>
-          ) : (
-            <p style={{ margin:"6px 0 0", fontSize:13 }}>
-              No pattern crossed the red-flag threshold in the areas assessed. That is a genuinely good result worth recognizing.
-            </p>
-          )}
-        </div>
-
-        <h2 className="rf-sec">Patterns assessed</h2>
-        {keys.map(k => {
-          const m = sevMeta(getSev(scores[k]||0, k).label);
-          return (
-            <div key={k} style={{ display:"flex", gap:10, alignItems:"baseline", padding:"4px 0", borderTop:"0.5px solid #ccc", fontSize:12 }}>
-              <span className="rf-code" style={{ flex:"0 0 118px" }}>{m.code}</span>
-              <span style={{ flex:1 }}>{ARC[k].street}</span>
-              <span className="rf-w" style={{ color:"#333" }}>score {scores[k]||0}</span>
-            </div>
-          );
-        })}
-
-        {flagged.length > 0 && <><h2 className="rf-sec">Flagged patterns — detail &amp; audit trail</h2>
-        {flagged.map(k => {
-          const a = auditFor(k);
-          const m = sevMeta(a.sev.label);
-          return (
-            <div key={k} className={"rf-block " + m.cls}>
-              <div className="rf-block-name">{ARC[k].street}</div>
-              <div className="rf-block-clin">{ARC[k].clinical} · <span className="rf-code">{m.code}</span></div>
-              <p className="rf-block-desc">{ARC_DESC[k]}</p>
-              <div className="rf-audit">
-                <div className="rf-audit-h">Why this Relational Red Flag triggered</div>
-                <p>Across {a.contribs.length} question{a.contribs.length===1?"":"s"} on this pattern, your answers summed to <span className="rf-formula">{a.score} of {a.maxPossible}</span> possible points.</p>
-                <p className="rf-formula">score {a.score} ≥ {a.crossed} → {a.sev.display}</p>
-                {a.contribs.some(c => c.choice) && <>
-                  <p style={{ marginBottom:2, fontWeight:700, fontSize:11 }}>Heaviest contributors first:</p>
-                  <ul className="rf-contribs">
-                    {a.contribs.map((c, i) => (
-                      <li key={i}><span className="rf-w">[{c.w}/3]</span><span>{c.choice ? "“" + c.choice + "”" : c.q}</span></li>
-                    ))}
-                  </ul>
-                </>}
-              </div>
-            </div>
-          );
-        })}</>}
-
-        {pk && sk && (
-          <div className="rf-clash">
-            <div className="rf-audit-h">Why you clash{combinedLabel ? " — " + combinedLabel : ""}</div>
-            <p style={{ fontSize:12, margin:"0 0 6px" }}>Your two strongest active patterns collide:</p>
-            <ul className="rf-contribs">
-              <li><span className="rf-w">{scores[pk]||0}</span><span>{ARC[pk].street} — {getSev(scores[pk]||0, pk).display}</span></li>
-              <li><span className="rf-w">{scores[sk]||0}</span><span>{ARC[sk].street} — {getSev(scores[sk]||0, sk).display}</span></li>
-            </ul>
-            <p style={{ fontSize:12, margin:"8px 0 0" }}>{combinedLabel
-              ? "In this framework, " + ARC[pk].street + " landing on top of " + ARC[sk].street + " is the named collision “" + combinedLabel + ".” Each pattern makes the other harder to interrupt, so it registers as one reinforcing loop rather than two separate issues."
-              : ARC[pk].street + " and " + ARC[sk].street + " are both active at once. They compound — addressing only one tends to leave the loop intact."}</p>
+  return (<div className="rf-container rf-pad">
+    <button className="rf-btn rf-btn-ghost rf-noprint" onClick={onBack}>← Back to results</button>
+    <div className="rf-report rf-paper" style={{ marginTop:12 }}>
+      <div className="rf-doc-title">RedFlag — Relational Risk Report</div>
+      <div className="rf-doc-sub">A behavioral-pattern assessment of {REL_WHO[rel]||"this relationship"}.</div>
+      <div className="rf-doc-meta">Generated {dateStr} · Reflects your perception, not a clinical diagnosis · Stays on your device</div>
+      <hr className="rf-rule"/>
+      <div className="rf-legend">
+        <span><span className="rf-code">////</span> Severe</span>
+        <span><span className="rf-code">///</span> Worth addressing</span>
+        <span><span className="rf-code">//</span> Worth watching</span>
+        <span><span className="rf-code">·</span> Clear</span>
+      </div>
+      <div className={"rf-summary " + sevMeta(overall.label).cls}>
+        <div className="rf-code">{sevMeta(overall.label).code}</div>
+        {pk ? (<p style={{ margin:"6px 0 0", fontSize:13 }}>Strongest pattern detected: <strong>{ARC[pk].street}</strong> ({ARC[pk].clinical}).{combinedLabel && <> Combined with {ARC[sk].street}, this reads as the reinforcing loop <strong>“{combinedLabel}”</strong>.</>}</p>)
+             : (<p style={{ margin:"6px 0 0", fontSize:13 }}>No pattern crossed the red-flag threshold in the areas assessed. That is a genuinely good result worth recognizing.</p>)}
+      </div>
+      <h2 className="rf-sec">Patterns assessed</h2>
+      {keys.map(k=>{ const m=sevMeta(getSev(scores[k]||0,k).label); return (
+        <div key={k} style={{ display:"flex", gap:10, alignItems:"baseline", padding:"4px 0", borderTop:"0.5px solid #ccc", fontSize:12 }}>
+          <span className="rf-code" style={{ flex:"0 0 118px" }}>{m.code}</span>
+          <span style={{ flex:1 }}>{ARC[k].street}</span>
+          <span className="rf-w" style={{ color:"#333" }}>score {scores[k]||0}</span>
+        </div>); })}
+      {flagged.length>0 && <><h2 className="rf-sec">Flagged patterns — detail &amp; audit trail</h2>
+      {flagged.map(k=>{ const a=auditFor(k); const m=sevMeta(a.sev.label); return (
+        <div key={k} className={"rf-block " + m.cls}>
+          <div className="rf-block-name">{ARC[k].street}</div>
+          <div className="rf-block-clin">{ARC[k].clinical} · <span className="rf-code">{m.code}</span></div>
+          <p className="rf-block-desc">{ARC_DESC[k]}</p>
+          <div className="rf-audit">
+            <div className="rf-audit-h">Why this Relational Red Flag triggered</div>
+            <p>Across {a.contribs.length} question{a.contribs.length===1?"":"s"} on this pattern, your answers summed to <span className="rf-formula">{a.score} of {a.maxPossible}</span> possible points.</p>
+            <p className="rf-formula">score {a.score} ≥ {a.crossed} → {a.sev.display}</p>
+            {a.contribs.some(c=>c.choice) && <>
+              <p style={{ marginBottom:2, fontWeight:700, fontSize:11 }}>Heaviest contributors first:</p>
+              <ul className="rf-contribs">{a.contribs.map((c,i)=>(<li key={i}><span className="rf-w">[{c.w}/3]</span><span>{c.choice?"“"+c.choice+"”":c.q}</span></li>))}</ul>
+            </>}
           </div>
-        )}
-
-        <div className="rf-crisis">
-          <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>If you ever feel unsafe</div>
-          <div><strong>1-800-799-7233</strong> — National Domestic Violence Hotline (24/7, free, confidential)</div>
-          <div style={{ fontSize:12, marginTop:2 }}>Text START to 88788 · Crisis Text Line: text HOME to 741741</div>
-        </div>
-
-        <hr className="rf-rule"/>
-        <div className="rf-foot">
-          RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf ? "your self-assessment" : "your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice.
-          {" "}To compare both sides, run RedFlag again in {isSelf ? "a partner mode" : "“Myself” mode"} and print the matching report.
-        </div>
+        </div>); })}</>}
+      {pk && sk && (<div className="rf-clash">
+        <div className="rf-audit-h">Why you clash{combinedLabel?" — "+combinedLabel:""}</div>
+        <p style={{ fontSize:12, margin:"0 0 6px" }}>Your two strongest active patterns collide:</p>
+        <ul className="rf-contribs">
+          <li><span className="rf-w">{scores[pk]||0}</span><span>{ARC[pk].street} — {getSev(scores[pk]||0,pk).display}</span></li>
+          <li><span className="rf-w">{scores[sk]||0}</span><span>{ARC[sk].street} — {getSev(scores[sk]||0,sk).display}</span></li>
+        </ul>
+        <p style={{ fontSize:12, margin:"8px 0 0" }}>{combinedLabel
+          ? "In this framework, " + ARC[pk].street + " landing on top of " + ARC[sk].street + " is the named collision “" + combinedLabel + ".” Each pattern makes the other harder to interrupt, so it registers as one reinforcing loop rather than two separate issues."
+          : ARC[pk].street + " and " + ARC[sk].street + " are both active at once. They compound — addressing only one tends to leave the loop intact."}</p>
+      </div>)}
+      <div className="rf-crisis">
+        <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>If you ever feel unsafe</div>
+        <div><strong>1-800-799-7233</strong> — National Domestic Violence Hotline (24/7, free, confidential)</div>
+        <div style={{ fontSize:12, marginTop:2 }}>Text START to 88788 · Crisis Text Line: text HOME to 741741</div>
       </div>
-
-      <div className="rf-noprint" style={{ marginTop:16 }}>
-        <button style={S.btnDark} onClick={() => window.print()}>🖨 Save as PDF / Print</button>
-        <button style={S.btnOutline} onClick={onBack}>← Back to results</button>
-        <p style={S.meta}>Opens your browser's print dialog — choose <strong>“Save as PDF”</strong> to keep a copy. Styled ink-saver: no heavy red blocks, high-contrast black on white, prints clean on any printer.</p>
-      </div>
+      <hr className="rf-rule"/>
+      <div className="rf-foot">RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf?"your self-assessment":"your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice. To compare both sides, run RedFlag again in {isSelf?"a partner mode":"“Myself” mode"} and print the matching report.</div>
     </div>
-  );
+    <div className="rf-noprint rf-actions" style={{ marginTop:18 }}>
+      <button className="rf-btn rf-btn-primary" onClick={()=>window.print()}>🖨 Save as PDF / Print</button>
+      <button className="rf-btn rf-btn-outline" onClick={onBack}>← Back to results</button>
+    </div>
+    <p className="rf-fineprint rf-noprint">Opens your browser's print dialog — choose <strong>“Save as PDF”</strong> to keep a copy. Styled ink-saver: no heavy red blocks, high-contrast black on white, prints clean on any printer.</p>
+  </div>);
 }
 
-// ─── APP ──────────────────────────────────────────────────────────────────────
+// ─── APP ─────────────────────────────────────────────────────────────────────────
 const SCREENS = { LAND:"land", ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report", FINDER:"finder" };
+const NAV_OF = { land:"home", onboard:"quiz", summary:"quiz", q1:"quiz", r1:"quiz", bridge:"quiz", q2:"quiz", r2:"quiz", wn:"quiz", share:"quiz", report:"quiz", finder:"finder" };
 
 function App() {
   const saved = useMemo(loadSession, []);
@@ -1034,104 +1091,117 @@ function App() {
   const [allScores, setAllScores] = useState(()=>saved?.allScores ?? {});
   const [p1Answers, setP1Answers] = useState(()=>saved?.p1Answers ?? []);
   const [p2Answers, setP2Answers] = useState(()=>saved?.p2Answers ?? []);
-  const [dark,      setDark]      = useState(()=>{ try{return localStorage.getItem("rf-dark")==="1";}catch{return false;} });
+  const theme = useThemeState();
 
-  // Persist the whole session so a reload restores the current stage + results (IV.1).
-  useEffect(() => {
-    saveSession({ screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers });
-  }, [screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers]);
+  useEffect(()=>{ saveSession({ screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers }); },
+    [screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers]);
 
-  function toggleDark() { setDark(d=>{ const n=!d; try{localStorage.setItem("rf-dark",n?"1":"0");}catch{} return n; }); }
-  function go(s) { setScreen(s); }
-  function restart() { clearSession();setScreen(SCREENS.LAND);setRel(null);setHasKids(false);setP1Keys([]);setP2Keys([]);setP1Scores({});setP1Result(null);setP2Result(null);setAllScores({});setP1Answers([]);setP2Answers([]); }
+  function go(s) { setScreen(s); try { window.scrollTo(0,0); } catch (e) {} }
+  function restart() { clearSession(); setScreen(SCREENS.LAND); setRel(null); setHasKids(false); setP1Keys([]); setP2Keys([]); setP1Scores({}); setP1Result(null); setP2Result(null); setAllScores({}); setP1Answers([]); setP2Answers([]); }
+  function onNav(id) { if(id==="home")go(SCREENS.LAND); else if(id==="finder")go(SCREENS.FINDER); else go(rel?(p1Result?SCREENS.R1:SCREENS.SUMMARY):SCREENS.ONBOARD); }
 
   const isSelf = rel === "self";
-  const allQ   = isSelf ? SELF_Q : PARTNER_Q;
-
-  // Filter questions to only those for selected archetype keys, excluding gatekeeper when no kids
+  const allQ = isSelf ? SELF_Q : PARTNER_Q;
   const p1Q = allQ.filter(q => p1Keys.includes(q.a));
   const p2Q = allQ.filter(q => p2Keys.includes(q.a) && (hasKids || q.a !== "gatekeeper"));
 
   function onP1Done(answers) {
-    const scores = {}; p1Keys.forEach(k=>{scores[k]=0;});
+    const scores={}; p1Keys.forEach(k=>{scores[k]=0;});
     answers.forEach(a=>{ if(scores[a.archetype]!==undefined) scores[a.archetype]+=a.weight; });
     setP1Scores(scores); setP1Result(computeResult(scores,p1Keys)); setAllScores(scores); setP1Answers(answers); go(SCREENS.R1);
   }
-
   function onP2Done(answers) {
-    const scores = {}; p2Keys.forEach(k=>{scores[k]=0;});
+    const scores={}; p2Keys.forEach(k=>{scores[k]=0;});
     answers.forEach(a=>{ if(scores[a.archetype]!==undefined) scores[a.archetype]+=a.weight; });
-    const combined = {}; [...p1Keys,...p2Keys].forEach(k=>{combined[k]=(p1Scores[k]||0)+(scores[k]||0);});
-    const result = computeResult(combined,[...p1Keys,...p2Keys]);
-    result.newlyDiscovered = p2Keys.filter(k=>(scores[k]||0)>3&&k!==p1Result?.primary&&k!==p1Result?.secondary);
+    const combined={}; [...p1Keys,...p2Keys].forEach(k=>{combined[k]=(p1Scores[k]||0)+(scores[k]||0);});
+    const result=computeResult(combined,[...p1Keys,...p2Keys]);
+    result.newlyDiscovered=p2Keys.filter(k=>(scores[k]||0)>3&&k!==p1Result?.primary&&k!==p1Result?.secondary);
     setP2Result(result); setAllScores(combined); setP2Answers(answers); go(SCREENS.R2);
   }
 
-  const cssVars = dark ? DARK_VARS : LIGHT_VARS;
-
   return (
-    <DarkCtx.Provider value={{ dark, toggle:toggleDark }}>
-      <div style={{ ...cssVars, ...S.wrap }}>
-        <DarkToggle/>
-        {screen===SCREENS.LAND    && <Landing onStart={()=>go(SCREENS.ONBOARD)} onFinder={()=>go(SCREENS.FINDER)}/>}
-        {screen===SCREENS.ONBOARD && <Onboarding onSelect={(r,k)=>{setRel(r);setHasKids(k);go(SCREENS.SUMMARY);}}/>}
-        {screen===SCREENS.SUMMARY && <SummaryScreen hasKids={hasKids} isSelf={isSelf} onConfirm={(p1,p2)=>{setP1Keys(p1);setP2Keys(p2);go(SCREENS.Q1);}}/>}
-        {screen===SCREENS.Q1 && <QuizScreen questions={p1Q} relType={rel} partLabel="Part 1" onComplete={onP1Done} onBack={()=>go(SCREENS.SUMMARY)}/>}
-        {screen===SCREENS.R1 && (
-          <div style={S.screen}>
-            <span style={S.eyebrow}>Part 1 results</span>
-            <h1 style={S.h1}>Here's what your answers reveal.</h1>
-            <div style={S.notice}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
-            <ResultSection title="Your selected patterns" scores={p1Scores} keys={p1Keys} part={1}/>
-            <button style={S.btnRed} onClick={()=>go(SCREENS.BRIDGE)}>Go deeper — Part 2</button>
-            <button style={S.btnDark} onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
-            <button style={S.btnOutline} onClick={()=>go(SCREENS.REPORT)}>Download printable report</button>
-          </div>
-        )}
-        {screen===SCREENS.BRIDGE && (
-          <div style={S.screen}>
-            <span style={S.eyebrow}>Part 1 complete</span>
-            <h1 style={S.h1}>Want to check if any of these apply to {isSelf?"you":"your partner"}?</h1>
-            <p style={S.p}>Part 2 covers {p2Keys.length} more patterns in {p2Q.length} questions. Here's exactly what you'd be exploring:</p>
-            <div style={{ marginBottom:18 }}>
-              {p2Keys.map(k=>(
-                <div key={k} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"10px 0", borderBottom:"0.5px solid var(--rf-border)" }}>
-                  <div style={{ width:6,height:6,borderRadius:"50%",background:"#C0392B",flexShrink:0,marginTop:6 }}/>
-                  <div>
-                    <div style={{ fontSize:14,fontWeight:500,color:"var(--rf-text)" }}>{ARC[k]?.street}</div>
-                    <div style={{ fontSize:12,color:"var(--rf-text3)" }}>{ARC[k]?.one}</div>
+    <ThemeCtx.Provider value={theme}>
+      <div className="rf-app">
+        <Header onNav={onNav} active={NAV_OF[screen]}/>
+        <main className="rf-main">
+          {screen===SCREENS.LAND    && <Landing onNav={onNav}/>}
+          {screen===SCREENS.ONBOARD && <Onboarding onSelect={(r,k)=>{setRel(r);setHasKids(k);go(SCREENS.SUMMARY);}}/>}
+          {screen===SCREENS.SUMMARY && <SummaryScreen hasKids={hasKids} isSelf={isSelf} onConfirm={(p1,p2)=>{setP1Keys(p1);setP2Keys(p2);go(SCREENS.Q1);}}/>}
+          {screen===SCREENS.Q1 && <QuizScreen questions={p1Q} relType={rel} partLabel="Part 1" onComplete={onP1Done} onBack={()=>go(SCREENS.SUMMARY)}/>}
+          {screen===SCREENS.R1 && (
+            <div className="rf-container rf-pad">
+              <span className="rf-eyebrow">Part 1 results</span>
+              <h1 className="rf-h2big">Here’s what your answers reveal.</h1>
+              <div className="rf-notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
+              <div className="rf-results">
+                <div><ResultSection title="Your selected patterns" scores={p1Scores} keys={p1Keys} part={1}/></div>
+                <aside className="rf-side">
+                  <div className="rf-side-card">
+                    <div className="rf-sec-h" style={{ marginBottom:10 }}>Next steps</div>
+                    <div className="rf-actions">
+                      <button className="rf-btn rf-btn-danger" onClick={()=>go(SCREENS.BRIDGE)}>Go deeper — Part 2</button>
+                      <button className="rf-btn rf-btn-primary" onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
+                      <button className="rf-btn rf-btn-outline" onClick={()=>go(SCREENS.REPORT)}>Download report</button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                </aside>
+              </div>
             </div>
-            <button style={S.btnRed} onClick={()=>go(SCREENS.Q2)}>Yes, go deeper — Part 2</button>
-            <button style={S.btnOutline} onClick={()=>go(SCREENS.WN)}>I'm done for now — see results</button>
-            <p style={S.meta}>Part 2 is optional. Your Part 1 results are complete and valid.</p>
-          </div>
-        )}
-        {screen===SCREENS.Q2 && <QuizScreen questions={p2Q} relType={rel} partLabel="Part 2" onComplete={onP2Done} onBack={()=>go(SCREENS.BRIDGE)}/>}
-        {screen===SCREENS.R2 && (
-          <div style={S.screen}>
-            <span style={S.eyebrow}>Full profile</span>
-            <h1 style={S.h1}>Your complete picture.</h1>
-            <div style={S.notice}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
-            <ResultSection title="Part 2 — Deeper patterns" scores={allScores} keys={p2Keys} newlyDiscovered={p2Result?.newlyDiscovered||[]} part={2}/>
-            <div style={S.divider}/>
-            <ResultSection title="Part 1 — Your selections" scores={allScores} keys={p1Keys} part={1}/>
-            <button style={S.btnDark} onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
-            <button style={S.btnOutline} onClick={()=>go(SCREENS.REPORT)}>Download printable report</button>
-            <button style={S.btnOutline} onClick={()=>go(SCREENS.SHARE)}>Share my results card</button>
-          </div>
-        )}
-        {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} scores={allScores} keys={[...p1Keys,...p2Keys]} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>go(SCREENS.FINDER)} onRestart={restart}/>}
-        {screen===SCREENS.REPORT && <ReportScreen rel={rel} scores={allScores} answers={[...p1Answers,...p2Answers]} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.R1)}/>}
-        {screen===SCREENS.FINDER && <FinderScreen onBack={()=>go(rel?SCREENS.WN:SCREENS.LAND)} onQuiz={()=>go(rel?SCREENS.WN:SCREENS.ONBOARD)}/>}
-        {screen===SCREENS.SHARE && <ShareCard result={p1Result} part2Result={p2Result} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.WN)}/>}
+          )}
+          {screen===SCREENS.BRIDGE && (
+            <div className="rf-container rf-narrow rf-pad">
+              <span className="rf-eyebrow">Part 1 complete</span>
+              <h1 className="rf-h2big">Want to check if any of these apply to {isSelf?"you":"your partner"}?</h1>
+              <p className="rf-lead">Part 2 covers {p2Keys.length} more patterns in {p2Q.length} questions. Here’s exactly what you’d be exploring:</p>
+              <div style={{ margin:"18px 0" }}>
+                {p2Keys.map(k=>(
+                  <div key={k} className="rf-list-item">
+                    <div className="rf-dot" style={{ background:"var(--danger)" }}/>
+                    <div><div style={{ fontSize:14, fontWeight:600, color:"var(--text)" }}>{ARC[k]?.street}</div><div className="rf-dim">{ARC[k]?.one}</div></div>
+                  </div>
+                ))}
+              </div>
+              <div className="rf-actions">
+                <button className="rf-btn rf-btn-danger" onClick={()=>go(SCREENS.Q2)}>Yes, go deeper — Part 2</button>
+                <button className="rf-btn rf-btn-outline" onClick={()=>go(SCREENS.WN)}>I’m done for now — see results</button>
+              </div>
+            </div>
+          )}
+          {screen===SCREENS.Q2 && <QuizScreen questions={p2Q} relType={rel} partLabel="Part 2" onComplete={onP2Done} onBack={()=>go(SCREENS.BRIDGE)}/>}
+          {screen===SCREENS.R2 && (
+            <div className="rf-container rf-pad">
+              <span className="rf-eyebrow">Full profile</span>
+              <h1 className="rf-h2big">Your complete picture.</h1>
+              <div className="rf-notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
+              <div className="rf-results">
+                <div>
+                  <ResultSection title="Part 2 — Deeper patterns" scores={allScores} keys={p2Keys} newlyDiscovered={p2Result?.newlyDiscovered||[]} part={2}/>
+                  <div className="rf-divider"/>
+                  <ResultSection title="Part 1 — Your selections" scores={allScores} keys={p1Keys} part={1}/>
+                </div>
+                <aside className="rf-side">
+                  <div className="rf-side-card">
+                    <div className="rf-sec-h" style={{ marginBottom:10 }}>Next steps</div>
+                    <div className="rf-actions">
+                      <button className="rf-btn rf-btn-primary" onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
+                      <button className="rf-btn rf-btn-outline" onClick={()=>go(SCREENS.REPORT)}>Download report</button>
+                      <button className="rf-btn rf-btn-outline" onClick={()=>go(SCREENS.SHARE)}>Share results card</button>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          )}
+          {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} scores={allScores} keys={[...p1Keys,...p2Keys]} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>go(SCREENS.FINDER)} onRestart={restart}/>}
+          {screen===SCREENS.SHARE && <ShareCard result={p1Result} part2Result={p2Result} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.WN)}/>}
+          {screen===SCREENS.REPORT && <ReportScreen rel={rel} scores={allScores} answers={[...p1Answers,...p2Answers]} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.R1)}/>}
+          {screen===SCREENS.FINDER && <FinderScreen onBack={()=>go(rel?SCREENS.WN:SCREENS.LAND)} onQuiz={()=>go(rel?SCREENS.WN:SCREENS.ONBOARD)}/>}
+        </main>
+        <Footer/>
       </div>
-    </DarkCtx.Provider>
+    </ThemeCtx.Provider>
   );
 }
-
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));
