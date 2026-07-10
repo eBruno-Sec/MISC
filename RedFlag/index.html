@@ -371,6 +371,197 @@ const ARC_DESC = {
   gatekeeper:  "Using children as leverage — withholding access, undermining the parenting relationship, or threatening custody.",
 };
 
+// ─── ARCHETYPE DEEP-DIVE DATA ─────────────────────────────────────────────────
+const ARC_DETAIL = {
+  gaslight:{
+    what:`Gaslighting is a sustained pattern in which one person repeatedly distorts or denies a shared reality so that the other begins to doubt their own perception, memory, and judgment. The term comes from the 1944 film Gaslight, in which a husband secretly dims the gas lights and then insists his wife is imagining the flicker. In practice it ranges from flat denial (“that never happened”) through subtle reframing (“you always make things dramatic”) to outright reversal (“I only said that because you pushed me to it”).`,
+    develops:`Clinically, gaslighting overlaps with coercive control, narcissistic relational patterns, and learned DARVO (Deny, Attack, Reverse Victim and Offender). It rarely starts fully formed. It usually begins as a defense mechanism — the person deflects one difficult conversation, sees that it works, and gradually systemizes it. In personality research it correlates with low trait Agreeableness and high Machiavellianism.`,
+    feels:`Targets describe a creeping erosion of self-trust. You replay the conversation three times before bed trying to figure out what actually happened. You stop raising concerns because every attempt ends with you apologizing. You catch yourself pre-clearing your version of events with a third party before you feel safe saying it out loud. Researchers describe this experience as “epistemic coercion” — your access to your own knowledge is being managed by someone else.`,
+    research:`Jennifer Freyd’s betrayal trauma theory (1996) explains why targets of gaslighting by a trusted partner are especially slow to name it: the very attachment that makes the relationship matter also suppresses threat-detection. More recently, Sweet (2019) in Gender & Society documented how digital tools (screenshots, message histories) are increasingly weaponized in intimate-partner gaslighting.`,
+    respond:[`Keep a brief private log — even just timestamps and one-line summaries of conversations — not to litigate, but to re-anchor your own memory.`,`Name the pattern by its impact, not their motive: “I need you to confirm what happened, because I keep ending up confused after we talk.”`,`If a trusted person outside the relationship consistently sees what you see, weight that signal.`]
+  },
+  control:{
+    what:`Coercive control is a pattern of ongoing behavior designed to dominate a partner’s autonomy through monitoring, restriction, micromanagement, and consequences for independence. Evan Stark, who coined the term, distinguishes it from episodic violence: coercive control is continuous, atmospheric — it shapes the entire texture of daily life rather than occurring as isolated incidents.`,
+    develops:`Control patterns typically escalate in stages. Early presentations look like protectiveness, “caring” jealousy, or intense investment. Over time the monitoring expands (location tracking, contact checking), the permissions narrow, and the cost of independent behavior rises. Stark’s 2007 research found that in relationships with coercive control, the controlling partner’s behavior intensifies at transitions — pregnancy, job changes, attempts to leave.`,
+    feels:`Partners describe losing the ability to make even small decisions without calculating the aftermath. Which friend is safe to text. Whether to mention an after-work drink. A constant background cost-benefit analysis before every action. Lundy Bancroft calls this “walking on eggshells.” The cumulative weight of small restrictions is often more disorienting than any single incident.`,
+    research:`Stark’s Coercive Control (2007) remains the foundational text. The UK Serious Crime Act 2015 became the first legislation to criminalize coercive control as a pattern rather than requiring proof of physical violence — a recognition that the harm is structural and cumulative, not incident-by-incident.`,
+    respond:[`Trust the pattern, not the incident — if independence consistently creates consequences, the pattern is the data.`,`Financial and social independence (your own account, your own friendships) are not negotiable ground; they are safety infrastructure.`,`Specialist domestic abuse services (not general couples counseling) are the appropriate resource here — couples counseling can increase danger when coercive control is present.`]
+  },
+  emotional:{
+    what:`Emotional invalidation as a persistent pattern involves treating a partner’s feelings as exaggerations, attacks, or weaknesses rather than as valid experiences. This goes beyond the ordinary friction of two people with different emotional registers; it is the consistent communication that having feelings is itself a problem.`,
+    develops:`This pattern often originates in dismissive or avoidant attachment formed in early care environments. People who were parented by emotionally unavailable caregivers frequently internalize the message that emotions are dangerous or excessive. In adulthood this manifests as discomfort — sometimes genuine — when a partner expresses distress, which then gets managed by deflecting, minimizing, or blaming.`,
+    feels:`Partners describe pre-editing their emotional expression before they dare say anything. The loss isn’t just feeling unsupported — it’s the slow disappearance of the capacity to trust your own emotional responses.`,
+    research:`John Gottman’s longitudinal research on couple dynamics identifies contempt (which includes emotional invalidation) as the single strongest predictor of relationship dissolution — more predictive than conflict frequency or intensity. Invalidation specifically is associated with increased anxiety and depressive symptoms in the partner who receives it (Shenk & Fruzzetti, 2011).`,
+    respond:[`Name the impact, not the intention: “When I share something hard and it gets minimized, I stop wanting to share. That affects us.”`,`Test whether repair is possible by sharing a small, low-stakes feeling and watching what happens.`,`A therapist who specializes in attachment can be invaluable — for both people — if the pattern is rooted in early experience rather than contempt.`]
+  },
+  lovebomb:{
+    what:`Love bombing is the deployment of intense, premature affection — gifts, declarations, constant contact, future-planning — early in a relationship, followed eventually by withdrawal or devaluation. The intensity is strategic (consciously or not) rather than genuine: it creates attachment quickly, and the subsequent withdrawal leverages that attachment as a leash.`,
+    develops:`Love bombing is closely associated with narcissistic and borderline attachment patterns. The idealization-devaluation cycle was first described in object relations theory (Kernberg, 1975) and maps directly onto the love-bomb-withdraw pattern: the person is either pedestalized or discarded, with little stable middle ground. The neurochemical hook is real — intermittent reinforcement creates stronger attachment than consistent positive reinforcement.`,
+    feels:`Targets describe an initial experience of “finally” — finally someone who really sees me, who matches my intensity, who knows immediately that this is real. The disillusionment that follows is therefore doubly destabilizing: not only is the relationship painful, but your own initial read of it feels humiliated.`,
+    research:`Intermittent reinforcement (B.F. Skinner’s variable ratio schedule) is the most resistance-to-extinction reinforcement pattern identified in behavioral research. Applied to attachment, this is why the push-pull cycle of love bombing creates bonds that are paradoxically stronger — and harder to leave — than consistently warm relationships.`,
+    respond:[`Pace matters. Someone who wants to skip steps is signaling discomfort with the ordinary middle of things.`,`Watch for affection that tracks compliance — if warmth increases when you agree and cools when you don’t, that’s information.`,`The boring-good-day test: can this person be content when nothing dramatic is happening?`]
+  },
+  stone:{
+    what:`Stonewalling as a pattern is not the same as needing a break. It is the repeated use of complete emotional withdrawal — going silent, leaving, refusing to engage — as a way to end or win disagreements rather than as a genuine dysregulation break.`,
+    develops:`Gottman’s research identifies stonewalling as a physiological response to flooding (heart rate above ~100 bpm), but notes that chronic stonewallers often avoid the cue rather than repairing it. In attachment terms it maps to dismissive-avoidant style: connection is sought but intimacy triggers deactivating strategies.`,
+    feels:`The receiving partner is left holding an unresolved issue with no path to resolution. Over time this creates a pattern where only one person can “lose” a conversation — by being the one who always has to reopen it, always has to manage the breach, always has to absorb the non-response.`,
+    research:`Gottman and Levenson (1988) found stonewalling in 85% of cases to be performed by men in heterosexual couples, though this varies across populations. In their longitudinal data, chronic stonewalling was one of the “Four Horsemen” — the four behavioral predictors of divorce. The issue is not that it happens but that it becomes the primary conflict resolution strategy.`,
+    respond:[`A genuine break with a time and return commitment is not stonewalling. Insist on that contract: “Let’s take 30 minutes and then finish this.”`,`Track whether the issues raised before a silence ever actually get resolved — or whether silence functions as the resolution.`,`Gottman’s self-soothing protocol (physiological calming before re-engagement) is evidence-based and worth introducing as a joint practice.`]
+  },
+  passive:{
+    what:`Passive aggression as a relational pattern is the consistent indirect expression of hostility — through procrastination, forgetfulness, backhanded compliments, or cold compliance — rather than direct communication of grievance. It is a relationship to conflict, not a single behavior.`,
+    develops:`Passive aggression typically develops in environments where direct expression of anger or dissatisfaction was unsafe or punished. The person learned to get needs met — or get even — without the risk of direct confrontation. In adulthood this becomes the default mode for handling relational friction.`,
+    feels:`Partners describe the exhausting work of decoding. “Fine” means nothing is fine. Forgetting feels deliberate. The hostility is plausibly deniable at every step, which means raising it always looks like the more irrational move. You become the interpreter of a language you were never taught.`,
+    research:`Wetzler (1992) identified passive aggression as a relational style distinct from isolated passive-aggressive acts, characterized by persistent ambiguity and deniability. Contemporary personality research connects it to low Agreeableness and indirect hostility as measured on the Dark Triad scales.`,
+    respond:[`Name the pattern without diagnosing the person: “I’ve noticed that when you’re upset, I find out through behavior rather than words. I’d rather hear it directly.”`,`Invite direct expression repeatedly, especially after the behavior occurs: “What’s actually going on?”`,`Passive aggression often softens when direct expression becomes safe — i.e., when direct anger is met with curiosity rather than counterattack.`]
+  },
+  identity:{
+    what:`Identity-based attacks use a partner’s background, ethnicity, religion, gender, neurodiversity, mental health history, or personal insecurities as ammunition during conflict. The attack is precise because it uses intimate knowledge — things only shared in trust — against the person who shared them.`,
+    develops:`This pattern is often associated with contempt (Gottman’s strongest predictor of relationship breakdown) and with a relational style that competes for status within the partnership. The person who uses identity attacks has learned that hitting the most sensitive target ends the argument fastest.`,
+    feels:`The violation is doubled: the trust that allowed disclosure is what makes the attack effective. Partners often describe starting to hide or pre-censor information about themselves to prevent future ammunition. The relationship becomes a place where being fully known feels dangerous.`,
+    research:`Research on interpersonal rejection sensitivity (Downey & Feldman, 1996) shows that people with high rejection sensitivity are particularly vulnerable to identity-based attacks because the content maps directly onto the fears they brought into the relationship. The attack doesn’t land randomly — it lands precisely.`,
+    respond:[`Name the specific content that was weaponized: “What you said about that topic used something I told you in confidence. That’s off-limits.”`,`Track whether apologies are followed by the same content reappearing in the next conflict.`,`A relationship in which you are systematically concealing parts of yourself to stay safe is already a relationship in which you have lost ground.`]
+  },
+  narcissistic:{
+    what:`Narcissistic relational patterns involve the consistent centering of one person’s needs, perceptions, and narrative at the expense of the partner’s — manifesting as conversation hijacking, inability to hold accountability, entitlement, and the treatment of the partner’s perspective as a threat to be neutralized rather than a viewpoint to be engaged.`,
+    develops:`Narcissistic personality organization (Kernberg’s term, distinct from the clinical diagnosis of NPD) typically develops from early environments that either failed to provide healthy mirroring or provided so much idealized mirroring that normal imperfection became intolerable. The grandiosity is a defense against a fragile core self rather than a stable identity.`,
+    feels:`Partners describe the specific exhaustion of never being fully seen. Every conversation eventually becomes about them. Good news gets hijacked. Mistakes never quite land with ownership. You begin to shrink your own experience to avoid the work of competing for space in your own relationship.`,
+    research:`Craig Malkin’s Rethinking Narcissism (2015) offers the most accessible research-grounded account, distinguishing healthy self-regard from the echoism (self-erasure) that frequently develops in partners of people with high narcissistic traits. His research shows narcissistic traits are more malleable than popular culture suggests — but only with sustained motivation on the person’s own part.`,
+    respond:[`Watch the accountability test: can they say “I was wrong” about something real, without a “but” or a counter-grievance?`,`Your experience deserves the same airtime as theirs. Name this: “I’ve noticed that when I raise something, we usually end up on your feelings rather than the topic.”`,`The prognosis for change is better in people who voluntarily pursue individual therapy for this — not because a partner requires it.`]
+  },
+  financial:{
+    what:`Financial abuse involves the use of money — access, control, information, or withholding — as an instrument of power in a relationship. This ranges from requiring permission to spend, to controlling all account access, to sabotaging a partner’s income or employment, to creating debt in their name.`,
+    develops:`Financial control escalates alongside other coercive control patterns and is often one of the later-emerging elements — once other forms of dependency have been established. The Economic Abuse Reference Guide (Sharp-Jeffs, 2015) identifies three primary mechanisms: exploiting (using a partner’s resources), sabotaging (destroying income potential), and coercing (forcing financial decisions).`,
+    feels:`The practical effect is a partner who cannot leave because they have no money — often the explicit design. Beyond exit blockage, financial dependence creates a daily power differential that touches every decision. Even small purchases become negotiation, permission, or risk.`,
+    research:`The Allstate Foundation’s research (2009) found that 98% of domestic abuse survivors reported also experiencing economic abuse. More recently, the concept of “economic entrapment” has been formalized as a distinct harm category — recognizing that financial control can constitute abuse entirely independently of physical violence.`,
+    respond:[`Your own income and your own accessible account are not luxuries — they are foundational to the ability to leave.`,`Know what accounts exist and what they contain. Opacity in this area is itself a signal.`,`Economic abuse specialists (distinct from general financial advisors) are available through most domestic violence organizations and can help create a safety plan.`]
+  },
+  intimidation:{
+    what:`Intimidation as an abuse pattern uses physical size, positioning, proximity, facial expression, voice, or property destruction to create fear without necessarily making physical contact. The legal definition in many jurisdictions includes “putting someone in fear” — the intent to frighten, not just the act of violence.`,
+    develops:`Intimidation is typically a learned behavior that has been successful — it ends disagreements, restores control, and triggers submission quickly. The escalation ladder often moves from posturing and raised voice, to property destruction, to physical contact. But property destruction and posturing are already abusive — they do not require escalation to count.`,
+    feels:`The physiological fear response is real and it is correct: your nervous system is correctly identifying a threat. Partners frequently minimize this because “nothing happened” — but the purpose of intimidation is precisely to control through the threat, so that explicit violence is rarely necessary.`,
+    research:`The Power and Control Wheel (Duluth Model, Pence & Paymar, 1993) identifies intimidation as one of eight primary tactics in a pattern of domestic abuse. Research shows that property destruction in particular is strongly predictive of future physical violence (Hotaling & Sugarman, 1986).`,
+    respond:[`Fear in your own home is not normal. If you are afraid, that is sufficient. You do not need bruises to name it.`,`Property destruction during conflict is not “just venting” — it is a demonstration of what could happen to you.`,`Safety planning with a specialized advocate is the right step here, not couples work.`]
+  },
+  sexual:{
+    what:`Sexual coercion in a relationship context includes pressure, guilt-tripping, persistence after a no, sulking or anger as a response to refusal, and the use of intimacy as a transactional reward or punishment. Consent within an established relationship is not automatic — it is required every time.`,
+    develops:`Sexual coercion frequently develops alongside other entitlement patterns and escalates in parallel with emotional coercion. The relational script that drives it treats the partner as having an obligation (real or implied) rather than a choice. Research shows it is underreported partly because it doesn’t match cultural scripts of what “real” sexual violence looks like.`,
+    feels:`Partners describe learning to say yes to avoid the aftermath — the sulking, the guilt, the withdrawal. When the cost of saying no consistently exceeds the cost of going along, consent is no longer meaningfully operating. This is coercion regardless of whether force is used.`,
+    research:`DeKeseredy & Schwartz (2001) estimated that sexual coercion by intimate partners affects approximately 1 in 4 women in long-term relationships, making it the most statistically common form of sexual coercion. The SANE (Sexual Assault Nurse Examiner) framework now explicitly includes non-physical coercion in its assessment protocols.`,
+    respond:[`A no should cost you nothing. If there is a predictable negative consequence for declining, that is coercion.`,`You are not obligated to accept any sexual act in exchange for relationship peace.`,`RAINN (1-800-656-4673) provides support specifically for coercion and pressure within relationships — not just stranger assault.`]
+  },
+  isolation:{
+    what:`Isolation as a control tactic involves the systematic narrowing of a partner’s external connections — friends, family, colleagues, activities — in order to increase dependency, reduce outside perspective, and make exit more difficult. It often proceeds gradually and is presented as concern, preference, or wounded love.`,
+    develops:`Isolation is among the most reliably documented tactics in coercive control relationships (Johnson, 2008; Stark, 2007). It proceeds in phases: complaints about specific people, then about the time spent with people, then about the idea of external connection itself. The effect is that the controlling partner becomes the only source of emotional support, validation, and social contact.`,
+    feels:`Partners often realize the isolation in retrospect — mapping who is left in their lives and noticing that only people approved by the partner have survived. The world has contracted. And because the contraction was gradual, each step seemed explainable.`,
+    research:`Judith Herman’s Trauma and Recovery (1992) identifies isolation as one of the primary methods of psychological coercion — parallel to what perpetrators of hostage situations and cult leaders deploy. The mechanism is identical: remove outside perspective, and the controller’s reality becomes the only available one.`,
+    respond:[`Your outside connections are not a threat to a healthy relationship. If they consistently are treated as one, that is the data.`,`Rebuilding external ties is both prevention and recovery. Start small: one text, one coffee, one conversation outside the relationship.`,`An advocate at a domestic violence organization can help you map the isolation and plan safely — including how to re-establish contact with people who may feel distant.`]
+  },
+  blame:{
+    what:`Blame-shifting and DARVO (Deny, Attack, Reverse Victim and Offender) is the pattern in which a person accused of harmful behavior responds by denying it, attacking the person who raised it, and repositioning themselves as the real victim of the accusation. The result is that the person who raised the concern ends up apologizing for raising it.`,
+    develops:`DARVO was named and systematically described by Jennifer Freyd (1997) in the context of institutional responses to abuse allegations — but it operates identically in intimate relationships. It is a defensive maneuver that has been effective: it stops accountability conversations in their tracks and transfers the emotional debt to the person seeking accountability.`,
+    feels:`Partners describe the disorienting experience of starting a conversation about a real concern and ending it by comforting the person who hurt them. After enough iterations, you stop raising things — which is exactly what the pattern achieves.`,
+    research:`Harsey, Zurbriggen & Freyd (2017) found that DARVO is a common response to disclosures of sexual assault and emotional abuse, and that witnessing DARVO increases victim self-blame. The pattern is so reliably destabilizing precisely because it exploits the target’s care for the relationship.`,
+    respond:[`Stay on the original topic: “I hear that you’re upset. I’d like to come back to what I raised.”`,`Track across conversations: who ends up apologizing for the raise, not just for the behavior?`,`If every concern you raise reverses onto you, the mechanism itself is the problem — independent of any individual issue.`]
+  },
+  somatic:{
+    what:`Somatic manipulation involves the use of real or exaggerated physical symptoms — headaches, chest pain, panic, illness — to halt difficult conversations, avoid accountability, or generate guilt in the partner who raised an issue. This does not mean all illness is manipulation; it means that when illness predictably follows accountability attempts, a pattern exists.`,
+    develops:`Somatic symptom patterns can begin as genuine distress responses — emotional pain expressed physically — and become instrumentalized over time when the partner learns that physical symptoms reliably redirect attention and end threatening conversations. The behavior is often not consciously strategic.`,
+    feels:`Partners describe the impossible position of not being able to tell the real from the managed. You can’t push through what might be genuine pain. So accountability consistently yields to care, and the original issue disappears. You begin to feel guilty for raising things at all.`,
+    research:`Research on illness behavior in relationship contexts (Barsky, 2002) distinguishes genuine somatization (physical expression of psychological distress, which is real and valid) from factitious behavior (conscious fabrication) from instrumentalized illness (real or exaggerated symptoms deployed functionally). The latter is the pattern relevant here.`,
+    respond:[`The timing is the data. Note whether symptoms track conflict — not to dismiss them, but as a legitimate observation.`,`“Can we set a time to return to this when you’re feeling better?” — and then hold to it.`,`If this pattern is entrenched, a therapist for both individuals (separately) is more appropriate than couples counseling.`]
+  },
+  jealousy:{
+    what:`Pathological jealousy is an unfounded, persistent belief that a partner is being or will be unfaithful, combined with surveillance, interrogation, or punishment in response to that belief — and crucially, a pattern in which no reassurance or evidence succeeds in calming the jealousy for long.`,
+    develops:`Pathological jealousy is associated with insecure (particularly anxious) attachment, borderline personality features, and sometimes delusional thinking (Othello syndrome). It differs from normal jealousy in two key ways: it persists without evidence, and it is not resolved by reassurance. Each reassurance is temporary; the next incident resets the cycle.`,
+    feels:`Partners describe the exhausting work of perpetual proof. Every interaction outside the relationship becomes a potential accusation. You self-censor, self-monitor, and self-report preemptively to manage the aftermath. Your freedom shrinks to fit the size of their anxiety.`,
+    research:`Karakurt & Silver (2013) identify pathological jealousy as distinct from normative jealousy in intimate relationships, and associate it with higher rates of partner violence. The jealousy functions as a control tactic regardless of whether the jealous person experiences it as fear rather than aggression.`,
+    respond:[`Your behavior should not have to fit the constraints of their jealousy. Accommodating surveillance is not reassurance — it is compliance.`,`Ask: what would actually help you feel secure — and is that question about me, or about something inside you?`,`Jealousy rooted in the person’s own history or attachment style is addressable in individual therapy, not by partner modification.`]
+  },
+  religious:{
+    what:`Religious or cultural coercion uses shared (or claimed) faith, scripture, cultural expectation, or community norms to enforce compliance, restrict choices, and insulate control from challenge. The coercion is distinguished from genuine shared faith by its asymmetry: the rules bind the partner, while the controlling person selectively exempts themselves.`,
+    develops:`Religious coercion exploits the specific vulnerability that comes from shared identity and community membership: challenging the control means potentially challenging the faith, the culture, and the community simultaneously. This makes resistance feel not just personally risky but existentially threatening.`,
+    feels:`Partners describe the specific trap of having their own values weaponized against them. Dissent is framed as sin, faithlessness, or cultural betrayal. The community may be complicit, reducing outside support. The intimate and the institutional become fused.`,
+    research:`Drumm, Popescu & Kersting (2009) documented the distinct dynamics of religious intimate partner abuse, noting that survivors face additional barriers including fear of community judgment and lack of support from religious institutions. The National Domestic Violence Hotline has specialized resources for survivors navigating faith-based abuse contexts.`,
+    respond:[`Shared faith or culture should apply to both people with equal weight. Ask directly whether the obligations are mutual.`,`Genuine faith communities do not endorse domestic control. Many have trained advocates; the hotline can connect you to faith-sensitive resources.`,`Your tradition and your safety are not in conflict — even if someone has made them feel that way.`]
+  },
+  humiliation:{
+    what:`Public humiliation, private shaming, and status-building at a partner’s expense are patterns of degradation — making the partner small to make the self look larger. This includes cutting remarks in social settings, sharing private information as entertainment, and the deployment of “just joking” as retroactive consent.`,
+    develops:`Humiliation as a control tactic functions by eroding the partner’s self-concept and social standing — making exit feel less viable and making the relationship feel like the only place where any version of worth is available. It is associated with contempt and with sadistic interpersonal styles.`,
+    feels:`Partners describe the double bind of social situations: the anticipation of the cutting remark, the performance of not-minding, the processing afterwards alone. The public witness adds a layer of shame — not just the hurt, but the not-being-defended, the watching-others-laugh.`,
+    research:`Gottman’s contempt research (1994) identifies the eye-roll, the sneer, and the cutting public remark as markers of contempt — the single strongest predictor of relationship deterioration. Unlike criticism or defensiveness, contempt communicates fundamental disrespect for the partner’s humanity.`,
+    respond:[`Name the specific incident: “What you said about me in front of those people was humiliating. I need that to stop.”`,`Private information shared as social currency is a violation of trust beyond the humiliation itself.`,`“Can’t you take a joke?” is not an explanation. If you are consistently hurt by the jokes, the jokes are not jokes.`]
+  },
+  rage:{
+    what:`Explosive rage as a relational pattern — disproportionate outbursts followed by remorse, renewed warmth, and eventual re-escalation — is the cycle most people recognize from descriptions of the “cycle of abuse.” The post-explosion remorse and warmth phase (the honeymoon period) is as much a part of the pattern as the explosion itself.`,
+    develops:`Walker’s cycle of violence (1979) remains the standard framework: tension building → explosion → honeymoon → tension building. The honeymoon phase creates the attachment that makes leaving feel like abandoning someone at their most reachable and remorseful. Neurologically, explosive anger is associated with reduced prefrontal inhibition of limbic response — but this can be treated.`,
+    feels:`Partners describe the constant environmental scanning — reading mood, managing topics, adjusting tone — to prevent the next explosion. Life is organized around the unpredictability. The post-explosion tenderness is genuine, which is why leaving during it feels wrong. But the next tension-build has already started.`,
+    research:`The predictive research on domestic homicide (Campbell et al., 2003) identifies explosive anger, access to weapons, and recent separation as the three strongest risk factors. The explosion-remorse cycle is not self-correcting without intervention — it typically shortens (less time between explosions) and escalates over time.`,
+    respond:[`Fear in this context is appropriate and informative. You should not have to manage someone’s explosions.`,`Anger management programs specifically designed for intimate partner violence (not generic anger management) have an evidence base. The distinction matters.`,`If you are planning to leave, do so with a safety plan and support from a domestic violence advocate — this is a statistically elevated-risk transition.`]
+  },
+  gatekeeper:{
+    what:`Using children as leverage — threatening custody during conflict, withholding access as punishment, undermining the co-parenting relationship, or positioning as the “good parent” to the children — is a distinct abuse tactic that often intensifies after separation rather than ending with the relationship.`,
+    develops:`Gatekeeping as a control tactic typically escalates during the separation process, when other control mechanisms are being lost. It exploits the asymmetry of parental attachment and the legal complexity of custody — areas where the controlling person can inflict significant harm through legitimate-seeming mechanisms.`,
+    feels:`The targeted parent describes a dual experience: concern for the children’s wellbeing and access, and the realization that their bond with their children is being used as the mechanism of control. Every difficult conversation carries the implicit or explicit threat.`,
+    research:`Johnston & Kelly (2004) document that parental alienation and gatekeeping behaviors escalate significantly in high-conflict post-separation situations, and that children exposed to sustained alienation tactics suffer distinct psychological harm independent of their relationship with either parent.`,
+    respond:[`Document everything — access agreements, communications, incidents — from the start.`,`A family law attorney familiar with coercive control and parental alienation is essential in contested custody situations.`,`Domestic violence organizations have specialists in post-separation coercive control; this is a distinct and recognized area of expertise.`]
+  },
+};
+
+// ─── BLOG ARTICLES ────────────────────────────────────────────────────────────
+const BLOG_POSTS = [
+  { id:"gaslighting-truth", title:"What gaslighting actually is — and what it isn't", date:"June 2025", tag:"Pattern deep-dive", read:"7 min",
+    intro:"The word has escaped its clinical meaning. Here's the original, and why the distinction matters.",
+    body:[
+      { h:"It started with a play", p:"The term comes from Patrick Hamilton's 1938 play Gaslight (filmed in 1944), in which a husband systematically manipulates his wife into believing she is losing her mind — partly by secretly dimming the gas lights and then denying they've changed when she notices. The husband's goal is specific: control through manufactured self-doubt, not mere dishonesty." },
+      { h:"What it actually requires", p:"Clinical gaslighting has three components that have to appear together. First, the distortion is sustained and systematic — not one instance of \"I don't remember it that way,\" but a pattern. Second, the person doing it has consistent explanations that make your perception the problem (\"you're too sensitive,\" \"you always exaggerate,\" \"you're imagining things\"). Third, the result is that the target begins to doubt their own memory and judgment — not just in the relationship, but in general." },
+      { h:"What gets mislabeled", p:"\"He lied to me\" is not gaslighting. \"She denied doing something she did\" is not, by itself, gaslighting. Ordinary defensiveness, selective memory, and conflict styles are real problems, but they're different problems. Over-using the label dilutes it — and makes it harder for people experiencing the real pattern to name what's happening to them." },
+      { h:"Why it works so well", p:"Psychologist Jennifer Freyd's concept of betrayal blindness helps explain it: the closer and more trusted the relationship, the more the brain suppresses threat-recognition in order to preserve the attachment. Gaslighting by a stranger is obvious. Gaslighting by a person you love, who says they love you, is filtered through months or years of that love — which is exactly why it's so effective." },
+      { h:"The recovery", p:"The most common description from people who've been through it: they kept a private log (even just a note on their phone) as a way to re-anchor their own memory. Not to prove anything to anyone — to stop second-guessing themselves. Rebuilding access to your own perception is the core of recovery from gaslighting." },
+    ]
+  },
+  { id:"coercive-control-explained", title:"Coercive control: the pattern the law finally named", date:"May 2025", tag:"Research", read:"9 min",
+    intro:"Why the relationship pattern that causes the most harm was also the hardest to legislate — and what changed.",
+    body:[
+      { h:"The gap in the law", p:"For most of the 20th century, domestic violence law focused on discrete incidents — a hit, an assault, a threat. You needed a specific event to prosecute. But survivors and advocates had long understood that the most systematically damaging relationships often contained few or no incidents of physical violence — and many relationships with significant violence contained something far worse underneath it: a pattern of control that made the violence almost beside the point." },
+      { h:"Evan Stark's contribution", p:"Sociologist Evan Stark spent three decades studying domestic abuse before publishing Coercive Control in 2007 — a text that fundamentally reframed the field. His argument: physical violence is a tactic within a larger strategy. The strategy is control. The strategy is what does the long-term psychological damage. The strategy is what makes leaving so difficult. And the strategy could operate completely without violence." },
+      { h:"The UK's 2015 law", p:"In 2015, England and Wales became the first jurisdiction to criminalize coercive control as a standalone offense, independent of physical violence. The law recognized what survivors had been saying for decades: that continuous monitoring, isolation, financial restriction, and intimidation constitute harm — even without a single punch. Scotland, Ireland, Australia, and parts of the US and Canada have since followed with similar legislation." },
+      { h:"What coercive control looks like in practice", p:"It's the partner who needs to approve which friends you can see. Who requires you to account for your location. Who controls all financial access. Who enforces silence through sulking or anger, making you responsible for their mood management. The cumulative weight of these small things creates a life lived inside someone else's permission structure — which is the harm." },
+      { h:"Why it's hard to see from the inside", p:"The pattern is gradual. Each individual element was introduced in a context that made it feel like care, or love, or concern. By the time the structure is fully in place, the person inside it often can't see the structure because they've been living in it. This is why outside perspective — a therapist, a trusted friend, a hotline — is so valuable. Not to tell you what to do, but to reflect back what is there." },
+    ]
+  },
+  { id:"trauma-bonding", title:"Why you can't just leave: trauma bonding, explained", date:"April 2025", tag:"Psychology", read:"8 min",
+    intro:"\"Just leave\" is the most common advice given to abuse survivors. Here's why it fundamentally misunderstands the psychology.",
+    body:[
+      { h:"The bonding mechanism", p:"Trauma bonding (sometimes called Stockholm syndrome in its extreme form) is the psychological process by which a person develops strong emotional attachment to someone who is harming them. It's not irrational — it is the rational response of an attachment system trying to make sense of a situation it wasn't designed to handle: a relationship where love and danger coexist in the same person." },
+      { h:"Intermittent reinforcement", p:"The mechanism is intermittent reinforcement — the same learning schedule that makes slot machines more addictive than guaranteed payouts. When kindness and warmth are unpredictable, the nervous system becomes hypervigilant to positive signals and highly motivated to produce them. The good moments become more salient, not less, precisely because they're uncertain. This is behavioral neuroscience, not weakness." },
+      { h:"The cycle cements it", p:"Each cycle of tension, explosion, and honeymoon deepens the bonding. The remorse phase produces neurochemical signals (oxytocin, dopamine relief) that are among the most reinforcing the brain can experience. The person who just hurt you is also the person whose attention and warmth you need most — which is the trap." },
+      { h:"What \"leaving\" actually requires", p:"Leaving a trauma-bonded relationship is not a single decision. Research on abusive relationship exits (Anderson, 2003) finds that survivors attempt to leave an average of seven times before leaving permanently. This is not failure — it is the normal arc. Each attempt builds the knowledge, resources, and emotional infrastructure that eventually makes permanent exit possible." },
+      { h:"What actually helps", p:"Outside support networks are the single most protective factor. Isolation is a coercive control tactic partly because it removes the outside relationships that provide perspective and practical resources. Rebuilding those connections — even partially, even carefully — changes the calculus of exit in measurable ways. You don't leave alone. You leave toward something." },
+    ]
+  },
+  { id:"conflict-vs-abuse", title:"Conflict versus abuse: the difference that changes everything", date:"March 2025", tag:"Foundations", read:"6 min",
+    intro:"All relationships have conflict. The distinction between conflict and abuse is not about intensity — it's about power.",
+    body:[
+      { h:"The most common confusion", p:"People in abusive relationships frequently resist the word \"abuse\" because the relationship doesn't match the image they have of abuse — a perpetual war, constant violence, obvious danger. Most abusive relationships have good days. Many have mostly good days. The pattern isn't the frequency of bad days; it's what happens in them." },
+      { h:"The structural difference", p:"Healthy conflict is mutual — both people can raise concerns, both can be wrong, both might end up apologizing. The power in the relationship is roughly balanced, meaning either person can leave, either person can hold a boundary, either person can disagree without consistent punishment. Abuse is asymmetric: one person sets the terms, one person bears the cost." },
+      { h:"Four signs you're in conflict, not abuse", p:"Both of you feel entitled to raise issues. Both of you sometimes change your position. Neither of you is afraid of the other's reaction. Conflict resolution leaves both people feeling heard at least part of the time — not one person consistently defeated." },
+      { h:"Four signs you've crossed into abuse", p:"You pre-edit what you raise based on anticipated fallout. You feel responsible for managing the other person's emotional state. The \"resolution\" of conflict consistently involves you apologizing or backing down. You feel fear — even low-level, diffuse fear — about ordinary interactions with your partner." },
+      { h:"Why the distinction matters", p:"The intervention for conflict is communication improvement, couples therapy, skill-building. The intervention for abuse is safety planning, individual support, and often separation. Couples therapy in the context of coercive control or abuse is contraindicated — it can provide the controlling partner with more information to use as ammunition and can make the targeted partner less safe. Getting the diagnosis right is not academic — it determines what actually helps." },
+    ]
+  },
+  { id:"healthy-conflict", title:"What healthy relationship conflict actually looks like", date:"February 2025", tag:"Foundations", read:"5 min",
+    intro:"Most of us were never taught what good conflict looks like. Here's the research-backed picture.",
+    body:[
+      { h:"Conflict is not the enemy", p:"John Gottman's landmark research, which followed hundreds of couples across decades, found that the frequency of conflict was not predictive of relationship outcomes. Couples who fought a lot could thrive; couples who never fought could be in serious trouble. What mattered was how conflict was handled — specifically, whether it maintained fundamental respect and allowed for repair." },
+      { h:"The four destructive patterns (and their opposites)", p:"Gottman identified four patterns — the \"Four Horsemen\" — that were predictive of relationship breakdown: criticism (attacking the person rather than the behavior), contempt (treating the partner with disgust or superiority), defensiveness (countering a complaint with a counter-complaint), and stonewalling (emotional withdrawal as non-engagement). Their opposites — gentle startup, admiration, accountability, and self-soothing then re-engagement — are what healthy conflict actually looks like." },
+      { h:"Repair attempts", p:"The single most differentiating factor between stable and unstable couples in Gottman's research was not the absence of ruptures but the presence of repair attempts — moments where one or both people try to de-escalate, reconnect, or acknowledge what just happened. These can be clumsy and imperfect. They just have to happen, and they have to land (i.e., be accepted by the other person)." },
+      { h:"The 5:1 ratio", p:"Gottman's \"magic ratio\" — five positive interactions for every one negative — describes what maintains the emotional reservoir that makes conflict survivable. This isn't about suppressing negative interactions; it's about maintaining enough goodwill that a bad conversation doesn't drain the account entirely." },
+      { h:"What to look for in your own relationship", p:"Can you raise a concern gently? Does it stay on the issue? Does the other person take accountability sometimes, and do you? Do you come back after the hard conversation feeling like you both showed up? These are not high bars — they are the ordinary workings of a relationship that can sustain itself. If they feel impossibly distant, the gap is worth naming." },
+    ]
+  },
+];
+
 const SCRIPTS = {
   gaslight:    ['"I know we see this differently, but my experience of what happened is real to me and I need that acknowledged."', '"When I bring something up and end up feeling like the problem, that\'s when I go quiet. I don\'t want to go quiet."'],
   control:     ['"I\'ve noticed that when I do things independently, there are often consequences. I need that to stop."', '"I should be able to see my friends without it creating a problem between us."'],
@@ -708,11 +899,14 @@ function Logo({ size=22 }) {
 function Check() { return (<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
 
 const NAV = [
-  { id:"learn",    label:"Start Here" },
-  { id:"patterns", label:"The Patterns" },
-  { id:"lenses",   label:"The Six Lenses" },
-  { id:"finder",   label:"Warning-Sign Finder" },
-  { id:"help",     label:"Get Help" },
+  { id:"learn",      label:"Start Here" },
+  { id:"archetypes", label:"Archetypes" },
+  { id:"patterns",   label:"The Patterns" },
+  { id:"lenses",     label:"The Six Lenses" },
+  { id:"finder",     label:"Warning-Sign Finder" },
+  { id:"help",       label:"Get Help" },
+  { id:"blog",       label:"Blog" },
+  { id:"about",      label:"About" },
 ];
 function Header({ onNav, active }) {
   const { dark, toggle } = useContext(ThemeCtx);
@@ -804,11 +998,13 @@ function ResultSection({ title, scores, keys, newlyDiscovered=[], part=1 }) {
 function Home({ onNav }) {
   const ways = [
     ["Start Here","What a red flag actually is, and how to tell a bad day from a real pattern.","learn","Read"],
-    ["The Patterns","The 19 behavioral patterns RedFlag reads, grouped and explained in plain language.","patterns","Explore"],
+    ["Archetypes","Deep-dive into each of the 19 patterns: the research, the feel, and how real change looks.","archetypes","Explore"],
+    ["The Patterns","The 19 behavioral patterns grouped into six families, explained in plain language.","patterns","Explore"],
     ["The Six Lenses","MBTI, Enneagram, Big Five, DISC, love languages, life-fit — and how each turns toxic.","lenses","Explore"],
     ["Warning-Sign Finder","Screen someone new, or a spouse, or an ex — the questions to ask and tells to watch.","finder","Open"],
     ["Take the Quiz","A private, 5-minute read on a real relationship, with a printable report.","quiz","Start"],
     ["Get Help","Crisis lines, what therapy actually does, and how boundaries really work.","help","Read"],
+    ["Blog","Research-grounded articles on behavioral patterns, psychology, and what the evidence says.","blog","Read"],
   ];
   return (<div className="container">
     <section className="hero">
@@ -838,7 +1034,7 @@ function Home({ onNav }) {
       </div>
     </section>
     <section className="section">
-      <div className="section-head"><div className="eyebrow">Where to go</div><h2>Six ways in</h2><p>Pick the door that matches what you're actually here for.</p></div>
+      <div className="section-head"><div className="eyebrow">Where to go</div><h2>Eight ways in</h2><p>Pick the door that matches what you're actually here for.</p></div>
       <div className="grid grid-3">
         {ways.map((w,i)=>(<button key={i} className="card" onClick={()=>onNav(w[2])}>
           <div className="card-glyph"><Logo size={30}/></div>
@@ -945,6 +1141,141 @@ function GetHelp() {
       <div className="callout"><h4>Can a bad partner become a good one?</h4><p>Sometimes — but only if the change is theirs, sustained over months, and shown in behavior rather than promised over dinner. You cannot love someone out of a pattern. Take the quiz and open the “Can it change?” tab for the real-vs-fake-change signals, pattern by pattern.</p></div>
     </div>
   </div>);
+}
+
+// ─── ARCHETYPES VIEW ─────────────────────────────────────────────────────────────
+function ArchetypesView({ onNav }) {
+  const [selected, setSelected] = useState(null);
+  const arc = selected && ARC[selected];
+  const det = selected && ARC_DETAIL[selected];
+  if (selected && arc && det) return (
+    <div className="container view narrow">
+      <button className="btn btn-ghost" style={{ marginBottom:18 }} onClick={()=>setSelected(null)}>← All Patterns</button>
+      <div className="eyebrow">{arc.clinical}</div>
+      <h1 style={{ fontSize:"clamp(28px,4vw,42px)", fontWeight:400, marginBottom:8 }}>{arc.street}</h1>
+      <p className="sub" style={{ marginBottom:28 }}>{arc.one}</p>
+      {PLAY[selected]?.safety && <div className="callout is-safe" style={{ marginBottom:24 }}><h4>Safety note</h4><p>This pattern can involve real danger. If you feel unsafe, please reach out to the National Domestic Violence Hotline: <strong>1-800-799-7233</strong> · text START to 88788.</p></div>}
+      <div className="prose">
+        <h3>What it is</h3><p>{det.what}</p>
+        <h3>How it develops</h3><p>{det.develops}</p>
+        <h3>What it feels like as the target</h3><p>{det.feels}</p>
+        <h3>The research</h3><p>{det.research}</p>
+        <h3>How to respond</h3><ul>{det.respond.map((r,i)=><li key={i}>{r}</li>)}</ul>
+        {PLAY[selected] && (<>
+          <h3>What to watch for</h3><ul>{PLAY[selected].watch.map((w,i)=><li key={i}>{w}</li>)}</ul>
+          <h3>Questions to ask</h3><ul>{PLAY[selected].ask.map((a,i)=><li key={i}>{a}</li>)}</ul>
+          <h3>Signs of real change vs. false change</h3>
+          <div className="grid grid-2" style={{ marginTop:10 }}>
+            <div className="callout" style={{ background:"var(--green-soft)", border:"1px solid var(--green)" }}><h4 style={{ color:"var(--green)" }}>Real change looks like</h4><ul style={{ margin:0, paddingLeft:18 }}>{PLAY[selected].change.real.map((r,i)=><li key={i}>{r}</li>)}</ul></div>
+            <div className="callout" style={{ marginTop:0 }}><h4>Fake change looks like</h4><ul style={{ margin:0, paddingLeft:18 }}>{PLAY[selected].change.fake.map((f,i)=><li key={i}>{f}</li>)}</ul></div>
+          </div>
+        </>)}
+      </div>
+      <div className="actions" style={{ marginTop:32 }}>
+        <button className="btn btn-primary" onClick={()=>onNav("quiz")}>Take the quiz →</button>
+        <button className="btn btn-outline" onClick={()=>setSelected(null)}>← Back to all patterns</button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="container view">
+      <div className="eyebrow">Pattern library</div>
+      <h1 style={{ fontSize:"clamp(30px,4vw,46px)", fontWeight:400, marginBottom:8 }}>The 19 patterns, in depth.</h1>
+      <p className="sub" style={{ maxWidth:640, marginBottom:36 }}>Each pattern has a clinical grounding, a description of what it feels like from the inside, research behind it, and a guide on what real change would require.</p>
+      {FAMILIES.map(fam=>(
+        <div key={fam.name} style={{ marginBottom:40 }}>
+          <div className="eyebrow" style={{ marginBottom:4 }}>{fam.name}</div>
+          <p style={{ color:"var(--ink-dim)", fontSize:14, marginBottom:14 }}>{fam.blurb}</p>
+          <div className="grid grid-3">
+            {fam.keys.map(k=>ARC[k]&&(
+              <button key={k} className="card" style={{ textAlign:"left", cursor:"pointer", border:"1px solid var(--line)", padding:"18px 20px" }} onClick={()=>setSelected(k)}>
+                <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:500, marginBottom:4 }}>{ARC[k].street}</div>
+                <div style={{ fontSize:12.5, color:"var(--ink-faint)", marginBottom:8 }}>{ARC[k].clinical}</div>
+                <div style={{ fontSize:13.5, color:"var(--ink-dim)", lineHeight:1.5 }}>{ARC[k].one}</div>
+                {PLAY[k]?.safety && <div style={{ marginTop:10, fontSize:11.5, color:"var(--accent-bright)", fontWeight:600, letterSpacing:".04em", textTransform:"uppercase" }}>Safety concern</div>}
+                <div style={{ marginTop:12, fontSize:12.5, color:"var(--accent-bright)", fontWeight:500 }}>Read deep-dive →</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="callout" style={{ marginTop:8 }}>
+        <h4>Not a diagnostic tool</h4>
+        <p>Pattern names here are behavioral descriptions, not clinical diagnoses. No one is being labeled a "narcissist" or an "abuser" — the patterns describe what happens between two people, not what someone is.</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── BLOG VIEW ───────────────────────────────────────────────────────────────────
+function BlogView() {
+  const [post, setPost] = useState(null);
+  const p = post && BLOG_POSTS.find(b=>b.id===post);
+  if (p) return (
+    <div className="container view narrow">
+      <button className="btn btn-ghost" style={{ marginBottom:18 }} onClick={()=>setPost(null)}>← All articles</button>
+      <div className="eyebrow">{p.tag} · {p.read} read</div>
+      <h1 style={{ fontSize:"clamp(26px,4vw,40px)", fontWeight:400, marginBottom:8 }}>{p.title}</h1>
+      <p className="sub" style={{ marginBottom:32, fontSize:17 }}>{p.intro}</p>
+      <div className="prose">
+        {p.body.map((sec,i)=>(<div key={i}><h3>{sec.h}</h3><p>{sec.p}</p></div>))}
+      </div>
+      <div style={{ marginTop:32, borderTop:"1px solid var(--line)", paddingTop:24, color:"var(--ink-faint)", fontSize:13 }}>
+        Published {p.date} · RedFlag Editorial · All content is for educational purposes only, not professional mental health advice.
+      </div>
+      <div className="actions" style={{ marginTop:24 }}>
+        <button className="btn btn-ghost" onClick={()=>setPost(null)}>← All articles</button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="container view">
+      <div className="eyebrow">Editorial</div>
+      <h1 style={{ fontSize:"clamp(30px,4vw,46px)", fontWeight:400, marginBottom:8 }}>Articles on relationship patterns.</h1>
+      <p className="sub" style={{ maxWidth:600, marginBottom:40 }}>Research-grounded writing on behavioral patterns, psychology, and what the evidence says about change.</p>
+      <div className="grid grid-2">
+        {BLOG_POSTS.map(b=>(
+          <button key={b.id} className="card" style={{ textAlign:"left", cursor:"pointer", border:"1px solid var(--line)", padding:"24px 26px", alignItems:"flex-start" }} onClick={()=>setPost(b.id)}>
+            <div style={{ fontSize:11.5, fontFamily:"var(--mono)", color:"var(--accent-bright)", letterSpacing:".1em", textTransform:"uppercase", marginBottom:10 }}>{b.tag} · {b.read} read</div>
+            <div style={{ fontFamily:"var(--display)", fontSize:19, fontWeight:500, lineHeight:1.25, marginBottom:8 }}>{b.title}</div>
+            <div style={{ fontSize:14, color:"var(--ink-dim)", lineHeight:1.55, marginBottom:14 }}>{b.intro}</div>
+            <div style={{ fontSize:12.5, color:"var(--ink-faint)" }}>{b.date}</div>
+            <div style={{ marginTop:14, fontSize:13, color:"var(--accent-bright)", fontWeight:500 }}>Read article →</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ABOUT VIEW ──────────────────────────────────────────────────────────────────
+function AboutView({ onNav }) {
+  return (
+    <div className="container view narrow">
+      <div className="eyebrow">About RedFlag</div>
+      <h1 style={{ fontSize:"clamp(30px,4vw,46px)", fontWeight:400, marginBottom:8 }}>What this is, and what it isn't.</h1>
+      <div className="prose">
+        <h3>The mission</h3>
+        <p>RedFlag was built from a simple premise: the information that helps people recognize harmful relationship patterns exists — in research papers, in clinical training, in the work of advocates and therapists — but it's not accessible to most people until they're already in trouble. This site tries to change that.</p>
+        <h3>What we read</h3>
+        <p>The pattern framework is grounded in established behavioral research: Evan Stark on coercive control, John Gottman on couple dynamics, Jennifer Freyd on DARVO and betrayal trauma, Judith Herman on complex trauma, Lundy Bancroft on abuser psychology, and the Duluth Model's Power and Control framework. The quiz is not a validated clinical instrument — it is a structured reflection tool designed to surface patterns, not produce diagnoses.</p>
+        <h3>Privacy</h3>
+        <p>Nothing you enter leaves your device. The quiz results, your answers, and your session data live only in your browser's sessionStorage — which clears when you close the tab. There are no accounts, no tracking, no analytics that touch your responses. Theme preference is the only thing stored in localStorage.</p>
+        <h3>What this is not</h3>
+        <p>RedFlag is not a mental health diagnosis tool. It names behavioral patterns — things that happen between people — not clinical conditions that belong to a person. Results are a starting point for reflection and, where relevant, a prompt to seek professional support. They are not a verdict on your partner, yourself, or your relationship.</p>
+        <div className="callout is-safe">
+          <h4>If you're in danger now</h4>
+          <p><strong>National Domestic Violence Hotline:</strong> 1-800-799-7233 · text START to 88788<br/><strong>Crisis Text Line:</strong> text HOME to 741741<br/>Free, confidential, staffed 24/7. You don't need to be certain to call.</p>
+        </div>
+        <h3>Feedback and corrections</h3>
+        <p>If you spot an error in the research citations, a pattern description that doesn't track, or a resource that should be listed — this is a living project and corrections are genuinely welcome.</p>
+      </div>
+      <div className="actions" style={{ marginTop:32 }}>
+        <button className="btn btn-primary" onClick={()=>onNav("quiz")}>Take the quiz →</button>
+        <button className="btn btn-outline" onClick={()=>onNav("help")}>Crisis resources →</button>
+      </div>
+    </div>
+  );
 }
 
 // ─── QUIZ FLOW ────────────────────────────────────────────────────────────────────
@@ -1210,7 +1541,7 @@ function ReportScreen({ rel, scores, answers, onBack }) {
 }
 
 // ─── APP ─────────────────────────────────────────────────────────────────────────
-const VIEWS = { HOME:"home", LEARN:"learn", PATTERNS:"patterns", LENSES:"lenses", FINDER:"finder", HELP:"help", QUIZ:"quiz" };
+const VIEWS = { HOME:"home", LEARN:"learn", ARCHETYPES:"archetypes", PATTERNS:"patterns", LENSES:"lenses", FINDER:"finder", HELP:"help", BLOG:"blog", ABOUT:"about", QUIZ:"quiz" };
 const SCREENS = { ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report" };
 
 function App() {
@@ -1267,12 +1598,15 @@ function App() {
       <div className="rf-app">
         <Header onNav={onNav} active={view}/>
         <main className="rf-main">
-          {view===VIEWS.HOME     && <Home onNav={onNav}/>}
-          {view===VIEWS.LEARN    && <StartHere onNav={onNav}/>}
-          {view===VIEWS.PATTERNS && <Patterns onNav={onNav}/>}
-          {view===VIEWS.LENSES   && <Lenses onNav={onNav}/>}
-          {view===VIEWS.HELP     && <GetHelp/>}
-          {view===VIEWS.FINDER   && <FinderScreen onQuiz={()=>onNav("quiz")}/>}
+          {view===VIEWS.HOME       && <Home onNav={onNav}/>}
+          {view===VIEWS.LEARN      && <StartHere onNav={onNav}/>}
+          {view===VIEWS.ARCHETYPES && <ArchetypesView onNav={onNav}/>}
+          {view===VIEWS.PATTERNS   && <Patterns onNav={onNav}/>}
+          {view===VIEWS.LENSES     && <Lenses onNav={onNav}/>}
+          {view===VIEWS.HELP       && <GetHelp/>}
+          {view===VIEWS.FINDER     && <FinderScreen onQuiz={()=>onNav("quiz")}/>}
+          {view===VIEWS.BLOG       && <BlogView/>}
+          {view===VIEWS.ABOUT      && <AboutView onNav={onNav}/>}
           {view===VIEWS.QUIZ && (<>
             {screen===SCREENS.ONBOARD && <Onboarding onSelect={(r,k)=>{setRel(r);setHasKids(k);go(SCREENS.SUMMARY);}}/>}
             {screen===SCREENS.SUMMARY && <SummaryScreen hasKids={hasKids} isSelf={isSelf} onConfirm={(p1,p2)=>{setP1Keys(p1);setP2Keys(p2);go(SCREENS.Q1);}}/>}
