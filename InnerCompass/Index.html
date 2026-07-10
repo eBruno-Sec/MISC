@@ -53,6 +53,32 @@
   --shadow-hover: 0 10px 34px rgba(90,60,30,0.14), 0 0 0 1px var(--coral);
 }
 
+/* ---- Dark mode ---- */
+:root[data-theme="dark"]{
+  --bg:#0e0c09; --bg-1:#171410; --bg-2:#1f1a13; --bg-card:#1b1712;
+  --line:#302820; --line-soft:#221d16;
+  --gold:#c9a24b; --gold-bright:#e3c275; --gold-glow:rgba(201,162,75,0.12);
+  --coral:#e8825f; --coral-deep:#ef9573;
+  --teal:#4cb5a4; --purple:#bb8ae4; --forest:#5aa87f;
+  --ink:#f0e8d8; --ink-dim:#b0a492; --ink-faint:#8a7d68;
+  --shadow-card:0 2px 12px rgba(0,0,0,0.35);
+  --shadow-hover:0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px var(--coral);
+}
+:root[data-theme="dark"] .site-header{ background:rgba(14,12,9,0.85); }
+:root[data-theme="dark"] .bg-warm{ background:linear-gradient(135deg,#171410 0%,#1b1712 50%,#171410 100%); }
+
+/* ---- Theme toggle ---- */
+.theme-toggle{
+  background:none; border:1px solid var(--line); color:var(--ink-dim);
+  width:40px; height:40px; border-radius:var(--radius); cursor:pointer; flex-shrink:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  transition:border-color .15s ease, color .15s ease;
+}
+.theme-toggle:hover{ border-color:var(--gold); color:var(--gold); }
+.theme-icon-sun{ display:none; }
+:root[data-theme="dark"] .theme-icon-sun{ display:block; }
+:root[data-theme="dark"] .theme-icon-moon{ display:none; }
+
 *,*::before,*::after{ box-sizing:border-box; }
 html{ scroll-behavior:smooth; }
 @media(prefers-reduced-motion:reduce){
@@ -794,8 +820,9 @@ section:has(.signup){ display:none; }
 @media print{
   *,*:before,*:after{ -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; }
   body{ background:#fff!important; color:#111!important; }
-  .site-header,.hero,.progress-track,#quiz-form-wrap,#quiz-restart,.download-bar,footer,.skip-link,nav{ display:none!important; }
-  .page-section{ display:block!important; padding:0!important; }
+  .site-header,.hero,.progress-track,#quiz-form-wrap,#quiz-restart,.download-bar,footer,.skip-link,nav,.theme-toggle{ display:none!important; }
+  .page-section:not(.active){ display:none!important; }
+  .page-section.active{ display:block!important; padding:0!important; }
   .quiz-result{ display:block!important; }
   .result-card{ background:#fff!important; border:none!important; padding:0 0 20px!important; }
   .result-card h2,.result-card p{ color:#111!important; }
@@ -1021,6 +1048,7 @@ p{ line-height: 1.9; }
 .petal-val{ font-size:.85rem; color:var(--gold); font-family:var(--mono); }
 .petal-desc{ font-size:.8rem; color:var(--ink-dim); margin:0; line-height:1.6; }
 </style>
+<script>(function(){try{var t=localStorage.getItem('ic_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();</script>
 </head>
 <body>
 <a href="#main" class="skip-link">Skip to content</a>
@@ -1031,6 +1059,10 @@ p{ line-height: 1.9; }
       <li><a href="#start-here">Start Here</a></li><li><a href="#archetypes">Archetypes</a></li><li><a href="#shadow-work">Shadow Work</a></li><li><a href="#dreams-symbols">Dreams & Symbols</a></li><li><a href="#animal-archetypes">Animal Archetypes</a></li><li><a href="#korean-symbolism">Korean Symbolism</a></li><li><a href="#blog">Blog</a></li><li><a href="#about">About</a></li><li><a href="#contact">Contact</a></li>
     </ul>
     <div class="nav-actions">
+      <button class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark / light mode">
+        <svg class="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="6.8" y2="6.8"/><line x1="17.2" y1="17.2" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="6.8" y2="17.2"/><line x1="17.2" y1="6.8" x2="19.1" y2="4.9"/></svg>
+      </button>
       <a href="#quiz" class="nav-cta">Take the Quiz</a>
       <button class="nav-toggle" aria-label="Open menu" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="1" y1="4" x2="17" y2="4"/><line x1="1" y1="9" x2="17" y2="9"/><line x1="1" y1="14" x2="17" y2="14"/></svg>
@@ -2929,11 +2961,25 @@ p{ line-height: 1.9; }
 // ===========================================================
 
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   initNav();
   initContactForm();
   initFilters();
   initQuiz();
 });
+
+/* ---------------- theme toggle ---------------- */
+function initTheme(){
+  const btn = document.querySelector('.theme-toggle');
+  if(!btn) return;
+  btn.addEventListener('click', () => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const next = isDark ? 'light' : 'dark';
+    if(next === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+    try{ localStorage.setItem('ic_theme', next); }catch(e){}
+  });
+}
 
 /* ---------------- mobile nav ---------------- */
 function initNav(){
