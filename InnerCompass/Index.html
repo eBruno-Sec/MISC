@@ -2319,7 +2319,7 @@ p{ line-height: 1.9; }
   <div class="container container-narrow center">
     <div class="eyebrow" style="justify-content:center;">Complete Self-Assessment</div>
     <h1>One quiz. Every framework.</h1>
-    <p class="sub lead">10 scenarios — each rated for intensity — that simultaneously score your animal archetype, MBTI type, Enneagram, Big Five traits, DISC profile, Love Languages, and Holland career code. About 4 minutes.</p>
+    <p class="sub lead">28 short scenarios, each rated for how strongly it fits you, scoring your Big Five traits, animal archetype, and Holland career code, plus MBTI, Enneagram, DISC, and Love Languages. About 7 minutes.</p>
   </div>
 </section>
 
@@ -2987,103 +2987,283 @@ function initFilters(){
    =========================================================== */
 const QUIZ_QUESTIONS = [
   {
-    scenario: "Scenario 1 of 10 — Under pressure",
-    q: "Your team’s biggest project just collapsed — missed deadline, blame flying. What do you actually do?",
+    scenario: "Scenario 1 of 28 · Under pressure",
+    q: "A big deadline is tomorrow and things are going wrong. What actually happens inside you?",
     options: [
-      { text: "Take control: assign accountability, redirect the energy, get it back on track.", scores: { wolf:2, lion:2, mb_T:2, mb_E:1, di_D:3, en_8:2, en_3:1, ri_E:1 } },
-      { text: "Pull the quietest person aside, find the real story, then rebuild from there.", scores: { dog:2, wolf:1, mb_F:2, mb_E:1, di_S:2, en_2:1, en_6:2, ri_S:1, ll_time:1 } },
-      { text: "Locate the technical failure point and fix it before emotions contaminate the facts.", scores: { owl:2, eagle:1, mb_T:3, mb_I:1, di_C:3, en_5:1, en_1:2, ri_I:2, bf_C_hi:1 } },
-      { text: "Give everyone space first, then reconnect once heads are cooler.", scores: { bear:3, mb_I:2, mb_F:1, di_S:2, en_9:3, bf_A_hi:1 } }
+      { text: "I stay calm and just work the problem, step by step.", scores: { bf_N_lo:3, bf_C_hi:1, owl:1, eagle:1, di_C:1, mb_I:1 } },
+      { text: "Stress spikes hard, but I push through it anyway.", scores: { bf_N_hi:2, bf_C_hi:1, di_D:1, tiger:1, en_3:1 } },
+      { text: "I spiral a little and need someone to reassure me.", scores: { bf_N_hi:3, bf_A_hi:1, dog:1, ll_words:1, en_6:1 } },
+      { text: "I shrug. It tends to sort itself out.", scores: { bf_N_lo:3, bf_C_lo:1, bear:2, mb_P:1, en_9:1 } }
     ]
   },
   {
-    scenario: "Scenario 2 of 10 — Natural habitat",
-    q: "Zero obligations, no one expecting anything. You feel most like yourself when you:",
+    scenario: "Scenario 2 of 28 · Free Saturday night",
+    q: "No obligations tonight. Your genuinely ideal version is:",
     options: [
-      { text: "Lose track of time building, fixing, or making something physical.", scores: { bear:2, mb_S:2, mb_I:1, en_9:1, ri_R:3, bf_C_hi:1 } },
-      { text: "Disappear somewhere completely new — a trail, neighborhood, or country you’ve never been.", scores: { fox:2, snake:2, mb_P:2, mb_N:1, en_7:3, bf_O_hi:2, ri_A:1 } },
-      { text: "Spend the whole day in one long conversation with someone who really knows you.", scores: { dog:2, wolf:1, mb_F:2, mb_I:1, en_6:1, en_2:2, ll_time:3, bf_A_hi:1 } },
-      { text: "Go deep alone — a book, course, or problem you’ve been wanting to explore for months.", scores: { owl:2, raven:2, mb_I:2, mb_N:2, en_5:3, bf_O_hi:2, ri_I:2 } }
+      { text: "Out with a group, people and energy everywhere.", scores: { bf_E_hi:3, mb_E:2, di_I:1, lion:1, fox:1 } },
+      { text: "One close friend and a long, real conversation.", scores: { bf_E_lo:1, bf_A_hi:1, dog:2, ll_time:2, mb_I:1 } },
+      { text: "Alone with a book, game, or project. Bliss.", scores: { bf_E_lo:3, mb_I:2, owl:2, en_5:1 } },
+      { text: "Host something small at my place.", scores: { bf_E_hi:2, di_I:1, bear:1, dog:1, ll_time:1 } }
     ]
   },
   {
-    scenario: "Scenario 3 of 10 — Work at its best",
-    q: "When work feels natural and electric, your environment looks like:",
+    scenario: "Scenario 3 of 28 · The spontaneous trip",
+    q: "A friend wants to leave tomorrow for somewhere you know nothing about. You:",
     options: [
-      { text: "High-stakes and fast-moving — decisions matter and the impact is immediate.", scores: { tiger:2, lion:2, mb_E:2, mb_T:1, di_D:3, en_3:2, en_8:1, ri_E:2, bf_E_hi:1 } },
-      { text: "Deep solo focus — one complex problem, long timeline, minimal interruption.", scores: { owl:2, eagle:2, mb_I:2, mb_N:2, en_5:3, ri_I:3, bf_O_hi:1, bf_C_hi:1 } },
-      { text: "A tight team that knows each other’s rhythms and actually trusts each other.", scores: { wolf:2, dog:2, mb_E:1, mb_F:2, di_S:3, en_6:1, en_2:1, ri_S:2, bf_A_hi:2 } },
-      { text: "Creative freedom — outcome is defined but how I get there is entirely mine.", scores: { fox:2, snake:2, mb_P:2, mb_N:2, en_4:2, en_7:1, ri_A:3, bf_O_hi:2 } }
+      { text: "Yes. The not-knowing is the best part.", scores: { bf_O_hi:3, mb_N:2, fox:1, ri_A:1, en_7:1 } },
+      { text: "Intrigued, but I research it thoroughly first.", scores: { bf_O_hi:1, bf_C_hi:2, owl:1, eagle:1, mb_J:1, ri_I:1 } },
+      { text: "I'd rather go somewhere I already know I'll like.", scores: { bf_O_lo:3, mb_S:2, bear:1, di_S:1 } },
+      { text: "Hard no. Too much chaos for me.", scores: { bf_O_lo:2, bf_C_hi:1, mb_S:1, en_6:1, di_C:1 } }
     ]
   },
   {
-    scenario: "Scenario 4 of 10 — How love reaches you",
-    q: "The moment you feel most genuinely loved or valued, it usually comes through:",
+    scenario: "Scenario 4 of 28 · How you run things",
+    q: "You're in charge of a project or a trip. Your real approach:",
     options: [
-      { text: "Something they did without being asked — they just quietly handled it.", scores: { dog:2, wolf:1, ll_acts:4, en_2:1, mb_F:1, bf_A_hi:2 } },
-      { text: "Words — actually listening, then saying the specific things that matter.", scores: { raven:1, mb_F:2, ll_words:4, en_4:1, bf_E_hi:1 } },
-      { text: "Undivided time — hours together with no agenda, just completely present.", scores: { wolf:1, dog:2, ll_time:4, mb_I:1, en_6:2, bf_A_hi:1 } },
-      { text: "Physical touch — a hand on your back, a hug that actually lasts.", scores: { ll_touch:4, mb_F:1, bf_E_hi:1, en_2:1 } }
+      { text: "Detailed plan, lists, everything mapped in advance.", scores: { bf_C_hi:3, mb_J:2, di_C:1, eagle:2, ri_C:1 } },
+      { text: "Rough plan, then adjust as I go.", scores: { bf_C_hi:1, bf_O_hi:1, wolf:1, mb_J:1 } },
+      { text: "Wing it and figure it out live.", scores: { bf_C_lo:3, mb_P:2, fox:2, en_7:1 } },
+      { text: "Get others to organize while I drive it forward.", scores: { bf_C_lo:1, di_D:2, lion:1, mb_P:1 } }
     ]
   },
   {
-    scenario: "Scenario 5 of 10 — The gift",
-    q: "Someone who cares about you gives you an unexpected, thoughtful gift. Your honest reaction:",
+    scenario: "Scenario 5 of 28 · The friend who crossed a line",
+    q: "A friend does something that annoys the whole group. You:",
     options: [
-      { text: "Deeply moved — a real gift means they were thinking about me specifically.", scores: { ll_gifts:4, en_4:2, mb_F:1, bf_N_hi:1 } },
-      { text: "Touched — but a real conversation or handwritten note would have landed even harder.", scores: { ll_words:3, ll_gifts:1, en_4:1, mb_F:2 } },
-      { text: "Grateful — but I’d trade it for them showing up and helping with something real.", scores: { ll_acts:3, ll_gifts:1, en_2:1, bf_A_hi:2 } },
-      { text: "Sweet — but I’d rather they just gave me uninterrupted time with no agenda.", scores: { ll_time:3, ll_gifts:1, en_6:2, bf_A_hi:1 } }
+      { text: "Address it directly. Honesty over comfort.", scores: { bf_A_lo:3, mb_T:2, di_D:1, raven:2, en_8:1 } },
+      { text: "Smooth it over and keep the peace.", scores: { bf_A_hi:3, mb_F:1, bear:1, en_9:2, di_S:1 } },
+      { text: "Pull them aside privately and gently.", scores: { bf_A_hi:2, mb_F:1, dog:2, en_2:1, ll_time:1 } },
+      { text: "Stay out of it. Not my job to fix.", scores: { bf_A_lo:1, bf_E_lo:1, snake:1, mb_I:1, en_5:1 } }
     ]
   },
   {
-    scenario: "Scenario 6 of 10 — Calling",
-    q: "The work that would make you feel like your time on earth was not wasted:",
+    scenario: "Scenario 6 of 28 · Criticized in public",
+    q: "Someone criticizes your work in front of others. Honestly, you:",
     options: [
-      { text: "Leading people toward something bigger than what they thought was possible.", scores: { lion:2, eagle:1, ri_E:3, di_D:2, en_3:2, mb_E:2, mb_N:1 } },
-      { text: "Understanding something deeply complex that most people have not even thought to ask.", scores: { owl:2, raven:2, ri_I:3, en_5:3, bf_O_hi:2, mb_N:2 } },
-      { text: "Creating something — art, writing, design, music, or original performance.", scores: { snake:2, fox:1, ri_A:3, en_4:3, bf_O_hi:2, mb_N:1, mb_P:1 } },
-      { text: "Directly improving people’s lives through service, care, or teaching.", scores: { dog:2, wolf:1, ri_S:3, en_2:2, bf_A_hi:2, mb_F:2 } }
+      { text: "It stings badly and I replay it all day.", scores: { bf_N_hi:3, en_4:1, ll_words:1, dog:1 } },
+      { text: "Annoyed, but I move on fast.", scores: { bf_N_lo:3, mb_T:1, tiger:1, di_D:1 } },
+      { text: "Calm on the outside, I take the useful part.", scores: { bf_N_lo:2, bf_C_hi:1, owl:1, eagle:1, en_1:1 } },
+      { text: "I get defensive and push back.", scores: { bf_N_hi:1, bf_A_lo:2, di_D:1, en_8:1, lion:1 } }
     ]
   },
   {
-    scenario: "Scenario 7 of 10 — Deepest fear",
-    q: "The thing underneath everything — what you work hardest to prevent:",
+    scenario: "Scenario 7 of 28 · Recovering from a hard week",
+    q: "You're completely drained. To actually recharge you:",
     options: [
-      { text: "Being abandoned, unwanted, or no longer chosen by the people who matter.", scores: { en_2:2, en_6:3, ll_time:1, bf_N_hi:2, mb_F:1 } },
-      { text: "Being controlled, trapped, or overpowered by someone else.", scores: { tiger:2, en_8:3, di_D:1, mb_P:1, mb_I:1, bf_N_hi:2 } },
-      { text: "Being ordinary — invisible, forgotten, or easily replaceable.", scores: { lion:2, en_3:2, en_4:2, di_I:1, bf_N_hi:1, mb_E:1 } },
-      { text: "Losing competence, falling behind, or being exposed as incapable.", scores: { eagle:1, owl:1, en_5:2, en_1:2, bf_N_hi:1, bf_C_hi:1, mb_T:1 } }
+      { text: "See friends, go out, get around more people.", scores: { bf_E_hi:3, mb_E:2, di_I:1, lion:1 } },
+      { text: "Total solitude. Silence, no one, please.", scores: { bf_E_lo:3, mb_I:2, snake:1, owl:1, en_5:1 } },
+      { text: "One trusted person and something quiet.", scores: { bf_E_lo:1, dog:1, ll_time:2, bear:1 } },
+      { text: "A little social, then a lot of alone time.", scores: { bf_E_lo:1, bf_E_hi:1, fox:1, mb_I:1 } }
     ]
   },
   {
-    scenario: "Scenario 8 of 10 — Identity at the core",
-    q: "The sentence that fits you most honestly when no one is watching:",
+    scenario: "Scenario 8 of 28 · What pulls you in",
+    q: "You're most naturally drawn to:",
     options: [
-      { text: "“I set my own standard and hold to it — even when no one checks.”", scores: { en_1:3, mb_J:2, bf_C_hi:2, di_C:2, ri_C:1, eagle:1 } },
-      { text: "“I am most myself when growing, changing, or shedding what I have outgrown.”", scores: { snake:3, en_4:2, en_7:1, bf_O_hi:2, mb_N:2, mb_P:2 } },
-      { text: "“My value is in what I build and accomplish — results are how I keep score.”", scores: { lion:2, eagle:1, en_3:3, di_D:2, mb_T:1, mb_J:1, ri_E:1 } },
-      { text: "“I am who I protect and who protects me — relationships are the whole point.”", scores: { wolf:3, dog:2, en_6:2, en_2:1, bf_A_hi:2, ll_time:1 } }
+      { text: "Ideas and theory. Why things work.", scores: { bf_O_hi:2, mb_N:1, ri_I:2, owl:2, en_5:1 } },
+      { text: "Art, beauty, and making things.", scores: { bf_O_hi:2, ri_A:2, mb_N:1, fox:1, en_4:1 } },
+      { text: "Practical, useful, hands-on work.", scores: { bf_O_lo:2, ri_R:2, mb_S:1, bear:1, di_C:1 } },
+      { text: "People and their stories, not systems.", scores: { bf_O_hi:1, ri_S:1, dog:1, mb_F:1, ll_words:1 } }
     ]
   },
   {
-    scenario: "Scenario 9 of 10 — Stress response",
-    q: "When everything hits at once — your instinctive first move is:",
+    scenario: "Scenario 9 of 28 · Your space",
+    q: "Your room or desk usually looks:",
     options: [
-      { text: "Move. Action clears the noise faster than sitting with it.", scores: { tiger:2, lion:1, di_D:3, bf_E_hi:1, en_8:2, en_7:1, ri_R:1, mb_E:1 } },
-      { text: "Analyze. Map exactly what broke and build a precise response.", scores: { owl:2, raven:1, mb_T:3, di_C:3, en_6:1, en_5:2, bf_C_hi:2 } },
-      { text: "Talk. Processing out loud with someone close resets me completely.", scores: { dog:2, mb_F:2, bf_E_hi:2, en_2:1, ll_time:1, ll_words:2, di_I:1 } },
-      { text: "Withdraw. Space and silence reset me faster than anything else.", scores: { bear:3, mb_I:2, bf_E_lo:2, en_9:2, en_5:1, di_S:1 } }
+      { text: "Organized. Everything has its place.", scores: { bf_C_hi:3, mb_J:2, di_C:1, eagle:1, ri_C:1 } },
+      { text: "Controlled chaos. I know where things are.", scores: { bf_C_lo:2, mb_P:1, fox:1, bf_O_hi:1 } },
+      { text: "Messy, and I genuinely don't care.", scores: { bf_C_lo:3, mb_P:2, en_7:1 } },
+      { text: "Tidy in public, messy where no one sees.", scores: { bf_C_hi:1, bf_C_lo:1, en_3:1, mb_J:1 } }
     ]
   },
   {
-    scenario: "Scenario 10 of 10 — How you grow",
-    q: "When you want to master something new, you naturally:",
+    scenario: "Scenario 10 of 28 · Negotiating",
+    q: "You're haggling over a big purchase. You:",
     options: [
-      { text: "Build a structured plan with milestones and track progress deliberately.", scores: { mb_J:2, mb_S:1, bf_C_hi:3, di_C:2, en_1:2, ri_C:2 } },
-      { text: "Jump straight in and figure it out — doing teaches faster than studying.", scores: { fox:2, mb_P:3, mb_S:1, di_D:2, en_7:2, ri_R:2, bf_O_hi:1 } },
-      { text: "Research exhaustively first — you want the complete picture before you touch it.", scores: { owl:2, eagle:2, mb_N:2, mb_T:2, en_5:3, ri_I:3, bf_O_hi:2 } },
-      { text: "Find a mentor, community, or partner — you learn best through people.", scores: { dog:2, mb_F:1, mb_E:2, di_S:2, en_2:1, en_6:1, ri_S:2, bf_A_hi:2 } }
+      { text: "Push hard for the best deal. I enjoy it.", scores: { bf_A_lo:3, di_D:2, mb_T:1, lion:1, en_8:1 } },
+      { text: "Hate it. I just want it fair and over.", scores: { bf_A_hi:2, bf_N_hi:1, dog:1, en_9:1 } },
+      { text: "Research first, show up armed with data.", scores: { bf_A_lo:1, bf_C_hi:2, owl:1, eagle:1, ri_I:1, mb_T:1 } },
+      { text: "Bring someone who's good at it.", scores: { bf_A_hi:1, bf_E_lo:1, di_S:1, bear:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 11 of 28 · A satisfying weekend build",
+    q: "Which weekend project sounds most satisfying?",
+    options: [
+      { text: "Build or fix something with my hands.", scores: { ri_R:3, bf_O_lo:1, bear:1, di_C:1, mb_S:1 } },
+      { text: "Take something apart to see how it works.", scores: { ri_R:2, ri_I:1, owl:1, bf_O_hi:1 } },
+      { text: "A physical challenge outdoors.", scores: { ri_R:2, bf_E_hi:1, tiger:1, lion:1 } },
+      { text: "None of that. Indoors, with ideas.", scores: { ri_I:1, bf_O_hi:1, mb_N:1, owl:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 12 of 28 · A problem lands",
+    q: "A tricky problem shows up. Your first instinct:",
+    options: [
+      { text: "Dig into the data and find the root cause.", scores: { ri_I:3, bf_O_hi:1, owl:2, mb_T:1, en_5:1 } },
+      { text: "Experiment and test theories.", scores: { ri_I:2, ri_R:1, bf_O_hi:1, eagle:1 } },
+      { text: "Ask people what they think first.", scores: { ri_S:1, bf_E_hi:1, dog:1, mb_F:1 } },
+      { text: "Trust my gut and act fast.", scores: { ri_E:1, di_D:1, bf_C_lo:1, lion:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 13 of 28 · The blank canvas",
+    q: "You're handed a project with total freedom. You:",
+    options: [
+      { text: "Create something original from my own vision.", scores: { ri_A:3, bf_O_hi:2, fox:1, en_4:1, mb_N:1 } },
+      { text: "Take something that exists and improve it.", scores: { ri_C:1, bf_C_hi:1, eagle:1, ri_R:1 } },
+      { text: "Collaborate on something expressive.", scores: { ri_A:2, ri_S:1, bf_E_hi:1, dog:1 } },
+      { text: "Honestly, I'd rather have clear instructions.", scores: { ri_C:2, bf_O_lo:1, bf_C_hi:1, di_C:1, mb_S:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 14 of 28 · What feels rewarding",
+    q: "Which of these is most rewarding to you?",
+    options: [
+      { text: "Helping someone grow or heal.", scores: { ri_S:3, bf_A_hi:2, dog:2, en_2:1, ll_acts:1 } },
+      { text: "Teaching or explaining something clearly.", scores: { ri_S:2, ri_I:1, owl:1, mb_F:1 } },
+      { text: "Winning, or hitting an ambitious target.", scores: { ri_E:2, di_D:1, lion:1, en_3:1 } },
+      { text: "Solving it alone and cleanly.", scores: { ri_I:1, bf_E_lo:1, snake:1, mb_I:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 15 of 28 · In a group project",
+    q: "Put in a team, you naturally become the one who:",
+    options: [
+      { text: "Takes the lead and sets direction.", scores: { ri_E:3, di_D:2, wolf:2, lion:1, mb_E:1, en_8:1 } },
+      { text: "Sells the idea and rallies people.", scores: { ri_E:2, bf_E_hi:1, di_I:1, fox:1 } },
+      { text: "Quietly does the actual work.", scores: { ri_C:1, bf_E_lo:1, di_S:1, bear:1, mb_I:1 } },
+      { text: "Analyzes and advises, but won't lead.", scores: { ri_I:1, owl:1, bf_E_lo:1, mb_T:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 16 of 28 · Your best work happens when",
+    q: "You do your best work when the environment is:",
+    options: [
+      { text: "Structured, with clear rules and accuracy.", scores: { ri_C:3, bf_C_hi:2, di_C:1, eagle:1, mb_J:1, en_1:1 } },
+      { text: "Flexible, open-ended, and creative.", scores: { ri_A:2, bf_O_hi:1, bf_C_lo:1, fox:1 } },
+      { text: "Fast, competitive, and results-driven.", scores: { ri_E:2, di_D:1, tiger:1, en_3:1 } },
+      { text: "Collaborative and people-focused.", scores: { ri_S:2, bf_A_hi:1, dog:1, di_I:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 17 of 28 · A small mistake",
+    q: "A minor mistake you made last week... right now it:",
+    options: [
+      { text: "Still pops into my head and makes me cringe.", scores: { bf_N_hi:3, en_1:1, en_6:1, owl:1 } },
+      { text: "I forgot about it almost immediately.", scores: { bf_N_lo:3, bear:1, di_D:1, en_9:1 } },
+      { text: "I learned from it and filed it away.", scores: { bf_N_lo:2, bf_C_hi:1, eagle:1, en_1:1 } },
+      { text: "What mistake? I really don't dwell.", scores: { bf_N_lo:2, bf_A_lo:1, tiger:1, mb_T:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 18 of 28 · A room full of strangers",
+    q: "You walk into a room where you know no one. You:",
+    options: [
+      { text: "Love it. I'll work the whole room.", scores: { bf_E_hi:3, mb_E:2, di_I:1, lion:1, fox:1 } },
+      { text: "Find one person and stick with them.", scores: { bf_E_lo:2, dog:1, ll_time:1, mb_I:1 } },
+      { text: "Hang back and observe first.", scores: { bf_E_lo:2, mb_I:1, owl:2, snake:1, en_5:1 } },
+      { text: "Dread it and look for the exit.", scores: { bf_E_lo:2, bf_N_hi:1, en_6:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 19 of 28 · Your ideal life",
+    q: "The life that actually appeals to you feels more like:",
+    options: [
+      { text: "Variety and new things, constantly.", scores: { bf_O_hi:3, mb_N:2, fox:1, en_7:1, ri_A:1 } },
+      { text: "A comfortable, familiar rhythm.", scores: { bf_O_lo:3, mb_S:2, bear:2, di_S:1, en_9:1 } },
+      { text: "Structure, with the occasional adventure.", scores: { bf_O_lo:1, bf_C_hi:1, eagle:1, mb_J:1 } },
+      { text: "Depends entirely on my mood.", scores: { bf_O_hi:1, bf_C_lo:1, mb_P:1, fox:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 20 of 28 · Your word",
+    q: "You promised to do something you now really don't feel like doing. You:",
+    options: [
+      { text: "Do it anyway. My word matters.", scores: { bf_C_hi:3, mb_J:1, di_C:1, en_1:2, wolf:1 } },
+      { text: "Do it, but at the last possible minute.", scores: { bf_C_lo:1, mb_P:1, en_3:1, fox:1 } },
+      { text: "Try to renegotiate or push it back.", scores: { bf_C_lo:2, bf_A_hi:1, mb_P:1 } },
+      { text: "Honestly, I often let it slide.", scores: { bf_C_lo:3, mb_P:1, en_7:1, en_9:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 21 of 28 · Someone's venting",
+    q: "A person you care about is upset and venting to you. You:",
+    options: [
+      { text: "Feel it with them. Comfort comes first.", scores: { bf_A_hi:3, mb_F:2, dog:2, ll_touch:1, en_2:1 } },
+      { text: "Try to fix the actual problem for them.", scores: { bf_A_hi:1, mb_T:1, di_D:1, eagle:1, ll_acts:1 } },
+      { text: "Listen, but stay objective about it.", scores: { bf_A_lo:2, mb_T:2, owl:1, snake:1 } },
+      { text: "Get uncomfortable and want it to end.", scores: { bf_A_lo:1, bf_E_lo:1, mb_T:1, en_5:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 22 of 28 · Feeling cared for",
+    q: "You feel most loved when someone:",
+    options: [
+      { text: "Tells you, out loud, in words.", scores: { ll_words:3, mb_F:1, dog:1 } },
+      { text: "Gives you their full, undivided attention.", scores: { ll_time:3, bf_E_lo:1, en_4:1 } },
+      { text: "Does something genuinely helpful for you.", scores: { ll_acts:3, bf_C_hi:1, di_S:1 } },
+      { text: "Is physically close and affectionate.", scores: { ll_touch:3, bf_E_hi:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 23 of 28 · Showing you care",
+    q: "When you care about someone, you naturally:",
+    options: [
+      { text: "Encourage them with words and praise.", scores: { ll_words:3, bf_A_hi:1, en_2:1 } },
+      { text: "Show up and simply be present.", scores: { ll_time:3, dog:1, bf_A_hi:1 } },
+      { text: "Give thoughtful gifts and tokens.", scores: { ll_gifts:3, en_2:1 } },
+      { text: "Do practical things for them.", scores: { ll_acts:3, di_S:1, bf_C_hi:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 24 of 28 · What stings most",
+    q: "In a close relationship, what hurts you the most?",
+    options: [
+      { text: "Harsh words or sharp criticism.", scores: { ll_words:3, bf_N_hi:1, en_4:1 } },
+      { text: "Being ignored, or given no time.", scores: { ll_time:3, bf_E_lo:1, en_2:1 } },
+      { text: "Broken promises and zero effort.", scores: { ll_acts:3, bf_C_hi:1, en_1:1 } },
+      { text: "Coldness and no affection.", scores: { ll_touch:3, bf_A_hi:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 25 of 28 · What drives you",
+    q: "Deep down, the thing that drives you most is:",
+    options: [
+      { text: "Being good and right, with real integrity.", scores: { en_1:3, bf_C_hi:1, eagle:1 } },
+      { text: "Being loved and truly needed.", scores: { en_2:2, ll_words:1, dog:1, bf_A_hi:1 } },
+      { text: "Achieving and being admired for it.", scores: { en_3:3, di_D:1, lion:1, ri_E:1 } },
+      { text: "Being authentic and unmistakably myself.", scores: { en_4:3, bf_O_hi:1, ri_A:1, fox:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 26 of 28 · Your quiet fear",
+    q: "The fear that sits quietly underneath is being:",
+    options: [
+      { text: "Incompetent, or completely overwhelmed.", scores: { en_5:3, bf_O_hi:1, owl:1, snake:1 } },
+      { text: "Without support or security.", scores: { en_6:3, bf_N_hi:1, dog:1 } },
+      { text: "Trapped, deprived, or bored.", scores: { en_7:3, bf_O_hi:1, fox:1 } },
+      { text: "Controlled or dominated by others.", scores: { en_8:3, di_D:1, tiger:1, bf_A_lo:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 27 of 28 · Your role in a group",
+    q: "In almost any group, you end up being the:",
+    options: [
+      { text: "Leader and driver.", scores: { di_D:2, wolf:2, lion:1, ri_E:1, en_8:1, mb_E:1 } },
+      { text: "Connector and energizer.", scores: { di_I:2, bf_E_hi:1, fox:1, dog:1, mb_E:1 } },
+      { text: "Steady rock and supporter.", scores: { di_S:2, bear:2, bf_A_hi:1, en_9:1, mb_F:1 } },
+      { text: "Analyst and quality check.", scores: { di_C:2, owl:2, eagle:1, bf_C_hi:1, mb_T:1, en_5:1 } }
+    ]
+  },
+  {
+    scenario: "Scenario 28 of 28 · How you'd be remembered",
+    q: "You'd most want to be remembered as someone who:",
+    options: [
+      { text: "Led and built things that lasted.", scores: { wolf:2, lion:2, ri_E:1, en_8:1, di_D:1 } },
+      { text: "Was wise and saw things clearly.", scores: { owl:2, raven:1, eagle:1, ri_I:1, en_5:1 } },
+      { text: "Was loyal and fiercely protected people.", scores: { bear:2, dog:2, bf_A_hi:1, en_6:1, ll_time:1 } },
+      { text: "Was bold and lived fully, on their own terms.", scores: { tiger:2, fox:1, lion:1, bf_O_hi:1, en_7:1 } }
     ]
   }
 ];
@@ -3295,7 +3475,7 @@ function initQuiz(){
     + '<h2 style="margin-bottom:12px;">Answer as your real self — not your ideal self</h2>'
     + '<p style="margin-bottom:20px;">How you actually behave at home, with close friends, when no one is watching — not how you wish you were.</p>'
     + '<div class="onboarding-rules">'
-    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">⚡</span><span><strong style="color:var(--ink);">10 scenarios</strong> with an intensity rating each. About 4 minutes.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">⚡</span><span><strong style="color:var(--ink);">28 scenarios</strong> with an intensity rating each. About 7 minutes.</span></div>'
     +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">🔒</span><span>Your answers stay on your device — nothing is sent anywhere.</span></div>'
     +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">✦</span><span>Pick the option that fits best, then rate how strongly. That is what makes the results accurate.</span></div>'
     + '</div>'
@@ -3403,7 +3583,7 @@ function initQuiz(){
       var mult = INTENSITY_MULT[intensity] || 1;
       var opt = QUIZ_QUESTIONS[qi].options[ci];
       Object.keys(opt.scores).forEach(function(k){ sc[k]=(sc[k]||0)+opt.scores[k]*mult; });
-      auditLog.push({qi:qi, ci:ci, intensity:intensity, scenario:QUIZ_QUESTIONS[qi].scenario.replace(/Scenario \d+ of 10 — /,''), answer:opt.text, scores:opt.scores});
+      auditLog.push({qi:qi, ci:ci, intensity:intensity, scenario:QUIZ_QUESTIONS[qi].scenario.replace(/^Scenario[^·]*·\s*/,''), answer:opt.text, scores:opt.scores});
     });
     function g(k){ return sc[k]||0; }
 
