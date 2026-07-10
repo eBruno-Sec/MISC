@@ -444,13 +444,24 @@ td{ color:var(--ink-dim); }
 .quiz-step-label{ font-family:var(--mono); font-size:.74rem; color:var(--ink-faint); margin-bottom:10px; }
 .quiz-options{ display:grid; gap:11px; margin-top:24px; }
 .quiz-option{
+  display:flex; align-items:center; gap:14px; width:100%;
   text-align:left; background:var(--bg-1); border:1.5px solid var(--line); color:var(--ink);
-  padding:18px 22px; border-radius:var(--radius-lg); cursor:pointer;
+  padding:15px 18px; border-radius:var(--radius-lg); cursor:pointer;
   font-family:var(--body); font-size:.98rem; line-height:1.5;
   transition:border-color .15s ease, background .15s ease, transform .1s ease;
 }
 .quiz-option:hover{ border-color:var(--gold); background:rgba(201,162,75,.06); transform:translateX(3px); }
-.quiz-option.selected{ border-color:var(--gold); background:rgba(201,162,75,.1); }
+.quiz-option.ranked{ border-color:var(--gold); background:rgba(201,162,75,.09); }
+.quiz-option.rank-1{ border-color:var(--gold-bright); background:rgba(201,162,75,.15); }
+.quiz-opt-text{ flex:1; }
+.quiz-rank-badge{
+  flex-shrink:0; width:30px; height:30px; border-radius:50%;
+  border:1.5px solid var(--line); display:flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:.82rem; font-weight:700; color:var(--ink-faint);
+  transition:all .15s ease;
+}
+.quiz-option.ranked .quiz-rank-badge{ border-color:var(--gold); color:var(--gold); background:rgba(201,162,75,.12); }
+.quiz-option.rank-1 .quiz-rank-badge{ border-color:var(--gold-bright); color:var(--bg); background:var(--gold-bright); }
 .quiz-nav{ display:flex; justify-content:space-between; margin-top:32px; gap:12px; }
 .quiz-result{ display:none; }
 .quiz-result.show{ display:block; animation:fadein .4s ease; }
@@ -952,15 +963,11 @@ p{ line-height: 1.9; }
 .onboarding-rule{ display:flex; gap:14px; align-items:flex-start; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius); padding:13px 16px; font-size:.9rem; color:var(--ink-dim); }
 .onboarding-rule-icon{ font-size:1.1rem; flex-shrink:0; }
 
-/* ---- Intensity selector ---- */
+/* ---- Rank instruction ---- */
 .quiz-step-meta{ font-family:var(--mono); font-size:.68rem; color:var(--gold); letter-spacing:.12em; text-transform:uppercase; margin-bottom:8px; opacity:.85; }
-.intensity-wrap{ margin-top:18px; padding:16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-lg); animation:fadein .2s ease; }
-.intensity-label{ font-family:var(--mono); font-size:.7rem; color:var(--ink-faint); letter-spacing:.08em; text-align:center; margin-bottom:10px; }
-.intensity-row{ display:flex; gap:8px; }
-.intensity-btn{ flex:1; padding:11px 6px; border-radius:var(--radius); border:1.5px solid var(--line); background:var(--bg-1); color:var(--ink-dim); font-family:var(--mono); font-size:.72rem; letter-spacing:.03em; cursor:pointer; transition:all .15s; text-align:center; min-height:44px; }
-.intensity-btn:hover{ border-color:var(--gold); color:var(--gold); background:var(--gold-glow); }
-.intensity-btn.sel{ border-color:var(--gold-bright); background:rgba(201,162,75,.12); color:var(--gold-bright); font-weight:700; }
-.intensity-btn.sel.high{ box-shadow:0 0 14px rgba(201,162,75,.25); }
+.quiz-rank-hint{ margin-top:14px; margin-bottom:-8px; font-size:.88rem; color:var(--ink-dim); display:flex; align-items:center; gap:8px; }
+.quiz-rank-hint strong{ color:var(--gold); }
+.quiz-rank-progress{ font-family:var(--mono); font-size:.72rem; color:var(--ink-faint); margin-left:auto; letter-spacing:.05em; }
 
 /* ---- Blueprint intro ---- */
 .blueprint-intro{ margin:44px 0 4px; }
@@ -2319,7 +2326,7 @@ p{ line-height: 1.9; }
   <div class="container container-narrow center">
     <div class="eyebrow" style="justify-content:center;">Complete Self-Assessment</div>
     <h1>One quiz. Every framework.</h1>
-    <p class="sub lead">28 short scenarios, each rated for how strongly it fits you, scoring your Big Five traits, animal archetype, and Holland career code, plus MBTI, Enneagram, DISC, and Love Languages. About 7 minutes.</p>
+    <p class="sub lead">28 short scenarios. You rank every option from most to least like you, scoring your Big Five traits, animal archetype, and Holland career code, plus MBTI, Enneagram, DISC, and Love Languages. About 7 minutes.</p>
   </div>
 </section>
 
@@ -3416,8 +3423,6 @@ function build7Petal(animalKey, mbtiCode, enNum, discP, discS, E, T, J, holland,
 }
 
 function buildAudit(auditLog, animalKey, mbtiCode, enNum, discP){
-  var intLabel = {low:'0.5x — Sometimes',med:'1x — Mostly',high:'2x — This is me'};
-  var multMap = {low:0.5,med:1.0,high:2.0};
   var frameworks = [
     {key:animalKey, label:'Animal: '+ANIMAL_RESULTS[animalKey].name, skeys:[animalKey]},
     {key:mbtiCode,  label:'MBTI: '+mbtiCode,  skeys:['mb_E','mb_I','mb_S','mb_N','mb_T','mb_F','mb_J','mb_P']},
@@ -3426,20 +3431,18 @@ function buildAudit(auditLog, animalKey, mbtiCode, enNum, discP){
   ];
   return frameworks.map(function(fw){
     var rows = auditLog
-      .filter(function(e){ return fw.skeys.some(function(sk){return e.scores[sk];}); })
       .map(function(e){
-        var pts = fw.skeys.reduce(function(s,sk){return s+(e.scores[sk]||0);},0);
-        var w = Math.round(pts*(multMap[e.intensity]||1)*10)/10;
-        return {scenario:e.scenario,num:e.qi+1,letter:String.fromCharCode(65+e.ci),answer:e.answer,intensity:e.intensity,weighted:w};
+        var pts = fw.skeys.reduce(function(s,sk){return s+(e.wScores[sk]||0);},0);
+        return {scenario:e.scenario,num:e.qi+1,letter:e.topLetter,answer:e.topText,weighted:Math.round(pts*10)/10};
       })
+      .filter(function(r){ return r.weighted > 0; })
       .sort(function(a,b){return b.weighted-a.weighted;})
       .slice(0,4);
-    var intWord = {low:'Sometimes (0.5×)',med:'Mostly (1×)',high:'100% me (2×)'};
     var rowsHtml = rows.map(function(c){
       var snip = c.answer.length>90?c.answer.substring(0,90)+'…':c.answer;
-      return '<div class="audit-row"><span class="audit-badge '+c.intensity+'">'+intLabel[c.intensity]+'</span>'
+      return '<div class="audit-row"><span class="audit-badge high">Your ranking</span>'
         + '<strong>'+c.scenario+'</strong>'
-        + '<div class="audit-row-tag">Scenario '+c.num+' · Option '+c.letter+' · '+intWord[c.intensity]+'</div>'
+        + '<div class="audit-row-tag">Scenario '+c.num+' · top pick: Option '+c.letter+'</div>'
         + '<div class="audit-row-ans">"'+snip+'"</div>'
         + '<div class="audit-row-pts">→ +'+c.weighted+' pts weighted into this result</div></div>';
     }).join('');
@@ -3451,8 +3454,9 @@ function initQuiz(){
   var root = document.querySelector('#quiz-app');
   if(!root) return;
 
-  var STORAGE_KEY = 'ic_quiz_v4';
-  var INTENSITY_MULT = {low:0.5, med:1.0, high:2.0};
+  var STORAGE_KEY = 'ic_quiz_v5';
+  var RANK_WEIGHTS = [1.0, 0.5, 0.2, 0.0];
+  function isComplete(a, idx){ return a && a.length === QUIZ_QUESTIONS[idx].options.length; }
 
   var qContainer = root.querySelector('#quiz-questions');
   var progressFill = root.querySelector('.progress-fill');
@@ -3472,12 +3476,12 @@ function initQuiz(){
   var onboardEl = document.createElement('div');
   onboardEl.className = 'quiz-onboarding';
   onboardEl.innerHTML = '<div class="eyebrow" style="justify-content:center;margin-bottom:14px;">Before You Begin</div>'
-    + '<h2 style="margin-bottom:12px;">Answer as your real self — not your ideal self</h2>'
-    + '<p style="margin-bottom:20px;">How you actually behave at home, with close friends, when no one is watching — not how you wish you were.</p>'
+    + '<h2 style="margin-bottom:12px;">Answer as your real self, not your ideal self</h2>'
+    + '<p style="margin-bottom:20px;">How you actually behave at home, with close friends, when no one is watching. Not how you wish you were.</p>'
     + '<div class="onboarding-rules">'
-    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">⚡</span><span><strong style="color:var(--ink);">28 scenarios</strong> with an intensity rating each. About 7 minutes.</span></div>'
-    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">🔒</span><span>Your answers stay on your device — nothing is sent anywhere.</span></div>'
-    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">✦</span><span>Pick the option that fits best, then rate how strongly. That is what makes the results accurate.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">⚡</span><span><strong style="color:var(--ink);">28 scenarios</strong>, each ranked best to least. About 7 minutes.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">🔒</span><span>Your answers stay on your device. Nothing is sent anywhere.</span></div>'
+    +   '<div class="onboarding-rule"><span class="onboarding-rule-icon">✦</span><span>Tap the options in order, most like you first. Ranking all four is what makes the results accurate.</span></div>'
     + '</div>'
     + '<button class="btn btn-primary" id="quiz-start-btn" style="margin-top:20px;">'+(hasSaved?'Continue Assessment ✦':'Start the Assessment')+'</button>'
     + (hasSaved?'<p style="margin-top:12px;font-family:var(--mono);font-size:.72rem;color:var(--gold);letter-spacing:.06em;">✦ Progress saved — picking up where you left off</p>':'');
@@ -3488,7 +3492,7 @@ function initQuiz(){
   onboardEl.querySelector('#quiz-start-btn').addEventListener('click', function(){
     onboardEl.style.display = 'none';
     qContainer.style.display = '';
-    var firstUnanswered = answered.findIndex(function(a){return a===null;});
+    var firstUnanswered = answered.findIndex(function(a,idx){return !isComplete(a,idx);});
     goTo(firstUnanswered === -1 ? 0 : firstUnanswered);
   });
 
@@ -3502,60 +3506,61 @@ function initQuiz(){
     var isLast = i === QUIZ_QUESTIONS.length - 1;
     block.innerHTML = '<div class="quiz-step-meta">'+item.scenario+'</div>'
       + '<h3>'+item.q+'</h3>'
+      + '<div class="quiz-rank-hint">Tap the options in order, <strong>best first</strong>. <span class="quiz-rank-progress"></span></div>'
       + '<div class="quiz-options"></div>'
-      + '<div class="intensity-wrap" style="display:none;">'
-      +   '<div class="intensity-label">How strongly does this fit you?</div>'
-      +   '<div class="intensity-row">'
-      +     '<button type="button" class="intensity-btn low" data-val="low">Sometimes</button>'
-      +     '<button type="button" class="intensity-btn med" data-val="med">Mostly</button>'
-      +     '<button type="button" class="intensity-btn high" data-val="high">This is 100% me</button>'
-      +   '</div>'
-      + '</div>'
       + '<div class="quiz-nav">'
       +   '<button type="button" class="btn btn-outline quiz-back"'+(i===0?' disabled style="visibility:hidden;"':'')+'>Back</button>'
       +   '<button type="button" class="btn btn-primary quiz-next" disabled>'+(isLast?'Reveal My Profile ✦':'Next')+'</button>'
       + '</div>';
 
     var optWrap = block.querySelector('.quiz-options');
-    var iWrap   = block.querySelector('.intensity-wrap');
     var nextBtn = block.querySelector('.quiz-next');
+    var progEl  = block.querySelector('.quiz-rank-progress');
+    var optCount = item.options.length;
 
-    var selOpt = answered[i] ? answered[i].ci : null;
-    var selInt = answered[i] ? answered[i].intensity : null;
+    var order = (answered[i] && answered[i].length) ? answered[i].slice() : [];
 
-    if(selOpt !== null){ iWrap.style.display = ''; }
-    if(selOpt !== null && selInt){ nextBtn.disabled = false; }
+    function renderRanks(){
+      optWrap.querySelectorAll('.quiz-option').forEach(function(b, oi){
+        var pos = order.indexOf(oi);
+        var badge = b.querySelector('.quiz-rank-badge');
+        b.classList.remove('ranked','rank-1');
+        if(pos === -1){ badge.textContent = ''; }
+        else {
+          badge.textContent = pos + 1;
+          b.classList.add('ranked');
+          if(pos === 0) b.classList.add('rank-1');
+        }
+      });
+      var done = order.length === optCount;
+      nextBtn.disabled = !done;
+      progEl.textContent = done ? 'All ranked ✦' : (order.length + ' of ' + optCount + ' ranked');
+    }
 
     item.options.forEach(function(opt, oi){
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'quiz-option' + (selOpt === oi ? ' selected' : '');
-      b.textContent = opt.text;
+      b.className = 'quiz-option';
+      b.innerHTML = '<span class="quiz-rank-badge"></span><span class="quiz-opt-text"></span>';
+      b.querySelector('.quiz-opt-text').textContent = opt.text;
       b.addEventListener('click', function(){
-        optWrap.querySelectorAll('.quiz-option').forEach(function(o){o.classList.remove('selected');});
-        b.classList.add('selected');
-        selOpt = oi;
-        selInt = null;
-        iWrap.style.display = '';
-        iWrap.querySelectorAll('.intensity-btn').forEach(function(ib){ib.classList.remove('sel');});
-        nextBtn.disabled = true;
-        answered[i] = null;
+        var pos = order.indexOf(oi);
+        if(pos !== -1){
+          order.splice(pos, 1);
+        } else {
+          order.push(oi);
+          if(order.length === optCount - 1){
+            for(var z = 0; z < optCount; z++){ if(order.indexOf(z) === -1){ order.push(z); break; } }
+          }
+        }
+        answered[i] = order.length ? order.slice() : null;
         save();
+        renderRanks();
       });
       optWrap.appendChild(b);
     });
 
-    iWrap.querySelectorAll('.intensity-btn').forEach(function(ib){
-      if(selInt === ib.dataset.val) ib.classList.add('sel');
-      ib.addEventListener('click', function(){
-        iWrap.querySelectorAll('.intensity-btn').forEach(function(x){x.classList.remove('sel');});
-        ib.classList.add('sel');
-        selInt = ib.dataset.val;
-        answered[i] = {ci: selOpt, intensity: selInt};
-        save();
-        nextBtn.disabled = false;
-      });
-    });
+    renderRanks();
 
     block.querySelector('.quiz-next').addEventListener('click', function(){ goTo(i + 1); });
     block.querySelector('.quiz-back').addEventListener('click', function(){ goTo(i - 1); });
@@ -3577,13 +3582,26 @@ function initQuiz(){
   function showResult(){
     var sc = {};
     var auditLog = [];
-    answered.forEach(function(item, qi){
-      if(!item) return;
-      var ci = item.ci, intensity = item.intensity;
-      var mult = INTENSITY_MULT[intensity] || 1;
-      var opt = QUIZ_QUESTIONS[qi].options[ci];
-      Object.keys(opt.scores).forEach(function(k){ sc[k]=(sc[k]||0)+opt.scores[k]*mult; });
-      auditLog.push({qi:qi, ci:ci, intensity:intensity, scenario:QUIZ_QUESTIONS[qi].scenario.replace(/^Scenario[^·]*·\s*/,''), answer:opt.text, scores:opt.scores});
+    answered.forEach(function(order, qi){
+      if(!order || !order.length) return;
+      var opts = QUIZ_QUESTIONS[qi].options;
+      var wScores = {};
+      order.forEach(function(ci, pos){
+        var w = RANK_WEIGHTS[pos] || 0;
+        if(!w) return;
+        Object.keys(opts[ci].scores).forEach(function(k){
+          var add = opts[ci].scores[k] * w;
+          sc[k] = (sc[k]||0) + add;
+          wScores[k] = (wScores[k]||0) + add;
+        });
+      });
+      auditLog.push({
+        qi: qi,
+        scenario: QUIZ_QUESTIONS[qi].scenario.replace(/^Scenario[^·]*·\s*/,''),
+        topText: opts[order[0]].text,
+        topLetter: String.fromCharCode(65 + order[0]),
+        wScores: wScores
+      });
     });
     function g(k){ return sc[k]||0; }
 
