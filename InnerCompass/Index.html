@@ -3790,6 +3790,7 @@ function initQuiz(){
       +   '<div class="eyebrow">Save your results</div>'
       +   '<div class="download-options">'
       +     '<button class="btn btn-primary pq-dl-pdf">Print / Save as PDF</button>'
+      +     '<button class="btn btn-outline pq-dl-md">Download .md</button>'
       +     '<button class="btn btn-outline pq-dl-txt">Download .txt</button>'
       +     '<button class="btn btn-outline pq-dl-json">Download .json</button>'
       +   '</div>'
@@ -3860,6 +3861,112 @@ function initQuiz(){
       },null,2);
     }
 
+    function buildMarkdown(){
+      function bar(pct){ var n=Math.max(0,Math.min(10,Math.round(pct/10))); var s=''; for(var i=0;i<10;i++) s+=(i<n?'█':'░'); return s; }
+      function pad(str,len){ str=String(str); while(str.length<len) str+=' '; return str.substring(0,len); }
+      var L = [];
+      L.push('# ✦ Inner Compass — Personality Blueprint');
+      L.push('');
+      L.push('> *A complete cross-framework profile from a single 28-scenario assessment.*');
+      L.push(''); L.push('---'); L.push('');
+      L.push('## At a Glance');
+      L.push('');
+      L.push('| Framework | Your Result |');
+      L.push('| :-- | :-- |');
+      L.push('| 🐾 Animal Archetype | **The '+ar.name+'** (then The '+ar2.name+') |');
+      L.push('| 🧭 MBTI | **'+mbtiCode+'** · '+md.name+' |');
+      L.push('| 🔢 Enneagram | **Type '+enNum+'** · '+ed.name+' |');
+      L.push('| 🎯 DISC | **'+discP+'/'+discS+'** · '+DISC_PROFILES[discP].name+' |');
+      L.push('| 💬 Top Love Language | **'+LOVE_LANGUAGES[llRanked[0].k].name+'** |');
+      L.push('| 💼 Holland Code | **'+holland+'** |');
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 🐾 Animal Archetype — The '+ar.name);
+      L.push('');
+      L.push('> '+ar.description);
+      L.push('');
+      L.push('- **Traits:** '+ar.traits);
+      L.push('- **Growth edge:** '+ar.growth);
+      L.push('- **Shadow:** '+ar.shadow);
+      L.push('- **Secondary archetype:** The '+ar2.name);
+      L.push('');
+      L.push('**Archetype spread**');
+      L.push('');
+      L.push('```');
+      var maxA = animalSorted[0].s || 1;
+      animalSorted.slice(0,5).forEach(function(x){
+        var pct=Math.round(x.s/maxA*100);
+        L.push(pad(ANIMAL_RESULTS[x.k].name,8)+' '+bar(pct)+' '+pct+'%');
+      });
+      L.push('```');
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 🧭 MBTI — '+mbtiCode+' · '+md.name);
+      L.push('');
+      L.push('*'+md.tagline+'*');
+      L.push('');
+      L.push('| Axis | Leaning | Strength |');
+      L.push('| :-- | :-- | :-- |');
+      L.push('| Energy | '+(E?'Extravert':'Introvert')+' | `'+bar(E?ePct:100-ePct)+'` '+(E?ePct:100-ePct)+'% |');
+      L.push('| Information | '+(S?'Sensing':'Intuitive')+' | `'+bar(S?sPct:100-sPct)+'` '+(S?sPct:100-sPct)+'% |');
+      L.push('| Decisions | '+(T?'Thinking':'Feeling')+' | `'+bar(T?tPct:100-tPct)+'` '+(T?tPct:100-tPct)+'% |');
+      L.push('| Structure | '+(J?'Judging':'Perceiving')+' | `'+bar(J?jPct:100-jPct)+'` '+(J?jPct:100-jPct)+'% |');
+      L.push('');
+      L.push('Cognitive functions: `'+md.functions+'`');
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 🔢 Enneagram — Type '+enNum+' · '+ed.name);
+      L.push('');
+      L.push('*'+ed.triad+' triad*');
+      L.push('');
+      L.push('> '+ed.desc);
+      L.push('');
+      L.push('| Driver | Value |');
+      L.push('| :-- | :-- |');
+      L.push('| **Core fear** | '+ed.fear+' |');
+      L.push('| **Core desire** | '+ed.desire+' |');
+      L.push('| **Trap** | '+ed.trap+' |');
+      L.push('| **Growth path** | → Type '+ed.integration+' · '+ENNEAGRAM_TYPES[ed.integration].name+' |');
+      L.push('| **Stress path** | → Type '+ed.disintegration+' · '+ENNEAGRAM_TYPES[ed.disintegration].name+' |');
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 📊 Big Five (OCEAN)');
+      L.push('');
+      L.push('```');
+      ['O','C','E','A','N'].forEach(function(t){
+        var hi=g('bf_'+t+'_hi'),lo=g('bf_'+t+'_lo');
+        var pct=Math.round(hi/(hi+lo+.01)*100),d=BIG_FIVE[t];
+        L.push(pad(d.name,18)+' '+bar(pct)+' '+pad(pct+'%',4)+' '+(pct>=50?d.hi_label:d.lo_label));
+      });
+      L.push('```');
+      L.push('');
+      ['O','C','E','A','N'].forEach(function(t){
+        var hi=g('bf_'+t+'_hi'),lo=g('bf_'+t+'_lo');
+        var pct=Math.round(hi/(hi+lo+.01)*100),d=BIG_FIVE[t];
+        L.push('- **'+d.name+' ('+pct+'%):** '+(pct>=50?d.desc_hi:d.desc_lo));
+      });
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 🎯 DISC — '+discP+'/'+discS);
+      L.push('');
+      L.push('**'+DISC_PROFILES[discP].name+' / '+DISC_PROFILES[discS].name+'**');
+      L.push('');
+      L.push('> '+DISC_PROFILES[discP].desc);
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 💬 Love Languages');
+      L.push('');
+      llRanked.forEach(function(x,i){
+        L.push((i+1)+'. **'+LOVE_LANGUAGES[x.k].name+'**'+(i===0?' *(primary)*':''));
+      });
+      L.push(''); L.push('---'); L.push('');
+      L.push('## 💼 Holland Career Code — '+holland);
+      L.push('');
+      L.push('| Rank | Code | Type | Environment |');
+      L.push('| :-: | :-: | :-- | :-- |');
+      riRanked.slice(0,3).forEach(function(x,i){
+        L.push('| '+(i+1)+' | **'+RIASEC_DATA[x.k].code+'** | '+RIASEC_DATA[x.k].name+' | '+RIASEC_DATA[x.k].desc+' |');
+      });
+      L.push(''); L.push('---'); L.push('');
+      L.push('<sub>Generated by ✦ Inner Compass · one quiz, every framework.</sub>');
+      L.push('');
+      return L.join('\n');
+    }
+
     function triggerDownload(content, filename, mime){
       var a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([content],{type:mime}));
@@ -3868,6 +3975,7 @@ function initQuiz(){
     }
 
     resultEl.querySelector('.pq-dl-pdf').addEventListener('click', function(){ window.print(); });
+    resultEl.querySelector('.pq-dl-md').addEventListener('click', function(){ triggerDownload(buildMarkdown(),'inner-compass-results.md','text/markdown'); });
     resultEl.querySelector('.pq-dl-txt').addEventListener('click', function(){ triggerDownload(buildText(),'inner-compass-results.txt','text/plain'); });
     resultEl.querySelector('.pq-dl-json').addEventListener('click', function(){ triggerDownload(buildJSON(),'inner-compass-results.json','application/json'); });
   }
