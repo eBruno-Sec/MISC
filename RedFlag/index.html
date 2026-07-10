@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RedFlag — Know what you're dealing with</title>
-<meta name="description" content="Identify behavioral patterns in your relationship. Free, anonymous, nothing stored.">
+<meta name="description" content="Identify behavioral patterns in your relationship. Free, anonymous, nothing leaves your device.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%231A1209'/%3E%3Crect x='20' y='28' width='60' height='12' rx='6' fill='%23C0392B'/%3E%3Crect x='20' y='44' width='60' height='12' rx='6' fill='%23C0392B' opacity='.7'/%3E%3Crect x='20' y='60' width='60' height='12' rx='6' fill='%23C0392B' opacity='.4'/%3E%3C/svg%3E">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,6 +15,55 @@
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
+
+  /* ─── PRINTABLE REPORT (Section III: ink-saver, print-safe, 4.5:1 contrast) ─── */
+  /* The report renders as a white "paper" preview on screen (both themes) and
+     prints as pure #000 on #FFF with pattern codes + outlines instead of red ink blocks. */
+  .rf-report { background:#FFF; color:#000; font-family:Helvetica,Arial,sans-serif; line-height:1.5; }
+  .rf-report .rf-doc-title { font-size:22px; font-weight:700; margin:0 0 2px; letter-spacing:-.01em; color:#000; }
+  .rf-report .rf-doc-sub { font-size:12px; color:#000; margin:0 0 4px; }
+  .rf-report .rf-doc-meta { font-size:11px; color:#333; margin:0 0 12px; }
+  .rf-report .rf-rule { border:0; border-top:1px solid #000; margin:12px 0; }
+  .rf-report h2.rf-sec { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; margin:16px 0 8px; color:#000; }
+  .rf-report .rf-legend { display:flex; flex-wrap:wrap; gap:4px 16px; font-size:11px; margin:0 0 6px; }
+  .rf-report .rf-legend span { white-space:nowrap; color:#000; }
+  .rf-code { font-family:"Courier New",Courier,monospace; font-weight:700; font-size:12px; letter-spacing:1px; white-space:nowrap; color:#000; }
+  .rf-report .rf-summary { border:1px solid #000; border-radius:6px; padding:12px 14px; margin:0 0 14px; }
+  .rf-report .rf-block { border:1px solid #000; border-radius:6px; padding:12px 14px; margin:0 0 12px; }
+  .rf-report .rf-block-name { font-size:15px; font-weight:700; margin:0; color:#000; }
+  .rf-report .rf-block-clin { font-size:11px; color:#333; margin:1px 0 6px; }
+  .rf-report .rf-block-desc { font-size:12.5px; margin:0 0 8px; color:#000; }
+  .rf-report .rf-sev-severe  { border-left:7px solid #000; }
+  .rf-report .rf-sev-address { border-left:5px solid #000; }
+  .rf-report .rf-sev-watch   { border-left:3px solid #000; }
+  .rf-report .rf-sev-healthy { border-left:1px dashed #777; }
+  .rf-report .rf-audit { border:1px dashed #000; border-radius:6px; padding:10px 12px; margin:8px 0 0; }
+  .rf-report .rf-audit-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; margin:0 0 6px; color:#000; }
+  .rf-report .rf-audit p { font-size:12px; margin:0 0 6px; color:#000; }
+  .rf-report .rf-formula { font-family:"Courier New",Courier,monospace; font-size:12px; font-weight:700; color:#000; }
+  .rf-report ul.rf-contribs { margin:6px 0 0; padding:0; list-style:none; }
+  .rf-report ul.rf-contribs li { font-size:11.5px; padding:5px 0; border-top:.5px solid #999; display:flex; gap:8px; color:#000; }
+  .rf-report ul.rf-contribs li:first-child { border-top:0; }
+  .rf-report .rf-w { font-family:"Courier New",Courier,monospace; font-weight:700; flex:0 0 auto; }
+  .rf-report .rf-clash { border:1px solid #000; border-radius:6px; padding:12px 14px; margin:0 0 12px; }
+  .rf-report .rf-crisis { border:2px solid #000; border-radius:6px; padding:10px 12px; margin:12px 0; }
+  .rf-report .rf-crisis strong { font-size:16px; }
+  .rf-report .rf-foot { font-size:10.5px; color:#333; margin-top:14px; line-height:1.6; }
+  @media screen {
+    .rf-paper { padding:26px 22px; border:1px solid rgba(0,0,0,.14); border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.10); }
+  }
+  @media print {
+    @page { margin:14mm; }
+    html, body { background:#FFF !important; }
+    .rf-noprint { display:none !important; }
+    body * { visibility:hidden !important; }
+    .rf-report, .rf-report * { visibility:visible !important; }
+    .rf-report { position:absolute; left:0; top:0; width:100%; margin:0; padding:0; box-shadow:none !important; border:0 !important; }
+    .rf-report * { color:#000 !important; background:#FFF !important; box-shadow:none !important; }
+    .rf-report .rf-summary, .rf-report .rf-block, .rf-report .rf-audit,
+    .rf-report .rf-clash, .rf-report .rf-crisis { page-break-inside:avoid; border-color:#000 !important; }
+    .rf-report h2.rf-sec, .rf-report .rf-block-name, .rf-report .rf-audit-h { page-break-after:avoid; }
+  }
 </style>
 </head>
 <body>
@@ -25,7 +74,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 
 <script type="text/babel">
-const { useState, createContext, useContext } = React;
+const { useState, useEffect, useMemo, createContext, useContext } = React;
+
+// ─── SESSION PERSISTENCE (Section IV.1) ────────────────────────────────────────
+// Multi-stage quiz + results survive a browser reload via sessionStorage — which
+// clears when the tab closes, so nothing is left on the device afterward. This is
+// deliberate for a DV-adjacent tool: no durable record of assessing a partner.
+const SESSION_KEY = "rf-session-v1";
+function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch { return null; } }
+function saveSession(o) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(o)); } catch {} }
+function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
 
 
 // ─── DARK MODE ────────────────────────────────────────────────────────────────
@@ -55,7 +113,7 @@ const DARK_VARS = {
 function DarkToggle() {
   const { dark, toggle } = useContext(DarkCtx);
   return (
-    <button onClick={toggle} aria-label={dark ? "Light mode" : "Dark mode"}
+    <button onClick={toggle} aria-label={dark ? "Light mode" : "Dark mode"} className="rf-noprint"
       style={{ position:"fixed", top:14, right:14, zIndex:999, background:dark?"#2A2A2A":"#F0EDE8", border:`0.5px solid ${dark?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.08)"}`, borderRadius:50, width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:16 }}>
       {dark ? "☀" : "☾"}
     </button>
@@ -390,7 +448,7 @@ function Landing({ onStart }) {
       </div>
       <span style={S.eyebrow}>RedFlag</span>
       <h1 style={S.h1}>Know what you're dealing with.</h1>
-      <p style={S.p}>A structured way to identify behavioral patterns in your relationship. Clear language, not clinical jargon. Free, anonymous, nothing stored.</p>
+      <p style={S.p}>A structured way to identify behavioral patterns in your relationship. Clear language, not clinical jargon. Free, anonymous — your answers stay on your device and clear when you close the tab.</p>
       <button style={{ ...S.btnDark, marginTop:16 }} onClick={onStart}>Start the quiz →</button>
       <p style={S.meta}>Takes about 5 minutes · No account required</p>
     </div>
@@ -499,7 +557,7 @@ function QuizScreen({ questions, relType, partLabel, onComplete, onBack }) {
 
   function next() {
     if (sel===null) return;
-    const newAns = [...answers, { questionId:q.id, archetype:q.a, weight:q.ans[sel].w }];
+    const newAns = [...answers, { questionId:q.id, archetype:q.a, weight:q.ans[sel].w, choice:sel }];
     setAns(newAns); setSel(null);
     if (idx+1>=total) { onComplete(newAns); } else { setIdx(idx+1); }
   }
@@ -540,7 +598,7 @@ function QuizScreen({ questions, relType, partLabel, onComplete, onBack }) {
   );
 }
 
-function WhatNow({ result, part2Result, onShare, onRestart }) {
+function WhatNow({ result, part2Result, onShare, onReport, onRestart }) {
   const [tab, setTab] = useState(0);
   const pk = (part2Result||result)?.primary;
   const tabs = ["Understand","What to say","Red vs green","Get support"];
@@ -571,6 +629,7 @@ function WhatNow({ result, part2Result, onShare, onRestart }) {
       </div>)}
       <div style={S.divider}/>
       <button style={S.btnDark} onClick={onShare}>Share my results card</button>
+      {onReport && <button style={S.btnOutline} onClick={onReport}>Download printable report</button>}
       <button style={S.btnOutline} onClick={onRestart}>Start over</button>
       <p style={S.meta}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</p>
     </div>
@@ -606,24 +665,177 @@ function ShareCard({ result, part2Result, onBack }) {
   );
 }
 
+// ─── PRINTABLE REPORT (Section III) ────────────────────────────────────────────
+const REL_WHO = { current:"your current partner", ex:"your ex-partner", new:"someone new", self:"yourself" };
+// Ink-saver pattern codes — no solid red blocks; slashes + a bold outline weight
+// per severity (Section III.1). Prints as plain monospace text = minimal ink.
+function sevMeta(label) {
+  return ({
+    severe:  { code:"//// SEVERE",          cls:"rf-sev-severe"  },
+    address: { code:"/// WORTH ADDRESSING", cls:"rf-sev-address" },
+    watch:   { code:"// WORTH WATCHING",    cls:"rf-sev-watch"   },
+    healthy: { code:"·  CLEAR",             cls:"rf-sev-healthy" },
+  })[label] || { code:"·  CLEAR", cls:"rf-sev-healthy" };
+}
+
+function ReportScreen({ rel, scores, answers, onBack }) {
+  const bank = rel === "self" ? SELF_Q : PARTNER_Q;
+  const byId = useMemo(() => { const m = {}; bank.forEach(q => { m[q.id] = q; }); return m; }, [bank]);
+  const keys = Object.keys(scores).sort((a, b) => (scores[b]||0) - (scores[a]||0));
+  const flagged = keys.filter(k => (scores[k]||0) > 3);
+  const pk = flagged[0] || null;
+  const sk = flagged[1] || null;
+  const combinedLabel = pk && sk ? ((COMBINED[pk]?.[sk]) || (COMBINED[sk]?.[pk]) || null) : null;
+  const overall = pk ? getSev(scores[pk]||0, pk) : { label:"healthy", display:"No red flags" };
+  const isSelf = rel === "self";
+  const dateStr = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+
+  // Deterministic audit: which answers summed into a flag, and which threshold it crossed.
+  function auditFor(k) {
+    const contribs = answers.filter(a => a.archetype === k).map(a => {
+      const q = byId[a.questionId];
+      const opt = (q && typeof a.choice === "number") ? q.ans[a.choice] : null;
+      return { q: q ? q.q : "(question)", choice: opt ? opt.t : null, w: a.weight };
+    }).sort((x, y) => y.w - x.w);
+    const score = scores[k] || 0;
+    const maxPossible = contribs.length * 3;
+    const sev = getSev(score, k);
+    const severeThresh = (k === "isolation" || k === "blame") ? 5 : 9;
+    const crossed = sev.label === "severe" ? severeThresh : sev.label === "address" ? 7 : 4;
+    return { contribs, score, maxPossible, sev, crossed };
+  }
+
+  return (
+    <div style={S.screen}>
+      <button className="rf-noprint" style={S.btnGhost} onClick={onBack}>← Back to results</button>
+
+      <div className="rf-report rf-paper" style={{ marginTop:12 }}>
+        <div className="rf-doc-title">RedFlag — Relational Risk Report</div>
+        <div className="rf-doc-sub">A behavioral-pattern assessment of {REL_WHO[rel] || "this relationship"}.</div>
+        <div className="rf-doc-meta">Generated {dateStr} · Reflects your perception, not a clinical diagnosis · Stays on your device</div>
+        <hr className="rf-rule"/>
+
+        <div className="rf-legend">
+          <span><span className="rf-code">////</span> Severe</span>
+          <span><span className="rf-code">///</span> Worth addressing</span>
+          <span><span className="rf-code">//</span> Worth watching</span>
+          <span><span className="rf-code">·</span> Clear</span>
+        </div>
+
+        <div className={"rf-summary " + sevMeta(overall.label).cls}>
+          <div className="rf-code">{sevMeta(overall.label).code}</div>
+          {pk ? (
+            <p style={{ margin:"6px 0 0", fontSize:13 }}>
+              Strongest pattern detected: <strong>{ARC[pk].street}</strong> ({ARC[pk].clinical}).
+              {combinedLabel && <> Combined with {ARC[sk].street}, this reads as the reinforcing loop <strong>“{combinedLabel}”</strong>.</>}
+            </p>
+          ) : (
+            <p style={{ margin:"6px 0 0", fontSize:13 }}>
+              No pattern crossed the red-flag threshold in the areas assessed. That is a genuinely good result worth recognizing.
+            </p>
+          )}
+        </div>
+
+        <h2 className="rf-sec">Patterns assessed</h2>
+        {keys.map(k => {
+          const m = sevMeta(getSev(scores[k]||0, k).label);
+          return (
+            <div key={k} style={{ display:"flex", gap:10, alignItems:"baseline", padding:"4px 0", borderTop:"0.5px solid #ccc", fontSize:12 }}>
+              <span className="rf-code" style={{ flex:"0 0 118px" }}>{m.code}</span>
+              <span style={{ flex:1 }}>{ARC[k].street}</span>
+              <span className="rf-w" style={{ color:"#333" }}>score {scores[k]||0}</span>
+            </div>
+          );
+        })}
+
+        {flagged.length > 0 && <><h2 className="rf-sec">Flagged patterns — detail &amp; audit trail</h2>
+        {flagged.map(k => {
+          const a = auditFor(k);
+          const m = sevMeta(a.sev.label);
+          return (
+            <div key={k} className={"rf-block " + m.cls}>
+              <div className="rf-block-name">{ARC[k].street}</div>
+              <div className="rf-block-clin">{ARC[k].clinical} · <span className="rf-code">{m.code}</span></div>
+              <p className="rf-block-desc">{ARC_DESC[k]}</p>
+              <div className="rf-audit">
+                <div className="rf-audit-h">Why this Relational Red Flag triggered</div>
+                <p>Across {a.contribs.length} question{a.contribs.length===1?"":"s"} on this pattern, your answers summed to <span className="rf-formula">{a.score} of {a.maxPossible}</span> possible points.</p>
+                <p className="rf-formula">score {a.score} ≥ {a.crossed} → {a.sev.display}</p>
+                {a.contribs.some(c => c.choice) && <>
+                  <p style={{ marginBottom:2, fontWeight:700, fontSize:11 }}>Heaviest contributors first:</p>
+                  <ul className="rf-contribs">
+                    {a.contribs.map((c, i) => (
+                      <li key={i}><span className="rf-w">[{c.w}/3]</span><span>{c.choice ? "“" + c.choice + "”" : c.q}</span></li>
+                    ))}
+                  </ul>
+                </>}
+              </div>
+            </div>
+          );
+        })}</>}
+
+        {pk && sk && (
+          <div className="rf-clash">
+            <div className="rf-audit-h">Why you clash{combinedLabel ? " — " + combinedLabel : ""}</div>
+            <p style={{ fontSize:12, margin:"0 0 6px" }}>Your two strongest active patterns collide:</p>
+            <ul className="rf-contribs">
+              <li><span className="rf-w">{scores[pk]||0}</span><span>{ARC[pk].street} — {getSev(scores[pk]||0, pk).display}</span></li>
+              <li><span className="rf-w">{scores[sk]||0}</span><span>{ARC[sk].street} — {getSev(scores[sk]||0, sk).display}</span></li>
+            </ul>
+            <p style={{ fontSize:12, margin:"8px 0 0" }}>{combinedLabel
+              ? "In this framework, " + ARC[pk].street + " landing on top of " + ARC[sk].street + " is the named collision “" + combinedLabel + ".” Each pattern makes the other harder to interrupt, so it registers as one reinforcing loop rather than two separate issues."
+              : ARC[pk].street + " and " + ARC[sk].street + " are both active at once. They compound — addressing only one tends to leave the loop intact."}</p>
+          </div>
+        )}
+
+        <div className="rf-crisis">
+          <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>If you ever feel unsafe</div>
+          <div><strong>1-800-799-7233</strong> — National Domestic Violence Hotline (24/7, free, confidential)</div>
+          <div style={{ fontSize:12, marginTop:2 }}>Text START to 88788 · Crisis Text Line: text HOME to 741741</div>
+        </div>
+
+        <hr className="rf-rule"/>
+        <div className="rf-foot">
+          RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf ? "your self-assessment" : "your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice.
+          {" "}To compare both sides, run RedFlag again in {isSelf ? "a partner mode" : "“Myself” mode"} and print the matching report.
+        </div>
+      </div>
+
+      <div className="rf-noprint" style={{ marginTop:16 }}>
+        <button style={S.btnDark} onClick={() => window.print()}>🖨 Save as PDF / Print</button>
+        <button style={S.btnOutline} onClick={onBack}>← Back to results</button>
+        <p style={S.meta}>Opens your browser's print dialog — choose <strong>“Save as PDF”</strong> to keep a copy. Styled ink-saver: no heavy red blocks, high-contrast black on white, prints clean on any printer.</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
-const SCREENS = { LAND:"land", ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share" };
+const SCREENS = { LAND:"land", ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report" };
 
 function App() {
-  const [screen,    setScreen]    = useState(SCREENS.LAND);
-  const [rel,       setRel]       = useState(null);
-  const [hasKids,   setHasKids]   = useState(false);
-  const [p1Keys,    setP1Keys]    = useState([]);
-  const [p2Keys,    setP2Keys]    = useState([]);
-  const [p1Scores,  setP1Scores]  = useState({});
-  const [p1Result,  setP1Result]  = useState(null);
-  const [p2Result,  setP2Result]  = useState(null);
-  const [allScores, setAllScores] = useState({});
+  const saved = useMemo(loadSession, []);
+  const [screen,    setScreen]    = useState(()=>saved?.screen    ?? SCREENS.LAND);
+  const [rel,       setRel]       = useState(()=>saved?.rel       ?? null);
+  const [hasKids,   setHasKids]   = useState(()=>saved?.hasKids   ?? false);
+  const [p1Keys,    setP1Keys]    = useState(()=>saved?.p1Keys    ?? []);
+  const [p2Keys,    setP2Keys]    = useState(()=>saved?.p2Keys    ?? []);
+  const [p1Scores,  setP1Scores]  = useState(()=>saved?.p1Scores  ?? {});
+  const [p1Result,  setP1Result]  = useState(()=>saved?.p1Result  ?? null);
+  const [p2Result,  setP2Result]  = useState(()=>saved?.p2Result  ?? null);
+  const [allScores, setAllScores] = useState(()=>saved?.allScores ?? {});
+  const [p1Answers, setP1Answers] = useState(()=>saved?.p1Answers ?? []);
+  const [p2Answers, setP2Answers] = useState(()=>saved?.p2Answers ?? []);
   const [dark,      setDark]      = useState(()=>{ try{return localStorage.getItem("rf-dark")==="1";}catch{return false;} });
+
+  // Persist the whole session so a reload restores the current stage + results (IV.1).
+  useEffect(() => {
+    saveSession({ screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers });
+  }, [screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers]);
 
   function toggleDark() { setDark(d=>{ const n=!d; try{localStorage.setItem("rf-dark",n?"1":"0");}catch{} return n; }); }
   function go(s) { setScreen(s); }
-  function restart() { setScreen(SCREENS.LAND);setRel(null);setHasKids(false);setP1Keys([]);setP2Keys([]);setP1Scores({});setP1Result(null);setP2Result(null);setAllScores({}); }
+  function restart() { clearSession();setScreen(SCREENS.LAND);setRel(null);setHasKids(false);setP1Keys([]);setP2Keys([]);setP1Scores({});setP1Result(null);setP2Result(null);setAllScores({});setP1Answers([]);setP2Answers([]); }
 
   const isSelf = rel === "self";
   const allQ   = isSelf ? SELF_Q : PARTNER_Q;
@@ -635,7 +847,7 @@ function App() {
   function onP1Done(answers) {
     const scores = {}; p1Keys.forEach(k=>{scores[k]=0;});
     answers.forEach(a=>{ if(scores[a.archetype]!==undefined) scores[a.archetype]+=a.weight; });
-    setP1Scores(scores); setP1Result(computeResult(scores,p1Keys)); setAllScores(scores); go(SCREENS.R1);
+    setP1Scores(scores); setP1Result(computeResult(scores,p1Keys)); setAllScores(scores); setP1Answers(answers); go(SCREENS.R1);
   }
 
   function onP2Done(answers) {
@@ -644,7 +856,7 @@ function App() {
     const combined = {}; [...p1Keys,...p2Keys].forEach(k=>{combined[k]=(p1Scores[k]||0)+(scores[k]||0);});
     const result = computeResult(combined,[...p1Keys,...p2Keys]);
     result.newlyDiscovered = p2Keys.filter(k=>(scores[k]||0)>3&&k!==p1Result?.primary&&k!==p1Result?.secondary);
-    setP2Result(result); setAllScores(combined); go(SCREENS.R2);
+    setP2Result(result); setAllScores(combined); setP2Answers(answers); go(SCREENS.R2);
   }
 
   const cssVars = dark ? DARK_VARS : LIGHT_VARS;
@@ -665,6 +877,7 @@ function App() {
             <ResultSection title="Your selected patterns" scores={p1Scores} keys={p1Keys} part={1}/>
             <button style={S.btnRed} onClick={()=>go(SCREENS.BRIDGE)}>Go deeper — Part 2</button>
             <button style={S.btnDark} onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
+            <button style={S.btnOutline} onClick={()=>go(SCREENS.REPORT)}>Download printable report</button>
           </div>
         )}
         {screen===SCREENS.BRIDGE && (
@@ -698,10 +911,12 @@ function App() {
             <div style={S.divider}/>
             <ResultSection title="Part 1 — Your selections" scores={allScores} keys={p1Keys} part={1}/>
             <button style={S.btnDark} onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
+            <button style={S.btnOutline} onClick={()=>go(SCREENS.REPORT)}>Download printable report</button>
             <button style={S.btnOutline} onClick={()=>go(SCREENS.SHARE)}>Share my results card</button>
           </div>
         )}
-        {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} onShare={()=>go(SCREENS.SHARE)} onRestart={restart}/>}
+        {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
+        {screen===SCREENS.REPORT && <ReportScreen rel={rel} scores={allScores} answers={[...p1Answers,...p2Answers]} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.R1)}/>}
         {screen===SCREENS.SHARE && <ShareCard result={p1Result} part2Result={p2Result} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.WN)}/>}
       </div>
     </DarkCtx.Provider>
