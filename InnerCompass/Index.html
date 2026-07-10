@@ -801,8 +801,7 @@ section:has(.signup){ display:none; }
   .archetype-reveal{ background:#fff!important; border:none!important; padding:0 0 24px!important; }
   .animal-sil svg,.reveal-animal-name,.reveal-badges,.reveal-scroll-hint{ color:#111!important; }
   .reveal-badge{ border-color:#999!important; color:#444!important; background:#f0f0f0!important; }
-  /* premium blocks — ink-safe */
-  .premium-gate{ display:none!important; }
+  /* blueprint blocks — ink-safe */
   .cheat-tabs{ display:none!important; }
   .cheat-panel{ display:flex!important; flex-direction:column; gap:8px; page-break-inside:avoid; break-inside:avoid; }
   .cheat-tip{ background:#f7f7f7!important; border-color:#ccc!important; border-left-color:#333!important; }
@@ -963,20 +962,8 @@ p{ line-height: 1.9; }
 .intensity-btn.sel{ border-color:var(--gold-bright); background:rgba(201,162,75,.12); color:var(--gold-bright); font-weight:700; }
 .intensity-btn.sel.high{ box-shadow:0 0 14px rgba(201,162,75,.25); }
 
-/* ---- Premium gate ---- */
-.premium-gate{ margin:40px 0; border:1.5px solid rgba(201,162,75,.28); border-radius:var(--radius-lg); background:linear-gradient(135deg,rgba(201,162,75,.07),transparent); overflow:hidden; }
-.premium-gate-head{ padding:26px 28px 20px; border-bottom:1px solid rgba(201,162,75,.12); }
-.premium-gate-head h3{ margin:0 0 .3em; font-size:1.2rem; }
-.premium-gate-head p{ margin:0; font-size:.93rem; color:var(--ink-dim); }
-.premium-features{ display:grid; grid-template-columns:1fr 1fr; gap:1px; background:rgba(201,162,75,.08); }
-@media(max-width:540px){ .premium-features{ grid-template-columns:1fr; } }
-.premium-feat{ background:var(--bg-1); padding:16px 18px; display:flex; gap:11px; align-items:flex-start; }
-.premium-feat-icon{ font-size:1.1rem; flex-shrink:0; }
-.premium-feat strong{ display:block; color:var(--ink); font-size:.9rem; margin-bottom:2px; }
-.premium-feat span{ color:var(--ink-dim); font-size:.82rem; }
-.premium-gate-cta{ padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-.premium-price{ font-family:var(--display); font-size:1.9rem; color:var(--gold); line-height:1; }
-.premium-price small{ display:block; font-family:var(--mono); font-size:.68rem; color:var(--ink-faint); margin-top:3px; font-style:normal; }
+/* ---- Blueprint intro ---- */
+.blueprint-intro{ margin:44px 0 4px; }
 
 /* ---- Connection Cheat Sheet ---- */
 .cheat-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px; }
@@ -3567,25 +3554,9 @@ function initQuiz(){
 
       + '</div>'
 
-      + '<div class="premium-gate">'
-      +   '<div class="premium-gate-head">'
-      +     '<div class="eyebrow" style="margin-bottom:8px;">Full Blueprint</div>'
-      +     '<h3>Unlock your complete InnerCompass report</h3>'
-      +     '<p>Your free results give you the what. The Blueprint gives you the how — personalized scripts, career roadmap, and the data trail behind every score.</p>'
-      +   '</div>'
-      +   '<div class="premium-features">'
-      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128172;</span><div><strong>Connection Cheat Sheet</strong><span>Context-specific scripts for dates, job interviews, your partner, and deep friendships — built from your exact profile.</span></div></div>'
-      +     '<div class="premium-feat"><span class="premium-feat-icon">&#127864;</span><div><strong>7-Petal Career Blueprint</strong><span>All 7 career dimensions beyond Holland Code — working conditions, skills, salary, geography, and life philosophy.</span></div></div>'
-      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128269;</span><div><strong>Why You Got This Result</strong><span>A mathematical audit trail showing exactly which scenarios drove each score — with intensity weights.</span></div></div>'
-      +     '<div class="premium-feat"><span class="premium-feat-icon">&#128196;</span><div><strong>Print-Ready PDF Report</strong><span>A clean, ink-friendly printable report with everything included — designed for physical review.</span></div></div>'
-      +   '</div>'
-      +   '<div class="premium-gate-cta">'
-      +     '<div class="premium-price">$12<small>one-time &middot; instant access</small></div>'
-      +     '<button class="btn btn-primary pq-unlock-btn" style="font-size:.88rem;padding:14px 28px;">Unlock Full Blueprint</button>'
-      +   '</div>'
-      + '</div>'
+      + '<div class="blueprint-intro"><div class="eyebrow" style="justify-content:center;">The Full Picture</div><h3 style="text-align:center;margin:0;">Your complete blueprint</h3></div>'
 
-      + '<div id="premium-content" style="display:none;">'
+      + '<div id="blueprint-content">'
 
       +   '<div class="fw-card" style="margin-top:32px;">'
       +     '<div class="fw-card-label">Connection Cheat Sheet</div>'
@@ -3640,17 +3611,6 @@ function initQuiz(){
         resultEl.querySelectorAll('.cheat-panel').forEach(function(p){p.classList.toggle('active', p.dataset.panel===panel);});
       });
     });
-
-    var unlockBtn = resultEl.querySelector('.pq-unlock-btn');
-    var premiumContent = resultEl.querySelector('#premium-content');
-    if(unlockBtn && premiumContent){
-      unlockBtn.addEventListener('click', function(){
-        premiumContent.style.display = '';
-        premiumContent.style.animation = 'fadein .5s ease both';
-        unlockBtn.closest('.premium-gate').style.display = 'none';
-        premiumContent.scrollIntoView({behavior:'smooth', block:'start'});
-      });
-    }
 
     function buildText(){
       var bfLines = ['O','C','E','A','N'].map(function(t){
