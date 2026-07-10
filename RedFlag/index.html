@@ -191,6 +191,134 @@ const SCRIPTS = {
 };
 const DEFAULT_SCRIPTS = ['"I need to talk about something that happened, and I need you to hear me out before responding."', '"When [behavior] happens, I feel [impact]. I\'m saying it because it matters to me."'];
 
+// ─── PER-PATTERN PLAYBOOK (answer-dependent tips + change guidance) ─────────────
+// Drives the personalized post-quiz plan. `safety:true` = a pattern where "can
+// this change" must lead with safety, not DIY repair. `watch` = what it looks
+// like, `ask` = probes/questions, `change` = real vs. fake change signals.
+const PLAY = {
+  gaslight:    { safety:false, watch:["You leave conversations less sure of your own memory than when you walked in.","They correct your version of events more than they take in how you felt."], ask:["Ask: “When we remember something differently, what do you do about it?”","After a disagreement, notice — do you feel clearer, or foggier?"], change:{ real:["They can say “that happened and I was wrong” with no “but”.","They stop re-litigating your memory and start asking what you felt."], fake:["“I’m sorry you feel that way” with no ownership.","Apology today, same reality-flip next week."] } },
+  control:     { safety:true,  watch:["Your choices quietly shrink to avoid their reaction.","Doing something independently comes with “consequences”."], ask:["Ask: “How do you feel when I make plans without you?”","Watch closely the first time you calmly say no."], change:{ real:["They welcome your independence instead of punishing it.","They name the control out loud and get real help for it."], fake:["Loosens the leash for a week, then tightens it again.","Frames the control as “love” or “protection”."] } },
+  emotional:   { safety:false, watch:["Your feelings get treated as attacks or inconveniences.","You pre-edit what you feel before you dare say it."], ask:["Ask: “When I’m upset, what goes through your head?”","Share a small feeling early and watch what they do with it."], change:{ real:["They can sit with your emotion without fixing it or fleeing it.","They ask “what do you need?” instead of “why are you like this?”"], fake:["Listens once, dismisses the next ten times.","Turns your feeling into their grievance."] } },
+  lovebomb:    { safety:false, watch:["Intensity keeps replacing consistency — highs, then cold snaps.","You keep chasing the “beginning” version of them."], ask:["Notice whether affection tracks your compliance.","Ask: “What does a normal, boring good day look like to you?”"], change:{ real:["Warmth becomes steady instead of a reward you earn.","They can tolerate ordinary without manufacturing drama."], fake:["Grand gesture after every rupture, no real repair underneath.","Love returns only once you drop the issue."] } },
+  stone:       { safety:false, watch:["Conflict ends in silence, not resolution.","You’re almost always the one who breaks the ice."], ask:["Ask: “When you go quiet, what’s actually happening for you?”","Agree on a “short break, then come back” rule and see if they return."], change:{ real:["They ask for a break and actually come back to finish it.","Silences get shorter and they name why they shut down."], fake:["Silent treatment as punishment, relabeled “needing space”.","They only re-engage once you’ve dropped it entirely."] } },
+  passive:     { safety:false, watch:["“Fine” is followed by small punishments.","You decode moods instead of being told what’s wrong."], ask:["Ask: “Can you tell me directly when you’re upset?”","Ask what’s wrong; see if “nothing” matches the behavior."], change:{ real:["They start saying the hard thing out loud, early.","Digs and “forgetting” fade when they’re upset."], fake:["Promises directness, keeps the cold shoulder.","Denies there’s any pattern at all."] } },
+  identity:    { safety:false, watch:["Who you are gets used against you in fights.","You’ve shrunk parts of yourself to keep the peace."], ask:["Notice if your insecurities reappear as weapons.","Ask: “Do you like who I am, or who you want me to be?”"], change:{ real:["They affirm the very things they once mocked.","They own the low blows without excusing them."], fake:["“It was just a joke” every single time.","Affirmation in private, cuts in public."] } },
+  narcissistic:{ safety:false, watch:["Your moments get hijacked; mistakes never quite land on them.","Rules apply to you, not to them."], ask:["Share good news and watch whether it stays yours.","Ask: “When you’re wrong, what do you usually do?”"], change:{ real:["They can hold a genuine “I was wrong” and then repair.","They stay curious about you without redirecting."], fake:["A word-perfect apology with zero behavior change.","Accountability only when there’s an audience."] } },
+  financial:   { safety:true,  watch:["Money is used to reward, punish, or trap.","Your financial independence keeps shrinking."], ask:["Ask: “How should a couple handle money and independence?”","Keep your own account and watch the reaction."], change:{ real:["They restore your access and transparency, no strings.","They treat your earning power as a good thing."], fake:["“I’m just better with money” as cover for control.","Access returns only while you comply."] } },
+  intimidation:{ safety:true,  watch:["Size, doorways, objects, or tone are used to make you feel unsafe.","You manage your words to avoid escalation."], ask:["Trust the gut-fear response — it counts as data.","Property destroyed in anger is intimidation even if you’re never touched."], change:{ real:["They get professional help for anger/violence AND you feel physically safe over time.","The frightening behavior does not repeat — at all."], fake:["“I’d never actually hurt you,” said right after scaring you.","Remorse, then another “incident”."] } },
+  sexual:      { safety:true,  watch:["“No” doesn’t feel safe — pressure, guilt, or withdrawal follows.","Intimacy is used as a reward or a punishment."], ask:["A no should cost you nothing — quietly test that it doesn’t.","Notice if your “yes” is really “to avoid a problem”."], change:{ real:["They take a no as a complete answer, every time.","They stop tying intimacy to your compliance."], fake:["Consent in words, pressure in practice.","“You owe me” framing comes back under stress."] } },
+  isolation:   { safety:true,  watch:["Your circle keeps shrinking around them.","Seeing other people reliably creates conflict."], ask:["Map your friendships over the last year — who’s left?","Ask: “How do you feel about my time with friends and family?”"], change:{ real:["They actively encourage your outside ties.","Your world grows again without a fight."], fake:["“I just want you to myself” offered as the reason.","Other people are tolerated only if they can monitor."] } },
+  blame:       { safety:false, watch:["You end up apologizing for raising the concern.","Every issue reverses onto you (DARVO)."], ask:["Track who says sorry first over a month.","Raise one clear concern and see if it stays on topic."], change:{ real:["They can stay on the original issue and own their part.","A genuine “sorry” sometimes comes from them first."], fake:["Flips victim and offender the moment you speak.","“I already apologized” used to end all discussion."] } },
+  somatic:     { safety:false, watch:["Symptoms appear right when accountability does.","You censor your needs to protect their health."], ask:["Notice the timing: does illness track conflict resolution?","Ask: “Can we discuss hard things even when you’re unwell?”"], change:{ real:["They separate real health from conflict avoidance.","They can hold a hard talk without a health event ending it.","(Real illness is real — this is about the pattern, not judging sickness.)"], fake:["Every concern triggers a collapse.","Fast recovery the moment you back down."] } },
+  jealousy:    { safety:false, watch:["Accusations with no basis; reassurance never sticks.","You self-censor to avoid triggering suspicion."], ask:["Ask: “What would make you feel secure — and is that about me or about you?”","Notice if any interaction is ever “safe” from questioning."], change:{ real:["They work the insecurity in themselves or in therapy.","Trust grows over time instead of tightening."], fake:["Promises trust, keeps checking your phone.","Blames your behavior for their surveillance."] } },
+  religious:   { safety:false, watch:["Faith or culture is used to control you rather than shared with you.","The rules bind you, but not them."], ask:["Ask: “Do our values apply to both of us the same way?”","Notice whether “duty” always points in your direction."], change:{ real:["The standards genuinely apply to them too.","Shared faith becomes connection, not leverage."], fake:["Scripture used as a weapon mid-fight.","Your doubts labeled “sin” to shut them down."] } },
+  humiliation: { safety:false, watch:["You’re the punchline, especially in front of others.","Private things become social currency."], ask:["Notice how they talk about you when other people are around.","Ask: “How do you feel when you make me look small?”"], change:{ real:["They build you up in public and mean it.","Private information stays private."], fake:["“Can’t you take a joke?” on repeat.","Kind alone, cutting in the group."] } },
+  rage:        { safety:true,  watch:["Anger is unpredictable and out of proportion.","You’re managing a situation that could detonate."], ask:["Notice if you curate topics and timing around their temper.","The cycle after the blow-up matters as much as the blow-up."], change:{ real:["They get real anger treatment and it holds over months.","No more fear-inducing outbursts, period."], fake:["Explosion, then extra-loving, then repeat.","“You provoked me” offered as the explanation."] } },
+  gatekeeper:  { safety:true,  watch:["Kids or access to them get used as leverage.","Your bond with your children is quietly undermined."], ask:["Notice if parenting time shows up in conflict as a threat.","Ask: “Are the kids off-limits as a weapon — for both of us?”"], change:{ real:["They firewall the children from adult conflict.","They actively support your relationship with the kids."], fake:["“I’ll take them” surfaces whenever you push back.","They position as the “good parent” to the children."] } },
+};
+
+// ─── WARNING-SIGN FINDER (Section II.4) — screening content by relationship phase
+const FINDER = {
+  dates: {
+    label:"First few dates",
+    intro:"You’re mapping a near-stranger. That’s not paranoia — it’s paying attention. Early patterns are the cheapest, clearest data you will ever get on a person.",
+    ask:[
+      "“Tell me about a conflict with an ex — what was your part in it?” (Listen for zero ownership.)",
+      "“How do you handle it when someone tells you no?”",
+      "“What do your closest, longest friendships look like?” (No durable ones is a signal.)",
+      "“What does a boring, ordinary good day with a partner look like to you?”",
+      "“How do you act when you’re genuinely angry?”",
+    ],
+    green:[
+      "Speaks about exes with nuance — not just “they were crazy”.",
+      "Takes a small no gracefully: a changed plan, a different order, an early night.",
+      "Has durable friendships and is glad you keep yours.",
+    ],
+    red:[
+      "Moves fast — intense labels and future-talk in week one (love-bomb tempo).",
+      "Every ex is “crazy” and nothing was ever their fault.",
+      "Tests small boundaries early, then calls you “too sensitive” for holding one.",
+      "Warm to you, dismissive to waiters, drivers, and strangers.",
+    ],
+    boundary:[
+      "“I like taking things slow. If that’s a problem, better we both know now.”",
+      "“I keep my own friends and my own time. That part isn’t up for negotiation.”",
+    ],
+  },
+  cohab: {
+    label:"Moving in / long-term",
+    intro:"Living together removes the exits and the audience. Patterns you could walk away from at 10pm are now your daily weather.",
+    ask:[
+      "“How do we actually split money, chores, and downtime — for real?”",
+      "“What happens in your head when we disagree and can’t just leave the room?”",
+      "“Whose name is on what, and can we both see the accounts?”",
+      "“What’s your version of a fair fight?”",
+    ],
+    green:[
+      "Labor and money are transparent and roughly fair.",
+      "Conflict pauses and resumes — nobody weaponizes the silence.",
+      "You still see your people and keep your own space.",
+    ],
+    red:[
+      "Chores or finances quietly become one-sided; your independence shrinks.",
+      "Silent treatment or “consequences” stand in for repair.",
+      "You start managing their mood as a daily job (walking on eggshells).",
+    ],
+    boundary:[
+      "“We both keep financial visibility and some independence. That’s non-negotiable.”",
+      "“Silent punishment isn’t a fair fight. I need us to come back and finish.”",
+    ],
+  },
+  spouse: {
+    label:"Evaluating a spouse",
+    intro:"Marriage raises both the stakes and the sunk cost. The question isn’t “is it perfect” — it’s “is the pattern moving toward repair, or toward erosion.”",
+    ask:[
+      "“When you’re wrong, what do you actually do about it?”",
+      "“Are we both allowed to change our minds, our jobs, our friends?”",
+      "“What would make you willing to get help — together, or on your own?”",
+      "“What’s off-limits even in our worst fight?”",
+    ],
+    green:[
+      "Repair happens — real apologies, changed behavior over time.",
+      "Both of you can grow without it registering as a threat.",
+      "Hard topics — money, sex, family — can be discussed, not detonated.",
+    ],
+    red:[
+      "The same fight on a loop, no repair, for years.",
+      "Your world — friends, work, money, self — keeps shrinking.",
+      "Kids, faith, or finances get used as leverage in conflict.",
+    ],
+    boundary:[
+      "“I’ll do the work with you. I won’t do it alone while nothing changes.”",
+      "“Threats about the kids or the money end the conversation for me.”",
+    ],
+  },
+  ex: {
+    label:"Analyzing an ex",
+    intro:"Looking back isn’t about blame — it’s pattern recognition, so the next one is a choice and not a repeat. Be fair to past-you: you were surviving on the information you had.",
+    ask:[
+      "What did I explain away early that only got louder later?",
+      "When did I first start shrinking myself, and why?",
+      "Whose fault did every fight somehow end up being?",
+      "What did my gut know before my head would admit it?",
+    ],
+    green:[
+      "Naming the pattern — not just the person — is the actual win.",
+      "You can hold both “I loved them” and “it was harmful” at once.",
+      "You can spot the early tell you’d now walk toward the door on.",
+    ],
+    red:[
+      "The relationship taught you to distrust your own memory or gut.",
+      "You left the relationship smaller than you arrived.",
+      "“It was fine except…” hides the part that actually ran the show.",
+    ],
+    boundary:[
+      "“Next time, the first ignored boundary is information — not a test to keep passing.”",
+      "“I’m allowed to leave early. I don’t owe anyone a full season of proof.”",
+    ],
+  },
+};
+
 // ─── PARTNER QUESTIONS ────────────────────────────────────────────────────────
 const PARTNER_Q = [
   {id:"P1-Q1",  a:"gaslight",  sensitive:false, q:"When you bring up something your partner said or did that hurt you, what usually happens?",                                                                                 h:"Think about the typical time — not the best or worst.",         ans:[{t:"They listen and acknowledge what I felt",w:0},{t:"They get defensive but eventually hear me out",w:1},{t:"They say I'm overreacting or too sensitive",w:2},{t:"They deny it happened or say I'm making things up",w:3}]},
@@ -440,7 +568,7 @@ function ResultSection({ title, scores, keys, newlyDiscovered=[], part=1 }) {
 }
 
 // ─── SCREENS ──────────────────────────────────────────────────────────────────
-function Landing({ onStart }) {
+function Landing({ onStart, onFinder }) {
   return (
     <div style={S.screen}>
       <div style={{ width:42,height:42,background:"#C0392B",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:18 }}>
@@ -450,6 +578,7 @@ function Landing({ onStart }) {
       <h1 style={S.h1}>Know what you're dealing with.</h1>
       <p style={S.p}>A structured way to identify behavioral patterns in your relationship. Clear language, not clinical jargon. Free, anonymous — your answers stay on your device and clear when you close the tab.</p>
       <button style={{ ...S.btnDark, marginTop:16 }} onClick={onStart}>Start the quiz →</button>
+      {onFinder && <button style={S.btnOutline} onClick={onFinder}>Just screening someone new? Open the Warning-Sign Finder →</button>}
       <p style={S.meta}>Takes about 5 minutes · No account required</p>
     </div>
   );
@@ -598,30 +727,61 @@ function QuizScreen({ questions, relType, partLabel, onComplete, onBack }) {
   );
 }
 
-function WhatNow({ result, part2Result, onShare, onReport, onRestart }) {
+function WhatNow({ result, part2Result, scores, keys, onShare, onReport, onFinder, onRestart }) {
   const [tab, setTab] = useState(0);
-  const pk = (part2Result||result)?.primary;
-  const tabs = ["Understand","What to say","Red vs green","Get support"];
+  const flagged = (keys||[]).filter(k=>(scores?.[k]||0)>3).sort((a,b)=>(scores[b]||0)-(scores[a]||0));
+  const pk = flagged[0] || (part2Result||result)?.primary;
+  const tabs = ["Your patterns","Scripts","Can it change?","Red vs green","Get help"];
   const scripts = SCRIPTS[pk] || DEFAULT_SCRIPTS;
   return (
     <div style={S.screen}>
       <span style={S.eyebrow}>What now</span>
       <h1 style={S.h1}>Here's where to go from here.</h1>
       <div style={S.notice}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
-      <div style={{ display:"flex", gap:3, background:"var(--rf-surface2)", borderRadius:50, padding:3, marginBottom:18 }}>
+      <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:6, marginBottom:16, WebkitOverflowScrolling:"touch" }}>
         {tabs.map((t,i)=>(
-          <button key={i} onClick={()=>setTab(i)} style={{ flex:1,padding:"7px 6px",borderRadius:50,fontSize:12,fontWeight:500,cursor:"pointer",textAlign:"center",border:"none",background:tab===i?"var(--rf-surface)":"transparent",color:tab===i?"var(--rf-text)":"var(--rf-text2)",fontFamily:"system-ui,-apple-system,sans-serif",whiteSpace:"nowrap",transition:"all .2s" }}>{t}</button>
+          <button key={i} onClick={()=>setTab(i)} style={{ flex:"0 0 auto",padding:"9px 15px",minHeight:40,borderRadius:50,fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"center",border:"none",background:tab===i?"var(--rf-text)":"var(--rf-surface2)",color:tab===i?"var(--rf-bg)":"var(--rf-text2)",fontFamily:"system-ui,-apple-system,sans-serif",whiteSpace:"nowrap",transition:"all .2s" }}>{t}</button>
         ))}
       </div>
-      {tab===0&&(<div><h3 style={S.h3}>What's actually happening</h3><p style={S.p}>The patterns identified are recognized behavioral dynamics in relationship psychology. They're not about bad days — they're about consistent behavior over time. Naming them matters. When you can see a pattern clearly, it's harder to rationalize away.</p>{pk&&<p style={S.p}><strong>{ARC[pk]?.street}</strong> ({ARC[pk]?.clinical}): {ARC_DESC[pk]}</p>}</div>)}
-      {tab===1&&(<div><h3 style={S.h3}>Scripts to start with</h3><p style={{ ...S.p, fontSize:12 }}>Starting points, not scripts to memorize. Adapt to your voice.</p>{scripts.map((s,i)=><div key={i} style={{ background:"var(--rf-surface2)",borderRadius:"10px",padding:"12px 14px",marginBottom:8,fontSize:13,lineHeight:1.7,color:"var(--rf-text2)",fontStyle:"italic" }}>{s}</div>)}</div>)}
+      {tab===0&&(<div>
+        <h3 style={S.h3}>Patterns you flagged</h3>
+        {flagged.length===0
+          ? <p style={S.p}>You didn't cross the red-flag line on the patterns you explored. That's a real result — worth trusting, not explaining away.</p>
+          : flagged.map(k=>{ const P=PLAY[k]||{}; return (
+              <div key={k} style={S.card}>
+                <div style={{ fontSize:15,fontWeight:500,color:"var(--rf-text)" }}>{ARC[k].street}</div>
+                <div style={{ fontSize:11,color:"var(--rf-text3)",marginBottom:6 }}>{ARC[k].clinical}</div>
+                <p style={{ ...S.p, marginBottom:8 }}>{ARC_DESC[k]}</p>
+                {P.watch&&<><div style={{ ...S.h3, marginBottom:6 }}>What it looks like</div>{P.watch.map((w,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid var(--rf-border2)", marginBottom:6 }}>{w}</p>)}</>}
+                {P.ask&&<><div style={{ ...S.h3, marginTop:6, marginBottom:6 }}>What to ask or watch for</div>{P.ask.map((w,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid var(--rf-danger)", marginBottom:6 }}>{w}</p>)}</>}
+              </div>
+            ); })}
+      </div>)}
+      {tab===1&&(<div><h3 style={S.h3}>Scripts to start with</h3><p style={{ ...S.p, fontSize:12 }}>Starting points, not lines to memorize. Adapt to your voice.</p>{scripts.map((s,i)=><div key={i} style={{ background:"var(--rf-surface2)",borderRadius:"10px",padding:"12px 14px",marginBottom:8,fontSize:13,lineHeight:1.7,color:"var(--rf-text2)",fontStyle:"italic" }}>{s}</div>)}</div>)}
       {tab===2&&(<div>
+        <h3 style={S.h3}>Can this change?</h3>
+        <p style={S.p}>Short version: change is possible, but it has to be theirs. You can set the conditions and hold the boundary — you can't do the changing for them. Watch behavior over months, not promises over dinner.</p>
+        {flagged.length===0
+          ? <p style={S.p}>Nothing here crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
+          : flagged.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
+              <div key={k} style={S.card}>
+                <div style={{ fontSize:15,fontWeight:500,color:"var(--rf-text)",marginBottom:8 }}>{ARC[k].street}</div>
+                {P.safety&&<div style={{ ...S.notice, borderColor:"#C0392B", background:"rgba(192,57,43,.07)", color:"var(--rf-text)", marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first. You are not responsible for repairing it.</div>}
+                <div style={{ ...S.h3, color:"#27AE60", marginBottom:6 }}>Signs of real change</div>
+                {(P.change?.real||[]).map((s,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #D5F5E3", marginBottom:6 }}>{s}</p>)}
+                <div style={{ ...S.h3, color:"#C0392B", marginTop:8, marginBottom:6 }}>Signs of fake change</div>
+                {(P.change?.fake||[]).map((s,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #FADBD8", marginBottom:6 }}>{s}</p>)}
+              </div>
+            ); })}
+        {flagged.length>0&&<p style={{ ...S.p, fontSize:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
+      </div>)}
+      {tab===3&&(<div>
         <h3 style={{ ...S.h3, color:"#27AE60" }}>Signs this can be worked on</h3>
         {["They acknowledge impact without defending intent.","They stay in hard conversations rather than shutting down.","They can say 'I was wrong' without making you feel guilty.","They celebrate your wins without redirecting to themselves."].map((g,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #D5F5E3" }}>{g}</p>)}
         <h3 style={{ ...S.h3, marginTop:16, color:"#C0392B" }}>Signs this may be more serious</h3>
         {["Conversations consistently end with you apologizing.","Your emotional responses are treated as weapons.","You feel less like yourself than before this relationship.","Raising issues feels more dangerous than staying silent."].map((r,i)=><p key={i} style={{ ...S.p, paddingLeft:12, borderLeft:"2px solid #FADBD8" }}>{r}</p>)}
       </div>)}
-      {tab===3&&(<div>
+      {tab===4&&(<div>
         <h3 style={S.h3}>You don't have to figure this out alone</h3>
         <p style={S.p}>Therapy is not about being broken. It's about having a dedicated space to think clearly about something hard to see from the inside.</p>
         <div style={S.card}><div style={{ fontSize:13,fontWeight:500,marginBottom:2,color:"var(--rf-text)" }}>National Domestic Violence Hotline</div><div style={{ fontSize:22,fontWeight:700,color:"#C0392B",marginBottom:2 }}>1-800-799-7233</div><div style={{ fontSize:12,color:"var(--rf-text3)" }}>24/7 · Free · Confidential · Text START to 88788</div></div>
@@ -630,6 +790,7 @@ function WhatNow({ result, part2Result, onShare, onReport, onRestart }) {
       <div style={S.divider}/>
       <button style={S.btnDark} onClick={onShare}>Share my results card</button>
       {onReport && <button style={S.btnOutline} onClick={onReport}>Download printable report</button>}
+      {onFinder && <button style={S.btnOutline} onClick={onFinder}>Open the Warning-Sign Finder</button>}
       <button style={S.btnOutline} onClick={onRestart}>Start over</button>
       <p style={S.meta}>RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</p>
     </div>
@@ -661,6 +822,53 @@ function ShareCard({ result, part2Result, onBack }) {
         </div>
         <p style={{ ...S.p, textAlign:"center", fontSize:12 }}>Save this image and share it to start a conversation. Results reflect your perception, not a clinical assessment.</p>
       </div>
+    </div>
+  );
+}
+
+// ─── WARNING-SIGN FINDER SCREEN (Section II.4) ──────────────────────────────────
+function FinderList({ heading, items, accent, quote }) {
+  return (
+    <div style={{ ...S.card }}>
+      <h3 style={{ ...S.h3, color:accent||"var(--rf-text2)", marginBottom:10 }}>{heading}</h3>
+      {items.map((t,i)=>(
+        <div key={i} style={{ display:"flex", gap:10, padding:"7px 0", borderTop:i?"0.5px solid var(--rf-border)":"none" }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:accent||"var(--rf-text3)", flexShrink:0, marginTop:7 }}/>
+          <div style={{ fontSize:13, lineHeight:1.6, color:"var(--rf-text2)", fontStyle:quote?"italic":"normal" }}>{t}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FinderScreen({ onBack, onQuiz }) {
+  const [phase, setPhase] = useState("dates");
+  const d = FINDER[phase];
+  const phases = Object.keys(FINDER);
+  return (
+    <div style={S.screen}>
+      <button style={S.btnGhost} onClick={onBack}>← Back</button>
+      <span style={S.eyebrow}>Warning-Sign Finder</span>
+      <h1 style={S.h1}>Map someone before you’re in deep.</h1>
+      <p style={S.p}>Pick where you are. You get questions worth asking, the green flags that mean “keep going,” the warning signs worth slowing down for, and boundary lines to say out loud.</p>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:8, margin:"14px 0 16px" }}>
+        {phases.map(k=>(
+          <button key={k} onClick={()=>setPhase(k)} aria-pressed={phase===k}
+            style={{ padding:"9px 14px", minHeight:44, borderRadius:50, cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"system-ui,-apple-system,sans-serif",
+              border:phase===k?"0.5px solid var(--rf-text)":"0.5px solid var(--rf-border2)",
+              background:phase===k?"var(--rf-text)":"transparent", color:phase===k?"var(--rf-bg)":"var(--rf-text)", transition:"all .12s" }}>
+            {FINDER[k].label}
+          </button>
+        ))}
+      </div>
+      <div style={{ ...S.notice, marginBottom:16 }}>{d.intro}</div>
+      <FinderList heading="Questions worth asking" items={d.ask} accent="var(--rf-text)" quote/>
+      <FinderList heading="Green flags — keep going" items={d.green} accent="#27AE60"/>
+      <FinderList heading="Warning signs — slow down" items={d.red} accent="#C0392B"/>
+      <FinderList heading="Boundary lines to say out loud" items={d.boundary} accent="var(--rf-text2)" quote/>
+      <div style={S.divider}/>
+      <button style={S.btnRed} onClick={onQuiz}>Run the full pattern quiz →</button>
+      <p style={S.meta}>The Finder is a screening tool, not a diagnosis. Trust patterns over single moments.</p>
     </div>
   );
 }
@@ -811,7 +1019,7 @@ function ReportScreen({ rel, scores, answers, onBack }) {
 }
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
-const SCREENS = { LAND:"land", ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report" };
+const SCREENS = { LAND:"land", ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report", FINDER:"finder" };
 
 function App() {
   const saved = useMemo(loadSession, []);
@@ -865,7 +1073,7 @@ function App() {
     <DarkCtx.Provider value={{ dark, toggle:toggleDark }}>
       <div style={{ ...cssVars, ...S.wrap }}>
         <DarkToggle/>
-        {screen===SCREENS.LAND    && <Landing onStart={()=>go(SCREENS.ONBOARD)}/>}
+        {screen===SCREENS.LAND    && <Landing onStart={()=>go(SCREENS.ONBOARD)} onFinder={()=>go(SCREENS.FINDER)}/>}
         {screen===SCREENS.ONBOARD && <Onboarding onSelect={(r,k)=>{setRel(r);setHasKids(k);go(SCREENS.SUMMARY);}}/>}
         {screen===SCREENS.SUMMARY && <SummaryScreen hasKids={hasKids} isSelf={isSelf} onConfirm={(p1,p2)=>{setP1Keys(p1);setP2Keys(p2);go(SCREENS.Q1);}}/>}
         {screen===SCREENS.Q1 && <QuizScreen questions={p1Q} relType={rel} partLabel="Part 1" onComplete={onP1Done} onBack={()=>go(SCREENS.SUMMARY)}/>}
@@ -915,8 +1123,9 @@ function App() {
             <button style={S.btnOutline} onClick={()=>go(SCREENS.SHARE)}>Share my results card</button>
           </div>
         )}
-        {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
+        {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} scores={allScores} keys={[...p1Keys,...p2Keys]} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>go(SCREENS.FINDER)} onRestart={restart}/>}
         {screen===SCREENS.REPORT && <ReportScreen rel={rel} scores={allScores} answers={[...p1Answers,...p2Answers]} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.R1)}/>}
+        {screen===SCREENS.FINDER && <FinderScreen onBack={()=>go(rel?SCREENS.WN:SCREENS.LAND)} onQuiz={()=>go(rel?SCREENS.WN:SCREENS.ONBOARD)}/>}
         {screen===SCREENS.SHARE && <ShareCard result={p1Result} part2Result={p2Result} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.WN)}/>}
       </div>
     </DarkCtx.Provider>
