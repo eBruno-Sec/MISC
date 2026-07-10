@@ -801,6 +801,23 @@ section:has(.signup){ display:none; }
   .archetype-reveal{ background:#fff!important; border:none!important; padding:0 0 24px!important; }
   .animal-sil svg,.reveal-animal-name,.reveal-badges,.reveal-scroll-hint{ color:#111!important; }
   .reveal-badge{ border-color:#999!important; color:#444!important; background:#f0f0f0!important; }
+  /* premium blocks — ink-safe */
+  .premium-gate{ display:none!important; }
+  .cheat-tabs{ display:none!important; }
+  .cheat-panel{ display:flex!important; flex-direction:column; gap:8px; page-break-inside:avoid; break-inside:avoid; }
+  .cheat-tip{ background:#f7f7f7!important; border-color:#ccc!important; border-left-color:#333!important; }
+  .cheat-tip-label{ color:#111!important; }
+  .cheat-tip p{ color:#333!important; }
+  .petal-grid{ grid-template-columns:1fr 1fr!important; }
+  .petal-card{ background:#f7f7f7!important; border-color:#ccc!important; page-break-inside:avoid; break-inside:avoid; }
+  .petal-num{ color:#555!important; }
+  .petal-title,.petal-val{ color:#111!important; }
+  .petal-desc{ color:#333!important; }
+  .audit-box{ border-color:#ccc!important; page-break-inside:avoid; break-inside:avoid; }
+  .audit-box-head{ background:#f0f0f0!important; }
+  .audit-box-head h4,.audit-fw-name{ color:#111!important; }
+  .audit-row,.audit-row-tag,.audit-row-ans,.audit-row-pts{ color:#333!important; }
+  .audit-badge{ background:#e8e8e8!important; border-color:#bbb!important; color:#333!important; }
 }
 
 /* ============================================================
@@ -982,6 +999,9 @@ p{ line-height: 1.9; }
 .audit-rows{ display:flex; flex-direction:column; gap:4px; }
 .audit-row{ font-size:.82rem; color:var(--ink-faint); display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .audit-row-q{ color:var(--ink-dim); }
+.audit-row-tag{ flex-basis:100%; font-family:var(--mono); font-size:.63rem; color:var(--ink-faint); letter-spacing:.05em; }
+.audit-row-ans{ flex-basis:100%; color:var(--ink-dim); font-style:italic; line-height:1.55; }
+.audit-row-pts{ flex-basis:100%; font-family:var(--mono); font-size:.68rem; color:var(--gold); }
 .audit-badge{ font-family:var(--mono); font-size:.67rem; padding:1px 8px; border-radius:var(--radius-pill); border:1px solid var(--line); color:var(--ink-faint); margin-left:auto; flex-shrink:0; }
 .audit-badge.high{ border-color:var(--gold); color:var(--gold); }
 .audit-badge.low{ opacity:.55; }
@@ -3243,13 +3263,18 @@ function buildAudit(auditLog, animalKey, mbtiCode, enNum, discP){
       .map(function(e){
         var pts = fw.skeys.reduce(function(s,sk){return s+(e.scores[sk]||0);},0);
         var w = Math.round(pts*(multMap[e.intensity]||1)*10)/10;
-        return {scenario:e.scenario,answer:e.answer,intensity:e.intensity,weighted:w};
+        return {scenario:e.scenario,num:e.qi+1,letter:String.fromCharCode(65+e.ci),answer:e.answer,intensity:e.intensity,weighted:w};
       })
       .sort(function(a,b){return b.weighted-a.weighted;})
       .slice(0,4);
+    var intWord = {low:'Sometimes (0.5×)',med:'Mostly (1×)',high:'100% me (2×)'};
     var rowsHtml = rows.map(function(c){
       var snip = c.answer.length>90?c.answer.substring(0,90)+'…':c.answer;
-      return '<div class="audit-row"><span class="audit-badge">'+intLabel[c.intensity]+'</span> <strong>'+c.scenario+'</strong><div class="audit-row-ans">'+snip+'</div><div class="audit-row-pts">+'+c.weighted+' pts weighted</div></div>';
+      return '<div class="audit-row"><span class="audit-badge '+c.intensity+'">'+intLabel[c.intensity]+'</span>'
+        + '<strong>'+c.scenario+'</strong>'
+        + '<div class="audit-row-tag">Scenario '+c.num+' · Option '+c.letter+' · '+intWord[c.intensity]+'</div>'
+        + '<div class="audit-row-ans">"'+snip+'"</div>'
+        + '<div class="audit-row-pts">→ +'+c.weighted+' pts weighted into this result</div></div>';
     }).join('');
     return '<div class="audit-fw"><div class="audit-fw-name">'+fw.label+'</div><div class="audit-rows">'+rowsHtml+'</div></div>';
   }).join('');
