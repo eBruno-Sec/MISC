@@ -163,6 +163,15 @@ button.card:hover{ transform:translateY(-2px); box-shadow:var(--shadow-hover); }
 .opt:hover{ border-color:var(--ink-faint); }
 .opt.sel{ background:var(--accent); color:#fff; border-color:var(--accent); }
 .hint{ font-family:var(--display); font-style:italic; font-size:14px; color:var(--ink-faint); margin-bottom:16px; }
+.partner-opt{ border-left:3px solid rgba(200,120,80,.45); }
+.partner-opt.sel{ background:var(--accent-glow); color:var(--ink); border-color:var(--accent); }
+.scenario-block{ background:var(--bg-2); border-radius:var(--radius); padding:18px 20px; margin-bottom:18px; }
+.scenario-label{ font-family:var(--mono); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-faint); margin-bottom:8px; }
+.freq-row{ display:flex; gap:10px; margin-bottom:14px; }
+.freq-opt{ flex:1; padding:13px 8px; border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-card); cursor:pointer; text-align:center; transition:.12s; }
+.freq-opt:hover{ border-color:var(--ink-faint); }
+.freq-opt.sel{ background:var(--accent-glow); border-color:var(--accent); font-weight:600; }
+.freq-l{ display:block; font-size:14px; font-weight:500; color:var(--ink); }
 
 /* ── Choice / pick cards ── */
 .choice{ cursor:pointer; }
@@ -700,129 +709,131 @@ const FINDER = {
 };
 
 // ─── PARTNER QUESTIONS ────────────────────────────────────────────────────────
-const PARTNER_Q = [
-  {id:"P1-Q1",  a:"gaslight",  sensitive:false, q:"When you bring up something your partner said or did that hurt you, what usually happens?",                                                                                 h:"Think about the typical time — not the best or worst.",         ans:[{t:"They listen and acknowledge what I felt",w:0},{t:"They get defensive but eventually hear me out",w:1},{t:"They say I'm overreacting or too sensitive",w:2},{t:"They deny it happened or say I'm making things up",w:3}]},
-  {id:"P1-Q2",  a:"gaslight",  sensitive:false, q:"After an argument, how do you usually feel?",                                                                                                                               h:"Not the best fight — the typical one.",                          ans:[{t:"Resolved, even if it was hard",w:0},{t:"Tired but okay",w:1},{t:"Confused about what actually happened",w:2},{t:"Like somehow I became the problem",w:3}]},
-  {id:"P1-Q3",  a:"gaslight",  sensitive:false, q:"Has your partner brought up past events to use against you during current arguments in ways that felt twisted?",                                                             h:"This feels like keeping score or rewriting history.",            ans:[{t:"No, they stay focused on the current issue",w:0},{t:"Occasionally, but not weaponized",w:1},{t:"Yes, it always derails the conversation",w:2},{t:"Yes — by the end I'm defending myself instead",w:3}]},
-  {id:"P1-Q4",  a:"gaslight",  sensitive:false, q:"How confident do you feel in your own memory of events between you and your partner?",                                                                                      h:"About your gut trust in your own perception.",                   ans:[{t:"Fully confident — I trust what I remember",w:0},{t:"Mostly confident, occasional normal doubt",w:1},{t:"I often second-guess myself after talking to them",w:2},{t:"I genuinely can't tell what actually happened anymore",w:3}]},
-  {id:"P1-Q5",  a:"control",   sensitive:false, q:"How does your partner respond when you spend time with friends or family without them?",                                                                                    h:"The consistent pattern, not a one-off.",                        ans:[{t:"Fine with it, maybe asks how it went",w:0},{t:"Prefers to be included but doesn't make it an issue",w:1},{t:"Gets quiet or moody when I get back",w:2},{t:"Checks in constantly or starts an argument afterward",w:3}]},
-  {id:"P1-Q6",  a:"control",   sensitive:false, q:"Have you ever avoided doing something because you knew your partner would react badly?",                                                                                    h:"Includes canceling plans just to keep the peace.",              ans:[{t:"No, I don't change plans based on their mood",w:0},{t:"Occasionally, rare and minor",w:1},{t:"More often than I'd like to admit",w:2},{t:"Yes — I think twice about almost everything I do",w:3}]},
-  {id:"P1-Q7",  a:"control",   sensitive:false, q:"Does your partner check your phone, monitor your location, or want to know where you are at all times?",                                                                    h:"Mutual transparency is normal. One-sided monitoring is different.",ans:[{t:"No, they respect my privacy",w:0},{t:"They occasionally ask, feels like curiosity not control",w:1},{t:"They check regularly and I feel I must explain myself",w:2},{t:"Yes, and not responding fast enough has consequences",w:3}]},
-  {id:"P1-Q8",  a:"control",   sensitive:false, q:"How do decisions get made — where you go, how money is spent, who you see?",                                                                                                h:"Think about the pattern across small and big decisions.",        ans:[{t:"We discuss and decide together equally",w:0},{t:"One of us leads more but it doesn't feel unfair",w:1},{t:"My partner usually decides and I go along to avoid conflict",w:2},{t:"I feel like I need permission and pushback has consequences",w:3}]},
-  {id:"P1-Q9",  a:"emotional", sensitive:false, q:"When you cry or show strong emotion, how does your partner typically react?",                                                                                                h:"Think about when you're genuinely upset, not just venting.",    ans:[{t:"They check in, ask what's wrong, offer comfort",w:0},{t:"Not great at it but they try",w:1},{t:"They go quiet, leave the room, or shut down",w:2},{t:"They say things like 'here we go again' or 'you're so dramatic'",w:3}]},
-  {id:"P1-Q10", a:"emotional", sensitive:false, q:"When you share something bothering you, does your partner make you feel like your feelings are valid?",                                                                     h:"Valid means acknowledged, not agreed with.",                    ans:[{t:"Yes, even when they disagree they acknowledge how I feel",w:0},{t:"Sometimes — depends on their mood",w:1},{t:"Rarely — I usually end up feeling like the problem",w:2},{t:"Never — my feelings always become an inconvenience or attack on them",w:3}]},
-  {id:"P1-Q11", a:"emotional", sensitive:false, q:"Do you feel safe being vulnerable with your partner — sharing fears, insecurities, or embarrassing things?",                                                                h:"Safe means without fear of it being used against you later.",   ans:[{t:"Yes, fully — they hold those things carefully",w:0},{t:"Mostly, with some things I hold back",w:1},{t:"I'm selective because some things have come back to hurt me",w:2},{t:"No — I've learned not to show weakness around them",w:3}]},
-  {id:"P1-Q12", a:"lovebomb",  sensitive:false, q:"How does the relationship feel compared to when it first started?",                                                                                                         h:"About an extreme or confusing shift, not normal maturing.",     ans:[{t:"It naturally matured — still good, just more settled",w:0},{t:"A bit less intense but still secure and warm",w:1},{t:"Affection feels inconsistent — great periods followed by cold ones",w:2},{t:"I'm constantly trying to get back to how it felt at the beginning",w:3}]},
-  {id:"P1-Q13", a:"lovebomb",  sensitive:false, q:"When things are bad between you, how does your partner typically try to repair it?",                                                                                        h:"The question is what the repair looks like.",                   ans:[{t:"They acknowledge what happened and we work through it",w:0},{t:"They apologize and things get better without fully resolving",w:1},{t:"They do something big — gifts, grand gestures — then back to normal",w:2},{t:"They flip to incredibly loving and I feel confused about the bad part",w:3}]},
-  {id:"P1-Q14", a:"lovebomb",  sensitive:false, q:"How often do you feel like you're walking on eggshells?",                                                                                                                   h:"A persistent low-level alertness to their state, not occasional tension.",ans:[{t:"Rarely or never — I feel relaxed around them",w:0},{t:"Occasionally, around specific topics",w:1},{t:"Often — I'm frequently reading their mood first",w:2},{t:"Almost always — managing their state feels like a full-time job",w:3}]},
-  {id:"P1-Q15", a:"stone",     sensitive:false, q:"When there is a disagreement, what does your partner typically do?",                                                                                                        h:"The most common pattern, not the best or worst fight.",         ans:[{t:"They stay in the conversation even when it's hard",w:0},{t:"They need a breather but come back to talk it out",w:1},{t:"They go silent and I have to wait it out, sometimes hours",w:2},{t:"They shut down completely — sometimes for days — and refuse to engage",w:3}]},
-  {id:"P1-Q16", a:"stone",     sensitive:false, q:"After a conflict, who usually reaches out first to reconnect?",                                                                                                             h:"Not who apologizes — who breaks the silence.",                  ans:[{t:"Either of us, it's pretty natural",w:0},{t:"Usually me, but it feels mutual enough",w:1},{t:"Almost always me — if I don't reach out it stays cold",w:2},{t:"Always me, and even then they make me work for it",w:3}]},
-  {id:"P1-Q17", a:"stone",     sensitive:false, q:"Do you feel heard during disagreements — like your point lands before the conversation ends?",                                                                               h:"Not whether you win — whether they took in what you said.",     ans:[{t:"Yes, even if we disagree I feel heard",w:0},{t:"Sometimes — depends on the topic",w:1},{t:"Rarely — conversation usually ends before I feel understood",w:2},{t:"Never — conversations blow up or shut down before anything lands",w:3}]},
-  {id:"P1-Q18", a:"passive",   sensitive:false, q:"After your partner says 'fine' or 'whatever,' what usually happens next?",                                                                                                  h:"Surface agreement — then what comes after.",                    ans:[{t:"They actually mean it — the issue is dropped",w:0},{t:"They're a little off but shake it off quickly",w:1},{t:"They're cold or distant for a while",w:2},{t:"They act fine but make small digs or 'forget' things that matter to me",w:3}]},
-  {id:"P1-Q19", a:"passive",   sensitive:false, q:"Does your partner express frustration directly, or do you have to figure out something is wrong?",                                                                          h:"Direct = they tell you. Indirect = you piece it together.",     ans:[{t:"Directly — they tell me when something is bothering them",w:0},{t:"Mostly directly, occasional hints",w:1},{t:"Mostly indirect — I'm usually figuring out what's wrong",w:2},{t:"Always indirect — if I ask I get 'nothing' while the behavior continues",w:3}]},
-  {id:"P1-Q20", a:"passive",   sensitive:false, q:"Has your partner agreed to do something and then not done it — or done it badly — as a way of expressing displeasure without saying so?",                                   h:"Different from forgetting. This feels intentional.",            ans:[{t:"No, if they agree they follow through",w:0},{t:"Occasionally, but it doesn't feel pointed",w:1},{t:"Yes, and there's a correlation with prior conflict",w:2},{t:"Yes, consistently — it's how I know they're upset",w:3}]},
-  {id:"P1-Q21", a:"identity",  sensitive:false, q:"Has your partner ever threatened to expose something private about you without your consent?",                                                                               h:"Including anything you haven't chosen to share.",               ans:[{t:"No, never",w:0},{t:"Comments that felt like a warning but nothing direct",w:1},{t:"Yes, during arguments they've implied they could",w:2},{t:"Yes, explicitly — as leverage or punishment",w:3}]},
-  {id:"P1-Q22", a:"identity",  sensitive:false, q:"Does your partner use your background, identity, or insecurities against you during conflict?",                                                                             h:"'No one else would want you.' 'You're lucky I put up with you.'",ans:[{t:"No, they respect and affirm who I am",w:0},{t:"Occasionally a comment slips but they walk it back",w:1},{t:"Yes, it comes up in ways that feel like diminishment",w:2},{t:"Yes, consistently — to make me feel undeserving",w:3}]},
-  {id:"P1-Q23", a:"identity",  sensitive:false, q:"Do you feel like you can be fully yourself around your partner — in how you dress, speak, act?",                                                                            h:"Without fear of criticism, mockery, or punishment.",            ans:[{t:"Yes, completely — they celebrate who I am",w:0},{t:"Mostly, with some things I hold back",w:1},{t:"No, I've toned myself down to avoid their reactions",w:2},{t:"No, I feel like I've lost a significant part of myself",w:3}]},
-  {id:"P2-Q1",  a:"narcissistic",sensitive:false,q:"How does your partner respond when conversation shifts to you — your achievements, problems, needs?",                                                                      h:"Think about a time you shared good news or needed support.",    ans:[{t:"They engage genuinely — ask questions, celebrate, offer support",w:0},{t:"Okay at it but sometimes redirect to themselves",w:1},{t:"Usually find a way to make it about them within minutes",w:2},{t:"My moments consistently get hijacked",w:3}]},
-  {id:"P2-Q2",  a:"narcissistic",sensitive:false,q:"Does your partner believe rules that apply to others — waiting, being on time, commitments — apply to them?",                                                             h:"Entitlement is often subtle. Look for a pattern of self-exemptions.",ans:[{t:"Yes, they hold themselves to the same standard as everyone else",w:0},{t:"They have moments but nothing that feels like a pattern",w:1},{t:"Regularly expect exceptions and get irritated when they don't get them",w:2},{t:"Genuinely believe they are above normal rules",w:3}]},
-  {id:"P2-Q3",  a:"narcissistic",sensitive:false,q:"When your partner makes a mistake that affects you, how do they handle it?",                                                                                               h:"The consistent pattern.",                                       ans:[{t:"They own it and make a genuine effort to fix it",w:0},{t:"They acknowledge it but move on quickly without much repair",w:1},{t:"They minimize it or find a reason it wasn't really their fault",w:2},{t:"They never acknowledge mistakes — bringing it up turns into an attack on you",w:3}]},
-  {id:"P2-Q4",  a:"financial",  sensitive:false, q:"Do you have independent access to money — your own account, income, ability to spend without reporting back?",                                                             h:"About financial autonomy, not who earns more.",                 ans:[{t:"Yes, fully — I manage my own finances freely",w:0},{t:"Mostly, with some shared oversight that feels fair",w:1},{t:"Limited — I feel I need to justify purchases",w:2},{t:"No — my partner controls the money",w:3}]},
-  {id:"P2-Q5",  a:"financial",  sensitive:false, q:"Has your partner ever undermined your ability to work, earn money, or maintain financial independence?",                                                                    h:"Includes sabotaging job applications, causing scenes at work, or pressuring you to quit.",ans:[{t:"No, they support my financial independence",w:0},{t:"Expressed preferences but nothing controlling",w:1},{t:"Yes, made working harder through conflict, guilt, or interference",w:2},{t:"Yes, deliberately — it has affected my income or employment",w:3}]},
-  {id:"P2-Q6",  a:"financial",  sensitive:false, q:"Has your partner put debt in your name, made financial decisions without your knowledge, or used money as a reward or punishment?",                                         h:"Think about credit cards, loans, or withholding money after conflict.",ans:[{t:"No, financial decisions are made together and transparently",w:0},{t:"There have been surprises but nothing intentional or harmful",w:1},{t:"Yes, and it created stress or financial consequences",w:2},{t:"Yes, repeatedly — money is used as control",w:3}]},
-  {id:"P2-Q7",  a:"intimidation",sensitive:false,q:"Has your partner ever used their physical presence to make you feel unsafe — blocking a doorway, standing over you, getting close in a threatening way?",                  h:"This does not require physical contact.",                       ans:[{t:"No, never",w:0},{t:"Once or twice in a heated moment but felt unintentional",w:1},{t:"Yes, and it made me feel trapped or scared",w:2},{t:"Yes, regularly — I feel physically unsafe during arguments",w:3}]},
-  {id:"P2-Q8",  a:"intimidation",sensitive:false,q:"Has your partner ever thrown, broken, or hit objects during an argument?",                                                                                                 h:"Destroying property during conflict is intimidation regardless of whether you were physically touched.",ans:[{t:"No, never",w:0},{t:"Once, in an extreme moment that felt out of character",w:1},{t:"Yes, more than once — it frightens me even if I'm not the target",w:2},{t:"Yes, regularly — it feels like a demonstration",w:3}]},
-  {id:"P2-Q9",  a:"intimidation",sensitive:false,q:"Have you ever felt physically afraid of your partner — even briefly?",                                                                                                     h:"This includes a gut fear response, not just being startled.",   ans:[{t:"No, never",w:0},{t:"Once, in an isolated situation",w:1},{t:"Yes, occasionally — something in their behavior triggers fear",w:2},{t:"Yes, regularly — I manage my behavior to avoid physical escalation",w:3}]},
-  {id:"P2-Q10", a:"sexual",     sensitive:true,  q:"When you are not in the mood for intimacy, how does your partner respond?",                                                                                                h:"This question is about the pattern when you say no or not now.",ans:[{t:"They accept it without issue",w:0},{t:"Occasionally disappointed but never make me feel bad",w:1},{t:"They sulk, guilt-trip, or make the rejection feel like a problem I created",w:2},{t:"They pressure, persist, or punish emotionally until I give in",w:3}]},
-  {id:"P2-Q11", a:"sexual",     sensitive:false, q:"Has your partner ever used sex or intimacy as a bargaining chip — withholding it as punishment or using it as a reward?",                                                  h:"About intimacy being weaponized, not normal fluctuations in desire.",ans:[{t:"No, intimacy is never tied to compliance",w:0},{t:"Dry periods after conflict but it doesn't feel deliberate",w:1},{t:"Yes — intimacy increases when I comply and decreases when I don't",w:2},{t:"Yes, explicitly — it is used as leverage",w:3}]},
-  {id:"P2-Q12", a:"sexual",     sensitive:false, q:"Have you ever felt pressured into sexual activity you did not want — through persistence, guilt, withdrawal, or implied consequences?",                                     h:"You do not have to have said no out loud for this to count.",   ans:[{t:"No, I always feel free to decline without consequence",w:0},{t:"Occasionally gone along when I didn't want to, but felt minor",w:1},{t:"Yes, I have complied to avoid conflict or emotional punishment",w:2},{t:"Yes, regularly — genuine refusal doesn't feel like a safe option",w:3}]},
-  {id:"P2-Q13", a:"isolation",  sensitive:false, q:"Has your circle of friends or family contact gotten smaller since being with your partner?",                                                                                h:"About a pattern of disconnection that correlates with your partner's behavior.",ans:[{t:"No, my relationships outside this one are healthy",w:0},{t:"Some drift, but it feels like normal life change",w:1},{t:"Yes, connected to conflict, guilt, or pressure about those relationships",w:2},{t:"Yes, significantly — my partner is my primary or only source of support",w:3}]},
-  {id:"P2-Q14", a:"isolation",  sensitive:false, q:"Has your partner ever created conflict or behaved in ways that damaged your relationships with people you were close to?",                                                   h:"Includes turning family against you, causing scenes, or making you choose.",ans:[{t:"No, they support my outside relationships",w:0},{t:"There have been tensions but nothing that felt strategic",w:1},{t:"Yes, and some relationships have been damaged or ended",w:2},{t:"Yes, deliberately — I believe they have worked to isolate me",w:3}]},
-  {id:"P2-Q15", a:"blame",      sensitive:false, q:"When conflict happens, who ends up apologizing most of the time?",                                                                                                         h:"Regardless of who started it or who was actually at fault.",    ans:[{t:"It varies — whoever was actually wrong apologizes",w:0},{t:"Usually me, but that's sometimes fair",w:1},{t:"Almost always me — even when I know I wasn't wrong",w:2},{t:"Always me — I cannot recall my partner genuinely apologizing first",w:3}]},
-  {id:"P2-Q16", a:"blame",      sensitive:false, q:"When you raise a concern about your partner's behavior, does the conversation stay on the original issue?",                                                                 h:"DARVO: the person who raised the concern ends up defending themselves.",ans:[{t:"It stays on the issue",w:0},{t:"Sometimes drifts but we usually come back",w:1},{t:"It almost always shifts — I end up explaining myself",w:2},{t:"Every time — by the end I am the one who wronged them",w:3}]},
-  {id:"P2-Q17", a:"somatic",    sensitive:false, q:"When conflict arises, does your partner experience or report physical symptoms — chest pain, headaches, anxiety attacks — that cause the conversation to stop?",           h:"Real illness exists. This is about whether symptoms consistently appear at moments of accountability.",ans:[{t:"No, their health and conflict are not connected in a pattern",w:0},{t:"Occasionally they're unwell during stress but it doesn't feel like a pattern",w:1},{t:"Yes, and I notice the symptoms tend to appear when I raise concerns",w:2},{t:"Yes, consistently — any conflict immediately triggers a health event that ends the discussion",w:3}]},
-  {id:"P2-Q18", a:"somatic",    sensitive:false, q:"Do you feel guilty or cruel for having needs or raising concerns because of your partner's health?",                                                                        h:"This is about whether their health status has become a reason your needs cannot be addressed.",ans:[{t:"No, their health never enters into whether I can raise something",w:0},{t:"Sometimes I hold back but it feels like consideration not manipulation",w:1},{t:"Often — I pre-filter what I bring up based on their current health state",w:2},{t:"Always — I feel like having needs at all is dangerous given their condition",w:3}]},
-  {id:"P2-Q19", a:"somatic",    sensitive:false, q:"Has your partner ever recovered quickly from a health episode once a conflict was dropped or you apologized?",                                                              h:"Not about medical reality — about whether resolution of tension correlates with recovery.",ans:[{t:"No, their health runs independently of our relationship dynamics",w:0},{t:"Hard to say — I haven't noticed a clear pattern",w:1},{t:"Yes, I've noticed they tend to feel better once tension is resolved in their favor",w:2},{t:"Yes, consistently — recovery happens fast once I back down or give in",w:3}]},
-  {id:"P2-Q20", a:"jealousy",   sensitive:false, q:"Does your partner accuse you of cheating or being interested in others — without real evidence?",                                                                          h:"Occasional insecurity is normal. Persistent unfounded accusations are different.",ans:[{t:"No, they trust me",w:0},{t:"They get insecure occasionally but it passes without becoming an accusation",w:1},{t:"Yes, they regularly imply or accuse without real basis",w:2},{t:"Yes, constantly — no amount of reassurance changes their suspicion",w:3}]},
-  {id:"P2-Q21", a:"jealousy",   sensitive:false, q:"Does your partner react with anger, punishment, or interrogation when you interact with certain people?",                                                                   h:"Think about their reaction pattern, not just whether they get jealous.",ans:[{t:"No, they are comfortable with my interactions with others",w:0},{t:"They occasionally feel uncomfortable but handle it reasonably",w:1},{t:"Yes, certain interactions reliably trigger anger, interrogation, or punishment",w:2},{t:"Yes, almost any interaction with others gets monitored and questioned",w:3}]},
-  {id:"P2-Q22", a:"jealousy",   sensitive:false, q:"Have you changed your behavior — who you talk to, what you post, how you dress — to avoid triggering your partner's jealousy?",                                            h:"This is about self-censorship driven by their reaction pattern.",ans:[{t:"No, I don't change my behavior based on jealousy concerns",w:0},{t:"Minor adjustments, but it feels like normal relationship consideration",w:1},{t:"Yes, I regularly filter my behavior to avoid triggering a jealous reaction",w:2},{t:"Yes, significantly — my social life and self-expression are shaped around their jealousy",w:3}]},
-  {id:"P2-Q23", a:"religious",  sensitive:false, q:"Does your partner use religion, scripture, cultural tradition, or family honor to justify controlling your behavior or dismissing your concerns?",                          h:"Faith and culture are meaningful. This is about them being used as tools of control.",ans:[{t:"No, faith or culture is shared respectfully or not used at all",w:0},{t:"Occasionally referenced in ways that feel off but not a consistent pattern",w:1},{t:"Yes, religious or cultural framing is regularly used to justify their behavior or dismiss mine",w:2},{t:"Yes, consistently — I am told my concerns are sinful, shameful, or a violation of duty",w:3}]},
-  {id:"P2-Q24", a:"religious",  sensitive:false, q:"Has your partner used your shared faith, community, or family expectations to prevent you from leaving, seeking help, or speaking to others?",                              h:"This includes threats of spiritual consequences, family shame, or community rejection.",ans:[{t:"No, faith or family is never used to restrict my options",w:0},{t:"There is pressure but it feels more like genuine concern than manipulation",w:1},{t:"Yes, I feel that leaving or seeking help would bring consequences tied to faith or family",w:2},{t:"Yes, explicitly — I have been told I would be shamed or punished spiritually for speaking out",w:3}]},
-  {id:"P2-Q25", a:"religious",  sensitive:false, q:"Do you feel like your spiritual or cultural identity is used to keep you compliant rather than to genuinely practice shared values?",                                       h:"Shared faith should feel like connection. This is about it feeling like a leash.",ans:[{t:"No, our shared values feel like genuine connection",w:0},{t:"Occasionally it feels lopsided but not deliberately weaponized",w:1},{t:"Yes, I notice the standards apply to me more than to them",w:2},{t:"Yes, clearly — the rules apply to controlling me, not to how they behave",w:3}]},
-  {id:"P2-Q26", a:"humiliation",sensitive:false, q:"Has your partner ever put you down, mocked you, or criticized you in front of other people?",                                                                              h:"This includes jokes at your expense, correcting you publicly, or sharing your failures with others.",ans:[{t:"No, they are respectful of me in public",w:0},{t:"Occasional teasing that crossed a line but they apologized",w:1},{t:"Yes, it happens regularly and I feel humiliated even if others laugh it off",w:2},{t:"Yes, consistently — I dread social situations because I never know what they'll say",w:3}]},
-  {id:"P2-Q27", a:"humiliation",sensitive:false, q:"Has your partner shared private information about you — your struggles, your body, your past, your mistakes — with others without your consent?",                          h:"This includes telling family, friends, or posting things online.",ans:[{t:"No, what I share with them stays private",w:0},{t:"Once or twice in a way that felt careless but not malicious",w:1},{t:"Yes, private information has been shared and it has affected how others see me",w:2},{t:"Yes, deliberately — my private life is used as social currency or punishment",w:3}]},
-  {id:"P2-Q28", a:"humiliation",sensitive:false, q:"Do you feel like your partner builds themselves up by tearing you down — especially in front of others?",                                                                   h:"This is about whether your diminishment is how they gain status or confidence.",ans:[{t:"No, they build me up or stay neutral in public",w:0},{t:"Occasionally they make themselves look good at my expense but it doesn't feel deliberate",w:1},{t:"Yes, I notice I am frequently the example of what not to do in their stories",w:2},{t:"Yes, clearly — making me look small is how they make themselves look big",w:3}]},
-  {id:"P2-Q29", a:"rage",       sensitive:false, q:"How would you describe your partner's anger during conflict?",                                                                                                              h:"Not how they are on a normal day — how they get when they're genuinely angry.",ans:[{t:"Controlled — they get upset but stay regulated",w:0},{t:"Occasionally raises their voice but de-escalates fairly quickly",w:1},{t:"Unpredictable — I never know if a small conflict will turn into a big explosion",w:2},{t:"Explosive — their anger is disproportionate, frightening, and hard to predict",w:3}]},
-  {id:"P2-Q30", a:"rage",       sensitive:false, q:"After an explosive outburst, how does your partner typically behave?",                                                                                                     h:"The cycle after the explosion matters as much as the explosion itself.",ans:[{t:"They reflect on it seriously and work to change the behavior",w:0},{t:"They apologize but the pattern repeats without real change",w:1},{t:"They act as if nothing happened or minimize what occurred",w:2},{t:"They become overly loving and remorseful — until the next explosion",w:3}]},
-  {id:"P2-Q31", a:"rage",       sensitive:false, q:"Have you changed how you behave — topics you avoid, timing of conversations, tone you use — specifically to avoid triggering an explosive reaction?",                       h:"This is a deeper version of eggshell-walking, specifically around disproportionate anger.",ans:[{t:"No, I don't manage my behavior around fear of their anger",w:0},{t:"Minor adjustments that feel like normal communication consideration",w:1},{t:"Yes, I have a mental list of things that are too risky to bring up",w:2},{t:"Yes, significantly — I feel like I am constantly managing a situation that could detonate",w:3}]},
-  {id:"P2-Q32", a:"gatekeeper", sensitive:false, q:"Has your partner withheld access to your children, used parenting time as leverage, or threatened to take the children away during conflict?",                             h:"This includes both formal custody situations and day-to-day access within the home.",ans:[{t:"No, parenting is handled separately from our conflict",w:0},{t:"There has been tension around parenting during conflict but nothing deliberate",w:1},{t:"Yes, access to or time with the children has been used as leverage",w:2},{t:"Yes, explicitly — the children are used as a direct tool of punishment or control",w:3}]},
-  {id:"P2-Q33", a:"gatekeeper", sensitive:false, q:"Has your partner said or done things to undermine your relationship with your children — speaking negatively about you to them or positioning themselves as the good parent?",h:"This is about deliberate erosion of your relationship with your own children.",ans:[{t:"No, they support my relationship with our children",w:0},{t:"Occasional venting to the kids that felt inappropriate but isolated",w:1},{t:"Yes, I have noticed my children pulling away or repeating things that came from my partner",w:2},{t:"Yes, consistently — I feel like my relationship with my children is being deliberately damaged",w:3}]},
-  {id:"P2-Q34", a:"gatekeeper", sensitive:false, q:"Do you feel like your partner uses your role as a parent to keep you in the relationship — implying you will lose the children or damage them if you leave?",              h:"This is a form of coercion specific to co-parents.",            ans:[{t:"No, parenting and relationship decisions are kept separate",w:0},{t:"There have been comments but they felt more like fear than threat",w:1},{t:"Yes, leaving feels impossible because of what they imply about the children",w:2},{t:"Yes, explicitly — I have been told or made to feel I will lose my children if I leave",w:3}]},
+const SCENARIOS = [
+  { id:"S1", title:"The Money Hit",
+    story:"Your bank account just took an unexpected hit — a forgotten bill, a job complication, something that changes the numbers. Before either of you says a word — what's already happening?",
+    reactions:[
+      { t:"Bring it up calmly and figure it out together", a:null, w:0 },
+      { t:"Go quiet — I'll handle it without involving them", a:"stone", w:1 },
+      { t:"Look for whose fault this is", a:"blame", w:2 },
+      { t:"Take charge of the fix without consulting them", a:"control", w:2 },
+      { t:"Spiral — worst-case thinking, raising my voice", a:"rage", w:3 },
+    ]
+  },
+  { id:"S2", title:"The Plans You Didn't Know About",
+    story:"Plans just got made for both of you — without your input. You find out last minute through a text, a mutual friend, or just being told.",
+    reactions:[
+      { t:"Bring it up after — ask that we check in first next time", a:null, w:0 },
+      { t:"Go along but feel quietly resentful", a:"passive", w:1 },
+      { t:"Push back immediately — who said you could decide for both of us?", a:"control", w:2 },
+      { t:"Agree, then make the evening difficult in small ways", a:"passive", w:2 },
+      { t:"Refuse and make it clear how far out of line that was", a:"rage", w:3 },
+    ]
+  },
+  { id:"S3", title:"The Party",
+    story:"At a social event, someone is clearly interested in your partner. Your partner doesn't immediately shut it down. You're watching from across the room.",
+    reactions:[
+      { t:"Feel it, trust my partner, bring it up later if needed", a:null, w:0 },
+      { t:"Go cold for the rest of the night", a:"stone", w:1 },
+      { t:"Stay close, interrupt, make my presence unmistakably clear", a:"jealousy", w:2 },
+      { t:"Accuse my partner of encouraging it on the way home", a:"jealousy", w:2 },
+      { t:"Cause a scene or leave abruptly and make them follow", a:"rage", w:3 },
+    ]
+  },
+  { id:"S4", title:"The Loop",
+    story:"You're in a disagreement that's been circling for 20 minutes. Nobody's moved. You can feel it starting to escalate.",
+    reactions:[
+      { t:"Call a short break with a specific time to come back and finish", a:null, w:0 },
+      { t:"Go quiet and stop engaging", a:"stone", w:1 },
+      { t:"Pull in other examples of when they've done this before", a:"blame", w:2 },
+      { t:"Say fine, whatever — then stay cold for hours", a:"passive", w:2 },
+      { t:"Say something you know will land hard, just to end it", a:"humiliation", w:3 },
+    ]
+  },
+  { id:"S5", title:"Good News",
+    story:"Your partner just got something — a promotion, an acceptance, a personal win. They're telling you about it right now.",
+    reactions:[
+      { t:"Make the moment fully theirs — celebrate without detour", a:null, w:0 },
+      { t:"Congratulate them, then quickly mention something about yourself", a:"narcissistic", w:1 },
+      { t:"Respond flatly — you're dealing with your own stress", a:"emotional", w:2 },
+      { t:"Find something to qualify it: just don't let it go to your head", a:"emotional", w:2 },
+      { t:"Barely acknowledge it and change the subject", a:"emotional", w:3 },
+    ]
+  },
+  { id:"S6", title:"The Outside Voice",
+    story:"Someone close — a parent, a mutual friend — says something critical about your partner directly to you. You're caught in the middle.",
+    reactions:[
+      { t:"Defend your partner, then let them know about it without drama", a:null, w:0 },
+      { t:"Stay quiet about it and manage it on your own", a:"stone", w:1 },
+      { t:"Tell your partner in a way that feels like just so you know", a:"passive", w:2 },
+      { t:"Agree with the critic and file it away for later", a:"blame", w:2 },
+      { t:"Use it in a future argument: even that person thinks you...", a:"humiliation", w:3 },
+    ]
+  },
+  { id:"S7", title:"The Distance",
+    story:"Intimacy — physical, emotional, or both — has been less available from one side. This has been the pattern for weeks, not just a bad few days.",
+    reactions:[
+      { t:"Bring it up gently and ask if everything's okay", a:null, w:0 },
+      { t:"Pull back too and wait for it to resolve itself", a:"stone", w:1 },
+      { t:"Drop hints or make comments that imply something is owed", a:"lovebomb", w:2 },
+      { t:"Go cold and stop initiating anything at all", a:"passive", w:2 },
+      { t:"Bring it up mid-argument as proof they don't really care", a:"blame", w:3 },
+    ]
+  },
+  { id:"S8", title:"The Big Call",
+    story:"A major decision is on the table — moving, a significant purchase, a career shift. You have genuinely different preferences and the stakes are real.",
+    reactions:[
+      { t:"Share your perspective and genuinely try to understand theirs", a:null, w:0 },
+      { t:"Agree to their preference while quietly resenting it", a:"passive", w:1 },
+      { t:"Keep finding new arguments until they come around", a:"control", w:2 },
+      { t:"Present it as already decided", a:"control", w:3 },
+      { t:"Make clear the relationship is in question if they don't go along", a:"rage", w:3 },
+    ]
+  },
+  { id:"S9", title:"The Hidden Thing",
+    story:"You discovered something your partner hid or misrepresented — not catastrophic, but clearly intentional. You haven't said anything yet.",
+    reactions:[
+      { t:"Bring it up directly and give them space to explain", a:null, w:0 },
+      { t:"Bring it up, but in a way that's already defensive on your end", a:"blame", w:1 },
+      { t:"File it away and use it when you need leverage later", a:"passive", w:2 },
+      { t:"Confront them in a way that escalates fast — they need to feel this", a:"rage", w:2 },
+      { t:"Turn it around so they're apologizing before you say what you found", a:"gaslight", w:3 },
+    ]
+  },
+  { id:"S10", title:"The Hard Day",
+    story:"Your partner comes home visibly stressed and overwhelmed. They're not their usual self. You notice immediately — it's written all over them.",
+    reactions:[
+      { t:"Check in, offer space or support — let them lead", a:null, w:0 },
+      { t:"Leave them alone and wait to see if they come around", a:"stone", w:1 },
+      { t:"Take their mood personally and become quiet yourself", a:"emotional", w:2 },
+      { t:"Try to fix it, get frustrated when it isn't appreciated", a:"narcissistic", w:2 },
+      { t:"Match their energy — if they're shut down, so are you", a:"stone", w:3 },
+    ]
+  },
 ];
 
-// ─── SELF QUESTIONS (Part 1 + Part 2 combined, filtered by archetype at runtime)
-const SELF_Q = [
-  {id:"SC-Q1",  a:"gaslight",  sensitive:false, q:"When your partner brings up something you said or did that hurt them, how do you usually respond?",                                                                         h:"Think about your typical reaction — not your best or worst moment.",ans:[{t:"I listen and try to understand what they felt",w:0},{t:"I get defensive but eventually hear them out",w:1},{t:"I tell them they're overreacting or being too sensitive",w:2},{t:"I deny it happened or say they're making things up",w:3}]},
-  {id:"SC-Q2",  a:"gaslight",  sensitive:false, q:"After an argument, how does your partner usually seem to feel?",                                                                                                            h:"Not after your best fight — after a typical one.",              ans:[{t:"Resolved, even if it was hard",w:0},{t:"Tired but okay",w:1},{t:"Confused about what actually happened",w:2},{t:"Like they somehow became the problem even though they started it with a valid concern",w:3}]},
-  {id:"SC-Q3",  a:"gaslight",  sensitive:false, q:"Do you ever bring up your partner's past mistakes during a current argument to strengthen your position?",                                                                   h:"This is different from normal conflict. This is using history as a weapon.",ans:[{t:"No, I stay focused on the current issue",w:0},{t:"Occasionally, but not in a way I'd call weaponized",w:1},{t:"Yes, and it usually derails the conversation",w:2},{t:"Yes, and by the end they're defending themselves instead of the thing they brought up",w:3}]},
-  {id:"SC-Q4",  a:"gaslight",  sensitive:false, q:"Do you ever challenge your partner's memory of events in ways that make them doubt themselves?",                                                                             h:"This is about how your responses affect their confidence in their own perception.",ans:[{t:"No, I respect their recollection even when we remember things differently",w:0},{t:"Occasionally I push back but I don't think it undermines them",w:1},{t:"Yes, I often reframe events in ways that leave them second-guessing",w:2},{t:"Yes, consistently — my version of events tends to override theirs",w:3}]},
-  {id:"SC-Q5",  a:"control",   sensitive:false, q:"How do you feel when your partner spends time with friends or family without you?",                                                                                         h:"Honest self-check — not the answer you think you should give.", ans:[{t:"Fine — I encourage it and ask how it went",w:0},{t:"I prefer to be included but I don't make it an issue",w:1},{t:"I get quiet or moody when they get back",w:2},{t:"I check in constantly while they're out or start an argument afterward",w:3}]},
-  {id:"SC-Q6",  a:"control",   sensitive:false, q:"Has your partner ever avoided doing something because of how you might react?",                                                                                              h:"Think about whether your reactions shape their choices.",        ans:[{t:"No, I don't think my reactions limit their choices",w:0},{t:"Occasionally they adjust minor things but it feels mutual",w:1},{t:"Probably more often than I'd like to admit",w:2},{t:"Yes — they think twice about most things because of me",w:3}]},
-  {id:"SC-Q7",  a:"control",   sensitive:false, q:"Do you check your partner's phone, monitor their location, ask who they're texting, or expect to know where they are at all times?",                                        h:"Mutual transparency is normal. One-sided monitoring is different.",ans:[{t:"No, I respect their privacy",w:0},{t:"I occasionally ask but it feels like curiosity not control",w:1},{t:"I check regularly and expect them to explain themselves",w:2},{t:"Yes, and there are consequences if they don't respond fast enough",w:3}]},
-  {id:"SC-Q8",  a:"control",   sensitive:false, q:"How are decisions made in your relationship — where you go, how money is spent, who you see?",                                                                              h:"Think about who drives decisions and what happens when your partner pushes back.",ans:[{t:"We discuss and decide together pretty equally",w:0},{t:"I tend to lead more but it doesn't feel unfair",w:1},{t:"My partner usually goes along with my decisions to avoid conflict",w:2},{t:"I expect to make most decisions and pushback has consequences",w:3}]},
-  {id:"SC-Q9",  a:"emotional", sensitive:false, q:"When your partner cries or shows strong emotion, how do you typically react?",                                                                                               h:"Think about when they're genuinely upset — not just frustrated.", ans:[{t:"I check in, ask what's wrong, and offer comfort",w:0},{t:"I'm not great at it but I try in my own way",w:1},{t:"I go quiet, leave the room, or shut down",w:2},{t:"I say things like 'here we go again' or make them feel dramatic",w:3}]},
-  {id:"SC-Q10", a:"emotional", sensitive:false, q:"When your partner shares something that is bothering them, do you make them feel like their feelings are valid?",                                                            h:"Valid doesn't mean you agree — it means you acknowledge they feel what they feel.",ans:[{t:"Yes, even when I disagree I acknowledge how they feel",w:0},{t:"Sometimes — depends on my mood",w:1},{t:"Rarely — they usually end up feeling like the problem for bringing it up",w:2},{t:"Never — their feelings become an inconvenience or an attack on me",w:3}]},
-  {id:"SC-Q11", a:"emotional", sensitive:false, q:"Does your partner feel safe being vulnerable with you — sharing fears, insecurities, or embarrassing things?",                                                              h:"Safe means without fear of it being used against them or being mocked.",ans:[{t:"Yes, fully — I hold those things carefully",w:0},{t:"Mostly, though I've slipped occasionally",w:1},{t:"Probably not — some things they shared have come back in arguments",w:2},{t:"No — I think they've learned not to show weakness around me",w:3}]},
-  {id:"SC-Q12", a:"lovebomb",  sensitive:false, q:"How does your behavior toward your partner compare to how you were early in the relationship?",                                                                              h:"Early intensity is normal. This is about an extreme or confusing shift.",ans:[{t:"Naturally matured — still warm, just more settled",w:0},{t:"A bit less intense but still consistent and secure",w:1},{t:"My affection is inconsistent — warm periods followed by cold or withdrawn ones",w:2},{t:"Significantly different — I pursued intensely at the start and know things have shifted dramatically",w:3}]},
-  {id:"SC-Q13", a:"lovebomb",  sensitive:false, q:"When things are bad between you, how do you typically try to repair it?",                                                                                                   h:"Repair is healthy. The question is what your repair looks like.", ans:[{t:"I acknowledge what happened and work through it",w:0},{t:"I apologize and move on without fully resolving the issue",w:1},{t:"I do something big — gifts, intense affection, grand gestures — then expect things to return to normal",w:2},{t:"I flip to being incredibly loving in a way that makes the bad part feel confusing or unreal",w:3}]},
-  {id:"SC-Q14", a:"lovebomb",  sensitive:false, q:"Does your partner seem to walk on eggshells around you — carefully reading your mood before saying or doing things?",                                                       h:"This is about whether your state shapes their behavior.",        ans:[{t:"No, they seem relaxed around me most of the time",w:0},{t:"Occasionally around specific topics",w:1},{t:"Often — I notice them checking my mood before they speak or act",w:2},{t:"Almost always — managing my state takes up significant energy for them",w:3}]},
-  {id:"SC-Q15", a:"stone",     sensitive:false, q:"When there is a disagreement, what do you typically do?",                                                                                                                   h:"Pick the option that matches your most common pattern.",         ans:[{t:"I stay in the conversation even when it is hard",w:0},{t:"I need a breather but come back to talk it out",w:1},{t:"I go silent and wait for things to blow over",w:2},{t:"I shut down completely — sometimes for days — and refuse to engage",w:3}]},
-  {id:"SC-Q16", a:"stone",     sensitive:false, q:"After a conflict, who usually reaches out first to reconnect?",                                                                                                             h:"Not who apologizes first — who breaks the silence.",            ans:[{t:"Either of us — it's pretty natural",w:0},{t:"Usually them, but it feels mutual enough",w:1},{t:"Almost always them — if they don't reach out it stays cold",w:2},{t:"Always them — and even when they do I make them work for it",w:3}]},
-  {id:"SC-Q17", a:"stone",     sensitive:false, q:"Does your partner feel heard during disagreements — like their point lands before the conversation ends?",                                                                   h:"Not whether they win — whether you actually take in what they say.",ans:[{t:"Yes, even when I disagree I make sure they feel heard",w:0},{t:"Sometimes — depends on the topic",w:1},{t:"Rarely — conversations usually end before they feel understood",w:2},{t:"Never — conversations either blow up or I shut them down before anything lands",w:3}]},
-  {id:"SC-Q18", a:"passive",   sensitive:false, q:"When you say 'fine' or 'whatever' during a disagreement, what usually happens next?",                                                                                       h:"Surface agreement — then what you actually do after.",           ans:[{t:"I actually mean it — the issue is dropped and we move on",w:0},{t:"I'm a little off but shake it off within the hour",w:1},{t:"I go cold or distant for a while without saying why",w:2},{t:"I act fine on the surface but make small digs or 'forget' things that matter to them",w:3}]},
-  {id:"SC-Q19", a:"passive",   sensitive:false, q:"When something is bothering you, do you tell your partner directly or do they have to figure it out from your behavior?",                                                   h:"Direct means you tell them. Indirect means they piece it together.",ans:[{t:"Directly — I tell them when something is bothering me",w:0},{t:"Mostly directly, occasional hints",w:1},{t:"Mostly indirect — they usually have to detect that something is wrong",w:2},{t:"Always indirect — and if they ask I say 'nothing' while the behavior continues",w:3}]},
-  {id:"SC-Q20", a:"passive",   sensitive:false, q:"Have you ever agreed to do something and then not done it or done it badly as a way of expressing displeasure — without saying you were unhappy?",                          h:"This is different from forgetting. This feels intentional even if you wouldn't say that out loud.",ans:[{t:"No, if I agree to something I follow through",w:0},{t:"Occasionally I drop things but it doesn't feel pointed",w:1},{t:"Yes, there is usually a connection between a prior conflict and what gets 'forgotten'",w:2},{t:"Yes, consistently — it's a way I express displeasure without having to say it",w:3}]},
-  {id:"SC-Q21", a:"identity",  sensitive:false, q:"Have you ever threatened — directly or indirectly — to expose something private about your partner without their consent?",                                                  h:"This includes implying you could share personal information as leverage.",ans:[{t:"No, never",w:0},{t:"I've made comments that may have felt like a warning but nothing direct",w:1},{t:"Yes, during arguments I've implied I could",w:2},{t:"Yes, explicitly — as leverage or punishment",w:3}]},
-  {id:"SC-Q22", a:"identity",  sensitive:false, q:"Do you use who your partner is — their background, identity, insecurities, or how they present — against them during conflict?",                                            h:"Examples: 'No one else would want you,' 'You're lucky I put up with you.'",ans:[{t:"No, I respect and affirm who they are",w:0},{t:"Occasionally something slips that I regret",w:1},{t:"Yes, it comes up in ways I know feel diminishing",w:2},{t:"Yes, consistently — I use it to gain the upper hand",w:3}]},
-  {id:"SC-Q23", a:"identity",  sensitive:false, q:"Does your partner feel like they can be fully themselves — in how they dress, speak, act, or express themselves — around you?",                                             h:"Fully themselves means without fear of criticism, mockery, or punishment from you.",ans:[{t:"Yes, completely — I celebrate who they are",w:0},{t:"Mostly, though they hold some things back",w:1},{t:"Probably not — I think they tone themselves down around me",w:2},{t:"No — I think they've lost a significant part of themselves in this relationship",w:3}]},
-  // Self Part 2
-  {id:"SC-P2-Q1", a:"narcissistic",sensitive:false,q:"When the conversation shifts to your partner — their achievements, problems, or needs — how do you typically respond?",                                                 h:"Think about a recent time they shared good news or needed support.",ans:[{t:"I engage genuinely — ask questions, celebrate with them, or offer support",w:0},{t:"I'm okay at it but sometimes redirect to myself",w:1},{t:"I usually find a way to make it about me within a few minutes",w:2},{t:"Their moments consistently get hijacked by me",w:3}]},
-  {id:"SC-P2-Q2", a:"narcissistic",sensitive:false,q:"Do you hold yourself to the same rules and standards you expect of others — being on time, keeping commitments, waiting your turn?",                                    h:"Entitlement is often invisible to the person who has it.",      ans:[{t:"Yes, I hold myself to the same standard as everyone else",w:0},{t:"I have my moments but nothing that feels like a pattern",w:1},{t:"I regularly expect exceptions and get irritated when I don't get them",w:2},{t:"I genuinely believe certain rules don't apply to me and feel contempt when treated otherwise",w:3}]},
-  {id:"SC-P2-Q3", a:"narcissistic",sensitive:false,q:"When you make a mistake that affects your partner, how do you typically handle it?",                                                                                    h:"Not a one-time situation — your consistent pattern.",           ans:[{t:"I own it and make a genuine effort to fix it",w:0},{t:"I acknowledge it but move on quickly without much repair",w:1},{t:"I minimize it or find a reason why it wasn't really my fault",w:2},{t:"I never fully acknowledge mistakes — my partner bringing it up turns into an attack on them",w:3}]},
-  {id:"SC-P2-Q4", a:"financial", sensitive:false, q:"Does your partner have independent access to money — their own account, their own income, the ability to spend without reporting back to you?",                          h:"This is about their financial autonomy, not who earns more.",   ans:[{t:"Yes, fully — they manage their own finances freely",w:0},{t:"Mostly, with some shared oversight that feels fair",w:1},{t:"Limited — they feel like they need to justify purchases to me",w:2},{t:"No — I control the money and they have little to no independent access",w:3}]},
-  {id:"SC-P2-Q5", a:"financial", sensitive:false, q:"Have you ever undermined your partner's ability to work, earn money, or maintain financial independence?",                                                                h:"This includes creating conflict around their job, pressuring them to quit, or interfering with their employment.",ans:[{t:"No, I support their financial independence",w:0},{t:"I've expressed preferences about their work but nothing that felt controlling",w:1},{t:"Yes, I've made working harder for them through conflict, guilt, or interference",w:2},{t:"Yes, deliberately — and it has affected their income or employment",w:3}]},
-  {id:"SC-P2-Q6", a:"financial", sensitive:false, q:"Have you put debt in your partner's name, made financial decisions that affected them without their knowledge, or used money as a reward or punishment?",                  h:"Think about credit cards, loans, large purchases, or withholding money after conflict.",ans:[{t:"No, financial decisions are made together and transparently",w:0},{t:"There have been surprises but nothing that felt intentional or harmful",w:1},{t:"Yes, and it has created financial stress or consequences for them",w:2},{t:"Yes, repeatedly — I use money as control and I know it",w:3}]},
-  {id:"SC-P2-Q7", a:"intimidation",sensitive:false,q:"Have you ever used your physical presence to make your partner feel unsafe — blocking a doorway, standing over them, or getting physically close in a threatening way?", h:"This does not require physical contact. It is about using size or proximity as intimidation.",ans:[{t:"No, never",w:0},{t:"Once or twice in a heated moment but it felt unintentional",w:1},{t:"Yes, and I knew it made them feel trapped or scared",w:2},{t:"Yes, regularly — I use my presence to assert dominance during conflict",w:3}]},
-  {id:"SC-P2-Q8", a:"intimidation",sensitive:false,q:"Have you ever thrown, broken, or hit objects during an argument — even if you did not hit your partner?",                                                                h:"Destroying property during conflict is a form of intimidation regardless of whether contact was made.",ans:[{t:"No, never",w:0},{t:"Once, in an extreme moment I regret",w:1},{t:"Yes, more than once — I know it frightens them",w:2},{t:"Yes, regularly — I'm aware it communicates what I'm capable of",w:3}]},
-  {id:"SC-P2-Q9", a:"intimidation",sensitive:false,q:"Do you think your partner has ever felt physically afraid of you — even briefly?",                                                                                       h:"Honest self-assessment. A gut fear response in them counts.",   ans:[{t:"No, I'm confident they have never felt physically afraid of me",w:0},{t:"Once, in an extreme situation I believe was isolated",w:1},{t:"Possibly — I've seen fear in their response to me occasionally",w:2},{t:"Yes — I am aware they manage their behavior around what I might do",w:3}]},
-  {id:"SC-P2-Q10",a:"sexual",    sensitive:true,  q:"When your partner is not in the mood for intimacy, how do you respond?",                                                                                                  h:"A healthy response is acceptance. This question is about your pattern when they say no or not now.",ans:[{t:"I accept it without issue",w:0},{t:"I'm occasionally disappointed but I never make them feel bad about it",w:1},{t:"I sulk, guilt-trip, or make the rejection feel like a problem they created",w:2},{t:"I pressure, persist, or withdraw emotionally until they give in",w:3}]},
-  {id:"SC-P2-Q11",a:"sexual",    sensitive:false, q:"Have you ever used sex or intimacy as a bargaining chip — withholding it as punishment or using it as a reward for compliance?",                                          h:"This is about weaponizing intimacy, not normal fluctuations in desire.",ans:[{t:"No, intimacy is never tied to their behavior or compliance",w:0},{t:"There have been dry periods after conflict but it wasn't deliberate",w:1},{t:"Yes, the pattern is real — I'm more intimate when they comply and less when they don't",w:2},{t:"Yes, explicitly — I use it as leverage and I know it",w:3}]},
-  {id:"SC-P2-Q12",a:"sexual",    sensitive:false, q:"Has your partner ever felt pressured into sexual activity they didn't want — through your persistence, guilt, emotional withdrawal, or implied consequences?",             h:"They don't have to have said no out loud for this to count.",   ans:[{t:"No, they always feel free to decline without consequence",w:0},{t:"Possibly once or twice but I believe it felt minor",w:1},{t:"Yes, I think they've complied to avoid conflict or emotional punishment from me",w:2},{t:"Yes, regularly — I know genuine refusal doesn't feel safe for them",w:3}]},
-  {id:"SC-P2-Q13",a:"isolation", sensitive:false, q:"Looking at your partner's life over the past year or two, has their circle of friends or family contact gotten smaller since being with you?",                            h:"Normal relationship changes happen. This is about disconnection that correlates with your behavior.",ans:[{t:"No, their relationships outside ours are healthy and maintained",w:0},{t:"Some drift, but it feels like normal life change not something I drove",w:1},{t:"Yes, and I can connect it to conflict, pressure, or tension I created around those relationships",w:2},{t:"Yes, significantly — I am their primary or only source of support and I know that",w:3}]},
-  {id:"SC-P2-Q14",a:"isolation", sensitive:false, q:"Have you ever created conflict, told stories, or behaved in ways that damaged your partner's relationships with people they were close to?",                               h:"This includes turning their family against them, causing scenes in front of friends, or making them choose.",ans:[{t:"No, I support their outside relationships",w:0},{t:"There have been tensions but nothing that felt strategic on my part",w:1},{t:"Yes, and some of their relationships have been damaged or ended as a result",w:2},{t:"Yes, deliberately — I have worked to make them more dependent on me",w:3}]},
-  {id:"SC-P2-Q15",a:"blame",     sensitive:false, q:"When conflict happens in your relationship, who ends up apologizing most of the time?",                                                                                   h:"Regardless of who started it or who was actually at fault.",    ans:[{t:"It varies — whoever was actually wrong apologizes",w:0},{t:"Usually them, but that's sometimes fair",w:1},{t:"Almost always them — even when I know I was wrong",w:2},{t:"Always them — I cannot recall genuinely apologizing first",w:3}]},
-  {id:"SC-P2-Q16",a:"blame",     sensitive:false, q:"When your partner raises a concern about your behavior, does the conversation stay on the original issue or do you shift it back onto them?",                             h:"DARVO: Deny, Attack, Reverse Victim and Offender.",             ans:[{t:"It stays on the issue — I address what they brought up",w:0},{t:"It sometimes drifts but we usually come back to it",w:1},{t:"It almost always shifts — they end up explaining themselves instead",w:2},{t:"Every time — by the end they are the one who wronged me and the original issue is buried",w:3}]},
-  {id:"SC-P2-Q17",a:"somatic",   sensitive:false, q:"Do you experience or report physical symptoms — chest pain, headaches, anxiety attacks — when conflict arises with your partner?",                                        h:"Real illness exists. This is about whether your symptoms consistently appear at moments of accountability.",ans:[{t:"No, my health and conflict are not connected in a pattern",w:0},{t:"I'm sometimes unwell during stress but it doesn't feel like a pattern",w:1},{t:"Yes, I notice symptoms tend to surface when my partner raises concerns",w:2},{t:"Yes, consistently — conflict triggers a health event that ends the discussion",w:3}]},
-  {id:"SC-P2-Q18",a:"somatic",   sensitive:false, q:"Does your partner hold back concerns or needs because of your health?",                                                                                                   h:"This is about whether your health status has become a reason their needs cannot be addressed.",ans:[{t:"No, my health never enters into whether they can raise something",w:0},{t:"Sometimes they hold back but it feels like consideration not avoidance",w:1},{t:"Often — I think they pre-filter what they bring up based on my health state",w:2},{t:"Always — I think having needs around me feels dangerous for them",w:3}]},
-  {id:"SC-P2-Q19",a:"somatic",   sensitive:false, q:"Have you ever recovered quickly from a health episode once a conflict was dropped or your partner gave in?",                                                              h:"Not about medical reality — about whether resolution of tension correlates with your recovery.",ans:[{t:"No, my health runs independently of our relationship dynamics",w:0},{t:"Hard to say — I haven't noticed a clear pattern",w:1},{t:"Yes, I tend to feel better once tension is resolved in my favor",w:2},{t:"Yes, consistently — I recover fast once they back down or give in",w:3}]},
-  {id:"SC-P2-Q20",a:"jealousy",  sensitive:false, q:"Do you accuse your partner of cheating or being interested in others — without real evidence?",                                                                          h:"Occasional insecurity is normal. Persistent unfounded accusations are different.",ans:[{t:"No, I trust them",w:0},{t:"I get insecure occasionally but it passes without becoming an accusation",w:1},{t:"Yes, I regularly imply or accuse without real basis",w:2},{t:"Yes, constantly — no amount of reassurance changes my suspicion",w:3}]},
-  {id:"SC-P2-Q21",a:"jealousy",  sensitive:false, q:"Do you react with anger, interrogation, or punishment when your partner interacts with certain people?",                                                                  h:"Think about your reaction pattern, not just whether you feel jealous.",ans:[{t:"No, I am comfortable with their interactions with others",w:0},{t:"I occasionally feel uncomfortable but handle it reasonably",w:1},{t:"Yes, certain interactions reliably trigger anger or interrogation from me",w:2},{t:"Yes, almost any interaction they have with others gets monitored and questioned",w:3}]},
-  {id:"SC-P2-Q22",a:"jealousy",  sensitive:false, q:"Has your partner changed their behavior — who they talk to, what they post, how they dress — to avoid triggering your jealousy?",                                        h:"This is about self-censorship they practice because of your reaction pattern.",ans:[{t:"No, I don't think they change behavior because of my jealousy",w:0},{t:"Minor adjustments that feel like normal relationship consideration",w:1},{t:"Yes, I think they regularly filter their behavior to avoid triggering me",w:2},{t:"Yes, significantly — their social life and self-expression are shaped around my jealousy",w:3}]},
-  {id:"SC-P2-Q23",a:"religious", sensitive:false, q:"Do you use religion, scripture, cultural tradition, or family honor to justify controlling your partner's behavior or dismissing their concerns?",                        h:"Faith and culture are meaningful. This is about using them as tools of control.",ans:[{t:"No, faith or culture is shared respectfully or not used at all",w:0},{t:"Occasionally referenced in ways that may feel off but not a consistent pattern",w:1},{t:"Yes, I regularly use religious or cultural framing to justify my behavior or dismiss theirs",w:2},{t:"Yes, consistently — I tell them their concerns are sinful, shameful, or a violation of duty",w:3}]},
-  {id:"SC-P2-Q24",a:"religious", sensitive:false, q:"Have you used shared faith, community, or family expectations to prevent your partner from leaving, seeking help, or speaking to others about your relationship?",        h:"This includes threats of spiritual consequences, family shame, or community rejection.",ans:[{t:"No, faith or family is never used to restrict their options",w:0},{t:"There is some pressure but it feels more like genuine concern than control",w:1},{t:"Yes, I think leaving or seeking help feels costly for them because of faith or family dynamics I've reinforced",w:2},{t:"Yes, explicitly — I have told or implied they would be shamed or rejected spiritually for speaking out",w:3}]},
-  {id:"SC-P2-Q25",a:"religious", sensitive:false, q:"Do you apply religious or cultural standards to your partner more than to yourself?",                                                                                    h:"Shared faith should feel like connection. This is about it functioning as a leash for them.",ans:[{t:"No, the same standards apply equally to both of us",w:0},{t:"Occasionally it feels lopsided but not deliberately so",w:1},{t:"Yes, I notice the rules apply to controlling them more than to how I behave",w:2},{t:"Yes, clearly — I use faith or culture to keep them compliant while holding myself to a different standard",w:3}]},
-  {id:"SC-P2-Q26",a:"humiliation",sensitive:false,q:"Have you ever put your partner down, mocked them, or criticized them in front of other people?",                                                                          h:"This includes jokes at their expense, correcting them publicly, or sharing their failures with others.",ans:[{t:"No, I am respectful of them in public",w:0},{t:"Occasional teasing that crossed a line but I apologized",w:1},{t:"Yes, it happens regularly and I know it humiliates them",w:2},{t:"Yes, consistently — I dread how they feel but I do it anyway",w:3}]},
-  {id:"SC-P2-Q27",a:"humiliation",sensitive:false,q:"Have you shared private information about your partner — their struggles, their body, their past, their mistakes — with others without their consent?",                  h:"This includes telling family, friends, or posting things online.",ans:[{t:"No, what they share with me stays private",w:0},{t:"Once or twice in a way that felt careless but not malicious",w:1},{t:"Yes, private information has been shared and it has affected how others see them",w:2},{t:"Yes, deliberately — their private life is social currency or punishment for me",w:3}]},
-  {id:"SC-P2-Q28",a:"humiliation",sensitive:false,q:"Do you build yourself up by tearing your partner down — especially in front of others?",                                                                                  h:"This is about whether their diminishment is how you gain status or confidence.",ans:[{t:"No, I build them up or stay neutral in public",w:0},{t:"Occasionally I make myself look good at their expense but it doesn't feel deliberate",w:1},{t:"Yes, I notice they are frequently the example of what not to do in my stories",w:2},{t:"Yes, clearly — making them look small is how I make myself look big",w:3}]},
-  {id:"SC-P2-Q29",a:"rage",      sensitive:false, q:"How would you describe your own anger during conflict?",                                                                                                                  h:"Not how you are on a normal day — how you get when you're genuinely angry.",ans:[{t:"Controlled — I get upset but stay regulated",w:0},{t:"I occasionally raise my voice but de-escalate fairly quickly",w:1},{t:"Unpredictable — I know a small conflict can turn into a big explosion",w:2},{t:"Explosive — my anger is disproportionate and I know it frightens my partner",w:3}]},
-  {id:"SC-P2-Q30",a:"rage",      sensitive:false, q:"After an explosive outburst, how do you typically behave?",                                                                                                               h:"The cycle after the explosion matters as much as the explosion itself.",ans:[{t:"I reflect seriously and work to change the behavior",w:0},{t:"I apologize but the pattern repeats without real change",w:1},{t:"I act as if nothing happened or minimize what occurred",w:2},{t:"I become overly loving and remorseful — until the next explosion",w:3}]},
-  {id:"SC-P2-Q31",a:"rage",      sensitive:false, q:"Has your partner changed how they behave — topics they avoid, timing of conversations, tone they use — specifically to avoid triggering an explosive reaction from you?",  h:"This is about the impact of your anger pattern on their behavior.",ans:[{t:"No, I don't think they manage their behavior around fear of my anger",w:0},{t:"Minor adjustments that feel like normal communication",w:1},{t:"Yes, I think they have a mental list of things too risky to bring up with me",w:2},{t:"Yes, significantly — I know they feel like they're managing a situation that could detonate",w:3}]},
-  {id:"SC-P2-Q32",a:"gatekeeper",sensitive:false, q:"Have you withheld access to your children, used parenting time as leverage, or threatened to take the children away during conflict?",                                    h:"This includes both formal custody situations and day-to-day access within the home.",ans:[{t:"No, parenting is handled separately from our conflict",w:0},{t:"There has been tension around parenting during conflict but nothing deliberate",w:1},{t:"Yes, I have used access to the children as leverage",w:2},{t:"Yes, explicitly — the children are a direct tool of punishment or control for me",w:3}]},
-  {id:"SC-P2-Q33",a:"gatekeeper",sensitive:false, q:"Have you said or done things to undermine your partner's relationship with your children — speaking negatively about them to the kids or positioning yourself as the good parent?",h:"This is about deliberate erosion of their relationship with their own children.",ans:[{t:"No, I support their relationship with our children",w:0},{t:"Occasional venting to the kids that felt inappropriate but isolated",w:1},{t:"Yes, I have said things to the kids that I know affect how they see my partner",w:2},{t:"Yes, consistently — I am working to become the preferred parent by undermining them",w:3}]},
-  {id:"SC-P2-Q34",a:"gatekeeper",sensitive:false, q:"Do you use your partner's role as a parent to keep them in the relationship — implying they will lose the children or damage them if they leave?",                        h:"This is a form of coercion specific to co-parents.",            ans:[{t:"No, parenting and relationship decisions are kept separate",w:0},{t:"There have been comments but they came from fear not intent",w:1},{t:"Yes, I think leaving feels impossible for them partly because of things I've implied about the children",w:2},{t:"Yes, explicitly — I have told or made them feel they will lose the children if they leave",w:3}]},
-];
+function computeDualResult(answers) {
+  const userScores = {}, partnerScores = {};
+  answers.forEach(a => {
+    const scenario = SCENARIOS.find(s => s.id === a.scenarioId);
+    if (!scenario) return;
+    const freq = a.frequency || 1;
+    const myR = scenario.reactions[a.myChoice];
+    if (myR?.a) userScores[myR.a] = (userScores[myR.a]||0) + myR.w * freq;
+    const theirR = scenario.reactions[a.theirChoice];
+    if (theirR?.a) partnerScores[theirR.a] = (partnerScores[theirR.a]||0) + theirR.w * freq;
+  });
+  const topOf = sc => Object.entries(sc).sort(([,a],[,b])=>b-a).filter(([,v])=>v>0);
+  const flaggedUser    = topOf(userScores).filter(([,v])=>v>=4).map(([k])=>k);
+  const flaggedPartner = topOf(partnerScores).filter(([,v])=>v>=4).map(([k])=>k);
+  const collisions = flaggedUser.filter(k => (partnerScores[k]||0) >= 4);
+  const pk = flaggedPartner[0]||null, sk = flaggedPartner[1]||null;
+  const combinedLabel = pk&&sk?((COMBINED[pk]?.[sk])||(COMBINED[sk]?.[pk])||null):null;
+  const severity = pk ? getSev(partnerScores[pk]||0,pk) : { label:"healthy", display:"No red flags", color:"#27AE60" };
+  return { userScores, partnerScores, flaggedUser, flaggedPartner, collisions, primary:pk, secondary:sk, combinedLabel, severity };
+}
 
-// ─── UTILITIES ────────────────────────────────────────────────────────────────
+
 function getSev(score, arc) {
   const thresh = (arc==="isolation"||arc==="blame") ? 5 : 9;
   if (score >= thresh) return { label:"severe",  display:"Severe",           color:"#C0392B" };
@@ -1280,7 +1291,7 @@ function AboutView({ onNav }) {
 
 // ─── QUIZ FLOW ────────────────────────────────────────────────────────────────────
 function Onboarding({ onSelect }) {
-  const [rel, setRel] = useState(null); const [kids, setKids] = useState(null);
+  const [rel, setRel] = useState(null);
   const opts = [
     { k:"current", l:"My current partner", s:"Questions in present tense" },
     { k:"ex",      l:"An ex-partner",       s:"Questions reframed to past tense" },
@@ -1288,117 +1299,149 @@ function Onboarding({ onSelect }) {
     { k:"self",    l:"Myself",              s:"Am I the problem? Self-assessment mode" },
   ];
   return (<div className="container narrow view">
-    <div className="eyebrow">Step 1 of 2</div>
+    <div className="eyebrow">Start here</div>
     <h1 style={{ fontSize:32, fontWeight:400, marginBottom:16 }}>Who are you thinking about?</h1>
+    <p className="sub" style={{ marginBottom:20 }}>Ten real-life scenarios. For each one you'll react as yourself, then as the person you're thinking about. No right answers — just honest ones.</p>
     <div className="grid grid-2">
       {opts.map(o=>(<button key={o.k} className={"card choice" + (rel===o.k?" sel":"")} onClick={()=>setRel(o.k)}>
         <div className="cl">{o.l}</div><div className="cs">{o.s}</div></button>))}
     </div>
-    <h2 style={{ fontSize:19, fontWeight:400, margin:"26px 0 12px" }}>Are children involved in this relationship?</h2>
-    <div className="inline-2">
-      {[{k:true,l:"Yes"},{k:false,l:"No"}].map(o=>(<button key={String(o.k)} className={"card choice center" + (kids===o.k?" sel":"")} onClick={()=>setKids(o.k)}>{o.l}</button>))}
-    </div>
-    <button className="btn btn-solid btn-block mt" disabled={!rel||kids===null} onClick={()=>rel&&kids!==null&&onSelect(rel,kids)}>Continue →</button>
+    <button className="btn btn-solid btn-block mt" disabled={!rel} onClick={()=>rel&&onSelect(rel)}>Continue →</button>
   </div>);
 }
-function SummaryScreen({ hasKids, isSelf, onConfirm }) {
-  const [selected, setSelected] = useState(()=>new Set());
-  const available = Object.keys(ARC).filter(k => !ARC[k].kids || hasKids);
-  const MIN=5, MAX=8, count=selected.size, canStart = count>=MIN && count<=MAX;
-  function toggle(k) { setSelected(prev=>{ const n=new Set(prev); if(n.has(k))n.delete(k); else if(n.size<MAX)n.add(k); return n; }); }
-  return (<div className="container view">
-    <div className="summary-head">
-      <div>
-        <div className="eyebrow">Choose your focus</div>
-        <h1 style={{ fontSize:32, fontWeight:400, marginBottom:6 }}>Pick 5 to 8 patterns to explore first.</h1>
-        <p className="sub">{isSelf?"Select the ones that might describe you. Be honest.":"Select the ones that resonate. The rest become Part 2."}</p>
-      </div>
-      <div className={"counter" + (canStart?" ok":count?" warn":"")}>{count}/{MAX}</div>
-    </div>
-    <div className="grid grid-3">
-      {available.map(k=>{
-        const a=ARC[k]; const sel=selected.has(k); const locked=!sel&&count>=MAX;
-        return (<button key={k} className={"card pick" + (sel?" sel":"") + (locked?" locked":"")} onClick={()=>!locked&&toggle(k)}>
-          <div className="pick-box">{sel&&<Check/>}</div>
-          <div><div className="pick-name">{a.street}</div><div className="pick-one">{a.one}</div></div>
-        </button>);
-      })}
-    </div>
-    <div className="sticky-cta">
-      <button className="btn btn-primary btn-block" disabled={!canStart} onClick={()=>{ if(!canStart)return; const p1=[...selected]; const p2=available.filter(k=>!selected.has(k)); onConfirm(p1,p2); }}>
-        {canStart?`Start with these ${count} →`:`Select ${Math.max(0,MIN-count)} more to continue`}
-      </button>
-    </div>
-  </div>);
-}
-function QuizScreen({ questions, relType, partLabel, onComplete, onBack }) {
-  const [idx, setIdx] = useState(0); const [answers, setAns] = useState([]); const [sel, setSel] = useState(null);
-  const [showSens, setShowSens] = useState(false); const [sensOk, setSensOk] = useState(false);
-  const q = questions[idx]; const total = questions.length;
-  if (q?.sensitive && !sensOk && !showSens) setShowSens(true);
-  function next() { if(sel===null)return; const na=[...answers,{questionId:q.id,archetype:q.a,weight:q.ans[sel].w,choice:sel}]; setAns(na); setSel(null); if(idx+1>=total)onComplete(na); else setIdx(idx+1); }
-  function back() { if(idx===0){onBack();return;} setAns(answers.slice(0,-1)); setSel(null); setIdx(idx-1); }
-  if (showSens && !sensOk) return (<div className="container quiz view"><div className="card">
-    <h2 style={{ fontSize:22, fontWeight:400 }}>A moment before we continue</h2>
-    <p style={{ color:"var(--ink-dim)", margin:"8px 0 16px" }}>The next questions cover sensitive topics including sexual coercion. Answer only what you feel comfortable with — it's okay to select the first option for any question you'd rather skip.</p>
-    <button className="btn btn-solid" onClick={()=>{setSensOk(true);setShowSens(false);}}>I understand, continue</button>
-  </div></div>);
+
+function ScenarioQuiz({ rel, onComplete }) {
+  const [idx,        setIdx]        = useState(0);
+  const [answers,    setAns]        = useState([]);
+  const [myChoice,   setMyChoice]   = useState(null);
+  const [theirChoice,setTheirChoice]= useState(null);
+  const [freq,       setFreq]       = useState(null);
+  const s = SCENARIOS[idx];
+  const total = SCENARIOS.length;
+  const isSelf = rel === "self";
+  function next() {
+    if (myChoice===null||theirChoice===null||freq===null) return;
+    const na = [...answers, { scenarioId:s.id, myChoice, theirChoice, frequency:freq }];
+    setAns(na); setMyChoice(null); setTheirChoice(null); setFreq(null);
+    if (idx+1>=total) onComplete(na); else setIdx(idx+1);
+  }
+  const ready = myChoice!==null && theirChoice!==null && freq!==null;
   return (<div className="container quiz view">
     <div className="progress"><i style={{ width:Math.round((idx/total)*100)+"%" }}/></div>
-    <div className="quiz-meta"><button className="btn btn-ghost" onClick={back}>← Back</button><span>{partLabel} · {idx+1}/{total}</span></div>
-    <div className="eyebrow">{ARC[q.a]?.street}</div>
-    <h2 style={{ fontSize:23, fontWeight:400, marginBottom:12 }}>{reframe(q.q, relType)}</h2>
-    {q.h && <p className="hint">{q.h}</p>}
-    {q.ans.map((ans,i)=>(<button key={i} className={"opt" + (sel===i?" sel":"")} onClick={()=>setSel(i)}>{ans.t}</button>))}
-    <button className="btn btn-solid btn-block mt" disabled={sel===null} onClick={next}>{idx+1<total?"Next":"See results"}</button>
+    <div className="quiz-meta"><span>Scenario {idx+1} of {total}</span></div>
+    <div className="scenario-block">
+      <div className="scenario-label">{s.title}</div>
+      <p style={{ color:"var(--ink-dim)", fontSize:15, lineHeight:1.75, margin:0 }}>{s.story}</p>
+    </div>
+    <div className="sec-h" style={{ margin:"20px 0 10px" }}>Your gut reaction —</div>
+    {s.reactions.map((r,i)=>(<button key={i} className={"opt"+(myChoice===i?" sel":"")} onClick={()=>setMyChoice(i)}>{r.t}</button>))}
+    {myChoice!==null && (<>
+      <div className="sec-h" style={{ margin:"22px 0 10px" }}>{isSelf?"Your partner's likely reaction —":"Their gut reaction —"}</div>
+      {s.reactions.map((r,i)=>(<button key={i} className={"opt partner-opt"+(theirChoice===i?" sel":"")} onClick={()=>setTheirChoice(i)}>{r.t}</button>))}
+    </>)}
+    {myChoice!==null && theirChoice!==null && (<>
+      <div className="sec-h" style={{ margin:"22px 0 10px" }}>How often does this play out?</div>
+      <div className="freq-row">
+        {[{l:"Rarely",v:1},{l:"Sometimes",v:2},{l:"Often",v:3}].map(({l,v})=>(<button key={v} className={"freq-opt"+(freq===v?" sel":"")} onClick={()=>setFreq(v)}><span className="freq-l">{l}</span></button>))}
+      </div>
+    </>)}
+    <button className="btn btn-solid btn-block mt" disabled={!ready} onClick={next}>{idx+1<total?"Next":"See results"}</button>
   </div>);
 }
-function WhatNow({ result, part2Result, scores, keys, onShare, onReport, onFinder, onRestart }) {
+
+function DualResults({ dualResult, onWhatNow, onReport, onRestart }) {
+  const { partnerScores, userScores, flaggedPartner, primary:pk, secondary:sk, combinedLabel, severity } = dualResult;
+  const partnerKeys = Object.keys(partnerScores).sort((a,b)=>(partnerScores[b]||0)-(partnerScores[a]||0));
+  const userFlagged = Object.keys(userScores).filter(k=>(userScores[k]||0)>=4).sort((a,b)=>(userScores[b]||0)-(userScores[a]||0));
+  return (<div className="container view">
+    <div className="eyebrow">Your results</div>
+    <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Here's what your answers reveal.</h1>
+    <div className="notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
+    {pk && (<div className="combined">
+      <div className="l">{severity.display}</div>
+      <div style={{ fontFamily:"var(--display)", fontSize:18, lineHeight:1.3 }}>{ARC[pk]?.street}</div>
+      {combinedLabel && <div style={{ fontSize:13, color:"var(--ink-dim)", marginTop:4 }}>Combined with {ARC[sk]?.street}: &ldquo;{combinedLabel}&rdquo;</div>}
+    </div>)}
+    <div className="results">
+      <div>
+        <h3 className="sec-h">Their patterns</h3>
+        {partnerKeys.map(k=>{ const sev=getSev(partnerScores[k]||0,k); const fl=(partnerScores[k]||0)>=4; return (
+          <div key={k} className="card" style={{ marginBottom:10, opacity:fl?1:.5 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+              <div style={{ fontFamily:"var(--display)", fontWeight:500 }}>{ARC[k]?.street}</div>
+              <div style={{ fontFamily:"var(--mono)", fontSize:11, padding:"2px 9px", borderRadius:20, background:fl?"var(--accent-glow)":"var(--bg-2)", color:fl?"var(--accent-bright)":"var(--ink-faint)", whiteSpace:"nowrap" }}>{sev.display}</div>
+            </div>
+          </div>); })}
+        {userFlagged.length>0 && (<>
+          <div className="divider"/>
+          <h3 className="sec-h">Your own patterns (in this dynamic)</h3>
+          {userFlagged.map(k=>(<div key={k} className="card" style={{ marginBottom:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:10 }}>
+              <div style={{ fontFamily:"var(--display)", fontWeight:500 }}>{ARC[k]?.street}</div>
+              <div style={{ fontFamily:"var(--mono)", fontSize:11, padding:"2px 9px", borderRadius:20, background:"var(--bg-2)", color:"var(--ink-faint)", whiteSpace:"nowrap" }}>score {userScores[k]}</div>
+            </div>
+          </div>))}
+        </>)}
+      </div>
+      <aside className="side">
+        <div className="side-card">
+          <div className="sec-h" style={{ marginBottom:10 }}>Next steps</div>
+          <div className="actions">
+            <button className="btn btn-solid" onClick={onWhatNow}>What do I do now?</button>
+            <button className="btn btn-outline" onClick={onReport}>Download printable report</button>
+            <button className="btn btn-outline" onClick={onRestart}>Start over</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>);
+}
+
+function WhatNow({ dualResult, onReport, onFinder, onRestart }) {
   const [tab, setTab] = useState(0);
-  const flagged = (keys||[]).filter(k=>(scores?.[k]||0)>3).sort((a,b)=>(scores[b]||0)-(scores[a]||0));
-  const pk = flagged[0] || (part2Result||result)?.primary;
+  const { flaggedPartner, partnerScores } = dualResult || { flaggedPartner:[], partnerScores:{} };
   const tabs = ["Your patterns","Scripts","Can it change?","Red vs green","Get help"];
-  const scripts = SCRIPTS[pk] || DEFAULT_SCRIPTS;
+  const scripts = SCRIPTS[flaggedPartner[0]] || DEFAULT_SCRIPTS;
   return (<div className="container narrow view">
     <div className="eyebrow">What now</div>
     <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Here's where to go from here.</h1>
     <div className="notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only, not professional mental health advice.</div>
-    <div className="tabs">{tabs.map((t,i)=>(<button key={i} className={"tab" + (tab===i?" active":"")} onClick={()=>setTab(i)}>{t}</button>))}</div>
+    <div className="tabs">{tabs.map((t,i)=>(<button key={i} className={"tab"+(tab===i?" active":"")} onClick={()=>setTab(i)}>{t}</button>))}</div>
     {tab===0 && (<div>
       <h3 className="sec-h">Patterns you flagged</h3>
-      {flagged.length===0
-        ? <p style={{ color:"var(--ink-dim)" }}>You didn't cross the red-flag line on the patterns you explored. That's a real result — worth trusting, not explaining away.</p>
-        : <div className="grid grid-2">{flagged.map(k=>{ const P=PLAY[k]||{}; return (
+      {flaggedPartner.length===0
+        ? <p style={{ color:"var(--ink-dim)" }}>You didn't cross the red-flag line across the scenarios. That's a real result — worth trusting, not explaining away.</p>
+        : <div className="grid grid-2">{flaggedPartner.map(k=>{ const P=PLAY[k]||{}; return (
             <div key={k} className="card">
               <div className="arc-name">{ARC[k].street}</div>
               <div className="arc-clin" style={{ marginBottom:8 }}>{ARC[k].clinical}</div>
               <p className="arc-desc" style={{ marginBottom:10 }}>{ARC_DESC[k]}</p>
-              {P.watch && <><div className="sec-h" style={{ marginBottom:6 }}>What it looks like</div>{P.watch.map((w,i)=><p key={i} className="hang">{w}</p>)}</>}
-              {P.ask && <><div className="sec-h" style={{ margin:"8px 0 6px" }}>What to ask or watch for</div>{P.ask.map((w,i)=><p key={i} className="hang" style={{ borderColor:"var(--accent)" }}>{w}</p>)}</>}
+              {P.watch && <><div className="sec-h" style={{ marginBottom:6 }}>What it looks like</div>{P.watch.map((w,wi)=><p key={wi} className="hang">{w}</p>)}</>}
+              {P.ask && <><div className="sec-h" style={{ margin:"8px 0 6px" }}>What to ask or watch for</div>{P.ask.map((w,wi)=><p key={wi} className="hang" style={{ borderColor:"var(--accent)" }}>{w}</p>)}</>}
             </div>); })}</div>}
     </div>)}
-    {tab===1 && (<div><h3 className="sec-h">Scripts to start with</h3><p style={{ color:"var(--ink-dim)", fontSize:14, marginBottom:12 }}>Starting points, not lines to memorize. Adapt to your voice.</p>{scripts.map((s,i)=><div key={i} style={{ background:"var(--bg-2)", borderRadius:9, padding:"13px 16px", marginBottom:10, fontFamily:"var(--display)", fontStyle:"italic", fontSize:15, lineHeight:1.7, color:"var(--ink-dim)" }}>{s}</div>)}</div>)}
+    {tab===1 && (<div><h3 className="sec-h">Scripts to start with</h3><p style={{ color:"var(--ink-dim)", fontSize:14, marginBottom:12 }}>Starting points, not lines to memorize. Adapt to your voice.</p>{scripts.map((s,si)=><div key={si} style={{ background:"var(--bg-2)", borderRadius:9, padding:"13px 16px", marginBottom:10, fontFamily:"var(--display)", fontStyle:"italic", fontSize:15, lineHeight:1.7, color:"var(--ink-dim)" }}>{s}</div>)}</div>)}
     {tab===2 && (<div>
       <h3 className="sec-h">Can this change?</h3>
       <p style={{ color:"var(--ink-dim)", marginBottom:14 }}>Short version: change is possible, but it has to be theirs. You can set the conditions and hold the boundary — you can't do the changing for them. Watch behavior over months, not promises over dinner.</p>
-      {flagged.length===0
-        ? <p style={{ color:"var(--ink-dim)" }}>Nothing here crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
-        : <div className="grid grid-2">{flagged.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
+      {flaggedPartner.length===0
+        ? <p style={{ color:"var(--ink-dim)" }}>Nothing crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
+        : <div className="grid grid-2">{flaggedPartner.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
             <div key={k} className="card">
               <div className="arc-name" style={{ marginBottom:8 }}>{ARC[k].street}</div>
-              {P.safety && <div className="notice danger" style={{ marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first. You are not responsible for repairing it.</div>}
+              {P.safety && <div className="notice danger" style={{ marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first.</div>}
               <div className="sec-h" style={{ color:"var(--green)", marginBottom:6 }}>Signs of real change</div>
-              {(P.change?.real||[]).map((s,i)=><p key={i} className="hang" style={{ borderColor:"var(--green)" }}>{s}</p>)}
+              {(P.change?.real||[]).map((s,si)=><p key={si} className="hang" style={{ borderColor:"var(--green)" }}>{s}</p>)}
               <div className="sec-h" style={{ color:"var(--accent-bright)", margin:"8px 0 6px" }}>Signs of fake change</div>
-              {(P.change?.fake||[]).map((s,i)=><p key={i} className="hang" style={{ borderColor:"var(--accent)" }}>{s}</p>)}
+              {(P.change?.fake||[]).map((s,si)=><p key={si} className="hang" style={{ borderColor:"var(--accent)" }}>{s}</p>)}
             </div>); })}</div>}
-      {flagged.length>0 && <p style={{ color:"var(--ink-dim)", fontSize:14, marginTop:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
+      {flaggedPartner.length>0 && <p style={{ color:"var(--ink-dim)", fontSize:14, marginTop:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
     </div>)}
     {tab===3 && (<div>
       <h3 className="sec-h" style={{ color:"var(--green)" }}>Signs this can be worked on</h3>
-      {["They acknowledge impact without defending intent.","They stay in hard conversations rather than shutting down.","They can say 'I was wrong' without making you feel guilty.","They celebrate your wins without redirecting to themselves."].map((g,i)=><p key={i} className="hang" style={{ borderColor:"var(--green)" }}>{g}</p>)}
+      {["They acknowledge impact without defending intent.","They stay in hard conversations rather than shutting down.","They can say 'I was wrong' without making you feel guilty.","They celebrate your wins without redirecting to themselves."].map((g,gi)=><p key={gi} className="hang" style={{ borderColor:"var(--green)" }}>{g}</p>)}
       <h3 className="sec-h" style={{ marginTop:18, color:"var(--accent-bright)" }}>Signs this may be more serious</h3>
-      {["Conversations consistently end with you apologizing.","Your emotional responses are treated as weapons.","You feel less like yourself than before this relationship.","Raising issues feels more dangerous than staying silent."].map((r,i)=><p key={i} className="hang" style={{ borderColor:"var(--accent)" }}>{r}</p>)}
+      {["Conversations consistently end with you apologizing.","Your emotional responses are treated as weapons.","You feel less like yourself than before this relationship.","Raising issues feels more dangerous than staying silent."].map((r,ri)=><p key={ri} className="hang" style={{ borderColor:"var(--accent)" }}>{r}</p>)}
     </div>)}
     {tab===4 && (<div>
       <h3 className="sec-h">You don't have to figure this out alone</h3>
@@ -1408,33 +1451,10 @@ function WhatNow({ result, part2Result, scores, keys, onShare, onReport, onFinde
     </div>)}
     <div className="divider"/>
     <div className="actions">
-      <button className="btn btn-primary" onClick={onShare}>Share my results card</button>
       {onReport && <button className="btn btn-outline" onClick={onReport}>Download printable report</button>}
       {onFinder && <button className="btn btn-outline" onClick={onFinder}>Open the Warning-Sign Finder</button>}
       <button className="btn btn-outline" onClick={onRestart}>Start over</button>
     </div>
-  </div>);
-}
-function ShareCard({ result, part2Result, onBack }) {
-  const finalResult = part2Result||result; const pk = finalResult?.primary; const p = pk?ARC[pk]:null;
-  return (<div className="container narrow view">
-    <button className="btn btn-ghost" onClick={onBack}>← Back</button>
-    <div className="eyebrow" style={{ marginTop:14 }}>Share</div>
-    <h1 style={{ fontSize:34, fontWeight:400, marginBottom:14 }}>Your result card.</h1>
-    <div style={{ background:"#140f0a", color:"#F0EDE8", borderRadius:16, padding:32, textAlign:"center", maxWidth:460, border:"1px solid var(--line)" }}>
-      <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", opacity:.5, marginBottom:16 }}>RedFlag Result</div>
-      {p ? (<>
-        <div style={{ fontFamily:"var(--display)", fontSize:26, lineHeight:1.2, marginBottom:8 }}>{p.street}</div>
-        <div style={{ fontSize:12, opacity:.55, marginBottom:14 }}>{p.clinical}</div>
-        {finalResult.combinedLabel && <div style={{ background:"var(--accent-glow)", borderRadius:8, padding:"7px 14px", marginBottom:12, fontSize:13, fontWeight:600 }}>{finalResult.combinedLabel}</div>}
-        <div style={{ display:"inline-flex", padding:"4px 14px", borderRadius:50, background:"rgba(255,255,255,.12)", fontSize:11, fontWeight:600 }}>{finalResult.severity.display}</div>
-      </>) : (<>
-        <div style={{ fontFamily:"var(--display)", fontSize:20, marginBottom:8 }}>No significant patterns detected</div>
-        <div style={{ fontSize:13, opacity:.6 }}>Your responses reflect a healthy dynamic.</div>
-      </>)}
-      <div style={{ fontFamily:"var(--mono)", fontSize:9.5, opacity:.35, marginTop:18, letterSpacing:".06em" }}>redflag.app · Know what you're dealing with</div>
-    </div>
-    <p style={{ color:"var(--ink-dim)", fontSize:12.5, marginTop:14, maxWidth:460 }}>Save this image and share it to start a conversation. Results reflect your perception, not a clinical assessment.</p>
   </div>);
 }
 
@@ -1469,25 +1489,30 @@ function FinderScreen({ onQuiz }) {
   </div>);
 }
 
-// ─── PRINTABLE REPORT (Section III) ──────────────────────────────────────────────
+// ─── PRINTABLE REPORT ────────────────────────────────────────────────────────────
 const REL_WHO = { current:"your current partner", ex:"your ex-partner", new:"someone new", self:"yourself" };
 function sevMeta(label) {
   return ({ severe:{code:"//// SEVERE",cls:"rf-sev-severe"}, address:{code:"/// WORTH ADDRESSING",cls:"rf-sev-address"}, watch:{code:"// WORTH WATCHING",cls:"rf-sev-watch"}, healthy:{code:"·  CLEAR",cls:"rf-sev-healthy"} })[label] || { code:"·  CLEAR", cls:"rf-sev-healthy" };
 }
-function ReportScreen({ rel, scores, answers, onBack }) {
-  const bank = rel === "self" ? SELF_Q : PARTNER_Q;
-  const byId = useMemo(()=>{ const m={}; bank.forEach(q=>{ m[q.id]=q; }); return m; }, [bank]);
-  const keys = Object.keys(scores).sort((a,b)=>(scores[b]||0)-(scores[a]||0));
-  const flagged = keys.filter(k=>(scores[k]||0)>3);
-  const pk = flagged[0]||null, sk = flagged[1]||null;
-  const combinedLabel = pk&&sk?((COMBINED[pk]?.[sk])||(COMBINED[sk]?.[pk])||null):null;
-  const overall = pk?getSev(scores[pk]||0,pk):{ label:"healthy", display:"No red flags" };
+function ReportScreen({ rel, dualResult, scenarioAnswers, onBack }) {
+  const { partnerScores, flaggedPartner, primary:pk, secondary:sk, combinedLabel } = dualResult || { partnerScores:{}, flaggedPartner:[], primary:null, secondary:null, combinedLabel:null };
+  const overall = pk ? getSev(partnerScores[pk]||0, pk) : { label:"healthy", display:"No red flags" };
   const isSelf = rel === "self";
   const dateStr = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+  const allKeys = Object.keys(partnerScores).sort((a,b)=>(partnerScores[b]||0)-(partnerScores[a]||0));
   function auditFor(k) {
-    const contribs = answers.filter(a=>a.archetype===k).map(a=>{ const q=byId[a.questionId]; const opt=(q&&typeof a.choice==="number")?q.ans[a.choice]:null; return { q:q?q.q:"(question)", choice:opt?opt.t:null, w:a.weight }; }).sort((x,y)=>y.w-x.w);
-    const score=scores[k]||0; const maxPossible=contribs.length*3; const sev=getSev(score,k);
-    const severeThresh=(k==="isolation"||k==="blame")?5:9; const crossed=sev.label==="severe"?severeThresh:sev.label==="address"?7:4;
+    const contribs = (scenarioAnswers||[]).filter(a=>{
+      const sc=SCENARIOS.find(s=>s.id===a.scenarioId); if(!sc) return false;
+      const r=sc.reactions[a.theirChoice]; return r?.a===k && r.w>0;
+    }).map(a=>{
+      const sc=SCENARIOS.find(s=>s.id===a.scenarioId);
+      const r=sc.reactions[a.theirChoice]; const freq=a.frequency||1;
+      return { scenario:sc.title, choice:r.t, w:r.w, freq, freqL:["","Rarely","Sometimes","Often"][freq], pts:r.w*freq };
+    }).sort((x,y)=>y.pts-x.pts);
+    const score=partnerScores[k]||0;
+    const maxPossible=contribs.reduce((s,c)=>s+3*c.freq,0)||9;
+    const sev=getSev(score,k);
+    const crossed=(k==="isolation"||k==="blame")?5:sev.label==="severe"?9:sev.label==="address"?7:4;
     return { contribs, score, maxPossible, sev, crossed };
   }
   return (<div className="container view">
@@ -1500,98 +1525,73 @@ function ReportScreen({ rel, scores, answers, onBack }) {
       <div className="rf-legend"><span><span className="rf-code">////</span> Severe</span><span><span className="rf-code">///</span> Worth addressing</span><span><span className="rf-code">//</span> Worth watching</span><span><span className="rf-code">·</span> Clear</span></div>
       <div className={"rf-summary " + sevMeta(overall.label).cls}>
         <div className="rf-code">{sevMeta(overall.label).code}</div>
-        {pk ? (<p style={{ margin:"6px 0 0", fontSize:13 }}>Strongest pattern detected: <strong>{ARC[pk].street}</strong> ({ARC[pk].clinical}).{combinedLabel && <> Combined with {ARC[sk].street}, this reads as the reinforcing loop <strong>“{combinedLabel}”</strong>.</>}</p>)
-             : (<p style={{ margin:"6px 0 0", fontSize:13 }}>No pattern crossed the red-flag threshold in the areas assessed. That is a genuinely good result worth recognizing.</p>)}
+        {pk ? (<p style={{ margin:"6px 0 0", fontSize:13 }}>Strongest pattern detected: <strong>{ARC[pk].street}</strong> ({ARC[pk].clinical}).{combinedLabel && <> Combined with {ARC[sk].street}: <strong>&ldquo;{combinedLabel}&rdquo;</strong>.</>}</p>)
+             : (<p style={{ margin:"6px 0 0", fontSize:13 }}>No pattern crossed the red-flag threshold. That is a genuinely good result worth recognizing.</p>)}
       </div>
       <h2 className="rf-sec">Patterns assessed</h2>
-      {keys.map(k=>{ const m=sevMeta(getSev(scores[k]||0,k).label); return (
+      {allKeys.map(k=>{ const m=sevMeta(getSev(partnerScores[k]||0,k).label); return (
         <div key={k} style={{ display:"flex", gap:10, alignItems:"baseline", padding:"4px 0", borderTop:"0.5px solid #ccc", fontSize:12 }}>
-          <span className="rf-code" style={{ flex:"0 0 118px" }}>{m.code}</span><span style={{ flex:1 }}>{ARC[k].street}</span><span className="rf-w" style={{ color:"#333" }}>score {scores[k]||0}</span>
+          <span className="rf-code" style={{ flex:"0 0 118px" }}>{m.code}</span><span style={{ flex:1 }}>{ARC[k].street}</span><span className="rf-w" style={{ color:"#333" }}>score {partnerScores[k]||0}</span>
         </div>); })}
-      {flagged.length>0 && <><h2 className="rf-sec">Flagged patterns — detail &amp; audit trail</h2>
-      {flagged.map(k=>{ const a=auditFor(k); const m=sevMeta(a.sev.label); return (
+      {flaggedPartner.length>0 && (<><h2 className="rf-sec">Flagged patterns — detail &amp; audit trail</h2>
+      {flaggedPartner.map(k=>{ const a=auditFor(k); const m=sevMeta(a.sev.label); return (
         <div key={k} className={"rf-block " + m.cls}>
           <div className="rf-block-name">{ARC[k].street}</div>
           <div className="rf-block-clin">{ARC[k].clinical} · <span className="rf-code">{m.code}</span></div>
           <p className="rf-block-desc">{ARC_DESC[k]}</p>
           <div className="rf-audit">
             <div className="rf-audit-h">Why this Relational Red Flag triggered</div>
-            <p>Across {a.contribs.length} question{a.contribs.length===1?"":"s"} on this pattern, your answers summed to <span className="rf-formula">{a.score} of {a.maxPossible}</span> possible points.</p>
+            <p>Across {a.contribs.length} scenario{a.contribs.length===1?"":"s"} touching this pattern, scores summed to <span className="rf-formula">{a.score} of {a.maxPossible}</span> possible points.</p>
             <p className="rf-formula">score {a.score} ≥ {a.crossed} → {a.sev.display}</p>
-            {a.contribs.some(c=>c.choice) && <><p style={{ marginBottom:2, fontWeight:700, fontSize:11 }}>Heaviest contributors first:</p>
-              <ul className="rf-contribs">{a.contribs.map((c,i)=>(<li key={i}><span className="rf-w">[{c.w}/3]</span><span>{c.choice?"“"+c.choice+"”":c.q}</span></li>))}</ul></>}
+            {a.contribs.length>0 && (<><p style={{ marginBottom:2, fontWeight:700, fontSize:11 }}>Heaviest contributors first:</p>
+              <ul className="rf-contribs">{a.contribs.map((c,ci)=>(<li key={ci}><span className="rf-w">[{c.pts}/{3*c.freq}]</span><span>&ldquo;{c.choice}&rdquo; — {c.scenario} ({c.freqL})</span></li>))}</ul></>)}
           </div>
-        </div>); })}</>}
+        </div>); })}</>)}
       {pk && sk && (<div className="rf-clash">
         <div className="rf-audit-h">Why you clash{combinedLabel?" — "+combinedLabel:""}</div>
-        <p style={{ fontSize:12, margin:"0 0 6px" }}>Your two strongest active patterns collide:</p>
-        <ul className="rf-contribs"><li><span className="rf-w">{scores[pk]||0}</span><span>{ARC[pk].street} — {getSev(scores[pk]||0,pk).display}</span></li><li><span className="rf-w">{scores[sk]||0}</span><span>{ARC[sk].street} — {getSev(scores[sk]||0,sk).display}</span></li></ul>
-        <p style={{ fontSize:12, margin:"8px 0 0" }}>{combinedLabel ? "In this framework, " + ARC[pk].street + " landing on top of " + ARC[sk].street + " is the named collision “" + combinedLabel + ".” Each pattern makes the other harder to interrupt, so it registers as one reinforcing loop rather than two separate issues." : ARC[pk].street + " and " + ARC[sk].street + " are both active at once. They compound — addressing only one tends to leave the loop intact."}</p>
+        <p style={{ fontSize:12, margin:"0 0 6px" }}>Two strongest active patterns:</p>
+        <ul className="rf-contribs">
+          <li><span className="rf-w">{partnerScores[pk]||0}</span><span>{ARC[pk].street} — {getSev(partnerScores[pk]||0,pk).display}</span></li>
+          <li><span className="rf-w">{partnerScores[sk]||0}</span><span>{ARC[sk].street} — {getSev(partnerScores[sk]||0,sk).display}</span></li>
+        </ul>
+        <p style={{ fontSize:12, margin:"8px 0 0" }}>{combinedLabel ? `${ARC[pk].street} landing on top of ${ARC[sk].street} is the named collision "${combinedLabel}". Each makes the other harder to interrupt.` : `${ARC[pk].street} and ${ARC[sk].street} are both active at once. They compound — addressing only one tends to leave the loop intact.`}</p>
       </div>)}
       <div className="rf-crisis"><div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>If you ever feel unsafe</div><div><strong>1-800-799-7233</strong> — National Domestic Violence Hotline (24/7, free, confidential)</div><div style={{ fontSize:12, marginTop:2 }}>Text START to 88788 · Crisis Text Line: text HOME to 741741</div></div>
       <hr className="rf-rule"/>
-      <div className="rf-foot">RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf?"your self-assessment":"your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice. To compare both sides, run RedFlag again in {isSelf?"a partner mode":"“Myself” mode"} and print the matching report.</div>
+      <div className="rf-foot">RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf?"your self-assessment":"your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice.</div>
     </div>
     <div className="rf-noprint actions" style={{ marginTop:18 }}>
-      <button className="btn btn-solid" onClick={()=>window.print()}>🖨 Save as PDF / Print</button>
+      <button className="btn btn-solid" onClick={()=>window.print()}>Save as PDF</button>
       <button className="btn btn-outline" onClick={onBack}>← Back to results</button>
     </div>
-    <p className="rf-noprint" style={{ fontFamily:"var(--mono)", fontSize:11.5, color:"var(--ink-faint)", marginTop:10 }}>Opens your browser's print dialog — choose “Save as PDF” to keep a copy. Ink-saver: black on white, no heavy red blocks.</p>
+    <p className="rf-noprint" style={{ fontFamily:"var(--mono)", fontSize:11.5, color:"var(--ink-faint)", marginTop:10 }}>Opens your browser's print dialog — choose &ldquo;Save as PDF&rdquo; to keep a copy. Ink-saver: black on white.</p>
   </div>);
 }
 
 // ─── APP ─────────────────────────────────────────────────────────────────────────
 const VIEWS = { HOME:"home", LEARN:"learn", ARCHETYPES:"archetypes", PATTERNS:"patterns", LENSES:"lenses", FINDER:"finder", HELP:"help", BLOG:"blog", ABOUT:"about", QUIZ:"quiz" };
-const SCREENS = { ONBOARD:"onboard", SUMMARY:"summary", Q1:"q1", R1:"r1", BRIDGE:"bridge", Q2:"q2", R2:"r2", WN:"wn", SHARE:"share", REPORT:"report" };
+const SCREENS = { ONBOARD:"onboard", SCENARIO:"scenario", RESULTS:"results", WN:"wn", REPORT:"report" };
 
 function App() {
   const saved = useMemo(loadSession, []);
-  const [view,      setView]      = useState(()=>saved?.view      ?? VIEWS.HOME);
-  const [screen,    setScreen]    = useState(()=>saved?.screen    ?? SCREENS.ONBOARD);
-  const [rel,       setRel]       = useState(()=>saved?.rel       ?? null);
-  const [hasKids,   setHasKids]   = useState(()=>saved?.hasKids   ?? false);
-  const [p1Keys,    setP1Keys]    = useState(()=>saved?.p1Keys    ?? []);
-  const [p2Keys,    setP2Keys]    = useState(()=>saved?.p2Keys    ?? []);
-  const [p1Scores,  setP1Scores]  = useState(()=>saved?.p1Scores  ?? {});
-  const [p1Result,  setP1Result]  = useState(()=>saved?.p1Result  ?? null);
-  const [p2Result,  setP2Result]  = useState(()=>saved?.p2Result  ?? null);
-  const [allScores, setAllScores] = useState(()=>saved?.allScores ?? {});
-  const [p1Answers, setP1Answers] = useState(()=>saved?.p1Answers ?? []);
-  const [p2Answers, setP2Answers] = useState(()=>saved?.p2Answers ?? []);
+  const [view,       setView]       = useState(()=>saved?.view       ?? VIEWS.HOME);
+  const [screen,     setScreen]     = useState(()=>saved?.screen     ?? SCREENS.ONBOARD);
+  const [rel,        setRel]        = useState(()=>saved?.rel        ?? null);
+  const [scenarios,  setScenarios]  = useState(()=>saved?.scenarios  ?? []);
+  const [dualResult, setDualResult] = useState(()=>saved?.dualResult ?? null);
   const theme = useThemeState();
 
-  useEffect(()=>{ saveSession({ view, screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers }); },
-    [view, screen, rel, hasKids, p1Keys, p2Keys, p1Scores, p1Result, p2Result, allScores, p1Answers, p2Answers]);
+  useEffect(()=>{ saveSession({ view, screen, rel, scenarios, dualResult }); },
+    [view, screen, rel, scenarios, dualResult]);
 
   function top() { try { window.scrollTo(0,0); } catch (e) {} }
   function goView(v) { setView(v); top(); }
   function go(s) { setScreen(s); setView(VIEWS.QUIZ); top(); }
-  function restart() { clearSession(); setView(VIEWS.QUIZ); setScreen(SCREENS.ONBOARD); setRel(null); setHasKids(false); setP1Keys([]); setP2Keys([]); setP1Scores({}); setP1Result(null); setP2Result(null); setAllScores({}); setP1Answers([]); setP2Answers([]); top(); }
+  function restart() { clearSession(); setView(VIEWS.QUIZ); setScreen(SCREENS.ONBOARD); setRel(null); setScenarios([]); setDualResult(null); top(); }
   function onNav(id) {
     if (id==="quiz") { setView(VIEWS.QUIZ); if(!rel) setScreen(SCREENS.ONBOARD); top(); }
     else goView(id);
   }
-
-  const isSelf = rel === "self";
-  const allQ = isSelf ? SELF_Q : PARTNER_Q;
-  const p1Q = allQ.filter(q => p1Keys.includes(q.a));
-  const p2Q = allQ.filter(q => p2Keys.includes(q.a) && (hasKids || q.a !== "gatekeeper"));
-
-  function onP1Done(answers) {
-    const scores={}; p1Keys.forEach(k=>{scores[k]=0;});
-    answers.forEach(a=>{ if(scores[a.archetype]!==undefined) scores[a.archetype]+=a.weight; });
-    setP1Scores(scores); setP1Result(computeResult(scores,p1Keys)); setAllScores(scores); setP1Answers(answers); go(SCREENS.R1);
-  }
-  function onP2Done(answers) {
-    const scores={}; p2Keys.forEach(k=>{scores[k]=0;});
-    answers.forEach(a=>{ if(scores[a.archetype]!==undefined) scores[a.archetype]+=a.weight; });
-    const combined={}; [...p1Keys,...p2Keys].forEach(k=>{combined[k]=(p1Scores[k]||0)+(scores[k]||0);});
-    const result=computeResult(combined,[...p1Keys,...p2Keys]);
-    result.newlyDiscovered=p2Keys.filter(k=>(scores[k]||0)>3&&k!==p1Result?.primary&&k!==p1Result?.secondary);
-    setP2Result(result); setAllScores(combined); setP2Answers(answers); go(SCREENS.R2);
-  }
-
-  const SideNext = ({ children }) => (<aside className="side"><div className="side-card"><div className="sec-h" style={{ marginBottom:10 }}>Next steps</div><div className="actions">{children}</div></div></aside>);
 
   return (
     <ThemeCtx.Provider value={theme}>
@@ -1608,56 +1608,11 @@ function App() {
           {view===VIEWS.BLOG       && <BlogView/>}
           {view===VIEWS.ABOUT      && <AboutView onNav={onNav}/>}
           {view===VIEWS.QUIZ && (<>
-            {screen===SCREENS.ONBOARD && <Onboarding onSelect={(r,k)=>{setRel(r);setHasKids(k);go(SCREENS.SUMMARY);}}/>}
-            {screen===SCREENS.SUMMARY && <SummaryScreen hasKids={hasKids} isSelf={isSelf} onConfirm={(p1,p2)=>{setP1Keys(p1);setP2Keys(p2);go(SCREENS.Q1);}}/>}
-            {screen===SCREENS.Q1 && <QuizScreen questions={p1Q} relType={rel} partLabel="Part 1" onComplete={onP1Done} onBack={()=>go(SCREENS.SUMMARY)}/>}
-            {screen===SCREENS.R1 && (
-              <div className="container view">
-                <div className="eyebrow">Part 1 results</div>
-                <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Here's what your answers reveal.</h1>
-                <div className="notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
-                <div className="results">
-                  <div><ResultSection title="Your selected patterns" scores={p1Scores} keys={p1Keys} part={1}/></div>
-                  <SideNext>
-                    <button className="btn btn-primary" onClick={()=>go(SCREENS.BRIDGE)}>Go deeper — Part 2</button>
-                    <button className="btn btn-solid" onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
-                    <button className="btn btn-outline" onClick={()=>go(SCREENS.REPORT)}>Download report</button>
-                  </SideNext>
-                </div>
-              </div>
-            )}
-            {screen===SCREENS.BRIDGE && (
-              <div className="container narrow view">
-                <div className="eyebrow">Part 1 complete</div>
-                <h1 style={{ fontSize:32, fontWeight:400, marginBottom:12 }}>Want to check if any of these apply to {isSelf?"you":"your partner"}?</h1>
-                <p className="sub">Part 2 covers {p2Keys.length} more patterns in {p2Q.length} questions. Here's exactly what you'd be exploring:</p>
-                <div style={{ margin:"18px 0" }}>{p2Keys.map(k=>(<div key={k} className="list-item"><div className="dot" style={{ background:"var(--accent)" }}/><div><div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:500 }}>{ARC[k]?.street}</div><div style={{ fontSize:12.5, color:"var(--ink-faint)" }}>{ARC[k]?.one}</div></div></div>))}</div>
-                <div className="actions"><button className="btn btn-primary" onClick={()=>go(SCREENS.Q2)}>Yes, go deeper — Part 2</button><button className="btn btn-outline" onClick={()=>go(SCREENS.WN)}>I'm done for now — see results</button></div>
-              </div>
-            )}
-            {screen===SCREENS.Q2 && <QuizScreen questions={p2Q} relType={rel} partLabel="Part 2" onComplete={onP2Done} onBack={()=>go(SCREENS.BRIDGE)}/>}
-            {screen===SCREENS.R2 && (
-              <div className="container view">
-                <div className="eyebrow">Full profile</div>
-                <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Your complete picture.</h1>
-                <div className="notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
-                <div className="results">
-                  <div>
-                    <ResultSection title="Part 2 — Deeper patterns" scores={allScores} keys={p2Keys} newlyDiscovered={p2Result?.newlyDiscovered||[]} part={2}/>
-                    <div className="divider"/>
-                    <ResultSection title="Part 1 — Your selections" scores={allScores} keys={p1Keys} part={1}/>
-                  </div>
-                  <SideNext>
-                    <button className="btn btn-solid" onClick={()=>go(SCREENS.WN)}>What do I do now?</button>
-                    <button className="btn btn-outline" onClick={()=>go(SCREENS.REPORT)}>Download report</button>
-                    <button className="btn btn-outline" onClick={()=>go(SCREENS.SHARE)}>Share results card</button>
-                  </SideNext>
-                </div>
-              </div>
-            )}
-            {screen===SCREENS.WN    && <WhatNow result={p1Result} part2Result={p2Result} scores={allScores} keys={[...p1Keys,...p2Keys]} onShare={()=>go(SCREENS.SHARE)} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
-            {screen===SCREENS.SHARE && <ShareCard result={p1Result} part2Result={p2Result} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.WN)}/>}
-            {screen===SCREENS.REPORT && <ReportScreen rel={rel} scores={allScores} answers={[...p1Answers,...p2Answers]} onBack={()=>go(p2Result?SCREENS.R2:SCREENS.R1)}/>}
+            {screen===SCREENS.ONBOARD  && <Onboarding onSelect={(r)=>{ setRel(r); go(SCREENS.SCENARIO); }}/>}
+            {screen===SCREENS.SCENARIO && <ScenarioQuiz rel={rel} onComplete={(ans)=>{ const dr=computeDualResult(ans); setScenarios(ans); setDualResult(dr); go(SCREENS.RESULTS); }}/>}
+            {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
+            {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
+            {screen===SCREENS.REPORT   && dualResult && <ReportScreen rel={rel} dualResult={dualResult} scenarioAnswers={scenarios} onBack={()=>go(SCREENS.WN)}/>}
           </>)}
         </main>
         <Footer onNav={onNav}/>
