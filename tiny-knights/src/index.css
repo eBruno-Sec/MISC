@@ -81,9 +81,9 @@
   .dark .from-sky-200   { --tw-gradient-from: #0c1a38; }
   .dark .via-sky-100    { --tw-gradient-via:  #0f2040; }
 
-  /* Neutral text */
-  .dark .text-gray-300  { color: #6370a0; }
-  .dark .text-gray-400  { color: #8b93c4; }
+  /* Neutral text — all values verified ≥ 4.5:1 (WCAG AA) on dark card (#252d52) */
+  .dark .text-gray-300  { color: #9099cc; } /* was #6370a0 — 2.76:1 → 4.83:1 */
+  .dark .text-gray-400  { color: #9ba3d0; } /* was #8b93c4 — 4.49:1 → 5.42:1 */
   .dark .text-gray-500  { color: #a8b0d8; }
   .dark .text-gray-600  { color: #c5caf0; }
   .dark .text-gray-700  { color: #dde1f8; }
@@ -106,6 +106,7 @@
   .dark .text-red-600    { color: #fca5a5; }
   .dark .text-red-700    { color: #fca5a5; }
   .dark .text-sky-900    { color: #e0f2fe; }
+  .dark .text-castle-stone { color: #a8b0d8; } /* no dark override → 2.76:1 FAIL; now 6.26:1 */
 
   /* Neutral borders */
   .dark .border-white    { border-color: #3a4580; }

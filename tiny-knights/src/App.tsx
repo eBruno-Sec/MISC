@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GameMode, UserProgress, Badge, CosmeticUnlock } from './types';
 import { loadProgress, saveProgress, resetProgress } from './lib/storage';
 import { checkAndAwardBadges, checkCosmeticUnlocks, getLevelFromXp, recordQuestCompletion } from './lib/rewards';
@@ -30,8 +30,13 @@ export default function App() {
   const [sessionKey, setSessionKey] = useState(0);
   const [victoryData, setVictoryData] = useState<VictoryData | null>(null);
 
+  // Debounce saves to ~1.5 s to avoid serialising the full progress object on
+  // every individual React state update (answers, animations, coin ticks, etc.).
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    saveProgress(progress);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveProgress(progress), 1500);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [progress]);
 
   useEffect(() => {
