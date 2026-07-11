@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { UserProgress } from '../types';
 import MonsterBook from '../components/MonsterBook';
+import { useKnightsPass } from '../lib/entitlements';
 
 type SettingsScreenProps = {
   progress: UserProgress;
@@ -10,6 +11,7 @@ type SettingsScreenProps = {
 
 export default function SettingsScreen({ progress, onUpdateProgress, onBack }: SettingsScreenProps) {
   const [nameInput, setNameInput] = useState(progress.childName);
+  const { passActive } = useKnightsPass();
 
   function toggle(key: 'soundEnabled' | 'reducedMotion' | 'darkMode') {
     onUpdateProgress({
@@ -143,6 +145,33 @@ export default function SettingsScreen({ progress, onUpdateProgress, onBack }: S
       <section>
         <h2 className="font-display text-xl font-bold text-gray-700 mb-3">Monster Book</h2>
         <MonsterBook entries={progress.monsterBook} maxFactor={progress.maxFactor} />
+      </section>
+
+      <section>
+        <h2 className="font-display text-xl font-bold text-gray-700 mb-3">Your Gear</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {progress.cosmetics.map((c) => {
+            const unlocked = !!c.unlockedAt || (c.premium && passActive);
+            return (
+              <div
+                key={c.id}
+                className={`flex flex-col items-center gap-1 rounded-2xl border-2 p-3 text-center ${
+                  unlocked ? 'bg-purple-50 border-purple-300' : 'bg-gray-50 border-gray-200'
+                }`}
+              >
+                <span className={`text-2xl ${unlocked ? '' : 'opacity-30 grayscale'}`} aria-hidden="true">
+                  {c.icon}
+                </span>
+                <span className={`text-xs font-bold ${unlocked ? 'text-purple-700' : 'text-gray-400'}`}>
+                  {c.name}
+                </span>
+                {c.premium && !unlocked && (
+                  <span className="text-[10px] font-bold text-amber-600">👑 Knight's Pass</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section>

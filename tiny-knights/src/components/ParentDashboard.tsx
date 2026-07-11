@@ -2,9 +2,11 @@ import type { UserProgress } from '../types';
 import { getOverallMasteryPercent, parseFactKey } from '../lib/facts';
 import { getMasteryLabel } from '../lib/mastery';
 import { getQuestName } from '../lib/rewards';
+import { openProgressReport } from '../lib/progressReport';
 
 type ParentDashboardProps = {
   progress: UserProgress;
+  passActive: boolean;
   onReset: () => void;
   onMaxFactorChange: (value: 10 | 12) => void;
   onSessionLengthChange: (value: number) => void;
@@ -13,6 +15,7 @@ type ParentDashboardProps = {
 
 export default function ParentDashboard({
   progress,
+  passActive,
   onReset,
   onMaxFactorChange,
   onSessionLengthChange,
@@ -67,6 +70,22 @@ export default function ParentDashboard({
           icon="🧭"
         />
       </div>
+
+      {/* Progress report */}
+      <section>
+        {passActive ? (
+          <button
+            onClick={() => openProgressReport(progress)}
+            className="rounded-xl bg-knight-blue text-white font-bold text-sm px-4 py-2 hover:bg-knight-blue-dark transition-colors"
+          >
+            🖨️ Print Progress Report
+          </button>
+        ) : (
+          <p className="text-sm text-gray-500">
+            👑 Printable progress reports come with the Knight's Pass (see below).
+          </p>
+        )}
+      </section>
 
       {/* Weak facts */}
       <section>

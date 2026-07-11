@@ -15,8 +15,13 @@ multiplication questions — spaced repetition dressed up as a knight's adventur
   correct answers across at least three separate sessions
 - **Progression** — XP, coins, badges, cosmetic unlocks, a monster book, and a
   daily streak
-- **Parent Dashboard** — mastery overview, weak/slow facts, session history,
-  table range (1–10 or 1–12), and session length controls
+- **Parent Dashboard** — behind a grown-ups-only gate: mastery overview,
+  weak/slow facts, session history, table range (1–10 or 1–12), and session
+  length controls
+- **Knight's Pass** — optional one-time supporter unlock (activation codes
+  validated offline via SHA-256, see `src/lib/entitlements.ts`): premium gear
+  pack and printable progress reports; the pedagogy stays free and the kid-facing
+  game never shows prices
 - **No account, no ads** — all progress is saved in the browser via
   `localStorage`; includes dark mode, reduced motion, and sound toggles
 

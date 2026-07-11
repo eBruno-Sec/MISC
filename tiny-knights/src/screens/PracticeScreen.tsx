@@ -57,6 +57,9 @@ export type SessionResult = {
   xpEarned: number;
   coinsEarned: number;
   bossWon: boolean;
+  /** False when the knight was defeated or the player left early — progress
+      still saves, but no victory screen or quest completion is recorded. */
+  completed: boolean;
 };
 
 /**
@@ -254,7 +257,7 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
     setAnswerValue((v) => v.slice(0, -1));
   }
 
-  function finishSession(overrides?: SessionOverrides) {
+  function finishSession(overrides?: SessionOverrides, completed = true) {
     if (isComplete) return;
     setIsComplete(true);
 
@@ -312,7 +315,22 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
       monsterBook: updatedMonsterBook,
     };
 
-    onFinish({ session, updatedProgress, xpEarned: finalXpEarned, coinsEarned: finalCoinsEarned, bossWon: finalBossWon });
+    onFinish({
+      session,
+      updatedProgress,
+      xpEarned: finalXpEarned,
+      coinsEarned: finalCoinsEarned,
+      bossWon: finalBossWon,
+      completed,
+    });
+  }
+
+  /** Save partial progress when leaving mid-session, then hand control back. */
+  function handleExit() {
+    if (!isComplete && questionsAnswered > 0) {
+      finishSession(undefined, false);
+    }
+    onExit();
   }
 
   function advanceToNext(newPlan?: PlannedQuestion[], overrides?: SessionOverrides) {
@@ -448,7 +466,20 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
         });
         setAnswerValue('');
         setShowMultipleChoice(false);
-        setTimeout(() => setBattleStatus('defeat'), reducedMotion ? 0 : 500);
+        // Defeat still saves the session: the correct answers a kid earned
+        // before going down should never vanish.
+        const defeatOverrides: SessionOverrides = {
+          facts: newFacts,
+          incorrectCount: incorrectCount + 1,
+          questionsAnswered: questionsAnswered + 1,
+          responseTimesMs: [...responseTimesMs, responseMs],
+          factsPracticed: new Set(factsPracticed).add(currentFact.key),
+          missedFacts: new Set(missedFacts).add(currentFact.key),
+        };
+        setTimeout(() => {
+          setBattleStatus('defeat');
+          finishSession(defeatOverrides, false);
+        }, reducedMotion ? 0 : 500);
         return;
       }
 
@@ -578,7 +609,7 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
       {/* Header */}
       <div className="flex items-center justify-between shrink-0">
         <button
-          onClick={onExit}
+          onClick={handleExit}
           className="rounded-full bg-white border-2 border-gray-200 w-10 h-10 flex items-center justify-center text-xl shadow-sm hover:bg-gray-50"
           aria-label="Exit to home"
         >

@@ -35,7 +35,8 @@ export function checkAndAwardBadges(
   sessionMissedCount: number,
   sessionFactsMastered: FactKey[],
   bossWon: boolean,
-  practicedTablesThisSession: Set<number>
+  practicedTablesThisSession: Set<number>,
+  sessionCompleted = true
 ): { badges: Badge[]; newlyEarned: Badge[] } {
   const now = new Date().toISOString();
   const badges = progress.badges.map((b) => ({ ...b }));
@@ -72,7 +73,8 @@ export function checkAndAwardBadges(
     }
   }
 
-  if (sessionMissedCount === 0) award('badge-no-mistake');
+  // Requires a finished session, otherwise quitting after one answer earns it
+  if (sessionCompleted && sessionMissedCount === 0) award('badge-no-mistake');
   if (sessionFactsMastered.length > 0) award('badge-comeback');
   if (progress.dailyStreak >= 7) award('badge-7-day-streak');
   if (mode === 'bossBattle' && bossWon) award('badge-boss-slayer');

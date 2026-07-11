@@ -75,6 +75,8 @@ export type CosmeticUnlock = {
   type: 'sword' | 'shield' | 'helmet';
   icon: string;
   unlockedAt: string | null;
+  /** Part of the Knight's Pass supporter pack (not unlockable by level) */
+  premium?: boolean;
 };
 
 export type MonsterBookEntry = {

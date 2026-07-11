@@ -76,6 +76,13 @@ export function loadProgress(): UserProgress {
   }
 }
 
+/** Keep the player's earned items but pick up any newly added definitions. */
+function mergeById<T extends { id: string }>(stored: T[] | undefined, defaults: T[]): T[] {
+  if (!stored || stored.length === 0) return defaults;
+  const have = new Set(stored.map((s) => s.id));
+  return [...stored, ...defaults.filter((d) => !have.has(d.id))];
+}
+
 function migrateProgress(data: UserProgress): UserProgress {
   const defaults = createDefaultProgress();
 
@@ -96,8 +103,8 @@ function migrateProgress(data: UserProgress): UserProgress {
     maxFactor,
     facts,
     settings: { ...defaults.settings, ...(data.settings ?? {}) },
-    badges: data.badges && data.badges.length > 0 ? data.badges : defaults.badges,
-    cosmetics: data.cosmetics && data.cosmetics.length > 0 ? data.cosmetics : defaults.cosmetics,
+    badges: mergeById(data.badges, defaults.badges),
+    cosmetics: mergeById(data.cosmetics, defaults.cosmetics),
     monsterBook: data.monsterBook ?? [],
     sessions: (data.sessions ?? []).slice(-50),
     questCompletions: data.questCompletions ?? {},

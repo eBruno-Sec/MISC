@@ -64,7 +64,7 @@ export default function App() {
   }
 
   function handleFinishSession(result: SessionResult) {
-    const { updatedProgress, session, bossWon } = result;
+    const { updatedProgress, session, bossWon, completed } = result;
 
     const practicedTables = new Set<number>();
     session.factsPracticed.forEach((key) => {
@@ -80,7 +80,8 @@ export default function App() {
       session.missedFacts.length,
       session.factsMastered,
       bossWon,
-      practicedTables
+      practicedTables,
+      completed
     );
 
     const { cosmetics, newlyUnlocked } = checkCosmeticUnlocks(updatedProgress, afterLevel);
@@ -93,15 +94,18 @@ export default function App() {
     const accuracy =
       session.questionsAnswered > 0 ? Math.round((session.correct / session.questionsAnswered) * 100) : 0;
     const stars = accuracy >= 90 ? 3 : accuracy >= 70 ? 2 : accuracy >= 40 ? 1 : 0;
-    const questCompletions = recordQuestCompletion(
-      updatedProgress,
-      session.mode,
-      activeTable,
-      accuracy,
-      session.correct,
-      stars,
-      activeBossId
-    );
+    // Only fully played sessions count as quest completions
+    const questCompletions = completed
+      ? recordQuestCompletion(
+          updatedProgress,
+          session.mode,
+          activeTable,
+          accuracy,
+          session.correct,
+          stars,
+          activeBossId
+        )
+      : updatedProgress.questCompletions;
 
     const finalProgress: UserProgress = {
       ...updatedProgress,
@@ -113,6 +117,11 @@ export default function App() {
     };
 
     setProgress(finalProgress);
+
+    // Defeats and early exits save progress silently; PracticeScreen stays in
+    // control of what the player sees (defeat screen, or the exit navigation).
+    if (!completed) return;
+
     setVictoryData({
       result: { ...result, updatedProgress: finalProgress },
       newlyEarnedBadges: newlyEarned,

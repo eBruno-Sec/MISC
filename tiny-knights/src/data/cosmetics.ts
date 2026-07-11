@@ -9,6 +9,11 @@ export const COSMETIC_DEFINITIONS: Omit<CosmeticUnlock, 'unlockedAt'>[] = [
   { id: 'helmet-leather', name: 'Leather Cap', type: 'helmet', icon: '🧢' },
   { id: 'helmet-iron', name: 'Iron Helmet', type: 'helmet', icon: '🪖' },
   { id: 'helmet-gold', name: 'Golden Crown', type: 'helmet', icon: '👑' },
+  // Knight's Pass supporter pack
+  { id: 'sword-dragon', name: 'Dragonfang Blade', type: 'sword', icon: '🐉', premium: true },
+  { id: 'shield-royal', name: 'Royal Aegis', type: 'shield', icon: '🦁', premium: true },
+  { id: 'shield-star', name: 'Starlight Bulwark', type: 'shield', icon: '✨', premium: true },
+  { id: 'helmet-phoenix', name: 'Phoenix Plume', type: 'helmet', icon: '🔥', premium: true },
 ];
 
 export function createDefaultCosmetics(): CosmeticUnlock[] {

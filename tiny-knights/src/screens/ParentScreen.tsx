@@ -1,5 +1,9 @@
+import { useState } from 'react';
 import type { UserProgress } from '../types';
 import ParentDashboard from '../components/ParentDashboard';
+import ParentGate from '../components/ParentGate';
+import KnightsPassSection from '../components/KnightsPassSection';
+import { useKnightsPass } from '../lib/entitlements';
 import { extendFacts } from '../lib/facts';
 
 type ParentScreenProps = {
@@ -10,6 +14,9 @@ type ParentScreenProps = {
 };
 
 export default function ParentScreen({ progress, onUpdateProgress, onReset, onBack }: ParentScreenProps) {
+  const [verified, setVerified] = useState(false);
+  const { passActive } = useKnightsPass();
+
   function handleMaxFactorChange(value: 10 | 12) {
     onUpdateProgress({
       ...progress,
@@ -33,6 +40,10 @@ export default function ParentScreen({ progress, onUpdateProgress, onReset, onBa
     });
   }
 
+  if (!verified) {
+    return <ParentGate onPass={() => setVerified(true)} onBack={onBack} />;
+  }
+
   return (
     <div className="min-h-dvh flex flex-col gap-6 px-4 py-6 max-w-3xl mx-auto pb-8">
       <div className="flex items-center gap-3">
@@ -48,11 +59,14 @@ export default function ParentScreen({ progress, onUpdateProgress, onReset, onBa
 
       <ParentDashboard
         progress={progress}
+        passActive={passActive}
         onReset={onReset}
         onMaxFactorChange={handleMaxFactorChange}
         onSessionLengthChange={handleSessionLengthChange}
         onTimedModeToggle={handleTimedModeToggle}
       />
+
+      <KnightsPassSection />
     </div>
   );
 }
