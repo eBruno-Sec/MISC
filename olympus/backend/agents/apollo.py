@@ -359,8 +359,10 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         # nonce'd script below so the report can run under a strict CSP.
         toolbar_html = (
             '<div class="export-bar">'
-            '<button id="oly-print">Print / PDF</button>'
-            '<button id="oly-md">Markdown</button>'
+            '<button id="oly-theme">&#x2600; Light</button>'
+            '<button id="oly-print">&#x2399; Print</button>'
+            '<button id="oly-html">HTML</button>'
+            '<button id="oly-md">MD</button>'
             '<button id="oly-txt">TXT</button>'
             '<button id="oly-json">JSON</button>'
             '</div>'
@@ -445,10 +447,21 @@ function olyExport(kind){
   if (kind === 'md') return dl(fname('md'), 'text/markdown', toMd());
   return dl(fname('txt'), 'text/plain', toTxt());
 }
+function toHtml(){
+  dl(fname('html'), 'text/html', '<!DOCTYPE html>' + document.documentElement.outerHTML);
+}
+var _lightMode = false;
+function toggleTheme(){
+  _lightMode = !_lightMode;
+  document.body.setAttribute('data-theme', _lightMode ? 'light' : '');
+  document.getElementById('oly-theme').innerHTML = _lightMode ? '◐ Dark' : '☀ Light';
+}
 document.getElementById('oly-print').addEventListener('click', olyPrint);
+document.getElementById('oly-html').addEventListener('click', toHtml);
 document.getElementById('oly-md').addEventListener('click', function(){ olyExport('md'); });
 document.getElementById('oly-txt').addEventListener('click', function(){ olyExport('txt'); });
 document.getElementById('oly-json').addEventListener('click', function(){ olyExport('json'); });
+document.getElementById('oly-theme').addEventListener('click', toggleTheme);
 </script>"""
         # Nonce first (touches only the template's script tag), then inject the
         # findings JSON so finding text can never collide with a placeholder.
@@ -542,7 +555,31 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 .cand-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
 .cand-kw {{ color: var(--accent2); font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; margin-left: .4rem; }}
 .cand-st {{ color: var(--text-dim); font-size: .7rem; margin-left: .4rem; }}
-@media print {{ .export-bar {{ display: none; }} body {{ background: #fff; color: #000; }} .report-header, .section, .finding {{ break-inside: avoid; }} }}
+[data-theme="light"] {{
+  --bg: #ffffff; --surface: #f5f7fa; --surface2: #eaeef3;
+  --border: #cdd8e3; --border2: #a8bfcc;
+  --accent: #0055a5; --accent2: #cc0033; --accent3: #1a7a00; --gold: #8b5e00;
+  --text: #1a2d3e; --text-dim: #5a7585; --text-bright: #000c18;
+  --mono: 'Courier New', monospace;
+}}
+@media print {{
+  @page {{ margin: 1.5cm 2cm; size: A4; }}
+  :root {{
+    --bg: #ffffff; --surface: #f8f8f8; --surface2: #f0f0f0;
+    --border: #cccccc; --border2: #aaaaaa;
+    --accent: #0055a5; --accent2: #cc0033; --accent3: #1a7a00; --gold: #8b5e00;
+    --text: #111111; --text-dim: #555555; --text-bright: #000000;
+    --mono: 'Courier New', monospace;
+  }}
+  html, body {{ background: #ffffff !important; color: #111 !important; }}
+  .export-bar {{ display: none !important; }}
+  .report-header {{ background: #f5f7fa !important; border-bottom: 2px solid #cdd8e3 !important; }}
+  .meta-cell, .stat, .cov-cell, .host-item, .cand-list li {{ background: #f0f0f0 !important; }}
+  .finding-body pre {{ background: #f0f0f0 !important; color: #1a2d3e !important; }}
+  .finding, .section {{ break-inside: avoid; }}
+  .path-url {{ color: #111 !important; }}
+  a {{ color: #0055a5 !important; }}
+}}
 </style>
 </head>
 <body>

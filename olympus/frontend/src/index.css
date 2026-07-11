@@ -69,6 +69,30 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
+:root[data-theme="light"] {
+  --bg: #f0f4f8;
+  --surface: #ffffff;
+  --surface2: #eef1f5;
+  --surface3: #e3eaf2;
+  --border: #c8d8e4;
+  --border2: #a0b8c8;
+  --accent: #0055a5;
+  --accent-dim: rgba(0, 85, 165, 0.10);
+  --accent2: #cc0033;
+  --accent2-dim: rgba(204, 0, 51, 0.10);
+  --accent3: #1a7a00;
+  --accent3-dim: rgba(26, 122, 0, 0.08);
+  --gold: #8b5e00;
+  --text: #1a2d3e;
+  --text-dim: #5a7585;
+  --text-bright: #000c18;
+  --crit: #cc0033;
+  --high: #c93030;
+  --med: #8b5e00;
+  --low: #0055a5;
+  --info: #5a7585;
+}
+
 @keyframes pulse-border {
   0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.3); }
   50% { box-shadow: 0 0 0 6px rgba(0, 229, 255, 0); }

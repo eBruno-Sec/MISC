@@ -133,6 +133,29 @@ export default function MissionControl() {
 
   useWebSocket(id || null, onWsEvent)
 
+  const downloadSession = () => {
+    if (!mission) return
+    const snap = {
+      version: '1',
+      platform: 'OLYMPUS',
+      exported_at: new Date().toISOString(),
+      mission,
+      findings,
+      logs: logs.slice(-500),
+      notes,
+      status,
+      current_phase: currentPhase,
+      live_hosts: liveHosts,
+    }
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `OLYMPUS_backup_${new Date().toISOString().split('T')[0]}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   const handleRerun = async (agent: GodDef, targets?: string[], options?: object) => {
     if (!id) return
     try {
@@ -206,8 +229,16 @@ export default function MissionControl() {
 
             {/* Export */}
             <div style={{ display: 'flex', gap: '1px' }}>
-              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export CSV">CSV</a>
-              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export JSON">JSON</a>
+              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as CSV">CSV</a>
+              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as JSON">JSON</a>
+              <button
+                onClick={downloadSession}
+                title="Download full session snapshot as JSON (for backup / offline restore)"
+                aria-label="Download session backup"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.75rem', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)', cursor: 'pointer' }}
+              >
+                ↓ SESSION
+              </button>
             </div>
 
             {/* Report */}
