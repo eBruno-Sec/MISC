@@ -842,24 +842,13 @@ function getSev(score, arc) {
   return                      { label:"healthy", display:"No red flags",     color:"#27AE60" };
 }
 
-function computeResult(scores, keys) {
-  const ranked = keys.map(k => ({ k, s:scores[k]||0 })).sort((a,b) => b.s-a.s);
-  const primary   = ranked.find(x => x.s > 3) || null;
-  const secondary = ranked.filter(x => x.s > 1 && x.k !== primary?.k)[0] || null;
-  const pk = primary?.k || null;
-  const sk = secondary?.k || null;
-  const combinedLabel = pk && sk ? ((COMBINED[pk]?.[sk])||(COMBINED[sk]?.[pk])||null) : null;
-  const severity = pk ? getSev(primary.s, pk) : { label:"healthy", display:"No red flags", color:"#27AE60" };
-  return { primary:pk, secondary:sk, combinedLabel, severity };
-}
-
-function reframe(text, rt) {
+function reframe(text, rt, story=true) {
   if (rt==="current"||rt==="self") return text;
   if (rt==="ex") return text
     .replace(/\byour partner\b/gi,"your ex-partner").replace(/\bdoes your\b/gi,"did your")
     .replace(/\bdo you\b/gi,"did you").replace(/\bhave you\b/gi,"had you")
     .replace(/\byou feel\b/gi,"you felt").replace(/\bhas your\b/gi,"had your");
-  if (rt==="new") return "In what you've seen so far: "+text.charAt(0).toLowerCase()+text.slice(1);
+  if (rt==="new") return story ? "In what you've seen so far: "+text.charAt(0).toLowerCase()+text.slice(1) : text;
   return text;
 }
 
@@ -1331,13 +1320,13 @@ function ScenarioQuiz({ rel, onComplete }) {
     <div className="quiz-meta"><span>Scenario {idx+1} of {total}</span></div>
     <div className="scenario-block">
       <div className="scenario-label">{s.title}</div>
-      <p style={{ color:"var(--ink-dim)", fontSize:15, lineHeight:1.75, margin:0 }}>{s.story}</p>
+      <p style={{ color:"var(--ink-dim)", fontSize:15, lineHeight:1.75, margin:0 }}>{reframe(s.story, rel)}</p>
     </div>
     <div className="sec-h" style={{ margin:"20px 0 10px" }}>Your gut reaction —</div>
-    {s.reactions.map((r,i)=>(<button key={i} className={"opt"+(myChoice===i?" sel":"")} onClick={()=>setMyChoice(i)}>{r.t}</button>))}
+    {s.reactions.map((r,i)=>(<button key={i} className={"opt"+(myChoice===i?" sel":"")} onClick={()=>setMyChoice(i)}>{reframe(r.t, rel, false)}</button>))}
     {myChoice!==null && (<>
       <div className="sec-h" style={{ margin:"22px 0 10px" }}>{isSelf?"Your partner's likely reaction —":"Their gut reaction —"}</div>
-      {s.reactions.map((r,i)=>(<button key={i} className={"opt partner-opt"+(theirChoice===i?" sel":"")} onClick={()=>setTheirChoice(i)}>{r.t}</button>))}
+      {s.reactions.map((r,i)=>(<button key={i} className={"opt partner-opt"+(theirChoice===i?" sel":"")} onClick={()=>setTheirChoice(i)}>{reframe(r.t, rel, false)}</button>))}
     </>)}
     {myChoice!==null && theirChoice!==null && (<>
       <div className="sec-h" style={{ margin:"22px 0 10px" }}>How often does this play out?</div>
