@@ -775,7 +775,7 @@ const SCENARIOS = [
     reactions:[
       { t:"Bring it up gently and ask if everything's okay", a:null, w:0 },
       { t:"Pull back too and wait for it to resolve itself", a:"stone", w:1 },
-      { t:"Drop hints or make comments that imply something is owed", a:"lovebomb", w:2 },
+      { t:"Drop hints or make comments that imply something is owed", a:"sexual", w:2 },
       { t:"Go cold and stop initiating anything at all", a:"passive", w:2 },
       { t:"Bring it up mid-argument as proof they don't really care", a:"blame", w:3 },
     ]
@@ -848,7 +848,7 @@ function reframe(text, rt, story=true) {
     .replace(/\byour partner\b/gi,"your ex-partner").replace(/\bdoes your\b/gi,"did your")
     .replace(/\bdo you\b/gi,"did you").replace(/\bhave you\b/gi,"had you")
     .replace(/\byou feel\b/gi,"you felt").replace(/\bhas your\b/gi,"had your");
-  if (rt==="new") return story ? "In what you've seen so far: "+text.charAt(0).toLowerCase()+text.slice(1) : text;
+  if (rt==="new") { const t2=text.replace(/\byour partner\b/gi,"this person"); return story ? "In what you've seen so far: "+t2.charAt(0).toLowerCase()+t2.slice(1) : t2; }
   return text;
 }
 
@@ -1338,36 +1338,44 @@ function ScenarioQuiz({ rel, onComplete }) {
   </div>);
 }
 
-function DualResults({ dualResult, onWhatNow, onReport, onRestart }) {
-  const { partnerScores, userScores, flaggedPartner, primary:pk, secondary:sk, combinedLabel, severity } = dualResult;
-  const partnerKeys = Object.keys(partnerScores).sort((a,b)=>(partnerScores[b]||0)-(partnerScores[a]||0));
-  const userFlagged = Object.keys(userScores).filter(k=>(userScores[k]||0)>=4).sort((a,b)=>(userScores[b]||0)-(userScores[a]||0));
+function DualResults({ dualResult, rel, onWhatNow, onReport, onRestart }) {
+  const { partnerScores, userScores, flaggedUser, flaggedPartner, primary:pk, secondary:sk, combinedLabel, severity } = dualResult;
+  const isSelf = rel === "self";
+  const mainScores  = isSelf ? userScores    : partnerScores;
+  const mainFlagged = isSelf ? flaggedUser   : flaggedPartner;
+  const sideScores  = isSelf ? partnerScores : userScores;
+  const sideFlagged = isSelf ? flaggedPartner : flaggedUser;
+  const mainKeys = Object.keys(mainScores).sort((a,b)=>(mainScores[b]||0)-(mainScores[a]||0));
+  const displayPk  = isSelf ? (flaggedUser[0]||null)  : pk;
+  const displaySk  = isSelf ? (flaggedUser[1]||null)  : sk;
+  const displaySev = isSelf ? (flaggedUser[0] ? getSev(userScores[flaggedUser[0]]||0, flaggedUser[0]) : { label:"healthy", display:"No red flags", color:"#27AE60" }) : severity;
+  const displayCombined = isSelf ? null : combinedLabel;
   return (<div className="container view">
     <div className="eyebrow">Your results</div>
     <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Here's what your answers reveal.</h1>
     <div className="notice">RedFlag identifies patterns in behavior, not clinical conditions. Results are for self-reflection only.</div>
-    {pk && (<div className="combined">
-      <div className="l">{severity.display}</div>
-      <div style={{ fontFamily:"var(--display)", fontSize:18, lineHeight:1.3 }}>{ARC[pk]?.street}</div>
-      {combinedLabel && <div style={{ fontSize:13, color:"var(--ink-dim)", marginTop:4 }}>Combined with {ARC[sk]?.street}: &ldquo;{combinedLabel}&rdquo;</div>}
+    {displayPk && (<div className="combined">
+      <div className="l">{displaySev.display}</div>
+      <div style={{ fontFamily:"var(--display)", fontSize:18, lineHeight:1.3 }}>{ARC[displayPk]?.street}</div>
+      {displayCombined && <div style={{ fontSize:13, color:"var(--ink-dim)", marginTop:4 }}>Combined with {ARC[displaySk]?.street}: &ldquo;{displayCombined}&rdquo;</div>}
     </div>)}
     <div className="results">
       <div>
-        <h3 className="sec-h">Their patterns</h3>
-        {partnerKeys.map(k=>{ const sev=getSev(partnerScores[k]||0,k); const fl=(partnerScores[k]||0)>=4; return (
+        <h3 className="sec-h">{isSelf ? "Your patterns" : "Their patterns"}</h3>
+        {mainKeys.map(k=>{ const sev=getSev(mainScores[k]||0,k); const fl=(mainScores[k]||0)>=4; return (
           <div key={k} className="card" style={{ marginBottom:10, opacity:fl?1:.5 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
               <div style={{ fontFamily:"var(--display)", fontWeight:500 }}>{ARC[k]?.street}</div>
               <div style={{ fontFamily:"var(--mono)", fontSize:11, padding:"2px 9px", borderRadius:20, background:fl?"var(--accent-glow)":"var(--bg-2)", color:fl?"var(--accent-bright)":"var(--ink-faint)", whiteSpace:"nowrap" }}>{sev.display}</div>
             </div>
           </div>); })}
-        {userFlagged.length>0 && (<>
+        {sideFlagged.length>0 && (<>
           <div className="divider"/>
-          <h3 className="sec-h">Your own patterns (in this dynamic)</h3>
-          {userFlagged.map(k=>(<div key={k} className="card" style={{ marginBottom:10 }}>
+          <h3 className="sec-h">{isSelf ? "Their patterns (as context)" : "Your own patterns (in this dynamic)"}</h3>
+          {sideFlagged.map(k=>(<div key={k} className="card" style={{ marginBottom:10 }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:10 }}>
               <div style={{ fontFamily:"var(--display)", fontWeight:500 }}>{ARC[k]?.street}</div>
-              <div style={{ fontFamily:"var(--mono)", fontSize:11, padding:"2px 9px", borderRadius:20, background:"var(--bg-2)", color:"var(--ink-faint)", whiteSpace:"nowrap" }}>score {userScores[k]}</div>
+              <div style={{ fontFamily:"var(--mono)", fontSize:11, padding:"2px 9px", borderRadius:20, background:"var(--bg-2)", color:"var(--ink-faint)", whiteSpace:"nowrap" }}>score {sideScores[k]}</div>
             </div>
           </div>))}
         </>)}
@@ -1386,11 +1394,13 @@ function DualResults({ dualResult, onWhatNow, onReport, onRestart }) {
   </div>);
 }
 
-function WhatNow({ dualResult, onReport, onFinder, onRestart }) {
+function WhatNow({ dualResult, rel, onReport, onFinder, onRestart }) {
   const [tab, setTab] = useState(0);
-  const { flaggedPartner, partnerScores } = dualResult || { flaggedPartner:[], partnerScores:{} };
+  const { flaggedPartner, partnerScores, flaggedUser, userScores } = dualResult || { flaggedPartner:[], partnerScores:{}, flaggedUser:[], userScores:{} };
+  const isSelf = rel === "self";
+  const mainFlagged = isSelf ? flaggedUser : flaggedPartner;
   const tabs = ["Your patterns","Scripts","Can it change?","Red vs green","Get help"];
-  const scripts = SCRIPTS[flaggedPartner[0]] || DEFAULT_SCRIPTS;
+  const scripts = SCRIPTS[mainFlagged[0]] || DEFAULT_SCRIPTS;
   return (<div className="container narrow view">
     <div className="eyebrow">What now</div>
     <h1 style={{ fontSize:34, fontWeight:400, marginBottom:12 }}>Here's where to go from here.</h1>
@@ -1398,9 +1408,9 @@ function WhatNow({ dualResult, onReport, onFinder, onRestart }) {
     <div className="tabs">{tabs.map((t,i)=>(<button key={i} className={"tab"+(tab===i?" active":"")} onClick={()=>setTab(i)}>{t}</button>))}</div>
     {tab===0 && (<div>
       <h3 className="sec-h">Patterns you flagged</h3>
-      {flaggedPartner.length===0
+      {mainFlagged.length===0
         ? <p style={{ color:"var(--ink-dim)" }}>You didn't cross the red-flag line across the scenarios. That's a real result — worth trusting, not explaining away.</p>
-        : <div className="grid grid-2">{flaggedPartner.map(k=>{ const P=PLAY[k]||{}; return (
+        : <div className="grid grid-2">{mainFlagged.map(k=>{ const P=PLAY[k]||{}; return (
             <div key={k} className="card">
               <div className="arc-name">{ARC[k].street}</div>
               <div className="arc-clin" style={{ marginBottom:8 }}>{ARC[k].clinical}</div>
@@ -1413,9 +1423,9 @@ function WhatNow({ dualResult, onReport, onFinder, onRestart }) {
     {tab===2 && (<div>
       <h3 className="sec-h">Can this change?</h3>
       <p style={{ color:"var(--ink-dim)", marginBottom:14 }}>Short version: change is possible, but it has to be theirs. You can set the conditions and hold the boundary — you can't do the changing for them. Watch behavior over months, not promises over dinner.</p>
-      {flaggedPartner.length===0
+      {mainFlagged.length===0
         ? <p style={{ color:"var(--ink-dim)" }}>Nothing crossed the line, so there's nothing to "fix." Keep noticing patterns over time.</p>
-        : <div className="grid grid-2">{flaggedPartner.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
+        : <div className="grid grid-2">{mainFlagged.map(k=>{ const P=PLAY[k]||{change:{real:[],fake:[]}}; return (
             <div key={k} className="card">
               <div className="arc-name" style={{ marginBottom:8 }}>{ARC[k].street}</div>
               {P.safety && <div className="notice danger" style={{ marginBottom:10 }}>This pattern can involve real danger. It is <strong>not</strong> a fix-it-from-the-inside project. Change, if it comes, needs professional help — and your safety comes first.</div>}
@@ -1424,7 +1434,7 @@ function WhatNow({ dualResult, onReport, onFinder, onRestart }) {
               <div className="sec-h" style={{ color:"var(--accent-bright)", margin:"8px 0 6px" }}>Signs of fake change</div>
               {(P.change?.fake||[]).map((s,si)=><p key={si} className="hang" style={{ borderColor:"var(--accent)" }}>{s}</p>)}
             </div>); })}</div>}
-      {flaggedPartner.length>0 && <p style={{ color:"var(--ink-dim)", fontSize:14, marginTop:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
+      {mainFlagged.length>0 && <p style={{ color:"var(--ink-dim)", fontSize:14, marginTop:12 }}>If the fake-change signs keep repeating, believe the pattern — not the apology.</p>}
     </div>)}
     {tab===3 && (<div>
       <h3 className="sec-h" style={{ color:"var(--green)" }}>Signs this can be worked on</h3>
@@ -1599,8 +1609,8 @@ function App() {
           {view===VIEWS.QUIZ && (<>
             {screen===SCREENS.ONBOARD  && <Onboarding onSelect={(r)=>{ setRel(r); go(SCREENS.SCENARIO); }}/>}
             {screen===SCREENS.SCENARIO && <ScenarioQuiz rel={rel} onComplete={(ans)=>{ const dr=computeDualResult(ans); setScenarios(ans); setDualResult(dr); go(SCREENS.RESULTS); }}/>}
-            {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
-            {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
+            {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} rel={rel} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
+            {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} rel={rel} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
             {screen===SCREENS.REPORT   && dualResult && <ReportScreen rel={rel} dualResult={dualResult} scenarioAnswers={scenarios} onBack={()=>go(SCREENS.WN)}/>}
           </>)}
         </main>
