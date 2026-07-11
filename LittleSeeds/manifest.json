@@ -1,0 +1,35 @@
+{
+  "name": "Little Seeds – Bedtime Stories",
+  "short_name": "Little Seeds",
+  "description": "20 calming bedtime stories for kids ages 2–7. Plant courage, kindness, and wonder — one quiet night at a time.",
+  "start_url": "/MISC/LittleSeeds/",
+  "scope": "/MISC/LittleSeeds/",
+  "display": "standalone",
+  "background_color": "#1a1040",
+  "theme_color": "#1a1040",
+  "orientation": "portrait-primary",
+  "categories": ["education", "kids", "lifestyle"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Tonight's Story",
+      "short_name": "Tonight",
+      "url": "/MISC/LittleSeeds/Story/Day1.html",
+      "icons": [{ "src": "icon.svg", "sizes": "any" }]
+    }
+  ]
+}

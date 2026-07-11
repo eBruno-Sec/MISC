@@ -9,6 +9,7 @@
   <meta property="og:description" content="20 magical bedtime stories that plant courage, kindness, and wonder — one quiet night at a time." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>" />
+  <link rel="manifest" href="./manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
@@ -783,6 +784,11 @@
   </footer>
 
   <script>
+    // ── PWA: service worker registration ──────────────────────────────────────
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js', { scope: '/MISC/LittleSeeds/' }).catch(() => {});
+    }
+
     // ── Constants ──────────────────────────────────────────────────────────────
     const FREE_DAYS     = 3;
     const LS_PREMIUM    = 'ls_premium';
@@ -938,26 +944,26 @@
 
     // ── Story data ─────────────────────────────────────────────────────────────
     const stories = [
-      { day:1,  emoji:'🌰', title:'The Brave Seed and the Giant Oak',         theme:'Courage · Patience · Growth Mindset · Resilience',        accent:'#4caf7d' },
-      { day:2,  emoji:'⭐', title:'The Dream That Built the Stars',            theme:'Calmness · Wonder · Inner Peace · Big Dreams',            accent:'#ffe066' },
-      { day:3,  emoji:'🐯', title:'Kaito and the Spirit of the White Tiger',   theme:'Courage · Discipline · Self-Belief · Mental Focus',       accent:'#e67e22' },
-      { day:4,  emoji:'🦋', title:'Kaito and the Words That Made Him Fly',     theme:'Family Support · Confidence · Feedback · Motivation',     accent:'#9b59b6' },
-      { day:5,  emoji:'🥕', title:'Leo and the Power Plates',                  theme:'Healthy Eating · Strength · Curiosity · Self-Care',       accent:'#f9c74f' },
-      { day:6,  emoji:'👟', title:'Ethan and the Little Steps',                theme:'Sibling Bond · Growth · Patience · Empathy · Leadership', accent:'#1abc9c' },
-      { day:7,  emoji:'🌳', title:'The Thankful Tree',                         theme:'Gratitude · Family · Mindfulness · Happiness',            accent:'#4caf7d' },
-      { day:8,  emoji:'⏰', title:'Milo and the Race Against Later',           theme:'Time Management · Motivation · Focus · Action',           accent:'#ff6b6b' },
-      { day:9,  emoji:'🖊️', title:'Jonah and the Broken Pen',                 theme:'Resilience · Self-Regulation · Problem Solving',          accent:'#5dade2' },
-      { day:10, emoji:'⚡', title:'Eli and the Storm Inside',                  theme:'Self-Kindness · Emotional Regulation · Inner Strength',   accent:'#f9c74f' },
-      { day:11, emoji:'🎒', title:'The Heavy Backpack',                        theme:'Forgiveness · Letting Go · Responsibility',               accent:'#8e44ad' },
-      { day:12, emoji:'🗣️', title:'The Talking Stick',                        theme:'Listening · Respect · Patience · Communication',          accent:'#1abc9c' },
-      { day:13, emoji:'🧠', title:'Nilo and the Brain Nap',                    theme:'Rest · Brain Growth · Self-Care · Health',                accent:'#3498db' },
-      { day:14, emoji:'🥋', title:'Kai and the Practice Path',                 theme:'Discipline · Passion · Mastery · Effort · Growth',        accent:'#e67e22' },
-      { day:15, emoji:'🪞', title:"Nari's Mirror",                             theme:'Self-Love · Confidence · Positive Self-Talk · Self-Worth', accent:'#ff6b9d' },
-      { day:16, emoji:'🦁', title:'Eli and the Little Lion Voice',             theme:'Confidence · Courage · Self-Belief · Inner Voice',        accent:'#f39c12' },
-      { day:17, emoji:'🤝', title:'Zane and the Circle of Good Friends',       theme:'Friendship · Respect · Trust · Values',                   accent:'#27ae60' },
-      { day:18, emoji:'🧵', title:'Miko and the Heart Rope',                   theme:'Parent-Child Bond · Love · Trust · Time Together',        accent:'#ff6b6b' },
-      { day:19, emoji:'🕯️', title:'Jonah and the Cave of Shadows',            theme:'Courage · Facing Fears · Emotional Strength · Growth',    accent:'#5dade2' },
-      { day:20, emoji:'🧱', title:'Niko and the Falling Tower',                theme:'Resilience · Growth Mindset · Grit · Self-Compassion',    accent:'#ffe066' },
+      { day:1,  emoji:'🌰', title:'The Brave Seed and the Giant Oak',         theme:'Courage · Patience · Growth Mindset · Resilience',        accent:'#4caf7d', mins:5 },
+      { day:2,  emoji:'⭐', title:'The Dream That Built the Stars',            theme:'Calmness · Wonder · Inner Peace · Big Dreams',            accent:'#ffe066', mins:6 },
+      { day:3,  emoji:'🐯', title:'Kaito and the Spirit of the White Tiger',   theme:'Courage · Discipline · Self-Belief · Mental Focus',       accent:'#e67e22', mins:7 },
+      { day:4,  emoji:'🦋', title:'Kaito and the Words That Made Him Fly',     theme:'Family Support · Confidence · Feedback · Motivation',     accent:'#9b59b6', mins:5 },
+      { day:5,  emoji:'🥕', title:'Leo and the Power Plates',                  theme:'Healthy Eating · Strength · Curiosity · Self-Care',       accent:'#f9c74f', mins:5 },
+      { day:6,  emoji:'👟', title:'Ethan and the Little Steps',                theme:'Sibling Bond · Growth · Patience · Empathy · Leadership', accent:'#1abc9c', mins:6 },
+      { day:7,  emoji:'🌳', title:'The Thankful Tree',                         theme:'Gratitude · Family · Mindfulness · Happiness',            accent:'#4caf7d', mins:5 },
+      { day:8,  emoji:'⏰', title:'Milo and the Race Against Later',           theme:'Time Management · Motivation · Focus · Action',           accent:'#ff6b6b', mins:5 },
+      { day:9,  emoji:'🖊️', title:'Jonah and the Broken Pen',                 theme:'Resilience · Self-Regulation · Problem Solving',          accent:'#5dade2', mins:5 },
+      { day:10, emoji:'⚡', title:'Eli and the Storm Inside',                  theme:'Self-Kindness · Emotional Regulation · Inner Strength',   accent:'#f9c74f', mins:6 },
+      { day:11, emoji:'🎒', title:'The Heavy Backpack',                        theme:'Forgiveness · Letting Go · Responsibility',               accent:'#8e44ad', mins:5 },
+      { day:12, emoji:'🗣️', title:'The Talking Stick',                        theme:'Listening · Respect · Patience · Communication',          accent:'#1abc9c', mins:5 },
+      { day:13, emoji:'🧠', title:'Nilo and the Brain Nap',                    theme:'Rest · Brain Growth · Self-Care · Health',                accent:'#3498db', mins:5 },
+      { day:14, emoji:'🥋', title:'Kai and the Practice Path',                 theme:'Discipline · Passion · Mastery · Effort · Growth',        accent:'#e67e22', mins:6 },
+      { day:15, emoji:'🪞', title:"Nari's Mirror",                             theme:'Self-Love · Confidence · Positive Self-Talk · Self-Worth', accent:'#ff6b9d', mins:5 },
+      { day:16, emoji:'🦁', title:'Eli and the Little Lion Voice',             theme:'Confidence · Courage · Self-Belief · Inner Voice',        accent:'#f39c12', mins:5 },
+      { day:17, emoji:'🤝', title:'Zane and the Circle of Good Friends',       theme:'Friendship · Respect · Trust · Values',                   accent:'#27ae60', mins:5 },
+      { day:18, emoji:'🧵', title:'Miko and the Heart Rope',                   theme:'Parent-Child Bond · Love · Trust · Time Together',        accent:'#ff6b6b', mins:6 },
+      { day:19, emoji:'🕯️', title:'Jonah and the Cave of Shadows',            theme:'Courage · Facing Fears · Emotional Strength · Growth',    accent:'#5dade2', mins:6 },
+      { day:20, emoji:'🧱', title:'Niko and the Falling Tower',                theme:'Resilience · Growth Mindset · Grit · Self-Compassion',    accent:'#ffe066', mins:5 },
     ];
 
     // ── Story grid (with free/locked/read states) ──────────────────────────────
@@ -1009,6 +1015,7 @@
           <span class="story-emoji">${s.emoji}</span>
           <span class="story-title">${s.title}</span>
           <span class="story-theme">${s.theme}</span>
+          <span class="read-time">~${s.mins} min read aloud</span>
           ${locked ? '<span class="lock-icon" aria-hidden="true">🔒</span>' : ''}
         `;
         grid.appendChild(el);

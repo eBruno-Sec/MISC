@@ -1,5 +1,19 @@
 // ── Little Seeds — Shared Story Page Logic ───────────────────────────────────
 
+// PWA: inject manifest link (story pages don't have it in their <head>)
+(function() {
+  if (!document.querySelector('link[rel="manifest"]')) {
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = '../manifest.json';
+    document.head.appendChild(link);
+  }
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('../sw.js', { scope: '/MISC/LittleSeeds/' }).catch(() => {});
+  }
+})();
+
 const _stories = [
   { day:1,  emoji:'🌰', title:'The Brave Seed and the Giant Oak' },
   { day:2,  emoji:'⭐', title:'The Dream That Built the Stars' },
@@ -59,8 +73,32 @@ function markRead(day) {
   localStorage.setItem(LS_READ, JSON.stringify([...s]));
 }
 
-// Auto-mark when a reader reaches the story page
-if (_currentDay) markRead(_currentDay);
+// Auto-mark when a reader reaches the story page, then check for Day 3 completion
+if (_currentDay) {
+  markRead(_currentDay);
+
+  // After finishing the last free story, show a friendly upgrade nudge
+  if (_currentDay === FREE_DAYS && !isPremium()) {
+    const read = getReadStories();
+    const allFreeRead = [1, 2, 3].every(d => read.has(d));
+    if (allFreeRead) {
+      document.addEventListener('DOMContentLoaded', () => {
+        const wrapper = document.querySelector('.story-wrapper');
+        if (!wrapper) return;
+        const nudge = document.createElement('div');
+        nudge.className = 'free-complete-nudge';
+        nudge.innerHTML = `
+          <span class="nudge-icon">🌟</span>
+          <h3>You've read all 3 free stories!</h3>
+          <p>Your little reader is off to a wonderful start. Continue the journey with all 20 nights of courage, kindness, and wonder.</p>
+          <a href="../index.html#upgrade" class="nudge-btn">🌱 Unlock All 20 Stories</a>
+          <p class="nudge-sub">From $2.99/month · Cancel any time</p>
+        `;
+        wrapper.appendChild(nudge);
+      });
+    }
+  }
+}
 
 // ── STARS ─────────────────────────────────────────────────────────────────────
 
@@ -124,6 +162,14 @@ if (_currentDay) markRead(_currentDay);
     <button class="dimmer-sound-btn" id="soundBtn" onclick="toggleSound()">
       <span id="soundBtnIcon">🌧️</span> Gentle Rain
     </button>
+    <div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:0.85rem;margin-top:0.85rem">
+      <span class="dimmer-label">Text Size</span>
+      <div class="font-size-row">
+        <button class="fz-btn" id="fzNormal" onclick="setFontSize('normal')" style="font-size:0.85rem" aria-label="Normal text">A</button>
+        <button class="fz-btn" id="fzLarge"  onclick="setFontSize('large')"  style="font-size:1.05rem" aria-label="Large text">A</button>
+        <button class="fz-btn" id="fzXl"     onclick="setFontSize('xl')"     style="font-size:1.25rem" aria-label="Extra large text">A</button>
+      </div>
+    </div>
   `;
   document.body.appendChild(popup);
 
@@ -149,7 +195,31 @@ if (_currentDay) markRead(_currentDay);
     document.documentElement.style.filter = `brightness(${v}%)`;
     localStorage.setItem(LS_BRIGHT, v);
   });
+
+  // Restore saved font size and highlight active button
+  const savedSize = localStorage.getItem('ls_fontsize') || 'normal';
+  _applyFontSize(savedSize);
 })();
+
+// ── FONT SIZE ─────────────────────────────────────────────────────────────────
+
+const LS_FONTSIZE = 'ls_fontsize';
+
+function _applyFontSize(size) {
+  document.body.classList.remove('font-large', 'font-xl');
+  if (size === 'large') document.body.classList.add('font-large');
+  if (size === 'xl')    document.body.classList.add('font-xl');
+  ['fzNormal', 'fzLarge', 'fzXl'].forEach(id => {
+    document.getElementById(id)?.classList.remove('active');
+  });
+  const map = { normal: 'fzNormal', large: 'fzLarge', xl: 'fzXl' };
+  document.getElementById(map[size])?.classList.add('active');
+}
+
+function setFontSize(size) {
+  _applyFontSize(size);
+  localStorage.setItem(LS_FONTSIZE, size);
+}
 
 // ── AMBIENT RAIN SOUND ────────────────────────────────────────────────────────
 
@@ -197,6 +267,59 @@ function toggleSound() {
 
   _sndPlaying = true;
   if (btn) { btn.classList.add('playing'); btn.innerHTML = '<span id="soundBtnIcon">⏹</span> Stop Rain'; }
+}
+
+// ── SHARE BUTTON ──────────────────────────────────────────────────────────────
+
+(function() {
+  if (!_currentDay) return;
+  const navMain = document.querySelector('.nav-main');
+  if (!navMain) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'share-btn';
+  btn.setAttribute('aria-label', 'Share this story');
+  btn.title = 'Share';
+  btn.innerHTML = '📤';
+  navMain.insertBefore(btn, navMain.querySelector('.nav-stories-btn'));
+  btn.addEventListener('click', shareStory);
+})();
+
+async function shareStory() {
+  const story = _stories.find(s => s.day === _currentDay);
+  if (!story) return;
+  const data = {
+    title: `${story.emoji} ${story.title} — Little Seeds`,
+    text: `We're doing bedtime stories with Little Seeds 🌱 Tonight: "${story.title}"`,
+    url: location.href,
+  };
+  try {
+    if (navigator.share && navigator.canShare?.(data)) {
+      await navigator.share(data);
+    } else {
+      await navigator.clipboard.writeText(location.href);
+      showToast('🌱 Link copied!');
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      await navigator.clipboard.writeText(location.href).catch(() => {});
+      showToast('🌱 Link copied!');
+    }
+  }
+}
+
+function showToast(msg, ms = 2600) {
+  const existing = document.getElementById('ls-toast');
+  existing?.remove();
+  const t = document.createElement('div');
+  t.id = 'ls-toast';
+  t.className = 'ls-toast';
+  t.textContent = msg;
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
+  document.body.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('show')));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 320); }, ms);
 }
 
 // ── STORIES DRAWER ────────────────────────────────────────────────────────────

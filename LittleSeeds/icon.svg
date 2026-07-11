@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#1a1040"/>
+  <!-- Moon crescent -->
+  <circle cx="295" cy="155" r="85" fill="#ffe066"/>
+  <circle cx="330" cy="130" r="70" fill="#1a1040"/>
+  <!-- Stars -->
+  <circle cx="140" cy="90" r="6" fill="#fff8dc" opacity="0.8"/>
+  <circle cx="110" cy="170" r="4" fill="#fff8dc" opacity="0.6"/>
+  <circle cx="380" cy="95" r="5" fill="#fff8dc" opacity="0.7"/>
+  <circle cx="420" cy="200" r="4" fill="#fff8dc" opacity="0.5"/>
+  <circle cx="75" cy="240" r="3" fill="#fff8dc" opacity="0.6"/>
+  <!-- Stem -->
+  <rect x="244" y="285" width="24" height="130" rx="12" fill="#4caf7d"/>
+  <!-- Leaf left -->
+  <ellipse cx="195" cy="340" rx="55" ry="22" fill="#4caf7d" transform="rotate(-35 195 340)"/>
+  <!-- Leaf right -->
+  <ellipse cx="317" cy="325" rx="55" ry="22" fill="#2e7d52" transform="rotate(35 317 325)"/>
+  <!-- Sprout tip -->
+  <ellipse cx="256" cy="288" rx="18" ry="22" fill="#6ee7b7"/>
+  <!-- Soil mound -->
+  <ellipse cx="256" cy="418" rx="100" ry="26" fill="#5c3d1e"/>
+  <ellipse cx="256" cy="408" rx="85" ry="18" fill="#3e2a0f"/>
+</svg>
