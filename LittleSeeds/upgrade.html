@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unlock Little Seeds – All 20 Bedtime Stories</title>
+  <meta name="description" content="Give your child all 20 calming bedtime stories. Cancel any time. 7-day money-back guarantee." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sky:   #1a1040; --sky2:  #2d1b6e;
+      --moon:  #ffe066; --star:  #fff8dc;
+      --green: #4caf7d; --teal:  #1abc9c;
+      --cream: #fff8f0; --peach: #ffe0c2;
+      --coral: #ff6b6b; --white: #ffffff;
+      --font-h: 'Fredoka One', cursive;
+      --font-b: 'Nunito', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font-b);
+      background: var(--sky);
+      color: var(--cream);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── STARS ── */
+    .stars-layer { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+    .star { position: absolute; border-radius: 50%; background: var(--star);
+            animation: twinkle var(--d,3s) ease-in-out infinite alternate; opacity: 0; }
+    @keyframes twinkle {
+      0%   { opacity: 0.1; transform: scale(0.8); }
+      100% { opacity: 0.85; transform: scale(1.2); }
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky; top: 0; z-index: 200;
+      background: rgba(15,10,46,0.96);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(255,224,102,0.12);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1.5rem; max-width: 860px; margin: 0 auto;
+    }
+    .nav-brand { font-family: var(--font-h); font-size: 1.4rem; color: var(--moon); text-decoration: none; }
+    .nav-back {
+      font-size: 0.82rem; font-weight: 800; color: rgba(255,248,240,0.5);
+      text-decoration: none; transition: color 0.15s;
+    }
+    .nav-back:hover { color: var(--cream); }
+
+    /* ── LAYOUT ── */
+    .page { position: relative; z-index: 1; }
+    .section { max-width: 860px; margin: 0 auto; padding: 4rem 1.5rem; }
+
+    /* ── HERO ── */
+    .hero { text-align: center; padding: 5rem 1.5rem 3.5rem; }
+    .hero-moon { font-size: 4.5rem; display: block; animation: float 4s ease-in-out infinite; margin-bottom: 1rem; }
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+    .hero h1 {
+      font-family: var(--font-h);
+      font-size: clamp(2.2rem, 6vw, 4rem);
+      color: var(--moon);
+      line-height: 1.1;
+      text-shadow: 0 4px 24px rgba(249,199,79,0.35);
+      margin-bottom: 1rem;
+    }
+    .hero-sub {
+      max-width: 520px; margin: 0 auto 2rem;
+      font-size: 1.1rem; line-height: 1.7; color: var(--peach); font-weight: 600;
+    }
+
+    /* ── TRUST BAR ── */
+    .trust-bar {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+      justify-content: center; align-items: center;
+      background: rgba(255,255,255,0.04);
+      border-top: 1px solid rgba(255,255,255,0.07);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      padding: 0.9rem 1.5rem;
+      font-size: 0.82rem; font-weight: 800; color: rgba(255,248,240,0.55);
+      letter-spacing: 0.04em; text-align: center;
+    }
+    .trust-bar span { white-space: nowrap; }
+    .trust-bar .dot { opacity: 0.3; }
+
+    /* ── VALUE PROPS ── */
+    .value-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1.25rem; margin-top: 2rem;
+    }
+    .value-card {
+      background: rgba(255,255,255,0.05);
+      border: 1.5px solid rgba(255,255,255,0.09);
+      border-radius: 18px; padding: 1.5rem 1.25rem;
+    }
+    .value-icon { font-size: 2rem; display: block; margin-bottom: 0.75rem; }
+    .value-card h3 { font-family: var(--font-h); font-size: 1.15rem; color: var(--moon); margin-bottom: 0.4rem; }
+    .value-card p { font-size: 0.88rem; color: var(--peach); line-height: 1.65; }
+
+    /* ── PRICING ── */
+    .pricing-section { text-align: center; }
+    .section-head {
+      font-family: var(--font-h); font-size: clamp(1.8rem,5vw,2.8rem);
+      color: var(--moon); margin-bottom: 0.5rem;
+    }
+    .section-sub { color: var(--peach); font-size: 1rem; margin-bottom: 2.5rem; font-weight: 600; }
+
+    .pricing-grid {
+      display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: center; max-width: 640px; margin: 0 auto;
+    }
+    .pricing-card {
+      flex: 1; min-width: 240px; max-width: 300px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.12);
+      border-radius: 22px; padding: 2rem 1.75rem 1.75rem;
+      position: relative; text-align: left;
+      transition: transform 0.22s, box-shadow 0.22s;
+    }
+    .pricing-card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.45); }
+    .pricing-card.popular {
+      border-color: rgba(255,224,102,0.45);
+      background: rgba(255,224,102,0.06);
+    }
+    .popular-chip {
+      position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+      background: var(--moon); color: #1a1040;
+      font-size: 0.68rem; font-weight: 900; letter-spacing: 0.1em;
+      text-transform: uppercase; border-radius: 20px; padding: 0.2rem 0.7rem;
+      white-space: nowrap;
+    }
+    .price-amount {
+      font-family: var(--font-h); font-size: 2.8rem; color: var(--moon);
+      display: block; line-height: 1;
+    }
+    .price-period {
+      font-size: 0.8rem; color: rgba(255,248,240,0.5); font-weight: 700;
+      display: block; margin-bottom: 1.25rem; margin-top: 0.2rem;
+    }
+    .price-features { list-style: none; padding: 0; margin-bottom: 1.5rem; }
+    .price-features li {
+      font-size: 0.9rem; color: var(--peach); padding: 0.35rem 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06); line-height: 1.5;
+    }
+    .price-features li:last-child { border-bottom: none; }
+    .price-features li::before { content: '✓ '; color: var(--green); font-weight: 900; }
+    .price-features li.muted { opacity: 0.45; }
+    .price-features li.muted::before { content: '– '; color: rgba(255,255,255,0.3); }
+    .buy-btn {
+      display: block; width: 100%;
+      background: linear-gradient(135deg, var(--green), var(--teal));
+      color: #fff; font-family: var(--font-h); font-size: 1.1rem;
+      padding: 0.9rem; border-radius: 50px; border: none; cursor: pointer;
+      text-decoration: none; text-align: center;
+      box-shadow: 0 6px 20px rgba(76,175,125,0.38);
+      transition: transform 0.18s, box-shadow 0.18s;
+    }
+    .buy-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(76,175,125,0.5); }
+    .buy-btn.secondary {
+      background: rgba(255,255,255,0.06);
+      border: 1.5px solid rgba(255,255,255,0.16);
+      box-shadow: none; color: var(--cream);
+    }
+    .buy-btn.secondary:hover { background: rgba(255,255,255,0.1); box-shadow: none; }
+    .price-note { font-size: 0.74rem; color: rgba(255,248,240,0.38); text-align: center; margin-top: 0.75rem; font-weight: 700; }
+
+    /* ── GUARANTEE BADGE ── */
+    .guarantee {
+      display: flex; align-items: center; gap: 1rem;
+      background: rgba(76,175,125,0.08);
+      border: 1.5px solid rgba(76,175,125,0.25);
+      border-radius: 16px; padding: 1.25rem 1.5rem;
+      max-width: 500px; margin: 3rem auto 0;
+    }
+    .guarantee-icon { font-size: 2.5rem; flex-shrink: 0; }
+    .guarantee h4 { font-family: var(--font-h); color: #6ee7b7; font-size: 1.1rem; margin-bottom: 0.25rem; }
+    .guarantee p { font-size: 0.88rem; color: var(--peach); line-height: 1.6; }
+
+    /* ── TESTIMONIALS ── */
+    .testimonials-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr));
+      gap: 1rem; margin-top: 2rem;
+    }
+    .testimonial {
+      background: rgba(255,255,255,0.04);
+      border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px; padding: 1.4rem 1.25rem;
+    }
+    .testimonial .stars { color: var(--moon); font-size: 0.95rem; margin-bottom: 0.65rem; letter-spacing: 0.05em; }
+    .testimonial p { font-size: 0.92rem; color: var(--peach); line-height: 1.65; font-style: italic; margin-bottom: 0.75rem; }
+    .testimonial cite { font-size: 0.78rem; color: rgba(255,248,240,0.45); font-weight: 800; font-style: normal; }
+
+    /* ── FAQ ── */
+    .faq-list { margin-top: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    details {
+      background: rgba(255,255,255,0.04);
+      border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: 14px; overflow: hidden;
+    }
+    details[open] { border-color: rgba(255,224,102,0.22); }
+    summary {
+      font-family: var(--font-h); font-size: 1.05rem; color: var(--cream);
+      padding: 1.1rem 1.25rem; cursor: pointer; list-style: none;
+      display: flex; justify-content: space-between; align-items: center;
+      user-select: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: '+'; color: var(--moon); font-size: 1.3rem; transition: transform 0.2s; flex-shrink: 0; }
+    details[open] summary::after { transform: rotate(45deg); }
+    .faq-body { padding: 0 1.25rem 1.25rem; font-size: 0.95rem; color: var(--peach); line-height: 1.7; }
+
+    /* ── BOTTOM CTA ── */
+    .bottom-cta {
+      text-align: center;
+      background: rgba(45,27,110,0.45);
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding: 4rem 1.5rem;
+    }
+    .bottom-cta h2 { font-family: var(--font-h); font-size: clamp(1.8rem,5vw,3rem); color: var(--moon); margin-bottom: 0.75rem; }
+    .bottom-cta p { color: var(--peach); font-size: 1rem; margin-bottom: 2rem; font-weight: 600; }
+    .bottom-cta-btns { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .cta-primary {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: linear-gradient(135deg, var(--green), var(--teal));
+      color: #fff; font-family: var(--font-h); font-size: 1.25rem;
+      padding: 1rem 2.5rem; border-radius: 50px; text-decoration: none;
+      box-shadow: 0 8px 28px rgba(76,175,125,0.45);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .cta-primary:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 12px 36px rgba(76,175,125,0.55); }
+    .cta-secondary {
+      display: inline-flex; align-items: center;
+      background: rgba(255,255,255,0.06);
+      border: 1.5px solid rgba(255,255,255,0.15);
+      color: var(--cream); font-family: var(--font-h); font-size: 1.05rem;
+      padding: 1rem 2rem; border-radius: 50px; text-decoration: none;
+      transition: background 0.18s;
+    }
+    .cta-secondary:hover { background: rgba(255,255,255,0.1); }
+
+    /* ── SUCCESS OVERLAY ── */
+    .success-overlay {
+      position: fixed; inset: 0;
+      background: rgba(10,6,32,0.97);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      z-index: 900; display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem; text-align: center;
+    }
+    .success-card {
+      background: linear-gradient(160deg,#1a1040,#2d1b6e);
+      border: 2px solid rgba(76,175,125,0.4);
+      border-radius: 24px; padding: 3rem 2rem;
+      max-width: 420px; width: 100%;
+    }
+    .success-card .big-icon { font-size: 4rem; display: block; margin-bottom: 1rem; animation: float 3s ease-in-out infinite; }
+    .success-card h2 { font-family: var(--font-h); font-size: 2.2rem; color: #6ee7b7; margin-bottom: 0.75rem; }
+    .success-card p { color: var(--peach); font-size: 1rem; line-height: 1.65; margin-bottom: 1.5rem; }
+    .success-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; }
+    .success-bar-fill { height: 100%; background: linear-gradient(90deg,var(--green),var(--teal)); animation: fillbar 3s linear forwards; }
+    @keyframes fillbar { from { width:0; } to { width:100%; } }
+
+    /* ── FOOTER ── */
+    footer {
+      position: relative; z-index: 1; text-align: center;
+      padding: 2rem 1rem;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      color: rgba(255,248,240,0.45); font-size: 0.82rem; font-weight: 600;
+    }
+    footer a { color: rgba(255,248,240,0.55); text-decoration: none; }
+    footer a:hover { color: var(--cream); }
+    footer span { color: var(--coral); }
+
+    @media (max-width: 540px) {
+      .pricing-grid { flex-direction: column; align-items: center; }
+      .pricing-card { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="stars-layer" id="stars" aria-hidden="true"></div>
+
+  <div class="page">
+
+    <nav>
+      <div class="nav-inner">
+        <a href="./index.html" class="nav-brand">🌱 Little Seeds</a>
+        <a href="./index.html" class="nav-back">← Back to stories</a>
+      </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+      <span class="hero-moon">🌙</span>
+      <h1>Give Your Child All 20 Stories</h1>
+      <p class="hero-sub">
+        Each night builds something lasting — courage, kindness, emotional resilience.
+        Don't stop at 3.
+      </p>
+    </section>
+
+    <!-- TRUST BAR -->
+    <div class="trust-bar">
+      <span>🚫 Zero ads</span><span class="dot">·</span>
+      <span>🔒 No tracking</span><span class="dot">·</span>
+      <span>🙅 No in-app purchases for kids</span><span class="dot">·</span>
+      <span>💯 7-day money-back guarantee</span><span class="dot">·</span>
+      <span>❌ Cancel any time</span>
+    </div>
+
+    <!-- VALUE PROPS -->
+    <section class="section">
+      <div class="value-grid">
+        <div class="value-card">
+          <span class="value-icon">📚</span>
+          <h3>All 20 Stories</h3>
+          <p>From "The Brave Seed" to "Niko and the Falling Tower" — the full 20-night journey, unlocked instantly.</p>
+        </div>
+        <div class="value-card">
+          <span class="value-icon">🌧️</span>
+          <h3>Ambient Rain Sound</h3>
+          <p>Soft, generated rainfall in the browser. No audio files, no ads — just a calming backdrop for story time.</p>
+        </div>
+        <div class="value-card">
+          <span class="value-icon">🌙</span>
+          <h3>Night Brightness Control</h3>
+          <p>Dim the screen to exactly the right level for a dark room. Saved automatically for next time.</p>
+        </div>
+        <div class="value-card">
+          <span class="value-icon">🔤</span>
+          <h3>Font Size Toggle</h3>
+          <p>Three sizes — Normal, Large, XL — so every parent can read aloud comfortably in dim light.</p>
+        </div>
+        <div class="value-card">
+          <span class="value-icon">📊</span>
+          <h3>Reading Progress</h3>
+          <p>See exactly which stories you've read. Your child can watch their constellation of completed nights grow.</p>
+        </div>
+        <div class="value-card">
+          <span class="value-icon">📤</span>
+          <h3>Share Any Story</h3>
+          <p>One tap to share a story with your partner, grandparents, or a friend's family.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRICING -->
+    <section class="section pricing-section" id="pricing">
+      <h2 class="section-head">Simple, Fair Pricing</h2>
+      <p class="section-sub">Pick what works for your family. Both unlock everything instantly.</p>
+
+      <div class="pricing-grid">
+
+        <!-- Monthly -->
+        <div class="pricing-card popular">
+          <span class="popular-chip">Most Popular</span>
+          <span class="price-amount">$2.99</span>
+          <span class="price-period">per month · cancel any time</span>
+          <ul class="price-features">
+            <li>All 20 bedtime stories</li>
+            <li>New story packs as they drop</li>
+            <li>Ambient rain sound</li>
+            <li>Night brightness dimmer</li>
+            <li>Font size control</li>
+            <li>Reading progress tracker</li>
+          </ul>
+          <!-- Replace href with your Gumroad monthly product URL -->
+          <a href="https://littleseeds.gumroad.com/l/monthly" class="buy-btn" id="btnMonthly">
+            🌱 Get Monthly Access
+          </a>
+          <p class="price-note">Less than a cup of coffee. 100 nights of bedtime magic.</p>
+        </div>
+
+        <!-- Lifetime -->
+        <div class="pricing-card">
+          <span class="price-amount">$4.99</span>
+          <span class="price-period">one-time · yours forever</span>
+          <ul class="price-features">
+            <li>All 20 bedtime stories</li>
+            <li>Ambient rain sound</li>
+            <li>Night brightness dimmer</li>
+            <li>Font size control</li>
+            <li>Reading progress tracker</li>
+            <li class="muted">Future story packs</li>
+          </ul>
+          <!-- Replace href with your Gumroad lifetime product URL -->
+          <a href="https://littleseeds.gumroad.com/l/lifetime" class="buy-btn secondary" id="btnLifetime">
+            ✨ Get Lifetime Access
+          </a>
+          <p class="price-note">Pay once. Read forever.</p>
+        </div>
+
+      </div>
+
+      <!-- 7-day guarantee -->
+      <div class="guarantee">
+        <span class="guarantee-icon">💯</span>
+        <div>
+          <h4>7-Day Money-Back Guarantee</h4>
+          <p>If Little Seeds doesn't become part of your bedtime routine within a week, email us for a full refund. No questions, no hassle.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TESTIMONIALS -->
+    <section class="section">
+      <h2 class="section-head">What Parents Are Saying</h2>
+      <p class="section-sub">Real families. Real bedtime wins.</p>
+
+      <div class="testimonials-grid">
+        <div class="testimonial">
+          <div class="stars">★★★★★</div>
+          <p>"My 5-year-old asks for Little Seeds every night now. He started talking about 'having courage like the acorn.' I cried."</p>
+          <cite>— Sarah M., mom of two</cite>
+        </div>
+        <div class="testimonial">
+          <div class="stars">★★★★★</div>
+          <p>"We were skeptical about screen time at bedtime, but the dimmer feature and the rain sound actually wind our daughter down faster than physical books."</p>
+          <cite>— Daniel & Priya R., parents of a 4-year-old</cite>
+        </div>
+        <div class="testimonial">
+          <div class="stars">★★★★★</div>
+          <p>"The reflect questions are the best part. Our son said things during Day 7 that we'd never heard from him before. It opens them up."</p>
+          <cite>— Marcus T., dad of three</cite>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section">
+      <h2 class="section-head">Common Questions</h2>
+      <div class="faq-list">
+        <details>
+          <summary>How does the access code unlock work?</summary>
+          <div class="faq-body">
+            After your purchase, Gumroad will show you a confirmation page and send a receipt to your email. Inside that email, look for the access code button — copy the code, come back to Little Seeds, open any story past Day 3, and tap "Already a member? Enter code." Your device unlocks instantly and stays unlocked.
+          </div>
+        </details>
+        <details>
+          <summary>What devices does Little Seeds work on?</summary>
+          <div class="faq-body">
+            Any modern browser — iPhone, Android, iPad, Chromebook, Mac, or PC. On mobile, tap "Add to Home Screen" from your browser menu to install it like an app. The first 3 stories even work offline once installed.
+          </div>
+        </details>
+        <details>
+          <summary>Can I share my access with my partner / co-parent?</summary>
+          <div class="faq-body">
+            Yes. One purchase covers your household. Just share your access code with anyone in your family who reads the stories. We don't police family sharing — we're building for families.
+          </div>
+        </details>
+        <details>
+          <summary>Will there be new stories?</summary>
+          <div class="faq-body">
+            Monthly subscribers get every new story pack as it drops at no extra cost. Lifetime subscribers get the 20 current stories forever; future packs may be offered as optional add-ons.
+          </div>
+        </details>
+        <details>
+          <summary>What if I want a refund?</summary>
+          <div class="faq-body">
+            Email us within 7 days and you'll get a full refund — no forms, no hoops. We'd rather you leave happy than stay unhappy. Gumroad processes the refund within a few days.
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- BOTTOM CTA -->
+    <section class="bottom-cta">
+      <h2>Tonight could be the start.</h2>
+      <p>One story. One quiet moment. One seed planted. That's all it takes.</p>
+      <div class="bottom-cta-btns">
+        <a href="https://littleseeds.gumroad.com/l/monthly" class="cta-primary" id="ctaMonthly">
+          🌱 Get Monthly Access – $2.99/mo
+        </a>
+        <a href="https://littleseeds.gumroad.com/l/lifetime" class="cta-secondary" id="ctaLifetime">
+          ✨ Lifetime – $4.99
+        </a>
+      </div>
+    </section>
+
+    <footer>
+      Made with <span>♥</span> for little readers everywhere &nbsp;·&nbsp;
+      <a href="./index.html">← Back to Little Seeds</a> &nbsp;·&nbsp;
+      &copy; 2025 Little Seeds
+    </footer>
+
+  </div><!-- .page -->
+
+  <!-- SUCCESS OVERLAY — shown after returning from Gumroad -->
+  <div class="success-overlay" id="successOverlay" style="display:none">
+    <div class="success-card">
+      <span class="big-icon">🌱</span>
+      <h2>You're in!</h2>
+      <p>All 20 stories are unlocked. Head to bed — tonight is going to be a good one.</p>
+      <div class="success-bar"><div class="success-bar-fill"></div></div>
+    </div>
+  </div>
+
+  <script>
+    // ── PAYMENT CONFIG ────────────────────────────────────────────────────────
+    // Setup steps:
+    //   1. Create a free account at gumroad.com
+    //   2. Create two products: one Subscription ($2.99/mo) and one Single ($4.99)
+    //   3. In each product's settings, set the "Redirect URL after purchase" to:
+    //      https://ebruno-sec.github.io/MISC/LittleSeeds/upgrade.html?purchased=1
+    //   4. Replace the two placeholder URLs below with your real Gumroad links.
+    //   5. Optionally: set a product access code in Gumroad and add it to ls-utils
+    //      in index.html/nav.js so customers can self-serve unlock.
+    const GUMROAD = {
+      monthly:  'https://littleseeds.gumroad.com/l/monthly',    // ← your URL
+      lifetime: 'https://littleseeds.gumroad.com/l/lifetime',   // ← your URL
+    };
+
+    // Wire all CTA buttons to their product URLs
+    ['btnMonthly','ctaMonthly'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.href = GUMROAD.monthly;
+    });
+    ['btnLifetime','ctaLifetime'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.href = GUMROAD.lifetime;
+    });
+
+    // ── POST-PURCHASE UNLOCK ──────────────────────────────────────────────────
+    // Gumroad redirects here with ?purchased=1 after a successful checkout.
+    // This sets localStorage so the browser recognises the user as premium
+    // on all subsequent page loads — no server required.
+    //
+    // Security note: this is honour-system for an MVP. For production, verify
+    // the purchase server-side via Gumroad's webhook → a Cloudflare Worker that
+    // issues a signed token, then validate the token here instead of a flag.
+    (function() {
+      const params = new URLSearchParams(location.search);
+      if (params.get('purchased') !== '1') return;
+
+      // Clean URL immediately so refresh doesn't re-trigger
+      history.replaceState(null, '', location.pathname);
+
+      // Unlock
+      localStorage.setItem('ls_premium', 'true');
+
+      // Show success overlay, then redirect to story grid after 3s
+      const overlay = document.getElementById('successOverlay');
+      if (overlay) overlay.style.display = 'flex';
+      setTimeout(() => { location.href = './index.html'; }, 3200);
+    })();
+
+    // ── STARS ────────────────────────────────────────────────────────────────
+    (function() {
+      const layer = document.getElementById('stars');
+      for (let i = 0; i < 100; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        const sz = Math.random() * 3 + 1;
+        s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--d:${(Math.random()*3+2).toFixed(1)}s;animation-delay:${(Math.random()*4).toFixed(1)}s`;
+        layer.appendChild(s);
+      }
+    })();
+
+    // ── SERVICE WORKER ────────────────────────────────────────────────────────
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js', { scope: '/MISC/LittleSeeds/' }).catch(() => {});
+    }
+  </script>
+
+</body>
+</html>

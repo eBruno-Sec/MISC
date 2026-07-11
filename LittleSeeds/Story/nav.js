@@ -91,7 +91,7 @@ if (_currentDay) {
           <span class="nudge-icon">🌟</span>
           <h3>You've read all 3 free stories!</h3>
           <p>Your little reader is off to a wonderful start. Continue the journey with all 20 nights of courage, kindness, and wonder.</p>
-          <a href="../index.html#upgrade" class="nudge-btn">🌱 Unlock All 20 Stories</a>
+          <a href="../upgrade.html#pricing" class="nudge-btn">🌱 Unlock All 20 Stories</a>
           <p class="nudge-sub">From $2.99/month · Cancel any time</p>
         `;
         wrapper.appendChild(nudge);
@@ -361,7 +361,7 @@ function toggleDrawer() {
       <span class="gate-icon" aria-hidden="true">🌙</span>
       <h2>Continue the Journey</h2>
       <p>Day ${_currentDay} is part of the full Little Seeds library — 20 stories to grow with, one magical night at a time.</p>
-      <a href="../index.html#upgrade" class="gate-btn-primary">🌱 Unlock All 20 Stories</a>
+      <a href="../upgrade.html#pricing" class="gate-btn-primary">🌱 Unlock All 20 Stories</a>
       <button class="gate-btn-secondary" id="gateCodeToggle" onclick="showGateCodeEntry()">
         Already a member? Enter code
       </button>

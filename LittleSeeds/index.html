@@ -687,7 +687,7 @@
     </div>
     <div class="hero-cta-row">
       <a href="./Story/Day1.html" class="hero-cta">🌱 Start Free Tonight</a>
-      <button class="hero-cta-sub" onclick="openPremiumModal()">Unlock all 20 stories ✨</button>
+      <a href="./upgrade.html" class="hero-cta-sub">Unlock all 20 stories ✨</a>
     </div>
   </section>
 
@@ -764,8 +764,7 @@
           </ul>
         </div>
       </div>
-      <!-- Replace href with your Stripe/Gumroad payment link -->
-      <a href="#" class="modal-cta" id="modalCtaBtn" onclick="closePremiumModal()">🌱 Get Full Access</a>
+      <a href="./upgrade.html#pricing" class="modal-cta" id="modalCtaBtn">🌱 See Plans &amp; Pricing</a>
       <button class="modal-already" id="modalCodeToggle" onclick="showModalCodeEntry()">Already a member? Enter access code</button>
       <div id="modalCodeSection" style="display:none">
         <div class="modal-code-row">
@@ -788,6 +787,18 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js', { scope: '/MISC/LittleSeeds/' }).catch(() => {});
     }
+
+    // ── Post-purchase unlock (return from Gumroad/upgrade.html) ───────────────
+    // Gumroad redirects to upgrade.html?purchased=1 which sets ls_premium and
+    // then redirects here. This handles the edge case where the user lands here
+    // directly with the param (e.g. if they copied the URL).
+    (function() {
+      const p = new URLSearchParams(location.search);
+      if (p.get('purchased') === '1') {
+        localStorage.setItem('ls_premium', 'true');
+        history.replaceState(null, '', location.pathname);
+      }
+    })();
 
     // ── Constants ──────────────────────────────────────────────────────────────
     const FREE_DAYS     = 3;
