@@ -1,3 +1,5 @@
+// ── Little Seeds — Shared Story Page Logic ───────────────────────────────────
+
 const _stories = [
   { day:1,  emoji:'🌰', title:'The Brave Seed and the Giant Oak' },
   { day:2,  emoji:'⭐', title:'The Dream That Built the Stars' },
@@ -22,8 +24,46 @@ const _stories = [
 ];
 
 const _currentDay = parseInt(location.pathname.match(/Day(\d+)/i)?.[1] || 0);
+const FREE_DAYS    = 3;
+const LS_PREMIUM   = 'ls_premium';
+const LS_READ      = 'ls_read';
+const LS_BRIGHT    = 'ls_brightness';
+// Demo access codes — replace with server-side verification before production
+const _ACCESS_CODES = ['SEEDS2025', 'LITTLESEEDS', 'FAMILY2025'];
 
-// Stars
+// ── PREMIUM ───────────────────────────────────────────────────────────────────
+
+function isPremium() {
+  return localStorage.getItem(LS_PREMIUM) === 'true';
+}
+
+function unlockWithCode(code) {
+  if (_ACCESS_CODES.includes(code.toUpperCase().trim())) {
+    localStorage.setItem(LS_PREMIUM, 'true');
+    return true;
+  }
+  return false;
+}
+
+// ── READING PROGRESS ──────────────────────────────────────────────────────────
+
+function getReadStories() {
+  try { return new Set(JSON.parse(localStorage.getItem(LS_READ) || '[]')); }
+  catch { return new Set(); }
+}
+
+function markRead(day) {
+  if (!day) return;
+  const s = getReadStories();
+  s.add(day);
+  localStorage.setItem(LS_READ, JSON.stringify([...s]));
+}
+
+// Auto-mark when a reader reaches the story page
+if (_currentDay) markRead(_currentDay);
+
+// ── STARS ─────────────────────────────────────────────────────────────────────
+
 (function() {
   const layer = document.getElementById('stars');
   if (!layer) return;
@@ -37,7 +77,8 @@ const _currentDay = parseInt(location.pathname.match(/Day(\d+)/i)?.[1] || 0);
   }
 })();
 
-// Nav: day indicator + progress bar
+// ── NAV: day indicator + progress bar ────────────────────────────────────────
+
 (function() {
   if (!_currentDay) return;
   const navMain = document.querySelector('.nav-main');
@@ -54,7 +95,112 @@ const _currentDay = parseInt(location.pathname.match(/Day(\d+)/i)?.[1] || 0);
   nav.appendChild(prog);
 })();
 
-// Drawer: build story list
+// ── NAV: dimmer button + night controls popup ─────────────────────────────────
+
+(function() {
+  const navMain = document.querySelector('.nav-main');
+  if (!navMain) return;
+
+  const dimBtn = document.createElement('button');
+  dimBtn.className = 'dimmer-btn';
+  dimBtn.setAttribute('aria-label', 'Night mode controls');
+  dimBtn.setAttribute('aria-expanded', 'false');
+  dimBtn.title = 'Night controls';
+  dimBtn.innerHTML = '🌙';
+  navMain.insertBefore(dimBtn, navMain.querySelector('.nav-stories-btn'));
+
+  const popup = document.createElement('div');
+  popup.className = 'dimmer-popup';
+  popup.id = 'dimmerPopup';
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-label', 'Night mode controls');
+  popup.innerHTML = `
+    <span class="dimmer-label">Screen Brightness</span>
+    <div class="dimmer-row">
+      <span aria-hidden="true">🌑</span>
+      <input type="range" id="dimSlider" min="15" max="100" value="100" aria-label="Brightness" />
+      <span aria-hidden="true">☀️</span>
+    </div>
+    <button class="dimmer-sound-btn" id="soundBtn" onclick="toggleSound()">
+      <span id="soundBtnIcon">🌧️</span> Gentle Rain
+    </button>
+  `;
+  document.body.appendChild(popup);
+
+  dimBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = popup.classList.toggle('open');
+    dimBtn.setAttribute('aria-expanded', isOpen);
+  });
+  document.addEventListener('click', () => {
+    popup.classList.remove('open');
+    dimBtn.setAttribute('aria-expanded', 'false');
+  });
+  popup.addEventListener('click', e => e.stopPropagation());
+
+  // Restore saved brightness on load
+  const slider = document.getElementById('dimSlider');
+  const saved = localStorage.getItem(LS_BRIGHT) || '100';
+  slider.value = saved;
+  document.documentElement.style.filter = `brightness(${saved}%)`;
+
+  slider.addEventListener('input', () => {
+    const v = slider.value;
+    document.documentElement.style.filter = `brightness(${v}%)`;
+    localStorage.setItem(LS_BRIGHT, v);
+  });
+})();
+
+// ── AMBIENT RAIN SOUND ────────────────────────────────────────────────────────
+
+let _sndCtx = null, _sndSrc = null, _sndPlaying = false;
+
+function toggleSound() {
+  const btn   = document.getElementById('soundBtn');
+  const icon  = document.getElementById('soundBtnIcon');
+
+  if (_sndPlaying) {
+    _sndCtx?.suspend();
+    _sndPlaying = false;
+    if (btn)  { btn.classList.remove('playing'); btn.innerHTML = '<span id="soundBtnIcon">🌧️</span> Gentle Rain'; }
+    return;
+  }
+
+  if (_sndCtx && _sndCtx.state === 'suspended') {
+    _sndCtx.resume();
+  } else {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _sndCtx = new AC();
+
+    // Pink-noise approximation: white noise + two cascaded lowpass filters
+    const rate   = _sndCtx.sampleRate;
+    const buf    = _sndCtx.createBuffer(1, 2 * rate, rate);
+    const data   = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+    _sndSrc       = _sndCtx.createBufferSource();
+    _sndSrc.buffer = buf;
+    _sndSrc.loop   = true;
+
+    const lp1 = _sndCtx.createBiquadFilter();
+    lp1.type = 'lowpass'; lp1.frequency.value = 550; lp1.Q.value = 0.3;
+    const lp2 = _sndCtx.createBiquadFilter();
+    lp2.type = 'lowpass'; lp2.frequency.value = 900;
+
+    const gain = _sndCtx.createGain();
+    gain.gain.value = 0.09;
+
+    _sndSrc.connect(lp1); lp1.connect(lp2); lp2.connect(gain); gain.connect(_sndCtx.destination);
+    _sndSrc.start();
+  }
+
+  _sndPlaying = true;
+  if (btn) { btn.classList.add('playing'); btn.innerHTML = '<span id="soundBtnIcon">⏹</span> Stop Rain'; }
+}
+
+// ── STORIES DRAWER ────────────────────────────────────────────────────────────
+
 (function() {
   const grid = document.getElementById('drawerGrid');
   if (!grid) return;
@@ -68,13 +214,105 @@ const _currentDay = parseInt(location.pathname.match(/Day(\d+)/i)?.[1] || 0);
 })();
 
 function toggleDrawer() {
-  const drawer = document.getElementById('storiesDrawer');
+  const drawer  = document.getElementById('storiesDrawer');
   const overlay = document.getElementById('drawerOverlay');
-  const btn = document.getElementById('drawerToggle');
+  const btn     = document.getElementById('drawerToggle');
   if (!drawer) return;
   const isOpen = drawer.classList.toggle('open');
-  if (overlay) overlay.classList.toggle('open', isOpen);
-  if (btn) btn.setAttribute('aria-expanded', isOpen);
+  overlay?.classList.toggle('open', isOpen);
+  btn?.setAttribute('aria-expanded', isOpen);
   drawer.setAttribute('aria-hidden', !isOpen);
   document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+// ── PREMIUM GATE (injected on locked story pages) ─────────────────────────────
+
+(function() {
+  if (!_currentDay || _currentDay <= FREE_DAYS || isPremium()) return;
+
+  const gate = document.createElement('div');
+  gate.className = 'premium-gate';
+  gate.id = 'premiumGate';
+  gate.innerHTML = `
+    <div class="premium-gate-card">
+      <span class="gate-icon" aria-hidden="true">🌙</span>
+      <h2>Continue the Journey</h2>
+      <p>Day ${_currentDay} is part of the full Little Seeds library — 20 stories to grow with, one magical night at a time.</p>
+      <a href="../index.html#upgrade" class="gate-btn-primary">🌱 Unlock All 20 Stories</a>
+      <button class="gate-btn-secondary" id="gateCodeToggle" onclick="showGateCodeEntry()">
+        Already a member? Enter code
+      </button>
+      <div class="gate-code-section" id="gateCodeSection" style="display:none">
+        <label for="gateCodeInput">Access Code</label>
+        <div class="gate-code-row">
+          <input type="text" id="gateCodeInput" placeholder="SEEDS2025" autocomplete="off" spellcheck="false" />
+          <button onclick="submitGateCode()">Unlock</button>
+        </div>
+        <p class="gate-err" id="gateErr"></p>
+      </div>
+      <a href="../index.html" class="gate-back">← Back to stories</a>
+    </div>
+  `;
+  document.body.appendChild(gate);
+  document.body.style.overflow = 'hidden';
+})();
+
+function showGateCodeEntry() {
+  document.getElementById('gateCodeSection').style.display = 'block';
+  document.getElementById('gateCodeToggle').style.display = 'none';
+  document.getElementById('gateCodeInput')?.focus();
+}
+
+function submitGateCode() {
+  const input = document.getElementById('gateCodeInput');
+  const err   = document.getElementById('gateErr');
+  if (!input) return;
+  if (unlockWithCode(input.value)) {
+    location.reload();
+  } else {
+    err.textContent = 'Invalid code — check your email after purchase.';
+    input.value = '';
+    input.focus();
+  }
+}
+
+// ── PARENTAL GATE (wrap any external link) ────────────────────────────────────
+
+function parentalGate(url, label) {
+  const a = Math.floor(Math.random() * 9) + 1;
+  const b = Math.floor(Math.random() * 9) + 1;
+
+  const existing = document.getElementById('parentalGateOverlay');
+  existing?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'parental-gate-overlay';
+  overlay.id = 'parentalGateOverlay';
+  overlay.innerHTML = `
+    <div class="parental-gate-card">
+      <h3>🔐 Parental Check</h3>
+      <p>Just making sure a grown-up is here before visiting<br><strong>${label || 'an external link'}</strong>.</p>
+      <div class="math-q">${a} + ${b} = ?</div>
+      <input type="number" id="pgAnswer" placeholder="?" aria-label="Answer" />
+      <button onclick="checkParentalGate(${a + b}, '${encodeURIComponent(url)}')">Continue</button>
+      <p class="gate-err" id="pgErr"></p>
+      <button class="gate-cancel" onclick="document.getElementById('parentalGateOverlay').remove()">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('pgAnswer')?.focus(), 60);
+}
+
+function checkParentalGate(answer, encodedUrl) {
+  const input = document.getElementById('pgAnswer');
+  if (!input) return;
+  if (parseInt(input.value) === answer) {
+    document.getElementById('parentalGateOverlay')?.remove();
+    window.open(decodeURIComponent(encodedUrl), '_blank', 'noopener,noreferrer');
+  } else {
+    const err = document.getElementById('pgErr');
+    if (err) err.textContent = 'Not quite — try again!';
+    input.value = '';
+    input.focus();
+  }
 }
