@@ -35,7 +35,7 @@ export default function ModeSelectScreen({
       <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="rounded-full bg-white border-2 border-gray-200 w-10 h-10 flex items-center justify-center text-xl shadow-sm hover:bg-gray-50"
+          className="rounded-full bg-white border-2 border-gray-200 w-10 h-10 flex items-center justify-center text-xl text-gray-700 shadow-sm hover:bg-gray-50"
           aria-label="Back to home"
         >
           ←
