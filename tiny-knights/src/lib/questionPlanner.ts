@@ -22,31 +22,16 @@ function pickQuestionType(bucket: SelectionBucket, rng = Math.random): PlannedQu
   return rng() < 0.2 ? 'missingFactor' : 'standard';
 }
 
-/** Avoid back-to-back duplicate fact keys (and same fact as its commutative pair) */
+/** Best-effort pass to avoid the same fact appearing twice in a row */
 function dedupeAdjacent(queue: PlannedQuestion[]): PlannedQuestion[] {
-  const result: PlannedQuestion[] = [];
-  for (const item of queue) {
-    if (result.length === 0) {
-      result.push(item);
-      continue;
-    }
-    const prev = result[result.length - 1];
-    if (prev.factKey === item.factKey) {
-      // try to find a later slot to swap with
-      let swapped = false;
-      for (let j = result.length; j < queue.length; j++) {
-        // not used in single pass; fallback below
+  const result = [...queue];
+  for (let i = 1; i < result.length; i++) {
+    if (result[i].factKey !== result[i - 1].factKey) continue;
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[j].factKey !== result[i - 1].factKey) {
+        [result[i], result[j]] = [result[j], result[i]];
+        break;
       }
-      // Simplify: push and let later shuffle pass fix, but try inserting one position back if possible
-      if (result.length >= 2) {
-        const temp = result[result.length - 1];
-        result[result.length - 1] = item;
-        result.push(temp);
-        swapped = true;
-      }
-      if (!swapped) result.push(item);
-    } else {
-      result.push(item);
     }
   }
   return result;

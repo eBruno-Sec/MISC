@@ -16,19 +16,20 @@ const sizeMap = {
 };
 
 export default function MonsterSprite({ monster, state, size = 'lg' }: MonsterSpriteProps) {
-  const [localState, setLocalState] = useState<MonsterAnimState>('idle');
+  const [localState, setLocalState] = useState<MonsterAnimState>(state);
+  const [prevState, setPrevState] = useState(state);
+
+  // Adjust state during render when the prop changes (avoids an effect round-trip)
+  if (state !== prevState) {
+    setPrevState(state);
+    setLocalState(state);
+  }
 
   useEffect(() => {
-    if (state === 'idle') {
-      setLocalState('idle');
-      return;
-    }
-    setLocalState(state);
-    if (state === 'hurt') {
-      const timer = setTimeout(() => setLocalState('idle'), 450);
-      return () => clearTimeout(timer);
-    }
-  }, [state]);
+    if (localState !== 'hurt') return;
+    const timer = setTimeout(() => setLocalState('idle'), 450);
+    return () => clearTimeout(timer);
+  }, [localState]);
 
   if (localState === 'defeated') {
     return (

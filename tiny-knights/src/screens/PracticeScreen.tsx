@@ -3,6 +3,7 @@ import type {
   FactKey,
   FeedbackKind,
   GameMode,
+  Monster,
   PlannedQuestion,
   PracticeSession,
   UserProgress,
@@ -30,6 +31,7 @@ import {
   spawnMonster,
 } from '../lib/battleEngine';
 import { calculateCoinsForAnswer, calculateXpForAnswer } from '../lib/rewards';
+import { playSfx } from '../lib/sound';
 import { getWorldForTable } from '../data/worlds';
 import BattleArena from '../components/BattleArena';
 import QuestionCard from '../components/QuestionCard';
@@ -57,6 +59,26 @@ export type SessionResult = {
   bossWon: boolean;
 };
 
+/**
+ * Fresh values for the answer being processed. finishSession runs inside
+ * setTimeout callbacks whose closures predate the last setState, so the final
+ * answer of a session would otherwise be dropped from the results.
+ */
+type SessionOverrides = {
+  bossWon?: boolean;
+  facts?: UserProgress['facts'];
+  correctCount?: number;
+  incorrectCount?: number;
+  questionsAnswered?: number;
+  responseTimesMs?: number[];
+  factsPracticed?: Set<FactKey>;
+  factsMastered?: Set<FactKey>;
+  missedFacts?: Set<FactKey>;
+  monsterDefeats?: Record<string, number>;
+  xpEarned?: number;
+  coinsEarned?: number;
+};
+
 const SPEED_ROUND_SECONDS = 60;
 
 function getFastThreshold(difficulty: UserProgress['settings']['difficulty']) {
@@ -65,13 +87,99 @@ function getFastThreshold(difficulty: UserProgress['settings']['difficulty']) {
   return 4000;
 }
 
+function buildInitialPlan(params: {
+  progress: UserProgress;
+  mode: GameMode;
+  table?: number;
+  monster: Monster;
+}): { plan: PlannedQuestion[]; nextCursor: number } {
+  const { progress, mode, table, monster } = params;
+  const now = new Date();
+
+  if (mode === 'dailyQuest') {
+    const result = buildDailyQuestPlan({
+      facts: progress.facts,
+      maxFactor: progress.maxFactor,
+      sessionQuestionCount: progress.settings.sessionQuestionCount,
+      coverageCursor: progress.coverageCursor,
+      now,
+    });
+    return { plan: result.plan, nextCursor: result.nextCoverageCursor };
+  }
+
+  if (mode === 'tableTrainer' && table) {
+    return {
+      plan: buildTableTrainerPlan({
+        facts: progress.facts,
+        table,
+        maxFactor: progress.maxFactor,
+        sessionQuestionCount: Math.min(progress.settings.sessionQuestionCount, 15),
+        now,
+      }),
+      nextCursor: progress.coverageCursor,
+    };
+  }
+
+  if (mode === 'bossBattle') {
+    const bossMaxFactor =
+      monster.unlockTable && monster.unlockTable > 0
+        ? Math.min(progress.maxFactor, monster.unlockTable)
+        : progress.maxFactor;
+    const priority = Object.values(progress.facts)
+      .filter((f) => f.a <= bossMaxFactor && f.b <= bossMaxFactor && f.lastIncorrectAt && !f.isMastered)
+      .sort((a, b) => new Date(b.lastIncorrectAt!).getTime() - new Date(a.lastIncorrectAt!).getTime())
+      .slice(0, 5)
+      .map((f) => f.key);
+    return {
+      plan: buildBossBattlePlan({
+        facts: progress.facts,
+        maxFactor: bossMaxFactor,
+        sessionQuestionCount: getMonsterMaxHp(monster, 'bossBattle'),
+        priorityFacts: priority,
+        now,
+      }),
+      nextCursor: progress.coverageCursor,
+    };
+  }
+
+  if (mode === 'mistakeRescue') {
+    return {
+      plan: buildMistakeRescuePlan({
+        facts: progress.facts,
+        maxFactor: progress.maxFactor,
+        sessionQuestionCount: Math.min(progress.settings.sessionQuestionCount, 15),
+      }),
+      nextCursor: progress.coverageCursor,
+    };
+  }
+
+  // speedRound: oversized pool, the 60-second timer decides how far we get
+  return {
+    plan: buildMistakeRescuePlan({
+      facts: progress.facts,
+      maxFactor: progress.maxFactor,
+      sessionQuestionCount: 60,
+    }),
+    nextCursor: progress.coverageCursor,
+  };
+}
+
 export default function PracticeScreen({ progress, mode, table, bossId, onFinish, onExit, onRetry, onPracticeWeakFacts }: PracticeScreenProps) {
   const sessionId = useRef(`session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
   const startedAt = useRef(new Date().toISOString()).current;
 
   const [facts, setFacts] = useState(progress.facts);
-  const [coverageCursor, setCoverageCursor] = useState(progress.coverageCursor);
-  const [plan, setPlan] = useState<PlannedQuestion[]>([]);
+
+  const [monster, setMonster] = useState(() =>
+    spawnMonster(table ?? Math.floor(Math.random() * progress.maxFactor) + 1, mode, bossId)
+  );
+  const [monsterHp, setMonsterHp] = useState(() => getMonsterMaxHp(monster, mode));
+  const [knightEnergy, setKnightEnergy] = useState(KNIGHT_BASE_ENERGY);
+
+  // The session plan is computed once, synchronously, on first render.
+  const [initialPlanState] = useState(() => buildInitialPlan({ progress, mode, table, monster }));
+  const [plan, setPlan] = useState<PlannedQuestion[]>(initialPlanState.plan);
+  const coverageCursor = initialPlanState.nextCursor;
   const [planIndex, setPlanIndex] = useState(0);
 
   const [wrongAttempts, setWrongAttempts] = useState(0);
@@ -84,12 +192,6 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
   const [monsterState, setMonsterState] = useState<MonsterAnimState>('idle');
   const [attackTrigger, setAttackTrigger] = useState(0);
   const [blockTrigger, setBlockTrigger] = useState(0);
-
-  const [monster, setMonster] = useState(() =>
-    spawnMonster(table ?? Math.floor(Math.random() * progress.maxFactor) + 1, mode, bossId)
-  );
-  const [monsterHp, setMonsterHp] = useState(() => getMonsterMaxHp(monster, mode));
-  const [knightEnergy, setKnightEnergy] = useState(KNIGHT_BASE_ENERGY);
 
   const [questionStart, setQuestionStart] = useState<number>(Date.now());
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
@@ -107,84 +209,20 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
   const [battleStatus, setBattleStatus] = useState<'active' | 'victory' | 'defeat'>('active');
 
   const [timeLeft, setTimeLeft] = useState(SPEED_ROUND_SECONDS);
-  const [speedRoundOver, setSpeedRoundOver] = useState(false);
 
   const reducedMotion = progress.settings.reducedMotion;
 
-  // Build session plan on mount
+  // Speed round timer; finishSession is guarded by isComplete so it runs once
   useEffect(() => {
-    const now = new Date();
-    let newPlan: PlannedQuestion[] = [];
-    let nextCursor = coverageCursor;
-
-    if (mode === 'dailyQuest') {
-      const result = buildDailyQuestPlan({
-        facts: progress.facts,
-        maxFactor: progress.maxFactor,
-        sessionQuestionCount: progress.settings.sessionQuestionCount,
-        coverageCursor: progress.coverageCursor,
-        now,
-      });
-      newPlan = result.plan;
-      nextCursor = result.nextCoverageCursor;
-    } else if (mode === 'tableTrainer' && table) {
-      newPlan = buildTableTrainerPlan({
-        facts: progress.facts,
-        table,
-        maxFactor: progress.maxFactor,
-        sessionQuestionCount: Math.min(progress.settings.sessionQuestionCount, 15),
-        now,
-      });
-    } else if (mode === 'bossBattle') {
-      const bossMaxFactor =
-        monster.unlockTable && monster.unlockTable > 0
-          ? Math.min(progress.maxFactor, monster.unlockTable)
-          : progress.maxFactor;
-      const priority = Object.values(progress.facts)
-        .filter((f) => f.a <= bossMaxFactor && f.b <= bossMaxFactor && f.lastIncorrectAt && !f.isMastered)
-        .sort((a, b) => new Date(b.lastIncorrectAt!).getTime() - new Date(a.lastIncorrectAt!).getTime())
-        .slice(0, 5)
-        .map((f) => f.key);
-      const bossHp = getMonsterMaxHp(monster, 'bossBattle');
-      newPlan = buildBossBattlePlan({
-        facts: progress.facts,
-        maxFactor: bossMaxFactor,
-        sessionQuestionCount: bossHp,
-        priorityFacts: priority,
-        now,
-      });
-    } else if (mode === 'mistakeRescue') {
-      newPlan = buildMistakeRescuePlan({
-        facts: progress.facts,
-        maxFactor: progress.maxFactor,
-        sessionQuestionCount: Math.min(progress.settings.sessionQuestionCount, 15),
-      });
-    } else if (mode === 'speedRound') {
-      newPlan = buildMistakeRescuePlan({
-        facts: progress.facts,
-        maxFactor: progress.maxFactor,
-        sessionQuestionCount: 60,
-      });
-    }
-
-    setPlan(newPlan);
-    setCoverageCursor(nextCursor);
-    setQuestionStart(Date.now());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Speed round timer
-  useEffect(() => {
-    if (mode !== 'speedRound' || speedRoundOver || battleStatus !== 'active') return;
+    if (mode !== 'speedRound' || battleStatus !== 'active') return;
     if (timeLeft <= 0) {
-      setSpeedRoundOver(true);
       finishSession();
       return;
     }
     const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, mode, speedRoundOver, battleStatus]);
+  }, [timeLeft, mode, battleStatus]);
 
   const currentQuestion = plan[planIndex];
   const currentFact = currentQuestion ? facts[currentQuestion.factKey] : undefined;
@@ -207,6 +245,7 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
   function handleDigit(d: string) {
     if (battleStatus !== 'active') return;
     if (answerValue.length >= 3) return;
+    playSfx('tap');
     setAnswerValue((v) => v + d);
   }
 
@@ -215,20 +254,7 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
     setAnswerValue((v) => v.slice(0, -1));
   }
 
-  function finishSession(overrides?: {
-    bossWon?: boolean;
-    facts?: typeof facts;
-    correctCount?: number;
-    incorrectCount?: number;
-    questionsAnswered?: number;
-    responseTimesMs?: number[];
-    factsPracticed?: Set<FactKey>;
-    factsMastered?: Set<FactKey>;
-    missedFacts?: Set<FactKey>;
-    monsterDefeats?: Record<string, number>;
-    xpEarned?: number;
-    coinsEarned?: number;
-  }) {
+  function finishSession(overrides?: SessionOverrides) {
     if (isComplete) return;
     setIsComplete(true);
 
@@ -274,41 +300,27 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    let dailyStreak = progress.dailyStreak;
-    if (mode === 'dailyQuest') {
-      const lastDate = progress.lastPlayedDate?.slice(0, 10);
-      if (lastDate === today) {
-        // already counted today
-      } else if (lastDate) {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-        dailyStreak = lastDate === yesterday ? dailyStreak + 1 : 1;
-      } else {
-        dailyStreak = 1;
-      }
-    }
-
+    // Daily streak and lastPlayedDate are advanced in one place: App.handleFinishSession.
     const updatedProgress: UserProgress = {
       ...progress,
       facts: finalFacts,
       coverageCursor,
       xp: progress.xp + finalXpEarned,
       coins: progress.coins + finalCoinsEarned,
-      sessions: [...progress.sessions, session],
+      // keep only the most recent sessions so localStorage doesn't grow forever
+      sessions: [...progress.sessions, session].slice(-50),
       monsterBook: updatedMonsterBook,
-      lastPlayedDate: mode === 'dailyQuest' ? new Date().toISOString() : progress.lastPlayedDate,
-      dailyStreak: mode === 'dailyQuest' ? dailyStreak : progress.dailyStreak,
     };
 
     onFinish({ session, updatedProgress, xpEarned: finalXpEarned, coinsEarned: finalCoinsEarned, bossWon: finalBossWon });
   }
 
-  function advanceToNext(newPlan?: PlannedQuestion[]) {
+  function advanceToNext(newPlan?: PlannedQuestion[], overrides?: SessionOverrides) {
     const activePlan = newPlan ?? plan;
     const nextIndex = planIndex + 1;
 
     if (nextIndex >= activePlan.length) {
-      finishSession();
+      finishSession(overrides);
       return;
     }
 
@@ -328,11 +340,14 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
     setMonsterState('idle');
   }
 
-  function handleSubmit() {
+  function handleSubmit(submitted?: string) {
+    // `submitted` lets multiple-choice pass its value directly instead of
+    // waiting for the answerValue state update (which this closure can't see).
+    const rawAnswer = submitted ?? answerValue;
     if (battleStatus !== 'active') return;
-    if (!currentFact || !currentQuestion || answerValue === '') return;
+    if (!currentFact || !currentQuestion || rawAnswer === '') return;
 
-    const userAnswer = Number(answerValue);
+    const userAnswer = Number(rawAnswer);
     const responseMs = Date.now() - questionStart;
     const isCorrect = userAnswer === expectedAnswer;
     const difficulty = progress.settings.difficulty;
@@ -377,46 +392,43 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
       const damage = getAttackDamage(wasFast, mode);
       const newHp = clampHp(monsterHp - damage, monsterMaxHp);
       setMonsterHp(newHp);
+      playSfx(newHp <= 0 ? 'monsterDown' : 'correct');
+
+      const overrides: SessionOverrides = {
+        facts: newFacts,
+        correctCount: correctCount + 1,
+        questionsAnswered: questionsAnswered + 1,
+        responseTimesMs: [...responseTimesMs, responseMs],
+        factsPracticed: new Set(factsPracticed).add(currentFact.key),
+        factsMastered:
+          !wasAlreadyMastered && updatedFact.isMastered
+            ? new Set(factsMastered).add(currentFact.key)
+            : factsMastered,
+        xpEarned: xpEarned + earnedXp,
+        coinsEarned: coinsEarned + earnedCoins,
+      };
 
       if (newHp <= 0) {
         setMonsterState('defeated');
         const updatedMonsterDefeats = { ...monsterDefeats, [monster.id]: (monsterDefeats[monster.id] ?? 0) + 1 };
         setMonsterDefeats(updatedMonsterDefeats);
+        overrides.monsterDefeats = updatedMonsterDefeats;
 
         if (mode === 'bossBattle') {
           setBossWon(true);
-          const updatedFactsPracticed = new Set(factsPracticed).add(currentFact.key);
-          const updatedFactsMastered =
-            !wasAlreadyMastered && updatedFact.isMastered
-              ? new Set(factsMastered).add(currentFact.key)
-              : factsMastered;
-          setTimeout(
-            () =>
-              finishSession({
-                bossWon: true,
-                facts: newFacts,
-                correctCount: correctCount + 1,
-                questionsAnswered: questionsAnswered + 1,
-                responseTimesMs: [...responseTimesMs, responseMs],
-                factsPracticed: updatedFactsPracticed,
-                factsMastered: updatedFactsMastered,
-                monsterDefeats: updatedMonsterDefeats,
-                xpEarned: xpEarned + earnedXp,
-                coinsEarned: coinsEarned + earnedCoins,
-              }),
-            reducedMotion ? 100 : 700
-          );
+          setTimeout(() => finishSession({ ...overrides, bossWon: true }), reducedMotion ? 100 : 700);
         } else {
           const monsterTable = currentFact.b <= progress.maxFactor ? currentFact.b : currentFact.a;
           setTimeout(() => spawnNewMonster(monsterTable), reducedMotion ? 0 : 500);
-          setTimeout(() => advanceToNext(plan), reducedMotion ? 100 : 700);
+          setTimeout(() => advanceToNext(plan, overrides), reducedMotion ? 100 : 700);
         }
       } else {
         setMonsterState('hurt');
         setTimeout(() => setMonsterState('idle'), reducedMotion ? 0 : 400);
-        setTimeout(() => advanceToNext(), reducedMotion ? 100 : 600);
+        setTimeout(() => advanceToNext(undefined, overrides), reducedMotion ? 100 : 600);
       }
     } else {
+      playSfx('incorrect');
       setIncorrectCount((c) => c + 1);
       setMissedFacts((prev) => new Set(prev).add(currentFact.key));
 
@@ -440,16 +452,16 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
         return;
       }
 
-      let hintMessage = '';
       if (newWrongAttempts === 1) {
-        hintMessage = getHintForFact(currentFact);
-        setFeedback({ message: hintMessage, kind: 'incorrect' });
+        setFeedback({ message: getHintForFact(currentFact), kind: 'incorrect' });
       } else if (newWrongAttempts === 2) {
-        hintMessage = `Hint: ${getCommutativeHint(currentFact.a, currentFact.b)} Pick the answer below.`;
         const options = generateMultipleChoiceOptions(currentFact.answer, currentFact.a, currentFact.b);
         setMcOptions(options);
         setShowMultipleChoice(true);
-        setFeedback({ message: hintMessage, kind: 'hint' });
+        setFeedback({
+          message: `Hint: ${getCommutativeHint(currentFact.a, currentFact.b)} Pick the answer below.`,
+          kind: 'hint',
+        });
       } else {
         setFeedback({
           message: `${getRandomFeedback('incorrect')} The answer is ${currentFact.answer}.`,
@@ -460,20 +472,27 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
       setAnswerValue('');
 
       // Reschedule missed fact and commutative pair (not in mistake rescue)
-      let updatedPlan = plan;
       if (newWrongAttempts >= 3) {
-        updatedPlan = rescheduleMissedFact(plan, planIndex, currentFact.key, mode);
+        let updatedPlan = rescheduleMissedFact(plan, planIndex, currentFact.key, mode);
         updatedPlan = insertCommutativePair(updatedPlan, planIndex, currentFact.key, currentQuestion.bucket);
         setPlan(updatedPlan);
 
-        setTimeout(() => advanceToNext(updatedPlan), reducedMotion ? 100 : 1400);
+        const overrides: SessionOverrides = {
+          facts: newFacts,
+          incorrectCount: incorrectCount + 1,
+          questionsAnswered: questionsAnswered + 1,
+          responseTimesMs: [...responseTimesMs, responseMs],
+          factsPracticed: new Set(factsPracticed).add(currentFact.key),
+          missedFacts: new Set(missedFacts).add(currentFact.key),
+        };
+        setTimeout(() => advanceToNext(updatedPlan, overrides), reducedMotion ? 100 : 1400);
       }
     }
   }
 
   function handleMultipleChoiceSelect(value: number) {
     setAnswerValue(String(value));
-    setTimeout(() => handleSubmit(), 50);
+    handleSubmit(String(value));
   }
 
   // Keyboard support
@@ -492,6 +511,25 @@ export default function PracticeScreen({ progress, mode, table, bossId, onFinish
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answerValue, planIndex, isComplete, battleStatus]);
+
+  if (plan.length === 0) {
+    // e.g. Mistake Rescue with nothing missed and everything mastered
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[80vh] gap-6 px-4 py-6 text-center max-w-md mx-auto">
+        <div className="text-6xl" aria-hidden="true">🏰✨</div>
+        <h1 className="font-display text-3xl font-extrabold text-knight-blue-dark">All Clear, Brave Knight!</h1>
+        <p className="text-gray-600 font-bold">
+          There's nothing to practice here right now. Pick another quest from the map!
+        </p>
+        <button
+          onClick={onExit}
+          className="w-full rounded-2xl bg-knight-blue text-white font-display font-extrabold text-lg py-3 shadow-md hover:bg-knight-blue-dark transition-colors"
+        >
+          Return to Map
+        </button>
+      </div>
+    );
+  }
 
   if (!currentQuestion || !currentFact) {
     return (

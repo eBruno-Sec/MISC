@@ -213,6 +213,10 @@
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.6; }
   }
+  @keyframes screen-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
   .animate-bounce-idle  { animation: bounce-idle   2.2s ease-in-out infinite; }
   .animate-slash        { animation: slash         0.35s ease-out forwards; }
@@ -224,6 +228,7 @@
   .animate-poof         { animation: poof          0.4s  ease-out forwards; }
   .animate-float-fade   { animation: float-up-fade 1s    ease-out forwards; }
   .animate-pulse-soft   { animation: pulse-soft    1.5s  ease-in-out infinite; }
+  .screen-in            { animation: screen-in     0.25s ease-out; }
 
   @media (prefers-reduced-motion: reduce) {
     .animate-bounce-idle,
@@ -235,7 +240,8 @@
     .animate-victory-star,
     .animate-poof,
     .animate-float-fade,
-    .animate-pulse-soft {
+    .animate-pulse-soft,
+    .screen-in {
       animation: none !important;
     }
   }

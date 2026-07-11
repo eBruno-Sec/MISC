@@ -11,13 +11,19 @@ type AttackAnimationProps = {
  */
 export default function AttackAnimation({ trigger, type }: AttackAnimationProps) {
   const [visible, setVisible] = useState(false);
+  const [prevTrigger, setPrevTrigger] = useState(0);
+
+  // Adjust state during render when the trigger changes (avoids an effect round-trip)
+  if (trigger !== prevTrigger) {
+    setPrevTrigger(trigger);
+    if (trigger > 0) setVisible(true);
+  }
 
   useEffect(() => {
-    if (trigger === 0) return;
-    setVisible(true);
+    if (!visible) return;
     const timer = setTimeout(() => setVisible(false), 450);
     return () => clearTimeout(timer);
-  }, [trigger]);
+  }, [visible, trigger]);
 
   if (!visible) return null;
 

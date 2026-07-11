@@ -30,19 +30,6 @@ export default function ModeSelectScreen({
   const mistakeCompletion = progress.questCompletions['mistakeRescue'];
   const speedCompletion = progress.questCompletions['speedRound'];
 
-  function CompletionBadge({ completion }: { completion?: { timesCompleted: number; starsEarned: number } }) {
-    if (!completion) return null;
-    return (
-      <div className="flex items-center gap-1 mt-2">
-        <span className="text-sm" aria-label={`${completion.starsEarned} stars`}>
-          {'⭐'.repeat(completion.starsEarned)}
-          {'☆'.repeat(3 - completion.starsEarned)}
-        </span>
-        <span className="text-xs font-bold text-gray-400">Completed {completion.timesCompleted}x</span>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-dvh flex flex-col gap-6 px-4 py-6 max-w-3xl mx-auto pb-8">
       <div className="flex items-center gap-3">
@@ -102,6 +89,19 @@ export default function ModeSelectScreen({
           onSelectTable={onSelectTableTrainer}
         />
       </div>
+    </div>
+  );
+}
+
+function CompletionBadge({ completion }: { completion?: { timesCompleted: number; starsEarned: number } }) {
+  if (!completion) return null;
+  return (
+    <div className="flex items-center gap-1 mt-2">
+      <span className="text-sm" aria-label={`${completion.starsEarned} stars`}>
+        {'⭐'.repeat(completion.starsEarned)}
+        {'☆'.repeat(3 - completion.starsEarned)}
+      </span>
+      <span className="text-xs font-bold text-gray-400">Completed {completion.timesCompleted}x</span>
     </div>
   );
 }

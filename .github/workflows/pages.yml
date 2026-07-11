@@ -43,6 +43,16 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_BASE_URL: /MISC/refit/
 
+      - name: Build Tiny Knights
+        run: |
+          cd tiny-knights
+          npm ci
+          npm run build
+          cd ..
+          cp -r tiny-knights/dist /tmp/tiny-knights-dist
+          rm -rf tiny-knights
+          mv /tmp/tiny-knights-dist tiny-knights
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload entire repo as static artifact

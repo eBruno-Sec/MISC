@@ -1,73 +1,43 @@
-# React + TypeScript + Vite
+# Tiny Knights — Times Table Quest ⚔️
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A cozy math RPG for kids aged 6–11. Battle friendly monsters by answering
+multiplication questions — spaced repetition dressed up as a knight's adventure.
 
-Currently, two official plugins are available:
+**Play it:** https://ebruno-sec.github.io/MISC/tiny-knights/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **Daily Quest** — an adaptive 12-question session that mixes weak facts,
+  new material, and review using a spaced-repetition scheduler
+- **Table Trainer, Boss Battles, Mistake Rescue, Speed Round** — focused modes
+  for drilling one table, testing mastery, or low-pressure recovery practice
+- **Mastery engine** — a fact counts as mastered only after repeated fast,
+  correct answers across at least three separate sessions
+- **Progression** — XP, coins, badges, cosmetic unlocks, a monster book, and a
+  daily streak
+- **Parent Dashboard** — mastery overview, weak/slow facts, session history,
+  table range (1–10 or 1–12), and session length controls
+- **No account, no ads** — all progress is saved in the browser via
+  `localStorage`; includes dark mode, reduced motion, and sound toggles
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Stack
 
-## Expanding the ESLint configuration
+React 19 + TypeScript + Vite + Tailwind CSS 4. No backend.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Development
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev      # local dev server
+npm run build    # type-check + production build to dist/
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Deployment
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+GitHub Pages builds this app in CI (see `.github/workflows/pages.yml`): the
+workflow runs `npm ci && npm run build` and publishes `dist/` at
+`/MISC/tiny-knights/`. Don't commit build output — pushing to `main` is enough.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+A `Dockerfile` + `nginx.conf` are also included for self-hosting
+(see `DOCKER_GUIDE.md`).

@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import type { FactKey, PracticeSession, UserProgress } from '../types';
 import { getLevelFromXp } from '../lib/rewards';
 import { parseFactKey } from '../lib/facts';
+import { playSfx } from '../lib/sound';
 import RewardChest from '../components/RewardChest';
 import KnightSprite from '../components/KnightSprite';
 
@@ -29,6 +31,10 @@ export default function VictoryScreen({
 }: VictoryScreenProps) {
   const accuracy = session.questionsAnswered > 0 ? Math.round((session.correct / session.questionsAnswered) * 100) : 0;
   const stars = accuracy >= 90 ? 3 : accuracy >= 70 ? 2 : accuracy >= 40 ? 1 : 0;
+
+  useEffect(() => {
+    playSfx('victory');
+  }, []);
 
   const level = getLevelFromXp(progress.xp);
   const leveledUp = getLevelFromXp(progress.xp - xpEarned) < level;

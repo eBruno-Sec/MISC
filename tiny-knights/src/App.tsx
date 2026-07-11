@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import type { GameMode, UserProgress, Badge, CosmeticUnlock } from './types';
 import { loadProgress, saveProgress, resetProgress } from './lib/storage';
 import { checkAndAwardBadges, checkCosmeticUnlocks, getLevelFromXp, recordQuestCompletion } from './lib/rewards';
+import { advanceDailyStreak } from './lib/dates';
+import { setSoundEnabled } from './lib/sound';
 import HomeScreen from './screens/HomeScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import BossSelectScreen from './screens/BossSelectScreen';
@@ -49,6 +51,10 @@ export default function App() {
     }
   }, [progress.settings.darkMode]);
 
+  useEffect(() => {
+    setSoundEnabled(progress.settings.soundEnabled);
+  }, [progress.settings.soundEnabled]);
+
   function startQuest(mode: GameMode, table?: number, bossId?: string) {
     setActiveMode(mode);
     setActiveTable(table);
@@ -66,7 +72,6 @@ export default function App() {
       practicedTables.add(a);
     });
 
-    const beforeLevel = getLevelFromXp(progress.xp);
     const afterLevel = getLevelFromXp(updatedProgress.xp);
 
     const { badges, newlyEarned } = checkAndAwardBadges(
@@ -80,20 +85,10 @@ export default function App() {
 
     const { cosmetics, newlyUnlocked } = checkCosmeticUnlocks(updatedProgress, afterLevel);
 
-    let dailyStreak = updatedProgress.dailyStreak;
-    let lastPlayedDate = updatedProgress.lastPlayedDate;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (lastPlayedDate !== todayStr) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().slice(0, 10);
-      if (lastPlayedDate === yesterdayStr) {
-        dailyStreak += 1;
-      } else {
-        dailyStreak = 1;
-      }
-      lastPlayedDate = todayStr;
-    }
+    const { dailyStreak, lastPlayedDate } = advanceDailyStreak(
+      updatedProgress.lastPlayedDate,
+      updatedProgress.dailyStreak
+    );
 
     const accuracy =
       session.questionsAnswered > 0 ? Math.round((session.correct / session.questionsAnswered) * 100) : 0;
@@ -124,10 +119,6 @@ export default function App() {
       newlyUnlockedCosmetics: newlyUnlocked,
     });
     setScreen('victory');
-
-    if (afterLevel > beforeLevel) {
-      // level-up handled visually inside VictoryScreen via progress comparison
-    }
   }
 
   function handleUpdateProgress(updated: UserProgress) {
@@ -140,7 +131,83 @@ export default function App() {
     setScreen('home');
   }
 
-  if (screen === 'home') {
+  function renderScreen() {
+    if (screen === 'modeSelect') {
+      return (
+        <ModeSelectScreen
+          progress={progress}
+          onSelectTableTrainer={(table) => startQuest('tableTrainer', table)}
+          onSelectBossBattle={() => setScreen('bossSelect')}
+          onSelectMistakeRescue={() => startQuest('mistakeRescue')}
+          onSelectSpeedRound={() => startQuest('speedRound')}
+          onBack={() => setScreen('home')}
+        />
+      );
+    }
+
+    if (screen === 'bossSelect') {
+      return (
+        <BossSelectScreen
+          progress={progress}
+          onSelectBoss={(bossId) => startQuest('bossBattle', undefined, bossId)}
+          onBack={() => setScreen('modeSelect')}
+        />
+      );
+    }
+
+    if (screen === 'practice') {
+      return (
+        <PracticeScreen
+          key={sessionKey}
+          progress={progress}
+          mode={activeMode}
+          table={activeTable}
+          bossId={activeBossId}
+          onFinish={handleFinishSession}
+          onExit={() => setScreen('home')}
+          onRetry={() => startQuest(activeMode, activeTable, activeBossId)}
+          onPracticeWeakFacts={() => startQuest('mistakeRescue')}
+        />
+      );
+    }
+
+    if (screen === 'victory' && victoryData) {
+      return (
+        <VictoryScreen
+          session={victoryData.result.session}
+          xpEarned={victoryData.result.xpEarned}
+          coinsEarned={victoryData.result.coinsEarned}
+          newlyEarnedBadges={victoryData.newlyEarnedBadges.map((b) => ({ id: b.id, name: b.name, icon: b.icon }))}
+          newlyUnlockedCosmetics={victoryData.newlyUnlockedCosmetics.map((c) => ({ id: c.id, name: c.name, icon: c.icon }))}
+          bossWon={victoryData.result.bossWon}
+          progress={progress}
+          onContinue={() => startQuest('dailyQuest')}
+          onHome={() => setScreen('home')}
+        />
+      );
+    }
+
+    if (screen === 'parent') {
+      return (
+        <ParentScreen
+          progress={progress}
+          onUpdateProgress={handleUpdateProgress}
+          onReset={handleReset}
+          onBack={() => setScreen('home')}
+        />
+      );
+    }
+
+    if (screen === 'settings') {
+      return (
+        <SettingsScreen
+          progress={progress}
+          onUpdateProgress={handleUpdateProgress}
+          onBack={() => setScreen('home')}
+        />
+      );
+    }
+
     return (
       <HomeScreen
         progress={progress}
@@ -150,81 +217,10 @@ export default function App() {
     );
   }
 
-  if (screen === 'modeSelect') {
-    return (
-      <ModeSelectScreen
-        progress={progress}
-        onSelectTableTrainer={(table) => startQuest('tableTrainer', table)}
-        onSelectBossBattle={() => setScreen('bossSelect')}
-        onSelectMistakeRescue={() => startQuest('mistakeRescue')}
-        onSelectSpeedRound={() => startQuest('speedRound')}
-        onBack={() => setScreen('home')}
-      />
-    );
-  }
-
-  if (screen === 'bossSelect') {
-    return (
-      <BossSelectScreen
-        progress={progress}
-        onSelectBoss={(bossId) => startQuest('bossBattle', undefined, bossId)}
-        onBack={() => setScreen('modeSelect')}
-      />
-    );
-  }
-
-  if (screen === 'practice') {
-    return (
-      <PracticeScreen
-        key={sessionKey}
-        progress={progress}
-        mode={activeMode}
-        table={activeTable}
-        bossId={activeBossId}
-        onFinish={handleFinishSession}
-        onExit={() => setScreen('home')}
-        onRetry={() => startQuest(activeMode, activeTable, activeBossId)}
-        onPracticeWeakFacts={() => startQuest('mistakeRescue')}
-      />
-    );
-  }
-
-  if (screen === 'victory' && victoryData) {
-    return (
-      <VictoryScreen
-        session={victoryData.result.session}
-        xpEarned={victoryData.result.xpEarned}
-        coinsEarned={victoryData.result.coinsEarned}
-        newlyEarnedBadges={victoryData.newlyEarnedBadges.map((b) => ({ id: b.id, name: b.name, icon: b.icon }))}
-        newlyUnlockedCosmetics={victoryData.newlyUnlockedCosmetics.map((c) => ({ id: c.id, name: c.name, icon: c.icon }))}
-        bossWon={victoryData.result.bossWon}
-        progress={progress}
-        onContinue={() => startQuest('dailyQuest')}
-        onHome={() => setScreen('home')}
-      />
-    );
-  }
-
-  if (screen === 'parent') {
-    return (
-      <ParentScreen
-        progress={progress}
-        onUpdateProgress={handleUpdateProgress}
-        onReset={handleReset}
-        onBack={() => setScreen('home')}
-      />
-    );
-  }
-
-  if (screen === 'settings') {
-    return (
-      <SettingsScreen
-        progress={progress}
-        onUpdateProgress={handleUpdateProgress}
-        onBack={() => setScreen('home')}
-      />
-    );
-  }
-
-  return null;
+  // Keying on the screen name re-runs the entry animation on every navigation.
+  return (
+    <div key={screen} className="screen-in">
+      {renderScreen()}
+    </div>
+  );
 }

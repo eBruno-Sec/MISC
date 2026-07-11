@@ -1,0 +1,24 @@
+{
+  "name": "Tiny Knights — Times Table Quest",
+  "short_name": "Tiny Knights",
+  "description": "Battle friendly monsters by mastering multiplication tables 1–12. A cozy math RPG for kids.",
+  "start_url": "/MISC/tiny-knights/",
+  "scope": "/MISC/tiny-knights/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fef9ec",
+  "theme_color": "#3b5bdb",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "og-image.png",
+      "sizes": "600x897",
+      "type": "image/png"
+    }
+  ]
+}

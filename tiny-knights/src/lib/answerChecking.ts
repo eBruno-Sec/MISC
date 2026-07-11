@@ -30,7 +30,8 @@ export function updateFactAfterAnswer(params: {
     updated.currentStreak += 1;
     updated.bestStreak = Math.max(updated.bestStreak, updated.currentStreak);
     if (!updated.correctSessionIds.includes(sessionId)) {
-      updated.correctSessionIds = [...updated.correctSessionIds, sessionId];
+      // mastery only needs 3 distinct sessions; cap the list so storage stays small
+      updated.correctSessionIds = [...updated.correctSessionIds, sessionId].slice(-10);
     }
     if (wasFast) updated.masteryLevel = clampMastery(updated.masteryLevel + 1);
   } else {

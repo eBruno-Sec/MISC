@@ -82,6 +82,14 @@ function migrateProgress(data: UserProgress): UserProgress {
   const maxFactor = data.maxFactor === 12 ? 12 : 10;
   const facts = extendFacts(data.facts ?? {}, maxFactor);
 
+  // Trim unbounded lists written by earlier versions
+  for (const key of Object.keys(facts) as (keyof typeof facts)[]) {
+    const fact = facts[key];
+    if (fact.correctSessionIds.length > 10) {
+      facts[key] = { ...fact, correctSessionIds: fact.correctSessionIds.slice(-10) };
+    }
+  }
+
   return {
     ...defaults,
     ...data,
@@ -91,7 +99,7 @@ function migrateProgress(data: UserProgress): UserProgress {
     badges: data.badges && data.badges.length > 0 ? data.badges : defaults.badges,
     cosmetics: data.cosmetics && data.cosmetics.length > 0 ? data.cosmetics : defaults.cosmetics,
     monsterBook: data.monsterBook ?? [],
-    sessions: data.sessions ?? [],
+    sessions: (data.sessions ?? []).slice(-50),
     questCompletions: data.questCompletions ?? {},
   };
 }

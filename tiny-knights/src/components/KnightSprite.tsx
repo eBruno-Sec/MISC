@@ -15,17 +15,20 @@ const sizeMap = {
 };
 
 export default function KnightSprite({ state, size = 'lg' }: KnightSpriteProps) {
-  const [localState, setLocalState] = useState<KnightState>('idle');
+  const [localState, setLocalState] = useState<KnightState>(state);
+  const [prevState, setPrevState] = useState(state);
+
+  // Adjust state during render when the prop changes (avoids an effect round-trip)
+  if (state !== prevState) {
+    setPrevState(state);
+    setLocalState(state);
+  }
 
   useEffect(() => {
-    if (state === 'idle') {
-      setLocalState('idle');
-      return;
-    }
-    setLocalState(state);
+    if (localState === 'idle') return;
     const timer = setTimeout(() => setLocalState('idle'), 500);
     return () => clearTimeout(timer);
-  }, [state]);
+  }, [localState]);
 
   const isAttacking = localState === 'attack';
   const isBlocking = localState === 'block';
