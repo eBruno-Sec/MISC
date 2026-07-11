@@ -4,6 +4,7 @@ import { loadProgress, saveProgress, resetProgress } from './lib/storage';
 import { checkAndAwardBadges, checkCosmeticUnlocks, getLevelFromXp, recordQuestCompletion } from './lib/rewards';
 import { advanceDailyStreak } from './lib/dates';
 import { setSoundEnabled } from './lib/sound';
+import { initAnalytics, trackScreen } from './lib/analytics';
 import HomeScreen from './screens/HomeScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import BossSelectScreen from './screens/BossSelectScreen';
@@ -54,6 +55,14 @@ export default function App() {
   useEffect(() => {
     setSoundEnabled(progress.settings.soundEnabled);
   }, [progress.settings.soundEnabled]);
+
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
+  useEffect(() => {
+    trackScreen(screen);
+  }, [screen]);
 
   function startQuest(mode: GameMode, table?: number, bossId?: string) {
     setActiveMode(mode);

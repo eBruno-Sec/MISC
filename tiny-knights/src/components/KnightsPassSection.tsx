@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { KNIGHTS_PASS_URL, useKnightsPass } from '../lib/entitlements';
+import { trackEvent } from '../lib/analytics';
 
 /**
  * Supporter section shown inside the (parent-gated) Parent Dashboard.
@@ -16,7 +17,10 @@ export default function KnightsPassSection() {
     setStatus('checking');
     const ok = await activate(code);
     setStatus(ok ? 'success' : 'invalid');
-    if (ok) setCode('');
+    if (ok) {
+      setCode('');
+      trackEvent('knights-pass-activated');
+    }
   }
 
   if (passActive) {
