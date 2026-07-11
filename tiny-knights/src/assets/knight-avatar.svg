@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900">
+  <defs>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dde4ee"/>
+      <stop offset="0.5" stop-color="#b9c2cf"/>
+      <stop offset="1" stop-color="#96a1b4"/>
+    </linearGradient>
+    <linearGradient id="steelDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b9c2cf"/>
+      <stop offset="1" stop-color="#8a94a6"/>
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f03e3e"/>
+      <stop offset="1" stop-color="#c92a2a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ============ CAPE (behind everything) ============ -->
+  <path d="M 175 430
+           C 130 560, 118 700, 138 820
+           C 200 850, 260 838, 300 842
+           C 340 838, 400 850, 462 820
+           C 482 700, 470 560, 425 430
+           C 380 395, 220 395, 175 430 Z"
+        fill="url(#redGrad)" stroke="#8c1d1d" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M 205 470 C 180 590, 172 700, 182 800 C 220 815, 250 810, 268 812 L 258 470 Z"
+        fill="#b02525" opacity="0.55"/>
+
+  <!-- ============ LEGS ============ -->
+  <g stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round">
+    <rect x="238" y="634" width="58" height="130" rx="26" fill="url(#steelDark)"/>
+    <rect x="304" y="634" width="58" height="130" rx="26" fill="url(#steelDark)"/>
+    <!-- knee plates -->
+    <circle cx="267" cy="664" r="26" fill="url(#steel)"/>
+    <circle cx="333" cy="664" r="26" fill="url(#steel)"/>
+  </g>
+
+  <!-- ============ BOOTS: proper shoe shapes, toes splayed outward ============ -->
+  <!-- left boot (viewer left, toe points left) -->
+  <g stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round">
+    <path d="M 238 762
+             C 236 790, 232 806, 214 812
+             C 190 818, 170 824, 164 838
+             C 160 848, 168 856, 184 858
+             L 282 858
+             C 290 852, 292 840, 290 820
+             L 292 762
+             Z"
+          fill="url(#steelDark)"/>
+    <!-- toe cap highlight -->
+    <path d="M 176 830 C 186 820, 208 814, 226 812 C 214 824, 196 832, 182 838 Z"
+          fill="#dde4ee" stroke="none"/>
+    <!-- ankle plate line -->
+    <path d="M 242 792 C 256 799, 272 801, 286 798" fill="none" stroke-width="5"/>
+    <!-- sole -->
+    <path d="M 162 844 C 158 856, 166 866, 184 867 L 278 867 C 290 866, 294 858, 290 848
+             C 286 856, 282 858, 274 858 L 184 858 C 170 857, 164 850, 162 844 Z"
+          fill="#4a3728"/>
+  </g>
+  <!-- right boot (viewer right, toe points right) -->
+  <g stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round">
+    <path d="M 362 762
+             C 364 790, 368 806, 386 812
+             C 410 818, 430 824, 436 838
+             C 440 848, 432 856, 416 858
+             L 318 858
+             C 310 852, 308 840, 310 820
+             L 308 762
+             Z"
+          fill="url(#steelDark)"/>
+    <path d="M 424 830 C 414 820, 392 814, 374 812 C 386 824, 404 832, 418 838 Z"
+          fill="#dde4ee" stroke="none"/>
+    <path d="M 358 792 C 344 799, 328 801, 314 798" fill="none" stroke-width="5"/>
+    <path d="M 438 844 C 442 856, 434 866, 416 867 L 322 867 C 310 866, 306 858, 310 848
+             C 314 856, 318 858, 326 858 L 416 858 C 430 857, 436 850, 438 844 Z"
+          fill="#4a3728"/>
+  </g>
+
+  <!-- ============ TORSO ============ -->
+  <path d="M 208 420
+           C 196 480, 196 560, 216 622
+           C 262 648, 338 648, 384 622
+           C 404 560, 404 480, 392 420
+           C 340 396, 260 396, 208 420 Z"
+        fill="url(#steel)" stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round"/>
+  <!-- chest plate line + rivets -->
+  <path d="M 216 520 C 268 542, 332 542, 384 520" fill="none" stroke="#3a3f4d" stroke-width="5"/>
+  <circle cx="244" cy="470" r="6" fill="#e8edf4" stroke="#3a3f4d" stroke-width="3"/>
+  <circle cx="356" cy="470" r="6" fill="#e8edf4" stroke="#3a3f4d" stroke-width="3"/>
+  <!-- belt -->
+  <rect x="206" y="574" width="188" height="34" rx="14" fill="#8c5a2b" stroke="#3a3f4d" stroke-width="6"/>
+  <rect x="272" y="568" width="56" height="46" rx="10" fill="#ffd43b" stroke="#3a3f4d" stroke-width="6"/>
+  <rect x="286" y="580" width="28" height="22" rx="6" fill="#8c5a2b" stroke="none"/>
+
+  <!-- ============ RIGHT ARM + SWORD (viewer left) ============ -->
+  <path d="M 210 450 C 178 456, 154 470, 142 492 C 136 508, 146 522, 164 518 C 188 508, 206 490, 216 474 Z"
+        fill="url(#steelDark)" stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round"/>
+  <g transform="rotate(-14 145 500)" stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round">
+    <!-- blade -->
+    <path d="M 133 470 L 133 200 L 145 148 L 157 200 L 157 470 Z" fill="url(#steel)"/>
+    <path d="M 138 460 L 138 208 L 144 172 L 144 460 Z" fill="#eef2f8" stroke="none"/>
+    <!-- crossguard -->
+    <rect x="97" y="460" width="96" height="24" rx="11" fill="#ffd43b"/>
+    <!-- grip -->
+    <rect x="133" y="484" width="24" height="58" rx="11" fill="#8c5a2b"/>
+    <!-- gauntlet fist -->
+    <rect x="115" y="492" width="60" height="44" rx="19" fill="url(#steel)"/>
+    <path d="M 128 506 L 162 506 M 127 519 L 161 519" fill="none" stroke-width="4" stroke-linecap="round"/>
+    <!-- pommel -->
+    <circle cx="145" cy="552" r="13" fill="#ffd43b"/>
+  </g>
+
+  <!-- ============ SHIELD (viewer right, held in front) ============ -->
+  <g stroke="#3a3f4d" stroke-width="7" stroke-linejoin="round">
+    <path d="M 388 460 C 348 470, 330 500, 332 560 C 334 640, 372 700, 432 724
+             C 492 700, 530 640, 532 560 C 534 500, 516 470, 476 460
+             C 448 452, 416 452, 388 460 Z"
+          fill="url(#steel)"/>
+    <path d="M 396 478 C 362 486, 348 510, 350 560 C 352 628, 384 678, 432 700
+             C 480 678, 512 628, 514 560 C 516 510, 502 486, 468 478
+             C 444 471, 420 471, 396 478 Z"
+          fill="url(#redGrad)" stroke-width="5"/>
+    <!-- gold cross -->
+    <rect x="414" y="488" width="36" height="196" rx="8" fill="#ffd43b" stroke-width="5"/>
+    <rect x="366" y="540" width="132" height="36" rx="8" fill="#ffd43b" stroke-width="5"/>
+    <!-- rivets on rim -->
+    <g fill="#e8edf4" stroke-width="3">
+      <circle cx="388" cy="470" r="5"/><circle cx="432" cy="464" r="5"/><circle cx="476" cy="470" r="5"/>
+      <circle cx="352" cy="520" r="5"/><circle cx="512" cy="520" r="5"/>
+      <circle cx="356" cy="590" r="5"/><circle cx="508" cy="590" r="5"/>
+      <circle cx="384" cy="650" r="5"/><circle cx="480" cy="650" r="5"/>
+      <circle cx="432" cy="694" r="5"/>
+    </g>
+  </g>
+
+  <!-- ============ PAULDRONS ============ -->
+  <circle cx="196" cy="438" r="52" fill="url(#steel)" stroke="#3a3f4d" stroke-width="7"/>
+  <circle cx="404" cy="438" r="52" fill="url(#steel)" stroke="#3a3f4d" stroke-width="7"/>
+  <path d="M 168 420 C 174 404, 192 396, 208 400 C 192 402, 178 410, 172 424 Z" fill="#eef2f8" opacity="0.9"/>
+  <path d="M 432 420 C 426 404, 408 396, 392 400 C 408 402, 422 410, 428 424 Z" fill="#eef2f8" opacity="0.9"/>
+
+  <!-- ============ HEAD / HELMET ============ -->
+  <!-- plume -->
+  <path d="M 300 130
+           C 296 84, 314 48, 362 34
+           C 404 22, 448 32, 466 52
+           C 432 50, 412 60, 402 76
+           C 428 74, 448 84, 456 100
+           C 428 96, 404 102, 390 116
+           C 368 138, 336 148, 312 144 Z"
+        fill="url(#redGrad)" stroke="#8c1d1d" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M 316 128 C 314 92, 330 62, 366 46 C 340 70, 330 100, 330 128 Z"
+        fill="#ff6b6b" opacity="0.7"/>
+  <rect x="284" y="108" width="44" height="30" rx="10" fill="#ffd43b" stroke="#3a3f4d" stroke-width="6"/>
+  <!-- helmet dome -->
+  <path d="M 158 300
+           C 152 200, 214 122, 300 122
+           C 386 122, 448 200, 442 300
+           C 442 372, 420 416, 388 434
+           C 330 456, 270 456, 212 434
+           C 180 416, 158 372, 158 300 Z"
+        fill="url(#steel)" stroke="#3a3f4d" stroke-width="8" stroke-linejoin="round"/>
+  <!-- dome highlight -->
+  <path d="M 210 190 C 232 152, 272 136, 300 136 C 250 156, 226 190, 218 230 Z"
+        fill="#eef2f8" opacity="0.9"/>
+  <!-- brow band -->
+  <path d="M 166 262 C 256 240, 344 240, 434 262 L 434 288 C 344 266, 256 266, 166 288 Z"
+        fill="url(#steelDark)" stroke="#3a3f4d" stroke-width="6" stroke-linejoin="round"/>
+  <!-- visor slits -->
+  <g fill="#3a3f4d">
+    <rect x="238" y="196" width="16" height="38" rx="8"/>
+    <rect x="278" y="190" width="16" height="42" rx="8"/>
+    <rect x="318" y="190" width="16" height="42" rx="8"/>
+    <rect x="356" y="196" width="16" height="38" rx="8"/>
+  </g>
+  <!-- face opening -->
+  <path d="M 208 306
+           C 208 290, 220 280, 240 278
+           C 280 274, 320 274, 360 278
+           C 380 280, 392 290, 392 306
+           C 392 348, 372 376, 340 384
+           C 314 390, 286 390, 260 384
+           C 228 376, 208 348, 208 306 Z"
+        fill="#ffb95e" stroke="#3a3f4d" stroke-width="7"/>
+  <path d="M 214 300 C 216 290, 224 285, 238 284 C 246 300, 246 330, 240 352
+           C 224 340, 214 322, 214 300 Z" fill="#e89a3c" stroke="none"/>
+  <!-- eyes -->
+  <g>
+    <circle cx="266" cy="326" r="21" fill="#2b2320"/>
+    <circle cx="334" cy="326" r="21" fill="#2b2320"/>
+    <circle cx="273" cy="318" r="7" fill="#ffffff"/>
+    <circle cx="341" cy="318" r="7" fill="#ffffff"/>
+    <!-- little smile -->
+    <ellipse cx="240" cy="349" rx="13" ry="8" fill="#ff9d6b" opacity="0.65"/>
+    <ellipse cx="360" cy="349" rx="13" ry="8" fill="#ff9d6b" opacity="0.65"/>
+    <path d="M 287 358 C 296 366, 304 366, 313 358" fill="none" stroke="#8a5a28" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <!-- cheek chin guard lines -->
+  <path d="M 196 330 C 196 386, 226 420, 268 430" fill="none" stroke="#3a3f4d" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 404 330 C 404 386, 374 420, 332 430" fill="none" stroke="#3a3f4d" stroke-width="6" stroke-linecap="round"/>
+  <!-- side rivets -->
+  <circle cx="176" cy="300" r="8" fill="#e8edf4" stroke="#3a3f4d" stroke-width="4"/>
+  <circle cx="424" cy="300" r="8" fill="#e8edf4" stroke="#3a3f4d" stroke-width="4"/>
+</svg>
