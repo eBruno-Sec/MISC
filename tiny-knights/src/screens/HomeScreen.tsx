@@ -1,5 +1,6 @@
 import type { UserProgress } from '../types';
 import { getLevelFromXp, getXpIntoLevel } from '../lib/rewards';
+import { useKnightsPass, KNIGHTS_PASS_URL } from '../lib/entitlements';
 import KnightSprite from '../components/KnightSprite';
 import ProgressBar from '../components/ProgressBar';
 
@@ -12,6 +13,7 @@ type HomeScreenProps = {
 export default function HomeScreen({ progress, onStartDailyQuest, onNavigate }: HomeScreenProps) {
   const level = getLevelFromXp(progress.xp);
   const { current, needed } = getXpIntoLevel(progress.xp);
+  const { passActive } = useKnightsPass();
 
   return (
     <div className="min-h-dvh flex flex-col items-center gap-6 px-4 py-6 max-w-xl mx-auto">
@@ -70,12 +72,30 @@ export default function HomeScreen({ progress, onStartDailyQuest, onNavigate }: 
         </button>
       </div>
 
-      <button
-        onClick={() => onNavigate('parent')}
-        className="text-sm text-gray-400 underline hover:text-gray-600"
-      >
-        Parent Dashboard
-      </button>
+      <div className="flex flex-col items-center gap-2 pb-2">
+        <button
+          onClick={() => onNavigate('parent')}
+          className="text-sm text-gray-400 underline hover:text-gray-600"
+        >
+          Parent Dashboard
+        </button>
+        {passActive ? (
+          <p className="text-xs text-amber-600 font-bold">🏰 Knight's Pass — Active</p>
+        ) : (
+          <button
+            onClick={() => {
+              if (KNIGHTS_PASS_URL) {
+                window.open(KNIGHTS_PASS_URL, '_blank', 'noopener,noreferrer');
+              } else {
+                onNavigate('parent');
+              }
+            }}
+            className="text-xs text-amber-600 hover:text-amber-700 underline"
+          >
+            🏰 Get Knight's Pass — unlock extra content
+          </button>
+        )}
+      </div>
     </div>
   );
 }
