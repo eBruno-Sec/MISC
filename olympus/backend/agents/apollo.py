@@ -368,7 +368,11 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             '</div>'
         )
 
-        export_script = """<script nonce="__NONCE__">
+        # RAW string (r"""): the JS below contains `\n` string literals. In a normal
+        # Python string those become real newlines, which land *inside* JS '...' quotes
+        # and make the whole script a syntax error (so no export/print/theme button
+        # wires up). Raw keeps them as literal backslash-n for JS to parse at runtime.
+        export_script = r"""<script nonce="__NONCE__">
 const REPORT = __REPORT_JSON__;
 function olyPrint(){ window.print(); }
 function dl(name, mime, text){

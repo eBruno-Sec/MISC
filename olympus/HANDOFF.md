@@ -117,6 +117,13 @@ apollo (report).
 ---
 
 ## Key gotchas (for running / debugging)
+- **APOLLO report JS is a RAW string (`r"""`).** The report embeds an inline
+  `<script>` (export/print/theme buttons). It contains JS `\n` string literals; in a
+  normal Python string those become REAL newlines inside JS `'...'` quotes → an
+  "Invalid or unexpected token" syntax error that kills the *whole* script, so every
+  toolbar button is silently dead. Keep `export_script` raw, and never add a Python
+  `\`-escape to it. Guarded by `tests/test_report.py`. (Verify report JS actually
+  *parses/runs* in a browser — HTML rendering alone won't catch this.)
 - **Local Docker targets (Juice Shop etc.):** put the target container on OLYMPUS's
   network and target it by **container name + internal port** (`juice-shop:3000`), NOT
   `host.docker.internal:PORT` (that's the Docker host, not the container). `0 live hosts`
