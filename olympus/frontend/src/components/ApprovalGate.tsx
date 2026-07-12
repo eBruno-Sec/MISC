@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { ApprovalRequest } from '../types'
 import { api } from '../api'
 
@@ -15,13 +15,13 @@ const AGENT_SYMBOL: Record<string, string> = {
 
 export default function ApprovalGate({ missionId, approvals, onResolved }: Props) {
   const [loading, setLoading] = useState(false)
-
-  if (approvals.length === 0) return null
-
+  const dialogRef = useRef<HTMLDivElement>(null)
+  // Hooks must run unconditionally, so read defensively and guard the early
+  // return below (approvals can be empty on the render before this unmounts).
   const approval = approvals[0]
-  const symbol = AGENT_SYMBOL[approval.agent] || '●'
 
   const resolve = async (approved: boolean) => {
+    if (!approval) return
     setLoading(true)
     try {
       await api.resolveApproval(missionId, approval.id, approved)
@@ -33,6 +33,32 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
     }
   }
 
+  // Focus trap: move focus into the dialog on open, cycle Tab within it, and
+  // let Escape deny. Returning focus to the opener isn't needed — the gate is a
+  // full-screen overlay with no persistent trigger element behind it.
+  useEffect(() => {
+    if (!approval) return
+    const node = dialogRef.current
+    if (!node) return
+    const focusable = node.querySelectorAll<HTMLElement>('button:not([disabled])')
+    focusable[0]?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); resolve(false); return }
+      if (e.key !== 'Tab' || focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    node.addEventListener('keydown', onKey)
+    return () => node.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approval?.id])
+
+  if (approvals.length === 0 || !approval) return null
+
+  const symbol = AGENT_SYMBOL[approval.agent] || '●'
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 200,
@@ -40,7 +66,12 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '1rem',
     }}>
-      <div style={{
+      <div
+        ref={dialogRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="approval-title"
+        style={{
         background: 'var(--surface)',
         border: '1px solid var(--gold)',
         boxShadow: '0 0 40px rgba(245,158,11,0.15)',
@@ -56,7 +87,7 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
           <span style={{ fontSize: '1.2rem' }}>{symbol}</span>
           <div>
             <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--gold)', marginBottom: '0.2rem' }}>HUMAN-IN-THE-LOOP GATE</div>
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-bright)', fontWeight: 700 }}>
+            <div id="approval-title" style={{ fontSize: '0.9rem', color: 'var(--text-bright)', fontWeight: 700 }}>
               {approval.agent.toUpperCase()} requests authorization
             </div>
           </div>
@@ -93,6 +124,8 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
             <button
               onClick={() => resolve(false)}
               disabled={loading}
+              aria-label="Deny this action"
+              className="touch-target"
               style={{
                 padding: '0.9rem', fontSize: '0.8rem', letterSpacing: '0.15em',
                 fontFamily: 'var(--display)', fontWeight: 700,
@@ -107,6 +140,8 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
             <button
               onClick={() => resolve(true)}
               disabled={loading}
+              aria-label="Authorize this action"
+              className="touch-target"
               style={{
                 padding: '0.9rem', fontSize: '0.8rem', letterSpacing: '0.15em',
                 fontFamily: 'var(--display)', fontWeight: 700,
