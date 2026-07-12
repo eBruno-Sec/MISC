@@ -91,7 +91,13 @@ apollo (report).
   full `:root[data-theme="light"]` token block in `index.css`). **↓ SESSION backup**
   button in MissionControl serializes the whole mission (mission + findings + last
   500 logs + notes + live_hosts + status/phase) to `OLYMPUS_backup_YYYY-MM-DD.json`,
-  client-side, schema `version:"1"`. (Import/hydration + `/missions/restore` = TBD.)
+  client-side, schema `version:"1"`. **Import/hydration is live:** MissionList has an
+  "Upload Progress (.json)" drag-drop target + file picker; the file is `JSON.parse`d
+  and shape-checked client-side, then `POST /missions/restore` re-validates strictly
+  (`core/backup.py` `validate_backup`, unit-tested in `tests/test_backup.py`) and
+  imports it as a **NEW mission** (fresh id — never clobbers a live one; findings
+  restored verbatim). A corrupt file is rejected with the banner "Invalid or corrupted
+  progress file". `context.imported` flags the provenance (no schema change).
 - **A11y + touch pass:** `.touch-target` class (44px min on `@media (pointer:coarse)`
   only — desktop density preserved), ARIA roles on the tab strip (`tablist`/`tab`/
   `tabpanel`) + icon buttons (`aria-label`), focus-trapped `role="alertdialog"`

@@ -1,7 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { MissionSummary, Severity } from '../types'
+
+// Client-side schema check mirrors core/backup.validate_backup so a bad file is
+// caught before any upload. Returns a reason string, or null when the shape is OK.
+function validateBackupShape(data: any): string | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'not a JSON object'
+  if (String(data.version) !== '1') return 'unsupported or missing version'
+  if (!data.mission || typeof data.mission !== 'object') return 'missing mission record'
+  const target = typeof data.mission.target === 'string' ? data.mission.target.trim() : ''
+  if (!target) return 'missing target'
+  const findings = data.findings ?? data.mission.findings
+  if (findings !== undefined && findings !== null && !Array.isArray(findings)) return 'malformed findings'
+  return null
+}
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--text-dim)',
@@ -81,6 +94,30 @@ export default function MissionList() {
   const [relaunching, setRelaunching] = useState<string | null>(null)
   const [favorites, setFavorites] = useState<string[]>(loadFavorites)
   const [query, setQuery] = useState('')
+  const [importErr, setImportErr] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // Read a .json backup, validate client-side, then hydrate via the server (which
+  // re-validates and imports as a new mission). Any failure -> one clear banner.
+  const handleFile = async (file: File) => {
+    setImportErr(null)
+    setImporting(true)
+    try {
+      const text = await file.text()
+      let data: unknown = null
+      try { data = JSON.parse(text) } catch { throw new Error('parse') }
+      const problem = validateBackupShape(data)
+      if (problem) throw new Error(problem)
+      const res = await api.restoreSession(data)
+      navigate(`/mission/${res.id}`)
+    } catch {
+      setImportErr('Invalid or corrupted progress file')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const relaunch = async (e: React.MouseEvent, m: MissionSummary) => {
     e.stopPropagation()
@@ -153,8 +190,70 @@ export default function MissionList() {
         value={query}
         onChange={e => setQuery(e.target.value)}
         placeholder="filter missions by target or id..."
-        style={{ width: '100%', marginBottom: '1.25rem', fontSize: '0.85rem' }}
+        style={{ width: '100%', marginBottom: '0.75rem', fontSize: '0.85rem' }}
       />
+
+      {/* Restore a saved session. Drag-and-drop target + file picker (spec: State
+          Hydration). Validated client-side, then re-validated + imported server-side. */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => {
+          e.preventDefault(); setDragOver(false)
+          const f = e.dataTransfer.files?.[0]
+          if (f) handleFile(f)
+        }}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
+          flexWrap: 'wrap', marginBottom: '1.25rem',
+          padding: '0.75rem 1rem',
+          border: `1px dashed ${dragOver ? 'var(--accent)' : 'var(--border2)'}`,
+          background: dragOver ? 'var(--accent-dim)' : 'transparent',
+          transition: 'all 0.12s',
+        }}
+      >
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+          {importing
+            ? 'Restoring session…'
+            : dragOver
+              ? 'Drop the .json backup to restore'
+              : 'Restore a saved session — drag a backup here, or'}
+        </span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={importing}
+          aria-label="Upload progress backup file"
+          className="touch-target"
+          style={{
+            fontSize: '0.72rem', letterSpacing: '0.12em', padding: '0.4rem 0.9rem',
+            border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)',
+            cursor: importing ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+          }}
+        >↑ UPLOAD PROGRESS (.json)</button>
+      </div>
+
+      {importErr && (
+        <div role="alert" style={{
+          marginBottom: '1.25rem', padding: '0.7rem 1rem',
+          border: '1px solid var(--crit)', borderLeft: '4px solid var(--crit)',
+          background: 'rgba(255,0,64,0.08)', color: 'var(--crit)',
+          fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
+        }}>
+          <span>⚠ {importErr}</span>
+          <button
+            onClick={() => setImportErr(null)}
+            aria-label="Dismiss error"
+            style={{ color: 'var(--crit)', fontSize: '0.9rem', padding: '0.1rem 0.4rem', cursor: 'pointer' }}
+          >✕</button>
+        </div>
+      )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
