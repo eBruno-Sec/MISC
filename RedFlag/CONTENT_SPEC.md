@@ -13,14 +13,14 @@ This document covers the complete content and architecture blueprint for **RedFl
 
 ### Click-Order Ranking System
 
-Each question presents a real-world scenario with **4 unlabeled option cards**. The user clicks options in order of likelihood (how they would most plausibly respond). Each click-order maps to a point value:
+Each question presents a real-world scenario with **4 unlabeled option cards describing how a partner might behave**. The user clicks options in order of how closely each describes *their partner's actual behavior* — not the user's own. Each click-order maps to a point value:
 
 | Click Order | Label | Points |
 |---|---|---|
-| 1st click | Most Likely | 3 |
-| 2nd click | 2nd Likely | 2 |
-| 3rd click | 3rd Likely | 1 |
-| 4th click | Least Likely | 0 |
+| 1st click | Most like my partner | 3 |
+| 2nd click | 2nd most like them | 2 |
+| 3rd click | 3rd most like them | 1 |
+| 4th click | Least like them | 0 |
 
 ### Archetype Score Calculation
 
@@ -49,122 +49,122 @@ Each question: scenario text + 4 unlabeled option cards. Internal archetype key 
 ---
 
 ### Q1 — The Boundary Test
-*Pressure point: Needing space / saying no*
+*Pressure point: How they react when you need space or say no*
 
 **Scenario:**
-> Your partner asks to spend Saturday together, but you'd already mentally set that day aside as solo time to recharge. What's most likely your response?
+> You tell your partner you need this weekend to yourself — you love them, you just need to recharge. Rank how their response would most likely go.
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You say you have plans — vague ones — and feel a wave of relief when they don't push back. You don't explain. | `A` Avoidant |
-| B | You say yes immediately, then spend the week quietly hoping they'll read your mood and offer to reschedule on their own. | `B` Consumer |
-| C | You go along with it, build quiet resentment through the day, and bring it up three weeks later during a fight about something else entirely. | `C` Under-Functioner |
-| D | You tell them honestly that you'd planned some solo time, and suggest another day you're actually excited about. | `D` Secure |
+| A | "Fine, no problem" — almost too easily. No temperature shift in either direction. You couldn't tell if they were hurt, relieved, or completely indifferent. The weekend was yours, technically. | `A` Avoidant |
+| B | They don't argue, but their energy shifts. Quieter, slightly withdrawn. By Saturday you've spent half your alone time managing how they feel about your alone time. | `B` Consumer |
+| C | They agree — then text you three times that day anyway. Not urgently, just checking in. They forgot the terms of what you asked for. | `C` Under-Functioner |
+| D | "Of course — let me know when you're ready to reconnect." No fallout, no undercurrent. The weekend is actually yours. | `D` Secure |
 
 ---
 
 ### Q2 — The Conflict Test
-*Pressure point: Handling minor grievances*
+*Pressure point: How they handle it when you raise a grievance*
 
 **Scenario:**
-> Your partner made a comment in front of friends that stung. It wasn't malicious — but it landed wrong. What's your move?
+> You bring up something small that bothered you — a comment they made, something minor they missed. Rank how they'd most likely respond.
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You let it go in the moment. And the next one. And the one after that. Until one day the list is long enough that you exit quietly. | `A` Avoidant |
-| B | You post something vague on your story and wait to see if they notice and ask what's wrong. | `B` Consumer |
-| C | You mention it three weeks later in an unrelated argument — louder than you intended. | `C` Under-Functioner |
-| D | You bring it up privately, same day or the next morning. "Hey, that comment earlier — can we talk about it for a sec?" | `D` Secure |
+| A | They acknowledge it briefly — "yeah, fair" — and want to move past it immediately. Technically resolved, but you don't feel heard. They're slightly cooler the rest of the day. | `A` Avoidant |
+| B | They spiral. What started as your grievance becomes a conversation about whether they're a bad partner. Somehow you end up reassuring them about the thing they did to you. | `B` Consumer |
+| C | They apologize immediately and enthusiastically. Then do the exact same thing two weeks later. | `C` Under-Functioner |
+| D | They listen, acknowledge it without collapsing or deflecting, and the air actually clears. You feel heard. The rupture gets repaired. | `D` Secure |
 
 ---
 
 ### Q3 — The Communication Test
-*Pressure point: Texting habits / digital patterns when apart*
+*Pressure point: Their digital presence and energy when you're apart*
 
 **Scenario:**
-> You're both busy for three days — different cities, different schedules. How does the silence sit with you?
+> You've been apart for three days — different schedules, sporadic contact. When you reconnect, what's the vibe from their side?
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | Honestly? Fine. You almost prefer it. The distance gives you room to breathe that you didn't realize you needed. | `A` Avoidant |
-| B | You're checking their last-active, overthinking every gap, drafting texts you delete before you can send them. | `B` Consumer |
-| C | You go quiet to "give them space" — but really you're hoping they'll reach out first. When they don't, you feel abandoned. But you don't say that. | `C` Under-Functioner |
-| D | You send a quick check-in — low pressure, no hidden agenda — and trust the rhythm you've both built. | `D` Secure |
+| A | They pick up like nothing happened — warm, present, no reference to the gap. The distance clearly didn't register the same way for them. | `A` Avoidant |
+| B | There's a coolness you have to thaw. Nothing explicit — they'd deny it if asked — but the limited contact left a mark. Some relational maintenance required before things feel even. | `B` Consumer |
+| C | They also went quiet. Nobody reached out first. There's now a weird texture to the reconnection that neither of you is naming directly. | `C` Under-Functioner |
+| D | They checked in when natural — not constantly, not absent. The reconnection feels easy. No accumulation, no residue. | `D` Secure |
 
 ---
 
 ### Q4 — The Intimacy Spike
-*Pressure point: Reaction immediately following intense vulnerability*
+*Pressure point: Their behavior in the days after you've been deeply vulnerable*
 
 **Scenario:**
-> Your partner just shared something heavy — a real fear, an old wound, something they've never told anyone. The room goes quiet. What happens inside you?
+> You shared something heavy — a real fear, something from before them you've never told anyone. In the days immediately after, how do they show up?
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You feel the weight of it and quietly panic. This level of closeness feels like obligation. You change the subject. | `A` Avoidant |
-| B | You immediately match it with your own story — a bigger one — because this feels like a moment you should show up with equal intensity. | `B` Consumer |
-| C | You say all the right things in the moment, then go distant for two days with no explanation you can name. | `C` Under-Functioner |
-| D | You stay present. You don't rush to fix it. You ask one gentle follow-up and let them actually feel heard. | `D` Secure |
+| A | They were present in the moment — kind, the right words. But in the days after they're slightly more distant, like the closeness raised the stakes in a way they're quietly managing. | `A` Avoidant |
+| B | They immediately matched your vulnerability with their own — something bigger. The focus shifted before you'd finished processing. It was connection, technically. But it was also a takeover. | `B` Consumer |
+| C | They were exactly right in the moment. And then nothing. No follow-up. No "hey, how are you feeling about what you shared?" It just evaporated. | `C` Under-Functioner |
+| D | They sat in it with you. Asked a real follow-up question. Checked in two days later without being prompted. The thing you shared didn't disappear. | `D` Secure |
 
 ---
 
 ### Q5 — The Accountability Test
-*Pressure point: Reaction when they hurt the user's feelings*
+*Pressure point: How they respond when you tell them they hurt your feelings*
 
 **Scenario:**
-> You tell your partner that something they said hurt you. Before they respond — what are you expecting? What outcome have you already braced for?
+> You told them something they said hurt you. Rank how they'd most likely respond.
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You've already packaged your hurt as "just venting" to lower the stakes. You're not really expecting them to take it in. | `A` Avoidant |
-| B | You want a full, visible mea culpa — an apology that matches the size of the impact. Quickly. Anything less reads as not caring. | `B` Consumer |
-| C | You expect them to turn it around — to find a reason why you misunderstood or overreacted. You're already drafting your counter. | `C` Under-Functioner |
-| D | You expect a real conversation — not painless, but honest. You trust the outcome will be something you both can live with. | `D` Secure |
+| A | They apologize briefly and cleanly, then want to move on. Any attempt to stay in the conversation reads to them as relitigating. The closure feels imposed more than earned. | `A` Avoidant |
+| B | Your hurt becomes evidence of something they need to process about themselves. By the end of the conversation, you're comforting them about the thing they did to you. | `B` Consumer |
+| C | They find the angle where actually, it was complicated — or you're being too sensitive — or they didn't mean it that way. The apology, if it comes, arrives with conditions. | `C` Under-Functioner |
+| D | They hear it. Take responsibility without collapsing or making it about them. The air is genuinely different afterward. | `D` Secure |
 
 ---
 
 ### Q6 — The Crisis Test
-*Pressure point: Reaction when the user has a devastating day*
+*Pressure point: How they show up when you're having a devastating day*
 
 **Scenario:**
-> Something genuinely terrible happened today — work, family, health. You're not okay. What do you actually do?
+> Something genuinely terrible happened — work, family, health. You're not okay and you told them. How do they show up?
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You handle it alone. Telling them feels like a burden, or too intimate, or risky in ways you can't quite articulate to yourself. | `A` Avoidant |
-| B | You tell them immediately — partly for support, but also watching how they respond. Their reaction will tell you something important about the relationship. | `B` Consumer |
-| C | You hint at it. "Rough day." You wait to see if they dig in. If they don't, you feel invisible — but you never said you needed them to. | `C` Under-Functioner |
-| D | You reach out directly: "I need to talk. Not okay right now." You let them actually show up for you. | `D` Secure |
+| A | They acknowledge it — maybe try to solve it — then give you space. More space than you wanted. They meant well. It felt like being handled rather than held. | `A` Avoidant |
+| B | Initially present and attentive, but the conversation finds its way to their parallel stress, or advice you didn't ask for, or a comparison that quietly shrinks what you're going through. | `B` Consumer |
+| C | Warm in the moment. But no follow-up comes. If you need more, you'd have to ask for it explicitly. The burden of receiving support stays with you. | `C` Under-Functioner |
+| D | They showed up — actually there, not just technically. Asked what you needed. Checked in unprompted the next day. | `D` Secure |
 
 ---
 
 ### Q7 — The Integration Test
-*Pressure point: Blending into social circles, family, and social media*
+*Pressure point: Their approach to weaving you into their actual life*
 
 **Scenario:**
-> Three months in. Your friends ask when they're going to meet this person. What's your gut response?
+> A few months in. Rank which best describes their approach to bringing you into their world — friends, family, social life.
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You feel mildly seized. Meeting friends makes it Real. You're not sure you're ready for it to be Real. | `A` Avoidant |
-| B | You've already been quietly staging for this moment. Outfit drafted, context pre-briefed, narrative curated. You want it to go perfectly. | `B` Consumer |
-| C | You haven't mentioned it to them either. Social merging is complicated. You'd rather let it happen vaguely, whenever. | `C` Under-Functioner |
-| D | You feel ready — it's a natural next step. You arrange a low-key hangout and let it unfold. | `D` Secure |
+| A | Slow. You've met one friend, maybe, in a low-stakes way. The relationship still exists somewhat in a bubble. "We'll figure out the holidays" remains hypothetical. | `A` Avoidant |
+| B | Fast and curated. You've met everyone — but it felt like a rollout. Deliberate. You were the subject of scene-setting before you arrived. | `B` Consumer |
+| C | Lots of "we should all get together soon" that never becomes actual plans. Their friends know you exist. You haven't actually met them. | `C` Under-Functioner |
+| D | It happened naturally. You've met the people who matter to them. You were introduced with warmth and easy context. No performance, no avoidance. | `D` Secure |
 
 ---
 
 ### Q8 — The Pace Test
-*Pressure point: Handling timelines, commitment talks, and future planning*
+*Pressure point: How they handle timelines, commitment talks, and future planning*
 
 **Scenario:**
-> Six months in. They bring up the future casually but clearly — something about where this is going. How do you land?
+> You had a real conversation about where things are going. Rank which best describes their approach.
 
 | Option | Text | Archetype |
 |---|---|---|
-| A | You feel a flicker of something — pressure, maybe — and manage it by keeping the conversation abstract, philosophical, unresolved. | `A` Avoidant |
-| B | Your excitement spikes — not because you've thought it through, but because them bringing it up first feels like confirmation that you're chosen. | `B` Consumer |
-| C | You deflect or get slightly defensive. "We'll figure it out." Not because you don't like them — because accountability to a future is terrifying. | `C` Under-Functioner |
-| D | You share where you actually are — even if that's "I'm not ready to define this yet." You say it directly, without dramatics. | `D` Secure |
+| A | They engaged warmly but kept everything slightly vague — abstract, philosophical, unresolved. They seemed comfortable leaving it there. The conversation didn't land anywhere concrete. | `A` Avoidant |
+| B | Very enthusiastic — lots of future language and declarations. But push on specifics — logistics, real timelines, actual decisions — and the conversation goes fuzzy. | `B` Consumer |
+| C | Deflection or defensiveness. "Why does it need a label?" Or they agreed to something they clearly hadn't thought through and would revisit when convenient. | `C` Under-Functioner |
+| D | Direct. They told you where they actually are, including where they're uncertain. You left knowing where you stood. Whether or not the answer was perfect, you felt respected. | `D` Secure |
 
 ---
 
@@ -649,7 +649,7 @@ You can't keep living in the space between who they are and who they might becom
 
 ```javascript
 const SELF_STATE = {
-  mode: "self-assessment",       // distinct from "partner-scan" mode
+  mode: "partner-scan",          // user ranks their partner's behavior, not their own
   answers: [
     { qid: 1, ranked: ["D","A","C","B"] }  // index = click order (0-indexed)
   ],
