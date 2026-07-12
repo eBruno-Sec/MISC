@@ -1135,7 +1135,6 @@ const NAV = [
   { id:"patterns",   label:"The Patterns" },
   { id:"lenses",     label:"The Six Lenses" },
   { id:"finder",     label:"Warning-Sign Finder" },
-  { id:"attachment", label:"Attachment Quiz" },
   { id:"help",       label:"Get Help" },
   { id:"blog",       label:"Blog" },
   { id:"about",      label:"About" },
@@ -2188,8 +2187,7 @@ function App() {
   function restart() { clearSession(); setView(VIEWS.QUIZ); setScreen(SCREENS.ONBOARD); setRel(null); setScenarios([]); setDualResult(null); top(); }
   function arcRestart() { setView(VIEWS.ATTACHMENT); setScreen(SCREENS.ARC_MODE); setArcMode(null); setArcAnswers([]); setArcResult(null); top(); }
   function onNav(id) {
-    if (id==="quiz") { setView(VIEWS.QUIZ); if(!rel) setScreen(SCREENS.ONBOARD); top(); }
-    else if (id==="attachment") { setView(VIEWS.ATTACHMENT); if(!arcMode || arcResult) setScreen(SCREENS.ARC_MODE); top(); }
+    if (id==="quiz" || id==="attachment") { setView(VIEWS.ATTACHMENT); if(!arcMode || arcResult) setScreen(SCREENS.ARC_MODE); top(); }
     else goView(id);
   }
 
@@ -2222,17 +2220,10 @@ function App() {
           {view===VIEWS.FINDER     && <FinderScreen onQuiz={()=>onNav("quiz")}/>}
           {view===VIEWS.BLOG       && <BlogView/>}
           {view===VIEWS.ABOUT      && <AboutView onNav={onNav}/>}
-          {view===VIEWS.QUIZ && (<>
-            {screen===SCREENS.ONBOARD  && <Onboarding onSelect={(r)=>{ setRel(r); go(SCREENS.SCENARIO); }} onImport={hydrate}/>}
-            {screen===SCREENS.SCENARIO && <ScenarioQuiz rel={rel} onComplete={(ans)=>{ const dr=computeDualResult(ans); setScenarios(ans); setDualResult(dr); go(SCREENS.RESULTS); }}/>}
-            {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} rel={rel} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
-            {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} rel={rel} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
-            {screen===SCREENS.REPORT   && dualResult && <ReportScreen rel={rel} dualResult={dualResult} scenarioAnswers={scenarios} onBack={()=>go(SCREENS.WN)}/>}
-          </>)}
           {view===VIEWS.ATTACHMENT && (<>
             {screen===SCREENS.ARC_MODE    && <AttachmentModeSelect onSelect={(m)=>{ setArcMode(m); setArcAnswers([]); setArcResult(null); setScreen(SCREENS.ARC_QUIZ); top(); }}/>}
             {screen===SCREENS.ARC_QUIZ    && arcMode && <AttachmentQuiz mode={arcMode} onComplete={(ans)=>{ const sc=computeAttachmentScores(ans); const r=computeAttachmentResult(sc); setArcAnswers(ans); setArcResult(r); setScreen(SCREENS.ARC_RESULTS); top(); }}/>}
-            {screen===SCREENS.ARC_RESULTS && arcResult && <AttachmentResults result={arcResult} mode={arcMode} onRestart={arcRestart} onTakeRedFlags={()=>onNav("quiz")}/>}
+            {screen===SCREENS.ARC_RESULTS && arcResult && <AttachmentResults result={arcResult} mode={arcMode} onRestart={arcRestart}/>}
           </>)}
         </main>
         <Footer onNav={onNav}/>
