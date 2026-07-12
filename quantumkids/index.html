@@ -471,7 +471,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
      · PRINT        = Part III ink-saver line-art Lab Packs + audit page
    ═══════════════════════════════════════════════════════════════════ */
 
-const SCHEMA_VERSION = "1.1.0";
+const SCHEMA_VERSION = "1.2.0";
 
 /* ── I. CURRICULUM DATA STORE ─────────────────────────────────────── */
 const CURRICULUM = [
@@ -660,6 +660,104 @@ const CURRICULUM = [
         {t:"All stars become black holes",ok:false}
       ], explain:"Correct! Only the heavyweight stars have enough gravity to crush themselves into a black hole. Lighter stars fade into quiet white dwarfs."}
     }
+  },
+  {
+    id:"optics", n:7, emoji:"🔭", color:"#ec4899", premium:true,
+    title:"Optics & Wave Mechanics",
+    tagline:"Why a straw looks bent and fiber cables carry the internet.",
+    concepts:["Refraction","Snell's Law","Total Internal Reflection","Wave Speed"],
+    intro:"A straw in water looks broken. That's light bending as it crosses from glass to air — and if you tilt it past a magic angle, the light can't get out at all. That <b>trapped-light trick</b> is how a hair-thin glass fiber ships your video calls across entire oceans without losing a single photon.",
+    analogy:"Imagine a marching band crossing from pavement onto sand at an angle. The soldiers who hit the sand first slow down while the rest are still on the road — the whole line swings sideways. That is <b>Snell's Law</b>: the geometry of slowing down. Tilt steep enough and no one can reach the sand at all — total internal reflection.",
+    sim:"refraction",
+    heroLeap:"You went from a bent straw to <b>fiber-optic internet</b> — total internal reflection traps light in a glass thread so your data zips around the planet at the speed of light.",
+    benchmark:"Snell's Law: n₁sin(θ₁) = n₂sin(θ₂); total internal reflection when θ₁ > θc = arcsin(n₂/n₁)",
+    missions:[
+      {name:"The Bent Straw", emoji:"🔭"},
+      {name:"Sonic Boom", emoji:"📢", sim:"doppler",
+       intro:"An ambulance siren sounds higher as it rushes toward you, then drops the moment it passes. The ambulance didn't change the pitch — but <b>you moved relative to its wavefronts</b>. The same principle tells astronomers whether a galaxy a billion light-years away is racing toward us or away.",
+       analogy:"Throw a stone into a pond while walking. The ripples ahead of you are squished closer together and the ones behind stretch out. Sound from a moving source does the same thing in air — if the source outruns its own wavefronts, they all pile up into a sharp V-cone: that's a <b>sonic boom</b>.",
+       concepts:["Doppler Effect","Wave Frequency","Mach Cone","Shock Wave"],
+       benchmark:"Doppler shift: f_obs = f₀ × v_wave/(v_wave − v_source); Mach cone appears when source speed ≥ wave speed",
+       challenges:{
+         cadet:{prompt:"Drag speed to 0.5×. Watch the circles: are they squished (closer) in front of the moving source and stretched out behind it?", type:"observe", check:s=>s.observed},
+         specialist:{prompt:"Push source speed above 1.0× (faster than sound). Make the Mach cone — a visible V-shaped shockwave — appear on screen.", type:"state", check:s=>s.mach},
+         hero:{prompt:"A train horn sounds at 440 Hz at rest. The train charges toward you at half the wave speed. What pitch do you hear?", options:[
+           {t:"440 Hz — the pitch never changes",ok:false},
+           {t:"~880 Hz — roughly twice as high",ok:true},
+           {t:"~220 Hz — half as high",ok:false}
+         ], explain:"Correct! f = f₀ / (1 − v_s/v) = 440/(1 − 0.5) = 880 Hz. Moving at half wave speed toward you doubles the pitch. Police radar guns use this exact math to catch speeding drivers."}
+       }
+      }
+    ],
+    challenges:{
+      cadet:{prompt:"Raise the glass index past 2.0 and increase the angle. Did the refracted ray bend MORE away from the normal compared to a lower index?", type:"observe", check:s=>s.observedBend},
+      specialist:{prompt:"Increase the angle past the critical angle until the green refracted ray DISAPPEARS and a red reflected ray appears — that's Total Internal Reflection. Get TIR to trigger.", type:"state", check:s=>s.tir},
+      hero:{prompt:"Fiber-optic cables keep light inside a glass thread with no mirrors. How?", options:[
+        {t:"The glass is coated with reflective silver paint",ok:false},
+        {t:"Total internal reflection traps light at every shallow-angle bounce off the glass wall",ok:true},
+        {t:"Light is too fast to leak out through the glass",ok:false}
+      ], explain:"Correct! The glass–air boundary acts as a perfect mirror once the angle is past critical. Light zig-zags down the fiber bouncing off the walls indefinitely — no paint or metal needed, just geometry and Snell's Law."}
+    }
+  },
+  {
+    id:"fluid", n:8, emoji:"🌊", color:"#3b82f6", premium:true,
+    title:"Fluid Dynamics",
+    tagline:"Why planes fly and shower curtains attack you.",
+    concepts:["Bernoulli's Principle","Pressure","Continuity Equation","Lift Force"],
+    intro:"A 500-tonne aircraft stays in the air because of a pressure difference thinner than a credit card. Speed up the air over a curved wing, the pressure above drops, and the plane gets pushed up from below. The same pressure drop makes your <b>shower curtain billow inward</b> and lets carburetors feed fuel into engines. Daniel Bernoulli worked this out in 1738.",
+    analogy:"Imagine a river squeezing between two boulders. Water speeds up to fit through the gap — and as it does, it <b>pulls on the boulders</b> instead of pushing them apart. A wing is a precisely shaped pair of boulders for air. The curved top forces air to speed up, drops its pressure, and the sky pushes the wing upward from below.",
+    sim:"bernoulli",
+    heroLeap:"You went from a shower curtain to understanding how <b>every aircraft ever built stays in the air</b> — a pressure difference born from the speed of flow.",
+    benchmark:"Bernoulli's Principle: P + ½ρv² = constant along a streamline — faster flow means lower static pressure",
+    challenges:{
+      cadet:{prompt:"Narrow the pipe with the slider. Do the particles speed up (turn orange/red) through the pinch, and does the middle pressure bar (P₂) drop compared to the wide sections?", type:"observe", check:s=>s.observed},
+      specialist:{prompt:"Squeeze the pipe until the narrow-section pressure drops by at least 60% vs the wide section. Watch the P₂ bar fall into the red zone.", type:"state", check:s=>s.pressureDiff>=0.6},
+      hero:{prompt:"An airplane wing is curved on top and flatter underneath. Air flows faster over the curved upper surface. What happens to the pressure above the wing?", options:[
+        {t:"Pressure increases — fast air pushes up harder",ok:false},
+        {t:"Pressure drops — faster flow means lower static pressure, creating lift",ok:true},
+        {t:"Pressure stays equal on both sides",ok:false}
+      ], explain:"Correct! Bernoulli says faster flow → lower pressure. The wing's curve accelerates air above it, reducing pressure there, so the higher pressure below pushes the wing upward. That net upward force is lift."}
+    }
+  },
+  {
+    id:"nuclear", n:9, emoji:"⚗️", color:"#a3e635", premium:true,
+    title:"Nuclear Physics",
+    tagline:"Atoms that count down — and why carbon dating works.",
+    concepts:["Radioactive Decay","Half-Life","Exponential Decay","Isotopes"],
+    intro:"Every radioactive atom carries an invisible timer — but nobody (not even the atom itself) knows exactly when it'll go off. All you know is the <b>probability</b> it decays in the next second. Zoom out to a trillion atoms and that fuzziness becomes rock-solid: exactly half will have decayed after one <b>half-life</b>. That certainty lets doctors kill cancer cells, archaeologists date ancient bones, and engineers run nuclear power plants.",
+    analogy:"Picture a jar of 180 dice. Every second you roll them all and remove any that land on '6'. You can't predict which die goes first — pure random. But you can almost perfectly predict how many will be left after ten rounds. Radioactive atoms are nature's perfect dice, and each isotope comes rigged for a different number.",
+    sim:"halflife",
+    heroLeap:"You went from rolling dice to <b>carbon-14 dating</b> — why archaeologists can date a bone's death to within decades by counting how many atoms have ticked away.",
+    benchmark:"Radioactive decay law: N(t) = N₀ × 2^(−t/T½) — exponential decay underlies carbon dating, medical radioisotopes, and nuclear energy",
+    challenges:{
+      cadet:{prompt:"Watch the glowing green atoms decay to gray. After one T½ marker on the graph passes, did roughly HALF the green atoms disappear?", type:"observe", check:s=>s.halflifeSeen},
+      specialist:{prompt:"Set a short half-life and wait until fewer than 25 atoms (out of 180) are left — that's beyond 3 half-lives. Hit 'New sample' and try again if needed.", type:"state", check:s=>s.remaining<=25},
+      hero:{prompt:"A fossil bone has exactly half its original carbon-14 remaining. About how old is it? (Carbon-14 half-life = 5,730 years)", options:[
+        {t:"About 500 years",ok:false},
+        {t:"About 5,730 years — one half-life has passed",ok:true},
+        {t:"About 1,000,000 years",ok:false}
+      ], explain:"Correct! Half the atoms remain → one half-life has elapsed → the bone is ~5,730 years old. Two half-lives (¼ left) = ~11,460 years, and so on. Scientists use this exponential ladder to date organic material up to ~50,000 years."}
+    }
+  },
+  {
+    id:"qinfo", n:10, emoji:"💡", color:"#14b8a6", premium:true, capstone:"quantum",
+    title:"Quantum Information",
+    tagline:"The unbreakable code that physics itself guarantees.",
+    concepts:["Qubits","BB84 Protocol","No-Cloning Theorem","Quantum Cryptography"],
+    intro:"Quantum mechanics isn't just strange — it's the foundation of the most secure communication ever built. Because <b>measuring a quantum particle disturbs it</b>, an eavesdropper can't silently copy your message: they always leave fingerprints. In 1984, Bennett and Brassard proved you can use this to share an <b>unbreakable encryption key</b> — now protecting real financial networks.",
+    analogy:"Imagine sending a secret written in ink that <b>changes color permanently</b> the moment anyone else reads it. Classical locks can be picked; quantum cryptography is proven unbreakable by physics itself. Any eavesdropper who measures your photons alters them — and you'll catch them when the error rate spikes.",
+    sim:"bb84",
+    heroLeap:"You went from weird quantum measurement to <b>cryptography no computer can ever crack</b> — because breaking it would require breaking the laws of physics.",
+    benchmark:"BB84 quantum key distribution: eavesdropping is physically detectable via the no-cloning theorem — any measurement disturbs the quantum state, injecting a ~25% detectable error rate",
+    challenges:{
+      cadet:{prompt:"Watch Alice send photons and Bob receive them. When their bases MATCH (✓ shown), is the bit always correct? When they don't match (— shown), is the result random?", type:"observe", check:s=>s.observed},
+      specialist:{prompt:"Toggle Eve ON. After at least 8 matched-basis bits accumulate, does the error rate climb above 20%, exposing Eve's presence in the readout?", type:"state", check:s=>s.eveDetected},
+      hero:{prompt:"Why can't Eve copy each photon, keep a clone, and forward the original to Bob — covering her tracks perfectly?", options:[
+        {t:"She doesn't know what polarization Alice chose",ok:false},
+        {t:"The No-Cloning Theorem: quantum states cannot be perfectly duplicated",ok:true},
+        {t:"Bob checks a digital signature from Alice first",ok:false}
+      ], explain:"Correct! The No-Cloning Theorem (1982) proves no physical process can copy an arbitrary quantum state. Eve must measure each photon — and measurement disturbs it, leaking her presence into a detectable spike in the error rate."}
+    }
   }
 ];
 const byId = id => CURRICULUM.find(t=>t.id===id);
@@ -721,10 +819,10 @@ function validateState(obj){
   if(!Array.isArray(p.completedLessons)) return fail("Corrupted lesson list.");
   if(!p.trophies || typeof p.trophies!=="object") return fail("Trophy data is missing.");
   if(!p.sandboxParams || typeof p.sandboxParams!=="object") return fail("Sandbox data is missing.");
-  // every known track must carry a well-typed trophy triple
+  // every known track must carry a well-typed trophy triple (missing = new track added since save — ok)
   for(const t of CURRICULUM){
     const tr = p.trophies[t.id];
-    if(!tr || typeof tr!=="object") return fail("Trophy data corrupted ("+t.id+").");
+    if(!tr || typeof tr!=="object") continue; // new track not in old save — defaultState fills it
     for(const tier of ["cadet","specialist","hero"]){
       if(typeof tr[tier]!=="boolean") return fail("Trophy flag corrupted ("+t.id+"/"+tier+").");
     }
@@ -743,9 +841,10 @@ function validateState(obj){
   clean.progress.completedLessons = p.completedLessons.filter(x=>typeof x==="string" && byId(x));
   clean.premium.heroTracksUnlocked = obj.premium.heroTracksUnlocked;
   for(const t of CURRICULUM){
-    clean.progress.trophies[t.id] = {
-      cadet:!!p.trophies[t.id].cadet, specialist:!!p.trophies[t.id].specialist, hero:!!p.trophies[t.id].hero
-    };
+    const tr=p.trophies[t.id];
+    clean.progress.trophies[t.id] = tr && typeof tr==="object"
+      ? {cadet:!!tr.cadet, specialist:!!tr.specialist, hero:!!tr.hero}
+      : {cadet:false, specialist:false, hero:false};
     const sp = p.sandboxParams[t.id];
     if(sp && typeof sp==="object") clean.progress.sandboxParams[t.id] = sp;
     // migrate missionTrophies if present in saved file
@@ -1436,6 +1535,350 @@ const SANDBOXES = {
       resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
       metrics:()=>({observed, tunnelProb:tunnelProb()})
     };
+  },
+
+  /* 11 · REFRACTION — Snell's law and total internal reflection */
+  refraction(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,observedBend=false,tir=false;
+    const P={angle:30,n1:1.5}; const n2=1.0;
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function arrowHead(ax,ay,bx,by,col){
+      const dx=bx-ax,dy=by-ay,len=Math.sqrt(dx*dx+dy*dy)||1;
+      const ux=dx/len,uy=dy/len,s=10*DPR;
+      ctx.fillStyle=col; ctx.beginPath();
+      ctx.moveTo(bx,by); ctx.lineTo(bx-ux*s-uy*s*0.5,by-uy*s+ux*s*0.5);
+      ctx.lineTo(bx-ux*s+uy*s*0.5,by-uy*s-ux*s*0.5); ctx.closePath(); ctx.fill();
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H); const mid=H*0.5;
+      ctx.fillStyle="rgba(56,189,248,0.12)"; ctx.fillRect(0,0,W,mid);
+      ctx.fillStyle="rgba(99,102,241,0.22)"; ctx.fillRect(0,mid,W,H-mid);
+      ctx.fillStyle="rgba(255,255,255,0.5)"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="left";
+      ctx.fillText("Air  n₂ = 1.00",10*DPR,mid-10*DPR);
+      ctx.fillText("Glass  n₁ = "+P.n1.toFixed(2),10*DPR,mid+20*DPR);
+      ctx.setLineDash([6*DPR,4*DPR]); ctx.strokeStyle="rgba(255,255,255,0.2)"; ctx.lineWidth=1.5*DPR;
+      ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
+      ctx.setLineDash([]); ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=1*DPR;
+      ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(W,mid); ctx.stroke();
+      const θ1=P.angle*Math.PI/180, sinθ2=(P.n1/n2)*Math.sin(θ1), isTIR=sinθ2>=1;
+      tir=isTIR; const rl=Math.min(W,H)*0.37, ix=W/2, iy=mid;
+      const incX=ix-Math.sin(θ1)*rl, incY=iy+Math.cos(θ1)*rl;
+      ctx.strokeStyle="#fbbf24"; ctx.lineWidth=2.5*DPR;
+      ctx.beginPath(); ctx.moveTo(incX,incY); ctx.lineTo(ix,iy); ctx.stroke();
+      arrowHead(incX,incY,ix,iy,"#fbbf24");
+      if(isTIR){
+        const rx=ix+Math.sin(θ1)*rl, ry=iy+Math.cos(θ1)*rl;
+        ctx.strokeStyle="#fb7185"; ctx.lineWidth=2.5*DPR;
+        ctx.beginPath(); ctx.moveTo(ix,iy); ctx.lineTo(rx,ry); ctx.stroke();
+        arrowHead(ix,iy,rx,ry,"#fb7185");
+        ctx.fillStyle="#fb7185"; ctx.font=(13*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText("⚡ Total Internal Reflection!",W/2,mid-38*DPR);
+      } else {
+        const θ2=Math.asin(sinθ2);
+        const rx=ix+Math.sin(θ2)*rl, ry=iy-Math.cos(θ2)*rl;
+        ctx.strokeStyle="#34d399"; ctx.lineWidth=2.5*DPR;
+        ctx.beginPath(); ctx.moveTo(ix,iy); ctx.lineTo(rx,ry); ctx.stroke();
+        arrowHead(ix,iy,rx,ry,"#34d399");
+        if(Math.abs(θ2-θ1)>0.06) observedBend=true;
+        ctx.fillStyle="rgba(251,191,36,0.9)"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText("θ₁="+Math.round(P.angle)+"°",ix-50*DPR,iy+22*DPR);
+        ctx.fillStyle="rgba(52,211,153,0.9)";
+        ctx.fillText("θ₂="+Math.round(θ2*180/Math.PI)+"°",ix+50*DPR,iy-22*DPR);
+      }
+      const θc=Math.asin(n2/P.n1)*180/Math.PI;
+      ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.textAlign="right"; ctx.font=(11*DPR)+"px "+FONT;
+      ctx.fillText("θ_c = "+θc.toFixed(1)+"°",W-8*DPR,mid+18*DPR);
+      out({"Incident angle":Math.round(P.angle)+"°","Glass index n₁":P.n1.toFixed(2),
+           "Critical angle θ_c":θc.toFixed(1)+"°","Status":isTIR?"Total Internal Reflection":"Refracted at "+Math.round(Math.asin(sinθ2)*180/Math.PI)+"°"},
+          isTIR?"🪞 TIR — light is perfectly trapped in the glass!":"🔭 Light bends at the boundary — Snell's Law.");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"angle",label:"Angle of incidence",min:5,max:85,step:1,val:30,fmt:v=>Math.round(v)+"°"},
+        {key:"n1",label:"Glass refractive index (n₁)",min:1.2,max:2.5,step:0.05,val:1.5,fmt:v=>v.toFixed(2)}
+      ],
+      actions:[],
+      setParam:(k,v)=>{ P[k]=v; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observedBend, tir})
+    };
+  },
+
+  /* 12 · DOPPLER — moving source with circular wavefronts */
+  doppler(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,observed=false,mach=false;
+    const P={speed:0.5}; let waves=[];
+    const EMIT_EVERY=22; // frames between emissions
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; waves=[]; t=0; }
+    function srcX(frame){ return (frame*(P.speed*2.2*DPR))%(W*1.3)-W*0.15; }
+    function draw(){
+      t++; ctx.clearRect(0,0,W,H);
+      const vWave=2.2*DPR; // pixels per frame
+      const vSrc=P.speed*vWave;
+      // emit new ring at source position
+      if(t%EMIT_EVERY===0){ waves.push({bx:srcX(t),by:H/2,r:0}); if(waves.length>22) waves.shift(); }
+      // expand all rings
+      waves.forEach(w=>{ w.r+=vWave; });
+      // draw rings
+      waves.forEach(w=>{
+        const alpha=Math.max(0,1-w.r/(W*0.7));
+        ctx.strokeStyle=`rgba(99,202,255,${(alpha*0.7).toFixed(2)})`; ctx.lineWidth=1.8*DPR;
+        ctx.beginPath(); ctx.arc(w.bx,w.by,w.r,0,TAU); ctx.stroke();
+      });
+      // source dot
+      const sx=srcX(t);
+      ctx.fillStyle="#fbbf24"; ctx.shadowColor="#fbbf24"; ctx.shadowBlur=12*DPR;
+      ctx.beginPath(); ctx.arc(sx,H/2,10*DPR,0,TAU); ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="rgba(255,255,255,0.8)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("source",sx,H/2+22*DPR);
+      // Mach cone when speed ≥ 1
+      const isMach=P.speed>=1.0; mach=isMach;
+      if(isMach && waves.length>1){
+        // find envelope tangent — approximate: angle = arcsin(1/Mach)
+        const sinA=1/P.speed; const A=Math.asin(Math.min(sinA,1));
+        const coneLen=Math.min(W,H)*0.55;
+        ctx.strokeStyle="rgba(251,113,133,0.75)"; ctx.lineWidth=2*DPR;
+        ctx.setLineDash([6*DPR,4*DPR]);
+        ctx.beginPath(); ctx.moveTo(sx,H/2); ctx.lineTo(sx-coneLen*Math.cos(A),H/2-coneLen*Math.sin(A)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx,H/2); ctx.lineTo(sx-coneLen*Math.cos(A),H/2+coneLen*Math.sin(A)); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle="#fb7185"; ctx.font=(12*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText("💥 SONIC BOOM (Mach "+P.speed.toFixed(1)+")",W/2,30*DPR);
+      }
+      if(P.speed>0.2) observed=true;
+      // observed frequency hint
+      const fObs=P.speed<1?(1/(1-P.speed)).toFixed(2):"∞";
+      out({"Source speed":P.speed.toFixed(2)+"× wave speed","Observed pitch (front)":P.speed<1?fObs+"× f₀":"∞ (shock)","Mach cone":isMach?"YES ⚡":"No"},
+          isMach?"💥 Source outruns its own waves — Mach cone / sonic boom!":P.speed>0.5?"📢 Wavefronts compress ahead, stretch behind — Doppler shift!":"🔵 Slight compression ahead of the source.");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[{key:"speed",label:"Source speed (× wave speed)",min:0,max:1.5,step:0.05,val:0.5,fmt:v=>v.toFixed(2)+"×"}],
+      actions:[{key:"reset",label:"↺ Reset waves",run:()=>{waves=[];t=0;observed=false;mach=false;}}],
+      setParam:(k,v)=>{ P[k]=v; waves=[]; t=0; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, mach})
+    };
+  },
+
+  /* 13 · BERNOULLI — pipe flow with variable constriction */
+  bernoulli(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,observed=false;
+    const P={constrict:0.45}; let particles=[];
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; particles=[]; }
+    // pipe geometry: wide → narrow → wide
+    function pipeY(x){ // returns [top,bot] of pipe at this x
+      const cx1=W*0.35,cx2=W*0.65, wideH=H*0.38, narrowH=wideH*(1-P.constrict);
+      let h;
+      if(x<cx1) h=wideH;
+      else if(x>cx2) h=wideH;
+      else { const frac=(x-cx1)/(cx2-cx1); const t2=frac<0.5?frac*2:(1-frac)*2; h=wideH-t2*(wideH-narrowH); }
+      return [H/2-h,H/2+h];
+    }
+    function flowSpeed(x){ const [t,b]=pipeY(x); const localH=(b-t)/(H*0.76); const vRatio=1/Math.max(localH,0.01); return Math.min(vRatio,10); }
+    function spawnParticle(){ particles.push({x:W*0.04+Math.random()*10*DPR, y:H/2+(Math.random()-0.5)*H*0.3, vx:1.5*DPR}); }
+    function draw(){
+      t++; ctx.clearRect(0,0,W,H);
+      if(t%8===0) spawnParticle(); if(particles.length>60) particles.shift();
+      // pipe walls
+      ctx.fillStyle="rgba(30,40,80,0.9)";
+      ctx.beginPath(); ctx.moveTo(0,0);
+      for(let x=0;x<=W;x+=4){ const [tp]=pipeY(x); ctx.lineTo(x,tp); } ctx.lineTo(W,0); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0,H);
+      for(let x=0;x<=W;x+=4){ const [,bt]=pipeY(x); ctx.lineTo(x,bt); } ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle="rgba(99,102,241,0.5)"; ctx.lineWidth=1*DPR;
+      ctx.beginPath(); for(let x=0;x<=W;x+=4){ const [tp]=pipeY(x); x===0?ctx.moveTo(x,tp):ctx.lineTo(x,tp); } ctx.stroke();
+      ctx.beginPath(); for(let x=0;x<=W;x+=4){ const [,bt]=pipeY(x); x===0?ctx.moveTo(x,bt):ctx.lineTo(x,bt); } ctx.stroke();
+      // particles
+      particles=particles.filter(p=>p.x<W+10*DPR);
+      particles.forEach(p=>{
+        const spd=flowSpeed(p.x); p.x+=p.vx*spd; const [tp,bt]=pipeY(p.x); p.y=clamp(p.y,tp+2*DPR,bt-2*DPR);
+        const ratio=spd/flowSpeed(W*0.1)||1;
+        const hue=Math.round(120-clamp(ratio-1,0,4)*30); // green → orange → red
+        ctx.fillStyle=`hsl(${hue},90%,60%)`; ctx.beginPath(); ctx.arc(p.x,p.y,3*DPR,0,TAU); ctx.fill();
+      });
+      // pressure bars at 3 x positions
+      const xs=[W*0.2,W*0.5,W*0.8]; const labels=["P₁","P₂","P₃"];
+      const v1=flowSpeed(xs[0]); const vNarrow=flowSpeed(xs[1]);
+      const pressureRatio=p=>{const v=flowSpeed(p); return Math.max(0,1-(v*v-v1*v1)*0.18);};
+      const pd=Math.max(0,1-pressureRatio(xs[1]));
+      if(pd>0.05) observed=true;
+      xs.forEach((x,i)=>{
+        const pr=pressureRatio(x); const barH=H*0.35*pr; const barX=x-12*DPR; const barY=H*0.08;
+        ctx.fillStyle="rgba(255,255,255,0.1)"; ctx.fillRect(barX,barY,18*DPR,H*0.35);
+        ctx.fillStyle=pr<0.5?"#fb7185":pr<0.75?"#fbbf24":"#34d399";
+        ctx.fillRect(barX,barY+H*0.35-barH,18*DPR,barH);
+        ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText(labels[i],x,H*0.08+H*0.35+14*DPR);
+        ctx.fillText(Math.round(pr*100)+"%",x,H*0.08-8*DPR);
+      });
+      out({"Constriction":Math.round(P.constrict*100)+"%","Wide-section pressure":"100%",
+           "Narrow pressure":Math.round(pressureRatio(xs[1])*100)+"%",
+           "Speed ratio (narrow/wide)":vNarrow.toFixed(1)+"×"},
+          pd>=0.6?"✈️ Bernoulli at work — fast flow, low pressure! Lift explained.":pd>0.2?"🌊 Pressure drops in the narrow section — Bernoulli's principle!":"⬅️ Squeeze the pipe more to see the pressure drop.");
+      raf=requestAnimationFrame(draw);
+      draw._pd=pd;
+    }
+    resize();
+    return {
+      params:[{key:"constrict",label:"Pipe constriction",min:0.1,max:0.85,step:0.05,val:0.45,fmt:v=>Math.round(v*100)+"%"}],
+      actions:[{key:"clear",label:"↺ Clear flow",run:()=>{particles=[];observed=false;}}],
+      setParam:(k,v)=>{ P[k]=v; particles=[]; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, pressureDiff:draw._pd||0})
+    };
+  },
+
+  /* 14 · HALFLIFE — stochastic radioactive decay grid */
+  halflife(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,halflifeSeen=false,lastHalf=null;
+    const COLS=15, ROWS=12, N0=COLS*ROWS;
+    const P={halflife:3}; // seconds
+    let atoms=[]; const FPS=60;
+    function reset(){ atoms=Array.from({length:N0},()=>({decayed:false,flash:0})); t=0; lastHalf=null; halflifeSeen=false; }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function draw(){
+      t+=1/FPS; ctx.clearRect(0,0,W,H);
+      // stochastic decay per frame
+      const decayProb=1-Math.exp(-Math.LN2/(P.halflife*FPS));
+      let active=0;
+      atoms.forEach(a=>{ if(!a.decayed){ if(Math.random()<decayProb){ a.decayed=true; a.flash=1; } else active++; } });
+      const remaining=active;
+      // check half-life event
+      if(!halflifeSeen && remaining<=Math.floor(N0/2)){ halflifeSeen=true; lastHalf=t; }
+      // draw atoms
+      const pw=(W-20*DPR)/COLS, ph=(H*0.72)/ROWS;
+      atoms.forEach((a,i)=>{
+        const col=i%COLS, row=Math.floor(i/COLS);
+        const ax=10*DPR+col*pw+pw/2, ay=H*0.08+row*ph+ph/2;
+        const r=Math.min(pw,ph)*0.38;
+        if(a.flash>0){ ctx.fillStyle=`rgba(250,204,21,${a.flash.toFixed(2)})`; a.flash=Math.max(0,a.flash-0.06); }
+        else ctx.fillStyle=a.decayed?"rgba(100,116,139,0.55)":"#4ade80";
+        ctx.beginPath(); ctx.arc(ax,ay,r,0,TAU); ctx.fill();
+      });
+      // progress bar
+      const frac=remaining/N0; const bx=20*DPR,by=H*0.86,bw=W-40*DPR,bh=14*DPR;
+      ctx.fillStyle="rgba(255,255,255,0.1)"; roundRect(ctx,bx,by,bw,bh,7*DPR); ctx.fill();
+      ctx.fillStyle=frac>0.5?"#4ade80":frac>0.25?"#fbbf24":"#fb7185";
+      if(frac>0) { roundRect(ctx,bx,by,bw*frac,bh,7*DPR); ctx.fill(); }
+      ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText(remaining+" atoms remain ("+Math.round(frac*100)+"%) · T½ = "+P.halflife+"s",W/2,by-6*DPR);
+      if(lastHalf!==null){
+        ctx.fillStyle="rgba(250,204,21,0.85)";
+        ctx.fillText("✓ Half decayed at t = "+lastHalf.toFixed(1)+"s",W/2,by+bh+16*DPR);
+      }
+      out({"Remaining atoms":remaining+"/"+N0,"Half-life T½":P.halflife+"s","Time elapsed":t.toFixed(1)+"s",
+           "Expected remaining (theory)":Math.round(N0*Math.pow(2,-t/P.halflife))},
+          remaining<=25?"☢️ Beyond 3 half-lives — exponential decay in action!":halflifeSeen?"✓ Half-life reached — half decayed on schedule!":"🟢 Watch atoms decay one by one — statistics rules!");
+      raf=requestAnimationFrame(draw);
+    }
+    reset(); resize();
+    return {
+      params:[{key:"halflife",label:"Half-life T½",min:0.5,max:8,step:0.5,val:3,fmt:v=>v+"s"}],
+      actions:[{key:"reset",label:"🔄 New sample",primary:true,run:reset}],
+      setParam:(k,v)=>{ P[k]=v; reset(); },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({halflifeSeen, remaining:atoms.filter(a=>!a.decayed).length})
+    };
+  },
+
+  /* 15 · BB84 — quantum key distribution with optional eavesdropper */
+  bb84(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,observed=false,eveDetected=false;
+    const P={eveOn:0};
+    // simulation state
+    let photons=[],key=[],errors=0,matchedCount=0;
+    const BASES=["rectilinear","diagonal"];
+    const EMIT_EVERY=55;
+    function reset(){ photons=[]; key=[]; errors=0; matchedCount=0; observed=false; eveDetected=false; t=0; }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function polarSymbol(ctx,x,y,basis,bit,color,sz){
+      ctx.strokeStyle=color; ctx.lineWidth=2*DPR; ctx.save(); ctx.translate(x,y);
+      const ang=basis==="rectilinear"?(bit?0:Math.PI/2):(bit?Math.PI/4:-Math.PI/4);
+      ctx.rotate(ang); ctx.beginPath(); ctx.moveTo(0,-sz); ctx.lineTo(0,sz); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-sz*0.5,0); ctx.lineTo(sz*0.5,0); ctx.stroke();
+      ctx.restore();
+    }
+    function emitPhoton(){
+      const aliceBasis=BASES[Math.floor(Math.random()*2)];
+      const aliceBit=Math.random()<0.5?0:1;
+      let travBasis=aliceBasis, travBit=aliceBit, eveErr=false;
+      if(P.eveOn){
+        const eveBasis=BASES[Math.floor(Math.random()*2)];
+        if(eveBasis!==aliceBasis){ travBit=Math.random()<0.5?0:1; travBasis=eveBasis; eveErr=true; }
+      }
+      const bobBasis=BASES[Math.floor(Math.random()*2)];
+      const basesMatch=bobBasis===aliceBasis;
+      const bobBit=basesMatch?travBit:(Math.random()<0.5?0:1);
+      const error=basesMatch && bobBit!==aliceBit;
+      photons.push({x:W*0.18,y:H*0.5,tx:W*0.82,aliceBasis,aliceBit,bobBasis,bobBit,basesMatch,error,eveErr,age:0});
+    }
+    function draw(){
+      t++; ctx.clearRect(0,0,W,H);
+      // Alice & Bob labels
+      const lY=H*0.5; const aX=W*0.12,bX=W*0.88;
+      const panel=(x,label,color)=>{
+        ctx.fillStyle=color; roundRect(ctx,x-28*DPR,lY-22*DPR,56*DPR,44*DPR,8*DPR); ctx.fill();
+        ctx.fillStyle="#fff"; ctx.font=(12*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.fillText(label,x,lY+5*DPR);
+      };
+      panel(aX,"Alice","#7c3aed"); panel(bX,"Bob","#0369a1");
+      // Eve
+      if(P.eveOn){
+        ctx.fillStyle="#dc2626"; roundRect(ctx,W/2-26*DPR,lY-18*DPR,52*DPR,36*DPR,8*DPR); ctx.fill();
+        ctx.fillStyle="#fff"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.fillText("👁 Eve",W/2,lY+4*DPR);
+      }
+      // channel line
+      ctx.strokeStyle="rgba(255,255,255,0.15)"; ctx.lineWidth=1*DPR; ctx.setLineDash([4*DPR,4*DPR]);
+      ctx.beginPath(); ctx.moveTo(aX+30*DPR,lY); ctx.lineTo(bX-30*DPR,lY); ctx.stroke(); ctx.setLineDash([]);
+      // emit
+      if(t%EMIT_EVERY===0) emitPhoton();
+      // move & draw photons
+      photons=photons.filter(p=>p.x<=W+10*DPR);
+      photons.forEach(p=>{
+        p.x+=((p.tx-W*0.18)/EMIT_EVERY*1.1); p.age++;
+        const col=p.eveErr?"#fb7185":"#a78bfa";
+        polarSymbol(ctx,p.x,lY,p.aliceBasis,p.aliceBit,col,9*DPR);
+      });
+      // completed photon results
+      const done=photons.filter(p=>p.age>=EMIT_EVERY-2);
+      done.forEach(p=>{
+        observed=true;
+        if(p.basesMatch){ matchedCount++; if(p.error){ errors++; } key.push({bit:p.aliceBit,err:p.error}); }
+        if(key.length>20) key.shift();
+      });
+      photons=photons.filter(p=>p.age<EMIT_EVERY-2);
+      // key display
+      const kY=H*0.22; const kX=W*0.5; const kMax=Math.min(key.length,16);
+      ctx.fillStyle="rgba(255,255,255,0.45)"; ctx.font=(10*DPR)+"px "+MONO; ctx.textAlign="center";
+      ctx.fillText("Key bits (matched bases):",kX,kY-8*DPR);
+      for(let i=0;i<kMax;i++){
+        const k=key[key.length-kMax+i];
+        ctx.fillStyle=k.err?"#fb7185":"#4ade80";
+        ctx.fillRect(kX+(i-kMax/2)*13*DPR,kY,11*DPR,18*DPR);
+        ctx.fillStyle="#000"; ctx.font=(10*DPR)+"px "+MONO;
+        ctx.fillText(k.bit,kX+(i-kMax/2)*13*DPR+5.5*DPR,kY+13*DPR);
+      }
+      const errRate=matchedCount>0?errors/matchedCount:0;
+      if(P.eveOn && matchedCount>=8 && errRate>0.2) eveDetected=true;
+      ctx.fillStyle=errRate>0.2?"#fb7185":"rgba(255,255,255,0.6)"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("Error rate: "+Math.round(errRate*100)+"% (expected ~25% with Eve)",W/2,H*0.78);
+      out({"Matched-basis bits":matchedCount,"Errors detected":errors,
+           "Error rate":Math.round(errRate*100)+"%","Eve active":P.eveOn?"YES 🔴":"No"},
+          eveDetected?"🚨 Eve detected! Error rate above 20% — key is compromised!":P.eveOn?"👁 Eve is intercepting — errors accumulating…":"🔐 Secure channel — no errors, key is safe.");
+      raf=requestAnimationFrame(draw);
+    }
+    reset(); resize();
+    return {
+      params:[{key:"eveOn",label:"Eavesdropper Eve",min:0,max:1,step:1,val:0,fmt:v=>v?"ON 👁":"OFF 🔒"}],
+      actions:[{key:"reset",label:"↺ New session",run:reset}],
+      setParam:(k,v)=>{ P[k]=Math.round(v); reset(); },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, eveDetected})
+    };
   }
 };
 
@@ -1474,6 +1917,20 @@ const QK = (()=>{
   }
 
   /* ── HOME ── */
+  function isCapstoneUnlocked(t){
+    if(!t.capstone) return true;
+    const req=byId(t.capstone); if(!req) return false;
+    const tr=STATE.progress.trophies[t.capstone];
+    if(!tr||!tr.cadet||!tr.specialist||!tr.hero) return false;
+    if(req.missions){
+      return req.missions.slice(1).every((_,i)=>{
+        const mt=STATE.progress.missionTrophies[t.capstone+"_"+(i+1)]||{};
+        return mt.cadet&&mt.specialist&&mt.hero;
+      });
+    }
+    return true;
+  }
+
   function renderHome(){
     document.getElementById("xpVal").textContent = STATE.progress.xp;
     const name = STATE.profile.cadetName;
@@ -1492,9 +1949,10 @@ const QK = (()=>{
       const totalMissions = t.missions ? t.missions.length : 1;
       const totalDone = allMissionBadges(t);
       const locked = t.premium && !STATE.premium.heroTracksUnlocked;
+      const capLocked = t.capstone && !isCapstoneUnlocked(t);
       const el = document.createElement("button");
       el.className="track"; el.style.setProperty("--c",t.color);
-      el.onclick = ()=> locked ? go("parent") : openLesson(t.id, 0);
+      el.onclick = ()=> capLocked ? toast("Complete all Quantum Mechanics missions to unlock!") : locked ? go("parent") : openLesson(t.id, 0);
       // mission sub-pips for multi-mission tracks
       const missionPips = t.missions && t.missions.length>1
         ? `<div class="mission-pips">${t.missions.map((m,mi)=>{
@@ -1513,7 +1971,7 @@ const QK = (()=>{
           </div>
           <span class="lvl">Track ${t.n} · ${totalDone}/${totalMissions*3}</span>
         </div>
-        ${locked?`<div class="lock"><div class="lk"><div class="ic">🔒</div><div class="tx">Hero Track</div><div class="sub">Tap to unlock</div></div></div>`:""}`;
+        ${capLocked?`<div class="lock"><div class="lk"><div class="ic">🔐</div><div class="tx">Capstone Track</div><div class="sub">Master Quantum Mechanics first</div></div></div>`:locked?`<div class="lock"><div class="lk"><div class="ic">🔒</div><div class="tx">Hero Track</div><div class="sub">Tap to unlock</div></div></div>`:""}`;
       grid.appendChild(el);
     });
   }
@@ -1692,7 +2150,7 @@ const QK = (()=>{
     const grid=document.getElementById("metricGrid");
     grid.innerHTML=[
       [badges+"/"+maxBadges(),"Mastery badges"],
-      [mastered+"/"+STATE.progress.completedLessons.length+" missions","Completed"],
+      [mastered+"/"+CURRICULUM.reduce((s,t)=>s+(t.missions?t.missions.length:1),0)+" missions","Completed"],
       [STATE.progress.xp,"Quanta (XP)"],
       [rankFor(badges),"Current rank"]
     ].map(([n,l])=>`<div class="metric"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
@@ -1763,7 +2221,11 @@ const QK = (()=>{
       thermo:`<svg width="260" height="150" viewBox="0 0 260 150"><rect x="30" y="20" width="200" height="110" fill="none" stroke="#000" stroke-width="2"/>${Array.from({length:14}).map(()=>`<circle cx="${(40+Math.random()*180)|0}" cy="${(30+Math.random()*90)|0}" r="4" fill="#000"/>`).join("")}</svg>`,
       relativity:`<svg width="260" height="150" viewBox="0 0 260 150"><rect x="20" y="55" width="70" height="40" rx="6" fill="none" stroke="#000" stroke-width="2"/><text x="55" y="80" font-size="12" text-anchor="middle" font-family="monospace">05:00</text><rect x="170" y="55" width="70" height="40" rx="6" fill="none" stroke="#000" stroke-width="2"/><text x="205" y="80" font-size="12" text-anchor="middle" font-family="monospace">02:30</text><text x="55" y="115" font-size="9" text-anchor="middle" font-family="Arial">HOME</text><text x="205" y="115" font-size="9" text-anchor="middle" font-family="Arial">ROCKET (fast)</text><line x1="95" y1="75" x2="165" y2="75" stroke="#000" stroke-width="1.2" marker-end="url(#b)"/><defs><marker id="b" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#000"/></marker></defs></svg>`,
       quantum:`<svg width="260" height="150" viewBox="0 0 260 150"><ellipse cx="90" cy="75" rx="10" ry="34" fill="none" stroke="#000" stroke-width="2"/><text x="90" y="80" font-size="11" text-anchor="middle" font-family="Arial">?</text><ellipse cx="180" cy="75" rx="34" ry="34" fill="none" stroke="#000" stroke-width="2"/><text x="180" y="80" font-size="11" text-anchor="middle" font-family="Arial">H or T</text><line x1="110" y1="75" x2="145" y2="75" stroke="#000" stroke-width="1.2" marker-end="url(#c)"/><text x="128" y="66" font-size="8" text-anchor="middle" font-family="Arial">measure</text><defs><marker id="c" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#000"/></marker></defs></svg>`,
-      astro:`<svg width="260" height="150" viewBox="0 0 260 150"><circle cx="130" cy="75" r="26" fill="none" stroke="#000" stroke-width="2"/>${Array.from({length:12}).map((_,i)=>{const a=i/12*6.28;return `<line x1="${130+Math.cos(a)*30}" y1="${75+Math.sin(a)*30}" x2="${130+Math.cos(a)*55}" y2="${75+Math.sin(a)*55}" stroke="#000" stroke-width="1.4"/>`;}).join("")}<text x="130" y="79" font-size="9" text-anchor="middle" font-family="Arial">STAR</text></svg>`
+      astro:`<svg width="260" height="150" viewBox="0 0 260 150"><circle cx="130" cy="75" r="26" fill="none" stroke="#000" stroke-width="2"/>${Array.from({length:12}).map((_,i)=>{const a=i/12*6.28;return `<line x1="${130+Math.cos(a)*30}" y1="${75+Math.sin(a)*30}" x2="${130+Math.cos(a)*55}" y2="${75+Math.sin(a)*55}" stroke="#000" stroke-width="1.4"/>`;}).join("")}<text x="130" y="79" font-size="9" text-anchor="middle" font-family="Arial">STAR</text></svg>`,
+      optics:`<svg width="260" height="150" viewBox="0 0 260 150"><line x1="130" y1="0" x2="130" y2="150" stroke="#000" stroke-width="1" stroke-dasharray="4 3"/><line x1="0" y1="75" x2="260" y2="75" stroke="#000" stroke-width="1.5"/><text x="30" y="50" font-size="9" font-family="Arial">Air n=1.0</text><text x="30" y="120" font-size="9" font-family="Arial">Glass n₁</text><line x1="80" y1="140" x2="130" y2="75" stroke="#000" stroke-width="2" marker-end="url(#oa)"/><line x1="130" y1="75" x2="200" y2="30" stroke="#000" stroke-width="2" marker-end="url(#oa)"/><text x="90" y="95" font-size="8" font-family="Arial">θ₁</text><text x="155" y="60" font-size="8" font-family="Arial">θ₂</text><defs><marker id="oa" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#000"/></marker></defs></svg>`,
+      fluid:`<svg width="260" height="150" viewBox="0 0 260 150"><path d="M0,40 L90,40 L120,60 L140,60 L170,40 L260,40" fill="none" stroke="#000" stroke-width="2"/><path d="M0,110 L90,110 L120,90 L140,90 L170,110 L260,110" fill="none" stroke="#000" stroke-width="2"/><text x="35" y="80" font-size="9" text-anchor="middle" font-family="Arial">P₁ high</text><text x="130" y="80" font-size="9" text-anchor="middle" font-family="Arial">P₂ low</text><text x="220" y="80" font-size="9" text-anchor="middle" font-family="Arial">P₃ high</text><line x1="35" y1="40" x2="35" y2="110" stroke="#000" stroke-width="1" stroke-dasharray="3 2"/><line x1="130" y1="60" x2="130" y2="90" stroke="#000" stroke-width="1" stroke-dasharray="3 2"/><line x1="220" y1="40" x2="220" y2="110" stroke="#000" stroke-width="1" stroke-dasharray="3 2"/></svg>`,
+      nuclear:`<svg width="260" height="150" viewBox="0 0 260 150">${Array.from({length:30}).map((_,i)=>`<circle cx="${20+(i%10)*24}" cy="${20+Math.floor(i/10)*24}" r="8" fill="${i<15?"#000":"none"}" stroke="#000" stroke-width="1.5"/>`).join("")}<text x="130" y="135" font-size="9" text-anchor="middle" font-family="Arial">15 decayed (gray) · 15 active (filled)</text></svg>`,
+      qinfo:`<svg width="260" height="150" viewBox="0 0 260 150"><rect x="10" y="55" width="45" height="40" rx="5" fill="none" stroke="#000" stroke-width="2"/><text x="32" y="80" font-size="10" text-anchor="middle" font-family="Arial">Alice</text><rect x="205" y="55" width="45" height="40" rx="5" fill="none" stroke="#000" stroke-width="2"/><text x="227" y="80" font-size="10" text-anchor="middle" font-family="Arial">Bob</text><line x1="55" y1="75" x2="205" y2="75" stroke="#000" stroke-width="1.5" stroke-dasharray="5 3"/><text x="130" y="65" font-size="8" text-anchor="middle" font-family="Arial">↑ → ↗ ↘</text><text x="130" y="90" font-size="8" text-anchor="middle" font-family="Arial">photon polarizations</text><text x="130" y="130" font-size="8" text-anchor="middle" font-family="Arial">Matched bases → key bit</text></svg>`
     };
     return svgs[t.id]||"";
   }
@@ -1810,8 +2272,8 @@ const QK = (()=>{
       <h1>What Your Child Unlocked</h1>
       <p>Every action in the QuantumKids sandbox maps to a formal physics benchmark. Here is what <b>${esc(STATE.profile.cadetName||"your child")}</b> has mastered so far.</p>
       <table><tr><th>Metric</th><th>Value</th></tr>
-        <tr><td>Mastery badges earned</td><td>${countBadges()} of 18</td></tr>
-        <tr><td>Tracks fully mastered</td><td>${STATE.progress.completedLessons.length} of 6</td></tr>
+        <tr><td>Mastery badges earned</td><td>${countBadges()} of ${maxBadges()}</td></tr>
+        <tr><td>Missions fully mastered</td><td>${STATE.progress.completedLessons.length} of ${CURRICULUM.reduce((s,t)=>s+(t.missions?t.missions.length:1),0)}</td></tr>
         <tr><td>Quanta (experience points)</td><td>${STATE.progress.xp}</td></tr>
         <tr><td>Current rank</td><td>${rankFor(countBadges())}</td></tr>
       </table>
