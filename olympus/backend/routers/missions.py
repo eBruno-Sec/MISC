@@ -16,6 +16,7 @@ from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalReque
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
 from core import poc, replay
+from core.backup import validate_backup, BackupError
 
 router = APIRouter()
 
@@ -35,6 +36,20 @@ class MissionCreate(BaseModel):
     mode: str = "passive"
     scope_rules: dict = {}
     auto_approve: bool = False   # pre-authorize all HITL gates (autonomous run)
+
+
+class RestoreBody(BaseModel):
+    # Mirrors the client "Download Progress (.json)" snapshot. Kept permissive
+    # (dicts/optional) so validation + normalization happens in core.backup, which
+    # returns the precise reason surfaced by the UI's error banner.
+    version: Optional[str] = None
+    platform: Optional[str] = None
+    mission: dict = {}
+    findings: Optional[List[dict]] = None
+    notes: Optional[List[dict]] = None
+    logs: Optional[List[dict]] = None
+    status: Optional[str] = None
+    current_phase: Optional[str] = None
 
 
 class ApprovalResolve(BaseModel):
@@ -206,6 +221,53 @@ async def create_mission(
     )
 
     return {"id": mission.id, "target": mission.target, "status": mission.status}
+
+
+@router.post("/restore")
+async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get_session)):
+    """Hydrate a mission from a Download-Progress (.json) backup.
+
+    The client validates + parses first; we re-validate strictly server-side
+    (core.backup.validate_backup) and import as a NEW mission (fresh UUID) so a
+    restore never overwrites a live mission. Findings/notes/logs are restored
+    verbatim. Rejects a corrupt file with 422 + a clear reason (the UI shows the
+    'Invalid or corrupted progress file' banner)."""
+    try:
+        norm = validate_backup(body.model_dump(), is_valid_target)
+    except BackupError as e:
+        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
+
+    mission = Mission(
+        target=norm["target"],
+        scope=norm["scope"],
+        mode=norm["mode"],
+        status=norm["status"],
+        current_phase=norm["current_phase"],
+        scope_rules=norm["scope_rules"],
+        # flag the provenance without a schema change (context JSON, per constraints)
+        context={**norm["context"], "imported": True, "imported_at": datetime.utcnow().isoformat()},
+    )
+    session.add(mission)
+    await session.flush()  # assign mission.id before inserting children
+
+    for fd in norm["findings"]:
+        session.add(Finding(mission_id=mission.id, **fd))
+    for nd in norm["notes"]:
+        session.add(MissionNote(mission_id=mission.id, **nd))
+    for ld in norm["logs"]:
+        session.add(AgentLog(mission_id=mission.id, **ld))
+
+    await session.commit()
+    return {
+        "id": mission.id,
+        "target": mission.target,
+        "status": mission.status,
+        "restored": {
+            "findings": len(norm["findings"]),
+            "notes": len(norm["notes"]),
+            "logs": len(norm["logs"]),
+        },
+    }
 
 
 @router.get("")

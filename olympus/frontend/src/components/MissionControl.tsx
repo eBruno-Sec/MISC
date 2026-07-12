@@ -133,6 +133,29 @@ export default function MissionControl() {
 
   useWebSocket(id || null, onWsEvent)
 
+  const downloadSession = () => {
+    if (!mission) return
+    const snap = {
+      version: '1',
+      platform: 'OLYMPUS',
+      exported_at: new Date().toISOString(),
+      mission,
+      findings,
+      logs: logs.slice(-500),
+      notes,
+      status,
+      current_phase: currentPhase,
+      live_hosts: liveHosts,
+    }
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `OLYMPUS_backup_${new Date().toISOString().split('T')[0]}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   const handleRerun = async (agent: GodDef, targets?: string[], options?: object) => {
     if (!id) return
     try {
@@ -159,10 +182,14 @@ export default function MissionControl() {
 
   const TabBtn = ({ id, label, count }: { id: Tab; label: string; count?: number }) => (
     <button
+      role="tab"
+      aria-selected={tab === id}
+      aria-controls="mc-tabpanel"
+      className="touch-target"
       onClick={() => setTab(id)}
       style={{
         fontSize: '0.68rem', letterSpacing: '0.15em', padding: '0.5rem 1rem',
-        border: 'none', cursor: 'pointer',
+        border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
         borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent',
         background: tab === id ? 'var(--accent-dim)' : 'var(--surface)',
         color: tab === id ? 'var(--accent)' : 'var(--text-dim)',
@@ -206,8 +233,16 @@ export default function MissionControl() {
 
             {/* Export */}
             <div style={{ display: 'flex', gap: '1px' }}>
-              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export CSV">CSV</a>
-              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export JSON">JSON</a>
+              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as CSV">CSV</a>
+              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as JSON">JSON</a>
+              <button
+                onClick={downloadSession}
+                title="Download full session snapshot as JSON (for backup / offline restore)"
+                aria-label="Download session backup"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.75rem', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)', cursor: 'pointer' }}
+              >
+                ↓ SESSION
+              </button>
             </div>
 
             {/* Report */}
@@ -229,13 +264,15 @@ export default function MissionControl() {
           />
         </div>
 
-        {/* Main layout: left panel (tabs) + right panel (findings) */}
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '60% 40%', overflow: 'hidden' }}>
+        {/* Main layout: left panel (tabs) + right panel (findings).
+            .mc-main-grid owns the 60/40 columns so a media query can collapse
+            it to stacked rows on mobile (see index.css). */}
+        <div className="mc-main-grid">
 
           {/* Left panel */}
-          <div style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="mc-left-panel" style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {/* Tab bar */}
-            <div style={{ display: 'flex', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div className="tab-strip" role="tablist" aria-label="Mission panels" style={{ display: 'flex', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <TabBtn id="terminal" label="TERMINAL" />
               <TabBtn id="targets" label="TARGETS" count={liveHosts.length} />
               <TabBtn id="notes" label="NOTES" count={notes.length || undefined} />
@@ -246,7 +283,7 @@ export default function MissionControl() {
               <TabBtn id="topology" label="TOPOLOGY" />
             </div>
 
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div id="mc-tabpanel" role="tabpanel" aria-label={`${tab} panel`} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {tab === 'terminal' && <TerminalFeed logs={logs} />}
               {tab === 'targets' && (
                 <TargetsPanel

@@ -1,0 +1,1871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>QuantumKids — Zero to Hero Physics for Ages 8–15</title>
+<meta name="description" content="An interactive physics academy that takes kids from absolute zero to Hero — Relativity, Thermodynamics & Quantum Mechanics through play, not equations. Manipulate real simulations, earn mastery badges, and save progress offline." />
+<meta name="theme-color" content="#0b0f1e" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+/* ══════════════════════════════════════════════════════════════
+   QUANTUMKIDS — self-contained interactive physics academy
+   No build step, no dependencies. Screen theme = cosmic dark.
+   Print theme = ink-saver black-on-white line-art (Section III).
+   ══════════════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0f1e; --bg2:#111634; --surface:#161c3d; --surface2:#1d2650;
+  --border:#2a3566; --line:#38477f;
+  --text:#aeb6da; --bright:#f2f5ff; --muted:#6b76a8;
+  --accent:#7c5cff; --accent2:#22d3ee; --good:#34d399; --warn:#fbbf24; --bad:#fb7185;
+  --gold:#ffd35c;
+  --display:'Baloo 2',system-ui,sans-serif;
+  --body:'Nunito',system-ui,sans-serif;
+  --r:16px; --tap:48px;
+  /* per-track hues (set on lesson open) */
+  --track:#7c5cff;
+}
+html,body{min-height:100%}
+body{
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(124,92,255,.18), transparent 60%),
+    radial-gradient(900px 600px at 5% 10%, rgba(34,211,238,.12), transparent 55%),
+    var(--bg);
+  background-attachment:fixed;
+  color:var(--text); font-family:var(--body); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+.stars{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5}
+button,input,select{font-family:inherit}
+button{cursor:pointer;border:none;background:none;color:inherit}
+:focus-visible{outline:3px solid var(--accent2);outline-offset:2px;border-radius:8px}
+
+.app{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:18px 18px 120px}
+
+/* ── Top bar ─────────────────────────────────────────────── */
+.topbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.logo{
+  width:44px;height:44px;border-radius:13px;display:grid;place-items:center;font-size:1.5rem;
+  background:linear-gradient(145deg,#7c5cff,#22d3ee);box-shadow:0 6px 22px rgba(124,92,255,.45);
+}
+.brand h1{font-family:var(--display);font-weight:800;font-size:1.3rem;color:var(--bright);line-height:1;letter-spacing:-.01em}
+.brand .tag{font-size:.72rem;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.spacer{flex:1}
+.xp-pill{
+  display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);
+  border-radius:999px;padding:7px 14px;min-height:var(--tap);font-weight:800;color:var(--bright);font-size:.9rem
+}
+.xp-pill .star{color:var(--gold)}
+.icon-btn{
+  min-width:var(--tap);min-height:var(--tap);border-radius:13px;background:var(--surface);
+  border:1.5px solid var(--border);display:grid;place-items:center;font-size:1.25rem;color:var(--bright);
+  transition:transform .12s,border-color .12s
+}
+.icon-btn:hover{transform:translateY(-2px);border-color:var(--accent)}
+
+/* ── Hero / home ─────────────────────────────────────────── */
+.hero{
+  background:linear-gradient(160deg,var(--surface),var(--bg2));
+  border:1.5px solid var(--border);border-radius:22px;padding:26px 24px;margin-bottom:22px;position:relative;overflow:hidden
+}
+.hero::after{content:"";position:absolute;right:-40px;top:-40px;width:220px;height:220px;border-radius:50%;
+  background:radial-gradient(circle,rgba(124,92,255,.35),transparent 70%);pointer-events:none}
+.hero .kicker{font-weight:800;color:var(--accent2);letter-spacing:.12em;text-transform:uppercase;font-size:.72rem}
+.hero h2{font-family:var(--display);font-weight:800;color:var(--bright);font-size:clamp(1.6rem,5vw,2.4rem);line-height:1.08;margin:8px 0 10px;letter-spacing:-.02em}
+.hero p{max-width:52ch;color:var(--text)}
+.hero .cta-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+
+.btn{
+  min-height:var(--tap);padding:0 20px;border-radius:14px;font-family:var(--display);font-weight:700;
+  font-size:1rem;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:transform .12s,box-shadow .12s,opacity .12s;color:#fff;
+  background:linear-gradient(145deg,var(--accent),#5b3ff0);box-shadow:0 8px 24px rgba(124,92,255,.4)
+}
+.btn:hover{transform:translateY(-2px)}
+.btn.ghost{background:var(--surface);color:var(--bright);border:1.5px solid var(--border);box-shadow:none}
+.btn.mini{min-height:40px;font-size:.9rem;padding:0 14px;border-radius:11px}
+.btn.wide{width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+/* ── Section headers ─────────────────────────────────────── */
+.sec-label{font-family:var(--display);font-weight:700;color:var(--bright);font-size:1.15rem;margin:24px 4px 12px;display:flex;align-items:center;gap:10px}
+.sec-label .hint{font-family:var(--body);font-weight:700;font-size:.78rem;color:var(--muted)}
+
+/* ── Track grid ──────────────────────────────────────────── */
+.tracks{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px}
+.track{
+  --c:var(--accent);
+  position:relative;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);
+  padding:18px;text-align:left;transition:transform .14s,border-color .14s,box-shadow .14s;overflow:hidden
+}
+.track:hover{transform:translateY(-3px);border-color:var(--c);box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.track .halo{position:absolute;right:-30px;top:-30px;width:130px;height:130px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--c) 45%,transparent),transparent 70%)}
+.track .emoji{font-size:1.9rem;width:52px;height:52px;border-radius:14px;display:grid;place-items:center;
+  background:color-mix(in srgb,var(--c) 18%,var(--bg));border:1.5px solid color-mix(in srgb,var(--c) 40%,transparent)}
+.track h3{font-family:var(--display);font-weight:700;color:var(--bright);font-size:1.15rem;margin:12px 0 4px}
+.track .tl{font-size:.86rem;color:var(--text);min-height:2.6em}
+.track .foot{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+.badges{display:flex;gap:5px}
+.b-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);background:transparent;display:grid;place-items:center;font-size:.6rem}
+.b-dot.on{border-color:var(--gold);background:var(--gold);color:#3a2c00}
+.track .lvl{font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.lock{position:absolute;inset:0;background:rgba(11,15,30,.72);backdrop-filter:blur(2px);display:grid;place-items:center;border-radius:var(--r);z-index:2}
+.lock .lk{text-align:center}
+.lock .lk .ic{font-size:1.6rem}
+.lock .lk .tx{font-weight:800;color:var(--bright);font-size:.85rem;margin-top:4px}
+.lock .lk .sub{font-size:.72rem;color:var(--muted)}
+
+/* progress strip */
+.progress-strip{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:6px}
+.progress-strip .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.bar{height:12px;background:var(--bg);border-radius:999px;overflow:hidden;border:1px solid var(--border);margin-top:12px}
+.bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;transition:width .5s cubic-bezier(.22,1,.36,1)}
+
+/* ── Lesson view ─────────────────────────────────────────── */
+.view{display:none;animation:fade .3s ease both}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.back{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--muted);font-weight:800;font-size:.85rem}
+.back:hover{color:var(--bright)}
+
+.lesson-head{display:flex;gap:14px;align-items:flex-start;margin:8px 0 16px}
+.lesson-head .emoji{font-size:2rem;width:60px;height:60px;border-radius:16px;flex-shrink:0;display:grid;place-items:center;
+  background:color-mix(in srgb,var(--track) 20%,var(--bg));border:1.5px solid color-mix(in srgb,var(--track) 45%,transparent)}
+.lesson-head h2{font-family:var(--display);font-weight:800;color:var(--bright);font-size:1.5rem;line-height:1.1}
+.lesson-head .num{font-size:.72rem;font-weight:800;color:var(--track);letter-spacing:.1em;text-transform:uppercase}
+
+.card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:18px;margin-bottom:14px}
+.card h4{font-family:var(--display);font-weight:700;color:var(--bright);font-size:1.05rem;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.card p{margin-bottom:8px}
+.card p:last-child{margin-bottom:0}
+.analogy{background:color-mix(in srgb,var(--track) 12%,var(--surface));border-left:4px solid var(--track)}
+.analogy .lbl{font-weight:800;color:var(--track);font-size:.75rem;letter-spacing:.08em;text-transform:uppercase}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}
+.chip{background:var(--bg);border:1.5px solid var(--border);border-radius:999px;padding:5px 12px;font-size:.8rem;font-weight:700;color:var(--text)}
+
+/* ── Sandbox ─────────────────────────────────────────────── */
+.sandbox{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:14px}
+.sandbox .stage{position:relative;background:radial-gradient(120% 120% at 50% 0%,#0d1330,#080b1a);aspect-ratio:16/10;width:100%}
+.sandbox canvas{display:block;width:100%;height:100%;touch-action:none}
+.readout{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.readout .r{background:rgba(8,11,26,.72);border:1px solid var(--border);border-radius:10px;padding:5px 10px;font-weight:800;font-size:.82rem;color:var(--bright);backdrop-filter:blur(4px)}
+.readout .r b{color:var(--accent2)}
+.verdict{position:absolute;right:12px;top:12px;background:rgba(8,11,26,.8);border:1.5px solid var(--track);border-radius:12px;padding:8px 12px;font-family:var(--display);font-weight:700;color:var(--bright);font-size:.9rem;max-width:45%}
+
+.controls{padding:16px 18px;border-top:1.5px solid var(--border);display:grid;gap:14px}
+.ctl{display:grid;gap:6px}
+.ctl .lab{display:flex;justify-content:space-between;font-weight:800;font-size:.85rem;color:var(--bright)}
+.ctl .lab .val{color:var(--track);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:12px;border-radius:999px;background:var(--bg);border:1px solid var(--border);outline-offset:4px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:linear-gradient(145deg,var(--track),#fff);border:3px solid var(--surface);box-shadow:0 3px 10px rgba(0,0,0,.5);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:var(--track);border:3px solid var(--surface);cursor:pointer}
+.ctl-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ── Challenges ──────────────────────────────────────────── */
+.tiers{display:grid;gap:12px}
+.tier{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:16px 18px;transition:border-color .15s}
+.tier.done{border-color:var(--gold)}
+.tier .th{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.tier .rk{font-size:1.4rem}
+.tier .tt{font-family:var(--display);font-weight:800;color:var(--bright);font-size:1.02rem}
+.tier .tt small{display:block;font-family:var(--body);font-weight:700;font-size:.72rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.tier .status{margin-left:auto;font-weight:800;font-size:.8rem;color:var(--muted)}
+.tier.done .status{color:var(--gold)}
+.tier .prompt{color:var(--text);margin-bottom:12px}
+.opts{display:grid;gap:8px}
+.opt{text-align:left;min-height:var(--tap);padding:11px 14px;border-radius:12px;background:var(--bg);border:1.5px solid var(--border);color:var(--bright);font-weight:700;transition:border-color .12s,background .12s}
+.opt:hover{border-color:var(--track)}
+.opt.correct{border-color:var(--good);background:color-mix(in srgb,var(--good) 16%,var(--bg))}
+.opt.wrong{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 16%,var(--bg))}
+.feedback{margin-top:10px;font-weight:700;font-size:.9rem;min-height:1.2em}
+.feedback.ok{color:var(--good)}
+.feedback.no{color:var(--bad)}
+
+/* ── Parent dashboard ────────────────────────────────────── */
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.metric{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:16px}
+.metric .n{font-family:var(--display);font-weight:800;font-size:1.9rem;color:var(--bright);line-height:1}
+.metric .l{font-size:.78rem;font-weight:700;color:var(--muted);margin-top:4px}
+.audit-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start}
+.audit-row:last-child{border-bottom:none}
+.audit-row .ic{flex-shrink:0}
+.audit-row .bx b{color:var(--bright)}
+.audit-row .bx .std{font-size:.78rem;color:var(--accent2);font-weight:800}
+.upsell{background:linear-gradient(160deg,#241a52,#161c3d);border:1.5px solid var(--accent);border-radius:22px;padding:24px;position:relative;overflow:hidden}
+.upsell::after{content:"";position:absolute;right:-30px;bottom:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,211,92,.25),transparent 70%)}
+.upsell h3{font-family:var(--display);font-weight:800;color:var(--bright);font-size:1.4rem}
+.price{font-family:var(--display);font-weight:800;color:var(--gold);font-size:2rem;margin:6px 0}
+.price small{font-size:.9rem;color:var(--muted);font-weight:700}
+.feat{display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-weight:700;color:var(--text)}
+.feat .ck{color:var(--good)}
+
+/* ── Save / Load panel + drop zone ───────────────────────── */
+.drop{
+  border:2.5px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;background:var(--bg);
+  transition:border-color .15s,background .15s
+}
+.drop.over{border-color:var(--accent2);background:color-mix(in srgb,var(--accent2) 12%,var(--bg))}
+.drop .big{font-size:1.6rem}
+.drop .t{font-weight:800;color:var(--bright);margin:6px 0 2px}
+.drop .s{font-size:.82rem;color:var(--muted)}
+
+/* ── Banner / toast ──────────────────────────────────────── */
+.banner{display:none;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;font-weight:800;margin-bottom:12px}
+.banner.show{display:flex}
+.banner.err{background:color-mix(in srgb,var(--bad) 18%,var(--surface));border:1.5px solid var(--bad);color:#ffdfe4}
+.banner.ok{background:color-mix(in srgb,var(--good) 18%,var(--surface));border:1.5px solid var(--good);color:#d6ffe9}
+#toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,20px);z-index:50;
+  background:var(--surface2);border:1.5px solid var(--gold);border-radius:14px;padding:12px 18px;font-family:var(--display);
+  font-weight:800;color:var(--bright);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.3s;max-width:90vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ── Bottom thumb-zone nav (mobile-first ergonomics) ─────── */
+.tabbar{
+  position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;justify-content:center;gap:6px;
+  padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(11,15,30,.9);backdrop-filter:blur(12px);
+  border-top:1.5px solid var(--border)
+}
+.tab{flex:1;max-width:150px;min-height:var(--tap);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--muted);font-weight:800;font-size:.7rem}
+.tab .ic{font-size:1.25rem}
+.tab.active{color:var(--bright);background:var(--surface)}
+.tab.active .ic{filter:drop-shadow(0 0 8px var(--accent))}
+
+/* modal */
+.modal-bg{position:fixed;inset:0;z-index:60;background:rgba(4,6,15,.72);backdrop-filter:blur(4px);display:none;place-items:center;padding:18px}
+.modal-bg.show{display:grid}
+.modal{background:var(--surface);border:1.5px solid var(--border);border-radius:22px;padding:22px;max-width:440px;width:100%;animation:fade .25s both}
+.modal h3{font-family:var(--display);font-weight:800;color:var(--bright);font-size:1.3rem;margin-bottom:8px}
+.field{display:grid;gap:6px;margin:14px 0}
+.field label{font-weight:800;font-size:.82rem;color:var(--bright)}
+.field input{min-height:var(--tap);background:var(--bg);border:1.5px solid var(--border);border-radius:12px;padding:0 14px;color:var(--bright);font-size:1rem;font-weight:700}
+.field input:focus{border-color:var(--accent)}
+
+.footnote{text-align:center;color:var(--muted);font-size:.78rem;margin-top:20px;line-height:1.7}
+
+/* mission picker strip */
+.mission-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;margin-bottom:4px}
+.mission-strip::-webkit-scrollbar{display:none}
+.m-tab{flex-shrink:0;min-height:44px;padding:0 14px;border-radius:12px;background:var(--surface);border:1.5px solid var(--border);color:var(--muted);font-weight:800;font-size:.82rem;display:flex;align-items:center;gap:7px;transition:border-color .12s,color .12s}
+.m-tab.active{border-color:var(--track);color:var(--bright);background:color-mix(in srgb,var(--track) 12%,var(--surface))}
+.m-tab.done-m{border-color:var(--gold);color:var(--gold)}
+.m-tab .m-ic{font-size:1rem}
+/* mission sub-pips on track cards */
+.mission-pips{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.mpip{font-size:.68rem;font-weight:800;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.mpip.done{border-color:var(--gold);color:var(--gold)}
+
+/* ══════════════════════════════════════════════════════════
+   PRINT LAYER (Section III) — ink-saver black-on-white line-art
+   Everything on-screen is hidden; only #printRoot renders.
+   ══════════════════════════════════════════════════════════ */
+#printRoot{display:none}
+@media print{
+  :root{--track:#000}
+  body{background:#fff !important;color:#000 !important}
+  .stars,.app,.tabbar,#toast,.modal-bg{display:none !important}
+  #printRoot{display:block !important;color:#000;font-family:Georgia,'Times New Roman',serif}
+  .sheet{page-break-after:always;padding:0.4in 0.5in;max-width:7.5in;margin:0 auto}
+  .sheet:last-child{page-break-after:auto}
+  .sheet h1{font-size:22pt;border-bottom:3px solid #000;padding-bottom:6px;margin-bottom:4px;font-family:Arial,sans-serif}
+  .sheet .kick{font-size:9pt;letter-spacing:2px;text-transform:uppercase;font-weight:bold;font-family:Arial,sans-serif}
+  .sheet h2{font-size:14pt;margin:14px 0 6px;font-family:Arial,sans-serif}
+  .sheet p{font-size:11pt;margin-bottom:8px}
+  .sheet .lab-box{border:2px solid #000;border-radius:8px;padding:12px 14px;margin:10px 0}
+  .sheet .blank{border-bottom:1.5px solid #000;height:22px;margin:14px 0}
+  .sheet .grid-lines{background-image:linear-gradient(#000 .5px,transparent .5px),linear-gradient(90deg,#000 .5px,transparent .5px);background-size:20px 20px;opacity:.18;border:1.5px solid #000;height:2in;margin:8px 0;border-radius:4px}
+  .sheet svg{display:block;margin:10px auto}
+  .sheet .steps li{margin-bottom:8px;font-size:11pt}
+  .sheet .footer{margin-top:18px;border-top:1.5px solid #000;padding-top:6px;font-size:8.5pt;display:flex;justify-content:space-between;font-family:Arial,sans-serif}
+  .sheet table{width:100%;border-collapse:collapse;margin:8px 0}
+  .sheet td,.sheet th{border:1.5px solid #000;padding:6px 8px;font-size:10pt;text-align:left}
+  .sheet th{background:#000;color:#fff;font-family:Arial,sans-serif}
+  .audit-print .row{display:flex;gap:8px;padding:8px 0;border-bottom:1px solid #000}
+  .audit-print .row .b b{font-family:Arial,sans-serif}
+}
+
+@media (max-width:560px){
+  .app{padding:14px 12px 120px}
+  .hero{padding:20px 16px}
+  .lesson-head .emoji{width:52px;height:52px}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms !important;transition-duration:.001ms !important}}
+</style>
+</head>
+<body>
+<canvas class="stars" id="stars" aria-hidden="true"></canvas>
+
+<div class="app" id="app">
+  <div class="topbar">
+    <div class="brand" onclick="QK.go('home')" role="button" tabindex="0" aria-label="QuantumKids home">
+      <div class="logo">🚀</div>
+      <div>
+        <h1>QuantumKids</h1>
+        <div class="tag">ZERO → HERO PHYSICS · AGES 8–15</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="xp-pill" title="Quanta earned"><span class="star">✦</span><span id="xpVal">0</span></div>
+    <button class="icon-btn" onclick="QK.go('parent')" aria-label="Parent zone" title="Parent Zone">👨‍👩‍👧</button>
+  </div>
+
+  <!-- ══ HOME ══ -->
+  <section class="view active" id="view-home" aria-label="Home">
+    <div class="hero">
+      <div class="kicker">The Physics Academy That Feels Like Play</div>
+      <h2 id="heroGreeting">Become a Physics Hero 🦸</h2>
+      <p>No scary equations. No boring lectures. You'll <b>dial up gravity</b>, <b>freeze subatomic particles</b>, and <b>race a beam of light</b> — and discover the same laws that Einstein and Newton spent lifetimes chasing. Ready, Cadet?</p>
+      <div class="cta-row">
+        <button class="btn" id="resumeBtn" onclick="QK.resume()">▶ Start Training</button>
+        <button class="btn ghost" onclick="QK.go('parent')">For Parents →</button>
+      </div>
+    </div>
+
+    <div class="progress-strip">
+      <div class="row">
+        <div><b style="color:var(--bright);font-family:var(--display)" id="rankName">Rank: Rookie Cadet</b>
+          <div style="font-size:.82rem;color:var(--muted)"><span id="badgeCount">0</span> mastery badges earned</div>
+        </div>
+        <button class="btn ghost mini" onclick="QK.go('parent')">💾 Save / Load</button>
+      </div>
+      <div class="bar"><i id="overallBar" style="width:0%"></i></div>
+    </div>
+
+    <div class="sec-label">🧭 Choose Your Track <span class="hint">6 tracks · each ends in a “Hero Leap”</span></div>
+    <div class="tracks" id="trackGrid"></div>
+
+    <p class="footnote">
+      QuantumKids models real physics with real math under the hood — but shows it to you with pictures first.<br>
+      Progress saves automatically on this device, and travels anywhere as a <b>.json backup</b>.
+    </p>
+  </section>
+
+  <!-- ══ LESSON ══ -->
+  <section class="view" id="view-lesson" aria-label="Lesson">
+    <button class="back" onclick="QK.go('home')">← All Tracks</button>
+    <div class="mission-strip" id="missionStrip" style="display:none"></div>
+    <div class="lesson-head">
+      <div class="emoji" id="lsEmoji">🛰️</div>
+      <div>
+        <div class="num" id="lsNum">TRACK 1 · MISSION</div>
+        <h2 id="lsTitle">Lesson</h2>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4>🎬 The Story</h4>
+      <div id="lsIntro"></div>
+      <div class="chips" id="lsConcepts"></div>
+    </div>
+
+    <div class="card analogy">
+      <div class="lbl">💡 Picture it like this</div>
+      <p id="lsAnalogy" style="margin-top:6px"></p>
+    </div>
+
+    <div class="sec-label">🕹️ The Sandbox <span class="hint">drag the dials — physics reacts instantly</span></div>
+    <div class="sandbox">
+      <div class="stage">
+        <canvas id="simCanvas"></canvas>
+        <div class="readout" id="simReadout"></div>
+        <div class="verdict" id="simVerdict" style="display:none"></div>
+      </div>
+      <div class="controls" id="simControls"></div>
+    </div>
+
+    <div class="sec-label">🏅 Prove Your Mastery <span class="hint">Cadet → Specialist → Hero</span></div>
+    <div class="tiers" id="tierBox"></div>
+
+    <div class="card" style="margin-top:14px;text-align:center;background:transparent;border-style:dashed">
+      <p style="margin-bottom:12px">Finished the mission? Take the blueprint home.</p>
+      <button class="btn ghost" onclick="QK.printLesson()">🖨️ Print this Lab Sheet</button>
+    </div>
+  </section>
+
+  <!-- ══ PARENT ══ -->
+  <section class="view" id="view-parent" aria-label="Parent zone">
+    <button class="back" onclick="QK.go('home')">← Back to the Academy</button>
+    <div class="lesson-head">
+      <div class="emoji" style="--track:#22d3ee">👨‍👩‍👧</div>
+      <div><div class="num" style="color:var(--accent2)">GROWN-UPS ONLY</div><h2>Parent Zone</h2></div>
+    </div>
+
+    <div id="parentBanner" class="banner"></div>
+
+    <div class="sec-label">📊 What your child is doing</div>
+    <div class="metric-grid" id="metricGrid"></div>
+
+    <div class="card" style="margin-top:14px">
+      <h4>🧾 What Your Child Unlocked</h4>
+      <p style="color:var(--muted);font-size:.86rem">Every game action traces back to a formal academic benchmark. This is the same report that prints on the last page of every Lab Pack.</p>
+      <div id="auditList" style="margin-top:10px"></div>
+    </div>
+
+    <div class="sec-label">💾 Never lose progress</div>
+    <div class="card">
+      <p style="margin-bottom:14px">QuantumKids runs entirely on this device — no account needed. Move your child's whole journey to a new tablet by downloading one small backup file and dropping it back in.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn" onclick="QK.exportProgress()">⬇️ Download Progress (.json)</button>
+        <label class="btn ghost" style="cursor:pointer">⬆️ Upload Progress (.json)
+          <input type="file" id="fileInput" accept="application/json,.json" hidden>
+        </label>
+      </div>
+      <div class="drop" id="dropZone">
+        <div class="big">📁</div>
+        <div class="t">Drag &amp; drop a backup here</div>
+        <div class="s">We check it's a real, uncorrupted QuantumKids file before loading anything.</div>
+      </div>
+    </div>
+
+    <div class="sec-label">🖨️ Printable Lab Packs</div>
+    <div class="card">
+      <p style="margin-bottom:14px">Ink-saver, black-on-white blueprint worksheets — perfect for the kitchen table, printed on any home printer. Includes the “What Your Child Unlocked” audit page.</p>
+      <button class="btn ghost wide" onclick="QK.printAll()">🖨️ Print full Lab Pack (all tracks + audit)</button>
+    </div>
+
+    <div class="sec-label">🦸 Unlock the Hero Tracks</div>
+    <div class="upsell" id="upsellBox"></div>
+
+    <p class="footnote">QuantumKids · a demonstration framework build · progress stored locally &amp; portable via JSON</p>
+  </section>
+</div>
+
+<!-- print target -->
+<div id="printRoot"></div>
+
+<!-- name modal -->
+<div class="modal-bg" id="nameModal">
+  <div class="modal">
+    <h3>Welcome, future Hero! 🚀</h3>
+    <p>What should we call you on the leaderboard?</p>
+    <div class="field">
+      <label for="nameInput">Cadet name</label>
+      <input id="nameInput" maxlength="16" placeholder="e.g. Nova" autocomplete="off">
+    </div>
+    <button class="btn wide" onclick="QK.setName()">Blast off →</button>
+  </div>
+</div>
+
+<!-- thumb-zone nav -->
+<nav class="tabbar" aria-label="Primary">
+  <button class="tab active" id="tab-home" onclick="QK.go('home')"><span class="ic">🧭</span>Tracks</button>
+  <button class="tab" id="tab-lesson" onclick="QK.resume()"><span class="ic">🕹️</span>Sandbox</button>
+  <button class="tab" id="tab-parent" onclick="QK.go('parent')"><span class="ic">👨‍👩‍👧</span>Parents</button>
+</nav>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════
+   QUANTUMKIDS — application core
+   Sections mirror the framework brief:
+     · CURRICULUM   = Part I data store (6 tracks, analogies, Hero Leaps)
+     · SANDBOXES    = Part II interactive simulation engine (canvas sims)
+     · STATE ENGINE = Part IV deterministic serialization + schema validation
+     · PRINT        = Part III ink-saver line-art Lab Packs + audit page
+   ═══════════════════════════════════════════════════════════════════ */
+
+const SCHEMA_VERSION = "1.1.0";
+
+/* ── I. CURRICULUM DATA STORE ─────────────────────────────────────── */
+const CURRICULUM = [
+  {
+    id:"classical", n:1, emoji:"🛰️", color:"#7c5cff", premium:false,
+    title:"Classical Mechanics",
+    tagline:"Why things fall, roll, and orbit.",
+    concepts:["Newton's Laws","Momentum","Gravity","Kinetic vs Potential Energy"],
+    intro:"Newton watched an apple fall and asked a wild question: what if the <b>same</b> pull that drops the apple is the invisible leash keeping the Moon from flying away? Spoiler — it is. In this mission you'll fling a ball around a planet and hunt for the magic speed that turns a falling rock into a forever-orbiting moon.",
+    analogy:"Gravity is a <b>cosmic trampoline</b>. A heavy planet is a bowling ball sitting in the middle of a stretchy mat — everything nearby rolls toward the dip. Roll your marble too slow and it spirals in; roll it just right and it circles forever; roll it fast enough and it escapes the trampoline completely.",
+    sim:"gravity",
+    heroLeap:"You jumped from a sliding block straight to calculating <b>orbital escape velocity</b> — the exact speed a rocket needs to break free of a planet forever.",
+    benchmark:"Newton's Law of Universal Gravitation & the conditions for orbital vs. escape trajectories",
+    missions:[
+      {name:"Orbit & Escape", emoji:"🛰️"},
+      {name:"Push & Pull (F=ma)", emoji:"🏃", sim:"newton",
+       intro:"Isaac Newton figured out that every push has a perfectly predictable result: double the force on the same object and you double the <b>acceleration</b>. Cut the mass in half and the same push creates <b>twice</b> the kick. The whole law fits in three letters: <b>F = m × a</b>.",
+       analogy:"A skateboard on a smooth ramp: push harder → you speed up faster. Load it with a second person → same push, half the burst. Force is the cause; acceleration is the effect; mass is how hard the universe fights back.",
+       concepts:["Newton's 2nd Law","Force","Mass","Acceleration"],
+       benchmark:"Newton's Second Law: F = ma — force equals mass times acceleration, directly verified",
+       challenges:{
+         cadet:{prompt:"Apply a small force, then a large force. Each time let it run for 3 seconds. Did bigger force → bigger acceleration (faster speed)?", type:"observe", check:s=>s.observed},
+         specialist:{prompt:"Debug the ratio: set mass to 2× and force to 4×. The acceleration should read EXACTLY 2.0. Get it showing 2.0 to claim the badge.", type:"state", check:s=>Math.abs(s.accel-2.0)<0.15},
+         hero:{prompt:"Predict: you double the mass AND double the force at the same time. The acceleration will…", options:[
+           {t:"Double — more force wins",ok:false},
+           {t:"Stay exactly the same",ok:true},
+           {t:"Halve — more mass wins",ok:false}
+         ], explain:"Correct! F=ma means if both double together, they cancel: 2F/(2m) = F/m. Acceleration is unchanged. This is why heavier rockets need bigger engines just to match lighter ones."}
+       }
+      },
+      {name:"Collision Course", emoji:"💥", sim:"collision",
+       intro:"Crash anything into anything and one law always holds: the total <b>momentum</b> — mass times velocity — of the whole system never changes. It might swap from one object to another, but none of it disappears. Ever.",
+       analogy:"Two bumper cars: a big slow one and a tiny fast one. After they crash, they swap 'punch.' The big one might barely budge the little one, or a head-on collision might launch it backward twice as fast — but the total momentum scorecard never changes.",
+       concepts:["Conservation of Momentum","Elastic Collision","Impulse","Newton's 3rd Law"],
+       benchmark:"Conservation of Linear Momentum: p_total = const in closed systems, verified through elastic collision",
+       challenges:{
+         cadet:{prompt:"Launch the collision. After the balls hit, watch the velocity arrows. Did the momentum clearly transfer from ball 1 to ball 2?", type:"observe", check:s=>s.collided},
+         specialist:{prompt:"Debug mass: set ball 1 to HEAVY (≥3×) and ball 2 to LIGHT (≤1×). After the crash, ball 2 should shoot off at more than DOUBLE ball 1's original speed.", type:"state", check:s=>s.fastEject},
+         hero:{prompt:"Predict: two identical balls roll toward each other at the same speed. After a perfectly elastic head-on collision…", options:[
+           {t:"They stick together and stop",ok:false},
+           {t:"They bounce back, each at the same speed they came in",ok:true},
+           {t:"The one on the right always wins",ok:false}
+         ], explain:"Correct! Equal masses in an elastic head-on collision perfectly swap velocities — each bounces back at the incoming speed. Billiard balls do exactly this."}
+       }
+      }
+    ],
+    challenges:{
+      cadet:{prompt:"Launch the ball and watch it curve around the planet at least once. Did the planet's gravity bend its path into a curve instead of a straight line?", type:"observe", check:s=>s.launched},
+      specialist:{prompt:"Debug the launch: find a speed where the ball settles into a stable ORBIT — not crashing, not escaping. Get it circling and this badge is yours.", type:"state", check:s=>s.state==="orbit"},
+      hero:{prompt:"Predict first, then test: if you crank the launch speed WAY up past the orbit speed, the ball will…", options:[
+        {t:"…fall straight into the planet",ok:false},
+        {t:"…break free and escape into deep space",ok:true},
+        {t:"…freeze in place and stop moving",ok:false}
+      ], explain:"Correct! Past escape velocity, gravity can't win the tug-of-war — the ball leaves forever. That's exactly how we launch probes to other planets."}
+    }
+  },
+  {
+    id:"em", n:2, emoji:"🧲", color:"#22d3ee", premium:false,
+    title:"Electromagnetism",
+    tagline:"The invisible forces behind light & lightning.",
+    concepts:["Coulomb's Law","Field Lines","Induction","EM Spectrum"],
+    intro:"Rub a balloon on your hair and — poof — it sticks to the wall. No glue. No tape. Just <b>invisible force lines</b> reaching through empty air. The very same lines, wiggled fast enough, become the light you're reading with right now. Let's make the invisible visible.",
+    analogy:"Charges are like <b>dancers on a floor</b>. Opposite charges (one +, one −) are drawn together like a couple; same charges (+ and +) shove apart like two people who both want the same spot. The 'attraction' reaches across the room through invisible field lines.",
+    sim:"em",
+    heroLeap:"You went from a balloon on a wall to seeing how a wiggling charge sends <b>ripples of light</b> across empty space — the heart of Maxwell's Equations.",
+    benchmark:"Coulomb's Law: like charges repel, opposites attract, with force weakening over distance",
+    challenges:{
+      cadet:{prompt:"Flip the right-hand charge's sign and watch the field lines. Did you see opposite charges pull their lines together and same charges push them apart?", type:"observe", check:s=>s.flipped},
+      specialist:{prompt:"Debug the force: slide the two charges CLOSE together with opposite signs. Make the attraction force meter climb into the STRONG (red) zone.", type:"state", check:s=>s.forceLevel==="strong" && s.attracting},
+      hero:{prompt:"Predict: if you double the distance between two charges, Coulomb's Law says the force becomes…", options:[
+        {t:"…twice as strong",ok:false},
+        {t:"…half as strong",ok:false},
+        {t:"…about four times weaker",ok:true}
+      ], explain:"Correct! Force follows an inverse-square law — double the distance, one-quarter the force. Distance matters a LOT."}
+    }
+  },
+  {
+    id:"thermo", n:3, emoji:"🔥", color:"#fb7185", premium:false,
+    title:"Thermodynamics & Entropy",
+    tagline:"Heat, engines, and the arrow of time.",
+    concepts:["Thermal Equilibrium","Kinetic Theory","Laws of Thermo","Entropy"],
+    intro:"Why does your hot cocoa always cool down — never heat itself back up? Why does a tidy bedroom always drift toward chaos? There's a single deep rule hiding behind all of it, and physicists call it <b>entropy</b>: the universe's love of spreading out.",
+    analogy:"Heat is a room full of <b>bumper cars</b> — hotter means faster, crashier bumper cars. And entropy is your <b>bedroom</b>: it messes itself up all on its own, but it takes real energy (you, cleaning) to tidy it back. The universe only ever gets messier for free.",
+    sim:"thermo",
+    heroLeap:"You went from watching cocoa cool to feeling the law behind the <b>heat death of the universe</b> — why time only runs one way.",
+    benchmark:"The Second Law of Thermodynamics: entropy (disorder) of an isolated system always increases",
+    challenges:{
+      cadet:{prompt:"Hit 'Sort particles' to squeeze them all into one corner (low entropy), then watch. Did they spread out and fill the whole box on their own?", type:"observe", check:s=>s.spread},
+      specialist:{prompt:"Debug the heat: raise the Temperature dial to MAX and watch the entropy meter. Get the particles racing so fast that entropy climbs above 90%.", type:"state", check:s=>s.entropy>=0.9},
+      hero:{prompt:"Predict: you sorted the particles neatly into one corner and let go. Without adding energy, will they EVER line up neatly again on their own?", options:[
+        {t:"Yes, every few seconds",ok:false},
+        {t:"Almost never — order doesn't return for free",ok:true},
+        {t:"Only if you make them colder",ok:false}
+      ], explain:"Correct! That one-way street from order to disorder is the Arrow of Time. Messiness is overwhelmingly more likely than tidiness."}
+    }
+  },
+  {
+    id:"relativity", n:4, emoji:"⏱️", color:"#fbbf24", premium:true,
+    title:"Special Relativity",
+    tagline:"Bend space. Stretch time. Chase light.",
+    concepts:["Speed of Light","Time Dilation","Length Contraction","Spacetime"],
+    intro:"Here's the rule that broke everyone's brain, including Einstein's at first: no matter how fast you chase a beam of light, it <b>always</b> races away from you at the exact same speed. To keep that impossible fact true, the universe does something wild — it bends <b>time itself</b>.",
+    analogy:"Imagine two identical <b>digital wristwatches</b>. One stays home; one straps onto a rocket screaming near light-speed. When the rocket returns, its watch shows <b>less time has passed</b>. The traveler literally aged slower. Faster you go, slower your clock ticks.",
+    sim:"relativity",
+    heroLeap:"You went from a speed limit to <b>time dilation near a black hole's event horizon</b>, where a minute for you could be years for everyone else.",
+    benchmark:"Einstein's Time Dilation: moving clocks tick slower, scaling with the Lorentz factor γ",
+    challenges:{
+      cadet:{prompt:"Slide the rocket's speed up toward the speed of light and watch the two clocks. Did the rocket's clock start ticking noticeably SLOWER than the home clock?", type:"observe", check:s=>s.beta>=0.5},
+      specialist:{prompt:"Debug spacetime: push the speed so high that time slows to less than HALF — a stretch factor (γ) of 2 or more. The rocket ages half as fast as home.", type:"state", check:s=>s.gamma>=2},
+      hero:{prompt:"Predict: a twin flies near light-speed to a star and back while the other stays on Earth. When they reunite…", options:[
+        {t:"They're exactly the same age",ok:false},
+        {t:"The traveling twin is YOUNGER",ok:true},
+        {t:"The Earth twin is younger",ok:false}
+      ], explain:"Correct! This is the famous Twin Paradox — and it's real. Astronauts on the ISS return a tiny fraction of a second younger than us."}
+    }
+  },
+  {
+    id:"quantum", n:5, emoji:"⚛️", color:"#a78bfa", premium:true,
+    title:"Quantum Mechanics",
+    tagline:"Where a thing can be two things at once.",
+    concepts:["Wave-Particle Duality","Superposition","Measurement","Entanglement"],
+    intro:"Zoom down smaller than an atom and reality stops behaving. A tiny particle isn't in one place — it's in a <b>blurry cloud of maybes</b>, all at once, until the exact moment you look. Then, snap, it picks one. Nobody fully knows why. Welcome to the weirdest, truest physics we have.",
+    analogy:"Superposition is a <b>spinning coin</b> in the air — not heads, not tails, but genuinely <b>both</b> until it lands in your hand. And entanglement? Two <b>magic shoes</b> boxed and flung across the galaxy: peek in one box, see a left shoe, and you <b>instantly</b> know the other is a right — no matter how far apart.",
+    sim:"quantum",
+    heroLeap:"You went from spinning coins to <b>quantum tunneling</b> — particles ghosting through walls they shouldn't pass — the trick that makes modern microchips work.",
+    benchmark:"Quantum Superposition & Measurement: states exist as probabilities until observation collapses them",
+    missions:[
+      {name:"Superposition & Collapse", emoji:"⚛️"},
+      {name:"The Double Slit", emoji:"🌊", sim:"doubleslit",
+       intro:"Fire a bullet at a wall with two holes and you get two stripes behind it. Fire an <b>electron</b> at the same wall — one at a time — and over thousands of shots a zebra-stripe <b>interference pattern</b> builds up, as if each electron went through <b>both</b> holes at the same time and interfered with itself.",
+       analogy:"Drop a stone in a pond and it makes expanding rings. Drop two stones and the rings cross each other: where two crests meet they <b>double up</b>, where a crest meets a trough they <b>cancel out</b>. Electrons are like quantum ripples — both slits at once — so their waves interfere on the screen just like water.",
+       concepts:["Wave-Particle Duality","Interference","Which-Path Info","Double Slit Experiment"],
+       benchmark:"Wave-Particle Duality: particles produce interference patterns consistent only with wave superposition through multiple slits",
+       challenges:{
+         cadet:{prompt:"Press 'Close one slit'. Particles make ONE stripe. Then open both slits — does the zebra interference pattern appear and build up over time?", type:"observe", check:s=>s.sawInterference},
+         specialist:{prompt:"Debug the fringes: slide the slit separation until you can count 5 or more distinct stripes on the screen (watch the counter).", type:"state", check:s=>s.fringeCount>=5},
+         hero:{prompt:"Predict: you place a tiny detector AT one slit to find out which hole each electron went through. The interference pattern will…", options:[
+           {t:"Get sharper — now we know more",ok:false},
+           {t:"Disappear — it turns back into two plain stripes",ok:true},
+           {t:"Stay the same — detectors don't affect electrons",ok:false}
+         ], explain:"Correct! This is the measurement paradox. The instant you learn 'which path', the wave collapses and the interference vanishes. Reality hides its quantum tricks the moment you peek."}
+       }
+      },
+      {name:"Quantum Tunneling", emoji:"🚇", sim:"tunnel",
+       intro:"Roll a marble at a hill that's taller than the marble has energy to climb — classically it rolls back, every time. But quantum particles sometimes <b>ghost through</b> the barrier anyway. This isn't a trick or an error: it's real, it happens billions of times per second inside the microchip you're reading this on.",
+       analogy:"Imagine a ghost who can walk through walls — but only thin ones, and only sometimes. Make the wall thicker or taller and the ghost struggles more. That probability of ghosting through is exactly what physicists calculate with the Schrödinger equation. The transistors in every phone and laptop exploit this daily.",
+       concepts:["Quantum Tunneling","Wave Functions","Barrier Penetration","Semiconductor Physics"],
+       benchmark:"Quantum tunneling probability scales exponentially with barrier width and height — foundation of tunnel-diode and MOSFET operation",
+       challenges:{
+         cadet:{prompt:"Set the barrier to THIN and MEDIUM height. Fire particles and watch: did at least one particle ghost through to the right side even though it shouldn't have enough energy?", type:"observe", check:s=>s.observed},
+         specialist:{prompt:"Debug the barrier: make it THICK and TALL until the tunneling probability readout drops below 10%. Find that combination.", type:"state", check:s=>s.tunnelProb<=0.10},
+         hero:{prompt:"Predict: a quantum particle hits a barrier that's TWICE as thick (but same height). Its tunneling probability will…", options:[
+           {t:"Halve — roughly half as likely",ok:false},
+           {t:"Drop dramatically — exponentially less likely",ok:true},
+           {t:"Stay the same — thickness doesn't matter",ok:false}
+         ], explain:"Correct! Tunneling probability falls off exponentially with barrier width. That's why chip designers obsess over nanometer-scale tolerances — a few extra atoms of barrier and the transistor stops switching."}
+       }
+      }
+    ],
+    challenges:{
+      cadet:{prompt:"Let the quantum coin spin (it's truly both heads AND tails), then press 'Measure!'. Did looking at it force it to instantly snap to a single answer?", type:"observe", check:s=>s.measured},
+      specialist:{prompt:"Debug entanglement: turn on 'Entangle the pair', then measure. Did measuring ONE coin instantly decide the other's opposite result, across the whole screen?", type:"state", check:s=>s.entangledMeasured},
+      hero:{prompt:"Predict: a quantum coin is in superposition. Right before you measure it, is it secretly ALREADY heads or tails and just hiding it from you?", options:[
+        {t:"Yes, it's decided — we just can't see it",ok:false},
+        {t:"No — it's genuinely both until measured",ok:true},
+        {t:"It's neither until you shake it",ok:false}
+      ], explain:"Correct — and this is the mind-bender. Experiments prove the coin truly has no answer until measured. Reality is undecided until observed."}
+    }
+  },
+  {
+    id:"astro", n:6, emoji:"🌌", color:"#34d399", premium:true,
+    title:"Astrophysics & Cosmology",
+    tagline:"Stars, star-stuff, and the whole universe.",
+    concepts:["Stellar Evolution","Nucleosynthesis","Dark Matter/Energy","Cosmic Dawn"],
+    intro:"Look at your hand. The iron in your blood, the calcium in your bones — every atom heavier than helium was forged inside a <b>dying star</b> and blasted across space in an explosion brighter than a billion suns. You are, quite literally, made of star-stuff. Let's build and blow up a star to see how.",
+    analogy:"A star is a <b>cosmic pressure cooker</b>. Gravity squeezes; nuclear fire pushes back. For a giant star the finale is a <b>supernova</b> — a pressure cooker so violent it manufactures the exact iron atoms now flowing through your veins and scatters them into new worlds.",
+    sim:"astro",
+    heroLeap:"You went from spotting constellations to reading a star's <b>whole life story from its mass</b> — and why the biggest ones die as black holes.",
+    benchmark:"Stellar Evolution & Nucleosynthesis: a star's mass determines its fate and the elements it forges",
+    challenges:{
+      cadet:{prompt:"Build a star: set its mass and press 'Ignite'. Watch it live and die. Did your star run out of fuel and reach a final fate (dwarf, neutron star, or black hole)?", type:"observe", check:s=>s.ended},
+      specialist:{prompt:"Debug the mass: dial the star's mass up into the HEAVY zone and ignite it. Make a star massive enough to collapse into a BLACK HOLE.", type:"state", check:s=>s.fate==="black hole"},
+      hero:{prompt:"Predict: which star ends its life as a black hole?", options:[
+        {t:"A small, low-mass star like our Sun",ok:false},
+        {t:"A giant, very high-mass star",ok:true},
+        {t:"All stars become black holes",ok:false}
+      ], explain:"Correct! Only the heavyweight stars have enough gravity to crush themselves into a black hole. Lighter stars fade into quiet white dwarfs."}
+    }
+  }
+];
+const byId = id => CURRICULUM.find(t=>t.id===id);
+
+/* ── STATE ──────────────────────────────────────────────────────── */
+function defaultState(){
+  const trophies={}, params={}, missionTrophies={};
+  CURRICULUM.forEach(t=>{
+    trophies[t.id]={cadet:false,specialist:false,hero:false};
+    params[t.id]={};
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      missionTrophies[t.id+"_"+(i+1)]={cadet:false,specialist:false,hero:false};
+    });
+  });
+  return {
+    app:"QUANTUMKIDS", version:SCHEMA_VERSION, savedAt:new Date().toISOString(),
+    profile:{ cadetName:"", avatarSeed:Math.floor(Math.random()*1e6) },
+    progress:{ moduleIndex:0, completedLessons:[], trophies, missionTrophies, sandboxParams:params, xp:0 },
+    premium:{ heroTracksUnlocked:false }
+  };
+}
+/* helper: get trophy object for a given track+missionIdx */
+function getTrophies(trackId, missionIdx){
+  if(!missionIdx) return STATE.progress.trophies[trackId];
+  return STATE.progress.missionTrophies[trackId+"_"+missionIdx] || {cadet:false,specialist:false,hero:false};
+}
+let STATE = defaultState();
+const LS_KEY = "quantumkids.state.v1";
+
+function persist(){
+  STATE.savedAt = new Date().toISOString();
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }catch(e){/* storage full/blocked */}
+}
+function loadLocal(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return false;
+    const v = validateState(JSON.parse(raw));
+    if(v.ok){ STATE = v.data; return true; }
+  }catch(e){}
+  return false;
+}
+
+/* ── IV. SCHEMA VALIDATION ──────────────────────────────────────────
+   Strict, defensive check run on EVERY import (and on local restore)
+   before any hydration touches the live app. Returns {ok,data,error}. */
+function validateState(obj){
+  const fail = m => ({ok:false, error:m});
+  if(obj===null || typeof obj!=="object" || Array.isArray(obj)) return fail("Not a QuantumKids file.");
+  if(obj.app!=="QUANTUMKIDS") return fail("This isn't a QuantumKids backup.");
+  if(typeof obj.version!=="string") return fail("Missing version tag.");
+  if(typeof obj.savedAt!=="string" || isNaN(Date.parse(obj.savedAt))) return fail("Missing or unreadable save date.");
+  if(!obj.profile || typeof obj.profile!=="object") return fail("Profile block is missing.");
+  if(typeof obj.profile.cadetName!=="string") return fail("Corrupted profile name.");
+  const p = obj.progress;
+  if(!p || typeof p!=="object") return fail("Progress block is missing.");
+  if(typeof p.moduleIndex!=="number" || !Number.isFinite(p.moduleIndex)) return fail("Corrupted module index.");
+  if(typeof p.xp!=="number" || !Number.isFinite(p.xp) || p.xp<0) return fail("Corrupted XP value.");
+  if(!Array.isArray(p.completedLessons)) return fail("Corrupted lesson list.");
+  if(!p.trophies || typeof p.trophies!=="object") return fail("Trophy data is missing.");
+  if(!p.sandboxParams || typeof p.sandboxParams!=="object") return fail("Sandbox data is missing.");
+  // every known track must carry a well-typed trophy triple
+  for(const t of CURRICULUM){
+    const tr = p.trophies[t.id];
+    if(!tr || typeof tr!=="object") return fail("Trophy data corrupted ("+t.id+").");
+    for(const tier of ["cadet","specialist","hero"]){
+      if(typeof tr[tier]!=="boolean") return fail("Trophy flag corrupted ("+t.id+"/"+tier+").");
+    }
+  }
+  if(!obj.premium || typeof obj.premium!=="object" || typeof obj.premium.heroTracksUnlocked!=="boolean")
+    return fail("Premium block corrupted.");
+  // v1.0.0 → v1.1.0 migration: missionTrophies may be absent — that's fine, default fills it
+  // passed — normalise into a clean, migration-safe default
+  const clean = defaultState();
+  clean.version = obj.version;
+  clean.savedAt = obj.savedAt;
+  clean.profile.cadetName = obj.profile.cadetName.slice(0,16);
+  clean.profile.avatarSeed = Number(obj.profile.avatarSeed)||clean.profile.avatarSeed;
+  clean.progress.moduleIndex = Math.max(0, Math.min(CURRICULUM.length-1, Math.floor(p.moduleIndex)));
+  clean.progress.xp = Math.floor(p.xp);
+  clean.progress.completedLessons = p.completedLessons.filter(x=>typeof x==="string" && byId(x));
+  clean.premium.heroTracksUnlocked = obj.premium.heroTracksUnlocked;
+  for(const t of CURRICULUM){
+    clean.progress.trophies[t.id] = {
+      cadet:!!p.trophies[t.id].cadet, specialist:!!p.trophies[t.id].specialist, hero:!!p.trophies[t.id].hero
+    };
+    const sp = p.sandboxParams[t.id];
+    if(sp && typeof sp==="object") clean.progress.sandboxParams[t.id] = sp;
+    // migrate missionTrophies if present in saved file
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      const key=t.id+"_"+(i+1);
+      const mt = p.missionTrophies && p.missionTrophies[key];
+      if(mt && typeof mt==="object" && typeof mt.cadet==="boolean")
+        clean.progress.missionTrophies[key]={cadet:!!mt.cadet,specialist:!!mt.specialist,hero:!!mt.hero};
+    });
+  }
+  return {ok:true, data:clean};
+}
+
+/* ── IV. EXPORT (deterministic serialization) ───────────────────── */
+function exportProgress(){
+  persist();
+  const data = JSON.stringify(STATE, null, 2);
+  const blob = new Blob([data], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const d = new Date();
+  const stamp = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  const a = document.createElement("a");
+  a.href = url; a.download = "QUANTUMKIDS_backup_"+stamp+".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  parentBanner("ok","✅ Backup saved as QUANTUMKIDS_backup_"+stamp+".json");
+}
+
+/* ── IV. IMPORT + HYDRATION ─────────────────────────────────────── */
+function importFile(file){
+  if(!file){ return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try{ parsed = JSON.parse(reader.result); }
+    catch(e){ parentBanner("err","🚫 Invalid or corrupted progress file"); return; }
+    const v = validateState(parsed);
+    if(!v.ok){ parentBanner("err","🚫 Invalid or corrupted progress file — "+v.error); return; }
+    STATE = v.data;
+    persist();
+    QK.renderAll();                    // instant reactive re-hydration
+    parentBanner("ok","✅ Progress restored! Welcome back"+(STATE.profile.cadetName?", "+STATE.profile.cadetName:"")+".");
+  };
+  reader.onerror = () => parentBanner("err","🚫 Invalid or corrupted progress file");
+  reader.readAsText(file);
+}
+
+function parentBanner(kind,msg){
+  const b = document.getElementById("parentBanner");
+  b.className = "banner show "+kind; b.textContent = msg;
+  if(kind==="ok") setTimeout(()=>{ b.className="banner"; }, 4200);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   II. SANDBOX SIMULATION ENGINE
+   Each sim returns a controller: {params, action?, start, stop, setParam, metrics}
+   The engine auto-builds sliders + action buttons from `params`/`actions`.
+   ═══════════════════════════════════════════════════════════════════ */
+const TAU = Math.PI*2;
+function rand(a,b){ return a+Math.random()*(b-a); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+const SANDBOXES = {
+  /* 1 · GRAVITY / ORBIT — cosmic trampoline */
+  gravity(cv, out){
+    const ctx = cv.getContext("2d");
+    let W,H, planet, ball, trail, raf, launched=false, state="idle";
+    const P = { gravity:1.0, speed:1.9 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; planet={x:W/2,y:H/2,r:26*DPR,m:1}; if(!launched) reset(); }
+    function reset(){
+      launched=false; state="idle";
+      const r=Math.min(W,H)*0.32;
+      ball={x:planet.x+r, y:planet.y, vx:0, vy:0, r:8*DPR, alive:true};
+      trail=[];
+    }
+    function launch(){
+      const r = Math.hypot(ball.x-planet.x, ball.y-planet.y);
+      const base = Math.sqrt(GM()/r);           // circular-orbit speed
+      const v = base * P.speed;                  // 1.0 → circular, ~1.41 → escape
+      ball.vx = 0; ball.vy = -v;                 // tangential (upward) launch
+      launched=true; state="flying"; trail=[];
+    }
+    function GM(){ return P.gravity * 42 * DPR*DPR*DPR; }
+    function step(){
+      if(launched && ball.alive){
+        for(let i=0;i<3;i++){                     // sub-steps for stability
+          const dx=planet.x-ball.x, dy=planet.y-ball.y;
+          const d=Math.max(Math.hypot(dx,dy), planet.r);
+          const a=GM()/(d*d);
+          ball.vx += a*dx/d; ball.vy += a*dy/d;
+          ball.x += ball.vx; ball.y += ball.vy;
+          if(d <= planet.r+ball.r){ ball.alive=false; state="crash"; }
+        }
+        const d=Math.hypot(planet.x-ball.x, planet.y-ball.y);
+        const vesc=Math.sqrt(2*GM()/d);
+        const spd=Math.hypot(ball.vx,ball.vy);
+        if(ball.alive){
+          if(d>Math.hypot(W,H)) state="escape";
+          else if(spd>=vesc*0.995) state="escape";
+          else state="orbit";
+        }
+        trail.push({x:ball.x,y:ball.y}); if(trail.length>420) trail.shift();
+      }
+      draw();
+      raf=requestAnimationFrame(step);
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      // trampoline warp grid
+      ctx.strokeStyle="rgba(124,92,255,0.14)"; ctx.lineWidth=1*DPR;
+      const g=34*DPR;
+      for(let gx=0;gx<=W;gx+=g){ ctx.beginPath();
+        for(let gy=0;gy<=H;gy+=6*DPR){ const dx=gx-planet.x,dy=gy-planet.y,d=Math.hypot(dx,dy)+40;
+          const pull=(700*DPR*P.gravity)/d; const yy=gy+ (dy/d)*pull*0.25; const xx=gx+(dx/d)*pull*0.25;
+          gy===0?ctx.moveTo(xx,yy):ctx.lineTo(xx,yy); } ctx.stroke(); }
+      // trail
+      ctx.strokeStyle="rgba(34,211,238,0.75)"; ctx.lineWidth=2.5*DPR; ctx.beginPath();
+      trail.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
+      // planet
+      const grd=ctx.createRadialGradient(planet.x-8*DPR,planet.y-8*DPR,4*DPR,planet.x,planet.y,planet.r);
+      grd.addColorStop(0,"#b39cff"); grd.addColorStop(1,"#5b3ff0");
+      ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(planet.x,planet.y,planet.r,0,TAU); ctx.fill();
+      // ball
+      if(ball.alive){ ctx.fillStyle="#22d3ee"; ctx.shadowColor="#22d3ee"; ctx.shadowBlur=12*DPR;
+        ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,TAU); ctx.fill(); ctx.shadowBlur=0; }
+      else { ctx.fillStyle="#fb7185"; ctx.font=(14*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.fillText("💥",ball.x,ball.y); }
+      // readout
+      const lbl = state==="idle"?"Ready to launch":state==="flying"?"Flying…":state[0].toUpperCase()+state.slice(1);
+      out({ "Status":lbl, "Gravity":P.gravity.toFixed(1)+"×", "Launch speed":P.speed.toFixed(2)+"×orbit" },
+          state==="orbit"?"🛰️ Stable orbit! It'll circle forever.":
+          state==="escape"?"🚀 Escape velocity! Gone into deep space.":
+          state==="crash"?"💥 Too slow — gravity pulled it down.":"");
+    }
+    resize();
+    return {
+      params:[
+        {key:"gravity",label:"Gravity strength",min:0.3,max:2.5,step:0.1,val:P.gravity,unit:"×",fmt:v=>v.toFixed(1)+"×"},
+        {key:"speed",label:"Launch speed",min:0.4,max:1.7,step:0.02,val:P.speed,unit:"",fmt:v=>v.toFixed(2)}
+      ],
+      actions:[{key:"launch",label:"🚀 Launch",primary:true,run:()=>{launch(); launched=true;}},
+               {key:"reset",label:"↺ Reset",run:reset}],
+      setParam:(k,v)=>{ P[k]=v; if(!launched) reset(); },
+      resize, start:()=>{ raf=requestAnimationFrame(step); }, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({launched, state, speed:P.speed})
+    };
+  },
+
+  /* 2 · ELECTROMAGNETISM — dance-floor charges + field lines */
+  em(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0;
+    const q=[{x:0,y:0,sign:1},{x:0,y:0,sign:-1}];
+    const P={ distance:0.5, rightSign:-1 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; place(); }
+    function place(){ const gap=(0.12+P.distance*0.36)*W; q[0].x=W/2-gap/2; q[1].x=W/2+gap/2; q[0].y=q[1].y=H/2; q[1].sign=P.rightSign; }
+    function forceLevel(){ const gap=(0.12+P.distance*0.36); const f=1/(gap*gap); return f>7.5?"strong":f>3?"medium":"weak"; }
+    function draw(){
+      t+=0.02; ctx.clearRect(0,0,W,H);
+      // field lines
+      const attract=q[0].sign!==q[1].sign;
+      ctx.lineWidth=1.6*DPR;
+      for(let a=0;a<16;a++){
+        const ang=(a/16)*TAU;
+        let x=q[0].x+Math.cos(ang)*q[0].r*0, y=q[0].y;
+        x=q[0].x+Math.cos(ang)*14*DPR; y=q[0].y+Math.sin(ang)*14*DPR;
+        ctx.strokeStyle="rgba(34,211,238,0.5)"; ctx.beginPath(); ctx.moveTo(x,y);
+        for(let s=0;s<140;s++){
+          let ex=0,ey=0;
+          q.forEach(c=>{ const dx=x-c.x,dy=y-c.y,d=Math.max(Math.hypot(dx,dy),10*DPR); const k=c.sign/(d*d);
+            ex+=k*dx/d*90000; ey+=k*dy/d*90000; });
+          const m=Math.hypot(ex,ey)||1; x+=ex/m*4*DPR; y+=ey/m*4*DPR;
+          if(x<0||x>W||y<0||y>H) break;
+          const near=Math.hypot(x-q[1].x,y-q[1].y); if(near<15*DPR) break;
+          ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+      }
+      // "party guests" drifting along the force direction
+      // charges
+      q.forEach((c,i)=>{
+        const grd=ctx.createRadialGradient(c.x-6*DPR,c.y-6*DPR,3*DPR,c.x,c.y,22*DPR);
+        if(c.sign>0){ grd.addColorStop(0,"#ffd0d6"); grd.addColorStop(1,"#fb7185"); }
+        else{ grd.addColorStop(0,"#c9f6ff"); grd.addColorStop(1,"#22d3ee"); }
+        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(c.x,c.y,22*DPR,0,TAU); ctx.fill();
+        ctx.fillStyle="#0b0f1e"; ctx.font="bold "+(22*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText(c.sign>0?"+":"−", c.x, c.y+2*DPR);
+      });
+      // attraction/repulsion arrows
+      const dir = attract?-1:1;
+      [0,1].forEach(i=>{ const c=q[i]; const s=(i===0?1:-1)*dir; const ax=c.x+ s*30*DPR*(attract?1:1);
+        ctx.strokeStyle=attract?"#34d399":"#fbbf24"; ctx.lineWidth=3*DPR; ctx.beginPath();
+        const ox=c.x+s*26*DPR, tx=c.x+s*(26+14*Math.abs(Math.sin(t*2)))*DPR;
+        ctx.moveTo(ox,c.y); ctx.lineTo(tx,c.y);
+        ctx.lineTo(tx-s*6*DPR,c.y-5*DPR); ctx.moveTo(tx,c.y); ctx.lineTo(tx-s*6*DPR,c.y+5*DPR); ctx.stroke(); });
+      const fl=forceLevel();
+      out({ "Left":"+ charge", "Right":(q[1].sign>0?"+ charge":"− charge"),
+            "Force":fl.toUpperCase()+(attract?" pull":" push") },
+          attract?"💞 Opposites attract — they pull together.":"↔️ Same signs repel — they push apart.");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"distance",label:"Distance apart",min:0,max:1,step:0.02,val:P.distance,fmt:v=>(v<0.34?"close":v<0.67?"medium":"far")},
+      ],
+      actions:[{key:"flip",label:"🔄 Flip right charge",primary:true,run:()=>{ P.rightSign*=-1; place(); }}],
+      setParam:(k,v)=>{ P[k]=v; place(); },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({flipped:P.rightSign===1, attracting:q[0].sign!==q[1].sign, forceLevel:forceLevel()})
+    };
+  },
+
+  /* 3 · THERMODYNAMICS — bumper cars + live entropy meter */
+  thermo(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,parts=[],spread=false;
+    const P={ temp:0.5 }; const N=90; const COLS=8, ROWS=5;
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; if(!parts.length) seed(false); }
+    function seed(ordered){
+      parts=[]; spread=false;
+      for(let i=0;i<N;i++){
+        const x= ordered? rand(20*DPR, W*0.28) : rand(20*DPR,W-20*DPR);
+        const y= ordered? rand(20*DPR, H-20*DPR) : rand(20*DPR,H-20*DPR);
+        const sp=(0.5+P.temp)*2*DPR, a=rand(0,TAU);
+        parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:5*DPR});
+      }
+    }
+    function entropy(){
+      // occupancy of a COLS×ROWS grid → normalized Shannon evenness
+      const cells=new Array(COLS*ROWS).fill(0);
+      parts.forEach(p=>{ const cx=Math.min(COLS-1,Math.floor(p.x/W*COLS)); const cy=Math.min(ROWS-1,Math.floor(p.y/H*ROWS)); cells[cy*COLS+cx]++; });
+      let ent=0; const tot=parts.length;
+      cells.forEach(c=>{ if(c>0){ const pr=c/tot; ent-=pr*Math.log(pr); } });
+      return ent/Math.log(cells.length);   // 0 (all one cell) → 1 (perfectly even)
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      const sp=(0.35+P.temp)*3.2*DPR;
+      parts.forEach(p=>{
+        const cur=Math.hypot(p.vx,p.vy)||1; p.vx=p.vx/cur*sp; p.vy=p.vy/cur*sp;
+        p.x+=p.vx; p.y+=p.vy;
+        if(p.x<p.r){p.x=p.r;p.vx*=-1;} if(p.x>W-p.r){p.x=W-p.r;p.vx*=-1;}
+        if(p.y<p.r){p.y=p.r;p.vy*=-1;} if(p.y>H-p.r){p.y=H-p.r;p.vy*=-1;}
+        const heat=clamp(P.temp,0,1);
+        ctx.fillStyle=`rgb(${Math.round(120+heat*135)},${Math.round(140-heat*70)},${Math.round(255-heat*180)})`;
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,TAU); ctx.fill();
+      });
+      const e=entropy();
+      if(e>0.75) spread=true;
+      // entropy meter
+      const mw=W-40*DPR, mx=20*DPR, my=H-16*DPR;
+      ctx.fillStyle="rgba(255,255,255,0.12)"; roundRect(ctx,mx,my-8*DPR,mw,10*DPR,5*DPR); ctx.fill();
+      ctx.fillStyle=e>0.85?"#fb7185":"#22d3ee"; roundRect(ctx,mx,my-8*DPR,mw*e,10*DPR,5*DPR); ctx.fill();
+      out({ "Temperature":Math.round(P.temp*100)+"%", "Entropy (disorder)":Math.round(e*100)+"%" },
+          e<0.4?"🧊 Neat & ordered — low entropy.":e>0.85?"🌀 Maximum chaos — high entropy!":"");
+      raf=requestAnimationFrame(draw);
+      draw._e=e;
+    }
+    resize();
+    return {
+      params:[{key:"temp",label:"Temperature (heat)",min:0,max:1,step:0.02,val:P.temp,fmt:v=>Math.round(v*100)+"%"}],
+      actions:[{key:"sort",label:"🧹 Sort particles",primary:true,run:()=>seed(true)},
+               {key:"shuffle",label:"↺ Reset",run:()=>seed(false)}],
+      setParam:(k,v)=>{P[k]=v;},
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({spread, entropy:draw._e||0})
+    };
+  },
+
+  /* 4 · RELATIVITY — twin rockets, dilated clocks */
+  relativity(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf, homeT=0, shipT=0, last=performance.now();
+    const P={ beta:0.3 };
+    function gamma(){ return 1/Math.sqrt(1-P.beta*P.beta); }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function fmt(t){ const m=Math.floor(t/60), s=Math.floor(t%60); return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"); }
+    function draw(now){
+      const dt=Math.min(0.05,(now-last)/1000)*8; last=now;
+      homeT+=dt; shipT+=dt/gamma();
+      ctx.clearRect(0,0,W,H);
+      // starfield streaks scaled with speed
+      ctx.strokeStyle="rgba(255,255,255,0.25)"; ctx.lineWidth=1*DPR;
+      for(let i=0;i<40;i++){ const y=(i*53%H); const len=(4+P.beta*60)*DPR; const x=((now*0.05*P.beta+i*80)%W);
+        ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-len,y); ctx.stroke(); }
+      drawScene(W*0.27,H*0.42,"🏠 Home clock",homeT,1,"#22d3ee",0);
+      drawScene(W*0.73,H*0.42,"🚀 Rocket clock",shipT,1/gamma(),"#fbbf24",P.beta);
+      // divider
+      ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.moveTo(W/2,20*DPR); ctx.lineTo(W/2,H-70*DPR); ctx.stroke();
+      out({ "Rocket speed":Math.round(P.beta*100)+"% of light", "Time stretch (γ)":gamma().toFixed(2)+"×" },
+          gamma()>=2?"⏳ Rocket clock runs <½ speed of home!":P.beta>=0.5?"⏳ The rocket clock is falling behind…":"");
+      raf=requestAnimationFrame(draw);
+    }
+    function drawScene(cx,cy,label,tval,rate,col,beta){
+      // rocket, length-contracted along travel
+      ctx.save(); ctx.translate(cx,cy);
+      ctx.scale(1-beta*0.55,1);
+      ctx.font=(30*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(label.startsWith("🚀")?"🚀":"🏠",0,-42*DPR);
+      ctx.restore();
+      // digital clock
+      ctx.fillStyle="rgba(8,11,26,0.85)"; roundRect(ctx,cx-46*DPR,cy-6*DPR,92*DPR,40*DPR,10*DPR); ctx.fill();
+      ctx.strokeStyle=col; ctx.lineWidth=2*DPR; roundRect(ctx,cx-46*DPR,cy-6*DPR,92*DPR,40*DPR,10*DPR); ctx.stroke();
+      ctx.fillStyle=col; ctx.font="bold "+(26*DPR)+"px "+MONO; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(fmt(tval),cx,cy+15*DPR);
+      ctx.fillStyle="rgba(255,255,255,0.6)"; ctx.font="bold "+(11*DPR)+"px "+FONT;
+      ctx.fillText(label,cx,cy+46*DPR);
+    }
+    resize();
+    return {
+      params:[{key:"beta",label:"Rocket speed (fraction of light)",min:0,max:0.95,step:0.01,val:P.beta,fmt:v=>Math.round(v*100)+"% c"}],
+      actions:[{key:"reset",label:"↺ Reset clocks",run:()=>{homeT=0;shipT=0;}}],
+      setParam:(k,v)=>{P[k]=v;},
+      resize, start:()=>{last=performance.now();raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({beta:P.beta, gamma:gamma()})
+    };
+  },
+
+  /* 5 · QUANTUM — spinning superposition coin + entanglement */
+  quantum(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0;
+    let measured=false, result=null, result2=null, entangledMeasured=false;
+    const P={ entangle:0 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function coin(cx,cy,face,spin,col){
+      const sq=Math.abs(Math.cos(t*4)); const w=(46*DPR)*(measured?1:sq+0.15);
+      ctx.save(); ctx.translate(cx,cy);
+      const grd=ctx.createLinearGradient(-w,0,w,0); grd.addColorStop(0,col); grd.addColorStop(1,"#fff");
+      ctx.fillStyle=measured?col:grd; ctx.strokeStyle="#fff"; ctx.lineWidth=3*DPR;
+      ctx.beginPath(); ctx.ellipse(0,0,Math.max(w,6*DPR),46*DPR,0,0,TAU); ctx.fill(); ctx.stroke();
+      ctx.fillStyle="#0b0f1e"; ctx.font="bold "+(34*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.textBaseline="middle";
+      if(measured) ctx.fillText(face==="H"?"👑":"⭐",0,2*DPR);
+      else if(sq>0.35) ctx.fillText(Math.cos(t*4)>0?"👑":"⭐",0,2*DPR);
+      ctx.restore();
+    }
+    function draw(){
+      t+=0.03; ctx.clearRect(0,0,W,H);
+      const two = P.entangle>0.5;
+      if(two){ coin(W*0.32,H*0.42,result,t,"#a78bfa"); coin(W*0.68,H*0.42,result2,t+1,"#22d3ee");
+        if(measured){ ctx.strokeStyle="rgba(52,211,153,0.6)"; ctx.setLineDash([6*DPR,6*DPR]); ctx.lineWidth=2*DPR;
+          ctx.beginPath(); ctx.moveTo(W*0.32,H*0.42); ctx.lineTo(W*0.68,H*0.42); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle="rgba(52,211,153,0.9)"; ctx.font="bold "+(11*DPR)+"px "+FONT; ctx.textAlign="center";
+          ctx.fillText("⚡ entangled — always opposite",W/2,H*0.42-70*DPR); }
+      } else { coin(W/2,H*0.42,result,t,"#a78bfa"); }
+      let sub;
+      if(!measured) sub={ "State":"SUPERPOSITION", "Value":"👑 & ⭐ at once" };
+      else if(two) sub={ "Coin A":result==="H"?"👑 Heads":"⭐ Tails", "Coin B":result2==="H"?"👑 Heads":"⭐ Tails" };
+      else sub={ "State":"COLLAPSED", "Result":result==="H"?"👑 Heads":"⭐ Tails" };
+      out(sub, measured?(two?"⚡ Measured one → the other snapped opposite instantly!":"👁️ You looked — it snapped to one answer!"):"🌫️ Spinning as BOTH until you measure it.");
+      raf=requestAnimationFrame(draw);
+    }
+    function measure(){
+      measured=true; result=Math.random()<0.5?"H":"T";
+      if(P.entangle>0.5){ result2 = result==="H"?"T":"H"; entangledMeasured=true; }
+    }
+    resize();
+    return {
+      params:[{key:"entangle",label:"Entangle a second coin",min:0,max:1,step:1,val:P.entangle,fmt:v=>v>0.5?"ON — 2 coins":"OFF — 1 coin"}],
+      actions:[{key:"measure",label:"👁️ Measure!",primary:true,run:measure},
+               {key:"reset",label:"↺ Spin again",run:()=>{measured=false;result=result2=null;}}],
+      setParam:(k,v)=>{ P[k]=v; measured=false; result=result2=null; entangledMeasured=false; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({measured, entangledMeasured:entangledMeasured&&P.entangle>0.5})
+    };
+  },
+
+  /* 6 · ASTROPHYSICS — build a star, watch its fate by mass */
+  astro(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0, phase="idle", ended=false, fate="", sparks=[];
+    const P={ mass:0.4 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; }
+    function ignite(){ phase="fusing"; t=0; ended=false; fate=""; sparks=[]; }
+    function fateFor(m){ return m<0.4?"white dwarf":m<0.75?"neutron star":"black hole"; }
+    function draw(){
+      t+=0.016; ctx.clearRect(0,0,W,H);
+      const cx=W/2, cy=H*0.44, base=(18+P.mass*30)*DPR;
+      if(phase==="idle"){
+        ctx.fillStyle="#ffd35c"; ctx.globalAlpha=0.9; glow(cx,cy,base,"#ffd35c"); ctx.globalAlpha=1;
+        out({ "Star mass":massLabel(), "Predicted fate":fateFor(P.mass) }, "☀️ Set the mass, then Ignite.");
+      } else if(phase==="fusing"){
+        const puff=Math.sin(t*4)*3*DPR; glow(cx,cy,base+puff,"#ffe08a");
+        if(t>2.2){ phase = P.mass<0.4?"dwarf":"boom"; t=0; if(phase==="dwarf"){fate="white dwarf";} }
+        out({ "Star mass":massLabel(), "Core":"fusing hydrogen → helium" }, "🔥 Burning bright…");
+      } else if(phase==="boom"){
+        // supernova
+        if(sparks.length===0){ for(let i=0;i<160;i++){ const a=rand(0,TAU),s=rand(2,10)*DPR; sparks.push({x:cx,y:cy,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,fe:Math.random()<0.4}); } }
+        const flash=clamp(1.2-t,0,1); if(flash>0){ ctx.globalAlpha=flash; glow(cx,cy,base*4,"#fff"); ctx.globalAlpha=1; }
+        sparks.forEach(s=>{ s.x+=s.vx; s.y+=s.vy; s.vx*=0.99; s.vy*=0.99; s.life-=0.012;
+          ctx.globalAlpha=clamp(s.life,0,1); ctx.fillStyle=s.fe?"#fb7185":"#ffd35c";
+          ctx.beginPath(); ctx.arc(s.x,s.y,(s.fe?2.5:1.8)*DPR,0,TAU); ctx.fill(); });
+        ctx.globalAlpha=1;
+        if(t>2.6){ phase="remnant"; fate=fateFor(P.mass); ended=true; }
+        out({ "Event":"💥 SUPERNOVA", "Forging":"iron & heavy elements" }, "🩸 Scattering the iron that's now in your blood!");
+      } else if(phase==="remnant"){
+        sparks.forEach(s=>{ s.x+=s.vx; s.y+=s.vy; s.life-=0.004; ctx.globalAlpha=clamp(s.life,0,0.5);
+          ctx.fillStyle=s.fe?"#fb7185":"#ffd35c"; ctx.beginPath(); ctx.arc(s.x,s.y,1.6*DPR,0,TAU); ctx.fill(); });
+        ctx.globalAlpha=1;
+        if(fate==="black hole"){ ctx.fillStyle="#000"; ctx.beginPath(); ctx.arc(cx,cy,base*0.7,0,TAU); ctx.fill();
+          ctx.strokeStyle="#a78bfa"; ctx.lineWidth=3*DPR; ctx.beginPath(); ctx.arc(cx,cy,base*0.9,0,TAU); ctx.stroke(); }
+        else if(fate==="neutron star"){ glow(cx,cy,8*DPR,"#c9f6ff"); }
+        else { glow(cx,cy,10*DPR,"#e8ecff"); }
+        out({ "Final fate":fate.toUpperCase(), "Star mass":massLabel() },
+            fate==="black hole"?"🕳️ Gravity won — a black hole is born.":fate==="neutron star"?"✨ A city-sized neutron star remains.":"⚪ A quiet white dwarf cinder remains.");
+      } else if(phase==="dwarf"){
+        glow(cx,cy,10*DPR,"#e8ecff"); ended=true; fate="white dwarf";
+        out({ "Final fate":"WHITE DWARF", "Star mass":massLabel() }, "⚪ Too light to explode — it fades to a white dwarf.");
+      }
+      raf=requestAnimationFrame(draw);
+    }
+    function massLabel(){ return P.mass<0.4?"light":P.mass<0.75?"heavy":"giant"; }
+    function glow(x,y,r,col){ const g=ctx.createRadialGradient(x,y,1,x,y,r); g.addColorStop(0,col); g.addColorStop(0.6,col); g.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.fill(); }
+    resize();
+    return {
+      params:[{key:"mass",label:"Star mass",min:0.1,max:1,step:0.02,val:P.mass,fmt:v=>massLabel()+" ("+(1+v*29|0)+"× Sun)"}],
+      actions:[{key:"ignite",label:"🔥 Ignite star",primary:true,run:ignite},
+               {key:"reset",label:"↺ New star",run:()=>{phase="idle";ended=false;fate="";sparks=[];}}],
+      setParam:(k,v)=>{ P[k]=v; if(phase!=="idle"){phase="idle";ended=false;} },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({ended, fate})
+    };
+  },
+
+  /* 7 · NEWTON F=ma — push block on frictionless surface */
+  newton(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,observed=false;
+    const P={ mass:1, force:1 };
+    const SCALE=60;
+    function accel(){ return P.force/P.mass; }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; t=0; }
+    function draw(){
+      t+=0.016; ctx.clearRect(0,0,W,H);
+      const a=accel();
+      // block position: x(t) = ½at² (wraps)
+      const bw=56*DPR, bh=40*DPR;
+      const baseX=W*0.1;
+      const travel=(0.5*a*SCALE*(t*t))%(W-bw-baseX);
+      const bx=baseX+travel, by=H*0.5-bh/2;
+      // ground line
+      ctx.strokeStyle="rgba(255,255,255,0.18)"; ctx.lineWidth=2*DPR;
+      ctx.beginPath(); ctx.moveTo(0,H*0.5+bh/2); ctx.lineTo(W,H*0.5+bh/2); ctx.stroke();
+      // tick marks
+      for(let i=0;i<8;i++){ const tx=W*0.1+i*(W-W*0.1)/8;
+        ctx.beginPath(); ctx.moveTo(tx,H*0.5+bh/2); ctx.lineTo(tx,H*0.5+bh/2+10*DPR); ctx.stroke(); }
+      // block
+      const heat=clamp(a/4,0,1);
+      ctx.fillStyle=`rgb(${Math.round(100+heat*155)},${Math.round(120-heat*60)},${Math.round(255-heat*180)})`;
+      roundRect(ctx,bx,by,bw,bh,8*DPR); ctx.fill();
+      ctx.fillStyle="#fff"; ctx.font="bold "+(18*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText("📦",bx+bw/2,by+bh/2);
+      // force arrow
+      const aw=clamp(a*18*DPR,8*DPR,60*DPR);
+      ctx.strokeStyle="#ffd35c"; ctx.fillStyle="#ffd35c"; ctx.lineWidth=3*DPR;
+      ctx.beginPath(); ctx.moveTo(bx+bw,by+bh/2); ctx.lineTo(bx+bw+aw,by+bh/2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx+bw+aw+10*DPR,by+bh/2); ctx.lineTo(bx+bw+aw,by+bh/2-6*DPR); ctx.lineTo(bx+bw+aw,by+bh/2+6*DPR); ctx.fill();
+      // velocity readout under block
+      const v=a*SCALE*t; const spd=v.toFixed(1);
+      ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("v = "+spd+" u/s", bx+bw/2, by+bh+16*DPR);
+      observed = observed || t>0.5;
+      out({ "Force":P.force.toFixed(1)+"N", "Mass":P.mass.toFixed(1)+"kg", "Acceleration":a.toFixed(2)+" m/s²" },
+          a>=2?"🚀 High acceleration — light or well-pushed!":a<0.6?"🐢 Low acceleration — heavy or weak push.":"");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"force",label:"Force applied (N)",min:0.5,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"N"},
+        {key:"mass", label:"Object mass (kg)", min:0.5,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"kg"}
+      ],
+      actions:[{key:"reset",label:"↺ Reset",run:()=>{t=0;observed=false;}}],
+      setParam:(k,v)=>{ P[k]=v; t=0; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, accel:accel()})
+    };
+  },
+
+  /* 8 · COLLISION — elastic momentum conservation */
+  collision(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,collided=false,fastEject=false,phase="ready";
+    let b1,b2;
+    const P={ mass1:1, mass2:1 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; setup(); }
+    function setup(){ collided=false; fastEject=false; phase="ready";
+      b1={x:W*0.18,vx:2.8*DPR,m:P.mass1,r:(12+P.mass1*5)*DPR,col:"#7c5cff"};
+      b2={x:W*0.82,vx:-1.4*DPR,m:P.mass2,r:(12+P.mass2*5)*DPR,col:"#22d3ee"}; }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      const cy=H*0.48;
+      // track
+      ctx.strokeStyle="rgba(255,255,255,0.15)"; ctx.lineWidth=2*DPR;
+      ctx.beginPath(); ctx.moveTo(20*DPR,cy+Math.max(b1.r,b2.r)+4*DPR); ctx.lineTo(W-20*DPR,cy+Math.max(b1.r,b2.r)+4*DPR); ctx.stroke();
+      if(phase==="moving"){
+        b1.x+=b1.vx; b2.x+=b2.vx;
+        // elastic collision
+        if(!collided && b1.x+b1.r>=b2.x-b2.r){
+          const m1=b1.m,m2=b2.m,u1=b1.vx,u2=b2.vx;
+          b1.vx=((m1-m2)*u1+2*m2*u2)/(m1+m2);
+          b2.vx=((m2-m1)*u2+2*m1*u1)/(m1+m2);
+          collided=true; fastEject = b2.vx>Math.abs(b2.vx)*1.9;  // ball2 faster than 2× b1 original
+          // also fix fastEject calculation properly
+          fastEject = (b1.m>=3 && b2.m<=1.5 && Math.abs(b2.vx)>4*DPR);
+        }
+        // wall bounces
+        if(b1.x-b1.r<20*DPR){b1.x=20*DPR+b1.r;b1.vx*=-1;}
+        if(b2.x+b2.r>W-20*DPR){b2.x=W-20*DPR-b2.r;b2.vx*=-1;}
+      }
+      // momentum bars
+      const p1=Math.abs(b1.m*b1.vx), p2=Math.abs(b2.m*b2.vx), pmax=Math.max(p1,p2,1);
+      const bary=H*0.82, barH=10*DPR, maxW=W*0.35;
+      ctx.fillStyle="#7c5cff"; roundRect(ctx,W*0.5-p1/pmax*maxW,bary,p1/pmax*maxW,barH,4*DPR); ctx.fill();
+      ctx.fillStyle="#22d3ee"; roundRect(ctx,W*0.5,bary,p2/pmax*maxW,barH,4*DPR); ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("← momentum →",W/2,bary+barH+12*DPR);
+      // balls with velocity arrows
+      [b1,b2].forEach(b=>{
+        const grd=ctx.createRadialGradient(b.x-b.r*0.3,cy-b.r*0.3,2,b.x,cy,b.r);
+        grd.addColorStop(0,"#fff"); grd.addColorStop(1,b.col);
+        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(b.x,cy,b.r,0,TAU); ctx.fill();
+        // velocity arrow
+        const av=b.vx*8; ctx.strokeStyle=b.col; ctx.lineWidth=3*DPR;
+        ctx.beginPath(); ctx.moveTo(b.x,cy-b.r-6*DPR); ctx.lineTo(b.x+av,cy-b.r-6*DPR); ctx.stroke();
+      });
+      if(collided){ ctx.fillStyle="#ffd35c"; ctx.font="bold "+(12*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText("💥 COLLISION — momentum transferred!",W/2,H*0.26); }
+      const ptot=Math.abs(b1.m*b1.vx+b2.m*b2.vx).toFixed(2);
+      out({ "Ball 1 momentum":(b1.m*Math.abs(b1.vx)).toFixed(2), "Ball 2 momentum":(b2.m*Math.abs(b2.vx)).toFixed(2), "Total momentum":ptot },
+          collided?"⚡ Momentum transferred — total conserved!":"");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"mass1",label:"Ball 1 mass",min:1,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"×"},
+        {key:"mass2",label:"Ball 2 mass",min:1,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"×"}
+      ],
+      actions:[{key:"launch",label:"🚀 Launch",primary:true,run:()=>{phase="moving";}},
+               {key:"reset",label:"↺ Reset",run:setup}],
+      setParam:(k,v)=>{ P[k]=v; setup(); if(k==="mass1"||k==="mass2"){ b1.m=P.mass1; b1.r=(12+P.mass1*5)*DPR; b2.m=P.mass2; b2.r=(12+P.mass2*5)*DPR; } },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({collided, fastEject})
+    };
+  },
+
+  /* 9 · DOUBLE SLIT — wave interference pattern */
+  doubleslit(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0, screen=null, oneSlitMode=false, sawInterference=false;
+    const P={ slitSep:0.4 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; screen=new Float32Array(Math.round(H)); }
+    function slitY(){ return [(0.5-P.slitSep*0.22)*H, (0.5+P.slitSep*0.22)*H]; }
+    function fringeCount(){
+      if(!screen) return 0;
+      let peaks=0, prev=false;
+      for(let i=4;i<screen.length-4;i++){
+        const hi=screen[i]>0.3 && screen[i]>=screen[i-1] && screen[i]>=screen[i+1];
+        if(hi && !prev){ peaks++; prev=true; } else if(!hi){ prev=false; }
+      }
+      return peaks;
+    }
+    function addParticle(){
+      const wallX=W*0.52, srcX=W*0.08;
+      const slits = oneSlitMode ? [slitY()[0]] : slitY();
+      // fire many particles per frame, build up screen
+      for(let n=0;n<6;n++){
+        const iy=rand(0,H);
+        // compute intensity at this y from each slit (Huygens principle)
+        let amplitude=0;
+        slits.forEach((sy,si)=>{
+          const dx=wallX-srcX, dy=sy-H/2;
+          const pathLen=Math.sqrt(dx*dx+(iy-sy)*(iy-sy));
+          const phase2=(pathLen/(W*0.028))*TAU;
+          amplitude+=Math.cos(phase2+si*0.8);
+        });
+        const prob=(amplitude/slits.length+1)*0.5; // 0-1
+        if(Math.random()<prob){ const idx=Math.round(iy); if(screen[idx]!==undefined) screen[idx]=Math.min(1,screen[idx]+0.015); }
+      }
+      if(!oneSlitMode && fringeCount()>=3) sawInterference=true;
+    }
+    function draw(){
+      t+=1; ctx.clearRect(0,0,W,H);
+      addParticle();
+      const wallX=W*0.52, srcX=W*0.1;
+      // emitter
+      const grd=ctx.createRadialGradient(srcX,H/2,2,srcX,H/2,20*DPR); grd.addColorStop(0,"#a78bfa"); grd.addColorStop(1,"transparent");
+      ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(srcX,H/2,20*DPR,0,TAU); ctx.fill();
+      ctx.fillStyle="#a78bfa"; ctx.font=(15*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.fillText("e⁻",srcX,H/2+5*DPR);
+      // ripple waves from source
+      for(let r=1;r<=4;r++){ const rr=(t*1.4+r*22)%((wallX-srcX)*1.1);
+        ctx.globalAlpha=Math.max(0,0.4-rr/(wallX-srcX)*0.4); ctx.strokeStyle="#a78bfa"; ctx.lineWidth=1.5*DPR;
+        ctx.beginPath(); ctx.arc(srcX,H/2,rr,0,TAU); ctx.stroke(); }
+      ctx.globalAlpha=1;
+      // barrier wall
+      ctx.fillStyle="rgba(56,71,127,0.85)"; ctx.fillRect(wallX-5*DPR,0,10*DPR,H);
+      // slits (gaps in wall)
+      const slits=slitY();
+      ctx.clearRect(wallX-6*DPR, slits[0]-10*DPR, 12*DPR, 20*DPR);
+      if(!oneSlitMode) ctx.clearRect(wallX-6*DPR, slits[1]-10*DPR, 12*DPR, 20*DPR);
+      // detection screen
+      const scrX=W*0.85;
+      ctx.fillStyle="rgba(30,40,80,0.9)"; ctx.fillRect(scrX,0,4*DPR,H);
+      for(let y=0;y<screen.length;y++){
+        const v=screen[y]; if(v<0.01) continue;
+        ctx.globalAlpha=v*0.9; ctx.fillStyle=oneSlitMode?"#22d3ee":"#ffd35c";
+        ctx.fillRect(scrX+4*DPR,y,8*DPR,1);
+      }
+      ctx.globalAlpha=1;
+      const fc=fringeCount();
+      out({ "Mode":oneSlitMode?"One slit":"Both slits", "Slit separation":Math.round(P.slitSep*100)+"%", "Fringes on screen":fc },
+          oneSlitMode?"🔵 Single slit — one blob.":sawInterference?"🌈 Interference! Electrons went through BOTH slits.":"⏳ Building up… keep watching.");
+      raf=requestAnimationFrame(draw);
+      draw._fc=fc;
+    }
+    resize();
+    return {
+      params:[{key:"slitSep",label:"Slit separation",min:0.15,max:0.85,step:0.05,val:0.4,fmt:v=>Math.round(v*100)+"%"}],
+      actions:[
+        {key:"toggle",label:"🔀 Toggle one/two slits",primary:true,run:()=>{ oneSlitMode=!oneSlitMode; screen.fill(0); sawInterference=false; }},
+        {key:"clear",label:"↺ Clear screen",run:()=>{ screen.fill(0); }}
+      ],
+      setParam:(k,v)=>{ P[k]=v; screen.fill(0); sawInterference=false; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({sawInterference, fringeCount:draw._fc||0})
+    };
+  },
+
+  /* 10 · QUANTUM TUNNELING — wave ghosting through barrier */
+  tunnel(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0, observed=false;
+    const P={ barrierH:0.5, barrierW:0.35 };
+    let particles=[];
+    function tunnelProb(){ return Math.exp(-6*P.barrierW*P.barrierH*4); }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; particles=[]; }
+    function spawnParticle(){
+      particles.push({x:W*0.05,vx:(1.8+Math.random()*0.8)*DPR,tunneled:false,passed:false,alive:true,alpha:1});
+    }
+    function draw(){
+      t+=0.018; ctx.clearRect(0,0,W,H);
+      const bx=W*0.52, bw=P.barrierW*W*0.22, bh=P.barrierH*H*0.72;
+      const by=(H-bh)/2;
+      const tp=tunnelProb();
+      // spawn
+      if(t%0.6<0.018) spawnParticle();
+      // barrier
+      const bgrd=ctx.createLinearGradient(bx,0,bx+bw,0);
+      bgrd.addColorStop(0,"rgba(251,113,133,0.8)"); bgrd.addColorStop(1,"rgba(251,113,133,0.4)");
+      ctx.fillStyle=bgrd; roundRect(ctx,bx,by,bw,bh,6*DPR); ctx.fill();
+      ctx.strokeStyle="#fb7185"; ctx.lineWidth=2*DPR; roundRect(ctx,bx,by,bw,bh,6*DPR); ctx.stroke();
+      ctx.fillStyle="#fff"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("BARRIER",bx+bw/2,H/2-bh/2-10*DPR);
+      ctx.fillText("height: "+Math.round(P.barrierH*100)+"%",bx+bw/2,H/2+bh/2+18*DPR);
+      // particles
+      particles.forEach(p=>{
+        if(!p.alive) return;
+        p.x+=p.vx;
+        // check barrier entry
+        if(!p.tunneled && !p.passed && p.x>=bx && p.x<bx+bw){
+          if(Math.random()<tp*0.07){ p.tunneled=true; }  // stochastic pass
+          else { p.vx*=-1; p.alive=false; p.alpha=0.5; } // reflect
+        }
+        if(p.tunneled && p.x>bx+bw){ p.passed=true; observed=true; }
+        if(p.x>W+10*DPR || p.x<-10*DPR){ p.alive=false; }
+        p.alpha=clamp(p.alpha,0,1);
+        const col=p.passed?"#34d399":p.tunneled?"#ffd35c":"#a78bfa";
+        ctx.globalAlpha=p.alpha; ctx.fillStyle=col;
+        ctx.beginPath(); ctx.arc(p.x,H/2,6*DPR,0,TAU); ctx.fill();
+        if(p.tunneled && !p.passed){ ctx.globalAlpha=0.4; ctx.strokeStyle="#ffd35c"; ctx.lineWidth=2*DPR;
+          ctx.setLineDash([4*DPR,4*DPR]); ctx.beginPath(); ctx.arc(p.x,H/2,10*DPR,0,TAU); ctx.stroke(); ctx.setLineDash([]); }
+      });
+      ctx.globalAlpha=1;
+      particles=particles.filter(p=>p.alive || p.passed);
+      // probability readout bar
+      const py=H*0.88, pw=W*0.6, px=(W-pw)/2;
+      ctx.fillStyle="rgba(255,255,255,0.12)"; roundRect(ctx,px,py,pw,12*DPR,6*DPR); ctx.fill();
+      ctx.fillStyle=tp<0.10?"#fb7185":tp<0.35?"#fbbf24":"#34d399";
+      roundRect(ctx,px,py,pw*tp,12*DPR,6*DPR); ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="left";
+      ctx.fillText("Tunneling probability: "+Math.round(tp*100)+"%",px,py-6*DPR);
+      out({ "Barrier height":Math.round(P.barrierH*100)+"%", "Barrier width":Math.round(P.barrierW*100)+"%",
+            "Tunnel probability":Math.round(tp*100)+"%" },
+          tp<0.05?"🧱 Barrier too thick/tall — particles mostly bounce.":tp>0.4?"👻 Particles ghosting right through!":"🎲 Some particles tunnel — quantum weirdness in action.");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"barrierH",label:"Barrier height (energy)",min:0.1,max:1,step:0.05,val:0.5,fmt:v=>Math.round(v*100)+"%"},
+        {key:"barrierW",label:"Barrier width (thickness)",min:0.1,max:1,step:0.05,val:0.35,fmt:v=>Math.round(v*100)+"%"}
+      ],
+      actions:[{key:"clear",label:"↺ Clear particles",run:()=>{ particles=[]; observed=false; }}],
+      setParam:(k,v)=>{ P[k]=v; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, tunnelProb:tunnelProb()})
+    };
+  }
+};
+
+/* canvas helpers */
+let DPR = Math.min(window.devicePixelRatio||1, 2);
+const FONT = "'Baloo 2',sans-serif";
+const MONO = "ui-monospace,Menlo,Consolas,monospace";
+function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   APP CONTROLLER  (views, rendering, gamification, wiring)
+   ═══════════════════════════════════════════════════════════════════ */
+const QK = (()=>{
+  let currentTrack=null, currentMissionIdx=0, sim=null;
+  const canvas = ()=>document.getElementById("simCanvas");
+  /* resolve mission data: missionIdx 0 = track root, 1+ = missions array */
+  function missionData(t, mi){
+    if(!mi || !t.missions || !t.missions[mi]) return t;
+    return {...t, ...t.missions[mi]};
+  }
+
+  function go(view){
+    if(sim && view!=="lesson"){ sim.stop(); sim=null; }
+    document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+    document.getElementById("view-"+view).classList.add("active");
+    document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+    const tab=document.getElementById("tab-"+(view==="lesson"?"lesson":view)); if(tab) tab.classList.add("active");
+    window.scrollTo({top:0,behavior:"smooth"});
+    if(view==="parent") renderParent();
+    if(view==="home") renderHome();
+  }
+
+  function resume(){
+    const t = CURRICULUM[STATE.progress.moduleIndex] || CURRICULUM[0];
+    openLesson(t.id, 0);
+  }
+
+  /* ── HOME ── */
+  function renderHome(){
+    document.getElementById("xpVal").textContent = STATE.progress.xp;
+    const name = STATE.profile.cadetName;
+    document.getElementById("heroGreeting").innerHTML = name? ("Welcome back, "+esc(name)+"! 🦸") : "Become a Physics Hero 🦸";
+    const badges = countBadges();
+    const totalBadges = maxBadges();
+    document.getElementById("badgeCount").textContent = badges;
+    document.getElementById("rankName").textContent = "Rank: "+rankFor(badges);
+    document.getElementById("overallBar").style.width = Math.round(badges/totalBadges*100)+"%";
+    document.getElementById("resumeBtn").textContent = badges>0 ? "▶ Continue Training" : "▶ Start Training";
+
+    const grid = document.getElementById("trackGrid"); grid.innerHTML="";
+    CURRICULUM.forEach(t=>{
+      const tr = STATE.progress.trophies[t.id];
+      const done = ["cadet","specialist","hero"].filter(k=>tr[k]).length;
+      const totalMissions = t.missions ? t.missions.length : 1;
+      const totalDone = allMissionBadges(t);
+      const locked = t.premium && !STATE.premium.heroTracksUnlocked;
+      const el = document.createElement("button");
+      el.className="track"; el.style.setProperty("--c",t.color);
+      el.onclick = ()=> locked ? go("parent") : openLesson(t.id, 0);
+      // mission sub-pips for multi-mission tracks
+      const missionPips = t.missions && t.missions.length>1
+        ? `<div class="mission-pips">${t.missions.map((m,mi)=>{
+            const mtr=getTrophies(t.id,mi); const mdone=["cadet","specialist","hero"].filter(k=>mtr[k]).length;
+            return `<span class="mpip${mdone===3?" done":""}">${m.emoji||t.emoji} ${m.name||t.title} ${mdone}/3</span>`;
+          }).join("")}</div>` : "";
+      el.innerHTML = `
+        <div class="halo"></div>
+        <div class="emoji">${t.emoji}</div>
+        <h3>${t.title}</h3>
+        <div class="tl">${t.tagline}</div>
+        ${missionPips}
+        <div class="foot">
+          <div class="badges">
+            ${["cadet","specialist","hero"].map(k=>`<span class="b-dot ${tr[k]?"on":""}">${tr[k]?"✓":""}</span>`).join("")}
+          </div>
+          <span class="lvl">Track ${t.n} · ${totalDone}/${totalMissions*3}</span>
+        </div>
+        ${locked?`<div class="lock"><div class="lk"><div class="ic">🔒</div><div class="tx">Hero Track</div><div class="sub">Tap to unlock</div></div></div>`:""}`;
+      grid.appendChild(el);
+    });
+  }
+
+  /* ── LESSON ── */
+  function openLesson(id, mi){
+    const t = byId(id); currentTrack=t; currentMissionIdx=mi||0;
+    STATE.progress.moduleIndex = CURRICULUM.indexOf(t); persist();
+    const m = missionData(t, currentMissionIdx);
+    document.documentElement.style.setProperty("--track", t.color);
+    document.getElementById("lsEmoji").textContent=m.emoji||t.emoji;
+    document.getElementById("lsEmoji").style.setProperty("--track",t.color);
+    document.getElementById("lsNum").textContent = "TRACK "+t.n+" · MISSION "+(currentMissionIdx+1);
+    document.getElementById("lsNum").style.color=t.color;
+    document.getElementById("lsTitle").textContent=(m.name||t.title);
+    document.getElementById("lsIntro").innerHTML="<p>"+(m.intro||t.intro)+"</p>";
+    document.getElementById("lsAnalogy").innerHTML=(m.analogy||t.analogy);
+    document.getElementById("lsConcepts").innerHTML = (m.concepts||t.concepts).map(c=>`<span class="chip">${c}</span>`).join("");
+    // mission picker strip
+    const strip=document.getElementById("missionStrip");
+    if(t.missions && t.missions.length>1){
+      strip.style.display="flex";
+      strip.innerHTML=t.missions.map((ms,i)=>{
+        const mtr=getTrophies(t.id,i); const alldone=["cadet","specialist","hero"].every(k=>mtr[k]);
+        const active=i===currentMissionIdx;
+        return `<button class="m-tab${active?" active":""}${alldone&&!active?" done-m":""}" onclick="QK.openLesson('${t.id}',${i})">
+          <span class="m-ic">${ms.emoji||t.emoji}</span>${ms.name||t.title}</button>`;
+      }).join("");
+    } else { strip.style.display="none"; }
+    go("lesson");
+    buildSandbox(m);
+    buildTiers(m, currentMissionIdx);
+  }
+
+  /* build sandbox + controls from the sim's declared params/actions */
+  function buildSandbox(t){
+    if(sim) sim.stop();
+    const cv = canvas();
+    const readoutEl = document.getElementById("simReadout");
+    const verdictEl = document.getElementById("simVerdict");
+    const out = (obj, verdict)=>{
+      readoutEl.innerHTML = Object.entries(obj).map(([k,v])=>`<div class="r">${k}: <b>${v}</b></div>`).join("");
+      if(verdict){ verdictEl.style.display="block"; verdictEl.textContent=verdict; } else verdictEl.style.display="none";
+      checkTiers();
+    };
+    // size canvas to its box before creating the sim
+    requestAnimationFrame(()=>{ sim = SANDBOXES[t.sim](cv, out); mountControls(t, currentMissionIdx); sim.start(); });
+  }
+
+  function mountControls(t, mi){
+    const box=document.getElementById("simControls"); box.innerHTML="";
+    const paramKey = mi ? t.id+"_m"+mi : t.id;
+    // sliders
+    sim.params.forEach(p=>{
+      const saved = STATE.progress.sandboxParams[paramKey]?.[p.key];
+      const val = (typeof saved==="number")?saved:p.val;
+      sim.setParam(p.key, val);
+      const wrap=document.createElement("div"); wrap.className="ctl";
+      wrap.innerHTML=`<div class="lab"><span>${p.label}</span><span class="val" id="v-${p.key}">${p.fmt?p.fmt(val):val}</span></div>`;
+      const inp=document.createElement("input"); inp.type="range"; inp.min=p.min; inp.max=p.max; inp.step=p.step; inp.value=val;
+      inp.setAttribute("aria-label",p.label);
+      inp.oninput=()=>{ const v=parseFloat(inp.value); sim.setParam(p.key,v);
+        document.getElementById("v-"+p.key).textContent=p.fmt?p.fmt(v):v;
+        STATE.progress.sandboxParams[paramKey]=STATE.progress.sandboxParams[paramKey]||{};
+        STATE.progress.sandboxParams[paramKey][p.key]=v; persist(); checkTiers(); };
+      wrap.appendChild(inp); box.appendChild(wrap);
+    });
+    // action buttons
+    if(sim.actions && sim.actions.length){
+      const row=document.createElement("div"); row.className="ctl-actions";
+      sim.actions.forEach(a=>{ const b=document.createElement("button");
+        b.className="btn "+(a.primary?"":"ghost")+" mini"; b.textContent=a.label;
+        b.onclick=()=>{ a.run(); setTimeout(checkTiers,50); }; row.appendChild(b); });
+      box.appendChild(row);
+    }
+  }
+
+  /* ── CHALLENGE TIERS ── */
+  function buildTiers(t, mi){
+    const box=document.getElementById("tierBox"); box.innerHTML="";
+    const order=[["cadet","🎖️","Cadet","Visual proof"],["specialist","🥈","Specialist","Variable debugging"],["hero","🏆","Hero","Predictive output"]];
+    order.forEach(([tier,rk,name,sub])=>{
+      const ch=t.challenges[tier]; const done=getTrophies(currentTrack.id, mi)[tier];
+      const el=document.createElement("div"); el.className="tier"+(done?" done":""); el.id="tier-"+tier;
+      let inner=`<div class="th"><span class="rk">${rk}</span><span class="tt">${name}<small>${sub}</small></span>
+        <span class="status">${done?"✓ Earned":"Locked"}</span></div><div class="prompt">${ch.prompt}</div>`;
+      if(ch.type==="observe" || ch.type==="state"){
+        inner+=`<div class="ctl-actions"><button class="btn mini" id="claim-${tier}" onclick="QK.claim('${tier}')">${done?"✓ Completed":"✅ I did it — check!"}</button></div>
+          <div class="feedback" id="fb-${tier}"></div>`;
+      } else { // hero MCQ
+        inner+=`<div class="opts" id="opts-${tier}">`+ch.options.map((o,i)=>`<button class="opt" onclick="QK.answer('${tier}',${i})">${o.t}</button>`).join("")+`</div><div class="feedback" id="fb-${tier}"></div>`;
+      }
+      el.innerHTML=inner; box.appendChild(el);
+    });
+    checkTiers();
+  }
+
+  // auto-verify observe/state challenges against live sim metrics
+  function checkTiers(){
+    if(!currentTrack || !sim) return;
+    const m = sim.metrics();
+    ["cadet","specialist"].forEach(tier=>{
+      const md=missionData(currentTrack,currentMissionIdx);
+      const ch=md.challenges[tier]; if(!ch || !ch.check) return;
+      const btn=document.getElementById("claim-"+tier);
+      const already=getTrophies(currentTrack.id,currentMissionIdx)[tier];
+      if(btn && !already){ btn.disabled=false; }
+    });
+  }
+
+  function claim(tier){
+    const t=currentTrack, mi=currentMissionIdx;
+    const md=missionData(t,mi); const ch=md.challenges[tier];
+    const m=sim.metrics();
+    const fb=document.getElementById("fb-"+tier);
+    if(getTrophies(t.id,mi)[tier]) return;
+    if(ch.check(m)){
+      awardBadge(t,mi,tier);
+      fb.className="feedback ok"; fb.textContent = tier==="cadet"?"Nice observing! 🎖️ Badge earned.":"Debugged it! 🥈 Badge earned.";
+      document.getElementById("tier-"+tier).classList.add("done");
+      document.querySelector("#tier-"+tier+" .status").textContent="✓ Earned";
+      document.getElementById("claim-"+tier).textContent="✓ Completed";
+    } else {
+      fb.className="feedback no";
+      fb.textContent = tier==="specialist"
+        ? "Not quite — keep adjusting the dials to hit the target, then check again."
+        : "Almost! Interact with the sandbox above so it happens, then check again.";
+    }
+  }
+
+  function answer(tier,i){
+    const t=currentTrack, mi=currentMissionIdx;
+    const md=missionData(t,mi); const ch=md.challenges[tier];
+    if(getTrophies(t.id,mi)[tier]) return;
+    const opts=document.querySelectorAll("#opts-"+tier+" .opt");
+    const fb=document.getElementById("fb-"+tier);
+    if(ch.options[i].ok){
+      opts[i].classList.add("correct"); opts.forEach(o=>o.style.pointerEvents="none");
+      awardBadge(t,mi,tier);
+      fb.className="feedback ok"; fb.textContent=ch.explain;
+      document.getElementById("tier-"+tier).classList.add("done");
+      document.querySelector("#tier-"+tier+" .status").textContent="✓ Earned";
+    } else {
+      opts[i].classList.add("wrong");
+      fb.className="feedback no"; fb.textContent="Hmm, not that one — think it through and try again. 🤔";
+    }
+  }
+
+  function awardBadge(t,mi,tier){
+    const trophies=getTrophies(t.id,mi);
+    if(trophies[tier]) return;
+    // write to the right place
+    if(!mi){ STATE.progress.trophies[t.id][tier]=true; }
+    else {
+      const key=t.id+"_"+mi;
+      if(!STATE.progress.missionTrophies[key]) STATE.progress.missionTrophies[key]={cadet:false,specialist:false,hero:false};
+      STATE.progress.missionTrophies[key][tier]=true;
+    }
+    STATE.progress.xp += tier==="cadet"?50:tier==="specialist"?100:200;
+    const allThree = ["cadet","specialist","hero"].every(k=>getTrophies(t.id,mi)[k]);
+    const mKey = mi ? t.id+"_m"+mi : t.id;
+    if(allThree && !STATE.progress.completedLessons.includes(mKey)){
+      STATE.progress.completedLessons.push(mKey); STATE.progress.xp+=100;
+    }
+    persist();
+    document.getElementById("xpVal").textContent=STATE.progress.xp;
+    const mName=mi?(t.missions[mi].name||t.title):t.title;
+    const names={cadet:"Cadet",specialist:"Specialist",hero:"HERO"};
+    toast((tier==="hero"?"🏆 HERO — "+mName+"!":"⭐ "+names[tier]+" badge earned!")+" +XP");
+    if(allThree) setTimeout(()=>toast("🎉 "+mName+" MASTERED — all 3 badges!"),1400);
+  }
+
+  /* ── PARENT DASHBOARD ── */
+  function renderParent(){
+    const badges=countBadges(), mastered=STATE.progress.completedLessons.length;
+    const grid=document.getElementById("metricGrid");
+    grid.innerHTML=[
+      [badges+"/"+maxBadges(),"Mastery badges"],
+      [mastered+"/"+STATE.progress.completedLessons.length+" missions","Completed"],
+      [STATE.progress.xp,"Quanta (XP)"],
+      [rankFor(badges),"Current rank"]
+    ].map(([n,l])=>`<div class="metric"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+
+    // audit trail (only earned things)
+    const audit=document.getElementById("auditList");
+    const rows=[];
+    CURRICULUM.forEach(t=>{
+      const missions = t.missions || [{name:t.title,emoji:t.emoji}];
+      missions.forEach((ms,mi)=>{
+        const tr=getTrophies(t.id,mi);
+        if(!tr.cadet && !tr.specialist && !tr.hero) return;
+        const tiers=["cadet","specialist","hero"].filter(k=>tr[k]).length;
+        const bm = mi===0 ? t.benchmark : (t.missions[mi].benchmark||t.benchmark);
+        const mname = mi===0 ? t.title : (ms.name||t.title);
+        rows.push(`<div class="audit-row"><span class="ic">${ms.emoji||t.emoji}</span><div class="bx">
+          <b>${mname}</b> — ${tiers}/3 badges${tr.hero?" · <b style='color:var(--gold)'>HERO</b>":""}
+          <div class="std">Benchmark: ${bm}</div></div></div>`);
+      });
+    });
+    audit.innerHTML = rows.length? rows.join("") : `<p style="color:var(--muted)">No missions completed yet. When your child earns badges, each one will map to a formal physics benchmark right here.</p>`;
+
+    // upsell
+    const unlocked=STATE.premium.heroTracksUnlocked;
+    const premiumTracks=CURRICULUM.filter(t=>t.premium).map(t=>t.title).join(", ");
+    document.getElementById("upsellBox").innerHTML = unlocked
+      ? `<h3>🦸 Hero Tracks unlocked!</h3><p style="margin-top:6px">Your child has full access to ${premiumTracks}. Explore every corner of modern physics.</p>
+         <button class="btn ghost mini" style="margin-top:14px" onclick="QK.togglePremium(false)">Reset to free preview</button>`
+      : `<h3>Unlock the Hero Tracks 🚀</h3>
+         <div class="price">$0 <small>demo unlock · normally the premium tier</small></div>
+         <p style="margin-bottom:10px">Your child has explored the free foundations. The advanced <b>Hero Tracks</b> — ${premiumTracks} — are where the real "wow" lives.</p>
+         <div class="feat"><span class="ck">✓</span><span>3 advanced tracks with real-time simulations kids can't get anywhere else</span></div>
+         <div class="feat"><span class="ck">✓</span><span>Printable Lab Packs + the "What Your Child Unlocked" report for every mission</span></div>
+         <div class="feat"><span class="ck">✓</span><span>Progress that maps directly to school-level physics benchmarks</span></div>
+         <button class="btn wide" style="margin-top:14px" onclick="QK.togglePremium(true)">🔓 Unlock Hero Tracks (demo)</button>`;
+  }
+  function togglePremium(v){ STATE.premium.heroTracksUnlocked=v; persist(); renderParent(); if(v) toast("🎉 Hero Tracks unlocked!"); }
+
+  /* ── helpers ── */
+  function allMissionBadges(t){
+    let n=0;
+    ["cadet","specialist","hero"].forEach(k=>{ if(STATE.progress.trophies[t.id][k]) n++; });
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      const key=t.id+"_"+(i+1); const mt=STATE.progress.missionTrophies[key]||{};
+      ["cadet","specialist","hero"].forEach(k=>{ if(mt[k]) n++; });
+    });
+    return n;
+  }
+  function maxBadges(){ return CURRICULUM.reduce((s,t)=>s+3*(t.missions?t.missions.length:1),0); }
+  function countBadges(){ return CURRICULUM.reduce((s,t)=>s+allMissionBadges(t),0); }
+  function rankFor(b){
+    const max=maxBadges();
+    return b>=max?"Grand Physics Hero 🏆":b>=Math.round(max*0.72)?"Master Cadet":b>=Math.round(max*0.44)?"Star Specialist":b>=Math.round(max*0.22)?"Junior Cadet":b>=1?"Rookie Cadet":"Rookie Cadet";
+  }
+  function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  let toastTimer;
+  function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
+    clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove("show"),2600); }
+
+  function renderAll(){ renderHome(); if(document.getElementById("view-parent").classList.contains("active")) renderParent(); document.getElementById("xpVal").textContent=STATE.progress.xp; }
+
+  /* ── III. PRINT: build ink-saver line-art Lab Sheets ── */
+  function labSheetSVG(t){
+    // clean black vector blueprint per track
+    const svgs={
+      classical:`<svg width="260" height="150" viewBox="0 0 260 150"><circle cx="130" cy="75" r="20" fill="none" stroke="#000" stroke-width="2"/><ellipse cx="130" cy="75" rx="95" ry="55" fill="none" stroke="#000" stroke-width="1.5" stroke-dasharray="5 4"/><circle cx="225" cy="75" r="6" fill="#000"/><line x1="225" y1="75" x2="225" y2="55" stroke="#000" stroke-width="1.5" marker-end="url(#a)"/><defs><marker id="a" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#000"/></marker></defs><text x="130" y="80" font-size="9" text-anchor="middle" font-family="Arial">PLANET</text></svg>`,
+      em:`<svg width="260" height="150" viewBox="0 0 260 150"><circle cx="70" cy="75" r="18" fill="none" stroke="#000" stroke-width="2"/><text x="70" y="80" font-size="16" text-anchor="middle">+</text><circle cx="190" cy="75" r="18" fill="none" stroke="#000" stroke-width="2"/><text x="190" y="81" font-size="18" text-anchor="middle">−</text><path d="M88,75 Q130,40 172,75" fill="none" stroke="#000" stroke-width="1.2"/><path d="M88,75 Q130,110 172,75" fill="none" stroke="#000" stroke-width="1.2"/><path d="M88,75 L172,75" stroke="#000" stroke-width="1.2" stroke-dasharray="4 3"/></svg>`,
+      thermo:`<svg width="260" height="150" viewBox="0 0 260 150"><rect x="30" y="20" width="200" height="110" fill="none" stroke="#000" stroke-width="2"/>${Array.from({length:14}).map(()=>`<circle cx="${(40+Math.random()*180)|0}" cy="${(30+Math.random()*90)|0}" r="4" fill="#000"/>`).join("")}</svg>`,
+      relativity:`<svg width="260" height="150" viewBox="0 0 260 150"><rect x="20" y="55" width="70" height="40" rx="6" fill="none" stroke="#000" stroke-width="2"/><text x="55" y="80" font-size="12" text-anchor="middle" font-family="monospace">05:00</text><rect x="170" y="55" width="70" height="40" rx="6" fill="none" stroke="#000" stroke-width="2"/><text x="205" y="80" font-size="12" text-anchor="middle" font-family="monospace">02:30</text><text x="55" y="115" font-size="9" text-anchor="middle" font-family="Arial">HOME</text><text x="205" y="115" font-size="9" text-anchor="middle" font-family="Arial">ROCKET (fast)</text><line x1="95" y1="75" x2="165" y2="75" stroke="#000" stroke-width="1.2" marker-end="url(#b)"/><defs><marker id="b" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#000"/></marker></defs></svg>`,
+      quantum:`<svg width="260" height="150" viewBox="0 0 260 150"><ellipse cx="90" cy="75" rx="10" ry="34" fill="none" stroke="#000" stroke-width="2"/><text x="90" y="80" font-size="11" text-anchor="middle" font-family="Arial">?</text><ellipse cx="180" cy="75" rx="34" ry="34" fill="none" stroke="#000" stroke-width="2"/><text x="180" y="80" font-size="11" text-anchor="middle" font-family="Arial">H or T</text><line x1="110" y1="75" x2="145" y2="75" stroke="#000" stroke-width="1.2" marker-end="url(#c)"/><text x="128" y="66" font-size="8" text-anchor="middle" font-family="Arial">measure</text><defs><marker id="c" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#000"/></marker></defs></svg>`,
+      astro:`<svg width="260" height="150" viewBox="0 0 260 150"><circle cx="130" cy="75" r="26" fill="none" stroke="#000" stroke-width="2"/>${Array.from({length:12}).map((_,i)=>{const a=i/12*6.28;return `<line x1="${130+Math.cos(a)*30}" y1="${75+Math.sin(a)*30}" x2="${130+Math.cos(a)*55}" y2="${75+Math.sin(a)*55}" stroke="#000" stroke-width="1.4"/>`;}).join("")}<text x="130" y="79" font-size="9" text-anchor="middle" font-family="Arial">STAR</text></svg>`
+    };
+    return svgs[t.id]||"";
+  }
+
+  function buildSheet(t){
+    const strip=t.intro.replace(/<[^>]+>/g,"");
+    const analog=t.analogy.replace(/<[^>]+>/g,"");
+    return `<div class="sheet">
+      <div class="kick">QuantumKids Lab Pack · Track ${t.n}</div>
+      <h1>${t.title}</h1>
+      <p><b>Big idea:</b> ${t.tagline}</p>
+      ${labSheetSVG(t)}
+      <div class="lab-box"><b>Picture it:</b> ${analog}</div>
+      <h2>🔬 Experiment steps</h2>
+      <ol class="steps">
+        <li>Open the ${t.title} Sandbox on the tablet.</li>
+        <li>${t.challenges.cadet.prompt}</li>
+        <li>${t.challenges.specialist.prompt}</li>
+        <li>Draw what you saw in the box below:</li>
+      </ol>
+      <div class="grid-lines"></div>
+      <h2>✍️ Your prediction</h2>
+      <p>${t.challenges.hero.prompt}</p>
+      <div class="blank"></div>
+      <div class="footer"><span>QuantumKids · ${t.title}</span><span>Name: ____________  Date: ________</span></div>
+    </div>`;
+  }
+
+  function auditSheet(){
+    const rows=[];
+    CURRICULUM.forEach(t=>{
+      const missions=t.missions||[{name:t.title,emoji:t.emoji}];
+      missions.forEach((ms,mi)=>{
+        const tr=getTrophies(t.id,mi); const done=["cadet","specialist","hero"].filter(k=>tr[k]).length;
+        if(!done) return;
+        const bm=mi===0?t.benchmark:(t.missions[mi].benchmark||t.benchmark);
+        const mname=mi===0?t.title:(ms.name||t.title);
+        rows.push(`<div class="row"><span>${ms.emoji||t.emoji}</span><div class="b"><b>${mname}</b> — ${done}/3 mastery badges${tr.hero?" · HERO":""}<br>
+          <span style="font-size:9pt">By solving this sandbox, your child intuitively derived: <b>${bm}</b>.</span></div></div>`);
+      });
+    });
+    return `<div class="sheet audit-print">
+      <div class="kick">QuantumKids · Parental Audit Trail</div>
+      <h1>What Your Child Unlocked</h1>
+      <p>Every action in the QuantumKids sandbox maps to a formal physics benchmark. Here is what <b>${esc(STATE.profile.cadetName||"your child")}</b> has mastered so far.</p>
+      <table><tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>Mastery badges earned</td><td>${countBadges()} of 18</td></tr>
+        <tr><td>Tracks fully mastered</td><td>${STATE.progress.completedLessons.length} of 6</td></tr>
+        <tr><td>Quanta (experience points)</td><td>${STATE.progress.xp}</td></tr>
+        <tr><td>Current rank</td><td>${rankFor(countBadges())}</td></tr>
+      </table>
+      <h2>Benchmarks demonstrated</h2>
+      ${rows || "<p>No missions completed yet — encourage your child to earn their first badge!</p>"}
+      <div class="footer"><span>QuantumKids Parental Report</span><span>Generated ${new Date().toLocaleDateString()}</span></div>
+    </div>`;
+  }
+
+  function printLesson(){ document.getElementById("printRoot").innerHTML = buildSheet(currentTrack)+auditSheet(); window.print(); }
+  function printAll(){ document.getElementById("printRoot").innerHTML = CURRICULUM.map(buildSheet).join("")+auditSheet(); window.print(); }
+
+  /* ── name modal ── */
+  function setName(){
+    const v=document.getElementById("nameInput").value.trim();
+    STATE.profile.cadetName=v.slice(0,16); persist();
+    document.getElementById("nameModal").classList.remove("show");
+    renderHome();
+  }
+
+  /* ── boot ── */
+  function init(){
+    const had = loadLocal();
+    // wire import UI
+    const drop=document.getElementById("dropZone"), fi=document.getElementById("fileInput");
+    fi.addEventListener("change",e=>{ if(e.target.files[0]) importFile(e.target.files[0]); fi.value=""; });
+    ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+    ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+    drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) importFile(f); });
+    document.getElementById("nameInput").addEventListener("keydown",e=>{ if(e.key==="Enter") setName(); });
+
+    renderHome();
+    if(!had || !STATE.profile.cadetName){ document.getElementById("nameModal").classList.add("show"); setTimeout(()=>document.getElementById("nameInput").focus(),200); }
+
+    // responsive canvas
+    let rt; window.addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>{ DPR=Math.min(window.devicePixelRatio||1,2); if(sim&&sim.resize) sim.resize(); },150); });
+  }
+
+  return { go, resume, openLesson, claim, answer, exportProgress, importFile, printLesson, printAll, setName, togglePremium, renderAll, init };
+})();
+
+/* QK is declared with const, so publish it for the inline on* handlers */
+window.QK = QK;
+</script>
+
+<script>
+/* ── starfield backdrop ── */
+(function(){
+  const c=document.getElementById("stars"), x=c.getContext("2d"); let stars=[];
+  function size(){ c.width=innerWidth; c.height=innerHeight; stars=Array.from({length:90},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.4,a:Math.random()})); }
+  function draw(){ x.clearRect(0,0,c.width,c.height); stars.forEach(s=>{ s.a+=0.01; x.globalAlpha=0.35+Math.sin(s.a)*0.35; x.fillStyle="#cdd6ff"; x.beginPath(); x.arc(s.x,s.y,s.r,0,6.28); x.fill(); }); requestAnimationFrame(draw); }
+  addEventListener("resize",size); size(); draw();
+})();
+QK.init();
+</script>
+</body>
+</html>

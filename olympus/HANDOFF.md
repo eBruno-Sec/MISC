@@ -78,10 +78,32 @@ apollo (report).
 - **Manual workbench:** `core/replay.py` (send/fuzz/diff/score/access_verdict) + endpoints
   `/replay` `/fuzz` `/diff` `/profiles` `/access-check` `/surface`.
 - **Report (APOLLO):** escaped + nonce-CSP HTML, coverage panel, attack surface,
-  discovered paths, manual-test candidates.
+  discovered paths, manual-test candidates. **Export suite:** Print/PDF, HTML
+  (outerHTML blob), Markdown, TXT, JSON — all client-side, no backend deps. A
+  **Light/Dark toggle** flips the report's CSS-variable tokens in place.
+  **Print media query resets the FULL token set** in `:root` (the old rule only
+  recolored `body`, leaving dark tokens active → invisible-text PDFs — fixed).
 - **UI (frontend, 4 tabs):** SURFACE (inventory + AI/LLM endpoints), WORKBENCH
   (Repeater+Intruder), ACCESS (cross-role IDOR/BOLA), TOPOLOGY (site-map tree, rounded
   rects + curved edges + dashed redirect arrows).
+- **App theme + session mobility:** global **Dark/Light toggle** in the header
+  (`data-theme` on `documentElement`, persisted in `localStorage['olympus_theme']`;
+  full `:root[data-theme="light"]` token block in `index.css`). **↓ SESSION backup**
+  button in MissionControl serializes the whole mission (mission + findings + last
+  500 logs + notes + live_hosts + status/phase) to `OLYMPUS_backup_YYYY-MM-DD.json`,
+  client-side, schema `version:"1"`. **Import/hydration is live:** MissionList has an
+  "Upload Progress (.json)" drag-drop target + file picker; the file is `JSON.parse`d
+  and shape-checked client-side, then `POST /missions/restore` re-validates strictly
+  (`core/backup.py` `validate_backup`, unit-tested in `tests/test_backup.py`) and
+  imports it as a **NEW mission** (fresh id — never clobbers a live one; findings
+  restored verbatim). A corrupt file is rejected with the banner "Invalid or corrupted
+  progress file". `context.imported` flags the provenance (no schema change).
+- **A11y + touch pass:** `.touch-target` class (44px min on `@media (pointer:coarse)`
+  only — desktop density preserved), ARIA roles on the tab strip (`tablist`/`tab`/
+  `tabpanel`) + icon buttons (`aria-label`), focus-trapped `role="alertdialog"`
+  ApprovalGate (Tab-cycle + Escape-to-deny), inline two-step delete confirm replacing
+  `window.confirm`, `.mc-main-grid` collapses the 60/40 split to stacked rows ≤820px,
+  and a `prefers-reduced-motion` guard. All additive — inline styles still own desktop.
 - **Mission archive list UX:** per-mission severity "peek" badges (C·H·M·L·I — from
   `GET /missions` `severity_counts`, one grouped query), **favorites** (star, pinned to
   top, persisted in `localStorage['olympus_favorites']` — no DB), and a target/id search
@@ -95,6 +117,13 @@ apollo (report).
 ---
 
 ## Key gotchas (for running / debugging)
+- **APOLLO report JS is a RAW string (`r"""`).** The report embeds an inline
+  `<script>` (export/print/theme buttons). It contains JS `\n` string literals; in a
+  normal Python string those become REAL newlines inside JS `'...'` quotes → an
+  "Invalid or unexpected token" syntax error that kills the *whole* script, so every
+  toolbar button is silently dead. Keep `export_script` raw, and never add a Python
+  `\`-escape to it. Guarded by `tests/test_report.py`. (Verify report JS actually
+  *parses/runs* in a browser — HTML rendering alone won't catch this.)
 - **Local Docker targets (Juice Shop etc.):** put the target container on OLYMPUS's
   network and target it by **container name + internal port** (`juice-shop:3000`), NOT
   `host.docker.internal:PORT` (that's the Docker host, not the container). `0 live hosts`
