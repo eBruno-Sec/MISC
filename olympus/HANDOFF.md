@@ -78,10 +78,26 @@ apollo (report).
 - **Manual workbench:** `core/replay.py` (send/fuzz/diff/score/access_verdict) + endpoints
   `/replay` `/fuzz` `/diff` `/profiles` `/access-check` `/surface`.
 - **Report (APOLLO):** escaped + nonce-CSP HTML, coverage panel, attack surface,
-  discovered paths, manual-test candidates.
+  discovered paths, manual-test candidates. **Export suite:** Print/PDF, HTML
+  (outerHTML blob), Markdown, TXT, JSON — all client-side, no backend deps. A
+  **Light/Dark toggle** flips the report's CSS-variable tokens in place.
+  **Print media query resets the FULL token set** in `:root` (the old rule only
+  recolored `body`, leaving dark tokens active → invisible-text PDFs — fixed).
 - **UI (frontend, 4 tabs):** SURFACE (inventory + AI/LLM endpoints), WORKBENCH
   (Repeater+Intruder), ACCESS (cross-role IDOR/BOLA), TOPOLOGY (site-map tree, rounded
   rects + curved edges + dashed redirect arrows).
+- **App theme + session mobility:** global **Dark/Light toggle** in the header
+  (`data-theme` on `documentElement`, persisted in `localStorage['olympus_theme']`;
+  full `:root[data-theme="light"]` token block in `index.css`). **↓ SESSION backup**
+  button in MissionControl serializes the whole mission (mission + findings + last
+  500 logs + notes + live_hosts + status/phase) to `OLYMPUS_backup_YYYY-MM-DD.json`,
+  client-side, schema `version:"1"`. (Import/hydration + `/missions/restore` = TBD.)
+- **A11y + touch pass:** `.touch-target` class (44px min on `@media (pointer:coarse)`
+  only — desktop density preserved), ARIA roles on the tab strip (`tablist`/`tab`/
+  `tabpanel`) + icon buttons (`aria-label`), focus-trapped `role="alertdialog"`
+  ApprovalGate (Tab-cycle + Escape-to-deny), inline two-step delete confirm replacing
+  `window.confirm`, `.mc-main-grid` collapses the 60/40 split to stacked rows ≤820px,
+  and a `prefers-reduced-motion` guard. All additive — inline styles still own desktop.
 - **Mission archive list UX:** per-mission severity "peek" badges (C·H·M·L·I — from
   `GET /missions` `severity_counts`, one grouped query), **favorites** (star, pinned to
   top, persisted in `localStorage['olympus_favorites']` — no DB), and a target/id search

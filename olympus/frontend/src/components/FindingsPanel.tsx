@@ -37,6 +37,7 @@ export default function FindingsPanel({ missionId, findings, onUpdate, onDelete,
   const [editing, setEditing] = useState<string | null>(null)
   const [editData, setEditData] = useState<Partial<Finding>>({})
   const [showAdd, setShowAdd] = useState(false)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [addForm, setAddForm] = useState<AddFindingForm>({
     title: '', severity: 'medium', description: '', evidence: '', cvss_score: '', remediation: '',
   })
@@ -75,12 +76,15 @@ export default function FindingsPanel({ missionId, findings, onUpdate, onDelete,
     setSaving(false)
   }
 
+  // Two-step inline delete confirmation (replaces the blocking, unstyleable,
+  // screen-reader-hostile window.confirm). The ✕ button arms confirmDel; a
+  // second explicit ✓ commits. Never auto-hides a finding — deletion is manual.
   const del = async (id: string) => {
-    if (!confirm('Delete this finding?')) return
     try {
       await api.deleteFinding(missionId, id)
       onDelete(id)
     } catch {}
+    setConfirmDel(null)
   }
 
   const submitAdd = async () => {
@@ -114,6 +118,8 @@ export default function FindingsPanel({ missionId, findings, onUpdate, onDelete,
         </span>
         <button
           onClick={() => setShowAdd(true)}
+          aria-label="Add manual finding"
+          className="touch-target"
           style={{ fontSize: '0.62rem', letterSpacing: '0.12em', padding: '0.2rem 0.55rem', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)', cursor: 'pointer' }}
         >+ ADD</button>
       </div>
@@ -172,24 +178,52 @@ export default function FindingsPanel({ missionId, findings, onUpdate, onDelete,
                   )}
                 </div>
                 {/* Action buttons */}
-                <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                  <button
-                    title="Cycle tag"
-                    onClick={() => cycleTag(f)}
-                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', cursor: 'pointer', background: 'transparent' }}
-                  >⊛</button>
-                  <button
-                    title="Edit"
-                    onClick={() => { setEditing(isEdit ? null : f.id); setEditData({ severity: f.severity, title: f.title, description: f.description ?? '', evidence: f.evidence ?? '', remediation: f.remediation ?? '', analyst_notes: f.analyst_notes ?? '' }) }}
-                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: isEdit ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer', background: isEdit ? 'var(--accent-dim)' : 'transparent' }}
-                  >✎</button>
-                  <button
-                    title="Delete"
-                    onClick={() => del(f.id)}
-                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', cursor: 'pointer', background: 'transparent' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent2)'; e.currentTarget.style.color = 'var(--accent2)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--text-dim)' }}
-                  >✕</button>
+                <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                  {confirmDel === f.id ? (
+                    <>
+                      <span style={{ fontSize: '0.62rem', color: 'var(--accent2)', whiteSpace: 'nowrap' }}>Delete?</span>
+                      <button
+                        aria-label="Confirm delete finding"
+                        title="Confirm delete"
+                        className="touch-target"
+                        onClick={() => del(f.id)}
+                        style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', border: '1px solid var(--accent2)', color: 'var(--accent2)', cursor: 'pointer', background: 'var(--accent2-dim)' }}
+                      >✓ YES</button>
+                      <button
+                        aria-label="Cancel delete"
+                        title="Cancel"
+                        className="touch-target"
+                        onClick={() => setConfirmDel(null)}
+                        style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', cursor: 'pointer', background: 'transparent' }}
+                      >NO</button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        aria-label="Cycle finding tag"
+                        title="Cycle tag"
+                        className="touch-target"
+                        onClick={() => cycleTag(f)}
+                        style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', cursor: 'pointer', background: 'transparent' }}
+                      >⊛</button>
+                      <button
+                        aria-label="Edit finding"
+                        title="Edit"
+                        className="touch-target"
+                        onClick={() => { setEditing(isEdit ? null : f.id); setEditData({ severity: f.severity, title: f.title, description: f.description ?? '', evidence: f.evidence ?? '', remediation: f.remediation ?? '', analyst_notes: f.analyst_notes ?? '' }) }}
+                        style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: isEdit ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer', background: isEdit ? 'var(--accent-dim)' : 'transparent' }}
+                      >✎</button>
+                      <button
+                        aria-label="Delete finding"
+                        title="Delete"
+                        className="touch-target"
+                        onClick={() => setConfirmDel(f.id)}
+                        style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', cursor: 'pointer', background: 'transparent' }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent2)'; e.currentTarget.style.color = 'var(--accent2)' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--text-dim)' }}
+                      >✕</button>
+                    </>
+                  )}
                 </div>
               </div>
 

@@ -182,10 +182,14 @@ export default function MissionControl() {
 
   const TabBtn = ({ id, label, count }: { id: Tab; label: string; count?: number }) => (
     <button
+      role="tab"
+      aria-selected={tab === id}
+      aria-controls="mc-tabpanel"
+      className="touch-target"
       onClick={() => setTab(id)}
       style={{
         fontSize: '0.68rem', letterSpacing: '0.15em', padding: '0.5rem 1rem',
-        border: 'none', cursor: 'pointer',
+        border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
         borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent',
         background: tab === id ? 'var(--accent-dim)' : 'var(--surface)',
         color: tab === id ? 'var(--accent)' : 'var(--text-dim)',
@@ -260,13 +264,15 @@ export default function MissionControl() {
           />
         </div>
 
-        {/* Main layout: left panel (tabs) + right panel (findings) */}
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '60% 40%', overflow: 'hidden' }}>
+        {/* Main layout: left panel (tabs) + right panel (findings).
+            .mc-main-grid owns the 60/40 columns so a media query can collapse
+            it to stacked rows on mobile (see index.css). */}
+        <div className="mc-main-grid">
 
           {/* Left panel */}
-          <div style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="mc-left-panel" style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {/* Tab bar */}
-            <div style={{ display: 'flex', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div className="tab-strip" role="tablist" aria-label="Mission panels" style={{ display: 'flex', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <TabBtn id="terminal" label="TERMINAL" />
               <TabBtn id="targets" label="TARGETS" count={liveHosts.length} />
               <TabBtn id="notes" label="NOTES" count={notes.length || undefined} />
@@ -277,7 +283,7 @@ export default function MissionControl() {
               <TabBtn id="topology" label="TOPOLOGY" />
             </div>
 
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div id="mc-tabpanel" role="tabpanel" aria-label={`${tab} panel`} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {tab === 'terminal' && <TerminalFeed logs={logs} />}
               {tab === 'targets' && (
                 <TargetsPanel
