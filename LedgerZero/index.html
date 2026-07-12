@@ -1434,7 +1434,7 @@ function seedState() {
         { title: "Section 179 Immediate Expensing · Manufacturing Equipment", amount: cents(224_900), cite: "IRC §179", confidence: "matched", desc: "Formlabs SLS · Universal Laser · Kuka arm · elected in-service 2026" },
         { title: "R&D Credit · Engineering Payroll Allocation",              amount: cents(184_600), cite: "IRC §41",  confidence: "matched", desc: "8 qualified activities · 4 engineers · substantiation vector locked" },
         { title: "QBI Deduction · Passthrough Income",                       amount: cents(432_440), cite: "IRC §199A", confidence: "verified", desc: "20% qualified business income deduction applied at shareholder K-1" },
-        { title: "Depreciation · MACRS 5-yr Property (accelerated)",         amount: cents(88_200),  cite: "IRC §168",  confidence: "verified", desc: "Bonus depreciation 60% for 2026 in-service assets" },
+        { title: "Depreciation · MACRS 5-yr Property (accelerated)",         amount: cents(29_400),  cite: "IRC §168",  confidence: "verified", desc: "Bonus depreciation 20% for 2026 in-service assets (TCJA phase-down)" },
         { title: "Health Insurance · Shareholder-Employee (>2%)",            amount: cents(24_600),  cite: "IRC §162(l)", confidence: "matched", desc: "Reported on W-2 Box 14 · deducted as wages" }
       ]
     },
@@ -2040,7 +2040,7 @@ function renderTax() {
       <div class="tax-tile">
         <div class="tax-tile-label">Estimated Tax Saved</div>
         <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(cents(estimatedSavings/100))}</div>
-        <div class="tax-tile-note">At blended ${fmtPct(tax.federalRate + tax.stateRate, 1)} effective rate</div>
+        <div class="tax-tile-note">At ${fmtPct(tax.federalRate + tax.stateRate, 1)} top marginal ceiling (representative)</div>
       </div>
       <div class="tax-tile">
         <div class="tax-tile-label">Q3 Estimated Payment</div>
@@ -2407,7 +2407,7 @@ function renderPayroll() {
 /* -------------------- M&A Data Room -------------------- */
 function renderDataRoom() {
   const bundles = [
-    { title: "Audited Financial Statements", desc: "3-year Income, Balance Sheet, Cash Flow · GAAP-audited signature", verified: true, updated: "07-12-2026", pages: 42 },
+    { title: "Audited Financial Statements", desc: "3-year Income, Balance Sheet, Cash Flow · independently audited (GAAP)", verified: true, updated: "07-12-2026", pages: 42 },
     { title: "Cap Table &amp; Ownership Ledger",  desc: "SAFE conversions, Series Seed / A / B, ESOP pool + vesting schedules", verified: true, updated: "07-11-2026", pages: 18 },
     { title: "Revenue Cohort Analysis",         desc: "MRR retention, cohort curves, ARR bridge Q1-2024 → Q3-2026", verified: true, updated: "07-12-2026", pages: 24 },
     { title: "Tax Compliance Bundle",           desc: "Federal 1120-S, state returns (DE/CA/WA/NY), R&D credit substantiation", verified: true, updated: "07-10-2026", pages: 88 },
@@ -2657,7 +2657,7 @@ function openOriginModal(originId) {
       <div class="origin-trail-title">Atomic Transactions</div>
       <div class="origin-tx">
         <div class="d">2026-07-11</div>
-        <div><div class="desc">Wire receipt · Zenith Ventures · Series B t3</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Bank: Silicon Valley Bank ****3821</div></div>
+        <div><div class="desc">Wire receipt · Zenith Ventures · Series B t3</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Bank: Mercury ****3821</div></div>
         <div class="amt">${fmtUSD(cents(128_400))}</div>
       </div>
       <div class="origin-tx">
