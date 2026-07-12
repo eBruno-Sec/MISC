@@ -292,7 +292,24 @@ button.card:hover{ transform:translateY(-2px); box-shadow:var(--shadow-hover); }
   .grid-2,.grid-3{ grid-template-columns:1fr; } .contrast{ grid-template-columns:1fr; } .inline-2{ grid-template-columns:1fr 1fr; }
   .summary-head{ flex-direction:column; gap:8px; } .footer-inner{ grid-template-columns:1fr; } .side{ flex-direction:column; }
 }
+/* ── State persistence & export UI ── */
+.progress-export-btn{ display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.04em; padding:8px 12px; min-height:38px; border-radius:var(--radius); border:1px solid var(--line); background:var(--bg-2); color:var(--ink-dim); cursor:pointer; transition:.13s; white-space:nowrap; }
+.progress-export-btn:hover{ border-color:var(--accent-bright); color:var(--accent-bright); }
+.import-zone{ border:2px dashed var(--line); border-radius:var(--radius-lg); padding:26px 20px; text-align:center; transition:.18s; cursor:pointer; margin-top:24px; }
+.import-zone:hover,.import-zone.drag-over{ border-color:var(--accent-bright); background:var(--accent-glow); }
+.import-zone-title{ font-family:var(--display); font-size:17px; font-weight:500; color:var(--ink); margin-bottom:5px; }
+.import-zone-sub{ font-size:13px; color:var(--ink-faint); margin-bottom:14px; }
+.import-zone code{ font-family:var(--mono); font-size:11.5px; background:var(--bg-2); padding:2px 5px; border-radius:4px; }
+.import-banner{ display:flex; align-items:flex-start; gap:11px; padding:13px 16px; border-radius:var(--radius); margin-top:12px; font-size:13.5px; line-height:1.5; }
+.import-banner.error{ background:rgba(192,57,43,.09); border:1px solid var(--accent); color:var(--accent-bright); }
+.import-banner.success{ background:var(--green-soft); border:1px solid var(--green); color:var(--green); }
+.import-banner-icon{ font-size:15px; flex-shrink:0; line-height:1.3; font-weight:700; }
+.export-panel{ border:1px solid var(--line); border-radius:var(--radius-lg); padding:20px 22px; background:var(--bg-2); margin-top:20px; }
+.export-panel-label{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:13px; }
+.export-btns{ display:flex; flex-wrap:wrap; gap:9px; }
+.export-btns .btn{ min-height:44px; font-size:13px; padding:0 18px; }
 </style>
+<script>(function(){try{var v=localStorage.getItem('rf-dark');if(v==='0')document.documentElement.setAttribute('data-theme','light');}catch(e){}})()</script>
 </head>
 <body>
 <div id="root"></div>
@@ -302,13 +319,48 @@ button.card:hover{ transform:translateY(-2px); box-shadow:var(--shadow-hover); }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 
 <script type="text/babel">
-const { useState, useEffect, useMemo, createContext, useContext } = React;
+const { useState, useEffect, useMemo, createContext, useContext, useRef } = React;
 
 // ─── SESSION PERSISTENCE (Section IV.1) ────────────────────────────────────────
 const SESSION_KEY = "rf-session-v1";
+const PLATFORM_NAME = "RedFlag";
 function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch (e) { return null; } }
 function saveSession(o) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(o)); } catch (e) {} }
 function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
+// ─── FILE UTILITIES ──────────────────────────────────────────────────────────
+function dlFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+}
+
+function todayStr() {
+  const d = new Date(); const pad = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+// ─── STATE BACKUP / RESTORE ──────────────────────────────────────────────────
+function exportProgress(state) {
+  const payload = JSON.stringify({ _schema:SESSION_KEY, _exportedAt:new Date().toISOString(), ...state }, null, 2);
+  dlFile(payload, `${PLATFORM_NAME}_backup_${todayStr()}.json`, "application/json");
+}
+
+function validateImport(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch(e) { return { ok:false, error:"Not valid JSON — file may be corrupted." }; }
+  if (!parsed || typeof parsed !== "object") return { ok:false, error:"Unexpected file format." };
+  if (parsed._schema !== SESSION_KEY) return { ok:false, error:"Invalid or corrupted progress file — this doesn't appear to be a RedFlag backup, or it's from an incompatible version." };
+  const required = ["view","screen","rel","scenarios"];
+  for (const k of required) {
+    if (!(k in parsed)) return { ok:false, error:`Invalid or corrupted progress file — missing required field "${k}".` };
+  }
+  if (!Array.isArray(parsed.scenarios)) return { ok:false, error:"Invalid or corrupted progress file — scenario data is malformed." };
+  return { ok:true, state:parsed };
+}
 
 // ─── THEME (default dark, editorial — like Inner Compass) ───────────────────────
 const ThemeCtx = createContext({ dark:true, toggle:()=>{} });
@@ -908,7 +960,7 @@ const NAV = [
   { id:"blog",       label:"Blog" },
   { id:"about",      label:"About" },
 ];
-function Header({ onNav, active }) {
+function Header({ onNav, active, hasProgress, onExportProgress }) {
   const { dark, toggle } = useContext(ThemeCtx);
   const [open, setOpen] = useState(false);
   const nav = (id) => { setOpen(false); onNav(id); };
@@ -921,7 +973,12 @@ function Header({ onNav, active }) {
         </ul>
         <div className="nav-actions">
           <button className="nav-cta" onClick={()=>nav("quiz")}>Take the Quiz</button>
-          <button className="icon-btn" aria-label={dark?"Light mode":"Dark mode"} onClick={toggle}>{dark?"☀":"☾"}</button>
+          {hasProgress && (
+            <button className="progress-export-btn" onClick={onExportProgress} title="Download session backup (.json)">
+              ↓ Backup
+            </button>
+          )}
+          <button className="icon-btn" aria-label={dark?"Switch to light mode":"Switch to dark mode"} onClick={toggle}>{dark?"☀":"☾"}</button>
           <button className="nav-toggle" aria-label="Menu" aria-expanded={open} onClick={()=>setOpen(o=>!o)}>
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6"><line x1="1" y1="4" x2="17" y2="4"/><line x1="1" y1="9" x2="17" y2="9"/><line x1="1" y1="14" x2="17" y2="14"/></svg>
           </button>
@@ -1279,7 +1336,71 @@ function AboutView({ onNav }) {
 }
 
 // ─── QUIZ FLOW ────────────────────────────────────────────────────────────────────
-function Onboarding({ onSelect }) {
+// ─── IMPORT DROP ZONE ────────────────────────────────────────────────────────────
+function ImportDropZone({ onImport }) {
+  const [dragging, setDragging] = useState(false);
+  const [status, setStatus] = useState(null);
+  const inputRef = useRef(null);
+
+  function processFile(file) {
+    if (!file) return;
+    if (!file.name.endsWith(".json")) { setStatus({ type:"error", msg:"Please select a .json file exported by RedFlag." }); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const result = validateImport(e.target.result);
+      if (!result.ok) { setStatus({ type:"error", msg:result.error }); return; }
+      setStatus({ type:"success", msg:"Progress restored. Resuming your session…" });
+      setTimeout(()=>onImport(result.state), 700);
+    };
+    reader.readAsText(file);
+  }
+
+  return (
+    <div>
+      <div className={"import-zone" + (dragging?" drag-over":"")}
+        onDragOver={e=>{ e.preventDefault(); setDragging(true); }}
+        onDragLeave={()=>setDragging(false)}
+        onDrop={e=>{ e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files?.[0]); }}
+        onClick={()=>inputRef.current?.click()}
+        role="button" tabIndex={0} aria-label="Upload saved progress file"
+        onKeyDown={e=>e.key==="Enter"&&inputRef.current?.click()}>
+        <div className="import-zone-title">Restore a saved session</div>
+        <div className="import-zone-sub">Drag a <code>RedFlag_backup_*.json</code> here, or tap to browse</div>
+        <button className="btn btn-outline" style={{ minHeight:44, fontSize:13, pointerEvents:"none" }}>Upload Progress (.json)</button>
+        <input ref={inputRef} type="file" accept=".json,application/json" style={{ display:"none" }} onChange={e=>processFile(e.target.files?.[0])}/>
+      </div>
+      {status && (
+        <div className={"import-banner " + status.type} role="alert">
+          <span className="import-banner-icon">{status.type==="error" ? "✕" : "✓"}</span>
+          <span>{status.msg}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EXPORT REPORT PANEL ─────────────────────────────────────────────────────────
+function ExportReportPanel({ rel, dualResult, scenarioAnswers }) {
+  const exports = [
+    { label:"PDF",      fn:()=>openReportPDF({ rel, dualResult, scenarioAnswers }),                                                                          solid:true  },
+    { label:"HTML",     fn:()=>dlFile(buildReportHTML({ rel, dualResult, scenarioAnswers }), `${PLATFORM_NAME}_report_${todayStr()}.html`, "text/html")              },
+    { label:"Markdown", fn:()=>dlFile(buildReportMD({ rel, dualResult, scenarioAnswers }),  `${PLATFORM_NAME}_report_${todayStr()}.md`,   "text/markdown")           },
+    { label:"TXT",      fn:()=>dlFile(buildReportTXT({ rel, dualResult, scenarioAnswers }), `${PLATFORM_NAME}_report_${todayStr()}.txt`,  "text/plain")              },
+    { label:"JSON",     fn:()=>dlFile(buildReportJSON({ rel, dualResult, scenarioAnswers }),`${PLATFORM_NAME}_report_${todayStr()}.json`, "application/json")        },
+  ];
+  return (
+    <div className="export-panel rf-noprint">
+      <div className="export-panel-label">Export Report</div>
+      <div className="export-btns">
+        {exports.map(e=>(
+          <button key={e.label} className={"btn " + (e.solid ? "btn-solid" : "btn-outline")} onClick={e.fn}>{e.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Onboarding({ onSelect, onImport }) {
   const [rel, setRel] = useState(null);
   const opts = [
     { k:"current", l:"My current partner", s:"Questions in present tense" },
@@ -1296,6 +1417,7 @@ function Onboarding({ onSelect }) {
         <div className="cl">{o.l}</div><div className="cs">{o.s}</div></button>))}
     </div>
     <button className="btn btn-solid btn-block mt" disabled={!rel} onClick={()=>rel&&onSelect(rel)}>Continue →</button>
+    {onImport && <ImportDropZone onImport={onImport}/>}
   </div>);
 }
 
@@ -1488,8 +1610,129 @@ function FinderScreen({ onQuiz }) {
   </div>);
 }
 
-// ─── PRINTABLE REPORT ────────────────────────────────────────────────────────────
+// ─── REPORT EXPORT ENGINE ────────────────────────────────────────────────────────
 const REL_WHO = { current:"your current partner", ex:"your ex-partner", new:"someone new", self:"yourself" };
+
+function computeReportData({ rel, dualResult, scenarioAnswers }) {
+  const { partnerScores={}, flaggedPartner=[], userScores={}, flaggedUser=[], primary:pk=null, secondary:sk=null, combinedLabel=null } = dualResult || {};
+  const isSelf = rel === "self";
+  const mainScores = isSelf ? userScores : partnerScores;
+  const mainFlagged = isSelf ? flaggedUser : flaggedPartner;
+  const overall = pk ? getSev(mainScores[pk]||0, pk) : { label:"healthy", display:"No red flags" };
+  const allKeys = Object.keys(mainScores).sort((a,b)=>(mainScores[b]||0)-(mainScores[a]||0));
+  const dateLabel = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+  function auditFor(k) {
+    const contribs = (scenarioAnswers||[]).filter(a=>{
+      const sc=SCENARIOS.find(s=>s.id===a.scenarioId); if(!sc) return false;
+      const r=isSelf?sc.reactions[a.myChoice]:sc.reactions[a.theirChoice]; return r?.a===k && r.w>0;
+    }).map(a=>{
+      const sc=SCENARIOS.find(s=>s.id===a.scenarioId);
+      const r=isSelf?sc.reactions[a.myChoice]:sc.reactions[a.theirChoice]; const freq=a.frequency||1;
+      return { scenario:sc.title, choice:r.t, w:r.w, freq, freqL:["","Rarely","Sometimes","Often"][freq], pts:r.w*freq };
+    }).sort((x,y)=>y.pts-x.pts);
+    const score=mainScores[k]||0; const sev=getSev(score,k);
+    const crossed=(k==="isolation"||k==="blame")?5:sev.label==="severe"?9:sev.label==="address"?7:4;
+    return { contribs, score, sev, crossed };
+  }
+  return { rel, isSelf, pk, sk, combinedLabel, overall, allKeys, mainScores, mainFlagged, dateLabel, auditFor };
+}
+
+function buildReportTXT({ rel, dualResult, scenarioAnswers }) {
+  const { pk, sk, combinedLabel, overall, allKeys, mainScores, mainFlagged, dateLabel, auditFor } = computeReportData({ rel, dualResult, scenarioAnswers });
+  const L = [];
+  L.push("REDFLAG — RELATIONAL RISK REPORT");
+  L.push("================================");
+  L.push(`Generated: ${dateLabel}`);
+  L.push(`Assessment: ${REL_WHO[rel]||rel}`);
+  L.push(""); L.push(`OVERALL: ${overall.display.toUpperCase()}`);
+  if (pk) {
+    L.push(`Primary pattern: ${ARC[pk].street} (${ARC[pk].clinical})`);
+    if (sk) L.push(`Secondary pattern: ${ARC[sk].street} (${ARC[sk].clinical})`);
+    if (combinedLabel) L.push(`Combined dynamic: "${combinedLabel}"`);
+  }
+  L.push(""); L.push("PATTERNS ASSESSED"); L.push("-----------------");
+  allKeys.forEach(k=>{ const sev=getSev(mainScores[k]||0,k); L.push(`${sev.display.padEnd(22)}${ARC[k].street} (score: ${mainScores[k]||0})`); });
+  if (mainFlagged.length>0) {
+    L.push(""); L.push("FLAGGED PATTERNS — DETAIL"); L.push("-------------------------");
+    mainFlagged.forEach(k=>{
+      const a=auditFor(k);
+      L.push(`\n${ARC[k].street}`);
+      L.push(`${ARC[k].clinical} — ${a.sev.display} (score: ${a.score})`);
+      L.push(ARC_DESC[k]);
+      if (a.contribs.length>0) { L.push("Contributing scenarios:"); a.contribs.forEach(c=>L.push(`  [${c.pts}pts] "${c.choice}" — ${c.scenario} (${c.freqL})`)); }
+    });
+  }
+  L.push(""); L.push("─────────────────────────────────────────────────");
+  L.push("If you ever feel unsafe: 1-800-799-7233");
+  L.push("National Domestic Violence Hotline — 24/7, free, confidential · Text START to 88788");
+  L.push(""); L.push("RedFlag identifies patterns in behavior, not clinical conditions.");
+  L.push("For self-reflection only — not professional mental-health advice.");
+  return L.join("\n");
+}
+
+function buildReportMD({ rel, dualResult, scenarioAnswers }) {
+  const { pk, sk, combinedLabel, overall, allKeys, mainScores, mainFlagged, dateLabel, auditFor } = computeReportData({ rel, dualResult, scenarioAnswers });
+  const L = [];
+  L.push("# RedFlag — Relational Risk Report");
+  L.push(""); L.push(`> Assessment of ${REL_WHO[rel]||rel} · Generated ${dateLabel}`);
+  L.push(""); L.push("---"); L.push(""); L.push("## Summary"); L.push("");
+  L.push(`**Overall:** ${overall.display}`);
+  if (pk) {
+    L.push(`**Primary pattern:** ${ARC[pk].street} *(${ARC[pk].clinical})*`);
+    if (sk) L.push(`**Secondary pattern:** ${ARC[sk].street} *(${ARC[sk].clinical})*`);
+    if (combinedLabel) L.push(`**Combined dynamic:** "${combinedLabel}"`);
+  } else {
+    L.push("No behavioral patterns crossed the red-flag threshold — a genuinely good result.");
+  }
+  L.push(""); L.push("---"); L.push(""); L.push("## Patterns Assessed"); L.push("");
+  L.push("| Pattern | Clinical Name | Score | Severity |");
+  L.push("| :-- | :-- | --: | :-- |");
+  allKeys.forEach(k=>{ const sev=getSev(mainScores[k]||0,k); const b=mainFlagged.includes(k)?"**":""; L.push(`| ${b}${ARC[k].street}${b} | ${ARC[k].clinical} | ${mainScores[k]||0} | ${sev.display} |`); });
+  if (mainFlagged.length>0) {
+    L.push(""); L.push("---"); L.push(""); L.push("## Flagged Patterns — Detail");
+    mainFlagged.forEach(k=>{
+      const a=auditFor(k);
+      L.push(`\n### ${ARC[k].street}`);
+      L.push(`*${ARC[k].clinical}* · **${a.sev.display}** (score: ${a.score})`);
+      L.push(""); L.push(ARC_DESC[k]);
+      if (a.contribs.length>0) { L.push(""); L.push("**Contributing scenarios:**"); a.contribs.forEach(c=>L.push(`- \`[${c.pts}pts]\` "${c.choice}" — *${c.scenario}* (${c.freqL})`)); }
+    });
+  }
+  L.push(""); L.push("---"); L.push(""); L.push("## If You Need Support"); L.push("");
+  L.push("**National Domestic Violence Hotline:** 1-800-799-7233 · Text START to 88788");
+  L.push("**Crisis Text Line:** Text HOME to 741741"); L.push("");
+  L.push("*RedFlag identifies patterns in behavior, not clinical conditions. For self-reflection only.*");
+  return L.join("\n");
+}
+
+function buildReportJSON({ rel, dualResult, scenarioAnswers }) {
+  const { pk, sk, combinedLabel, overall, allKeys, mainScores, mainFlagged, dateLabel, auditFor } = computeReportData({ rel, dualResult, scenarioAnswers });
+  const scores = {};
+  allKeys.forEach(k=>{ scores[k]={ name:ARC[k].street, clinical:ARC[k].clinical, score:mainScores[k]||0, severity:getSev(mainScores[k]||0,k).display, flagged:mainFlagged.includes(k) }; });
+  const flaggedDetail = mainFlagged.map(k=>{ const a=auditFor(k); return { key:k, name:ARC[k].street, clinical:ARC[k].clinical, severity:a.sev.display, score:a.score, contributors:a.contribs.map(c=>({ scenario:c.scenario, choice:c.choice, frequency:c.freqL, points:c.pts })) }; });
+  return JSON.stringify({ _schema:"rf-report-v1", generatedAt:new Date().toISOString(), rel, assessment:REL_WHO[rel]||rel, overall:{ severity:overall.display, primaryPattern:pk?ARC[pk].street:null, secondaryPattern:sk?ARC[sk].street:null, combinedDynamic:combinedLabel }, scores, flaggedPatterns:flaggedDetail }, null, 2);
+}
+
+function buildReportHTML({ rel, dualResult, scenarioAnswers }) {
+  const { pk, sk, combinedLabel, overall, allKeys, mainScores, mainFlagged, dateLabel, auditFor } = computeReportData({ rel, dualResult, scenarioAnswers });
+  const sm = lbl=>({ severe:{c:"//// SEVERE",b:"7px solid #000"}, address:{c:"/// WORTH ADDRESSING",b:"5px solid #000"}, watch:{c:"// WORTH WATCHING",b:"3px solid #000"}, healthy:{c:"·  CLEAR",b:"1px dashed #777"} })[lbl]||{c:"·  CLEAR",b:"1px dashed #777"};
+  const mono = "font-family:'Courier New',Courier,monospace;font-weight:700;font-size:12px;";
+  const patternsRows = allKeys.map(k=>{ const m=sm(getSev(mainScores[k]||0,k).label); return `<div style="display:flex;gap:10px;align-items:baseline;padding:4px 0;border-top:.5px solid #ccc;font-size:12px;"><span style="${mono}flex:0 0 150px;">${m.c}</span><span style="flex:1;">${ARC[k].street}</span><span style="color:#333;">score ${mainScores[k]||0}</span></div>`; }).join("");
+  const flaggedBlocks = mainFlagged.length===0 ? "" : "<h2 style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;margin:18px 0 8px;color:#000;\">Flagged Patterns — Detail &amp; Audit Trail</h2>" + mainFlagged.map(k=>{ const a=auditFor(k); const m=sm(a.sev.label); const cs=a.contribs.length>0?`<p style="margin:4px 0 2px;font-weight:700;font-size:11px;">Heaviest contributors:</p><ul style="margin:6px 0 0;padding:0;list-style:none;">${a.contribs.map(c=>`<li style="font-size:11.5px;padding:5px 0;border-top:.5px solid #999;display:flex;gap:8px;"><span style="${mono}">[${c.pts}/${3*c.freq}]</span><span>"${c.choice}" — ${c.scenario} (${c.freqL})</span></li>`).join("")}</ul>`:""; return `<div style="border:1px solid #000;border-left:${m.b};border-radius:6px;padding:12px 14px;margin:0 0 12px;"><div style="font-size:15px;font-weight:700;color:#000;">${ARC[k].street}</div><div style="font-size:11px;color:#333;margin:1px 0 6px;">${ARC[k].clinical} · <span style="${mono}">${m.c}</span></div><p style="font-size:12.5px;margin:0 0 8px;color:#000;">${ARC_DESC[k]}</p><div style="border:1px dashed #000;border-radius:6px;padding:10px 12px;margin:8px 0 0;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin:0 0 6px;color:#000;">Why this pattern triggered</div><p style="font-size:12px;margin:0 0 6px;color:#000;">Score ${a.score} ≥ ${a.crossed} → ${a.sev.display}</p>${cs}</div></div>`; }).join("");
+  const clashBlock = pk&&sk ? `<div style="border:1px solid #000;border-radius:6px;padding:12px 14px;margin:0 0 12px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin:0 0 6px;color:#000;">Why you clash${combinedLabel?" — "+combinedLabel:""}</div><p style="font-size:12px;margin:0;">Two strongest patterns: ${ARC[pk].street} (${mainScores[pk]||0}) + ${ARC[sk].street} (${mainScores[sk]||0})</p></div>` : "";
+  const ovM = sm(overall.label);
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>RedFlag — Relational Risk Report</title><style>*{box-sizing:border-box;}body{font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;margin:0;padding:40px;background:#fff;color:#000;}@media print{@page{margin:14mm;}body{padding:0;}}</style></head><body><div style="max-width:760px;margin:0 auto;"><div style="font-size:24px;font-weight:700;margin:0 0 2px;letter-spacing:-.01em;">RedFlag — Relational Risk Report</div><div style="font-size:13px;margin:0 0 4px;">A behavioral-pattern assessment of ${REL_WHO[rel]||rel}.</div><div style="font-size:11px;color:#333;margin:0 0 12px;">Generated ${dateLabel} · Reflects your perception, not a clinical diagnosis</div><hr style="border:0;border-top:1px solid #000;margin:14px 0;"><div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;margin:0 0 6px;"><span><span style="${mono}">////</span> Severe</span><span><span style="${mono}">///</span> Worth addressing</span><span><span style="${mono}">//</span> Worth watching</span><span><span style="${mono}">·</span> Clear</span></div><div style="border:1px solid #000;border-left:${ovM.b};border-radius:6px;padding:12px 14px;margin:0 0 14px;"><div style="${mono}">${ovM.c}</div>${pk?`<p style="margin:6px 0 0;font-size:13px;">Strongest pattern: <strong>${ARC[pk].street}</strong> (${ARC[pk].clinical}).${combinedLabel?` Combined with ${ARC[sk].street}: <strong>"${combinedLabel}"</strong>`:""}</p>`:`<p style="margin:6px 0 0;font-size:13px;">No pattern crossed the red-flag threshold — a genuinely good result.</p>`}</div><h2 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;margin:18px 0 8px;color:#000;">Patterns Assessed</h2>${patternsRows}${flaggedBlocks}${clashBlock}<div style="border:2px solid #000;border-radius:6px;padding:10px 12px;margin:12px 0;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">If you ever feel unsafe</div><div><strong>1-800-799-7233</strong> — National Domestic Violence Hotline (24/7, free, confidential)</div><div style="font-size:12px;margin-top:2px;">Text START to 88788 · Crisis Text Line: text HOME to 741741</div></div><hr style="border:0;border-top:1px solid #000;margin:14px 0;"><div style="font-size:10.5px;color:#333;line-height:1.6;">RedFlag identifies patterns in behavior, not clinical conditions. For self-reflection only — not professional mental-health, legal, or diagnostic advice.</div></div></body></html>`;
+}
+
+function openReportPDF({ rel, dualResult, scenarioAnswers }) {
+  const html = buildReportHTML({ rel, dualResult, scenarioAnswers });
+  const w = window.open("", "_blank", "width=900,height=800");
+  if (!w) { alert("Allow pop-ups to generate the PDF, then try again."); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  w.focus(); setTimeout(()=>{ try { w.print(); } catch(e){} }, 700);
+}
+
+// ─── PRINTABLE REPORT ────────────────────────────────────────────────────────────
 function sevMeta(label) {
   return ({ severe:{code:"//// SEVERE",cls:"rf-sev-severe"}, address:{code:"/// WORTH ADDRESSING",cls:"rf-sev-address"}, watch:{code:"// WORTH WATCHING",cls:"rf-sev-watch"}, healthy:{code:"·  CLEAR",cls:"rf-sev-healthy"} })[label] || { code:"·  CLEAR", cls:"rf-sev-healthy" };
 }
@@ -1559,11 +1802,10 @@ function ReportScreen({ rel, dualResult, scenarioAnswers, onBack }) {
       <hr className="rf-rule"/>
       <div className="rf-foot">RedFlag identifies patterns in behavior, not clinical conditions. This report reflects {isSelf?"your self-assessment":"your perception of another person"} and is for self-reflection only — not professional mental-health, legal, or diagnostic advice.</div>
     </div>
-    <div className="rf-noprint actions" style={{ marginTop:18 }}>
-      <button className="btn btn-solid" onClick={()=>window.print()}>Save as PDF</button>
-      <button className="btn btn-outline" onClick={onBack}>← Back to results</button>
+    <ExportReportPanel rel={rel} dualResult={dualResult} scenarioAnswers={scenarioAnswers}/>
+    <div className="rf-noprint actions" style={{ marginTop:14 }}>
+      <button className="btn btn-ghost" onClick={onBack}>← Back to results</button>
     </div>
-    <p className="rf-noprint" style={{ fontFamily:"var(--mono)", fontSize:11.5, color:"var(--ink-faint)", marginTop:10 }}>Opens your browser's print dialog — choose &ldquo;Save as PDF&rdquo; to keep a copy. Ink-saver: black on white.</p>
   </div>);
 }
 
@@ -1592,10 +1834,22 @@ function App() {
     else goView(id);
   }
 
+  function hydrate(state) {
+    setView(state.view || VIEWS.QUIZ);
+    setScreen(state.screen || SCREENS.ONBOARD);
+    setRel(state.rel || null);
+    setScenarios(state.scenarios || []);
+    setDualResult(state.dualResult || null);
+    top();
+  }
+
+  const hasProgress = rel !== null || scenarios.length > 0 || dualResult !== null;
+  const currentState = { view, screen, rel, scenarios, dualResult };
+
   return (
     <ThemeCtx.Provider value={theme}>
       <div className="rf-app">
-        <Header onNav={onNav} active={view}/>
+        <Header onNav={onNav} active={view} hasProgress={hasProgress} onExportProgress={()=>exportProgress(currentState)}/>
         <main className="rf-main">
           {view===VIEWS.HOME       && <Home onNav={onNav}/>}
           {view===VIEWS.LEARN      && <StartHere onNav={onNav}/>}
@@ -1607,7 +1861,7 @@ function App() {
           {view===VIEWS.BLOG       && <BlogView/>}
           {view===VIEWS.ABOUT      && <AboutView onNav={onNav}/>}
           {view===VIEWS.QUIZ && (<>
-            {screen===SCREENS.ONBOARD  && <Onboarding onSelect={(r)=>{ setRel(r); go(SCREENS.SCENARIO); }}/>}
+            {screen===SCREENS.ONBOARD  && <Onboarding onSelect={(r)=>{ setRel(r); go(SCREENS.SCENARIO); }} onImport={hydrate}/>}
             {screen===SCREENS.SCENARIO && <ScenarioQuiz rel={rel} onComplete={(ans)=>{ const dr=computeDualResult(ans); setScenarios(ans); setDualResult(dr); go(SCREENS.RESULTS); }}/>}
             {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} rel={rel} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
             {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} rel={rel} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
