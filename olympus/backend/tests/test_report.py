@@ -61,3 +61,20 @@ def test_all_export_buttons_wired(tmp_path, monkeypatch):
     for bid in ("oly-print", "oly-html", "oly-md", "oly-txt", "oly-json", "oly-theme"):
         assert f'id="{bid}"' in html, f"button {bid} missing"
         assert f"getElementById('{bid}')" in html, f"listener for {bid} not wired"
+
+
+def test_export_script_escapes_js_line_separators(tmp_path, monkeypatch):
+    """U+2028 / U+2029 are valid in JSON but are line terminators in JS; unescaped in
+    the injected REPORT literal they break parsing. They must be backslash-u escaped."""
+    monkeypatch.setattr(settings, "reports_dir", str(tmp_path))
+    ls, ps = chr(0x2028), chr(0x2029)
+    a = Apollo(session=None, mission_id="seps")
+    findings = [Finding(title="t", severity="high", found_by="ares",
+                        description="x" + ls + "y", evidence="a" + ps + "b", remediation="r")]
+    stats = {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0}
+    path = asyncio.run(a._generate_html_report(
+        "example.com", findings, stats, "sum", {"athena": {"mode": "full"}}))
+    with open(path, encoding="utf-8") as fh:
+        js = _script(fh.read())
+    assert ls not in js and ps not in js          # no raw JS line-terminators in the script
+    assert (chr(92) + "u2028") in js              # escaped backslash-u2028 injected instead

@@ -353,7 +353,16 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                 for fnd in sorted_findings
             ],
         }
-        report_json = json.dumps(report_payload, ensure_ascii=False).replace("</", "<\\/")
+        # ensure_ascii=False keeps unicode readable, but U+2028/U+2029 are legal in
+        # JSON yet are LINE TERMINATORS in JS — unescaped they break the `const REPORT =`
+        # literal (same syntax-error class as the newline bug). Escape them, plus </ to
+        # prevent a </script> breakout.
+        report_json = (
+            json.dumps(report_payload, ensure_ascii=False)
+            .replace("</", "<\\/")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
 
         # No inline onclick handlers: they are wired via addEventListener in the
         # nonce'd script below so the report can run under a strict CSP.
