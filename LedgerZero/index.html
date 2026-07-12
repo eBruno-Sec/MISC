@@ -1,0 +1,2992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LedgerZero — Autonomous Fiscal Command</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #f2f4f7;
+  --surface:   #ffffff;
+  --surface-2: #f8f9fb;
+  --surface-3: #eef1f5;
+  --border:    #d9dee5;
+  --border-strong: #b7c0cc;
+  --ink:       #0b1220;
+  --ink-2:     #1e2938;
+  --ink-mute:  #55627a;
+  --ink-dim:   #8794a8;
+  --accent:    #0b5cff;
+  --accent-dk: #0947c9;
+  --accent-so: #e6efff;
+  --verified:  #0f7a4a;
+  --verified-so:#e2f5eb;
+  --matched:   #1553b7;
+  --matched-so:#e6efff;
+  --pending:   #a8620a;
+  --pending-so:#fbf1de;
+  --risk:      #b02323;
+  --risk-so:   #fbe5e5;
+  --mono:      'JetBrains Mono', ui-monospace, monospace;
+  --sans:      'Inter', system-ui, sans-serif;
+  --radius:    6px;
+  --shadow-sm: 0 1px 2px rgba(15,25,45,0.04);
+  --shadow-md: 0 4px 14px rgba(15,25,45,0.08);
+  --shadow-lg: 0 12px 32px rgba(15,25,45,0.12);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+a { color: var(--accent); text-decoration: none; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ============ LOGIN / ONBOARDING ============ */
+#gate {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500; padding: 2rem;
+}
+.gate-card {
+  width: 100%; max-width: 460px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 2.5rem;
+  box-shadow: var(--shadow-lg);
+}
+.gate-mark {
+  display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.75rem;
+}
+.gate-logo-glyph {
+  width: 32px; height: 32px; background: var(--ink);
+  border-radius: 6px; display: grid; place-items: center;
+  color: white; font-family: var(--mono); font-weight: 700; font-size: 15px;
+  letter-spacing: -0.05em;
+}
+.gate-logo-glyph::before {
+  content: "L∅"; letter-spacing: -0.1em;
+}
+.gate-logo-word {
+  font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+}
+.gate-logo-word span { color: var(--ink-mute); font-weight: 500; }
+.gate-title {
+  font-size: 1.55rem; font-weight: 700; letter-spacing: -0.02em;
+  margin-bottom: 0.35rem; color: var(--ink);
+}
+.gate-sub { color: var(--ink-mute); font-size: 0.9rem; margin-bottom: 2rem; }
+.gate-field { margin-bottom: 1rem; }
+.gate-field label {
+  display: block; font-size: 0.72rem; font-weight: 600;
+  color: var(--ink-mute); letter-spacing: 0.06em; text-transform: uppercase;
+  margin-bottom: 0.4rem;
+}
+.gate-field input, .gate-field select {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.7rem 0.85rem; font-size: 0.9rem;
+  outline: none; transition: border-color 0.15s, background 0.15s;
+}
+.gate-field input:focus, .gate-field select:focus {
+  border-color: var(--accent); background: var(--surface);
+}
+.gate-btn {
+  width: 100%; background: var(--ink); color: white; border-radius: var(--radius);
+  padding: 0.85rem 1rem; font-weight: 600; font-size: 0.9rem;
+  transition: transform 0.15s, background 0.15s; margin-top: 0.5rem;
+}
+.gate-btn:hover { background: var(--ink-2); }
+.gate-btn:active { transform: translateY(1px); }
+.gate-trust {
+  display: flex; gap: 0.75rem; margin-top: 1.5rem;
+  padding-top: 1.25rem; border-top: 1px solid var(--border);
+  font-size: 0.72rem; color: var(--ink-mute);
+  align-items: center; justify-content: center;
+}
+.gate-trust span { display: flex; align-items: center; gap: 0.35rem; }
+.gate-trust svg { width: 12px; height: 12px; color: var(--verified); }
+.gate-alt {
+  text-align: center; margin-top: 1rem;
+  font-size: 0.8rem; color: var(--ink-mute);
+}
+.gate-alt button {
+  color: var(--accent); font-weight: 600; padding: 0;
+}
+
+/* ============ APP SHELL ============ */
+#app { display: none; }
+#app.visible { display: block; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100vh;
+}
+
+/* SIDEBAR */
+.sidebar {
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; position: sticky; top: 0;
+  height: 100vh;
+}
+.sidebar-brand {
+  padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.55rem;
+}
+.brand-glyph {
+  width: 26px; height: 26px; background: var(--ink); border-radius: 5px;
+  display: grid; place-items: center; color: white;
+  font-family: var(--mono); font-weight: 700; font-size: 12px;
+  letter-spacing: -0.08em;
+}
+.brand-glyph::before { content: "L∅"; }
+.brand-name {
+  font-weight: 700; font-size: 0.95rem; letter-spacing: -0.02em;
+}
+.brand-name span { color: var(--ink-dim); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.05em; margin-left: 0.35rem; }
+
+.sidebar-entity {
+  padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.entity-label {
+  font-size: 0.65rem; color: var(--ink-dim); letter-spacing: 0.08em;
+  text-transform: uppercase; margin-bottom: 0.25rem; font-weight: 600;
+}
+.entity-select {
+  width: 100%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 5px; padding: 0.45rem 0.55rem; font-size: 0.82rem;
+  font-weight: 600; color: var(--ink); outline: none;
+}
+.entity-select:focus { border-color: var(--accent); }
+
+.nav {
+  flex: 1; overflow-y: auto; padding: 0.75rem 0.6rem;
+}
+.nav-group { margin-bottom: 1.1rem; }
+.nav-group-label {
+  font-size: 0.62rem; color: var(--ink-dim); letter-spacing: 0.1em;
+  text-transform: uppercase; font-weight: 700;
+  padding: 0.35rem 0.7rem 0.4rem;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.7rem; border-radius: 5px;
+  color: var(--ink-2); font-size: 0.84rem; font-weight: 500;
+  cursor: pointer; transition: background 0.12s;
+  width: 100%; text-align: left; position: relative;
+}
+.nav-item:hover { background: var(--surface-3); }
+.nav-item.active {
+  background: var(--surface-3); color: var(--ink); font-weight: 600;
+}
+.nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 3px; background: var(--accent); border-radius: 3px;
+}
+.nav-icon { width: 15px; height: 15px; flex-shrink: 0; color: var(--ink-mute); }
+.nav-item.active .nav-icon { color: var(--accent); }
+.nav-count {
+  margin-left: auto; font-family: var(--mono); font-size: 0.7rem;
+  background: var(--surface-3); color: var(--ink-mute);
+  padding: 0.1rem 0.4rem; border-radius: 8px; font-weight: 600;
+}
+.nav-count.alert { background: var(--pending-so); color: var(--pending); }
+.nav-item.active .nav-count { background: var(--accent-so); color: var(--accent); }
+
+.sidebar-foot {
+  padding: 0.8rem 1rem; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.55rem;
+}
+.foot-avatar {
+  width: 30px; height: 30px; border-radius: 50%; background: var(--ink);
+  color: white; display: grid; place-items: center;
+  font-size: 0.75rem; font-weight: 700;
+}
+.foot-user { flex: 1; min-width: 0; }
+.foot-name { font-size: 0.8rem; font-weight: 600; color: var(--ink); }
+.foot-email { font-size: 0.7rem; color: var(--ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot-logout {
+  color: var(--ink-mute); padding: 0.3rem; border-radius: 4px;
+}
+.foot-logout:hover { background: var(--surface-3); color: var(--risk); }
+
+/* MAIN */
+.main {
+  min-width: 0;
+  display: flex; flex-direction: column;
+}
+.topbar {
+  height: 56px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 1.5rem; gap: 1rem;
+  position: sticky; top: 0; z-index: 50;
+}
+.topbar-title {
+  font-size: 1rem; font-weight: 700; letter-spacing: -0.01em;
+}
+.topbar-crumb { color: var(--ink-mute); font-size: 0.82rem; font-weight: 500; }
+.topbar-actions {
+  margin-left: auto; display: flex; align-items: center; gap: 0.5rem;
+}
+.tb-btn {
+  padding: 0.4rem 0.75rem; border: 1px solid var(--border);
+  background: var(--surface); border-radius: 5px; font-size: 0.78rem;
+  font-weight: 600; color: var(--ink-2); display: flex; align-items: center; gap: 0.35rem;
+  transition: all 0.12s;
+}
+.tb-btn:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.tb-btn.primary {
+  background: var(--ink); color: white; border-color: var(--ink);
+}
+.tb-btn.primary:hover { background: var(--ink-2); border-color: var(--ink-2); }
+.tb-btn svg { width: 13px; height: 13px; }
+.tb-status {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.72rem; color: var(--verified); font-weight: 600;
+  padding: 0.3rem 0.6rem; background: var(--verified-so); border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+.tb-status::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--verified); box-shadow: 0 0 0 3px rgba(15,122,74,0.15);
+  animation: livePulse 2s infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.workspace {
+  padding: 1.5rem;
+  flex: 1;
+}
+.view { display: none; }
+.view.active { display: block; }
+.view-header { margin-bottom: 1.25rem; }
+.view-title {
+  font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.2rem;
+}
+.view-sub { color: var(--ink-mute); font-size: 0.88rem; }
+
+/* KPI GRID */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.1rem 1.15rem;
+  position: relative; overflow: hidden;
+}
+.kpi-label {
+  font-size: 0.7rem; color: var(--ink-mute); letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 600; margin-bottom: 0.5rem;
+  display: flex; align-items: center; gap: 0.3rem;
+}
+.kpi-value {
+  font-family: var(--mono); font-size: 1.55rem; font-weight: 700;
+  letter-spacing: -0.02em; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.kpi-delta {
+  margin-top: 0.4rem; font-size: 0.75rem; color: var(--ink-mute);
+  display: flex; align-items: center; gap: 0.25rem;
+}
+.kpi-delta.up { color: var(--verified); }
+.kpi-delta.down { color: var(--risk); }
+.kpi-delta strong { font-weight: 700; font-family: var(--mono); }
+.kpi-mini {
+  position: absolute; right: 0.9rem; top: 0.9rem;
+  width: 28px; height: 28px; border-radius: 6px;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--ink-mute);
+}
+.kpi-mini svg { width: 15px; height: 15px; }
+.kpi.hero {
+  background: linear-gradient(135deg, var(--ink) 0%, var(--ink-2) 100%);
+  color: white; border-color: transparent;
+  grid-column: span 2;
+}
+.kpi.hero .kpi-label { color: rgba(255,255,255,0.7); }
+.kpi.hero .kpi-value { color: white; font-size: 2rem; }
+.kpi.hero .kpi-mini { background: rgba(255,255,255,0.1); color: white; }
+
+/* AUDIT VULNERABILITY */
+.avs-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.2rem 1.3rem; margin-bottom: 1.5rem;
+  display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem;
+  align-items: center;
+}
+.avs-gauge {
+  position: relative; width: 200px; height: 120px;
+  margin: 0 auto;
+}
+.avs-gauge svg { width: 100%; height: 100%; }
+.avs-track { fill: none; stroke: var(--surface-3); stroke-width: 14; }
+.avs-fill { fill: none; stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset 1s ease-out; }
+.avs-score {
+  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  text-align: center;
+}
+.avs-num {
+  font-family: var(--mono); font-size: 2.2rem; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1;
+}
+.avs-unit { color: var(--ink-mute); font-size: 0.75rem; font-weight: 600; }
+.avs-status {
+  text-align: center; font-size: 0.72rem; letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 700; margin-top: 0.4rem;
+}
+.avs-content h3 {
+  font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.avs-content p {
+  color: var(--ink-mute); font-size: 0.85rem; line-height: 1.55;
+  margin-bottom: 0.85rem;
+}
+.avs-flags {
+  display: flex; flex-wrap: wrap; gap: 0.4rem;
+}
+.avs-flag {
+  font-size: 0.72rem; padding: 0.25rem 0.55rem; border-radius: 4px;
+  background: var(--surface-3); color: var(--ink-2); font-weight: 500;
+  display: flex; align-items: center; gap: 0.3rem;
+  border: 1px solid var(--border);
+}
+.avs-flag.warn { background: var(--pending-so); color: var(--pending); border-color: transparent; }
+.avs-flag.ok { background: var(--verified-so); color: var(--verified); border-color: transparent; }
+.avs-flag svg { width: 10px; height: 10px; }
+
+/* SPLIT LAYOUT */
+.split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.split.equal { grid-template-columns: 1fr 1fr; }
+
+/* CARD */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.card-head {
+  padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.75rem;
+}
+.card-head h3 {
+  font-size: 0.95rem; font-weight: 700; letter-spacing: -0.01em;
+  flex: 1;
+}
+.card-head .card-sub {
+  font-size: 0.75rem; color: var(--ink-mute); margin-top: 0.15rem;
+  font-weight: 500;
+}
+.card-head-actions { display: flex; gap: 0.4rem; }
+.card-mini-btn {
+  padding: 0.25rem 0.6rem; font-size: 0.72rem; font-weight: 600;
+  color: var(--ink-mute); border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.card-mini-btn:hover { color: var(--ink); border-color: var(--border-strong); }
+.card-mini-btn.active { background: var(--ink); color: white; border-color: var(--ink); }
+.card-body { padding: 1.1rem 1.15rem; }
+.card-body.tight { padding: 0; }
+
+/* PRIORITY ACTION STREAM */
+.stream {
+  display: flex; flex-direction: column;
+}
+.stream-row {
+  padding: 0.85rem 1.15rem; border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto;
+  gap: 0.85rem; align-items: center;
+  transition: background 0.12s;
+  cursor: pointer;
+}
+.stream-row.compact { grid-template-columns: 32px 1fr; }
+.stream-row:last-child { border-bottom: none; }
+.stream-row:hover { background: var(--surface-2); }
+.stream-num {
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+  color: var(--ink-dim); text-align: center;
+}
+.stream-body { min-width: 0; }
+.stream-title {
+  font-size: 0.87rem; font-weight: 600; color: var(--ink);
+  margin-bottom: 0.15rem; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stream-meta {
+  font-size: 0.75rem; color: var(--ink-mute);
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.stream-meta strong {
+  font-family: var(--mono); color: var(--ink-2); font-weight: 600;
+}
+.stream-amount {
+  font-family: var(--mono); font-size: 0.88rem; font-weight: 700;
+  color: var(--ink); text-align: right; font-variant-numeric: tabular-nums;
+}
+.stream-actions {
+  display: flex; gap: 0.35rem;
+}
+.stream-btn {
+  padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 600;
+  border-radius: 4px; border: 1px solid var(--border);
+  color: var(--ink-2); transition: all 0.12s;
+}
+.stream-btn:hover { border-color: var(--border-strong); }
+.stream-btn.primary {
+  background: var(--ink); color: white; border-color: var(--ink);
+}
+.stream-btn.primary:hover { background: var(--ink-2); }
+
+/* CONFIDENCE TIER PILLS */
+.pill {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.7rem;
+  font-weight: 600; letter-spacing: 0.02em;
+}
+.pill svg { width: 10px; height: 10px; }
+.pill.verified { background: var(--verified-so); color: var(--verified); }
+.pill.matched  { background: var(--matched-so);  color: var(--matched); }
+.pill.pending  { background: var(--pending-so);  color: var(--pending); }
+.pill.risk     { background: var(--risk-so);     color: var(--risk); }
+.pill.neutral  { background: var(--surface-3);   color: var(--ink-mute); }
+
+/* CASH FLOW / CHART */
+.chart {
+  width: 100%; height: 200px;
+}
+.chart-legend {
+  display: flex; gap: 1rem; padding: 0 1.15rem 0.75rem;
+  font-size: 0.72rem; color: var(--ink-mute); flex-wrap: wrap;
+}
+.chart-legend > div { display: flex; align-items: center; gap: 0.35rem; }
+.chart-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
+
+/* DATA TABLE */
+.data-table {
+  width: 100%; border-collapse: collapse; font-size: 0.83rem;
+  font-variant-numeric: tabular-nums;
+}
+.data-table thead th {
+  text-align: left; padding: 0.65rem 1.15rem;
+  font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+  font-weight: 700; color: var(--ink-mute);
+  background: var(--surface-2); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0;
+}
+.data-table thead th.num { text-align: right; }
+.data-table tbody td {
+  padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--surface-2); }
+.data-table td.num, .data-table td.mono {
+  font-family: var(--mono); text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.data-table td.pos { color: var(--verified); font-weight: 600; }
+.data-table td.neg { color: var(--risk); font-weight: 600; }
+.data-table .row-desc {
+  font-weight: 600; color: var(--ink);
+}
+.data-table .row-hint {
+  font-size: 0.72rem; color: var(--ink-mute); margin-top: 0.15rem;
+  display: flex; align-items: center; gap: 0.3rem;
+}
+.data-table .origin-link {
+  color: var(--accent); font-size: 0.72rem; font-weight: 600;
+  padding: 0.15rem 0; display: inline-flex; align-items: center; gap: 0.25rem;
+  cursor: pointer;
+}
+.data-table .origin-link:hover { text-decoration: underline; }
+
+.tbl-toolbar {
+  padding: 0.75rem 1.15rem; display: flex; align-items: center; gap: 0.6rem;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.tbl-search {
+  flex: 1; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 5px; padding: 0.4rem 0.7rem; font-size: 0.8rem;
+  outline: none;
+}
+.tbl-search:focus { border-color: var(--accent); }
+.tbl-filter {
+  padding: 0.35rem 0.65rem; font-size: 0.78rem; font-weight: 600;
+  border-radius: 5px; border: 1px solid var(--border);
+  color: var(--ink-mute); background: var(--surface);
+}
+.tbl-filter.active { background: var(--ink); color: white; border-color: var(--ink); }
+.tbl-filter:hover:not(.active) { color: var(--ink); }
+
+/* JOURNAL ENTRY (DOUBLE-ENTRY) */
+.je-entry {
+  border-bottom: 1px solid var(--border); padding: 0.9rem 1.15rem;
+}
+.je-entry:last-child { border-bottom: none; }
+.je-head {
+  display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem;
+}
+.je-date {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--ink-mute);
+  font-weight: 600;
+}
+.je-desc { flex: 1; font-size: 0.87rem; font-weight: 600; }
+.je-lines {
+  display: grid; grid-template-columns: 200px 1fr auto auto; gap: 0.5rem 1rem;
+  font-size: 0.8rem; align-items: baseline;
+}
+.je-lines .acct { color: var(--ink-2); font-weight: 500; padding-left: 0.5rem; }
+.je-lines .type {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--ink-mute);
+  font-weight: 600; text-transform: uppercase;
+}
+.je-lines .dr, .je-lines .cr {
+  font-family: var(--mono); font-weight: 600;
+  text-align: right; font-variant-numeric: tabular-nums;
+  min-width: 100px;
+}
+.je-lines .dr { color: var(--ink); }
+.je-lines .cr { color: var(--ink); }
+.je-lines .empty { color: var(--ink-dim); }
+.je-verify {
+  margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border);
+  font-size: 0.72rem; color: var(--verified); font-weight: 600;
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.je-verify svg { width: 12px; height: 12px; flex-shrink: 0; }
+.icon-inline { width: 13px; height: 13px; flex-shrink: 0; display: inline-block; vertical-align: -2px; }
+.icon-inline svg { width: 100%; height: 100%; display: block; }
+.origin-link svg { width: 11px; height: 11px; flex-shrink: 0; }
+.dr-meta svg { width: 11px; height: 11px; flex-shrink: 0; }
+.persist-card h3 svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--verified); }
+.data-table svg { width: 11px; height: 11px; flex-shrink: 0; display: inline-block; vertical-align: -1px; }
+
+/* TAX / FORM SECTION */
+.tax-scoreboard {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.25rem;
+}
+.tax-tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.1rem;
+}
+.tax-tile-label {
+  font-size: 0.72rem; color: var(--ink-mute); letter-spacing: 0.06em;
+  font-weight: 600; text-transform: uppercase; margin-bottom: 0.35rem;
+}
+.tax-tile-val {
+  font-family: var(--mono); font-size: 1.5rem; font-weight: 700;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.tax-tile-note { color: var(--ink-mute); font-size: 0.75rem; margin-top: 0.35rem; }
+
+.deduction {
+  padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr auto auto; gap: 1rem;
+  align-items: center;
+}
+.deduction:last-child { border-bottom: none; }
+.deduction-title {
+  font-weight: 600; font-size: 0.87rem; margin-bottom: 0.2rem;
+}
+.deduction-desc {
+  font-size: 0.76rem; color: var(--ink-mute);
+}
+.deduction-amt {
+  font-family: var(--mono); font-weight: 700; font-size: 0.95rem;
+  color: var(--verified);
+}
+.deduction-cite {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--ink-mute);
+  background: var(--surface-3); padding: 0.15rem 0.4rem; border-radius: 3px;
+  font-weight: 600;
+}
+
+/* PROGRESS BAR */
+.pbar {
+  height: 6px; background: var(--surface-3); border-radius: 3px;
+  overflow: hidden; margin-top: 0.4rem;
+}
+.pbar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.5s; }
+.pbar-fill.verified { background: var(--verified); }
+.pbar-fill.pending  { background: var(--pending); }
+.pbar-fill.risk     { background: var(--risk); }
+
+/* FIXED ASSETS SCHEDULE */
+.asset-row {
+  display: grid;
+  grid-template-columns: 1.5fr 0.8fr 0.8fr 0.8fr 1fr;
+  gap: 0.75rem; padding: 0.8rem 1.15rem;
+  border-bottom: 1px solid var(--border); font-size: 0.82rem;
+  align-items: center;
+}
+.asset-row.head {
+  font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-mute); font-weight: 700; background: var(--surface-2);
+}
+.asset-row .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.asset-name { font-weight: 600; }
+.asset-cite { font-size: 0.7rem; color: var(--ink-mute); }
+
+/* MODAL */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(11,18,32,0.55);
+  z-index: 400; display: none; align-items: center; justify-content: center;
+  padding: 2rem; backdrop-filter: blur(4px);
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--surface); border-radius: 10px;
+  width: 100%; max-width: 620px; max-height: 85vh; overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+.modal-head {
+  padding: 1.15rem 1.4rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+}
+.modal-head h3 { flex: 1; font-size: 1.05rem; font-weight: 700; }
+.modal-close {
+  color: var(--ink-mute); padding: 0.35rem; border-radius: 4px;
+  width: 30px; height: 30px; display: grid; place-items: center;
+}
+.modal-close:hover { background: var(--surface-3); color: var(--ink); }
+.modal-body { padding: 1.4rem; }
+.modal-foot {
+  padding: 1rem 1.4rem; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 0.5rem;
+}
+
+/* Computation origin trail */
+.origin-panel { }
+.origin-formula {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.9rem; font-family: var(--mono);
+  font-size: 0.85rem; margin-bottom: 1rem; line-height: 1.7;
+}
+.origin-formula strong { color: var(--accent); font-weight: 700; }
+.origin-trail-title {
+  font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-mute); font-weight: 700; margin-bottom: 0.5rem;
+}
+.origin-tx {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem;
+  padding: 0.55rem 0; border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+.origin-tx:last-child { border-bottom: none; }
+.origin-tx .d { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-mute); }
+.origin-tx .desc { font-weight: 500; }
+.origin-tx .amt { font-family: var(--mono); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* PRINT-READY IRS FORM */
+.print-form {
+  background: #ffffff;
+  color: #000000;
+  padding: 3rem 2.5rem;
+  max-width: 900px; margin: 0 auto;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  font-family: 'Times New Roman', Times, serif;
+}
+.print-form-head {
+  border-bottom: 2px solid #000000;
+  padding-bottom: 1rem; margin-bottom: 1.5rem;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: end;
+}
+.print-form-head-l h1 {
+  font-family: 'Times New Roman', serif;
+  font-size: 1.5rem; font-weight: 700; color: #000000;
+  letter-spacing: -0.01em; margin-bottom: 0.15rem;
+}
+.print-form-head-l p { font-size: 0.85rem; color: #000000; }
+.print-form-head-c {
+  text-align: center; font-family: var(--mono);
+  font-size: 0.7rem; letter-spacing: 0.08em; color: #333333;
+}
+.print-form-head-r {
+  text-align: right; font-size: 0.78rem; color: #000000;
+}
+.print-form-head-r strong { display: block; font-weight: 700; font-size: 0.85rem; }
+
+.pf-section {
+  margin-bottom: 1.5rem;
+}
+.pf-sec-label {
+  background: #000000; color: #ffffff;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; margin-bottom: 0.5rem;
+}
+.pf-line {
+  display: grid;
+  grid-template-columns: 40px 1fr 130px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem; align-items: baseline;
+  border-bottom: 1px solid #cccccc;
+}
+.pf-line:nth-child(even) { background: #f7f7f7; }
+.pf-line-num {
+  font-family: var(--mono); font-weight: 700; color: #000000; font-size: 0.8rem;
+}
+.pf-line-desc { color: #000000; padding-right: 1rem; }
+.pf-line-desc.sub { padding-left: 1.5rem; color: #333333; font-size: 0.8rem; }
+.pf-line-amt {
+  text-align: right; font-family: var(--mono); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #000000; font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: visible;
+}
+.pf-line.total {
+  background: #eeeeee !important;
+  border-top: 2px solid #000000;
+  border-bottom: 2px solid #000000;
+  font-weight: 700;
+}
+.pf-line.total .pf-line-desc, .pf-line.total .pf-line-amt { font-weight: 700; }
+.pf-sig {
+  margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #000000;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;
+  font-size: 0.78rem; color: #000000;
+}
+.pf-sig-line {
+  border-bottom: 1px solid #000000; height: 32px; margin-bottom: 0.25rem;
+  font-family: var(--mono); font-size: 0.85rem; padding-bottom: 0.15rem;
+  color: #000000; display: flex; align-items: flex-end;
+}
+.pf-sig-lbl { font-size: 0.68rem; letter-spacing: 0.06em; color: #333333; text-transform: uppercase; }
+.pf-foot {
+  margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid #cccccc;
+  font-size: 0.68rem; color: #333333;
+  display: flex; justify-content: space-between;
+}
+
+.print-toolbar {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.7rem 1rem;
+  display: flex; align-items: center; gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.print-toolbar > .label {
+  font-size: 0.75rem; color: var(--ink-mute); font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.print-toolbar select {
+  padding: 0.35rem 0.55rem; font-size: 0.8rem;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); font-weight: 600; outline: none;
+}
+.print-toolbar select:focus { border-color: var(--accent); }
+.print-toolbar .print-toolbar-spacer { flex: 1; }
+
+/* PAYROLL */
+.payroll-list { }
+.payroll-row {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr;
+  gap: 0.5rem; padding: 0.8rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem; align-items: center;
+}
+.payroll-row.head {
+  font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-mute); font-weight: 700; background: var(--surface-2);
+}
+.payroll-row .mono { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.emp-name { font-weight: 600; }
+.emp-role { font-size: 0.72rem; color: var(--ink-mute); }
+
+/* DATAROOM */
+.dr-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+}
+.dr-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.15rem;
+  transition: all 0.15s;
+}
+.dr-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.dr-icon {
+  width: 32px; height: 32px; border-radius: 6px;
+  background: var(--surface-3); color: var(--ink-mute);
+  display: grid; place-items: center; margin-bottom: 0.75rem;
+}
+.dr-icon svg { width: 16px; height: 16px; }
+.dr-title { font-weight: 700; font-size: 0.92rem; margin-bottom: 0.25rem; }
+.dr-desc { font-size: 0.78rem; color: var(--ink-mute); line-height: 1.5; margin-bottom: 0.75rem; }
+.dr-meta {
+  font-size: 0.7rem; color: var(--ink-mute); font-family: var(--mono);
+  padding-top: 0.75rem; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.dr-meta strong { color: var(--verified); font-weight: 700; }
+
+/* PERSISTENCE PANEL */
+.persist-panel {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+}
+.persist-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.5rem;
+}
+.persist-card h3 {
+  font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.persist-card p {
+  color: var(--ink-mute); font-size: 0.85rem; line-height: 1.55;
+  margin-bottom: 1.2rem;
+}
+.dropzone {
+  border: 2px dashed var(--border-strong); border-radius: 8px;
+  padding: 2rem 1.5rem; text-align: center;
+  background: var(--surface-2); transition: all 0.15s; cursor: pointer;
+}
+.dropzone:hover, .dropzone.hover {
+  border-color: var(--accent); background: var(--accent-so);
+}
+.dropzone-icon {
+  width: 42px; height: 42px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  display: grid; place-items: center; margin: 0 auto 0.75rem;
+  color: var(--ink-mute);
+}
+.dropzone-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.2rem; }
+.dropzone-sub { font-size: 0.78rem; color: var(--ink-mute); }
+.persist-btn {
+  width: 100%; background: var(--accent); color: white; border-radius: 6px;
+  padding: 0.85rem 1rem; font-weight: 700; font-size: 0.88rem;
+  transition: background 0.12s; display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+}
+.persist-btn:hover { background: var(--accent-dk); }
+.persist-btn svg { width: 14px; height: 14px; }
+.persist-btn.secondary {
+  background: var(--ink); color: white;
+}
+.persist-btn.secondary:hover { background: var(--ink-2); }
+
+.banner {
+  padding: 0.85rem 1.15rem; border-radius: 6px;
+  margin-bottom: 1rem; font-size: 0.85rem; font-weight: 500;
+  display: flex; align-items: center; gap: 0.5rem;
+  border: 1px solid;
+}
+.banner.success { background: var(--verified-so); color: var(--verified); border-color: rgba(15,122,74,0.2); }
+.banner.error { background: var(--risk-so); color: var(--risk); border-color: rgba(176,35,35,0.2); }
+.banner svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+/* ONBOARDING WIZARD (post-signup) */
+.wizard {
+  max-width: 720px; margin: 3rem auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.wizard-head {
+  padding: 1.5rem 2rem; border-bottom: 1px solid var(--border);
+  background: linear-gradient(to bottom, var(--surface) 0%, var(--surface-2) 100%);
+}
+.wizard-title { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.25rem; }
+.wizard-sub { font-size: 0.85rem; color: var(--ink-mute); }
+.wizard-steps {
+  display: flex; margin-top: 1.15rem; gap: 0.5rem;
+}
+.wizard-dot {
+  flex: 1; height: 5px; background: var(--surface-3);
+  border-radius: 3px; transition: background 0.3s;
+}
+.wizard-dot.active { background: var(--accent); }
+.wizard-dot.done { background: var(--verified); }
+.wizard-body { padding: 2rem; }
+.wizard-body h3 {
+  font-size: 1.05rem; font-weight: 700; margin-bottom: 0.35rem;
+}
+.wizard-body p { color: var(--ink-mute); font-size: 0.88rem; margin-bottom: 1.5rem; }
+.wizard-choices {
+  display: grid; gap: 0.6rem;
+}
+.wiz-choice {
+  padding: 1rem; border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; transition: all 0.15s; display: flex; gap: 0.75rem;
+  align-items: center; background: var(--surface);
+  text-align: left;
+}
+.wiz-choice:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.wiz-choice.picked { border-color: var(--accent); background: var(--accent-so); }
+.wiz-choice-icon {
+  width: 36px; height: 36px; border-radius: 6px;
+  background: var(--surface-3); color: var(--ink-mute);
+  display: grid; place-items: center; flex-shrink: 0;
+}
+.wiz-choice.picked .wiz-choice-icon { background: var(--accent); color: white; }
+.wiz-choice-icon svg { width: 18px; height: 18px; }
+.wiz-choice-body { flex: 1; }
+.wiz-choice-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.15rem; }
+.wiz-choice-desc { font-size: 0.78rem; color: var(--ink-mute); }
+.wizard-foot {
+  padding: 1.15rem 2rem; border-top: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface-2);
+}
+.wizard-timing {
+  font-size: 0.78rem; color: var(--ink-mute);
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.wizard-nav { display: flex; gap: 0.5rem; }
+.wiz-btn {
+  padding: 0.55rem 1.1rem; border-radius: 5px; font-weight: 600; font-size: 0.85rem;
+  transition: all 0.12s;
+}
+.wiz-btn.ghost { color: var(--ink-mute); }
+.wiz-btn.ghost:hover { color: var(--ink); }
+.wiz-btn.primary { background: var(--ink); color: white; }
+.wiz-btn.primary:hover { background: var(--ink-2); }
+
+/* ROI CALCULATOR */
+.roi {
+  background: linear-gradient(135deg, #0b1220 0%, #1e2938 100%);
+  border-radius: 10px; padding: 1.5rem 1.75rem; color: white;
+  margin-bottom: 1.5rem;
+}
+.roi-label {
+  font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255,255,255,0.65); font-weight: 700; margin-bottom: 0.4rem;
+}
+.roi-headline {
+  font-size: 1.65rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25;
+  margin-bottom: 1rem;
+}
+.roi-headline strong { color: #6be2a3; font-family: var(--mono); font-weight: 700; }
+.roi-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.15);
+}
+.roi-tile-label {
+  font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); margin-bottom: 0.35rem; font-weight: 600;
+}
+.roi-tile-val {
+  font-family: var(--mono); font-size: 1.15rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.roi-tile-note { font-size: 0.7rem; color: rgba(255,255,255,0.5); margin-top: 0.2rem; }
+
+/* RESPONSIVE */
+@media (max-width: 1024px) {
+  .shell { grid-template-columns: 200px 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .kpi.hero { grid-column: span 2; }
+  .split { grid-template-columns: 1fr; }
+  .tax-scoreboard { grid-template-columns: repeat(2, 1fr); }
+  .dr-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; left: -240px; z-index: 300; width: 240px; transition: left 0.2s; }
+  .sidebar.open { left: 0; }
+  .kpi-grid { grid-template-columns: 1fr; }
+  .kpi.hero { grid-column: span 1; }
+  .tax-scoreboard { grid-template-columns: 1fr; }
+  .dr-grid { grid-template-columns: 1fr; }
+  .persist-panel { grid-template-columns: 1fr; }
+  .stream-row { grid-template-columns: 24px 1fr; gap: 0.5rem; }
+  .stream-amount, .stream-actions { grid-column: 1 / -1; padding-left: 32px; margin-top: 0.35rem; }
+  .stream-amount { text-align: left; }
+  .workspace { padding: 1rem; }
+  .topbar { padding: 0 1rem; }
+  .topbar .tb-status { display: none; }
+  .avs-panel { grid-template-columns: 1fr; }
+  .je-lines { grid-template-columns: 1fr; }
+  .print-form { padding: 1.5rem 1rem; }
+  .pf-line { grid-template-columns: 30px 1fr 100px; }
+  .pf-line-amt { font-size: 0.75rem; }
+}
+
+/* PRINT MEDIA */
+@media print {
+  body { background: white; }
+  .sidebar, .topbar, .print-toolbar, #gate { display: none !important; }
+  .shell { display: block; }
+  .workspace { padding: 0; }
+  .print-form { box-shadow: none; border: none; padding: 0; max-width: 100%; }
+  .view:not(.active) { display: none; }
+}
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN / GATE ================= -->
+<div id="gate">
+  <div class="gate-card">
+    <div class="gate-mark">
+      <div class="gate-logo-glyph"></div>
+      <div class="gate-logo-word">LedgerZero <span>/ Fiscal Command</span></div>
+    </div>
+    <h1 class="gate-title" id="gateTitle">Welcome back</h1>
+    <p class="gate-sub" id="gateSub">Sign in to your autonomous ledger. SOC 2 Type II. 256-bit AES at rest.</p>
+
+    <div id="gateSignIn">
+      <div class="gate-field">
+        <label>Corporate Email</label>
+        <input type="email" id="signinEmail" placeholder="you@company.com" autocomplete="email" value="cfo@northwind.co">
+      </div>
+      <div class="gate-field">
+        <label>Password</label>
+        <input type="password" id="signinPass" placeholder="Enter your secure passphrase" autocomplete="current-password" value="••••••••••••">
+      </div>
+      <button class="gate-btn" id="signinBtn">Enter Command Center</button>
+      <div class="gate-alt">First time here? <button id="switchSignup">Create a company workspace</button></div>
+    </div>
+
+    <div id="gateSignUp" class="hidden">
+      <div class="gate-field">
+        <label>Company Legal Name</label>
+        <input type="text" id="signupCo" placeholder="Northwind Robotics, Inc." value="Northwind Robotics, Inc.">
+      </div>
+      <div class="gate-field">
+        <label>Federal EIN</label>
+        <input type="text" id="signupEIN" placeholder="XX-XXXXXXX" value="87-3421918">
+      </div>
+      <div class="gate-field">
+        <label>Entity Structure</label>
+        <select id="signupEntity">
+          <option value="1120">C-Corp (Form 1120)</option>
+          <option value="1120-S" selected>S-Corp (Form 1120-S)</option>
+          <option value="1065">Partnership (Form 1065)</option>
+          <option value="Sch-C">Sole Prop (Schedule C)</option>
+        </select>
+      </div>
+      <div class="gate-field">
+        <label>Primary Contact Email</label>
+        <input type="email" id="signupEmail" placeholder="you@company.com" value="cfo@northwind.co">
+      </div>
+      <button class="gate-btn" id="signupBtn">Provision Workspace &amp; Continue</button>
+      <div class="gate-alt">Already have access? <button id="switchSignin">Sign in instead</button></div>
+    </div>
+
+    <div class="gate-trust">
+      <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5l-9-4z"/></svg> SOC 2 Type II</span>
+      <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5l-9-4z"/></svg> AES-256</span>
+      <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5l-9-4z"/></svg> IRS e-file Auth</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ONBOARDING WIZARD ================= -->
+<div id="wizardShell" class="hidden">
+  <div class="wizard">
+    <div class="wizard-head">
+      <div class="wizard-title" id="wizTitle">Provision Northwind Robotics, Inc.</div>
+      <div class="wizard-sub" id="wizSub">Under 5 minutes to a fully reconciled ledger.</div>
+      <div class="wizard-steps">
+        <div class="wizard-dot active" data-step="0"></div>
+        <div class="wizard-dot" data-step="1"></div>
+        <div class="wizard-dot" data-step="2"></div>
+        <div class="wizard-dot" data-step="3"></div>
+      </div>
+    </div>
+    <div class="wizard-body" id="wizardBody"></div>
+    <div class="wizard-foot">
+      <div class="wizard-timing">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <span id="wizTiming">Est. 4 min 12 sec remaining</span>
+      </div>
+      <div class="wizard-nav">
+        <button class="wiz-btn ghost" id="wizBack">Back</button>
+        <button class="wiz-btn primary" id="wizNext">Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app">
+  <div class="shell">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-glyph"></div>
+        <div class="brand-name">LedgerZero <span>v3.1</span></div>
+      </div>
+      <div class="sidebar-entity">
+        <div class="entity-label">Active Entity</div>
+        <select class="entity-select" id="entitySelect">
+          <option value="northwind">Northwind Robotics, Inc. · S-Corp</option>
+          <option value="northwind-labs">Northwind Labs LLC · Partnership</option>
+          <option value="northwind-holdings">Northwind Holdings LP · 1065</option>
+        </select>
+      </div>
+      <nav class="nav" id="nav">
+        <div class="nav-group">
+          <div class="nav-group-label">Command</div>
+          <button class="nav-item active" data-view="dashboard">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            Command Center
+          </button>
+          <button class="nav-item" data-view="stream">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+            Priority Stream
+            <span class="nav-count alert" id="streamCount">10</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Ledger</div>
+          <button class="nav-item" data-view="ledger">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v14l-4-2-4 2-4-2-4 2z"/><path d="M8 8h8M8 12h5"/></svg>
+            Journal Entries
+          </button>
+          <button class="nav-item" data-view="statements">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>
+            Financial Statements
+          </button>
+          <button class="nav-item" data-view="assets">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="13" rx="1"/><path d="M3 12h18M8 8V5a2 2 0 012-2h4a2 2 0 012 2v3"/></svg>
+            Fixed Assets
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Tax &amp; Compliance</div>
+          <button class="nav-item" data-view="tax">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Tax Optimization
+          </button>
+          <button class="nav-item" data-view="audit">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            Audit Shield
+          </button>
+          <button class="nav-item" data-view="forms">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z"/><path d="M15 2v5h5"/></svg>
+            IRS Forms
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Operations</div>
+          <button class="nav-item" data-view="payroll">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+            Payroll
+          </button>
+          <button class="nav-item" data-view="dataroom">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
+            M&amp;A Data Room
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">System</div>
+          <button class="nav-item" data-view="persistence">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+            Backup &amp; Restore
+          </button>
+        </div>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="foot-avatar" id="footAvatar">CB</div>
+        <div class="foot-user">
+          <div class="foot-name" id="footName">CFO Console</div>
+          <div class="foot-email" id="footEmail">cfo@northwind.co</div>
+        </div>
+        <button class="foot-logout" id="logoutBtn" title="Lock workspace">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title" id="tbTitle">Command Center</div>
+          <div class="topbar-crumb" id="tbCrumb">Q4 2026 · Live ledger stream</div>
+        </div>
+        <div class="topbar-actions">
+          <div class="tb-status">LIVE · Plaid Sync 00:00:12</div>
+          <button class="tb-btn" id="tbBackup">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+            Download Progress (.json)
+          </button>
+          <button class="tb-btn primary" id="tbAction">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Journal Entry
+          </button>
+        </div>
+      </div>
+
+      <div class="workspace" id="workspace">
+        <!-- Views injected here -->
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= MODAL ================= -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Details</h3>
+      <button class="modal-close" id="modalClose">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+
+<script>
+/* =====================================================================
+   LEDGERZERO — Autonomous Fiscal Command Platform
+   Single-file demo (client-side state). All persistence via localStorage
+   + JSON export/import per spec §IV.
+===================================================================== */
+
+const SCHEMA_VERSION = "3.1.0";
+const LS_KEY = "ledgerzero.state.v3";
+
+/* -------------------- Money helpers (integer cents to avoid FP drift) -------------------- */
+const cents = (dollars) => Math.round(dollars * 100);
+const fromCents = (c) => c / 100;
+const fmtUSD = (c, opts = {}) => {
+  const n = typeof c === 'number' ? fromCents(c) : Number(c);
+  const s = n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return opts.noSign && n < 0 ? '(' + s.replace('-', '') + ')' : s;
+};
+const fmtCompact = (c) => {
+  const n = typeof c === 'number' ? fromCents(c) : Number(c);
+  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+  return fmtUSD(c);
+};
+const fmtPct = (n, d=1) => (n * 100).toFixed(d) + '%';
+const todayISO = () => new Date().toISOString().slice(0,10);
+
+/* -------------------- Seed / demo dataset -------------------- */
+function seedState() {
+  return {
+    schema: SCHEMA_VERSION,
+    savedAt: new Date().toISOString(),
+    user: {
+      email: "cfo@northwind.co",
+      role: "CFO Console",
+      initials: "CB"
+    },
+    activeEntity: "northwind",
+    entities: {
+      northwind: {
+        legal: "Northwind Robotics, Inc.",
+        ein: "87-3421918",
+        structure: "1120-S",
+        state: "DE",
+        fiscalYearEnd: "12-31"
+      },
+      "northwind-labs": {
+        legal: "Northwind Labs LLC",
+        ein: "92-1145029",
+        structure: "1065",
+        state: "CA",
+        fiscalYearEnd: "12-31"
+      },
+      "northwind-holdings": {
+        legal: "Northwind Holdings LP",
+        ein: "94-3388220",
+        structure: "1065",
+        state: "DE",
+        fiscalYearEnd: "12-31"
+      }
+    },
+    period: { year: 2026, quarter: 4 },
+    kpi: {
+      cashOnHand:      cents(4_186_722.44),
+      mrr:             cents(412_500.00),
+      burnRate:        cents(287_400.00),   // per month
+      runwayMonths:    14.6,
+      grossMargin:     0.72,
+      netMarginYTD:    0.183,
+      workingCapital:  cents(2_942_118.30),
+      ebitdaTTM:       cents(2_211_500.00),
+      cacToLtv:        4.7,
+      revenueYTD:      cents(11_820_400.00),
+      cogsYTD:         cents(3_312_600.00),
+      opexYTD:         cents(6_346_800.00)
+    },
+    audit: {
+      score: 12,          // 0-100, LOWER is better (vulnerability)
+      lastRun: "2026-07-12T09:14:22Z",
+      flags: [
+        { level: "ok",   label: "3-way reconciliation locked (bank / GL / receipts)" },
+        { level: "ok",   label: "R&D credit substantiation vectors verified" },
+        { level: "warn", label: "2 unlinked receipts > $10,000 pending" },
+        { level: "ok",   label: "Payroll withholding matched to state SUI rates" },
+        { level: "warn", label: "1 vendor without W-9 · payments YTD $23,400" }
+      ]
+    },
+    // 10-item Priority Action Stream (Rule §II.2)
+    stream: [
+      { id: "PA-0001", priority: 1, kind: "match-needed", title: "Match wire $128,400 · Zenith Ventures Series B tranche 3", meta: "Bank · 07-12 09:04 UTC", amount: cents(128_400), confidence: "pending", origin: "TX-98123" },
+      { id: "PA-0002", priority: 2, kind: "multi-state", title: "Classify sales tax nexus · Amazon Portland WA order", meta: "Multi-state · WA/OR ambiguous", amount: cents(4_820.15), confidence: "pending", origin: "TX-98087" },
+      { id: "PA-0003", priority: 3, kind: "receipt-gap", title: "Attach receipt · AWS invoice 2026-Q3 · $18,240 flagged", meta: "Cloud · missing PDF", amount: cents(18_240), confidence: "pending", origin: "TX-97984" },
+      { id: "PA-0004", priority: 4, kind: "irs-form", title: "1099-NEC threshold breached · Nakamura Design $612 over", meta: "Contractor · TIN on file", amount: cents(6_612), confidence: "matched", origin: "TX-97921" },
+      { id: "PA-0005", priority: 5, kind: "deduction", title: "R&D credit candidate · Sr. Engineer payroll allocation", meta: "§41 · 8 pay periods", amount: cents(142_800), confidence: "matched", origin: "TX-97814" },
+      { id: "PA-0006", priority: 6, kind: "duplicate", title: "Possible duplicate · Stripe payout ref 288f-42a1 (2x)", meta: "Bank · 07-11 · deltaHash=100%", amount: cents(9_402.11), confidence: "pending", origin: "TX-97740" },
+      { id: "PA-0007", priority: 7, kind: "recon", title: "Reconcile · Ramp corporate card statement · June", meta: "42 tx · 1 unmatched", amount: cents(41_918.44), confidence: "matched", origin: "TX-97621" },
+      { id: "PA-0008", priority: 8, kind: "fx", title: "FX gain unrealized · EUR receivable $88K · +2.1% MoM", meta: "Multi-currency · hedge open", amount: cents(1_848), confidence: "matched", origin: "TX-97490" },
+      { id: "PA-0009", priority: 9, kind: "sec179", title: "Section 179 election · Formlabs Fuse 1+ SLS printer", meta: "Fixed asset · $22,900 · in-service 07-01", amount: cents(22_900), confidence: "matched", origin: "TX-97388" },
+      { id: "PA-0010", priority: 10, kind: "review", title: "Quarterly estimated tax · Q3 · voucher prepared", meta: "Form 1120-W · pay by 09-15", amount: cents(184_600), confidence: "verified", origin: "TX-97221" }
+    ],
+    // Sample journal entries (double-entry)
+    journal: [
+      {
+        id: "JE-2026-1104",
+        date: "2026-07-11",
+        desc: "Series B tranche · Zenith Ventures wire receipt",
+        confidence: "verified",
+        lines: [
+          { account: "1010 · Operating Cash", type: "dr", amount: cents(128_400) },
+          { account: "3020 · Preferred Series B", type: "cr", amount: cents(128_400) }
+        ],
+        verifiedBy: "Plaid + Wire Ref 288f42a1"
+      },
+      {
+        id: "JE-2026-1103",
+        date: "2026-07-11",
+        desc: "Payroll run · 14 employees · gross + withholdings",
+        confidence: "verified",
+        lines: [
+          { account: "6100 · Salaries & Wages", type: "dr", amount: cents(184_212.00) },
+          { account: "6110 · Employer FICA",    type: "dr", amount: cents(14_092.22) },
+          { account: "2210 · Fed Withholding",  type: "cr", amount: cents(38_684.52) },
+          { account: "2220 · State Withholding", type: "cr", amount: cents(9_210.60) },
+          { account: "2230 · FICA Payable",     type: "cr", amount: cents(28_184.44) },
+          { account: "1010 · Operating Cash",   type: "cr", amount: cents(122_224.66) }
+        ],
+        verifiedBy: "Gusto payroll API · signature 0xa41b"
+      },
+      {
+        id: "JE-2026-1102",
+        date: "2026-07-10",
+        desc: "SaaS revenue recognition · June 2026 batch",
+        confidence: "verified",
+        lines: [
+          { account: "1210 · Deferred Revenue", type: "dr", amount: cents(412_500) },
+          { account: "4010 · Subscription Revenue", type: "cr", amount: cents(412_500) }
+        ],
+        verifiedBy: "Stripe reconciliation batch #1082"
+      },
+      {
+        id: "JE-2026-1101",
+        date: "2026-07-08",
+        desc: "AWS cloud infrastructure · Q3 pre-pay",
+        confidence: "matched",
+        lines: [
+          { account: "6420 · Cloud Infrastructure", type: "dr", amount: cents(18_240) },
+          { account: "1010 · Operating Cash",       type: "cr", amount: cents(18_240) }
+        ],
+        verifiedBy: "Vendor auto-match · confidence 94.2%"
+      },
+      {
+        id: "JE-2026-1100",
+        date: "2026-07-05",
+        desc: "Formlabs Fuse 1+ · SLS printer acquisition",
+        confidence: "matched",
+        lines: [
+          { account: "1520 · Manufacturing Equipment", type: "dr", amount: cents(22_900) },
+          { account: "2110 · Accounts Payable · Formlabs", type: "cr", amount: cents(22_900) }
+        ],
+        verifiedBy: "Purchase order PO-2026-778 · matched"
+      }
+    ],
+    // Tax posture (S-Corp scenario)
+    tax: {
+      form: "1120-S",
+      quarterlyEstimated: cents(184_600),
+      federalRate: 0.21,
+      stateRate: 0.087,  // DE composite
+      ytdIncomeSubjectToTax: cents(2_162_200),
+      currentTaxLiabilityAccrued: cents(487_460),
+      deductions: [
+        { title: "Section 179 Immediate Expensing · Manufacturing Equipment", amount: cents(224_900), cite: "IRC §179", confidence: "matched", desc: "Formlabs SLS · Universal Laser · Kuka arm · elected in-service 2026" },
+        { title: "R&D Credit · Engineering Payroll Allocation",              amount: cents(184_600), cite: "IRC §41",  confidence: "matched", desc: "8 qualified activities · 4 engineers · substantiation vector locked" },
+        { title: "QBI Deduction · Passthrough Income",                       amount: cents(432_440), cite: "IRC §199A", confidence: "verified", desc: "20% qualified business income deduction applied at shareholder K-1" },
+        { title: "Depreciation · MACRS 5-yr Property (accelerated)",         amount: cents(88_200),  cite: "IRC §168",  confidence: "verified", desc: "Bonus depreciation 60% for 2026 in-service assets" },
+        { title: "Health Insurance · Shareholder-Employee (>2%)",            amount: cents(24_600),  cite: "IRC §162(l)", confidence: "matched", desc: "Reported on W-2 Box 14 · deducted as wages" }
+      ]
+    },
+    // Fixed assets / MACRS
+    assets: [
+      { id: "FA-001", name: "Kuka KR 6 R900 Robotic Arm",    cost: cents(48_600), placed: "2025-03-14", life: 7, method: "MACRS-DDB", accumDep: cents(19_440), bookValue: cents(29_160) },
+      { id: "FA-002", name: "Universal Laser VLS3.60 Cutter", cost: cents(18_200), placed: "2025-06-22", life: 5, method: "MACRS-DDB", accumDep: cents(8_190),  bookValue: cents(10_010) },
+      { id: "FA-003", name: "Formlabs Fuse 1+ SLS Printer",   cost: cents(22_900), placed: "2026-07-01", life: 5, method: "§179 Immediate", accumDep: cents(22_900), bookValue: cents(0) },
+      { id: "FA-004", name: "Herman Miller Office Systems",   cost: cents(31_400), placed: "2024-11-10", life: 7, method: "MACRS-SL", accumDep: cents(11_235), bookValue: cents(20_165) },
+      { id: "FA-005", name: "US Patent 11,942,881 (Motion IP)", cost: cents(84_000), placed: "2025-01-05", life: 15, method: "SL Amortization", accumDep: cents(11_200), bookValue: cents(72_800) }
+    ],
+    // Payroll snapshot
+    payroll: [
+      { name: "Alexis Chen",     role: "VP Engineering",     gross: cents(19_500), federal: cents(4_680), state: cents(1_286), fica: cents(1_491) },
+      { name: "Marcus Okonkwo",  role: "Senior ML Engineer", gross: cents(15_800), federal: cents(3_792), state: cents(1_042), fica: cents(1_208) },
+      { name: "Priya Krishnan",  role: "Product Manager",    gross: cents(14_200), federal: cents(3_408), state: cents(937),   fica: cents(1_086) },
+      { name: "Sam Whitfield",   role: "Head of Sales",      gross: cents(18_600), federal: cents(4_464), state: cents(1_227), fica: cents(1_423) },
+      { name: "Nakamura Design", role: "Contractor (1099-NEC)", gross: cents(6_612), federal: cents(0), state: cents(0), fica: cents(0) }
+    ],
+    manualOverrides: [],
+    dropdownContext: null,
+    ui: { activeView: "dashboard" }
+  };
+}
+
+/* -------------------- State machine -------------------- */
+let state = null;
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (validateSchema(parsed)) return parsed;
+    }
+  } catch(e) { /* fallthrough */ }
+  return seedState();
+}
+function saveState() {
+  state.savedAt = new Date().toISOString();
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+}
+
+/* Schema validator for import (spec §IV.2) */
+function validateSchema(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  const requiredKeys = ['schema', 'savedAt', 'user', 'activeEntity', 'entities', 'kpi', 'audit', 'stream', 'journal', 'tax', 'assets', 'payroll'];
+  for (const k of requiredKeys) if (!(k in obj)) return false;
+  if (typeof obj.schema !== 'string') return false;
+  if (typeof obj.kpi !== 'object' || typeof obj.kpi.cashOnHand !== 'number') return false;
+  if (!Array.isArray(obj.stream) || !Array.isArray(obj.journal)) return false;
+  if (!Array.isArray(obj.assets) || !Array.isArray(obj.payroll)) return false;
+  const [major] = obj.schema.split('.');
+  const [seedMajor] = SCHEMA_VERSION.split('.');
+  if (major !== seedMajor) return false;
+  return true;
+}
+
+/* -------------------- Icons -------------------- */
+const ICON = {
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+  lock:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="1"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>',
+  warn:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 18v.5"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  origin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6M10 14L21 3"/></svg>',
+  up:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12l7-7 7 7M12 5v14"/></svg>',
+  down:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12l-7 7-7-7M12 5v14"/></svg>'
+};
+
+/* -------------------- Confidence pill mapping -------------------- */
+function pill(confidence) {
+  const map = {
+    verified: { cls: 'verified', label: 'LOCKED · COMPLIANCE ENGINE', icon: ICON.lock },
+    matched:  { cls: 'matched',  label: 'AUTO-MATCHED · CLICK TO OVERRIDE', icon: ICON.check },
+    pending:  { cls: 'pending',  label: 'NEEDS VERIFICATION', icon: ICON.warn },
+    risk:     { cls: 'risk',     label: 'HIGH AUDIT EXPOSURE', icon: ICON.warn },
+    neutral:  { cls: 'neutral',  label: 'INFO', icon: ICON.clock }
+  };
+  const p = map[confidence] || map.neutral;
+  return `<span class="pill ${p.cls}">${p.icon}${p.label}</span>`;
+}
+
+function pillShort(confidence) {
+  const map = {
+    verified: { cls: 'verified', label: 'LOCKED', icon: ICON.lock },
+    matched:  { cls: 'matched',  label: 'MATCHED', icon: ICON.check },
+    pending:  { cls: 'pending',  label: 'VERIFY', icon: ICON.warn },
+    risk:     { cls: 'risk',     label: 'RISK', icon: ICON.warn },
+    neutral:  { cls: 'neutral',  label: 'INFO', icon: ICON.clock }
+  };
+  const p = map[confidence] || map.neutral;
+  return `<span class="pill ${p.cls}">${p.icon}${p.label}</span>`;
+}
+
+/* ==================================================================
+   VIEW RENDERERS
+================================================================== */
+const workspace = document.getElementById('workspace');
+
+function renderView(view) {
+  state.ui.activeView = view;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  const titles = {
+    dashboard:   ['Command Center',        'Q4 2026 · live ledger stream · auto-reconciling'],
+    stream:      ['Priority Action Stream', 'Compressed anomaly queue · 10 items require your judgement'],
+    ledger:      ['Journal Entries',       'Double-entry ledger · every debit balanced against a credit'],
+    statements:  ['Financial Statements',  'Balance Sheet · Income · Cash Flows · GAAP/IFRS conformant'],
+    assets:      ['Fixed Assets Register', 'MACRS + §179 depreciation schedule · multi-currency ready'],
+    tax:         ['Tax Optimization',      'Real-time §41, §179, §199A, and quarterly estimated tax posture'],
+    audit:       ['Audit Shield',          'Forensic risk detection · vulnerability score 0-100'],
+    forms:       ['IRS Print-Ready Forms', 'Print-safe · standards-conformant · zero-drop precision'],
+    payroll:     ['Payroll Intercept',     'Automated federal / state / FICA withholding'],
+    dataroom:    ['M&A Data Room',         'Cryptographically signed diligence bundle · investor-ready'],
+    persistence: ['Backup &amp; Restore',      'Deterministic JSON state export/import · schema v' + SCHEMA_VERSION]
+  };
+  const [title, sub] = titles[view] || ['LedgerZero', ''];
+  document.getElementById('tbTitle').textContent = title.replace(/&amp;/g,'&');
+  document.getElementById('tbCrumb').textContent = sub;
+  const renderers = {
+    dashboard: renderDashboard,
+    stream: renderStream,
+    ledger: renderLedger,
+    statements: renderStatements,
+    assets: renderAssets,
+    tax: renderTax,
+    audit: renderAudit,
+    forms: renderForms,
+    payroll: renderPayroll,
+    dataroom: renderDataRoom,
+    persistence: renderPersistence
+  };
+  const fn = renderers[view] || renderDashboard;
+  workspace.innerHTML = fn();
+  attachViewEvents(view);
+  saveState();
+}
+
+/* -------------------- Dashboard -------------------- */
+function renderDashboard() {
+  const k = state.kpi;
+  const audit = state.audit;
+  const scorePct = audit.score / 100;
+  const gaugeLen = 251.3;                          // arc length for r=80 half circle
+  const offset = gaugeLen - (gaugeLen * scorePct); // remaining
+  const scoreColor = audit.score < 20 ? 'var(--verified)' : audit.score < 50 ? 'var(--pending)' : 'var(--risk)';
+  const scoreStatus = audit.score < 20 ? 'FULLY COMPLIANT' : audit.score < 50 ? 'REVIEW SUGGESTED' : 'IMMEDIATE ATTENTION';
+  const scoreStatusColor = audit.score < 20 ? 'var(--verified)' : audit.score < 50 ? 'var(--pending)' : 'var(--risk)';
+
+  // Cash flow chart (last 12 months, seeded)
+  const chartMonths = ['Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul'];
+  const revenueData  = [782, 812, 856, 891, 942, 998, 1042, 1088, 1122, 1168, 1212, 1247];
+  const expenseData  = [612, 638, 671, 702, 738, 771, 802, 826, 851, 872, 894, 912];
+  const chartSvg = renderCashFlowChart(chartMonths, revenueData, expenseData);
+
+  // ROI
+  const humanCPACost = 1200;
+  const platformCost = 99;
+  const monthlySavings = humanCPACost - platformCost;
+
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Command Center</h1>
+      <p class="view-sub">${state.entities[state.activeEntity].legal} · Fiscal Q${state.period.quarter} ${state.period.year} · <span style="color: var(--verified); font-weight: 600;">All engines nominal</span></p>
+    </div>
+
+    <div class="roi">
+      <div class="roi-label">Replacement Economics</div>
+      <div class="roi-headline">LedgerZero replaces your <strong>$1,200/mo</strong> external CPA retention. Net cash back to your P&L this year: <strong>$13,212.00</strong>.</div>
+      <div class="roi-grid">
+        <div>
+          <div class="roi-tile-label">LedgerZero</div>
+          <div class="roi-tile-val">$99.00/mo</div>
+          <div class="roi-tile-note">Enterprise plan · unlimited entities</div>
+        </div>
+        <div>
+          <div class="roi-tile-label">Legacy CPA Retainer</div>
+          <div class="roi-tile-val">$1,200.00/mo</div>
+          <div class="roi-tile-note">Bookkeeping + quarterly filings</div>
+        </div>
+        <div>
+          <div class="roi-tile-label">Annualized Savings</div>
+          <div class="roi-tile-val" style="color: #6be2a3;">+$13,212.00</div>
+          <div class="roi-tile-note">Plus 47 hours reclaimed / quarter</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi hero">
+        <div class="kpi-mini">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <div class="kpi-label">Cash on Hand · All Accounts</div>
+        <div class="kpi-value">${fmtUSD(k.cashOnHand)}</div>
+        <div class="kpi-delta up"><strong>+$412K</strong> this quarter · Runway <strong>${k.runwayMonths.toFixed(1)} months</strong></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-6"/></svg></div>
+        <div class="kpi-label">MRR · Recurring</div>
+        <div class="kpi-value">${fmtUSD(k.mrr)}</div>
+        <div class="kpi-delta up"><strong>+8.4%</strong> MoM</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+        <div class="kpi-label">Monthly Burn</div>
+        <div class="kpi-value">${fmtUSD(k.burnRate)}</div>
+        <div class="kpi-delta down"><strong>-3.2%</strong> vs 90-day avg · under target</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 4 3 5-6"/></svg></div>
+        <div class="kpi-label">EBITDA · TTM</div>
+        <div class="kpi-value">${fmtUSD(k.ebitdaTTM)}</div>
+        <div class="kpi-delta up"><strong>18.7%</strong> margin</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 3a4 4 0 100 8 4 4 0 000-8z"/></svg></div>
+        <div class="kpi-label">CAC : LTV Ratio</div>
+        <div class="kpi-value">1 : ${k.cacToLtv.toFixed(1)}</div>
+        <div class="kpi-delta up"><strong>+0.4x</strong> vs cohort baseline</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div class="kpi-label">Working Capital Ratio</div>
+        <div class="kpi-value">${fmtUSD(k.workingCapital)}</div>
+        <div class="kpi-delta up"><strong>2.94x</strong> current ratio · healthy</div>
+      </div>
+    </div>
+
+    <div class="avs-panel">
+      <div>
+        <div class="avs-gauge">
+          <svg viewBox="0 0 200 120">
+            <path class="avs-track" d="M 20 100 A 80 80 0 0 1 180 100" />
+            <path class="avs-fill" style="stroke: ${scoreColor}; stroke-dasharray: ${gaugeLen}; stroke-dashoffset: ${offset};" d="M 20 100 A 80 80 0 0 1 180 100" />
+          </svg>
+          <div class="avs-score">
+            <div class="avs-num" style="color: ${scoreColor};">${audit.score}<span style="font-size: 0.9rem; color: var(--ink-mute);">/100</span></div>
+            <div class="avs-unit">VULNERABILITY</div>
+          </div>
+        </div>
+        <div class="avs-status" style="color: ${scoreStatusColor};">${scoreStatus}</div>
+      </div>
+      <div class="avs-content">
+        <h3>Audit Vulnerability Score · Real-Time Forensic Sweep</h3>
+        <p>Lower is stronger. This score reflects the probability an IRS or state auditor could challenge your filings this quarter. LedgerZero shadow-scans your ledger every 60 seconds against 187 audit-trigger vectors — anomaly rhythms, deduction ratios, industry classification alignment, and receipt substantiation vectors.</p>
+        <div class="avs-flags">
+          ${audit.flags.map(f => `
+            <span class="avs-flag ${f.level === 'ok' ? 'ok' : f.level === 'warn' ? 'warn' : ''}">
+              ${f.level === 'ok' ? ICON.check : ICON.warn}
+              ${f.label}
+            </span>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <div class="card-head">
+          <div style="flex:1;">
+            <h3>Cash Flow · Trailing 12 Months</h3>
+            <div class="card-sub">Revenue vs. operating expense · thousands (USD)</div>
+          </div>
+          <div class="card-head-actions">
+            <button class="card-mini-btn active">12M</button>
+            <button class="card-mini-btn">6M</button>
+            <button class="card-mini-btn">Q</button>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <div><span class="dot" style="background: var(--verified);"></span> Revenue</div>
+          <div><span class="dot" style="background: var(--ink-mute);"></span> Operating Expense</div>
+          <div><span class="dot" style="background: var(--accent);"></span> Net (Gross Profit)</div>
+        </div>
+        <div class="card-body" style="padding-top: 0.5rem;">${chartSvg}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div style="flex:1;">
+            <h3>Priority Action Stream</h3>
+            <div class="card-sub">Top ${Math.min(5, state.stream.length)} of ${state.stream.length} · needing judgement</div>
+          </div>
+          <button class="card-mini-btn" data-nav="stream">View All →</button>
+        </div>
+        <div class="stream">
+          ${state.stream.slice(0,5).map(s => renderStreamRow(s, { compact: true })).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="split equal">
+      <div class="card">
+        <div class="card-head">
+          <div style="flex:1;">
+            <h3>Recent Journal Entries</h3>
+            <div class="card-sub">Latest 3 balanced entries · double-entry verified</div>
+          </div>
+          <button class="card-mini-btn" data-nav="ledger">Open Ledger →</button>
+        </div>
+        <div class="card-body tight">
+          ${state.journal.slice(0,3).map(renderJournalEntry).join('')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div style="flex:1;">
+            <h3>Tax Optimization · Live Scan</h3>
+            <div class="card-sub">Deductions actively harvested this fiscal year</div>
+          </div>
+          <button class="card-mini-btn" data-nav="tax">Full Report →</button>
+        </div>
+        <div class="card-body tight">
+          ${state.tax.deductions.slice(0,3).map(d => `
+            <div class="deduction">
+              <div>
+                <div class="deduction-title">${d.title}</div>
+                <div class="deduction-desc">${d.desc}</div>
+              </div>
+              <div>
+                <div class="deduction-amt">${fmtUSD(d.amount)}</div>
+                <div style="margin-top: 0.25rem; text-align: right;">${pillShort(d.confidence)}</div>
+              </div>
+              <div class="deduction-cite">${d.cite}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCashFlowChart(months, rev, exp) {
+  const w = 640, h = 200, padL = 40, padR = 20, padT = 20, padB = 30;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+  const maxV = Math.max(...rev, ...exp) * 1.15;
+  const stepX = chartW / (months.length - 1);
+  const y = v => padT + chartH - (v / maxV) * chartH;
+  const revPath = rev.map((v,i) => `${i === 0 ? 'M' : 'L'} ${padL + i*stepX} ${y(v)}`).join(' ');
+  const expPath = exp.map((v,i) => `${i === 0 ? 'M' : 'L'} ${padL + i*stepX} ${y(v)}`).join(' ');
+  const netPath = rev.map((v,i) => `${i === 0 ? 'M' : 'L'} ${padL + i*stepX} ${y(v - exp[i])}`).join(' ');
+  const areaPath = revPath + ` L ${padL + (rev.length-1)*stepX} ${padT + chartH} L ${padL} ${padT + chartH} Z`;
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(p => {
+    const yy = padT + chartH * (1-p);
+    const val = Math.round(maxV * p);
+    return `
+      <line x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" stroke="var(--surface-3)" stroke-width="1"/>
+      <text x="${padL - 6}" y="${yy + 3}" fill="var(--ink-mute)" font-size="9" text-anchor="end" font-family="var(--mono)">$${val}K</text>
+    `;
+  }).join('');
+  const xLabels = months.map((m,i) => `<text x="${padL + i*stepX}" y="${h - 8}" fill="var(--ink-mute)" font-size="9.5" text-anchor="middle">${m}</text>`).join('');
+  return `
+    <svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--verified)" stop-opacity="0.15"/>
+          <stop offset="1" stop-color="var(--verified)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      ${xLabels}
+      <path d="${areaPath}" fill="url(#rev-grad)"/>
+      <path d="${expPath}" fill="none" stroke="var(--ink-mute)" stroke-width="2" stroke-dasharray="4 4"/>
+      <path d="${revPath}" fill="none" stroke="var(--verified)" stroke-width="2.5"/>
+      <path d="${netPath}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"/>
+      ${rev.map((v,i) => `<circle cx="${padL + i*stepX}" cy="${y(v)}" r="2.5" fill="var(--verified)"/>`).join('')}
+    </svg>
+  `;
+}
+
+/* -------------------- Priority Stream -------------------- */
+function renderStream() {
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Priority Action Stream</h1>
+      <p class="view-sub">Thousands of banking events, compressed. Only the ${state.stream.length} items requiring your human judgement — nothing else.</p>
+    </div>
+
+    <div class="card">
+      <div class="tbl-toolbar">
+        <input class="tbl-search" placeholder="Search anomaly, vendor, or amount…" id="streamSearch">
+        <button class="tbl-filter active" data-filter="all">All (${state.stream.length})</button>
+        <button class="tbl-filter" data-filter="pending">Verify (${state.stream.filter(s=>s.confidence==='pending').length})</button>
+        <button class="tbl-filter" data-filter="matched">Matched</button>
+      </div>
+      <div class="stream" id="streamList">
+        ${state.stream.map(s => renderStreamRow(s)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderStreamRow(s, { compact = false } = {}) {
+  const btnLabel = s.confidence === 'pending' ? 'Verify' : s.confidence === 'matched' ? 'Approve' : 'View';
+  if (compact) {
+    return `
+      <div class="stream-row compact" data-stream-id="${s.id}">
+        <div class="stream-num">#${String(s.priority).padStart(2,'0')}</div>
+        <div class="stream-body">
+          <div class="stream-title">${s.title}</div>
+          <div class="stream-meta">${pillShort(s.confidence)} · <strong>${fmtUSD(s.amount)}</strong></div>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="stream-row" data-stream-id="${s.id}">
+      <div class="stream-num">#${String(s.priority).padStart(2,'0')}</div>
+      <div class="stream-body">
+        <div class="stream-title">${s.title}</div>
+        <div class="stream-meta">${pillShort(s.confidence)} · <strong>${s.meta}</strong></div>
+      </div>
+      <div class="stream-amount">${fmtUSD(s.amount)}</div>
+      <div class="stream-actions">
+        <button class="stream-btn" data-origin="${s.origin}">Origin</button>
+        <button class="stream-btn primary" data-approve="${s.id}">${btnLabel}</button>
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Journal / Ledger view -------------------- */
+function renderLedger() {
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Journal Entries · Double-Entry Ledger</h1>
+      <p class="view-sub">Every credit balances an equal debit. Immutable audit chain. GAAP + IFRS conformant.</p>
+    </div>
+    <div class="card">
+      <div class="tbl-toolbar">
+        <input class="tbl-search" placeholder="Search entries, accounts, amounts…">
+        <button class="tbl-filter active">All ${state.journal.length}</button>
+        <button class="tbl-filter">Cash</button>
+        <button class="tbl-filter">Revenue</button>
+        <button class="tbl-filter">Expense</button>
+      </div>
+      <div class="card-body tight">
+        ${state.journal.map(renderJournalEntry).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderJournalEntry(je) {
+  const totalDr = je.lines.filter(l => l.type === 'dr').reduce((s,l) => s + l.amount, 0);
+  const totalCr = je.lines.filter(l => l.type === 'cr').reduce((s,l) => s + l.amount, 0);
+  const balanced = totalDr === totalCr;
+  return `
+    <div class="je-entry">
+      <div class="je-head">
+        <span class="je-date">${je.date} · ${je.id}</span>
+        <div class="je-desc">${je.desc}</div>
+        ${pillShort(je.confidence)}
+      </div>
+      <div class="je-lines">
+        <div style="font-size: 0.68rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;">Account</div>
+        <div></div>
+        <div style="font-size: 0.68rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; text-align: right;">Debit</div>
+        <div style="font-size: 0.68rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; text-align: right;">Credit</div>
+        ${je.lines.map(l => `
+          <div class="acct">${l.account}</div>
+          <div class="type">${l.type}</div>
+          <div class="dr">${l.type === 'dr' ? fmtUSD(l.amount) : '<span class="empty">—</span>'}</div>
+          <div class="cr">${l.type === 'cr' ? fmtUSD(l.amount) : '<span class="empty">—</span>'}</div>
+        `).join('')}
+        <div style="font-weight: 700; padding-left: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.4rem;">Totals</div>
+        <div></div>
+        <div class="dr" style="border-top: 1px solid var(--border); padding-top: 0.4rem; font-weight: 700;">${fmtUSD(totalDr)}</div>
+        <div class="cr" style="border-top: 1px solid var(--border); padding-top: 0.4rem; font-weight: 700;">${fmtUSD(totalCr)}</div>
+      </div>
+      <div class="je-verify">
+        ${balanced ? ICON.check : ICON.warn}
+        ${balanced ? 'BALANCED · ' : 'IMBALANCE · '}${je.verifiedBy}
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Financial Statements -------------------- */
+function renderStatements() {
+  const k = state.kpi;
+  const grossProfit  = k.revenueYTD - k.cogsYTD;
+  const operatingInc = grossProfit - k.opexYTD;
+  const netIncome    = operatingInc - state.tax.currentTaxLiabilityAccrued;
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Financial Statements · Fiscal ${state.period.year}</h1>
+      <p class="view-sub">Balance Sheet · Income Statement · Statement of Cash Flows · all statements computed live from the journal</p>
+    </div>
+
+    <div class="tax-scoreboard">
+      <div class="tax-tile">
+        <div class="tax-tile-label">Revenue · YTD</div>
+        <div class="tax-tile-val">${fmtUSD(k.revenueYTD)}</div>
+        <div class="tax-tile-note">Recognized per ASC 606</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Gross Profit</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(grossProfit)}</div>
+        <div class="tax-tile-note">Margin ${fmtPct(grossProfit / k.revenueYTD)}</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Net Income · YTD</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(netIncome)}</div>
+        <div class="tax-tile-note">After ${fmtUSD(state.tax.currentTaxLiabilityAccrued)} tax accrual</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div style="flex: 1;"><h3>Income Statement · Year to Date</h3>
+        <div class="card-sub">Every line traces to atomic transactions · click any row for computation origins</div></div>
+        <button class="card-mini-btn" data-nav="forms">Print View →</button>
+      </div>
+      <div class="card-body tight">
+        <table class="data-table">
+          <thead><tr>
+            <th style="width:60%;">Line Item</th>
+            <th class="num">Amount</th>
+            <th style="width: 140px;">Origin</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="row-desc">Subscription Revenue</div><div class="row-hint">GAAP recognition · ASC 606 · monthly earn</div></td>
+              <td class="num pos">${fmtUSD(cents(9_920_400))}</td>
+              <td><button class="origin-link" data-origin="INC-REV-SUB">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">Professional Services Revenue</div><div class="row-hint">Milestone-based recognition</div></td>
+              <td class="num pos">${fmtUSD(cents(1_900_000))}</td>
+              <td><button class="origin-link" data-origin="INC-REV-PS">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr style="background: var(--surface-2); font-weight: 700;">
+              <td><div class="row-desc">Total Revenue</div></td>
+              <td class="num">${fmtUSD(k.revenueYTD)}</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">Cost of Goods Sold</div><div class="row-hint">Cloud infrastructure + payment processing</div></td>
+              <td class="num neg">(${fmtUSD(k.cogsYTD).replace('$','$')})</td>
+              <td><button class="origin-link" data-origin="INC-COGS">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr style="background: var(--surface-2); font-weight: 700;">
+              <td><div class="row-desc">Gross Profit</div></td>
+              <td class="num pos">${fmtUSD(grossProfit)}</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">Salaries &amp; Wages</div><div class="row-hint">14 W-2 employees + payroll taxes</div></td>
+              <td class="num neg">(${fmtUSD(cents(4_212_800))})</td>
+              <td><button class="origin-link" data-origin="INC-SAL">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">Sales &amp; Marketing</div><div class="row-hint">Paid acquisition + team + tools</div></td>
+              <td class="num neg">(${fmtUSD(cents(1_284_600))})</td>
+              <td><button class="origin-link" data-origin="INC-SM">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">General &amp; Administrative</div><div class="row-hint">Rent, insurance, legal, admin</div></td>
+              <td class="num neg">(${fmtUSD(cents(849_400))})</td>
+              <td><button class="origin-link" data-origin="INC-GA">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr style="background: var(--surface-2); font-weight: 700;">
+              <td><div class="row-desc">Operating Income</div></td>
+              <td class="num pos">${fmtUSD(operatingInc)}</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div class="row-desc">Provision for Income Taxes</div><div class="row-hint">Federal 21% + DE composite 8.7%</div></td>
+              <td class="num neg">(${fmtUSD(state.tax.currentTaxLiabilityAccrued)})</td>
+              <td><button class="origin-link" data-origin="INC-TAX">${ICON.origin} View Computation Origins</button></td>
+            </tr>
+            <tr style="background: var(--ink); color: white; font-weight: 700;">
+              <td style="color: white;"><div class="row-desc" style="color: white;">Net Income</div></td>
+              <td class="num" style="color: #6be2a3;">${fmtUSD(netIncome)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Tax Optimization -------------------- */
+function renderTax() {
+  const tax = state.tax;
+  const totalDeductions = tax.deductions.reduce((s,d) => s + d.amount, 0);
+  const estimatedSavings = Math.round(totalDeductions * (tax.federalRate + tax.stateRate));
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Tax Optimization · ${tax.form} S-Corp</h1>
+      <p class="view-sub">Shadow-scanning every ledger entry against 2026 IRC + state code. Deductions harvested continuously.</p>
+    </div>
+
+    <div class="tax-scoreboard">
+      <div class="tax-tile">
+        <div class="tax-tile-label">Deductions Harvested · YTD</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(totalDeductions)}</div>
+        <div class="tax-tile-note">Across ${tax.deductions.length} substantiated categories</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Estimated Tax Saved</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(cents(estimatedSavings/100))}</div>
+        <div class="tax-tile-note">At blended ${fmtPct(tax.federalRate + tax.stateRate, 1)} effective rate</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Q3 Estimated Payment</div>
+        <div class="tax-tile-val">${fmtUSD(tax.quarterlyEstimated)}</div>
+        <div class="tax-tile-note">Voucher ready · due 09-15-2026</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div style="flex:1;">
+          <h3>Deduction Harvest · Continuous Substantiation</h3>
+          <div class="card-sub">Every deduction traceable to IRC citation and atomic ledger evidence</div>
+        </div>
+        <button class="card-mini-btn active">All ${tax.deductions.length}</button>
+        <button class="card-mini-btn">Locked</button>
+        <button class="card-mini-btn">Matched</button>
+      </div>
+      <div class="card-body tight">
+        ${tax.deductions.map(d => `
+          <div class="deduction">
+            <div>
+              <div class="deduction-title">${d.title}</div>
+              <div class="deduction-desc">${d.desc}</div>
+              <div style="margin-top: 0.4rem;">${pillShort(d.confidence)}</div>
+            </div>
+            <div style="text-align: right;">
+              <div class="deduction-amt">${fmtUSD(d.amount)}</div>
+              <button class="origin-link" data-origin="DED-${d.cite}" style="margin-top: 0.25rem;">${ICON.origin} View Computation Origins</button>
+            </div>
+            <div class="deduction-cite">${d.cite}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Audit Shield -------------------- */
+function renderAudit() {
+  const a = state.audit;
+  const flagsOk    = a.flags.filter(f => f.level === 'ok').length;
+  const flagsWarn  = a.flags.filter(f => f.level === 'warn').length;
+  const scanVectors = [
+    { name: "Transaction Rhythm Analysis",       status: "clean",  detail: "Deposits, expenses, and payroll all fall within ±0.8σ of your 24-month baseline." },
+    { name: "Industry Deduction Ratio Match",    status: "clean",  detail: "Your G&A ratio (7.2%) is within NAICS 334519 range (5.4%–9.1%)." },
+    { name: "Receipt Substantiation Coverage",   status: "warn",   detail: "2 transactions exceeding $10,000 lack attached documentation." },
+    { name: "1099 / W-9 Vendor Compliance",      status: "warn",   detail: "1 vendor paid $23,400 YTD is missing a W-9 on file." },
+    { name: "Multi-State Nexus Detection",       status: "clean",  detail: "State registrations current: DE, CA, WA, NY. No new triggers detected this quarter." },
+    { name: "Depreciation Method Consistency",   status: "clean",  detail: "MACRS elections consistent with prior-year filings." },
+    { name: "Estimated Tax Payment Cadence",     status: "clean",  detail: "Q1–Q2 vouchers paid on time. Q3 preparing (09-15 deadline)." }
+  ];
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Audit Shield · Forensic Prediction Engine</h1>
+      <p class="view-sub">Every 60 seconds we scan 187 vectors that historically trigger IRS or state audits. Anomalies surface before you file.</p>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <div class="card-head">
+          <div style="flex:1;">
+            <h3>Live Detection Vectors</h3>
+            <div class="card-sub">Last full sweep · ${new Date(a.lastRun).toLocaleString()}</div>
+          </div>
+          <button class="card-mini-btn" id="rescanBtn">Re-scan now</button>
+        </div>
+        <div class="card-body tight">
+          ${scanVectors.map(v => `
+            <div style="padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: center;">
+              <div>
+                <div style="font-weight: 600; font-size: 0.87rem; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.4rem;">
+                  <span class="icon-inline" style="color: ${v.status === 'clean' ? 'var(--verified)' : 'var(--pending)'};">${v.status === 'clean' ? ICON.check : ICON.warn}</span>
+                  ${v.name}
+                </div>
+                <div style="font-size: 0.78rem; color: var(--ink-mute);">${v.detail}</div>
+              </div>
+              <div>${pillShort(v.status === 'clean' ? 'verified' : 'pending')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Vulnerability Breakdown</h3></div>
+        <div class="card-body">
+          <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.35rem;">
+              <span style="font-weight: 600;">Overall Score</span>
+              <span style="font-family: var(--mono); font-weight: 700; color: var(--verified);">${a.score}/100 · Excellent</span>
+            </div>
+            <div class="pbar"><div class="pbar-fill verified" style="width: ${a.score}%;"></div></div>
+          </div>
+          <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.35rem;">
+              <span style="font-weight: 600;">Documentation Coverage</span>
+              <span style="font-family: var(--mono); font-weight: 700;">96.4%</span>
+            </div>
+            <div class="pbar"><div class="pbar-fill verified" style="width: 96.4%;"></div></div>
+          </div>
+          <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.35rem;">
+              <span style="font-weight: 600;">Classification Accuracy</span>
+              <span style="font-family: var(--mono); font-weight: 700;">99.1%</span>
+            </div>
+            <div class="pbar"><div class="pbar-fill verified" style="width: 99.1%;"></div></div>
+          </div>
+          <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.35rem;">
+              <span style="font-weight: 600;">Reconciliation Freshness</span>
+              <span style="font-family: var(--mono); font-weight: 700;">Real-time</span>
+            </div>
+            <div class="pbar"><div class="pbar-fill verified" style="width: 100%;"></div></div>
+          </div>
+          <div style="margin-top: 1.5rem; padding: 0.85rem; background: var(--verified-so); color: var(--verified); border-radius: 6px; font-size: 0.83rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <span class="icon-inline">${ICON.check}</span> Filing Readiness: FULLY COMPLIANT for Q3 2026 estimated tax cycle.
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Fixed Assets -------------------- */
+function renderAssets() {
+  const totalCost   = state.assets.reduce((s,a) => s + a.cost, 0);
+  const totalAccum  = state.assets.reduce((s,a) => s + a.accumDep, 0);
+  const totalBook   = state.assets.reduce((s,a) => s + a.bookValue, 0);
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Fixed Assets Register</h1>
+      <p class="view-sub">MACRS + Section 179 optimized · every asset traces to depreciation schedule and IRC citation</p>
+    </div>
+
+    <div class="tax-scoreboard">
+      <div class="tax-tile">
+        <div class="tax-tile-label">Total Cost Basis</div>
+        <div class="tax-tile-val">${fmtUSD(totalCost)}</div>
+        <div class="tax-tile-note">${state.assets.length} capitalized assets</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Accumulated Depreciation</div>
+        <div class="tax-tile-val" style="color: var(--pending);">(${fmtUSD(totalAccum)})</div>
+        <div class="tax-tile-note">${fmtPct(totalAccum / totalCost)} of cost basis</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Net Book Value</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(totalBook)}</div>
+        <div class="tax-tile-note">On balance sheet at ${todayISO()}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div style="flex:1;"><h3>Depreciation Schedule</h3>
+        <div class="card-sub">Method + useful life per asset · IRC §168 / §179 compliant</div></div>
+        <button class="card-mini-btn active">All</button>
+        <button class="card-mini-btn">§179</button>
+        <button class="card-mini-btn">MACRS</button>
+      </div>
+      <div class="card-body tight">
+        <div class="asset-row head">
+          <div>Asset</div>
+          <div style="text-align: right;">Cost</div>
+          <div style="text-align: right;">Accum. Dep.</div>
+          <div style="text-align: right;">Book Value</div>
+          <div>Method / Life</div>
+        </div>
+        ${state.assets.map(a => `
+          <div class="asset-row">
+            <div>
+              <div class="asset-name">${a.name}</div>
+              <div class="asset-cite">${a.id} · in-service ${a.placed}</div>
+            </div>
+            <div class="mono" style="text-align: right;">${fmtUSD(a.cost)}</div>
+            <div class="mono" style="text-align: right; color: var(--pending);">(${fmtUSD(a.accumDep)})</div>
+            <div class="mono" style="text-align: right; color: var(--verified);">${fmtUSD(a.bookValue)}</div>
+            <div>
+              <div style="font-weight: 600; font-size: 0.78rem;">${a.method}</div>
+              <div style="font-size: 0.72rem; color: var(--ink-mute);">${a.life}-year life</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- IRS Forms (print-safe) -------------------- */
+function renderForms() {
+  const k = state.kpi;
+  const t = state.tax;
+  const grossProfit = k.revenueYTD - k.cogsYTD;
+  const opInc       = grossProfit - k.opexYTD;
+  return `
+    <div class="view-header">
+      <h1 class="view-title">IRS Print-Ready Forms</h1>
+      <p class="view-sub">Pure white canvas · black text · ink-conservation compliant · zero-drop numeric precision</p>
+    </div>
+
+    <div class="print-toolbar">
+      <span class="label">Form:</span>
+      <select id="formSelect">
+        <option value="1120-S" selected>Form 1120-S · S-Corp Income Tax Return</option>
+        <option value="1120">Form 1120 · C-Corp Income Tax Return</option>
+        <option value="1065">Form 1065 · Partnership Return</option>
+        <option value="Sch-C">Schedule C · Sole Proprietorship</option>
+      </select>
+      <span class="label" style="margin-left: 0.75rem;">Period:</span>
+      <select>
+        <option>Tax Year 2026</option>
+        <option>Tax Year 2025</option>
+      </select>
+      <div class="print-toolbar-spacer"></div>
+      <button class="tb-btn" onclick="window.print()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Print
+      </button>
+      <button class="tb-btn primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>
+        Export PDF
+      </button>
+    </div>
+
+    <div class="print-form" id="printForm">
+      <div class="print-form-head">
+        <div class="print-form-head-l">
+          <h1>Form 1120-S</h1>
+          <p>U.S. Income Tax Return for an S Corporation · Tax Year ${state.period.year}</p>
+        </div>
+        <div class="print-form-head-c">
+          OMB No. 1545-0123<br>
+          Rev. 2026 · DRAFT
+        </div>
+        <div class="print-form-head-r">
+          <strong>${state.entities[state.activeEntity].legal}</strong>
+          EIN ${state.entities[state.activeEntity].ein}<br>
+          Prepared ${todayISO()}
+        </div>
+      </div>
+
+      <div class="pf-section">
+        <div class="pf-sec-label">Part I — Income</div>
+        <div class="pf-line"><div class="pf-line-num">1a</div><div class="pf-line-desc">Gross receipts or sales</div><div class="pf-line-amt">${fmtUSD(k.revenueYTD)}</div></div>
+        <div class="pf-line"><div class="pf-line-num">1b</div><div class="pf-line-desc sub">Returns and allowances</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line"><div class="pf-line-num">2</div><div class="pf-line-desc">Cost of goods sold (Form 1125-A)</div><div class="pf-line-amt">(${fmtUSD(k.cogsYTD)})</div></div>
+        <div class="pf-line total"><div class="pf-line-num">3</div><div class="pf-line-desc">Gross profit — line 1a minus lines 1b and 2</div><div class="pf-line-amt">${fmtUSD(grossProfit)}</div></div>
+        <div class="pf-line"><div class="pf-line-num">4</div><div class="pf-line-desc">Net gain (loss) from Form 4797, Part II, line 17</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line"><div class="pf-line-num">5</div><div class="pf-line-desc">Other income (loss)</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line total"><div class="pf-line-num">6</div><div class="pf-line-desc">Total income (loss) — combine lines 3 through 5</div><div class="pf-line-amt">${fmtUSD(grossProfit)}</div></div>
+      </div>
+
+      <div class="pf-section">
+        <div class="pf-sec-label">Part II — Deductions</div>
+        <div class="pf-line"><div class="pf-line-num">7</div><div class="pf-line-desc">Compensation of officers</div><div class="pf-line-amt">${fmtUSD(cents(624_000))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">8</div><div class="pf-line-desc">Salaries and wages (less employment credits)</div><div class="pf-line-amt">${fmtUSD(cents(3_588_800))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">9</div><div class="pf-line-desc">Repairs and maintenance</div><div class="pf-line-amt">${fmtUSD(cents(48_200))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">10</div><div class="pf-line-desc">Bad debts</div><div class="pf-line-amt">${fmtUSD(cents(0))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">11</div><div class="pf-line-desc">Rents</div><div class="pf-line-amt">${fmtUSD(cents(216_000))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">12</div><div class="pf-line-desc">Taxes and licenses</div><div class="pf-line-amt">${fmtUSD(cents(84_400))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">13</div><div class="pf-line-desc">Interest</div><div class="pf-line-amt">${fmtUSD(cents(18_200))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">14</div><div class="pf-line-desc">Depreciation (Form 4562) — includes §179 election</div><div class="pf-line-amt">${fmtUSD(cents(224_900))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">15</div><div class="pf-line-desc">Depletion</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line"><div class="pf-line-num">16</div><div class="pf-line-desc">Advertising</div><div class="pf-line-amt">${fmtUSD(cents(842_400))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">17</div><div class="pf-line-desc">Pension, profit-sharing, and other retirement plans</div><div class="pf-line-amt">${fmtUSD(cents(122_400))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">18</div><div class="pf-line-desc">Employee benefit programs</div><div class="pf-line-amt">${fmtUSD(cents(198_600))}</div></div>
+        <div class="pf-line"><div class="pf-line-num">19</div><div class="pf-line-desc">Other deductions (attach statement)</div><div class="pf-line-amt">${fmtUSD(cents(378_900))}</div></div>
+        <div class="pf-line total"><div class="pf-line-num">20</div><div class="pf-line-desc">Total deductions — add lines 7 through 19</div><div class="pf-line-amt">${fmtUSD(cents(6_346_800))}</div></div>
+      </div>
+
+      <div class="pf-section">
+        <div class="pf-sec-label">Part III — Ordinary Business Income and Tax</div>
+        <div class="pf-line"><div class="pf-line-num">21</div><div class="pf-line-desc">Ordinary business income (loss) — line 6 minus line 20</div><div class="pf-line-amt">${fmtUSD(opInc)}</div></div>
+        <div class="pf-line"><div class="pf-line-num">22a</div><div class="pf-line-desc">Excess net passive income tax</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line"><div class="pf-line-num">22b</div><div class="pf-line-desc">Tax on built-in gains</div><div class="pf-line-amt">$0.00</div></div>
+        <div class="pf-line"><div class="pf-line-num">23</div><div class="pf-line-desc">Estimated tax payments — Q1 through Q3 vouchers</div><div class="pf-line-amt">${fmtUSD(t.quarterlyEstimated * 3)}</div></div>
+        <div class="pf-line total"><div class="pf-line-num">24</div><div class="pf-line-desc">Balance due (refund) at filing</div><div class="pf-line-amt">${fmtUSD(state.tax.currentTaxLiabilityAccrued - (t.quarterlyEstimated * 3))}</div></div>
+      </div>
+
+      <div class="pf-sig">
+        <div>
+          <div class="pf-sig-line">/s/ pending signer authorization</div>
+          <div class="pf-sig-lbl">Officer signature · title · date</div>
+        </div>
+        <div>
+          <div class="pf-sig-line">LedgerZero Autonomous Filing Engine v${SCHEMA_VERSION}</div>
+          <div class="pf-sig-lbl">Preparer / PTIN P00LZ-2026-APX</div>
+        </div>
+      </div>
+
+      <div class="pf-foot">
+        <div>Cryptographic seal · SHA-256 · <span style="font-family: var(--mono);">0x4a9f81…c22e</span></div>
+        <div>Page 1 of 8 · continued on Schedule K</div>
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Payroll -------------------- */
+function renderPayroll() {
+  const totalGross = state.payroll.reduce((s,p) => s + p.gross, 0);
+  const totalWH    = state.payroll.reduce((s,p) => s + p.federal + p.state + p.fica, 0);
+  const totalNet   = totalGross - totalWH;
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Payroll Intercept</h1>
+      <p class="view-sub">Automated federal &amp; state withholding · SUI · benefit allocation · payroll tax remittance</p>
+    </div>
+
+    <div class="tax-scoreboard">
+      <div class="tax-tile">
+        <div class="tax-tile-label">Gross Payroll · This Cycle</div>
+        <div class="tax-tile-val">${fmtUSD(totalGross)}</div>
+        <div class="tax-tile-note">${state.payroll.length} pay recipients</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Total Withholdings</div>
+        <div class="tax-tile-val" style="color: var(--pending);">${fmtUSD(totalWH)}</div>
+        <div class="tax-tile-note">Federal + State + FICA</div>
+      </div>
+      <div class="tax-tile">
+        <div class="tax-tile-label">Net Pay Disbursed</div>
+        <div class="tax-tile-val" style="color: var(--verified);">${fmtUSD(totalNet)}</div>
+        <div class="tax-tile-note">Direct deposit · scheduled 07-15</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div style="flex:1;"><h3>Current Pay Cycle · 07-01 to 07-15-2026</h3>
+        <div class="card-sub">Every withholding calculation matched to 2026 IRS Publication 15 tables</div></div>
+        <button class="card-mini-btn active">All</button>
+        <button class="card-mini-btn">W-2</button>
+        <button class="card-mini-btn">1099</button>
+      </div>
+      <div class="card-body tight">
+        <div class="payroll-row head">
+          <div>Recipient</div>
+          <div style="text-align: right;">Gross</div>
+          <div style="text-align: right;">Federal WH</div>
+          <div style="text-align: right;">State WH</div>
+          <div style="text-align: right;">Net Pay</div>
+        </div>
+        ${state.payroll.map(p => {
+          const net = p.gross - p.federal - p.state - p.fica;
+          return `
+            <div class="payroll-row">
+              <div>
+                <div class="emp-name">${p.name}</div>
+                <div class="emp-role">${p.role}</div>
+              </div>
+              <div class="mono">${fmtUSD(p.gross)}</div>
+              <div class="mono" style="color: var(--pending);">(${fmtUSD(p.federal)})</div>
+              <div class="mono" style="color: var(--pending);">(${fmtUSD(p.state)})</div>
+              <div class="mono" style="color: var(--verified); font-weight: 700;">${fmtUSD(net)}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- M&A Data Room -------------------- */
+function renderDataRoom() {
+  const bundles = [
+    { title: "Audited Financial Statements", desc: "3-year Income, Balance Sheet, Cash Flow · GAAP-audited signature", verified: true, updated: "07-12-2026", pages: 42 },
+    { title: "Cap Table &amp; Ownership Ledger",  desc: "SAFE conversions, Series Seed / A / B, ESOP pool + vesting schedules", verified: true, updated: "07-11-2026", pages: 18 },
+    { title: "Revenue Cohort Analysis",         desc: "MRR retention, cohort curves, ARR bridge Q1-2024 → Q3-2026", verified: true, updated: "07-12-2026", pages: 24 },
+    { title: "Tax Compliance Bundle",           desc: "Federal 1120-S, state returns (DE/CA/WA/NY), R&D credit substantiation", verified: true, updated: "07-10-2026", pages: 88 },
+    { title: "Customer Contracts &amp; MSAs",       desc: "Executed MSAs, order forms, and DPA/BAA agreements · encrypted vault", verified: true, updated: "07-09-2026", pages: 312 },
+    { title: "Intellectual Property Assignment", desc: "US Patents 11,942,881 + 12,104,220 · trademark registrations · assignment chain", verified: true, updated: "07-05-2026", pages: 22 },
+    { title: "Employee Agreements &amp; Options",   desc: "PIIA, non-solicit, offer letters, 409A valuations", verified: true, updated: "06-30-2026", pages: 156 },
+    { title: "Vendor &amp; Supplier Contracts",    desc: "Cloud, payment processor, key SaaS agreements", verified: true, updated: "07-08-2026", pages: 68 },
+    { title: "Insurance &amp; Regulatory Filings", desc: "Cyber, E&O, D&O policies · state registrations", verified: true, updated: "07-01-2026", pages: 36 }
+  ];
+  return `
+    <div class="view-header">
+      <h1 class="view-title">M&amp;A Data Room · Diligence-Ready Bundle</h1>
+      <p class="view-sub">Cryptographically signed financial statements · SHA-256 chain · investor access on demand</p>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <div class="card-head"><h3>Diligence Bundle</h3><div class="card-sub">All artifacts hash-verified · timestamped · immutable</div></div>
+        <div class="card-body">
+          <div class="dr-grid">
+            ${bundles.map(b => `
+              <div class="dr-card">
+                <div class="dr-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+                </div>
+                <div class="dr-title">${b.title}</div>
+                <div class="dr-desc">${b.desc}</div>
+                <div class="dr-meta">
+                  <span class="icon-inline" style="color: var(--verified);">${ICON.check}</span> <strong>${b.verified ? 'SIGNED' : 'PENDING'}</strong> · ${b.pages} pp · ${b.updated}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Deal Readiness</h3></div>
+        <div class="card-body">
+          <div style="margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 0.35rem;">EBITDA · TTM</div>
+            <div style="font-family: var(--mono); font-size: 1.4rem; font-weight: 700;">${fmtUSD(state.kpi.ebitdaTTM)}</div>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 0.35rem;">Implied Valuation Range</div>
+            <div style="font-family: var(--mono); font-size: 1.4rem; font-weight: 700;">${fmtCompact(state.kpi.ebitdaTTM * 8)} – ${fmtCompact(state.kpi.ebitdaTTM * 14)}</div>
+            <div style="font-size: 0.72rem; color: var(--ink-mute); margin-top: 0.2rem;">8x-14x EBITDA · SaaS · high growth · mid-margin</div>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 0.35rem;">CAC : LTV</div>
+            <div style="font-family: var(--mono); font-size: 1.4rem; font-weight: 700;">1 : ${state.kpi.cacToLtv.toFixed(1)}</div>
+          </div>
+          <div style="padding: 0.85rem; background: var(--verified-so); color: var(--verified); border-radius: 6px; font-size: 0.82rem; font-weight: 600; margin-top: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span class="icon-inline">${ICON.check}</span> DATA ROOM COMPLETE · Ready for investor grant
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* -------------------- Persistence view -------------------- */
+function renderPersistence() {
+  return `
+    <div class="view-header">
+      <h1 class="view-title">Backup &amp; Restore · Deterministic State</h1>
+      <p class="view-sub">Sovereign progress mobility. Download your entire ledger snapshot. Re-hydrate anywhere. Zero server dependency.</p>
+    </div>
+
+    <div id="persistBanner"></div>
+
+    <div class="persist-panel">
+      <div class="persist-card">
+        <h3>${ICON.lock} Download Progress (.json)</h3>
+        <p>Serializes your complete workspace tree — journal entries, un-reconciled queue, override arrays, entity metadata, and temporary ledger states. Client-side, cryptographically hashed, portable to any LedgerZero instance.</p>
+        <button class="persist-btn secondary" id="btnExport">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>
+          Download Progress (.json)
+        </button>
+        <div style="margin-top: 1rem; font-size: 0.75rem; color: var(--ink-mute); font-family: var(--mono);">
+          Schema v${SCHEMA_VERSION} · file: LEDGERZERO_backup_${todayISO()}.json
+        </div>
+      </div>
+
+      <div class="persist-card">
+        <h3>${ICON.check} Upload Progress (.json)</h3>
+        <p>Drag &amp; drop your backup file, or select via picker. Strict schema validation runs before hydration — corrupted files are rejected cleanly with an error banner.</p>
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg>
+          </div>
+          <div class="dropzone-title">Drop LEDGERZERO_backup_*.json here</div>
+          <div class="dropzone-sub">or click to pick a file · schema v${SCHEMA_VERSION} required</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.15rem 1.3rem;">
+      <div style="font-size: 0.72rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.5rem;">Current Session</div>
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.85rem;">
+        <div><div style="color: var(--ink-mute); font-size: 0.72rem;">Schema</div><div style="font-family: var(--mono); font-weight: 700;">v${SCHEMA_VERSION}</div></div>
+        <div><div style="color: var(--ink-mute); font-size: 0.72rem;">Last Saved</div><div style="font-family: var(--mono); font-weight: 700;">${new Date(state.savedAt).toLocaleString()}</div></div>
+        <div><div style="color: var(--ink-mute); font-size: 0.72rem;">Journal Entries</div><div style="font-family: var(--mono); font-weight: 700;">${state.journal.length}</div></div>
+        <div><div style="color: var(--ink-mute); font-size: 0.72rem;">Stream Queue</div><div style="font-family: var(--mono); font-weight: 700;">${state.stream.length} items</div></div>
+      </div>
+    </div>
+  `;
+}
+
+/* ==================================================================
+   VIEW EVENTS
+================================================================== */
+function attachViewEvents(view) {
+  // Card-mini nav delegates
+  workspace.querySelectorAll('[data-nav]').forEach(el => {
+    el.addEventListener('click', () => renderView(el.dataset.nav));
+  });
+
+  // Priority stream row -> details
+  workspace.querySelectorAll('.stream-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const id = row.dataset.streamId;
+      const item = state.stream.find(s => s.id === id);
+      if (item) openStreamModal(item);
+    });
+  });
+
+  workspace.querySelectorAll('[data-origin]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openOriginModal(el.dataset.origin);
+    });
+  });
+
+  workspace.querySelectorAll('[data-approve]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      approveStreamItem(el.dataset.approve);
+    });
+  });
+
+  // Stream filter buttons
+  workspace.querySelectorAll('.tbl-filter[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      workspace.querySelectorAll('.tbl-filter[data-filter]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const filter = btn.dataset.filter;
+      const list = document.getElementById('streamList');
+      if (!list) return;
+      list.querySelectorAll('.stream-row').forEach(row => {
+        const item = state.stream.find(s => s.id === row.dataset.streamId);
+        if (filter === 'all' || item.confidence === filter) row.style.display = '';
+        else row.style.display = 'none';
+      });
+    });
+  });
+
+  // Stream search
+  const search = document.getElementById('streamSearch');
+  if (search) {
+    search.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      workspace.querySelectorAll('#streamList .stream-row').forEach(row => {
+        const item = state.stream.find(s => s.id === row.dataset.streamId);
+        const match = !q || item.title.toLowerCase().includes(q) || item.meta.toLowerCase().includes(q) || String(fromCents(item.amount)).includes(q);
+        row.style.display = match ? '' : 'none';
+      });
+    });
+  }
+
+  // Rescan
+  const rescanBtn = document.getElementById('rescanBtn');
+  if (rescanBtn) {
+    rescanBtn.addEventListener('click', () => {
+      state.audit.lastRun = new Date().toISOString();
+      renderView('audit');
+    });
+  }
+
+  // Persistence view events
+  const btnExport = document.getElementById('btnExport');
+  if (btnExport) btnExport.addEventListener('click', exportJSON);
+
+  const dropzone = document.getElementById('dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('click', () => document.getElementById('fileInput').click());
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('hover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault(); dropzone.classList.remove('hover');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) importJSON(e.dataTransfer.files[0]);
+    });
+  }
+}
+
+/* ==================================================================
+   MODAL / ORIGIN TRAIL
+================================================================== */
+const modal      = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody  = document.getElementById('modalBody');
+const modalFoot  = document.getElementById('modalFoot');
+document.getElementById('modalClose').addEventListener('click', closeModal);
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+function openModal() { modal.classList.add('open'); }
+function closeModal() { modal.classList.remove('open'); }
+
+function openStreamModal(item) {
+  modalTitle.textContent = item.title;
+  modalBody.innerHTML = `
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+      <div>
+        <div style="font-size: 0.72rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.3rem;">Amount</div>
+        <div style="font-family: var(--mono); font-size: 1.4rem; font-weight: 700;">${fmtUSD(item.amount)}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.3rem;">Priority</div>
+        <div style="font-family: var(--mono); font-size: 1.4rem; font-weight: 700;">#${String(item.priority).padStart(2,'0')}</div>
+      </div>
+    </div>
+    <div style="margin-bottom: 1rem;">${pill(item.confidence)}</div>
+    <div style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem; font-size: 0.84rem; margin-bottom: 1rem;">
+      <div style="font-size: 0.72rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.35rem;">Signal Detail</div>
+      ${item.meta}
+    </div>
+    <div style="font-size: 0.72rem; color: var(--ink-mute); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.35rem;">Origin Transaction</div>
+    <div style="font-family: var(--mono); font-size: 0.85rem; background: var(--surface-2); border: 1px solid var(--border); padding: 0.5rem 0.7rem; border-radius: 4px;">${item.origin}</div>
+  `;
+  modalFoot.innerHTML = `
+    <button class="wiz-btn ghost" onclick="closeModal()">Dismiss</button>
+    <button class="wiz-btn primary" onclick="approveStreamItem('${item.id}')">${item.confidence === 'verified' ? 'Locked' : item.confidence === 'matched' ? 'Approve' : 'Verify &amp; Lock'}</button>
+  `;
+  openModal();
+}
+
+function openOriginModal(originId) {
+  modalTitle.textContent = 'Computation Origins · ' + originId;
+  modalBody.innerHTML = `
+    <div class="origin-panel">
+      <div class="origin-trail-title">Deterministic Formula Trail</div>
+      <div class="origin-formula">
+        <strong>Result</strong> = Σ(atomic ledger transactions) − Σ(reversing entries) + adjustments<br>
+        <strong>Confidence</strong> = f(receipt_hash_match, plaid_signature, historical_vector)<br>
+        <strong>Compliance</strong> = GAAP · ASC 606 · SOC 2 audit chain intact
+      </div>
+      <div class="origin-trail-title">Atomic Transactions</div>
+      <div class="origin-tx">
+        <div class="d">2026-07-11</div>
+        <div><div class="desc">Wire receipt · Zenith Ventures · Series B t3</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Bank: Silicon Valley Bank ****3821</div></div>
+        <div class="amt">${fmtUSD(cents(128_400))}</div>
+      </div>
+      <div class="origin-tx">
+        <div class="d">2026-07-11</div>
+        <div><div class="desc">Stripe subscription batch · 1,082 charges</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Auto-reconciled · payout ref 288f42a1</div></div>
+        <div class="amt">${fmtUSD(cents(412_500))}</div>
+      </div>
+      <div class="origin-tx">
+        <div class="d">2026-07-10</div>
+        <div><div class="desc">Payroll disbursement · 14 employees</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Gusto API · signature 0xa41b</div></div>
+        <div class="amt">(${fmtUSD(cents(212_496))})</div>
+      </div>
+      <div class="origin-tx">
+        <div class="d">2026-07-08</div>
+        <div><div class="desc">AWS Q3 pre-pay</div><div style="font-size: 0.72rem; color: var(--ink-mute);">Vendor invoice INV-2026-Q3-1198</div></div>
+        <div class="amt">(${fmtUSD(cents(18_240))})</div>
+      </div>
+      <div class="origin-tx">
+        <div class="d">2026-07-05</div>
+        <div><div class="desc">Formlabs SLS printer capitalization</div><div style="font-size: 0.72rem; color: var(--ink-mute);">§179 election · in-service 07-01</div></div>
+        <div class="amt">(${fmtUSD(cents(22_900))})</div>
+      </div>
+    </div>
+  `;
+  modalFoot.innerHTML = `
+    <button class="wiz-btn ghost" onclick="closeModal()">Close</button>
+    <button class="wiz-btn primary" onclick="closeModal()">Verify Chain</button>
+  `;
+  openModal();
+}
+
+function approveStreamItem(id) {
+  const item = state.stream.find(s => s.id === id);
+  if (!item) return;
+  const nextConfidence = item.confidence === 'pending' ? 'matched' : item.confidence === 'matched' ? 'verified' : 'verified';
+  item.confidence = nextConfidence;
+  if (item.confidence === 'verified') {
+    state.manualOverrides.push({ id: item.id, at: new Date().toISOString(), by: state.user.email });
+  }
+  updateSidebarCounts();
+  closeModal();
+  renderView(state.ui.activeView);
+}
+
+/* ==================================================================
+   PERSISTENCE (§IV)
+================================================================== */
+function exportJSON() {
+  state.savedAt = new Date().toISOString();
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `LEDGERZERO_backup_${todayISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showBanner('success', 'Progress downloaded successfully · LEDGERZERO_backup_' + todayISO() + '.json');
+}
+
+function importJSON(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (!validateSchema(parsed)) {
+        showBanner('error', 'Invalid or corrupted progress file · schema validation failed');
+        return;
+      }
+      state = parsed;
+      saveState();
+      updateSidebarCounts();
+      showBanner('success', 'Progress restored successfully · resuming at ' + (state.ui?.activeView || 'command center'));
+      renderView(state.ui?.activeView || 'dashboard');
+      updateEntityUI();
+    } catch(err) {
+      showBanner('error', 'Invalid or corrupted progress file · JSON parse error');
+    }
+  };
+  reader.onerror = () => showBanner('error', 'Could not read file');
+  reader.readAsText(file);
+}
+
+function showBanner(kind, msg) {
+  const container = document.getElementById('persistBanner') || document.querySelector('.view-header');
+  if (!container) {
+    alert(msg);
+    return;
+  }
+  const banner = document.createElement('div');
+  banner.className = 'banner ' + kind;
+  banner.innerHTML = `${kind === 'success' ? ICON.check : ICON.warn}<span>${msg}</span>`;
+  container.innerHTML = '';
+  container.appendChild(banner);
+  setTimeout(() => banner.remove(), 5000);
+}
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) importJSON(e.target.files[0]);
+  e.target.value = '';
+});
+
+/* ==================================================================
+   AUTH / LOGIN / ONBOARDING WIZARD
+================================================================== */
+const gate = document.getElementById('gate');
+const app  = document.getElementById('app');
+const wizardShell = document.getElementById('wizardShell');
+
+document.getElementById('signinBtn').addEventListener('click', enterApp);
+document.getElementById('switchSignup').addEventListener('click', () => {
+  document.getElementById('gateSignIn').classList.add('hidden');
+  document.getElementById('gateSignUp').classList.remove('hidden');
+  document.getElementById('gateTitle').textContent = 'Provision your workspace';
+  document.getElementById('gateSub').textContent = 'Under 5 minutes to a reconciled ledger. Cryptographically signed on first sync.';
+});
+document.getElementById('switchSignin').addEventListener('click', () => {
+  document.getElementById('gateSignUp').classList.add('hidden');
+  document.getElementById('gateSignIn').classList.remove('hidden');
+  document.getElementById('gateTitle').textContent = 'Welcome back';
+  document.getElementById('gateSub').textContent = 'Sign in to your autonomous ledger. SOC 2 Type II. 256-bit AES at rest.';
+});
+document.getElementById('signupBtn').addEventListener('click', () => {
+  const co  = document.getElementById('signupCo').value.trim() || "Northwind Robotics, Inc.";
+  const ein = document.getElementById('signupEIN').value.trim() || "87-3421918";
+  const entity = document.getElementById('signupEntity').value;
+  const email = document.getElementById('signupEmail').value.trim() || "cfo@northwind.co";
+  state.entities.northwind.legal = co;
+  state.entities.northwind.ein = ein;
+  state.entities.northwind.structure = entity;
+  state.user.email = email;
+  state.user.initials = co.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase() || 'NR';
+  gate.style.display = 'none';
+  wizardShell.classList.remove('hidden');
+  startWizard();
+});
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  app.classList.remove('visible');
+  gate.style.display = 'flex';
+});
+
+function enterApp() {
+  gate.style.display = 'none';
+  app.classList.add('visible');
+  updateEntityUI();
+  updateSidebarCounts();
+  renderView('dashboard');
+}
+
+/* -------------------- Wizard steps -------------------- */
+const wizardSteps = [
+  {
+    title: "Choose your integration set",
+    sub:   "We'll pre-wire the connectors we know your entity type needs.",
+    choices: [
+      { id: 'plaid',  title: 'Plaid Banking',      desc: '12,000+ US institutions · real-time transaction sync', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg>' },
+      { id: 'stripe', title: 'Stripe Revenue',     desc: 'Auto-recognize subscription MRR + payout reconciliation', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>' },
+      { id: 'gusto',  title: 'Gusto Payroll',      desc: 'W-2, 1099, benefits, and SUI · auto-withholding', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>' }
+    ]
+  },
+  {
+    title: "Confirm your chart of accounts",
+    sub:   "We generated a GAAP-standard COA for your entity type. Approve or customize.",
+    choices: [
+      { id: 'standard', title: 'Standard SaaS COA', desc: '84 accounts · matches your ${entity} structure · recommended', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v14l-4-2-4 2-4-2-4 2z"/></svg>' },
+      { id: 'custom',   title: 'Custom Import',    desc: 'Upload existing QuickBooks / Xero COA', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg>' }
+    ]
+  },
+  {
+    title: "Set your fiscal cadence",
+    sub:   "Locks depreciation, revenue recognition, and quarterly estimates to the correct calendar.",
+    choices: [
+      { id: 'calendar', title: 'Calendar Year',    desc: 'Jan 1 – Dec 31 · standard for most S-Corps', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>' },
+      { id: 'fiscal-q3', title: 'Fiscal Year · Q3 close', desc: 'Jul 1 – Jun 30', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 14l3 3 5-5"/></svg>' },
+      { id: 'custom', title: 'Custom Cadence', desc: 'Configure a custom fiscal calendar', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M12 8v4l3 2"/></svg>' }
+    ]
+  },
+  {
+    title: "You're ready. Enter Command Center.",
+    sub:   "We'll pre-populate a 90-day demo ledger so you can explore. Real Plaid/Stripe wiring runs on your first login.",
+    choices: []
+  }
+];
+let wizStep = 0;
+let wizPicks = {};
+
+function startWizard() {
+  wizStep = 0;
+  wizPicks = {};
+  document.getElementById('wizTitle').textContent = 'Provision ' + state.entities.northwind.legal;
+  renderWizStep();
+}
+function renderWizStep() {
+  const step = wizardSteps[wizStep];
+  const body = document.getElementById('wizardBody');
+  const dots = document.querySelectorAll('.wizard-dot');
+  dots.forEach((d, i) => {
+    d.classList.toggle('active', i === wizStep);
+    d.classList.toggle('done', i < wizStep);
+  });
+  const remaining = Math.max(1, wizardSteps.length - wizStep - 1);
+  document.getElementById('wizTiming').textContent = wizStep === wizardSteps.length - 1 ? 'All set · under 5 minutes' : `Est. ${remaining} step${remaining === 1 ? '' : 's'} · ~${remaining * 45}s remaining`;
+  document.getElementById('wizBack').style.visibility = wizStep === 0 ? 'hidden' : 'visible';
+  document.getElementById('wizNext').textContent = wizStep === wizardSteps.length - 1 ? 'Enter Command Center' : 'Continue';
+  body.innerHTML = `
+    <h3>${step.title}</h3>
+    <p>${step.sub}</p>
+    ${step.choices.length ? `
+      <div class="wizard-choices">
+        ${step.choices.map(c => `
+          <button class="wiz-choice ${wizPicks[wizStep]?.id === c.id ? 'picked' : ''}" data-cid="${c.id}">
+            <div class="wiz-choice-icon">${c.icon}</div>
+            <div class="wiz-choice-body">
+              <div class="wiz-choice-title">${c.title}</div>
+              <div class="wiz-choice-desc">${c.desc}</div>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    ` : `
+      <div style="background: var(--verified-so); color: var(--verified); padding: 1rem 1.15rem; border-radius: 6px; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+        <span class="icon-inline">${ICON.check}</span> 90-day demo ledger ready · 187 transactions pre-classified · audit vulnerability score computed
+      </div>
+    `}
+  `;
+  body.querySelectorAll('.wiz-choice').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const choice = step.choices.find(c => c.id === btn.dataset.cid);
+      wizPicks[wizStep] = choice;
+      renderWizStep();
+    });
+  });
+}
+document.getElementById('wizBack').addEventListener('click', () => {
+  if (wizStep > 0) { wizStep--; renderWizStep(); }
+});
+document.getElementById('wizNext').addEventListener('click', () => {
+  if (wizStep < wizardSteps.length - 1) {
+    wizStep++;
+    renderWizStep();
+  } else {
+    wizardShell.classList.add('hidden');
+    (window.enterApp || enterApp)();
+  }
+});
+
+/* ==================================================================
+   NAV & TOPBAR
+================================================================== */
+document.querySelectorAll('.nav-item[data-view]').forEach(el => {
+  el.addEventListener('click', () => renderView(el.dataset.view));
+});
+document.getElementById('tbBackup').addEventListener('click', exportJSON);
+document.getElementById('tbAction').addEventListener('click', () => {
+  modalTitle.textContent = 'New Journal Entry';
+  modalBody.innerHTML = `
+    <div style="font-size: 0.85rem; color: var(--ink-mute); margin-bottom: 1rem;">Every entry must balance: total debits = total credits.</div>
+    <div class="gate-field"><label>Description</label><input type="text" placeholder="e.g. Marketing spend · Q3 podcast sponsorship" id="jeDesc"></div>
+    <div class="gate-field"><label>Debit Account</label><select><option>6210 · Advertising</option><option>6100 · Salaries</option><option>6420 · Cloud Infrastructure</option></select></div>
+    <div class="gate-field"><label>Credit Account</label><select><option>1010 · Operating Cash</option><option>2110 · Accounts Payable</option></select></div>
+    <div class="gate-field"><label>Amount (USD)</label><input type="number" placeholder="0.00" step="0.01" id="jeAmt"></div>
+  `;
+  modalFoot.innerHTML = `
+    <button class="wiz-btn ghost" onclick="closeModal()">Cancel</button>
+    <button class="wiz-btn primary" onclick="createJE()">Post &amp; Verify</button>
+  `;
+  openModal();
+});
+
+window.createJE = function() {
+  const desc = document.getElementById('jeDesc').value.trim() || 'New journal entry';
+  const amt  = parseFloat(document.getElementById('jeAmt').value) || 100;
+  state.journal.unshift({
+    id: 'JE-2026-' + Math.floor(1200 + Math.random() * 800),
+    date: todayISO(),
+    desc,
+    confidence: 'matched',
+    lines: [
+      { account: '6210 · Advertising', type: 'dr', amount: cents(amt) },
+      { account: '1010 · Operating Cash', type: 'cr', amount: cents(amt) }
+    ],
+    verifiedBy: 'Manual entry · ' + state.user.email
+  });
+  closeModal();
+  renderView('ledger');
+};
+
+document.getElementById('entitySelect').addEventListener('change', (e) => {
+  state.activeEntity = e.target.value;
+  renderView(state.ui.activeView);
+});
+
+function updateEntityUI() {
+  document.getElementById('entitySelect').value = state.activeEntity;
+  document.getElementById('footAvatar').textContent = state.user.initials;
+  document.getElementById('footName').textContent = state.user.role;
+  document.getElementById('footEmail').textContent = state.user.email;
+}
+
+function updateSidebarCounts() {
+  const pending = state.stream.filter(s => s.confidence === 'pending').length;
+  const el = document.getElementById('streamCount');
+  if (el) {
+    el.textContent = pending;
+    el.classList.toggle('alert', pending > 0);
+  }
+}
+
+/* ==================================================================
+   BOOTSTRAP
+================================================================== */
+state = loadState();
+if (localStorage.getItem(LS_KEY + '.session') === 'active') {
+  enterApp();
+} else {
+  gate.style.display = 'flex';
+}
+// mark active once entered
+const _enter = enterApp;
+window.enterApp = function() { localStorage.setItem(LS_KEY + '.session','active'); _enter(); };
+
+// Re-bind since we overrode after DOM listeners were set
+document.getElementById('signinBtn').removeEventListener('click', enterApp);
+document.getElementById('signinBtn').addEventListener('click', window.enterApp);
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem(LS_KEY + '.session');
+});
+</script>
+</body>
+</html>
