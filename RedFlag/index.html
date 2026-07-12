@@ -292,6 +292,45 @@ button.card:hover{ transform:translateY(-2px); box-shadow:var(--shadow-hover); }
   .grid-2,.grid-3{ grid-template-columns:1fr; } .contrast{ grid-template-columns:1fr; } .inline-2{ grid-template-columns:1fr 1fr; }
   .summary-head{ flex-direction:column; gap:8px; } .footer-inner{ grid-template-columns:1fr; } .side{ flex-direction:column; }
 }
+/* ── Attachment archetype quiz ── */
+.mode-cards{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:24px 0; }
+.mode-card{ cursor:pointer; text-align:left; padding:22px 20px; border:2px solid var(--line); border-radius:var(--radius-lg); background:var(--bg-card); transition:.14s; }
+.mode-card:hover{ border-color:var(--ink-faint); transform:translateY(-2px); }
+.mode-card.active{ border-color:var(--accent); background:var(--accent-glow); }
+.mode-card-icon{ font-size:24px; margin-bottom:10px; }
+.mode-card h3{ font-size:16px; margin-bottom:4px; font-family:var(--display); font-weight:500; }
+.mode-card p{ color:var(--ink-dim); font-size:13.5px; margin:0; line-height:1.5; }
+.rank-opts{ display:flex; flex-direction:column; gap:10px; margin-top:4px; }
+.rank-opt{ display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border:1.5px solid var(--line); border-radius:var(--radius); background:var(--bg-card); cursor:pointer; text-align:left; font-family:var(--body); color:var(--ink); transition:.12s; }
+.rank-opt:hover:not(.ranked-done){ border-color:var(--ink-faint); background:var(--bg-2); }
+.rank-num{ width:26px; height:26px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; font-weight:700; border:1.5px solid var(--line); color:var(--ink-faint); transition:.12s; }
+.rank-num.r1{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.rank-num.r2{ background:var(--bg-2); border-color:var(--ink-faint); color:var(--ink); }
+.rank-num.r3{ background:var(--bg-2); border-color:var(--ink-faint); color:var(--ink-dim); }
+.rank-num.r4{ background:var(--bg-2); border-color:var(--line); color:var(--ink-faint); }
+.rank-opt-text{ font-size:14.5px; line-height:1.55; padding-top:3px; }
+.rank-prompt{ font-family:var(--mono); font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--ink-faint); text-transform:uppercase; margin:20px 0 12px; }
+.attach-result-hero{ padding:36px 0 28px; text-align:center; }
+.attach-result-hero .arc-letter{ display:inline-flex; align-items:center; justify-content:center; width:56px; height:56px; border-radius:50%; font-family:var(--display); font-weight:600; font-size:24px; margin-bottom:16px; }
+.attach-result-hero h2{ font-size:clamp(26px,4vw,38px); font-weight:400; margin-bottom:8px; }
+.attach-result-hero .tagline{ font-family:var(--display); font-style:italic; font-size:18px; color:var(--ink-dim); margin:0; }
+.attach-bars{ display:flex; flex-direction:column; gap:12px; margin:24px 0; }
+.attach-bar-row{ display:grid; grid-template-columns:1fr 60px 80px; gap:12px; align-items:center; }
+.attach-bar-name{ font-size:13.5px; font-weight:600; }
+.attach-bar-track{ height:8px; background:var(--line); border-radius:4px; overflow:hidden; }
+.attach-bar-fill{ height:100%; border-radius:4px; transition:width .4s ease; }
+.attach-bar-meta{ text-align:right; }
+.attach-bar-pct{ font-family:var(--mono); font-size:12px; font-weight:700; }
+.attach-bar-label{ font-size:10.5px; color:var(--ink-faint); }
+.blend-callout{ background:var(--accent-glow); border:1px solid var(--accent); border-radius:var(--radius); padding:14px 18px; margin:16px 0; font-size:14px; color:var(--ink); line-height:1.55; }
+.subtype-badge{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:var(--radius); border:1px solid var(--line); background:var(--bg-2); font-size:13.5px; font-weight:600; color:var(--ink); margin:8px 0 0; }
+.share-area{ position:relative; margin-top:6px; }
+.share-pre{ background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.7; color:var(--ink-dim); white-space:pre-wrap; word-break:break-word; }
+.share-copy-btn{ position:absolute; top:8px; right:8px; background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius); padding:5px 12px; font-family:var(--body); font-size:12px; font-weight:600; cursor:pointer; color:var(--ink-dim); transition:.12s; }
+.share-copy-btn:hover{ color:var(--ink); border-color:var(--accent); }
+.share-copy-btn.copied{ color:var(--green); border-color:var(--green); }
+@media(max-width:620px){ .mode-cards{ grid-template-columns:1fr; } }
+
 /* ── State persistence & export UI ── */
 .progress-export-btn{ display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.04em; padding:8px 12px; min-height:38px; border-radius:var(--radius); border:1px solid var(--line); background:var(--bg-2); color:var(--ink-dim); cursor:pointer; transition:.13s; white-space:nowrap; }
 .progress-export-btn:hover{ border-color:var(--accent-bright); color:var(--accent-bright); }
@@ -904,6 +943,146 @@ function reframe(text, rt, story=true) {
   return text;
 }
 
+// ─── ATTACHMENT ARCHETYPE QUIZ ───────────────────────────────────────────────────
+const TOKEN_MAP = {
+  PARTNER: { THEY:"they", THEIR:"their", THEM:"them", THEYRE:"they're", THEYVE:"they've", THEYD:"they'd", THEY_UC:"They", SUBJECT:"Your partner", RANK_PROMPT:"Rank how they'd most likely respond." },
+  SELF:    { THEY:"you",  THEIR:"your",  THEM:"you",  THEYRE:"you're",  THEYVE:"you've",  THEYD:"you'd",  THEY_UC:"You",  SUBJECT:"You",           RANK_PROMPT:"Rank how you'd most likely respond." },
+};
+function renderCopy(tmpl, mode) {
+  const t = TOKEN_MAP[mode] || TOKEN_MAP.PARTNER;
+  return tmpl.replace(/\{(\w+)\}/g, (_, k) => t[k] != null ? t[k] : `{${k}}`);
+}
+
+const CLICK_POINTS = [3, 2, 1, 0];
+
+const ARCHETYPES = {
+  A: { name:"The Avoidant",       tagline:"Fear of Closeness",       color:"#3E7098", colorDark:"#5A98C0", subtypes:["The Ghost-in-Waiting","The Contrarian / Debater","The 'Right Person, Wrong Time' Martyr"], wound:"The Avoidant doesn't lack the capacity for love. They fear what love costs. Intimacy and threat got wired together early — and distance became armor that turned invisible over time." },
+  C: { name:"The Consumer",       tagline:"Hungry for Validation",    color:"#B03020", colorDark:"#E0655A", subtypes:["The Love-Bomber","The Main Character","The Collector / Rotator"], wound:"The Consumer learned early that love was conditional — earned through performance. The adult version is a relationship style built around the hunt for proof: proof that they're chosen, special, not replaced." },
+  U: { name:"The Under-Functioner",tagline:"Fear of Accountability", color:"#9A6B15", colorDark:"#C89030", subtypes:["The Project (Fixer-Upper)","The Peter Pan (Forever Child)"], wound:"For the Under-Functioner, being fully responsible for a relationship feels like being set up to fail. The system runs slightly below full capacity — never enough to be abandoned, never enough to be held accountable." },
+  S: { name:"The Secure Attacher",tagline:"The Healthy Baseline",     color:"#2E7D46", colorDark:"#4B9C65", subtypes:["The Secure Partner"], wound:"This is not the absence of history — it is the presence of repair. Security is not ease. It is the capacity to hold hard feelings without letting them run the relationship." },
+};
+
+const ATTACHMENT_QUESTIONS = [
+  { id:"Q1", title:"The Boundary Test",
+    partnerScenario:"You tell your partner you need this weekend to yourself — you love them, you just need to recharge. Rank how their response would most likely go.",
+    selfScenario:"Your partner tells you they need this weekend to themselves — they love you, they just need to recharge. Rank how your response would most likely go.",
+    opts:[
+      { key:"A", text:"{THEY_UC} say \"Fine, no problem\" — almost too easily. No temperature shift in either direction. You couldn't tell if {THEY} were hurt, relieved, or completely indifferent." },
+      { key:"C", text:"{THEY_UC} don't argue — but {THEIR} energy shifts. Quieter, slightly withdrawn. By the weekend {THEYVE} spent half {THEIR} alone time managing how {THEY} feel about the alone time." },
+      { key:"U", text:"{THEY_UC} agree — then text three times that day anyway. Not urgently, just checking in. {THEY_UC} forgot the terms of what was asked for." },
+      { key:"S", text:"\"Of course — let me know when you're ready to reconnect.\" No fallout, no undercurrent. {THEY_UC} meant it." },
+    ]
+  },
+  { id:"Q2", title:"The Conflict Test",
+    partnerScenario:"You bring up something small that bothered you — a comment they made, something minor they missed. Rank how they'd most likely respond.",
+    selfScenario:"Your partner brings up something small that bothered them — a comment you made, something you missed. Rank how you'd most likely respond.",
+    opts:[
+      { key:"A", text:"{THEY_UC} acknowledge it briefly — \"yeah, fair\" — and want to move past it immediately. Technically resolved. But you don't feel heard. {THEY_UC} are slightly cooler for the rest of the day." },
+      { key:"C", text:"{THEY_UC} spiral. What started as your grievance becomes a conversation about whether {THEYRE} a bad partner. Somehow you end up reassuring {THEM} about the thing {THEY} did." },
+      { key:"U", text:"{THEY_UC} apologize immediately and enthusiastically. Then do the exact same thing two weeks later." },
+      { key:"S", text:"{THEY_UC} listen, acknowledge it without collapsing or deflecting, and the air actually clears. The rupture gets repaired." },
+    ]
+  },
+  { id:"Q3", title:"The Communication Test",
+    partnerScenario:"You've been apart for three days — different schedules, sporadic contact. When you reconnect, what's the vibe from their side?",
+    selfScenario:"You've been apart for three days — different schedules, sporadic contact. What's your vibe when you reconnect?",
+    opts:[
+      { key:"A", text:"{THEY_UC} pick up like nothing happened — warm, present, no reference to the gap. The distance clearly didn't register the same way for {THEM}." },
+      { key:"C", text:"There's a coolness to thaw. Nothing explicit — {THEYD} deny it if asked — but the limited contact left a mark. Some relational maintenance required before things feel even." },
+      { key:"U", text:"{THEY_UC} also went quiet. Nobody reached out first. There's a weird texture to the reconnection that neither of you is naming." },
+      { key:"S", text:"{THEY_UC} checked in when it felt natural — not constantly, not absent. The reconnection feels easy. No accumulation, no residue." },
+    ]
+  },
+  { id:"Q4", title:"The Intimacy Spike",
+    partnerScenario:"You shared something heavy — a real fear, something you've never told anyone. In the days immediately after, how do they show up?",
+    selfScenario:"Your partner shared something heavy — a real fear, something they've never told anyone. How do you show up in the days after?",
+    opts:[
+      { key:"A", text:"{THEY_UC} were present in the moment — kind, the right words. But in the days after {THEYRE} slightly more distant, like the closeness raised the stakes in a way {THEYRE} quietly managing." },
+      { key:"C", text:"{THEY_UC} immediately matched your vulnerability with {THEIR} own — something bigger. The focus shifted before you'd finished processing. Connection, technically. But also a takeover." },
+      { key:"U", text:"{THEY_UC} were exactly right in the moment. And then nothing. No follow-up, no \"hey, how are you feeling about what you shared?\" It just evaporated." },
+      { key:"S", text:"{THEY_UC} sat in it with you. Asked a real follow-up question. Checked in two days later without being prompted. The thing you shared didn't disappear." },
+    ]
+  },
+  { id:"Q5", title:"The Accountability Test",
+    partnerScenario:"You told them something they said hurt you. Rank how they'd most likely respond.",
+    selfScenario:"Your partner told you that something you said hurt them. Rank how you'd most likely respond.",
+    opts:[
+      { key:"A", text:"{THEY_UC} apologize briefly and cleanly, then want to move on. Any attempt to stay in the conversation reads as relitigating. The closure feels imposed more than earned." },
+      { key:"C", text:"{THEIR} hurt becomes evidence of something {THEY} need to process about {THEMSELVES}. By the end, you're comforting {THEM} about the thing {THEY} did." },
+      { key:"U", text:"{THEY_UC} find the angle where it was actually complicated — or you're too sensitive — or {THEY} didn't mean it that way. The apology, if it comes, arrives with conditions." },
+      { key:"S", text:"{THEY_UC} hear it. Take responsibility without collapsing or making it about {THEM}. The air is genuinely different afterward." },
+    ]
+  },
+  { id:"Q6", title:"The Crisis Test",
+    partnerScenario:"Something genuinely terrible happened — work, family, health. You're not okay and you told them. How do they show up?",
+    selfScenario:"Something genuinely terrible happened to your partner — work, family, health. They told you they're not okay. How do you show up?",
+    opts:[
+      { key:"A", text:"{THEY_UC} acknowledge it — maybe try to solve it — then give you space. More space than you wanted. {THEY_UC} meant well. It felt like being handled rather than held." },
+      { key:"C", text:"Initially present and attentive — but the conversation finds its way to {THEIR} parallel stress, or advice you didn't ask for, or a comparison that quietly shrinks what you're going through." },
+      { key:"U", text:"Warm in the moment. But no follow-up comes. If you need more, you'd have to ask explicitly. The burden of receiving support stays with you." },
+      { key:"S", text:"{THEY_UC} showed up — actually there, not just technically. Asked what you needed. Checked in unprompted the next day." },
+    ]
+  },
+  { id:"Q7", title:"The Integration Test",
+    partnerScenario:"A few months in. Rank which best describes their approach to bringing you into their world — friends, family, social life.",
+    selfScenario:"A few months in. Rank which best describes your approach to bringing them into your world — friends, family, social life.",
+    opts:[
+      { key:"A", text:"Slow. {THEYVE} met one of {THEIR} friends, maybe, in a low-stakes way. The relationship still exists somewhat in a bubble {THEY} haven't opened." },
+      { key:"C", text:"Fast and curated. {THEYVE} met everyone — but it felt like a rollout. Deliberate. You were the subject of scene-setting before you arrived." },
+      { key:"U", text:"Lots of \"we should all get together soon\" that never becomes actual plans. {THEIR} friends know you exist. You haven't actually met them." },
+      { key:"S", text:"It happened naturally. {THEYVE} introduced you to the people who matter. With warmth and easy context. No performance, no avoidance." },
+    ]
+  },
+  { id:"Q8", title:"The Pace Test",
+    partnerScenario:"You had a real conversation about where things are going. Rank which best describes their approach.",
+    selfScenario:"You had a real conversation about where things are going. Rank which best describes your approach.",
+    opts:[
+      { key:"A", text:"{THEY_UC} engaged warmly but kept everything slightly vague — abstract, philosophical, unresolved. {THEY_UC} seemed comfortable leaving it there. Nothing landed concrete." },
+      { key:"C", text:"Very enthusiastic — lots of future language, declarations. But push on specifics — logistics, real timelines, actual decisions — and the conversation goes fuzzy." },
+      { key:"U", text:"Deflection or defensiveness. \"Why does it need a label?\" Or {THEY} agreed to something {THEY} clearly hadn't thought through and would revisit when convenient." },
+      { key:"S", text:"Direct. {THEY_UC} said where {THEY} actually are, including where {THEYRE} uncertain. You left knowing where you stood." },
+    ]
+  },
+];
+
+function computeAttachmentScores(answers) {
+  const scores = { A:0, C:0, U:0, S:0 };
+  for (const { ranked } of answers) {
+    ranked.forEach((key, i) => { if (scores[key] != null) scores[key] += CLICK_POINTS[i]; });
+  }
+  return scores;
+}
+
+function computeAttachmentResult(scores) {
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [[pk, ps], [sk, ss]] = sorted;
+  const blend = (ps - ss) <= 4;
+  const pct = v => Math.round((v / 24) * 100);
+  const label = v => v >= 70 ? "Dominant" : v >= 50 ? "Prominent" : v >= 30 ? "Contributing" : "Minimal";
+  return {
+    primary: pk, secondary: blend ? sk : null, blend,
+    scores: Object.fromEntries(
+      Object.entries(scores).map(([k, v]) => { const p = pct(v); return [k, { raw:v, pct:p, label:label(p) }]; })
+    ),
+  };
+}
+
+function buildAttachmentShareText(result, mode) {
+  const arc = ARCHETYPES[result.primary];
+  const subtype = arc.subtypes[0];
+  const oneLiner = {
+    A: { PARTNER:"they show up just enough to keep you — and just little enough to keep the exit open", SELF:"i'm there when it's easy and hard to find when it gets real" },
+    C: { PARTNER:"everything is fine until you need to be the main character for five minutes", SELF:"i'm basically running a real-time validation scan at all times lol" },
+    U: { PARTNER:"great in theory, somehow always unavailable for the actual part", SELF:"i have a lot of potential that i keep meaning to work on" },
+    S: { PARTNER:"honestly refreshing — consistent, direct, actually does the repair work", SELF:"apparently i'm well-adjusted which feels suspicious but i'll take it" },
+  };
+  const summary = oneLiner[result.primary]?.[mode] ?? "";
+  if (mode === "PARTNER") {
+    return `🚩 just ran my relationship through RedFlag\n\ntheir type: ${arc.name}\n"${arc.tagline}"\n\nsub-type flagged: ${subtype}\n\n${summary}\n\ntake the free quiz 👇\nredflag.io`;
+  }
+  return `🚩 just audited myself on RedFlag\n\nmy type: ${arc.name}\n"${arc.tagline}"\n\nsub-type: ${subtype}\n\n${summary}\n\ntake the free quiz 👇\nredflag.io`;
+}
+
 // ─── EDUCATIONAL CONTENT ─────────────────────────────────────────────────────────
 const FAMILIES = [
   { name:"Reality & mind games", keys:["gaslight","blame","somatic"],
@@ -956,6 +1135,7 @@ const NAV = [
   { id:"patterns",   label:"The Patterns" },
   { id:"lenses",     label:"The Six Lenses" },
   { id:"finder",     label:"Warning-Sign Finder" },
+  { id:"attachment", label:"Attachment Quiz" },
   { id:"help",       label:"Get Help" },
   { id:"blog",       label:"Blog" },
   { id:"about",      label:"About" },
@@ -1810,8 +1990,182 @@ function ReportScreen({ rel, dualResult, scenarioAnswers, onBack }) {
 }
 
 // ─── APP ─────────────────────────────────────────────────────────────────────────
-const VIEWS = { HOME:"home", LEARN:"learn", ARCHETYPES:"archetypes", PATTERNS:"patterns", LENSES:"lenses", FINDER:"finder", HELP:"help", BLOG:"blog", ABOUT:"about", QUIZ:"quiz" };
-const SCREENS = { ONBOARD:"onboard", SCENARIO:"scenario", RESULTS:"results", WN:"wn", REPORT:"report" };
+// ─── ATTACHMENT QUIZ COMPONENTS ───────────────────────────────────────────────────
+
+function AttachmentModeSelect({ onSelect }) {
+  return (
+    <div className="container view">
+      <div className="learn-hero">
+        <div className="pill">Attachment Type Quiz</div>
+        <h1>Who are you really dealing with?</h1>
+        <p className="subhead">8 real scenarios. Click to rank reactions. One of four attachment archetypes — no fluff.</p>
+      </div>
+      <div className="mode-cards">
+        <button className="mode-card" onClick={()=>onSelect("PARTNER")}>
+          <div style={{fontSize:26,marginBottom:10}}>🔍</div>
+          <strong style={{fontSize:16,display:"block",marginBottom:6}}>Audit My Partner</strong>
+          <p>How does their attachment style shape this relationship?</p>
+        </button>
+        <button className="mode-card" onClick={()=>onSelect("SELF")}>
+          <div style={{fontSize:26,marginBottom:10}}>🪞</div>
+          <strong style={{fontSize:16,display:"block",marginBottom:6}}>Audit Myself</strong>
+          <p>What does my own attachment style bring to relationships?</p>
+        </button>
+      </div>
+      <p style={{fontSize:12,color:"var(--ink-faint)",textAlign:"center",marginTop:16}}>Your answers stay on your device.</p>
+    </div>
+  );
+}
+
+function AttachmentQuiz({ mode, onComplete }) {
+  const [qIndex,     setQIndex]     = useState(0);
+  const [allAnswers, setAllAnswers] = useState([]);
+  const [ranked,     setRanked]     = useState([]);
+  const q          = ATTACHMENT_QUESTIONS[qIndex];
+  const total      = ATTACHMENT_QUESTIONS.length;
+  const pct        = Math.round((qIndex / total) * 100);
+  const scenario   = renderCopy(mode==="SELF" ? q.selfScenario : q.partnerScenario, mode);
+  const rankPrompt = (TOKEN_MAP[mode] || TOKEN_MAP.PARTNER).RANK_PROMPT;
+
+  function toggleRank(key) {
+    setRanked(prev => {
+      const idx = prev.indexOf(key);
+      if (idx >= 0) return prev.filter(k => k !== key);
+      if (prev.length >= 4) return prev;
+      return [...prev, key];
+    });
+  }
+
+  function advance() {
+    const newAnswers = [...allAnswers, { qId: q.id, ranked }];
+    if (qIndex < total - 1) {
+      setAllAnswers(newAnswers);
+      setRanked([]);
+      setQIndex(i => i + 1);
+      try { window.scrollTo(0, 0); } catch(e) {}
+    } else {
+      onComplete(newAnswers);
+    }
+  }
+
+  return (
+    <div className="container view">
+      <div style={{marginBottom:24}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:12,color:"var(--ink-faint)",fontFamily:"var(--mono)"}}>Question {qIndex+1} of {total}</span>
+          <span style={{fontSize:12,color:"var(--ink-faint)"}}>Attachment Quiz</span>
+        </div>
+        <div style={{height:3,background:"var(--line)",borderRadius:2,overflow:"hidden"}}>
+          <div style={{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:2,transition:"width .3s"}}/>
+        </div>
+      </div>
+      <div style={{marginBottom:8}}>
+        <div className="pill" style={{marginBottom:12}}>{q.title}</div>
+        <p style={{fontSize:15,lineHeight:1.7,color:"var(--ink)",margin:"0 0 4px"}}>{scenario}</p>
+      </div>
+      <p className="rank-prompt">{rankPrompt}</p>
+      <div className="rank-opts">
+        {q.opts.map(opt => {
+          const ri     = ranked.indexOf(opt.key);
+          const placed = ri >= 0;
+          return (
+            <button key={opt.key}
+              className={"rank-opt" + (ranked.length === 4 ? " ranked-done" : "")}
+              onClick={()=>toggleRank(opt.key)}
+            >
+              <span className={"rank-num" + (placed ? " r"+(ri+1) : "")}>{placed ? ri+1 : ""}</span>
+              <span className="rank-opt-text">{renderCopy(opt.text, mode)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{marginTop:22,display:"flex",justifyContent:"flex-end",gap:12,alignItems:"center"}}>
+        {ranked.length < 4 && <span style={{fontSize:12,color:"var(--ink-faint)"}}>Rank all 4 to continue</span>}
+        <button className="btn btn-primary" disabled={ranked.length < 4} onClick={advance}>
+          {qIndex < total - 1 ? "Next →" : "See My Results →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
+  const [copied, setCopied] = useState(false);
+  const arc        = ARCHETYPES[result.primary];
+  const secArc     = result.secondary ? ARCHETYPES[result.secondary] : null;
+  const { dark }   = useContext(ThemeCtx);
+  const arcColor   = dark ? arc.colorDark : arc.color;
+  const sortedKeys = ["A","C","U","S"].sort((a,b) => result.scores[b].pct - result.scores[a].pct);
+
+  function copyShare() {
+    const text = buildAttachmentShareText(result, mode);
+    navigator.clipboard.writeText(text)
+      .then(()=>{ setCopied(true); setTimeout(()=>setCopied(false), 2200); })
+      .catch(()=>{});
+  }
+
+  return (
+    <div className="container view">
+      <div className="attach-result-hero">
+        <div className="arc-letter" style={{background:arcColor,color:"#fff"}}>{result.primary}</div>
+        <h2>{arc.name}</h2>
+        <p className="tagline">{arc.tagline}</p>
+      </div>
+
+      {result.blend && secArc && (
+        <div className="blend-callout">
+          <strong>Blend detected — {arc.name} + {secArc.name}</strong>
+          <p style={{margin:"4px 0 0",fontSize:13}}>These two archetypes scored within 4 points of each other — likely a blend, not a clean single read.</p>
+        </div>
+      )}
+
+      <div className="attach-bars">
+        {sortedKeys.map(k => {
+          const a   = ARCHETYPES[k];
+          const s   = result.scores[k];
+          const col = dark ? a.colorDark : a.color;
+          return (
+            <div key={k} className="attach-bar-row">
+              <div>
+                <div className="attach-bar-name" style={{color:col}}>{a.name}</div>
+                <div className="attach-bar-track">
+                  <div className="attach-bar-fill" style={{width:s.pct+"%",background:col}}/>
+                </div>
+              </div>
+              <div className="attach-bar-pct">{s.pct}%</div>
+              <div className="attach-bar-meta"><div className="attach-bar-label">{s.label}</div></div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{marginTop:24,padding:"18px 20px",background:"var(--bg-card)",borderRadius:"var(--radius-lg)",border:"1px solid var(--line)"}}>
+        <div style={{fontSize:11,fontFamily:"var(--mono)",letterSpacing:".08em",color:"var(--ink-faint)",marginBottom:10,textTransform:"uppercase"}}>What&rsquo;s underneath</div>
+        <p style={{margin:0,fontSize:14,lineHeight:1.75}}>{arc.wound}</p>
+      </div>
+
+      <div style={{marginTop:18}}>
+        <div style={{fontSize:11,fontFamily:"var(--mono)",letterSpacing:".08em",color:"var(--ink-faint)",marginBottom:10,textTransform:"uppercase"}}>{arc.subtypes.length===1?"Subtype":"Subtypes"}</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {arc.subtypes.map((s,i)=><span key={i} className="subtype-badge">{s}</span>)}
+        </div>
+      </div>
+
+      <div className="share-area" style={{marginTop:26}}>
+        <pre className="share-pre">{buildAttachmentShareText(result, mode)}</pre>
+        <button className={"share-copy-btn"+(copied?" copied":"")} onClick={copyShare}>{copied?"Copied ✓":"Copy to share"}</button>
+      </div>
+
+      <div style={{marginTop:24,display:"flex",flexWrap:"wrap",gap:10,paddingBottom:40}}>
+        <button className="btn btn-ghost" onClick={onRestart}>↺ Retake Quiz</button>
+        {onTakeRedFlags && <button className="btn btn-ghost" onClick={onTakeRedFlags}>Take the Red Flag Quiz →</button>}
+      </div>
+    </div>
+  );
+}
+
+const VIEWS = { HOME:"home", LEARN:"learn", ARCHETYPES:"archetypes", PATTERNS:"patterns", LENSES:"lenses", FINDER:"finder", HELP:"help", BLOG:"blog", ABOUT:"about", QUIZ:"quiz", ATTACHMENT:"attachment" };
+const SCREENS = { ONBOARD:"onboard", SCENARIO:"scenario", RESULTS:"results", WN:"wn", REPORT:"report", ARC_MODE:"arc_mode", ARC_QUIZ:"arc_quiz", ARC_RESULTS:"arc_results" };
 
 function App() {
   const saved = useMemo(loadSession, []);
@@ -1820,17 +2174,22 @@ function App() {
   const [rel,        setRel]        = useState(()=>saved?.rel        ?? null);
   const [scenarios,  setScenarios]  = useState(()=>saved?.scenarios  ?? []);
   const [dualResult, setDualResult] = useState(()=>saved?.dualResult ?? null);
+  const [arcMode,    setArcMode]    = useState(()=>saved?.arcMode    ?? null);
+  const [arcAnswers, setArcAnswers] = useState(()=>saved?.arcAnswers ?? []);
+  const [arcResult,  setArcResult]  = useState(()=>saved?.arcResult  ?? null);
   const theme = useThemeState();
 
-  useEffect(()=>{ saveSession({ view, screen, rel, scenarios, dualResult }); },
-    [view, screen, rel, scenarios, dualResult]);
+  useEffect(()=>{ saveSession({ view, screen, rel, scenarios, dualResult, arcMode, arcAnswers, arcResult }); },
+    [view, screen, rel, scenarios, dualResult, arcMode, arcAnswers, arcResult]);
 
   function top() { try { window.scrollTo(0,0); } catch (e) {} }
   function goView(v) { setView(v); top(); }
   function go(s) { setScreen(s); setView(VIEWS.QUIZ); top(); }
   function restart() { clearSession(); setView(VIEWS.QUIZ); setScreen(SCREENS.ONBOARD); setRel(null); setScenarios([]); setDualResult(null); top(); }
+  function arcRestart() { setView(VIEWS.ATTACHMENT); setScreen(SCREENS.ARC_MODE); setArcMode(null); setArcAnswers([]); setArcResult(null); top(); }
   function onNav(id) {
     if (id==="quiz") { setView(VIEWS.QUIZ); if(!rel) setScreen(SCREENS.ONBOARD); top(); }
+    else if (id==="attachment") { setView(VIEWS.ATTACHMENT); if(!arcMode || arcResult) setScreen(SCREENS.ARC_MODE); top(); }
     else goView(id);
   }
 
@@ -1840,11 +2199,14 @@ function App() {
     setRel(state.rel || null);
     setScenarios(state.scenarios || []);
     setDualResult(state.dualResult || null);
+    setArcMode(state.arcMode || null);
+    setArcAnswers(state.arcAnswers || []);
+    setArcResult(state.arcResult || null);
     top();
   }
 
-  const hasProgress = rel !== null || scenarios.length > 0 || dualResult !== null;
-  const currentState = { view, screen, rel, scenarios, dualResult };
+  const hasProgress = rel !== null || scenarios.length > 0 || dualResult !== null || arcResult !== null;
+  const currentState = { view, screen, rel, scenarios, dualResult, arcMode, arcAnswers, arcResult };
 
   return (
     <ThemeCtx.Provider value={theme}>
@@ -1866,6 +2228,11 @@ function App() {
             {screen===SCREENS.RESULTS  && dualResult && <DualResults dualResult={dualResult} rel={rel} onWhatNow={()=>go(SCREENS.WN)} onReport={()=>go(SCREENS.REPORT)} onRestart={restart}/>}
             {screen===SCREENS.WN       && dualResult && <WhatNow dualResult={dualResult} rel={rel} onReport={()=>go(SCREENS.REPORT)} onFinder={()=>onNav("finder")} onRestart={restart}/>}
             {screen===SCREENS.REPORT   && dualResult && <ReportScreen rel={rel} dualResult={dualResult} scenarioAnswers={scenarios} onBack={()=>go(SCREENS.WN)}/>}
+          </>)}
+          {view===VIEWS.ATTACHMENT && (<>
+            {screen===SCREENS.ARC_MODE    && <AttachmentModeSelect onSelect={(m)=>{ setArcMode(m); setArcAnswers([]); setArcResult(null); setScreen(SCREENS.ARC_QUIZ); top(); }}/>}
+            {screen===SCREENS.ARC_QUIZ    && arcMode && <AttachmentQuiz mode={arcMode} onComplete={(ans)=>{ const sc=computeAttachmentScores(ans); const r=computeAttachmentResult(sc); setArcAnswers(ans); setArcResult(r); setScreen(SCREENS.ARC_RESULTS); top(); }}/>}
+            {screen===SCREENS.ARC_RESULTS && arcResult && <AttachmentResults result={arcResult} mode={arcMode} onRestart={arcRestart} onTakeRedFlags={()=>onNav("quiz")}/>}
           </>)}
         </main>
         <Footer onNav={onNav}/>
