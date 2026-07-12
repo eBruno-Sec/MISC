@@ -8,38 +8,103 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root {
+:root, :root[data-theme="light"] {
   --bg:        #f2f4f7;
   --surface:   #ffffff;
-  --surface-2: #f8f9fb;
-  --surface-3: #eef1f5;
+  --surface-2: #f6f8fb;
+  --surface-3: #eaeef4;
   --border:    #d9dee5;
   --border-strong: #b7c0cc;
   --ink:       #0b1220;
   --ink-2:     #1e2938;
-  --ink-mute:  #55627a;
-  --ink-dim:   #8794a8;
+  --ink-mute:  #4a5568;      /* was #55627a — now 7.1:1 on white */
+  --ink-dim:   #6a7488;      /* was #8794a8 — now 4.6:1 on white */
   --accent:    #0b5cff;
   --accent-dk: #0947c9;
   --accent-so: #e6efff;
-  --verified:  #0f7a4a;
+  --verified:  #0e6a41;      /* was #0f7a4a — now 5.6:1 on white */
   --verified-so:#e2f5eb;
   --matched:   #1553b7;
   --matched-so:#e6efff;
-  --pending:   #a8620a;
+  --pending:   #925409;      /* was #a8620a — now 5.7:1 on white */
   --pending-so:#fbf1de;
-  --risk:      #b02323;
+  --risk:      #a01e1e;      /* was #b02323 — now 6.5:1 on white */
   --risk-so:   #fbe5e5;
+  --focus-ring:#0b5cff;
   --mono:      'JetBrains Mono', ui-monospace, monospace;
   --sans:      'Inter', system-ui, sans-serif;
   --radius:    6px;
   --shadow-sm: 0 1px 2px rgba(15,25,45,0.04);
   --shadow-md: 0 4px 14px rgba(15,25,45,0.08);
   --shadow-lg: 0 12px 32px rgba(15,25,45,0.12);
+  color-scheme: light;
+}
+
+/* DARK THEME — CPA tax-season mode */
+:root[data-theme="dark"] {
+  --bg:        #0a0e15;
+  --surface:   #131924;
+  --surface-2: #0f141d;
+  --surface-3: #1c2432;
+  --border:    #263145;
+  --border-strong: #3a465e;
+  --ink:       #eef2f8;
+  --ink-2:     #cbd3df;
+  --ink-mute:  #9aa4b8;      /* 7.3:1 on --surface */
+  --ink-dim:   #6b768d;
+  --accent:    #4b8dff;
+  --accent-dk: #2c6fe6;
+  --accent-so: rgba(75,141,255,0.15);
+  --verified:  #34c58a;      /* 6.4:1 on --surface */
+  --verified-so:rgba(52,197,138,0.13);
+  --matched:   #6aa6ff;
+  --matched-so:rgba(106,166,255,0.13);
+  --pending:   #ffbf5c;      /* 8.3:1 on --surface */
+  --pending-so:rgba(255,191,92,0.12);
+  --risk:      #ff6b6b;      /* 5.9:1 on --surface */
+  --risk-so:   rgba(255,107,107,0.13);
+  --focus-ring:#4b8dff;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 14px rgba(0,0,0,0.5);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.6);
+  color-scheme: dark;
+}
+/* Print form must stay light regardless of theme (spec §III) */
+:root[data-theme="dark"] .print-form,
+:root[data-theme="dark"] .print-form * {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: #cccccc !important;
+}
+:root[data-theme="dark"] .print-form .pf-sec-label {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+:root[data-theme="dark"] .print-form .pf-line.total {
+  background-color: #eeeeee !important;
+}
+/* Keep hero cards & ROI panel readable in dark (they're already dark) */
+:root[data-theme="dark"] .kpi.hero,
+:root[data-theme="dark"] .roi {
+  background: linear-gradient(135deg, #1c2635 0%, #2a3648 100%);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
+
+/* KEYBOARD FOCUS — visible ring for all interactive elements */
+:focus { outline: none; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Colorblind-safe: reinforce +/- direction with glyphs */
+.money-neg::before { content: "▼ "; font-size: 0.75em; opacity: 0.8; }
+.money-pos::before { content: "▲ "; font-size: 0.75em; opacity: 0.8; }
+.kpi-delta.up::before { content: "▲"; font-size: 0.7em; margin-right: 0.15em; }
+.kpi-delta.down::before { content: "▼"; font-size: 0.7em; margin-right: 0.15em; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -149,11 +214,14 @@ a { color: var(--accent); text-decoration: none; }
 }
 .brand-glyph {
   width: 26px; height: 26px; background: var(--ink); border-radius: 5px;
-  display: grid; place-items: center; color: white;
+  display: grid; place-items: center; color: var(--surface);
   font-family: var(--mono); font-weight: 700; font-size: 12px;
   letter-spacing: -0.08em;
 }
 .brand-glyph::before { content: "L∅"; }
+:root[data-theme="dark"] .brand-glyph { background: var(--accent); color: white; }
+:root[data-theme="dark"] .gate-logo-glyph { background: var(--accent); }
+:root[data-theme="dark"] .foot-avatar { background: var(--accent); }
 .brand-name {
   font-weight: 700; font-size: 0.95rem; letter-spacing: -0.02em;
 }
@@ -252,8 +320,15 @@ a { color: var(--accent); text-decoration: none; }
 .tb-btn.primary {
   background: var(--ink); color: white; border-color: var(--ink);
 }
+:root[data-theme="dark"] .tb-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+:root[data-theme="dark"] .tb-btn.primary:hover { background: var(--accent-dk); border-color: var(--accent-dk); }
 .tb-btn.primary:hover { background: var(--ink-2); border-color: var(--ink-2); }
 .tb-btn svg { width: 13px; height: 13px; }
+.tb-icon { padding: 0.4rem; width: 32px; height: 32px; justify-content: center; }
+.tb-icon svg { width: 15px; height: 15px; }
+.theme-moon { display: none; }
+:root[data-theme="dark"] .theme-sun { display: none; }
+:root[data-theme="dark"] .theme-moon { display: block; }
 .tb-status {
   display: flex; align-items: center; gap: 0.35rem;
   font-size: 0.72rem; color: var(--verified); font-weight: 600;
@@ -1025,15 +1100,61 @@ a { color: var(--accent); text-decoration: none; }
   .pf-line-amt { font-size: 0.75rem; }
 }
 
-/* PRINT MEDIA */
+/* PRINT MEDIA — strip chrome, force ink-safe light rendering everywhere */
 @media print {
-  body { background: white; }
-  .sidebar, .topbar, .print-toolbar, #gate { display: none !important; }
-  .shell { display: block; }
-  .workspace { padding: 0; }
-  .print-form { box-shadow: none; border: none; padding: 0; max-width: 100%; }
+  :root, :root[data-theme="dark"], :root[data-theme="light"] {
+    --bg: #ffffff; --surface: #ffffff; --surface-2: #ffffff; --surface-3: #f4f4f4;
+    --border: #cccccc; --border-strong: #999999;
+    --ink: #000000; --ink-2: #111111; --ink-mute: #333333; --ink-dim: #555555;
+    --accent: #000000; --verified: #0e6a41; --matched: #1553b7;
+    --pending: #925409; --risk: #a01e1e;
+    color-scheme: light !important;
+  }
+  html, body { background: #ffffff !important; color: #000000 !important; }
+  /* Strip navigation, toolbars, floating chrome */
+  .sidebar, .topbar, .print-toolbar, #gate, #wizardShell,
+  .modal-backdrop, .banner, .kpi-mini, .card-head-actions,
+  .card-mini-btn, .tb-btn, .stream-actions, .foot-logout,
+  #modalClose { display: none !important; }
+  .shell { display: block; grid-template-columns: 1fr; }
+  .main { display: block; }
+  .workspace { padding: 0 !important; }
   .view:not(.active) { display: none; }
+  /* Strip gradient/dark hero panels — replace with plain */
+  .kpi.hero, .roi {
+    background: #ffffff !important; color: #000000 !important;
+    border: 1px solid #cccccc !important;
+  }
+  .kpi.hero .kpi-label, .roi .roi-label, .roi .roi-tile-label,
+  .roi .roi-tile-note { color: #333333 !important; }
+  .kpi.hero .kpi-value, .roi .roi-headline, .roi .roi-tile-val { color: #000000 !important; }
+  .roi .roi-headline strong { color: #0e6a41 !important; }
+  /* Cards flatten */
+  .card, .kpi, .tax-tile, .dr-card, .persist-card {
+    box-shadow: none !important; background: #ffffff !important;
+    border: 1px solid #cccccc !important; break-inside: avoid;
+  }
+  /* Print form specifically — pure white, cleanest render */
+  .print-form { box-shadow: none !important; border: none !important; padding: 0 !important; max-width: 100% !important; }
+  .print-form, .print-form * {
+    background: #ffffff !important; color: #000000 !important;
+  }
+  .print-form .pf-sec-label { background: #000000 !important; color: #ffffff !important; }
+  .print-form .pf-line.total { background: #eeeeee !important; }
+  /* Page breaks respect financial section boundaries */
+  .pf-section, .card, .kpi-grid, .avs-panel { page-break-inside: avoid; }
+  /* Hide interactive/decorative bits */
+  .stream-num, .origin-link svg, .kpi-delta::before { display: none !important; }
+  a { color: #000000 !important; text-decoration: none !important; }
+  /* Ensure numeric column integrity even when print-shrunk */
+  .data-table, .je-lines, .pf-line-amt, .kpi-value {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
 }
+/* Ink-safe utility class for programmatic Print action */
+.print-scope { }
+@page { margin: 0.6in; }
 
 .hidden { display: none !important; }
 </style>
@@ -1225,6 +1346,14 @@ a { color: var(--accent); text-decoration: none; }
         </div>
         <div class="topbar-actions">
           <div class="tb-status">LIVE · Plaid Sync 00:00:12</div>
+          <button class="tb-btn tb-icon" id="tbTheme" title="Toggle dark mode" aria-label="Toggle dark mode">
+            <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+          </button>
+          <button class="tb-btn" id="tbPrint" title="Print current view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Print
+          </button>
           <button class="tb-btn" id="tbBackup">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
             Download Progress (.json)
@@ -2743,16 +2872,16 @@ function importJSON(file) {
 }
 
 function showBanner(kind, msg) {
-  const container = document.getElementById('persistBanner') || document.querySelector('.view-header');
-  if (!container) {
-    alert(msg);
-    return;
-  }
+  // Global floating banner — visible on every view (spec §IV.2)
+  const existing = document.getElementById('globalBanner');
+  if (existing) existing.remove();
   const banner = document.createElement('div');
+  banner.id = 'globalBanner';
   banner.className = 'banner ' + kind;
-  banner.innerHTML = `${kind === 'success' ? ICON.check : ICON.warn}<span>${msg}</span>`;
-  container.innerHTML = '';
-  container.appendChild(banner);
+  banner.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  banner.style.cssText = 'position: fixed; top: 72px; right: 24px; z-index: 350; box-shadow: var(--shadow-lg); min-width: 320px; max-width: 480px;';
+  banner.innerHTML = `<span class="icon-inline">${kind === 'success' ? ICON.check : ICON.warn}</span><span>${msg}</span>`;
+  document.body.appendChild(banner);
   setTimeout(() => banner.remove(), 5000);
 }
 
@@ -2912,6 +3041,28 @@ document.querySelectorAll('.nav-item[data-view]').forEach(el => {
   el.addEventListener('click', () => renderView(el.dataset.view));
 });
 document.getElementById('tbBackup').addEventListener('click', exportJSON);
+document.getElementById('tbPrint').addEventListener('click', () => window.print());
+
+/* Theme toggle — persistent, no layout shift, instant swap */
+const THEME_KEY = 'ledgerzero.theme';
+function applyTheme(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  try { localStorage.setItem(THEME_KEY, mode); } catch(e) {}
+  const btn = document.getElementById('tbTheme');
+  if (btn) btn.setAttribute('aria-pressed', mode === 'dark');
+}
+(function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem(THEME_KEY); } catch(e) {}
+  if (!saved) {
+    saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  applyTheme(saved);
+})();
+document.getElementById('tbTheme').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+});
 document.getElementById('tbAction').addEventListener('click', () => {
   modalTitle.textContent = 'New Journal Entry';
   modalBody.innerHTML = `
