@@ -248,6 +248,18 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
 
 .footnote{text-align:center;color:var(--muted);font-size:.78rem;margin-top:20px;line-height:1.7}
 
+/* mission picker strip */
+.mission-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;margin-bottom:4px}
+.mission-strip::-webkit-scrollbar{display:none}
+.m-tab{flex-shrink:0;min-height:44px;padding:0 14px;border-radius:12px;background:var(--surface);border:1.5px solid var(--border);color:var(--muted);font-weight:800;font-size:.82rem;display:flex;align-items:center;gap:7px;transition:border-color .12s,color .12s}
+.m-tab.active{border-color:var(--track);color:var(--bright);background:color-mix(in srgb,var(--track) 12%,var(--surface))}
+.m-tab.done-m{border-color:var(--gold);color:var(--gold)}
+.m-tab .m-ic{font-size:1rem}
+/* mission sub-pips on track cards */
+.mission-pips{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.mpip{font-size:.68rem;font-weight:800;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.mpip.done{border-color:var(--gold);color:var(--gold)}
+
 /* ══════════════════════════════════════════════════════════
    PRINT LAYER (Section III) — ink-saver black-on-white line-art
    Everything on-screen is hidden; only #printRoot renders.
@@ -317,7 +329,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
     <div class="progress-strip">
       <div class="row">
         <div><b style="color:var(--bright);font-family:var(--display)" id="rankName">Rank: Rookie Cadet</b>
-          <div style="font-size:.82rem;color:var(--muted)"><span id="badgeCount">0</span> of 18 mastery badges earned</div>
+          <div style="font-size:.82rem;color:var(--muted)"><span id="badgeCount">0</span> mastery badges earned</div>
         </div>
         <button class="btn ghost mini" onclick="QK.go('parent')">💾 Save / Load</button>
       </div>
@@ -336,6 +348,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
   <!-- ══ LESSON ══ -->
   <section class="view" id="view-lesson" aria-label="Lesson">
     <button class="back" onclick="QK.go('home')">← All Tracks</button>
+    <div class="mission-strip" id="missionStrip" style="display:none"></div>
     <div class="lesson-head">
       <div class="emoji" id="lsEmoji">🛰️</div>
       <div>
@@ -458,7 +471,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
      · PRINT        = Part III ink-saver line-art Lab Packs + audit page
    ═══════════════════════════════════════════════════════════════════ */
 
-const SCHEMA_VERSION = "1.0.0";
+const SCHEMA_VERSION = "1.1.0";
 
 /* ── I. CURRICULUM DATA STORE ─────────────────────────────────────── */
 const CURRICULUM = [
@@ -472,6 +485,39 @@ const CURRICULUM = [
     sim:"gravity",
     heroLeap:"You jumped from a sliding block straight to calculating <b>orbital escape velocity</b> — the exact speed a rocket needs to break free of a planet forever.",
     benchmark:"Newton's Law of Universal Gravitation & the conditions for orbital vs. escape trajectories",
+    missions:[
+      {name:"Orbit & Escape", emoji:"🛰️"},
+      {name:"Push & Pull (F=ma)", emoji:"🏃", sim:"newton",
+       intro:"Isaac Newton figured out that every push has a perfectly predictable result: double the force on the same object and you double the <b>acceleration</b>. Cut the mass in half and the same push creates <b>twice</b> the kick. The whole law fits in three letters: <b>F = m × a</b>.",
+       analogy:"A skateboard on a smooth ramp: push harder → you speed up faster. Load it with a second person → same push, half the burst. Force is the cause; acceleration is the effect; mass is how hard the universe fights back.",
+       concepts:["Newton's 2nd Law","Force","Mass","Acceleration"],
+       benchmark:"Newton's Second Law: F = ma — force equals mass times acceleration, directly verified",
+       challenges:{
+         cadet:{prompt:"Apply a small force, then a large force. Each time let it run for 3 seconds. Did bigger force → bigger acceleration (faster speed)?", type:"observe", check:s=>s.observed},
+         specialist:{prompt:"Debug the ratio: set mass to 2× and force to 4×. The acceleration should read EXACTLY 2.0. Get it showing 2.0 to claim the badge.", type:"state", check:s=>Math.abs(s.accel-2.0)<0.15},
+         hero:{prompt:"Predict: you double the mass AND double the force at the same time. The acceleration will…", options:[
+           {t:"Double — more force wins",ok:false},
+           {t:"Stay exactly the same",ok:true},
+           {t:"Halve — more mass wins",ok:false}
+         ], explain:"Correct! F=ma means if both double together, they cancel: 2F/(2m) = F/m. Acceleration is unchanged. This is why heavier rockets need bigger engines just to match lighter ones."}
+       }
+      },
+      {name:"Collision Course", emoji:"💥", sim:"collision",
+       intro:"Crash anything into anything and one law always holds: the total <b>momentum</b> — mass times velocity — of the whole system never changes. It might swap from one object to another, but none of it disappears. Ever.",
+       analogy:"Two bumper cars: a big slow one and a tiny fast one. After they crash, they swap 'punch.' The big one might barely budge the little one, or a head-on collision might launch it backward twice as fast — but the total momentum scorecard never changes.",
+       concepts:["Conservation of Momentum","Elastic Collision","Impulse","Newton's 3rd Law"],
+       benchmark:"Conservation of Linear Momentum: p_total = const in closed systems, verified through elastic collision",
+       challenges:{
+         cadet:{prompt:"Launch the collision. After the balls hit, watch the velocity arrows. Did the momentum clearly transfer from ball 1 to ball 2?", type:"observe", check:s=>s.collided},
+         specialist:{prompt:"Debug mass: set ball 1 to HEAVY (≥3×) and ball 2 to LIGHT (≤1×). After the crash, ball 2 should shoot off at more than DOUBLE ball 1's original speed.", type:"state", check:s=>s.fastEject},
+         hero:{prompt:"Predict: two identical balls roll toward each other at the same speed. After a perfectly elastic head-on collision…", options:[
+           {t:"They stick together and stop",ok:false},
+           {t:"They bounce back, each at the same speed they came in",ok:true},
+           {t:"The one on the right always wins",ok:false}
+         ], explain:"Correct! Equal masses in an elastic head-on collision perfectly swap velocities — each bounces back at the incoming speed. Billiard balls do exactly this."}
+       }
+      }
+    ],
     challenges:{
       cadet:{prompt:"Launch the ball and watch it curve around the planet at least once. Did the planet's gravity bend its path into a curve instead of a straight line?", type:"observe", check:s=>s.launched},
       specialist:{prompt:"Debug the launch: find a speed where the ball settles into a stable ORBIT — not crashing, not escaping. Get it circling and this badge is yours.", type:"state", check:s=>s.state==="orbit"},
@@ -552,6 +598,39 @@ const CURRICULUM = [
     sim:"quantum",
     heroLeap:"You went from spinning coins to <b>quantum tunneling</b> — particles ghosting through walls they shouldn't pass — the trick that makes modern microchips work.",
     benchmark:"Quantum Superposition & Measurement: states exist as probabilities until observation collapses them",
+    missions:[
+      {name:"Superposition & Collapse", emoji:"⚛️"},
+      {name:"The Double Slit", emoji:"🌊", sim:"doubleslit",
+       intro:"Fire a bullet at a wall with two holes and you get two stripes behind it. Fire an <b>electron</b> at the same wall — one at a time — and over thousands of shots a zebra-stripe <b>interference pattern</b> builds up, as if each electron went through <b>both</b> holes at the same time and interfered with itself.",
+       analogy:"Drop a stone in a pond and it makes expanding rings. Drop two stones and the rings cross each other: where two crests meet they <b>double up</b>, where a crest meets a trough they <b>cancel out</b>. Electrons are like quantum ripples — both slits at once — so their waves interfere on the screen just like water.",
+       concepts:["Wave-Particle Duality","Interference","Which-Path Info","Double Slit Experiment"],
+       benchmark:"Wave-Particle Duality: particles produce interference patterns consistent only with wave superposition through multiple slits",
+       challenges:{
+         cadet:{prompt:"Press 'Close one slit'. Particles make ONE stripe. Then open both slits — does the zebra interference pattern appear and build up over time?", type:"observe", check:s=>s.sawInterference},
+         specialist:{prompt:"Debug the fringes: slide the slit separation until you can count 5 or more distinct stripes on the screen (watch the counter).", type:"state", check:s=>s.fringeCount>=5},
+         hero:{prompt:"Predict: you place a tiny detector AT one slit to find out which hole each electron went through. The interference pattern will…", options:[
+           {t:"Get sharper — now we know more",ok:false},
+           {t:"Disappear — it turns back into two plain stripes",ok:true},
+           {t:"Stay the same — detectors don't affect electrons",ok:false}
+         ], explain:"Correct! This is the measurement paradox. The instant you learn 'which path', the wave collapses and the interference vanishes. Reality hides its quantum tricks the moment you peek."}
+       }
+      },
+      {name:"Quantum Tunneling", emoji:"🚇", sim:"tunnel",
+       intro:"Roll a marble at a hill that's taller than the marble has energy to climb — classically it rolls back, every time. But quantum particles sometimes <b>ghost through</b> the barrier anyway. This isn't a trick or an error: it's real, it happens billions of times per second inside the microchip you're reading this on.",
+       analogy:"Imagine a ghost who can walk through walls — but only thin ones, and only sometimes. Make the wall thicker or taller and the ghost struggles more. That probability of ghosting through is exactly what physicists calculate with the Schrödinger equation. The transistors in every phone and laptop exploit this daily.",
+       concepts:["Quantum Tunneling","Wave Functions","Barrier Penetration","Semiconductor Physics"],
+       benchmark:"Quantum tunneling probability scales exponentially with barrier width and height — foundation of tunnel-diode and MOSFET operation",
+       challenges:{
+         cadet:{prompt:"Set the barrier to THIN and MEDIUM height. Fire particles and watch: did at least one particle ghost through to the right side even though it shouldn't have enough energy?", type:"observe", check:s=>s.observed},
+         specialist:{prompt:"Debug the barrier: make it THICK and TALL until the tunneling probability readout drops below 10%. Find that combination.", type:"state", check:s=>s.tunnelProb<=0.10},
+         hero:{prompt:"Predict: a quantum particle hits a barrier that's TWICE as thick (but same height). Its tunneling probability will…", options:[
+           {t:"Halve — roughly half as likely",ok:false},
+           {t:"Drop dramatically — exponentially less likely",ok:true},
+           {t:"Stay the same — thickness doesn't matter",ok:false}
+         ], explain:"Correct! Tunneling probability falls off exponentially with barrier width. That's why chip designers obsess over nanometer-scale tolerances — a few extra atoms of barrier and the transistor stops switching."}
+       }
+      }
+    ],
     challenges:{
       cadet:{prompt:"Let the quantum coin spin (it's truly both heads AND tails), then press 'Measure!'. Did looking at it force it to instantly snap to a single answer?", type:"observe", check:s=>s.measured},
       specialist:{prompt:"Debug entanglement: turn on 'Entangle the pair', then measure. Did measuring ONE coin instantly decide the other's opposite result, across the whole screen?", type:"state", check:s=>s.entangledMeasured},
@@ -587,14 +666,25 @@ const byId = id => CURRICULUM.find(t=>t.id===id);
 
 /* ── STATE ──────────────────────────────────────────────────────── */
 function defaultState(){
-  const trophies={}, params={};
-  CURRICULUM.forEach(t=>{ trophies[t.id]={cadet:false,specialist:false,hero:false}; params[t.id]={}; });
+  const trophies={}, params={}, missionTrophies={};
+  CURRICULUM.forEach(t=>{
+    trophies[t.id]={cadet:false,specialist:false,hero:false};
+    params[t.id]={};
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      missionTrophies[t.id+"_"+(i+1)]={cadet:false,specialist:false,hero:false};
+    });
+  });
   return {
     app:"QUANTUMKIDS", version:SCHEMA_VERSION, savedAt:new Date().toISOString(),
     profile:{ cadetName:"", avatarSeed:Math.floor(Math.random()*1e6) },
-    progress:{ moduleIndex:0, completedLessons:[], trophies, sandboxParams:params, xp:0 },
+    progress:{ moduleIndex:0, completedLessons:[], trophies, missionTrophies, sandboxParams:params, xp:0 },
     premium:{ heroTracksUnlocked:false }
   };
+}
+/* helper: get trophy object for a given track+missionIdx */
+function getTrophies(trackId, missionIdx){
+  if(!missionIdx) return STATE.progress.trophies[trackId];
+  return STATE.progress.missionTrophies[trackId+"_"+missionIdx] || {cadet:false,specialist:false,hero:false};
 }
 let STATE = defaultState();
 const LS_KEY = "quantumkids.state.v1";
@@ -641,8 +731,8 @@ function validateState(obj){
   }
   if(!obj.premium || typeof obj.premium!=="object" || typeof obj.premium.heroTracksUnlocked!=="boolean")
     return fail("Premium block corrupted.");
-  // passed — normalise into a clean, migration-safe default so unknown/missing
-  // optional keys never crash the reactive layer.
+  // v1.0.0 → v1.1.0 migration: missionTrophies may be absent — that's fine, default fills it
+  // passed — normalise into a clean, migration-safe default
   const clean = defaultState();
   clean.version = obj.version;
   clean.savedAt = obj.savedAt;
@@ -658,6 +748,13 @@ function validateState(obj){
     };
     const sp = p.sandboxParams[t.id];
     if(sp && typeof sp==="object") clean.progress.sandboxParams[t.id] = sp;
+    // migrate missionTrophies if present in saved file
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      const key=t.id+"_"+(i+1);
+      const mt = p.missionTrophies && p.missionTrophies[key];
+      if(mt && typeof mt==="object" && typeof mt.cadet==="boolean")
+        clean.progress.missionTrophies[key]={cadet:!!mt.cadet,specialist:!!mt.specialist,hero:!!mt.hero};
+    });
   }
   return {ok:true, data:clean};
 }
@@ -1067,6 +1164,278 @@ const SANDBOXES = {
       resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
       metrics:()=>({ended, fate})
     };
+  },
+
+  /* 7 · NEWTON F=ma — push block on frictionless surface */
+  newton(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0,observed=false;
+    const P={ mass:1, force:1 };
+    const SCALE=60;
+    function accel(){ return P.force/P.mass; }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; t=0; }
+    function draw(){
+      t+=0.016; ctx.clearRect(0,0,W,H);
+      const a=accel();
+      // block position: x(t) = ½at² (wraps)
+      const bw=56*DPR, bh=40*DPR;
+      const baseX=W*0.1;
+      const travel=(0.5*a*SCALE*(t*t))%(W-bw-baseX);
+      const bx=baseX+travel, by=H*0.5-bh/2;
+      // ground line
+      ctx.strokeStyle="rgba(255,255,255,0.18)"; ctx.lineWidth=2*DPR;
+      ctx.beginPath(); ctx.moveTo(0,H*0.5+bh/2); ctx.lineTo(W,H*0.5+bh/2); ctx.stroke();
+      // tick marks
+      for(let i=0;i<8;i++){ const tx=W*0.1+i*(W-W*0.1)/8;
+        ctx.beginPath(); ctx.moveTo(tx,H*0.5+bh/2); ctx.lineTo(tx,H*0.5+bh/2+10*DPR); ctx.stroke(); }
+      // block
+      const heat=clamp(a/4,0,1);
+      ctx.fillStyle=`rgb(${Math.round(100+heat*155)},${Math.round(120-heat*60)},${Math.round(255-heat*180)})`;
+      roundRect(ctx,bx,by,bw,bh,8*DPR); ctx.fill();
+      ctx.fillStyle="#fff"; ctx.font="bold "+(18*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText("📦",bx+bw/2,by+bh/2);
+      // force arrow
+      const aw=clamp(a*18*DPR,8*DPR,60*DPR);
+      ctx.strokeStyle="#ffd35c"; ctx.fillStyle="#ffd35c"; ctx.lineWidth=3*DPR;
+      ctx.beginPath(); ctx.moveTo(bx+bw,by+bh/2); ctx.lineTo(bx+bw+aw,by+bh/2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx+bw+aw+10*DPR,by+bh/2); ctx.lineTo(bx+bw+aw,by+bh/2-6*DPR); ctx.lineTo(bx+bw+aw,by+bh/2+6*DPR); ctx.fill();
+      // velocity readout under block
+      const v=a*SCALE*t; const spd=v.toFixed(1);
+      ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("v = "+spd+" u/s", bx+bw/2, by+bh+16*DPR);
+      observed = observed || t>0.5;
+      out({ "Force":P.force.toFixed(1)+"N", "Mass":P.mass.toFixed(1)+"kg", "Acceleration":a.toFixed(2)+" m/s²" },
+          a>=2?"🚀 High acceleration — light or well-pushed!":a<0.6?"🐢 Low acceleration — heavy or weak push.":"");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"force",label:"Force applied (N)",min:0.5,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"N"},
+        {key:"mass", label:"Object mass (kg)", min:0.5,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"kg"}
+      ],
+      actions:[{key:"reset",label:"↺ Reset",run:()=>{t=0;observed=false;}}],
+      setParam:(k,v)=>{ P[k]=v; t=0; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, accel:accel()})
+    };
+  },
+
+  /* 8 · COLLISION — elastic momentum conservation */
+  collision(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,collided=false,fastEject=false,phase="ready";
+    let b1,b2;
+    const P={ mass1:1, mass2:1 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; setup(); }
+    function setup(){ collided=false; fastEject=false; phase="ready";
+      b1={x:W*0.18,vx:2.8*DPR,m:P.mass1,r:(12+P.mass1*5)*DPR,col:"#7c5cff"};
+      b2={x:W*0.82,vx:-1.4*DPR,m:P.mass2,r:(12+P.mass2*5)*DPR,col:"#22d3ee"}; }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      const cy=H*0.48;
+      // track
+      ctx.strokeStyle="rgba(255,255,255,0.15)"; ctx.lineWidth=2*DPR;
+      ctx.beginPath(); ctx.moveTo(20*DPR,cy+Math.max(b1.r,b2.r)+4*DPR); ctx.lineTo(W-20*DPR,cy+Math.max(b1.r,b2.r)+4*DPR); ctx.stroke();
+      if(phase==="moving"){
+        b1.x+=b1.vx; b2.x+=b2.vx;
+        // elastic collision
+        if(!collided && b1.x+b1.r>=b2.x-b2.r){
+          const m1=b1.m,m2=b2.m,u1=b1.vx,u2=b2.vx;
+          b1.vx=((m1-m2)*u1+2*m2*u2)/(m1+m2);
+          b2.vx=((m2-m1)*u2+2*m1*u1)/(m1+m2);
+          collided=true; fastEject = b2.vx>Math.abs(b2.vx)*1.9;  // ball2 faster than 2× b1 original
+          // also fix fastEject calculation properly
+          fastEject = (b1.m>=3 && b2.m<=1.5 && Math.abs(b2.vx)>4*DPR);
+        }
+        // wall bounces
+        if(b1.x-b1.r<20*DPR){b1.x=20*DPR+b1.r;b1.vx*=-1;}
+        if(b2.x+b2.r>W-20*DPR){b2.x=W-20*DPR-b2.r;b2.vx*=-1;}
+      }
+      // momentum bars
+      const p1=Math.abs(b1.m*b1.vx), p2=Math.abs(b2.m*b2.vx), pmax=Math.max(p1,p2,1);
+      const bary=H*0.82, barH=10*DPR, maxW=W*0.35;
+      ctx.fillStyle="#7c5cff"; roundRect(ctx,W*0.5-p1/pmax*maxW,bary,p1/pmax*maxW,barH,4*DPR); ctx.fill();
+      ctx.fillStyle="#22d3ee"; roundRect(ctx,W*0.5,bary,p2/pmax*maxW,barH,4*DPR); ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("← momentum →",W/2,bary+barH+12*DPR);
+      // balls with velocity arrows
+      [b1,b2].forEach(b=>{
+        const grd=ctx.createRadialGradient(b.x-b.r*0.3,cy-b.r*0.3,2,b.x,cy,b.r);
+        grd.addColorStop(0,"#fff"); grd.addColorStop(1,b.col);
+        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(b.x,cy,b.r,0,TAU); ctx.fill();
+        // velocity arrow
+        const av=b.vx*8; ctx.strokeStyle=b.col; ctx.lineWidth=3*DPR;
+        ctx.beginPath(); ctx.moveTo(b.x,cy-b.r-6*DPR); ctx.lineTo(b.x+av,cy-b.r-6*DPR); ctx.stroke();
+      });
+      if(collided){ ctx.fillStyle="#ffd35c"; ctx.font="bold "+(12*DPR)+"px "+FONT; ctx.textAlign="center";
+        ctx.fillText("💥 COLLISION — momentum transferred!",W/2,H*0.26); }
+      const ptot=Math.abs(b1.m*b1.vx+b2.m*b2.vx).toFixed(2);
+      out({ "Ball 1 momentum":(b1.m*Math.abs(b1.vx)).toFixed(2), "Ball 2 momentum":(b2.m*Math.abs(b2.vx)).toFixed(2), "Total momentum":ptot },
+          collided?"⚡ Momentum transferred — total conserved!":"");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"mass1",label:"Ball 1 mass",min:1,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"×"},
+        {key:"mass2",label:"Ball 2 mass",min:1,max:4,step:0.5,val:1,fmt:v=>v.toFixed(1)+"×"}
+      ],
+      actions:[{key:"launch",label:"🚀 Launch",primary:true,run:()=>{phase="moving";}},
+               {key:"reset",label:"↺ Reset",run:setup}],
+      setParam:(k,v)=>{ P[k]=v; setup(); if(k==="mass1"||k==="mass2"){ b1.m=P.mass1; b1.r=(12+P.mass1*5)*DPR; b2.m=P.mass2; b2.r=(12+P.mass2*5)*DPR; } },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({collided, fastEject})
+    };
+  },
+
+  /* 9 · DOUBLE SLIT — wave interference pattern */
+  doubleslit(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0, screen=null, oneSlitMode=false, sawInterference=false;
+    const P={ slitSep:0.4 };
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; screen=new Float32Array(Math.round(H)); }
+    function slitY(){ return [(0.5-P.slitSep*0.22)*H, (0.5+P.slitSep*0.22)*H]; }
+    function fringeCount(){
+      if(!screen) return 0;
+      let peaks=0, prev=false;
+      for(let i=4;i<screen.length-4;i++){
+        const hi=screen[i]>0.3 && screen[i]>=screen[i-1] && screen[i]>=screen[i+1];
+        if(hi && !prev){ peaks++; prev=true; } else if(!hi){ prev=false; }
+      }
+      return peaks;
+    }
+    function addParticle(){
+      const wallX=W*0.52, srcX=W*0.08;
+      const slits = oneSlitMode ? [slitY()[0]] : slitY();
+      // fire many particles per frame, build up screen
+      for(let n=0;n<6;n++){
+        const iy=rand(0,H);
+        // compute intensity at this y from each slit (Huygens principle)
+        let amplitude=0;
+        slits.forEach((sy,si)=>{
+          const dx=wallX-srcX, dy=sy-H/2;
+          const pathLen=Math.sqrt(dx*dx+(iy-sy)*(iy-sy));
+          const phase2=(pathLen/(W*0.028))*TAU;
+          amplitude+=Math.cos(phase2+si*0.8);
+        });
+        const prob=(amplitude/slits.length+1)*0.5; // 0-1
+        if(Math.random()<prob){ const idx=Math.round(iy); if(screen[idx]!==undefined) screen[idx]=Math.min(1,screen[idx]+0.015); }
+      }
+      if(!oneSlitMode && fringeCount()>=3) sawInterference=true;
+    }
+    function draw(){
+      t+=1; ctx.clearRect(0,0,W,H);
+      addParticle();
+      const wallX=W*0.52, srcX=W*0.1;
+      // emitter
+      const grd=ctx.createRadialGradient(srcX,H/2,2,srcX,H/2,20*DPR); grd.addColorStop(0,"#a78bfa"); grd.addColorStop(1,"transparent");
+      ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(srcX,H/2,20*DPR,0,TAU); ctx.fill();
+      ctx.fillStyle="#a78bfa"; ctx.font=(15*DPR)+"px "+FONT; ctx.textAlign="center"; ctx.fillText("e⁻",srcX,H/2+5*DPR);
+      // ripple waves from source
+      for(let r=1;r<=4;r++){ const rr=(t*1.4+r*22)%((wallX-srcX)*1.1);
+        ctx.globalAlpha=Math.max(0,0.4-rr/(wallX-srcX)*0.4); ctx.strokeStyle="#a78bfa"; ctx.lineWidth=1.5*DPR;
+        ctx.beginPath(); ctx.arc(srcX,H/2,rr,0,TAU); ctx.stroke(); }
+      ctx.globalAlpha=1;
+      // barrier wall
+      ctx.fillStyle="rgba(56,71,127,0.85)"; ctx.fillRect(wallX-5*DPR,0,10*DPR,H);
+      // slits (gaps in wall)
+      const slits=slitY();
+      ctx.clearRect(wallX-6*DPR, slits[0]-10*DPR, 12*DPR, 20*DPR);
+      if(!oneSlitMode) ctx.clearRect(wallX-6*DPR, slits[1]-10*DPR, 12*DPR, 20*DPR);
+      // detection screen
+      const scrX=W*0.85;
+      ctx.fillStyle="rgba(30,40,80,0.9)"; ctx.fillRect(scrX,0,4*DPR,H);
+      for(let y=0;y<screen.length;y++){
+        const v=screen[y]; if(v<0.01) continue;
+        ctx.globalAlpha=v*0.9; ctx.fillStyle=oneSlitMode?"#22d3ee":"#ffd35c";
+        ctx.fillRect(scrX+4*DPR,y,8*DPR,1);
+      }
+      ctx.globalAlpha=1;
+      const fc=fringeCount();
+      out({ "Mode":oneSlitMode?"One slit":"Both slits", "Slit separation":Math.round(P.slitSep*100)+"%", "Fringes on screen":fc },
+          oneSlitMode?"🔵 Single slit — one blob.":sawInterference?"🌈 Interference! Electrons went through BOTH slits.":"⏳ Building up… keep watching.");
+      raf=requestAnimationFrame(draw);
+      draw._fc=fc;
+    }
+    resize();
+    return {
+      params:[{key:"slitSep",label:"Slit separation",min:0.15,max:0.85,step:0.05,val:0.4,fmt:v=>Math.round(v*100)+"%"}],
+      actions:[
+        {key:"toggle",label:"🔀 Toggle one/two slits",primary:true,run:()=>{ oneSlitMode=!oneSlitMode; screen.fill(0); sawInterference=false; }},
+        {key:"clear",label:"↺ Clear screen",run:()=>{ screen.fill(0); }}
+      ],
+      setParam:(k,v)=>{ P[k]=v; screen.fill(0); sawInterference=false; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({sawInterference, fringeCount:draw._fc||0})
+    };
+  },
+
+  /* 10 · QUANTUM TUNNELING — wave ghosting through barrier */
+  tunnel(cv,out){
+    const ctx=cv.getContext("2d"); let W,H,raf,t=0, observed=false;
+    const P={ barrierH:0.5, barrierW:0.35 };
+    let particles=[];
+    function tunnelProb(){ return Math.exp(-6*P.barrierW*P.barrierH*4); }
+    function resize(){ W=cv.width=cv.clientWidth*DPR; H=cv.height=cv.clientHeight*DPR; particles=[]; }
+    function spawnParticle(){
+      particles.push({x:W*0.05,vx:(1.8+Math.random()*0.8)*DPR,tunneled:false,passed:false,alive:true,alpha:1});
+    }
+    function draw(){
+      t+=0.018; ctx.clearRect(0,0,W,H);
+      const bx=W*0.52, bw=P.barrierW*W*0.22, bh=P.barrierH*H*0.72;
+      const by=(H-bh)/2;
+      const tp=tunnelProb();
+      // spawn
+      if(t%0.6<0.018) spawnParticle();
+      // barrier
+      const bgrd=ctx.createLinearGradient(bx,0,bx+bw,0);
+      bgrd.addColorStop(0,"rgba(251,113,133,0.8)"); bgrd.addColorStop(1,"rgba(251,113,133,0.4)");
+      ctx.fillStyle=bgrd; roundRect(ctx,bx,by,bw,bh,6*DPR); ctx.fill();
+      ctx.strokeStyle="#fb7185"; ctx.lineWidth=2*DPR; roundRect(ctx,bx,by,bw,bh,6*DPR); ctx.stroke();
+      ctx.fillStyle="#fff"; ctx.font=(11*DPR)+"px "+FONT; ctx.textAlign="center";
+      ctx.fillText("BARRIER",bx+bw/2,H/2-bh/2-10*DPR);
+      ctx.fillText("height: "+Math.round(P.barrierH*100)+"%",bx+bw/2,H/2+bh/2+18*DPR);
+      // particles
+      particles.forEach(p=>{
+        if(!p.alive) return;
+        p.x+=p.vx;
+        // check barrier entry
+        if(!p.tunneled && !p.passed && p.x>=bx && p.x<bx+bw){
+          if(Math.random()<tp*0.07){ p.tunneled=true; }  // stochastic pass
+          else { p.vx*=-1; p.alive=false; p.alpha=0.5; } // reflect
+        }
+        if(p.tunneled && p.x>bx+bw){ p.passed=true; observed=true; }
+        if(p.x>W+10*DPR || p.x<-10*DPR){ p.alive=false; }
+        p.alpha=clamp(p.alpha,0,1);
+        const col=p.passed?"#34d399":p.tunneled?"#ffd35c":"#a78bfa";
+        ctx.globalAlpha=p.alpha; ctx.fillStyle=col;
+        ctx.beginPath(); ctx.arc(p.x,H/2,6*DPR,0,TAU); ctx.fill();
+        if(p.tunneled && !p.passed){ ctx.globalAlpha=0.4; ctx.strokeStyle="#ffd35c"; ctx.lineWidth=2*DPR;
+          ctx.setLineDash([4*DPR,4*DPR]); ctx.beginPath(); ctx.arc(p.x,H/2,10*DPR,0,TAU); ctx.stroke(); ctx.setLineDash([]); }
+      });
+      ctx.globalAlpha=1;
+      particles=particles.filter(p=>p.alive || p.passed);
+      // probability readout bar
+      const py=H*0.88, pw=W*0.6, px=(W-pw)/2;
+      ctx.fillStyle="rgba(255,255,255,0.12)"; roundRect(ctx,px,py,pw,12*DPR,6*DPR); ctx.fill();
+      ctx.fillStyle=tp<0.10?"#fb7185":tp<0.35?"#fbbf24":"#34d399";
+      roundRect(ctx,px,py,pw*tp,12*DPR,6*DPR); ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.font=(10*DPR)+"px "+FONT; ctx.textAlign="left";
+      ctx.fillText("Tunneling probability: "+Math.round(tp*100)+"%",px,py-6*DPR);
+      out({ "Barrier height":Math.round(P.barrierH*100)+"%", "Barrier width":Math.round(P.barrierW*100)+"%",
+            "Tunnel probability":Math.round(tp*100)+"%" },
+          tp<0.05?"🧱 Barrier too thick/tall — particles mostly bounce.":tp>0.4?"👻 Particles ghosting right through!":"🎲 Some particles tunnel — quantum weirdness in action.");
+      raf=requestAnimationFrame(draw);
+    }
+    resize();
+    return {
+      params:[
+        {key:"barrierH",label:"Barrier height (energy)",min:0.1,max:1,step:0.05,val:0.5,fmt:v=>Math.round(v*100)+"%"},
+        {key:"barrierW",label:"Barrier width (thickness)",min:0.1,max:1,step:0.05,val:0.35,fmt:v=>Math.round(v*100)+"%"}
+      ],
+      actions:[{key:"clear",label:"↺ Clear particles",run:()=>{ particles=[]; observed=false; }}],
+      setParam:(k,v)=>{ P[k]=v; },
+      resize, start:()=>{raf=requestAnimationFrame(draw);}, stop:()=>cancelAnimationFrame(raf),
+      metrics:()=>({observed, tunnelProb:tunnelProb()})
+    };
   }
 };
 
@@ -1080,8 +1449,13 @@ function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo
    APP CONTROLLER  (views, rendering, gamification, wiring)
    ═══════════════════════════════════════════════════════════════════ */
 const QK = (()=>{
-  let currentTrack=null, sim=null;
+  let currentTrack=null, currentMissionIdx=0, sim=null;
   const canvas = ()=>document.getElementById("simCanvas");
+  /* resolve mission data: missionIdx 0 = track root, 1+ = missions array */
+  function missionData(t, mi){
+    if(!mi || !t.missions || !t.missions[mi]) return t;
+    return {...t, ...t.missions[mi]};
+  }
 
   function go(view){
     if(sim && view!=="lesson"){ sim.stop(); sim=null; }
@@ -1096,7 +1470,7 @@ const QK = (()=>{
 
   function resume(){
     const t = CURRICULUM[STATE.progress.moduleIndex] || CURRICULUM[0];
-    openLesson(t.id);
+    openLesson(t.id, 0);
   }
 
   /* ── HOME ── */
@@ -1105,29 +1479,39 @@ const QK = (()=>{
     const name = STATE.profile.cadetName;
     document.getElementById("heroGreeting").innerHTML = name? ("Welcome back, "+esc(name)+"! 🦸") : "Become a Physics Hero 🦸";
     const badges = countBadges();
+    const totalBadges = maxBadges();
     document.getElementById("badgeCount").textContent = badges;
     document.getElementById("rankName").textContent = "Rank: "+rankFor(badges);
-    document.getElementById("overallBar").style.width = Math.round(badges/18*100)+"%";
+    document.getElementById("overallBar").style.width = Math.round(badges/totalBadges*100)+"%";
     document.getElementById("resumeBtn").textContent = badges>0 ? "▶ Continue Training" : "▶ Start Training";
 
     const grid = document.getElementById("trackGrid"); grid.innerHTML="";
     CURRICULUM.forEach(t=>{
       const tr = STATE.progress.trophies[t.id];
       const done = ["cadet","specialist","hero"].filter(k=>tr[k]).length;
+      const totalMissions = t.missions ? t.missions.length : 1;
+      const totalDone = allMissionBadges(t);
       const locked = t.premium && !STATE.premium.heroTracksUnlocked;
       const el = document.createElement("button");
       el.className="track"; el.style.setProperty("--c",t.color);
-      el.onclick = ()=> locked ? go("parent") : openLesson(t.id);
+      el.onclick = ()=> locked ? go("parent") : openLesson(t.id, 0);
+      // mission sub-pips for multi-mission tracks
+      const missionPips = t.missions && t.missions.length>1
+        ? `<div class="mission-pips">${t.missions.map((m,mi)=>{
+            const mtr=getTrophies(t.id,mi); const mdone=["cadet","specialist","hero"].filter(k=>mtr[k]).length;
+            return `<span class="mpip${mdone===3?" done":""}">${m.emoji||t.emoji} ${m.name||t.title} ${mdone}/3</span>`;
+          }).join("")}</div>` : "";
       el.innerHTML = `
         <div class="halo"></div>
         <div class="emoji">${t.emoji}</div>
         <h3>${t.title}</h3>
         <div class="tl">${t.tagline}</div>
+        ${missionPips}
         <div class="foot">
           <div class="badges">
-            ${["🎖️","🥈","🏆"].map((ic,i)=>`<span class="b-dot ${tr[["cadet","specialist","hero"][i]]?"on":""}">${tr[["cadet","specialist","hero"][i]]?"✓":""}</span>`).join("")}
+            ${["cadet","specialist","hero"].map(k=>`<span class="b-dot ${tr[k]?"on":""}">${tr[k]?"✓":""}</span>`).join("")}
           </div>
-          <span class="lvl">Track ${t.n} · ${done}/3</span>
+          <span class="lvl">Track ${t.n} · ${totalDone}/${totalMissions*3}</span>
         </div>
         ${locked?`<div class="lock"><div class="lk"><div class="ic">🔒</div><div class="tx">Hero Track</div><div class="sub">Tap to unlock</div></div></div>`:""}`;
       grid.appendChild(el);
@@ -1135,21 +1519,33 @@ const QK = (()=>{
   }
 
   /* ── LESSON ── */
-  function openLesson(id){
-    const t = byId(id); currentTrack=t;
+  function openLesson(id, mi){
+    const t = byId(id); currentTrack=t; currentMissionIdx=mi||0;
     STATE.progress.moduleIndex = CURRICULUM.indexOf(t); persist();
+    const m = missionData(t, currentMissionIdx);
     document.documentElement.style.setProperty("--track", t.color);
-    document.getElementById("lsEmoji").textContent=t.emoji;
+    document.getElementById("lsEmoji").textContent=m.emoji||t.emoji;
     document.getElementById("lsEmoji").style.setProperty("--track",t.color);
-    document.getElementById("lsNum").textContent = "TRACK "+t.n+" · MASTERY MISSION";
+    document.getElementById("lsNum").textContent = "TRACK "+t.n+" · MISSION "+(currentMissionIdx+1);
     document.getElementById("lsNum").style.color=t.color;
-    document.getElementById("lsTitle").textContent=t.title;
-    document.getElementById("lsIntro").innerHTML="<p>"+t.intro+"</p>";
-    document.getElementById("lsAnalogy").innerHTML=t.analogy;
-    document.getElementById("lsConcepts").innerHTML = t.concepts.map(c=>`<span class="chip">${c}</span>`).join("");
+    document.getElementById("lsTitle").textContent=(m.name||t.title);
+    document.getElementById("lsIntro").innerHTML="<p>"+(m.intro||t.intro)+"</p>";
+    document.getElementById("lsAnalogy").innerHTML=(m.analogy||t.analogy);
+    document.getElementById("lsConcepts").innerHTML = (m.concepts||t.concepts).map(c=>`<span class="chip">${c}</span>`).join("");
+    // mission picker strip
+    const strip=document.getElementById("missionStrip");
+    if(t.missions && t.missions.length>1){
+      strip.style.display="flex";
+      strip.innerHTML=t.missions.map((ms,i)=>{
+        const mtr=getTrophies(t.id,i); const alldone=["cadet","specialist","hero"].every(k=>mtr[k]);
+        const active=i===currentMissionIdx;
+        return `<button class="m-tab${active?" active":""}${alldone&&!active?" done-m":""}" onclick="QK.openLesson('${t.id}',${i})">
+          <span class="m-ic">${ms.emoji||t.emoji}</span>${ms.name||t.title}</button>`;
+      }).join("");
+    } else { strip.style.display="none"; }
     go("lesson");
-    buildSandbox(t);
-    buildTiers(t);
+    buildSandbox(m);
+    buildTiers(m, currentMissionIdx);
   }
 
   /* build sandbox + controls from the sim's declared params/actions */
@@ -1164,14 +1560,15 @@ const QK = (()=>{
       checkTiers();
     };
     // size canvas to its box before creating the sim
-    requestAnimationFrame(()=>{ sim = SANDBOXES[t.sim](cv, out); mountControls(t); sim.start(); });
+    requestAnimationFrame(()=>{ sim = SANDBOXES[t.sim](cv, out); mountControls(t, currentMissionIdx); sim.start(); });
   }
 
-  function mountControls(t){
+  function mountControls(t, mi){
     const box=document.getElementById("simControls"); box.innerHTML="";
+    const paramKey = mi ? t.id+"_m"+mi : t.id;
     // sliders
     sim.params.forEach(p=>{
-      const saved = STATE.progress.sandboxParams[t.id]?.[p.key];
+      const saved = STATE.progress.sandboxParams[paramKey]?.[p.key];
       const val = (typeof saved==="number")?saved:p.val;
       sim.setParam(p.key, val);
       const wrap=document.createElement("div"); wrap.className="ctl";
@@ -1180,8 +1577,8 @@ const QK = (()=>{
       inp.setAttribute("aria-label",p.label);
       inp.oninput=()=>{ const v=parseFloat(inp.value); sim.setParam(p.key,v);
         document.getElementById("v-"+p.key).textContent=p.fmt?p.fmt(v):v;
-        STATE.progress.sandboxParams[t.id]=STATE.progress.sandboxParams[t.id]||{};
-        STATE.progress.sandboxParams[t.id][p.key]=v; persist(); checkTiers(); };
+        STATE.progress.sandboxParams[paramKey]=STATE.progress.sandboxParams[paramKey]||{};
+        STATE.progress.sandboxParams[paramKey][p.key]=v; persist(); checkTiers(); };
       wrap.appendChild(inp); box.appendChild(wrap);
     });
     // action buttons
@@ -1195,11 +1592,11 @@ const QK = (()=>{
   }
 
   /* ── CHALLENGE TIERS ── */
-  function buildTiers(t){
+  function buildTiers(t, mi){
     const box=document.getElementById("tierBox"); box.innerHTML="";
     const order=[["cadet","🎖️","Cadet","Visual proof"],["specialist","🥈","Specialist","Variable debugging"],["hero","🏆","Hero","Predictive output"]];
     order.forEach(([tier,rk,name,sub])=>{
-      const ch=t.challenges[tier]; const done=STATE.progress.trophies[t.id][tier];
+      const ch=t.challenges[tier]; const done=getTrophies(currentTrack.id, mi)[tier];
       const el=document.createElement("div"); el.className="tier"+(done?" done":""); el.id="tier-"+tier;
       let inner=`<div class="th"><span class="rk">${rk}</span><span class="tt">${name}<small>${sub}</small></span>
         <span class="status">${done?"✓ Earned":"Locked"}</span></div><div class="prompt">${ch.prompt}</div>`;
@@ -1219,20 +1616,22 @@ const QK = (()=>{
     if(!currentTrack || !sim) return;
     const m = sim.metrics();
     ["cadet","specialist"].forEach(tier=>{
-      const ch=currentTrack.challenges[tier]; if(!ch || !ch.check) return;
+      const md=missionData(currentTrack,currentMissionIdx);
+      const ch=md.challenges[tier]; if(!ch || !ch.check) return;
       const btn=document.getElementById("claim-"+tier);
-      const already=STATE.progress.trophies[currentTrack.id][tier];
+      const already=getTrophies(currentTrack.id,currentMissionIdx)[tier];
       if(btn && !already){ btn.disabled=false; }
     });
   }
 
   function claim(tier){
-    const t=currentTrack, ch=t.challenges[tier];
+    const t=currentTrack, mi=currentMissionIdx;
+    const md=missionData(t,mi); const ch=md.challenges[tier];
     const m=sim.metrics();
     const fb=document.getElementById("fb-"+tier);
-    if(STATE.progress.trophies[t.id][tier]) return;
+    if(getTrophies(t.id,mi)[tier]) return;
     if(ch.check(m)){
-      awardBadge(t,tier);
+      awardBadge(t,mi,tier);
       fb.className="feedback ok"; fb.textContent = tier==="cadet"?"Nice observing! 🎖️ Badge earned.":"Debugged it! 🥈 Badge earned.";
       document.getElementById("tier-"+tier).classList.add("done");
       document.querySelector("#tier-"+tier+" .status").textContent="✓ Earned";
@@ -1246,13 +1645,14 @@ const QK = (()=>{
   }
 
   function answer(tier,i){
-    const t=currentTrack, ch=t.challenges[tier];
-    if(STATE.progress.trophies[t.id][tier]) return;
+    const t=currentTrack, mi=currentMissionIdx;
+    const md=missionData(t,mi); const ch=md.challenges[tier];
+    if(getTrophies(t.id,mi)[tier]) return;
     const opts=document.querySelectorAll("#opts-"+tier+" .opt");
     const fb=document.getElementById("fb-"+tier);
     if(ch.options[i].ok){
       opts[i].classList.add("correct"); opts.forEach(o=>o.style.pointerEvents="none");
-      awardBadge(t,tier);
+      awardBadge(t,mi,tier);
       fb.className="feedback ok"; fb.textContent=ch.explain;
       document.getElementById("tier-"+tier).classList.add("done");
       document.querySelector("#tier-"+tier+" .status").textContent="✓ Earned";
@@ -1262,19 +1662,28 @@ const QK = (()=>{
     }
   }
 
-  function awardBadge(t,tier){
-    if(STATE.progress.trophies[t.id][tier]) return;
-    STATE.progress.trophies[t.id][tier]=true;
+  function awardBadge(t,mi,tier){
+    const trophies=getTrophies(t.id,mi);
+    if(trophies[tier]) return;
+    // write to the right place
+    if(!mi){ STATE.progress.trophies[t.id][tier]=true; }
+    else {
+      const key=t.id+"_"+mi;
+      if(!STATE.progress.missionTrophies[key]) STATE.progress.missionTrophies[key]={cadet:false,specialist:false,hero:false};
+      STATE.progress.missionTrophies[key][tier]=true;
+    }
     STATE.progress.xp += tier==="cadet"?50:tier==="specialist"?100:200;
-    const allThree = ["cadet","specialist","hero"].every(k=>STATE.progress.trophies[t.id][k]);
-    if(allThree && !STATE.progress.completedLessons.includes(t.id)){
-      STATE.progress.completedLessons.push(t.id); STATE.progress.xp+=100;
+    const allThree = ["cadet","specialist","hero"].every(k=>getTrophies(t.id,mi)[k]);
+    const mKey = mi ? t.id+"_m"+mi : t.id;
+    if(allThree && !STATE.progress.completedLessons.includes(mKey)){
+      STATE.progress.completedLessons.push(mKey); STATE.progress.xp+=100;
     }
     persist();
     document.getElementById("xpVal").textContent=STATE.progress.xp;
+    const mName=mi?(t.missions[mi].name||t.title):t.title;
     const names={cadet:"Cadet",specialist:"Specialist",hero:"HERO"};
-    toast((tier==="hero"?"🏆 HERO of "+t.title+"!":"⭐ "+names[tier]+" badge earned!")+" +XP");
-    if(allThree) setTimeout(()=>toast("🎉 "+t.title+" MASTERED — all 3 badges!"),1400);
+    toast((tier==="hero"?"🏆 HERO — "+mName+"!":"⭐ "+names[tier]+" badge earned!")+" +XP");
+    if(allThree) setTimeout(()=>toast("🎉 "+mName+" MASTERED — all 3 badges!"),1400);
   }
 
   /* ── PARENT DASHBOARD ── */
@@ -1282,8 +1691,8 @@ const QK = (()=>{
     const badges=countBadges(), mastered=STATE.progress.completedLessons.length;
     const grid=document.getElementById("metricGrid");
     grid.innerHTML=[
-      [badges+"/18","Mastery badges"],
-      [mastered+"/6","Tracks completed"],
+      [badges+"/"+maxBadges(),"Mastery badges"],
+      [mastered+"/"+STATE.progress.completedLessons.length+" missions","Completed"],
       [STATE.progress.xp,"Quanta (XP)"],
       [rankFor(badges),"Current rank"]
     ].map(([n,l])=>`<div class="metric"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
@@ -1292,13 +1701,17 @@ const QK = (()=>{
     const audit=document.getElementById("auditList");
     const rows=[];
     CURRICULUM.forEach(t=>{
-      const tr=STATE.progress.trophies[t.id];
-      if(tr.cadet||tr.specialist||tr.hero){
+      const missions = t.missions || [{name:t.title,emoji:t.emoji}];
+      missions.forEach((ms,mi)=>{
+        const tr=getTrophies(t.id,mi);
+        if(!tr.cadet && !tr.specialist && !tr.hero) return;
         const tiers=["cadet","specialist","hero"].filter(k=>tr[k]).length;
-        rows.push(`<div class="audit-row"><span class="ic">${t.emoji}</span><div class="bx">
-          <b>${t.title}</b> — ${tiers}/3 badges${tr.hero?" · <b style='color:var(--gold)'>HERO</b>":""}
-          <div class="std">Benchmark unlocked: ${t.benchmark}</div></div></div>`);
-      }
+        const bm = mi===0 ? t.benchmark : (t.missions[mi].benchmark||t.benchmark);
+        const mname = mi===0 ? t.title : (ms.name||t.title);
+        rows.push(`<div class="audit-row"><span class="ic">${ms.emoji||t.emoji}</span><div class="bx">
+          <b>${mname}</b> — ${tiers}/3 badges${tr.hero?" · <b style='color:var(--gold)'>HERO</b>":""}
+          <div class="std">Benchmark: ${bm}</div></div></div>`);
+      });
     });
     audit.innerHTML = rows.length? rows.join("") : `<p style="color:var(--muted)">No missions completed yet. When your child earns badges, each one will map to a formal physics benchmark right here.</p>`;
 
@@ -1319,8 +1732,21 @@ const QK = (()=>{
   function togglePremium(v){ STATE.premium.heroTracksUnlocked=v; persist(); renderParent(); if(v) toast("🎉 Hero Tracks unlocked!"); }
 
   /* ── helpers ── */
-  function countBadges(){ let n=0; CURRICULUM.forEach(t=>["cadet","specialist","hero"].forEach(k=>{if(STATE.progress.trophies[t.id][k])n++;})); return n; }
-  function rankFor(b){ return b>=18?"Grand Physics Hero 🏆":b>=13?"Master Cadet":b>=8?"Star Specialist":b>=4?"Junior Cadet":b>=1?"Rookie Cadet":"Rookie Cadet"; }
+  function allMissionBadges(t){
+    let n=0;
+    ["cadet","specialist","hero"].forEach(k=>{ if(STATE.progress.trophies[t.id][k]) n++; });
+    if(t.missions) t.missions.slice(1).forEach((_,i)=>{
+      const key=t.id+"_"+(i+1); const mt=STATE.progress.missionTrophies[key]||{};
+      ["cadet","specialist","hero"].forEach(k=>{ if(mt[k]) n++; });
+    });
+    return n;
+  }
+  function maxBadges(){ return CURRICULUM.reduce((s,t)=>s+3*(t.missions?t.missions.length:1),0); }
+  function countBadges(){ return CURRICULUM.reduce((s,t)=>s+allMissionBadges(t),0); }
+  function rankFor(b){
+    const max=maxBadges();
+    return b>=max?"Grand Physics Hero 🏆":b>=Math.round(max*0.72)?"Master Cadet":b>=Math.round(max*0.44)?"Star Specialist":b>=Math.round(max*0.22)?"Junior Cadet":b>=1?"Rookie Cadet":"Rookie Cadet";
+  }
   function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
   let toastTimer;
   function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
@@ -1367,12 +1793,18 @@ const QK = (()=>{
   }
 
   function auditSheet(){
-    const rows=CURRICULUM.map(t=>{
-      const tr=STATE.progress.trophies[t.id]; const done=["cadet","specialist","hero"].filter(k=>tr[k]).length;
-      if(!done) return "";
-      return `<div class="row"><span>${t.emoji}</span><div class="b"><b>${t.title}</b> — ${done}/3 mastery badges${tr.hero?" · HERO":""}<br>
-        <span style="font-size:9pt">By solving the ${t.title} Sandbox, your child intuitively derived: <b>${t.benchmark}</b>.</span></div></div>`;
-    }).filter(Boolean).join("");
+    const rows=[];
+    CURRICULUM.forEach(t=>{
+      const missions=t.missions||[{name:t.title,emoji:t.emoji}];
+      missions.forEach((ms,mi)=>{
+        const tr=getTrophies(t.id,mi); const done=["cadet","specialist","hero"].filter(k=>tr[k]).length;
+        if(!done) return;
+        const bm=mi===0?t.benchmark:(t.missions[mi].benchmark||t.benchmark);
+        const mname=mi===0?t.title:(ms.name||t.title);
+        rows.push(`<div class="row"><span>${ms.emoji||t.emoji}</span><div class="b"><b>${mname}</b> — ${done}/3 mastery badges${tr.hero?" · HERO":""}<br>
+          <span style="font-size:9pt">By solving this sandbox, your child intuitively derived: <b>${bm}</b>.</span></div></div>`);
+      });
+    });
     return `<div class="sheet audit-print">
       <div class="kick">QuantumKids · Parental Audit Trail</div>
       <h1>What Your Child Unlocked</h1>
