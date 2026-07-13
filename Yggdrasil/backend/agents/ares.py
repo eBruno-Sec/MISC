@@ -259,12 +259,21 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             await self.log("No scannable hosts after argument-safety filter", "warn")
             return port_results
 
+        # nmap's -p and --top-ports are mutually exclusive (whichever is given
+        # wins outright, they do not union) — confirmed against a real nmap 7.94
+        # binary: `-p 80,443 --top-ports 1000` scans ONLY 80,443, not the top-1000
+        # set. So an explicit host:port target gets 80/443 unioned into its own
+        # -p list (guaranteed, since the standard web ports are worth checking on
+        # any target regardless of what nonstandard port it was launched with);
+        # a target with no explicit port uses --top-ports alone, which already
+        # includes 80/443 (they rank in nmap's top 5 most common ports).
         if explicit_ports:
-            port_flag = ["-p", ",".join(sorted(explicit_ports))]
-            scan_desc = f"port(s) {','.join(sorted(explicit_ports))}"
+            all_ports = sorted(explicit_ports | {"80", "443"}, key=lambda p: int(p))
+            port_flag = ["-p", ",".join(all_ports)]
+            scan_desc = f"port(s) {','.join(all_ports)}"
         else:
             port_flag = ["--top-ports", "1000"]
-            scan_desc = "top 1000 ports"
+            scan_desc = "top 1000 ports (includes 80/443)"
         # Advanced nmap: aggressive version detection, OS fingerprinting, and the
         # NSE vuln category (real CVE detection) + service auditing scripts, emitted
         # as XML for rich parsing. Heavy scripts are gated so operators can dial back.
@@ -273,7 +282,12 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
         if aggressive:
             scripts += (",vuln,http-enum,http-security-headers,ssl-enum-ciphers,"
                         "http-git,http-shellshock,http-sql-injection,http-dombased-xss")
-        nmap_cmd = ["nmap", "-sV", "--version-all", "-O", "--osscan-guess",
+        # -Pn: Hermes already confirmed HTTP liveness before this ever runs, so
+        # nmap's own host-discovery ping is redundant — and without -Pn, a host
+        # that doesn't answer nmap's discovery probes (very common behind a
+        # WAF/CDN that filters ICMP) gets marked "down" and PORT-SCANNED NOT AT
+        # ALL, silently producing "0 open ports" for a target we know is live.
+        nmap_cmd = ["nmap", "-sV", "--version-all", "-O", "--osscan-guess", "-Pn",
                     "--script", scripts, "-T4", "--open", "--host-timeout", "240s",
                     "-oX", "-"] + port_flag + host_args
         # Optional IDS/IPS evasion (fragmentation + payload padding) — off by default.

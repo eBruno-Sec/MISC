@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { agentMeta } from '../brand'
 
 interface Props {
   missionId: string
@@ -51,7 +52,7 @@ export default function RerunModal({ missionId, agentName, agentSymbol, agentRol
             <div>
               <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--text-dim)', marginBottom: '0.15rem' }}>RE-RUN AGENT</div>
               <div style={{ fontSize: '0.95rem', color: 'var(--text-bright)', fontWeight: 700 }}>
-                {agentName.toUpperCase()} — {agentRole}
+                {agentMeta(agentName).name} — {agentRole}
               </div>
             </div>
           </div>

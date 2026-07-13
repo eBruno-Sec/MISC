@@ -31,6 +31,39 @@ class ActionableFindingTests(unittest.TestCase):
         self.assertFalse(is_actionable_finding("DMARC Record Missing", "medium"))
         self.assertFalse(is_actionable_finding("Dev/Staging Environments Exposed (1 subdomains)", "medium"))
 
+    def test_medium_cors_and_host_header_are_actionable(self):
+        # Newly added injection-title classes (item 3): CORS misconfiguration
+        # and Host Header injection are real, testable classes BROKKR should
+        # forge payloads for, not just hygiene notes.
+        self.assertTrue(is_actionable_finding("CORS Misconfiguration: reflects arbitrary Origin", "medium"))
+        self.assertTrue(is_actionable_finding("Host Header Injection: cache poisoning risk", "medium"))
+        self.assertTrue(is_actionable_finding("Potential IDOR: /api/orders/{id}", "medium"))
+        self.assertTrue(is_actionable_finding("GraphQL Introspection Enabled", "medium"))
+
+    def test_medium_zap_alert_is_actionable_even_without_injection_keyword_match(self):
+        # ZAP ran a real active test against the target — a medium ZAP alert is
+        # tool-confirmed evidence even when ZAP's own (open-ended) alert name
+        # doesn't happen to match the injection-keyword list, e.g. a header/
+        # hardening alert that still represents real, reproducible evidence.
+        self.assertTrue(is_actionable_finding(
+            "[ZAP] Missing Anti-clickjacking Header", "medium"))
+        self.assertTrue(is_actionable_finding(
+            "[ZAP] Cookie No HttpOnly Flag", "medium"))
+
+    def test_medium_zap_alert_is_case_insensitive_on_prefix(self):
+        self.assertTrue(is_actionable_finding("[zap] Some Alert Title", "medium"))
+
+    def test_low_severity_zap_alert_is_not_actionable(self):
+        # The ZAP-alert carve-out only widens which MEDIUM titles qualify — it
+        # must not blanket-approve every ZAP alert regardless of severity.
+        self.assertFalse(is_actionable_finding("[ZAP] Some Informational Alert", "low"))
+        self.assertFalse(is_actionable_finding("[ZAP] Some Informational Alert", "info"))
+
+    def test_non_zap_medium_finding_without_injection_keyword_still_not_actionable(self):
+        # Confirms the ZAP carve-out is prefix-scoped, not a general relaxation
+        # of the medium-severity bar for every non-ZAP-titled finding.
+        self.assertFalse(is_actionable_finding("Missing Anti-clickjacking Header", "medium"))
+
     def test_low_and_info_are_not_actionable_even_if_injection_titled(self):
         # A LOW/INFO injection-adjacent note (e.g. a raw candidate) isn't strong
         # enough for BROKKR unless it's at least medium.

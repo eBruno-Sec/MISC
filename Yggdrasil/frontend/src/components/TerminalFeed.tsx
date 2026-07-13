@@ -1,21 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LogEntry } from '../types'
+import { agentMeta } from '../brand'
 
 const LEVEL_COLOR: Record<string, string> = {
   info: 'var(--text)',
   success: 'var(--accent3)',
   warn: 'var(--gold)',
   error: 'var(--accent2)',
-}
-
-const AGENT_COLOR: Record<string, string> = {
-  zeus: 'var(--accent)',
-  athena: '#a78bfa',
-  hermes: 'var(--accent)',
-  ares: 'var(--accent2)',
-  hephaestus: 'var(--gold)',
-  hades: '#9ca3af',
-  apollo: 'var(--accent3)',
 }
 
 interface Props {
@@ -68,11 +59,11 @@ export default function TerminalFeed({ logs }: Props) {
               {new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false })}
             </span>
             <span style={{
-              color: AGENT_COLOR[log.agent] || 'var(--text-dim)',
+              color: agentMeta(log.agent).tint,
               whiteSpace: 'nowrap', flexShrink: 0, fontWeight: 700,
               fontSize: '0.7rem', letterSpacing: '0.05em',
             }}>
-              {log.symbol}{log.agent.toUpperCase()}
+              {agentMeta(log.agent).symbol}{agentMeta(log.agent).name}
             </span>
             <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>›</span>
             <span style={{

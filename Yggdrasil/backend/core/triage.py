@@ -20,9 +20,17 @@ INJECTION_TITLE_RE = re.compile(
     r"server-side request forgery|\bssrf\b|open redirect|\bidor\b|\bbola\b|"
     r"broken object level|broken access control|access control|cross-role access|"
     r"os command injection|command injection|crlf injection|response splitting|"
-    r"http parameter pollution)",
+    r"http parameter pollution|cors misconfiguration|host header injection|"
+    r"potential idor|graphql introspection)",
     re.IGNORECASE,
 )
+
+# ZAP ran real active tests against the target (not a passive/recon note) — a
+# medium-or-higher ZAP alert is actionable as its own class even when its exact
+# title doesn't happen to match the injection-keyword list above (ZAP's alert
+# names are open-ended, e.g. "Missing Anti-clickjacking Header" wouldn't match
+# INJECTION_TITLE_RE, but it's still real, tool-confirmed evidence, not a guess).
+ZAP_ALERT_TITLE_RE = re.compile(r"^\[zap\]", re.IGNORECASE)
 
 # Sensitive-file exposure titles (matches core.web_security.classify_sensitive_path_hit
 # output) — used by SKULD's "confirmed sensitive file exposure" trigger.
@@ -54,9 +62,13 @@ def is_actionable_finding(title: str, severity: str) -> bool:
     """True when BROKKR should forge payloads for this finding.
 
     - critical/high: always actionable.
-    - medium: actionable only when the title is a real injection/access-control
+    - medium: actionable when the title is a real injection/access-control
       signal (SPF/DMARC/staging-exposure hygiene items never match and stay
-      excluded).
+      excluded), OR the finding came from OWASP ZAP's active scan — ZAP already
+      ran a real test against the target, not a passive/recon guess, so a
+      medium ZAP alert is real tool-confirmed evidence even when its specific
+      alert name (open-ended, ZAP-defined text) doesn't match a known injection
+      keyword.
     - "Attack Path:" (MIMIR-synthesized, correlated) findings are always
       actionable regardless of severity — that's the whole point of correlation.
     """
@@ -66,7 +78,7 @@ def is_actionable_finding(title: str, severity: str) -> bool:
         return True
     if sev in ("critical", "high"):
         return True
-    if sev == "medium" and INJECTION_TITLE_RE.search(t):
+    if sev == "medium" and (INJECTION_TITLE_RE.search(t) or ZAP_ALERT_TITLE_RE.search(t)):
         return True
     return False
 

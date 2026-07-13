@@ -18,11 +18,29 @@ import os
 
 from sqlalchemy import select
 
-from core.ai_client import complete
+from core.ai_client import complete, AIUnavailable, AICompletionError
 from core.models import Finding
 from core.triage import sanitize_attack_path
 from .base import BaseAgent
 from .athena import _extract_json
+
+
+def _strict_retry_prompt(target: str, catalog: list) -> str:
+    """A deliberately simpler, more constrained prompt for the one retry
+    attempt — drops the certainty-language ruleset (the deterministic
+    sanitize_attack_path() guard enforces that regardless of what the model
+    says) so there's less for a struggling model to get wrong, and asks for
+    nothing but the JSON object."""
+    return f"""Return ONLY a single JSON object. No prose, no markdown, no code fences,
+no explanation before or after it.
+
+Findings for {target}:
+{json.dumps(catalog, ensure_ascii=False)}
+
+Required JSON shape (all four keys required; use empty arrays/strings if nothing applies):
+{{"false_positives": [], "mappings": {{}}, "attack_paths": [], "summary": ""}}
+
+Output the JSON object now, nothing else:"""
 
 
 class Metis(BaseAgent):
@@ -30,6 +48,65 @@ class Metis(BaseAgent):
     symbol = "MI"
     display_name = "MIMIR"
     role = "Triage & Correlation"
+
+    async def _get_triage_json(self, target: str, prompt: str, catalog: list) -> dict | None:
+        """Call the model, parse its JSON, and retry once with a stricter prompt
+        on a bad/empty reply. Every failure path logs the REAL cause (provider,
+        model, status) instead of letting a swallowed blank string surface as a
+        bare 'Expecting value: line 1 column 1' JSON error, and never calls
+        json.loads on empty text. Returns None (triage skipped) only after both
+        the primary call and the retry have failed."""
+        try:
+            text = await complete(prompt, max_tokens=1500)
+        except AIUnavailable as e:
+            await self.log(f"Triage skipped — AI unavailable ({e})", "warn")
+            return None
+        except AICompletionError as e:
+            await self.log(
+                f"Triage model call failed — provider={e.provider} model={e.model} "
+                f"status={e.status}: {e.detail}", "warn")
+            return await self._retry_triage_json(target, catalog)
+
+        data = await self._try_parse(text)
+        if data is not None:
+            return data
+        return await self._retry_triage_json(target, catalog)
+
+    async def _retry_triage_json(self, target: str, catalog: list) -> dict | None:
+        try:
+            text = await complete(_strict_retry_prompt(target, catalog), max_tokens=1200)
+        except AIUnavailable as e:
+            await self.log(f"Triage retry skipped — AI unavailable ({e})", "warn")
+            return None
+        except AICompletionError as e:
+            await self.log(
+                f"Triage retry call also failed — provider={e.provider} model={e.model} "
+                f"status={e.status}: {e.detail}. Findings left unchanged.", "warn")
+            return None
+
+        data = await self._try_parse(text, retry=True)
+        if data is None:
+            await self.log("Triage retry also produced unparseable JSON; giving up. "
+                           "Findings left unchanged.", "warn")
+        return data
+
+    async def _try_parse(self, text: str, retry: bool = False) -> dict | None:
+        """Never calls json.loads on empty text. Logs the first 300 chars of a
+        raw reply that failed to parse, so a malformed response is diagnosable
+        instead of just 'Triage model call failed'."""
+        label = "Triage retry" if retry else "Triage"
+        if not text or not text.strip():
+            # complete() itself now raises on a genuinely empty completion, so
+            # this is only reachable if a future caller changes that contract —
+            # kept as an explicit guard rather than relying on that invariant.
+            await self.log(f"{label}: model returned an empty reply", "warn")
+            return None
+        try:
+            return _extract_json(text)
+        except Exception as e:
+            preview = text[:300].replace("\n", " ")
+            await self.log(f"{label}: JSON parse failed ({e}); raw reply (first 300 chars): {preview!r}", "warn")
+            return None
 
     async def execute(self, target: str, context: dict = None) -> dict:
         result = {"flagged": 0, "mapped": 0, "chains": 0, "summary": ""}
@@ -87,11 +164,8 @@ Rules:
 - Certainty language must match the underlying finding, not exceed it. A finding titled "Suspected...", "...signal", "...pending validation", or "possible..." is NOT confirmed — never describe it in a narrative or summary as "confirmed SQL injection", "confirmed RCE", "remote code execution", or "full/complete compromise" unless a referenced finding's own title already proves that (e.g. "...sqlmap-confirmed...", "...out-of-band confirmed...", "...execution confirmed...", "...boolean-based blind...", "...UNION-based..."). When a path rests only on suspected/signal-tier findings, its severity must be "medium" at most and the narrative must say the chain is unconfirmed.
 - No prose, no markdown, only the JSON object."""
 
-        try:
-            text = await complete(prompt, max_tokens=1500)
-            data = _extract_json(text)
-        except Exception as e:
-            await self.log(f"Triage model call failed ({e}); findings left unchanged", "warn")
+        data = await self._get_triage_json(target, prompt, catalog)
+        if data is None:
             return result
 
         by_id = {f.id: f for f in findings}

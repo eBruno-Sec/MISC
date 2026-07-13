@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import type { ApprovalRequest } from '../types'
 import { api } from '../api'
+import { agentMeta } from '../brand'
 
 interface Props {
   missionId: string
@@ -88,7 +89,7 @@ export default function ApprovalGate({ missionId, approvals, onResolved }: Props
           <div>
             <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--gold)', marginBottom: '0.2rem' }}>HUMAN-IN-THE-LOOP GATE</div>
             <div id="approval-title" style={{ fontSize: '0.9rem', color: 'var(--text-bright)', fontWeight: 700 }}>
-              {approval.agent.toUpperCase()} requests authorization
+              {agentMeta(approval.agent).name} requests authorization
             </div>
           </div>
         </div>

@@ -82,6 +82,24 @@ class CliToolVersionParsingTests(unittest.IsolatedAsyncioTestCase):
             "subfinder", stdout=b"[INF] Current Version: v2.6.6\n")
         self.assertEqual(results["subfinder"], {"available": True, "version": "2.6.6"})
 
+    async def test_httpx_real_projectdiscovery_shared_banner_parsed(self):
+        # Item: HEIMDALL (agents/hermes.py _httpx_probe) shells out to this
+        # binary but it had no CLI_TOOLS entry, so a missing httpx binary was
+        # invisible to scanner-health diagnostics — silently degrading to a
+        # slower library probe with no operator-facing warning.
+        stdout = (
+            b"\n     _   _   _         __  __\n"
+            b"[INF] Current Version: v1.6.8\n"
+            b"[INF] Latest Version: v1.6.9\n"
+        )
+        results = await self._check_real("httpx", stdout=stdout)
+        self.assertEqual(results["httpx"], {"available": True, "version": "1.6.8"})
+
+    async def test_httpx_missing_binary_reports_unavailable(self):
+        with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError())):
+            results = await check_cli_tools({"httpx": CLI_TOOLS["httpx"]})
+        self.assertEqual(results["httpx"], {"available": False, "version": None})
+
     async def test_nuclei_and_katana_do_not_share_a_regex(self):
         # Guard against re-introducing the exact bug: nuclei's pattern must NOT
         # accidentally be the same object/string as katana's shared-banner one.

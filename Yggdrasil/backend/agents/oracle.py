@@ -14,7 +14,21 @@ intended usage.
 import json
 import re
 
-from core.ai_client import complete
+from core.ai_client import complete, AIUnavailable, AICompletionError
+
+
+async def _complete_or_none(prompt: str, max_tokens: int, system: str) -> tuple[str | None, str | None]:
+    """Call complete() and turn its structured exceptions into (text, error_note)
+    instead of letting them propagate uncaught — Oracle is a best-effort advisor,
+    not a mission-critical agent step, so a failure should degrade to a clear
+    fallback message, never a raw exception."""
+    try:
+        return await complete(prompt, max_tokens=max_tokens, system=system), None
+    except AIUnavailable as e:
+        return None, f"No AI response. {e} — set AI_PROVIDER / AI_API_KEY in .env."
+    except AICompletionError as e:
+        return None, (f"No AI response. {e.provider}/{e.model} {e.status}: {e.detail}"
+                      if e.detail else f"No AI response. {e.provider}/{e.model} {e.status}.")
 
 SYSTEM = """You are ORACLE, an expert exploitation advisor for the PortSwigger Web Security Academy.
 The user is solving intentionally vulnerable, authorized training labs that they own an instance of. Give complete, precise, working exploitation guidance.
@@ -84,9 +98,9 @@ async def solve(lab_title: str, description: str, lab_url: str = "",
 
     prompt = ctx + "\nReturn the exploitation plan as JSON per the schema."
 
-    text = await complete(prompt, max_tokens=1800, system=SYSTEM)
-    if not text:
-        return _fallback("", "No AI response. Check AI_PROVIDER / AI_API_KEY in .env.")
+    text, error_note = await _complete_or_none(prompt, 1800, SYSTEM)
+    if text is None:
+        return _fallback("", error_note)
 
     try:
         data = _extract_json(text)
@@ -111,9 +125,9 @@ async def followup(lab_title: str, description: str, prior: dict,
         prompt += f"\nResponse the user saw:\n{captured_response}\n"
     prompt += "\nDiagnose why it did not solve and return a corrected plan as JSON per the schema."
 
-    text = await complete(prompt, max_tokens=1800, system=SYSTEM)
-    if not text:
-        return _fallback("", "No AI response. Check AI_PROVIDER / AI_API_KEY in .env.")
+    text, error_note = await _complete_or_none(prompt, 1800, SYSTEM)
+    if text is None:
+        return _fallback("", error_note)
     try:
         data = _extract_json(text)
         data.setdefault("payloads", [])

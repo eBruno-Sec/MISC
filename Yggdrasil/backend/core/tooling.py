@@ -32,6 +32,13 @@ CLI_TOOLS = {
     "ffuf":      (["ffuf", "-V"],           r"ffuf version:\s*(\S+)"),
     "subfinder": (["subfinder", "-version"], _PD_SHARED_VERSION_RE),
     "katana":    (["katana", "-version"],   _PD_SHARED_VERSION_RE),
+    # ProjectDiscovery httpx (HTTP probing toolkit) — same vendor/CLI banner
+    # convention as subfinder/katana above. HEIMDALL (agents/hermes.py
+    # _httpx_probe) already shells out to this binary for liveness/fingerprint
+    # and silently falls back to a slower library probe when it's missing; that
+    # fallback was previously invisible to scanner-health diagnostics, so a
+    # missing binary never showed up as a startup warning like every other tool.
+    "httpx":     (["httpx", "-version"],    _PD_SHARED_VERSION_RE),
     "dalfox":    (["dalfox", "version"],    r"(\d+\.\d+\.\d+)"),
     "sqlmap":    (["sqlmap", "--version"],  r"(\d+(?:\.\d+){1,2}(?:#\S+)?)"),
 }

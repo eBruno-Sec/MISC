@@ -166,6 +166,10 @@ class Hephaestus(BaseAgent):
             return "idor"
         if "default" in t and ("cred" in t or "login" in t or "password" in t):
             return "defaultcreds"
+        if "cors" in t:
+            return "cors"
+        if "host header" in t or "host-header" in t:
+            return "hostheader"
         return ""
 
     def _target_from_evidence(self, evidence: str) -> str:
@@ -198,6 +202,10 @@ class Hephaestus(BaseAgent):
             "idor": ("IDOR", ["increment/decrement the object id and replay the request"]),
             "defaultcreds": ("DefaultCreds", ["admin:admin", "admin:password",
                                               "admin:123456", "root:root"]),
+            "cors": ("CORS", ["Origin: https://evil-yggdrasil.example",
+                              "Origin: null"]),
+            "hostheader": ("HostHeader", ["Host: evil-yggdrasil.example",
+                                          "X-Forwarded-Host: evil-yggdrasil.example"]),
         }
         kind, payloads = sets.get(cls, ("", []))
         return [{"type": kind, "payload": p, "target": url} for p in payloads]
