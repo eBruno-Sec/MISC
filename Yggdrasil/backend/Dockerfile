@@ -1,5 +1,12 @@
 FROM python:3.11-slim
 
+# Without this, Python block-buffers stdout/stderr whenever they're not a TTY
+# (always true inside a container) — print()-based startup logs (including the
+# scanner tool-health warnings) can sit in an in-process buffer and never reach
+# `docker logs` until the buffer fills or the process exits, making a genuinely
+# printed warning look like it never fired.
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap whois curl wget unzip dnsutils netcat-openbsd jq procps \
     git python3-pip \
