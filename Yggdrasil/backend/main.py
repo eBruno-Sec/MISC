@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.database import engine, Base
+from core.schema_compat import ensure_schema_compatibility
 from routers import missions, ws, scope, wordlists, oracle
 from core.security import require_api_key, api_key_enabled
 from fastapi import Depends
@@ -12,6 +13,7 @@ from fastapi import Depends
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_schema_compatibility(conn)
 
     if not api_key_enabled():
         print("[YGGDRASIL][WARN] YGGDRASIL_API_KEY is not set; API auth is DISABLED. Set it in .env for anything beyond localhost.")
