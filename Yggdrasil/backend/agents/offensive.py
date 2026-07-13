@@ -983,7 +983,7 @@ class OffensiveEngine:
                                        cap=25, per_params=4)
 
     # ── Deep per-parameter fuzz: every parameter, every endpoint ──
-    async def deep_fuzz(self, urls, budget=2500, time_budget=20,
+    async def deep_fuzz(self, urls, base_url=None, budget=2500, time_budget=20,
                         max_endpoints=200, max_params=30, concurrency=6) -> list:
         """Bug-bounty-style deep fuzz. For EVERY parameter of EVERY discovered
         endpoint, fire the full payload library — SQLi (error + time-based blind),
@@ -1016,9 +1016,12 @@ class OffensiveEngine:
                     return await self._fuzz_endpoint(c, u, plan, state, seen, max_params)
             results = await asyncio.gather(*[do_endpoint(u) for u in param_urls],
                                            return_exceptions=True)
-        for res in results:
-            if isinstance(res, list):
-                findings += res
+            for res in results:
+                if isinstance(res, list):
+                    findings += res
+            # Stored/persistent XSS needs a second pass: inject unique canaries, then
+            # re-fetch endpoints + root and see which resurface where they weren't sent.
+            findings += await self._stored_xss_pass(c, param_urls, base_url, state)
 
         await self.log(
             f"Deep fuzz complete: {len(findings)} confirmed injection(s); "
@@ -1041,6 +1044,7 @@ class OffensiveEngine:
                 continue
             seen.add(dkey)
             out += await self._fuzz_param(c, parsed, params, pname, base, plan, state)
+            out += await self._boolean_sqli(c, parsed, params, pname, base, state)
         out += await self._hpp_probe(c, parsed, params, base, state)
         return out
 
@@ -1162,6 +1166,101 @@ class OffensiveEngine:
                         found.append({"param": pname, "family": "hpp", "payload": payload})
                         hit = True
                         break
+        return found
+
+    async def _boolean_sqli(self, c, parsed, params, pname, base, state):
+        """Boolean-based blind SQLi: append a TRUE and a FALSE condition to the
+        parameter and compare both against the benign baseline. TRUE ~ baseline while
+        FALSE diverges => the parameter controls SQL query logic."""
+        from core.payloads import SQLI_BOOL_PAIRS, boolean_verdict
+        clean_url = urlunparse(parsed._replace(query=""))
+        orig = (params.get(pname) or [""])[0] or "1"
+
+        def build(suffix):
+            m = dict(params)
+            m[pname] = [orig + suffix]
+            return urlunparse(parsed._replace(query=urlencode(m, doseq=True)))
+
+        for tpl, fpl in SQLI_BOOL_PAIRS[:2]:
+            if state["budget"] <= 1:
+                break
+            state["budget"] -= 2
+            try:
+                rt = await c.get(build(tpl))
+                rf = await c.get(build(fpl))
+            except Exception:
+                continue
+            self._probe_requests = getattr(self, "_probe_requests", 0) + 2
+            v = boolean_verdict(base.get("text", ""), rt.text, rf.text,
+                                base.get("status", 200), rt.status_code, rf.status_code)
+            if v:
+                fnd = await self.add_finding(
+                    title=f"{v['title']}: {pname}",
+                    severity=v["severity"], description=v["description"],
+                    evidence=f"URL: {clean_url}\nParameter: {pname}\nTRUE:  {orig + tpl}\n"
+                             f"FALSE: {orig + fpl}\n{v['evidence']}",
+                    cvss_score=v["cvss"], remediation=v["remediation"])
+                await self.capture(rt, finding_id=(fnd.id if fnd else None),
+                                   notes=f"Boolean-blind SQLi on parameter '{pname}'")
+                return [{"param": pname, "family": "sqli_bool"}]
+        return []
+
+    async def _stored_xss_pass(self, c, endpoints, base_url, state, cap_inject=40, cap_sinks=30):
+        """Stored/persistent XSS: inject a unique canary via each (endpoint, first
+        param), then re-fetch the clean endpoints and the site root. A canary that
+        resurfaces on a page it was NOT sent to is stored XSS. Bounded by caps/budget."""
+        tokens = {}
+        for i, u in enumerate(endpoints[:cap_inject]):
+            if state["budget"] <= 2:
+                break
+            parsed = urlparse(u)
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            if not params:
+                continue
+            pname = list(params.keys())[0]
+            token = f"sygg{i}z"
+            m = dict(params)
+            m[pname] = [f"<{token}>"]
+            try:
+                await c.get(urlunparse(parsed._replace(query=urlencode(m, doseq=True))))
+            except Exception:
+                continue
+            state["budget"] -= 1
+            self._probe_requests = getattr(self, "_probe_requests", 0) + 1
+            tokens[token] = (urlunparse(parsed._replace(query="")), pname)
+        if not tokens:
+            return []
+
+        if not base_url and endpoints:
+            p0 = urlparse(endpoints[0])
+            base_url = f"{p0.scheme}://{p0.netloc}"
+        sinks = list(dict.fromkeys(([base_url] if base_url else []) + [v[0] for v in tokens.values()]))[:cap_sinks]
+
+        found = []
+        for s in sinks:
+            if state["budget"] <= 0:
+                break
+            try:
+                r = await c.get(s)
+            except Exception:
+                continue
+            state["budget"] -= 1
+            body = r.text or ""
+            for token, (inj_url, pname) in list(tokens.items()):
+                if f"<{token}>" in body:
+                    fnd = await self.add_finding(
+                        title=f"Stored / Persistent XSS: {pname}",
+                        severity="high",
+                        description=("An injected payload was stored server-side and later reflected "
+                                     "unencoded on a response it was not sent to, confirming stored XSS "
+                                     "— it fires for every visitor who loads the affected page."),
+                        evidence=f"Injected at: {inj_url} (param {pname})\nResurfaced at: {s}\nMarker: <{token}>",
+                        cvss_score=8.0,
+                        remediation="Encode on output everywhere the value is rendered; apply a strict CSP.")
+                    await self.capture(r, finding_id=(fnd.id if fnd else None),
+                                       notes=f"Stored XSS: {pname} -> {s}")
+                    found.append({"param": pname, "family": "stored_xss", "sink": s})
+                    del tokens[token]
         return found
 
     # ── Form discovery + POST/body injection ─────────────────────
@@ -1762,7 +1861,7 @@ class OffensiveEngine:
             self.test_open_redirect(urls),
             self.test_cors(base_url, urls),
             self.test_host_header(base_url),
-            self.deep_fuzz(urls),
+            self.deep_fuzz(urls, base_url=base_url),
             self.test_forms(forms),
             return_exceptions=True,
         )

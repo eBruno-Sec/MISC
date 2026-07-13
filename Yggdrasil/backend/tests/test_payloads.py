@@ -1,5 +1,8 @@
 """Tests for core.payloads — the deep-fuzz payload plan and differential detectors."""
-from core.payloads import probe_families, evaluate, family_description, CANARY, SSTI_EXPECT
+from core.payloads import (
+    probe_families, evaluate, family_description, boolean_verdict,
+    CANARY, SSTI_EXPECT, SQLI_BOOL_PAIRS,
+)
 
 
 def test_probe_plan_covers_all_classes():
@@ -75,3 +78,43 @@ def test_every_family_has_a_description():
 def test_verdict_carries_severity_and_remediation():
     v = evaluate("cmdi", "$(id)", "uid=33(www-data) gid=33(www-data) groups=33")
     assert v["severity"] == "critical" and v["cvss"] >= 9 and v["remediation"]
+
+
+# ── sub-types added later: boolean-blind SQLi, LFI wrappers, Windows cmdi ──
+def test_probe_plan_includes_lfi_and_windows_blind():
+    plan = probe_families(include_time=True)
+    assert any(f == "lfi_wrapper" for f, _ in plan)
+    assert any(f == "cmdi_time" and "ping -n 6" in p for f, p in plan)  # Windows blind cmdi
+
+
+def test_bool_pairs_are_true_false_shaped():
+    assert SQLI_BOOL_PAIRS and all(len(pair) == 2 for pair in SQLI_BOOL_PAIRS)
+
+
+def test_boolean_blind_true_matches_false_differs():
+    base = "<html>" + "product row " * 300 + "</html>"
+    assert boolean_verdict(base, base, "<html>no results</html>") is not None
+
+
+def test_boolean_blind_no_flag_when_all_identical():
+    page = "same content " * 80
+    assert boolean_verdict(page, page, page) is None
+
+
+def test_boolean_blind_no_flag_when_true_also_differs():
+    base = "aaaa " * 200
+    other = "bbbb " * 200
+    assert boolean_verdict(base, other, other) is None   # TRUE not ~ baseline
+
+
+def test_lfi_wrapper_detects_php_source_leak_differential():
+    leak = "PD9waHAgZWNobyAiaGkiOw=="   # base64 of '<?php echo "hi";'
+    pl = "php://filter/convert.base64-encode/resource=index"
+    assert evaluate("lfi_wrapper", pl, leak) is not None
+    assert evaluate("lfi_wrapper", pl, "just a normal page") is None
+    assert evaluate("lfi_wrapper", pl, leak, base_text=leak) is None   # already in baseline
+
+
+def test_xss_attribute_handler_context_detected():
+    pl = f"\" autofocus onfocus={CANARY} x=\""
+    assert evaluate("xss", pl, f"<input value=\"{pl}\">") is not None
