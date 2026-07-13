@@ -1304,4 +1304,85 @@ release_gates:
 
 ---
 
+## 24. Codex Feature-Enforcement & Verification Package (Stage B work order)
+
+**Status of the committed Yggdrasil (`origin/main` @ `d02915b`):** the six operator-facing "cool" features are **present in source** (verified by `git grep`) but **not proven working** — the backend suite does not pass as committed, and the Codex implementation report does not match the commit. This package makes Codex *enforce* (prove-with-tests, not just carry over) each feature, and clears the two Stage-A merge blockers.
+
+**Preconditions (run where the app actually builds — NOT the review sandbox, which lacks `fastapi`/`sqlalchemy`):**
+```
+cd Yggdrasil/backend && pip install -r requirements.txt && python -m pytest tests/ -q
+cd Yggdrasil/frontend && npm install && npm run build      # tsc strict gate
+# runtime click-through: docker compose up --build  (or the local dev runner)
+```
+Codex rules apply: address every item, add a regression test per fix, do not weaken existing tests, **do not merge** (human approves).
+
+### 24.1 Blocker corrections (from the Stage-A critique — these gate everything else)
+
+| ID | Sev | Task | Acceptance |
+|---|---|---|---|
+| C-1 | HIGH | `backend/tests/test_web_security.py` calls `OffensiveEngine.generate_parameter_test_urls()` and `._candidate_parameter_names()`, which **do not exist** on the committed engine → 3 hard `AttributeError`s in any env. Either implement those two methods on `OffensiveEngine`, or rewrite the tests against the real shipped API in `core/web_security.py` (`generate_discovery_words`, `build_traversal_probes`, `build_idor_probes`, `is_url_in_scope`, …). | `python -m pytest tests/ -q` → **0 errors, 0 unexpected failures**; no method referenced by a test is missing. |
+| C-2 | HIGH | `CODEX_IMPLEMENTATION_PACKAGE.md` claims features not in `d02915b` (v2 SHA-256 backup "Passed"; endpoints `/backup/summary`, `/backup/import`, `/http-exchanges`; "22–23 tests passed"). Regenerate the report to describe the **actual** commit. | Every endpoint/test named in the report is confirmable with `git grep`; no claimed-but-absent feature remains. |
+| C-3 | MED | Split-brand: backend/report use Greek + ASCII (`apollo.py display_name="APOLLO" symbol="AP"`, footer "…APOLLO…"); frontend `brand.ts` uses Norse (`apollo→SAGA`, `zeus→ODIN`). Pick ONE naming and thread it through `display_name`/`symbol`, `AGENT_SYMBOL`, WS events, the report, and the print button ids (`oly-print`/`olyPrint`). | Report agent labels == UI agent labels for the same run; no `oly-`/`OLYMPUS` strings remain in generated report unless intentionally Olympus-attributed. |
+| C-4 | MED | WP-07 v2 backup integrity (SHA-256) is absent (`core/backup.py` is v1-only) though reported "Passed". Either implement v2 (optional `sha256`, verified on import, v1 still round-trips) or mark it **deferred** honestly in the report. | v2 tamper → reject with clear reason AND v1 round-trips; or report says "deferred", not "passed". |
+
+### 24.2 Feature-enforcement matrix (the "cool stuff" — prove each, don't assume)
+
+For every row: **assert** = automated test Codex must add/confirm; **drive** = manual/e2e runtime check; **accept** = pass bar. Evidence lines are the committed anchors I verified.
+
+| Feature (blueprint ID) | Committed anchor | Assert (automated) | Drive (runtime/e2e) | Accept |
+|---|---|---|---|---|
+| **Dark/light mode** (F078/F109) | `frontend/src/App.tsx:9` (`yggdrasil_theme`), `index.css:72` (`:root[data-theme="light"]`), report toggle in `apollo.py` | e2e: toggling header sets `data-theme` on `<html>` and writes `localStorage.yggdrasil_theme`; unit: `index.css` contains the full light token block; report render contains the in-report theme button + `[data-theme="light"]` token set | Toggle in header → persists across reload; open report → Light button flips tokens live | Both themes readable; choice persists across reload; **report's own toggle works** |
+| **Pre-authorize / autonomous** (F009) | `MissionLaunch.tsx:61` (`autoApprove`), `agents/base.py:172` (`context.auto_approve`) | unit: `request_approval()` with `context.auto_approve=True` returns `True`, writes an `ApprovalRequest(status="approved")`, and emits an audit log — **without blocking**; `createMission` forwards `autoApprove` | Launch FULL mode with the box ticked → run completes with **no gate prompts**, every gate still appears in the log | No pause; each skipped gate is audit-logged (never silently skipped) |
+| **Wordlists** (F097) | `routers/wordlists.py` (list/preview/download/generate), `core/wordlists.py`, `components/WordlistsPanel.tsx` | api: `GET /api/wordlists` returns curated+generated; `GET /{wid}/preview` returns text; `POST /generate/{mission_id}` builds a target list; `wl.content_wordlists_for` resolves a selection | WordlistsPanel lists sets; preview shows lines; download works; ARES consumes the launch-selected ids | All 4 endpoints 200; **selected wordlists actually flow into the scan** (not just displayed) |
+| **Printing results** (F079) | `apollo.py:376` (Print button), `:390` (`window.print()`), `:582` (`@media print`) | unit (regression): report HTML `@media print` resets the **full `:root` token set** (guards the invisible-PDF bug), toolbar `display:none` in print, export `<script>` parses; `test_report.py` green | Open report → Print/Save-PDF → dark-on-white **legible** text, no toolbar, sections don't break mid-finding | PDF legible in print; toolbar hidden; no truncated/invisible content |
+| **Sneak peek** (F002/F108 + wordlist preview) | `MissionList.tsx:60` (`SeverityPeek`, C·H·M·L·I + "no findings yet"), `routers/wordlists.py:31` (`/preview`) | unit: `GET /api/missions` returns `severity_counts`; `SeverityPeek` renders lit/dim states + empty state; wordlist `/preview?lines=N` caps at N | Archive rows show severity badges; hovering a wordlist shows first N lines | Badge counts match DB; empty state renders "no findings yet"; preview capped |
+| **Favorites** (F108) | `MissionList.tsx` `FAV_KEY='yggdrasil_favorites'`, `toggleFav`, star pinning | e2e: star writes `localStorage.yggdrasil_favorites`, pins the mission to top, survives reload; deleting a mission removes it from favorites | Star a mission → pinned + persists across reload; delete → removed from favorites | Pin + persist + cleanup all hold; no orphan favorite ids |
+
+### 24.3 Required new regression file
+
+Add `Yggdrasil/backend/tests/test_features.py` for the backend-assertable contracts above (pre-authorize passthrough, wordlist endpoints, report print-token reset, severity_counts shape). Add a Playwright spec `Yggdrasil/frontend/e2e/features.spec.ts` for the UI-only contracts (theme persistence, favorites pin/persist, report Print → non-empty PDF, in-report theme toggle). **Do not** delete or weaken `test_report.py`, `test_backup.py`, `test_security.py`.
+
+### 24.4 Release gate addition (blocks merge)
+
+- `python -m pytest tests/ -q` → **green, 0 errors** (C-1 cleared).
+- `npm run build` → green (tsc strict).
+- `test_features.py` + `features.spec.ts` → all green.
+- Report/UI brand labels consistent (C-3).
+- Implementation report matches commit (C-2).
+
+### 24.5 Manifest — new work packages
+
+```yaml
+feature_enforcement_version: "1.0"
+target_ref: "origin/main"
+target_commit: "d02915b"
+work_packages:
+  - id: WP-17
+    title: "Clear Stage-A merge blockers (C-1 broken test, C-2 report mismatch)"
+    dependencies: []
+    affected_areas: ["backend/tests/test_web_security.py","backend/agents/offensive.py|core/web_security.py","CODEX_IMPLEMENTATION_PACKAGE.md"]
+    acceptance_criteria:
+      - "pytest tests/ -q -> 0 errors"
+      - "no test references a missing engine method"
+      - "implementation report endpoints/tests confirmable via git grep"
+    required_tests: ["pytest backend/tests -q"]
+    rollback: "revert test/report edits"
+  - id: WP-18
+    title: "Enforce operator features working (dark mode, pre-authorize, wordlists, print, sneak-peek, favorites)"
+    dependencies: ["WP-17"]
+    affected_areas: ["backend/tests/test_features.py (new)","frontend/e2e/features.spec.ts (new)","apollo.py print tokens","brand.ts / display_name consistency"]
+    acceptance_criteria:
+      - "F009 autoApprove: no pause, every gate audit-logged"
+      - "F078/F109 theme: persists + report toggle works, both themes legible"
+      - "F097 wordlists: 4 endpoints 200 AND selection flows into scan"
+      - "F079 print: @media print resets full :root token set, legible PDF, toolbar hidden"
+      - "F002/F108 peek: severity_counts render + empty state + wordlist preview cap"
+      - "F108 favorites: pin + persist across reload + cleanup on delete"
+    required_tests: ["backend/tests/test_features.py","frontend/e2e/features.spec.ts","backend/tests/test_report.py"]
+    rollback: "features are additive tests + brand strings; revert commit"
+brand_decision_required_from_owner: "Greek (Olympus-heritage) vs Norse (Yggdrasil) agent names — pick one; C-3 threads it everywhere."
+```
+
+---
+
 OPUS HANDOFF COMPLETE — AWAITING CODEX IMPLEMENTATION PACKAGE
