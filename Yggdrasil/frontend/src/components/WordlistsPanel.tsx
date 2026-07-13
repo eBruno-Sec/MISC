@@ -152,7 +152,7 @@ export default function WordlistsPanel({ missionId }: { missionId: string }) {
       ))}
 
       <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '1.25rem', lineHeight: 1.7 }}>
-        ARES uses the generated target list plus your selected curated lists for content discovery.
+        TYR uses the generated target list plus your selected curated lists for content discovery.
         Select which curated lists to run when you launch a mission.
       </div>
     </div>

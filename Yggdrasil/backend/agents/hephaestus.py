@@ -10,9 +10,9 @@ from .base import BaseAgent
 
 class Hephaestus(BaseAgent):
     name = "hephaestus"
-    symbol = "HF"
-    display_name = "HEPHAESTUS"
-    role = "Payload Forge & Wordlist Generation"
+    symbol = "BR"
+    display_name = "BROKKR"
+    role = "Payload Forge"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         hermes = (context or {}).get("hermes", {})

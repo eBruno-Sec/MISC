@@ -16,6 +16,7 @@ export const AGENTS: AgentDef[] = [
   { key: 'ares', name: 'TYR', symbol: 'TY', role: 'Active Assessment', tint: 'var(--accent2)' },
   { key: 'hephaestus', name: 'BROKKR', symbol: 'BR', role: 'Payload Forge', tint: 'var(--gold)' },
   { key: 'hades', name: 'SKULD', symbol: 'SK', role: 'Impact Review', tint: '#6f7380' },
+  { key: 'metis', name: 'MIMIR', symbol: 'MI', role: 'Triage', tint: '#7a66a3' },
   { key: 'apollo', name: 'SAGA', symbol: 'SA', role: 'Reporting', tint: 'var(--accent3)' },
 ]
 

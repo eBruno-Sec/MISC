@@ -1,4 +1,4 @@
-"""Regression tests for the APOLLO report's embedded export script.
+"""Regression tests for the SAGA report's embedded export script.
 
 Guards the bug where `export_script` was a normal (non-raw) triple-quoted Python
 string, so the JS `\n` string literals were turned into REAL newlines by Python
@@ -58,9 +58,29 @@ def test_export_script_has_no_unterminated_string_literals(tmp_path, monkeypatch
 def test_all_export_buttons_wired(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "reports_dir", str(tmp_path))
     html = _render(tmp_path)
-    for bid in ("oly-print", "oly-html", "oly-md", "oly-txt", "oly-json", "oly-theme"):
+    for bid in ("ygg-print", "ygg-html", "ygg-md", "ygg-txt", "ygg-json", "ygg-theme"):
         assert f'id="{bid}"' in html, f"button {bid} missing"
         assert f"getElementById('{bid}')" in html, f"listener for {bid} not wired"
+
+
+def test_print_css_resets_report_tokens_and_hides_toolbar(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "reports_dir", str(tmp_path))
+    html = _render(tmp_path)
+    assert "@media print" in html, "print stylesheet block missing"
+    block = html[html.index("@media print"):html.index("</style>")]
+    for token in ("--bg", "--surface", "--surface2", "--border", "--border2",
+                  "--accent", "--accent2", "--accent3", "--gold",
+                  "--text", "--text-dim", "--text-bright", "--mono"):
+        assert token in block
+    assert ".export-bar" in block and "display: none !important" in block
+
+
+def test_report_uses_yggdrasil_stage_labels(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "reports_dir", str(tmp_path))
+    html = _render(tmp_path)
+    assert "TYR" in html
+    assert "APOLLO" not in html
+    assert "id=\"oly-" not in html
 
 
 def test_export_script_escapes_js_line_separators(tmp_path, monkeypatch):

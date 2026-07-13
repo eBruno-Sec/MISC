@@ -4,6 +4,7 @@ import html as _html
 import secrets
 from datetime import datetime
 from core.ai_client import complete
+from core.brand import agent_display_name
 from core.config import settings
 from core.models import Finding
 from core.surface import build_inventory
@@ -29,9 +30,9 @@ CVSS_MAP = {
 
 class Apollo(BaseAgent):
     name = "apollo"
-    symbol = "AP"
-    display_name = "APOLLO"
-    role = "Reporting & Risk Analysis"
+    symbol = "SA"
+    display_name = "SAGA"
+    role = "Reporting"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         await self.log("Compiling intelligence from all agents", "info")
@@ -88,7 +89,7 @@ class Apollo(BaseAgent):
                 f"{fnd.title} ({fnd.severity.upper()}) - {(fnd.description or '')[:100]}"
                 for fnd in sorted(findings, key=lambda x: CVSS_MAP.get(x.severity, 0), reverse=True)[:10]
             ]
-            prompt = f"""You are APOLLO, the reporting module of the Yggdrasil security assessment workspace.
+            prompt = f"""You are SAGA, the reporting module of the Yggdrasil security assessment workspace.
 Write a concise executive summary (3-4 paragraphs) for this authorized security assessment.
 
 Target: {target}
@@ -278,7 +279,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             # (XSS PoC payloads, response snippets, ZAP alert text, matched URLs).
             sev = _html.escape((fnd.severity or "info").upper())
             title = _html.escape(fnd.title or "")
-            found_by = _html.escape((fnd.found_by or "unknown").upper())
+            found_by = _html.escape(agent_display_name(fnd.found_by))
             description = _html.escape(fnd.description or "No description")
             evidence_block = (
                 '<div class="field"><span class="field-label">EVIDENCE</span><pre>'
@@ -349,7 +350,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                     "title": fnd.title,
                     "severity": fnd.severity,
                     "cvss": fnd.cvss_score,
-                    "found_by": fnd.found_by,
+                    "found_by": agent_display_name(fnd.found_by),
                     "description": fnd.description or "",
                     "evidence": fnd.evidence or "",
                     "remediation": fnd.remediation or "",
@@ -364,6 +365,9 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         report_json = (
             json.dumps(report_payload, ensure_ascii=False)
             .replace("</", "<\\/")
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
             .replace("\u2028", "\\u2028")
             .replace("\u2029", "\\u2029")
         )
@@ -372,12 +376,12 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         # nonce'd script below so the report can run under a strict CSP.
         toolbar_html = (
             '<div class="export-bar">'
-            '<button id="oly-theme">&#x2600; Light</button>'
-            '<button id="oly-print">&#x2399; Print</button>'
-            '<button id="oly-html">HTML</button>'
-            '<button id="oly-md">MD</button>'
-            '<button id="oly-txt">TXT</button>'
-            '<button id="oly-json">JSON</button>'
+            '<button id="ygg-theme">&#x2600; Light</button>'
+            '<button id="ygg-print">&#x2399; Print</button>'
+            '<button id="ygg-html">HTML</button>'
+            '<button id="ygg-md">MD</button>'
+            '<button id="ygg-txt">TXT</button>'
+            '<button id="ygg-json">JSON</button>'
             '</div>'
         )
 
@@ -387,7 +391,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         # wires up). Raw keeps them as literal backslash-n for JS to parse at runtime.
         export_script = r"""<script nonce="__NONCE__">
 const REPORT = __REPORT_JSON__;
-function olyPrint(){ window.print(); }
+function yggPrint(){ window.print(); }
 function dl(name, mime, text){
   const b = new Blob([text], {type: mime});
   const u = URL.createObjectURL(b);
@@ -459,7 +463,7 @@ function toMd(){
   });
   return L.join('\n');
 }
-function olyExport(kind){
+function yggExport(kind){
   if (kind === 'json') return dl(fname('json'), 'application/json', JSON.stringify(REPORT, null, 2));
   if (kind === 'md') return dl(fname('md'), 'text/markdown', toMd());
   return dl(fname('txt'), 'text/plain', toTxt());
@@ -471,14 +475,14 @@ var _lightMode = false;
 function toggleTheme(){
   _lightMode = !_lightMode;
   document.body.setAttribute('data-theme', _lightMode ? 'light' : '');
-  document.getElementById('oly-theme').innerHTML = _lightMode ? '◐ Dark' : '☀ Light';
+  document.getElementById('ygg-theme').innerHTML = _lightMode ? '◐ Dark' : '☀ Light';
 }
-document.getElementById('oly-print').addEventListener('click', olyPrint);
-document.getElementById('oly-html').addEventListener('click', toHtml);
-document.getElementById('oly-md').addEventListener('click', function(){ olyExport('md'); });
-document.getElementById('oly-txt').addEventListener('click', function(){ olyExport('txt'); });
-document.getElementById('oly-json').addEventListener('click', function(){ olyExport('json'); });
-document.getElementById('oly-theme').addEventListener('click', toggleTheme);
+document.getElementById('ygg-print').addEventListener('click', yggPrint);
+document.getElementById('ygg-html').addEventListener('click', toHtml);
+document.getElementById('ygg-md').addEventListener('click', function(){ yggExport('md'); });
+document.getElementById('ygg-txt').addEventListener('click', function(){ yggExport('txt'); });
+document.getElementById('ygg-json').addEventListener('click', function(){ yggExport('json'); });
+document.getElementById('ygg-theme').addEventListener('click', toggleTheme);
 </script>"""
         # Nonce first (touches only the template's script tag), then inject the
         # findings JSON so finding text can never collide with a placeholder.

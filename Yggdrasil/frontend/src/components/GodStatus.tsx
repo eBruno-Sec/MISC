@@ -1,3 +1,5 @@
+import { AGENTS } from '../brand'
+
 type GodState = 'idle' | 'active' | 'complete' | 'failed'
 
 interface GodDef {
@@ -7,15 +9,7 @@ interface GodDef {
   key: string
 }
 
-const GODS: GodDef[] = [
-  { key: 'zeus',        name: 'ZEUS',       symbol: 'Z',  role: 'Orchestrator' },
-  { key: 'athena',      name: 'ATHENA',     symbol: 'AT', role: 'AI Strategy' },
-  { key: 'hermes',      name: 'HERMES',     symbol: 'HE', role: 'OSINT / Recon' },
-  { key: 'ares',        name: 'ARES',       symbol: 'AR', role: 'Active Scanning' },
-  { key: 'hephaestus',  name: 'HEPHAESTUS', symbol: 'HF', role: 'Payload Forge' },
-  { key: 'hades',       name: 'HADES',      symbol: 'HD', role: 'Post-Exploit' },
-  { key: 'apollo',      name: 'APOLLO',     symbol: 'AP', role: 'Reporting' },
-]
+const GODS: GodDef[] = AGENTS.filter(agent => agent.key !== 'metis')
 
 const RERUNNABLE = new Set(['hermes', 'ares', 'hephaestus', 'hades', 'apollo', 'athena'])
 

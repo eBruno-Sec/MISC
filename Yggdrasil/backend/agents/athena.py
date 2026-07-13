@@ -1,5 +1,7 @@
 import json
 import os
+import re
+from urllib.parse import urlparse
 from core.ai_client import complete
 from .base import BaseAgent
 
@@ -19,11 +21,82 @@ def _extract_json(text: str):
     return json.loads(t)
 
 
+def _extract_declared_scope_paths(scope: str) -> list:
+    """Extract operator-declared URL paths and nearby vulnerability hints."""
+    rows = []
+    current = None
+
+    def close_current():
+        nonlocal current
+        if current:
+            current["hints"] = list(dict.fromkeys(current["hints"]))
+            rows.append(current)
+            current = None
+
+    for raw in (scope or "").splitlines():
+        line = raw.strip().strip("-*")
+        if not line:
+            continue
+
+        path = None
+        if line.startswith(("http://", "https://")):
+            parsed = urlparse(line)
+            if parsed.path and parsed.path != "/":
+                path = parsed.path
+        else:
+            match = re.search(r"(?<!\S)/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*", line)
+            if match:
+                path = match.group(0)
+
+        if path:
+            close_current()
+            current = {"path": path, "hints": []}
+            trailing = line[line.find(path) + len(path):].strip(" :-")
+            if trailing:
+                current["hints"].append(trailing)
+            continue
+
+        if current:
+            current["hints"].append(line)
+
+    close_current()
+    return rows
+
+
+def _summarize_scope_rules(scope_rules: dict) -> dict:
+    """Return a compact, UI-safe summary of structured scope rules."""
+    rules = scope_rules or {}
+    in_scope = [r for r in rules.get("in_scope", []) if isinstance(r, dict)]
+    out_of_scope = [r for r in rules.get("out_of_scope", []) if isinstance(r, dict)]
+    asset_types = {}
+    for rule in in_scope:
+        typ = str(rule.get("type") or "unknown").lower()
+        asset_types[typ] = asset_types.get(typ, 0) + 1
+
+    def examples(items):
+        out = []
+        for rule in items[:5]:
+            ident = str(rule.get("identifier") or "").strip()
+            typ = str(rule.get("type") or "unknown").strip() or "unknown"
+            if ident:
+                out.append(f"{ident} ({typ})")
+        return out
+
+    return {
+        "has_rules": bool(in_scope or out_of_scope),
+        "in_scope_count": len(in_scope),
+        "out_of_scope_count": len(out_of_scope),
+        "asset_types": asset_types,
+        "in_scope_examples": examples(in_scope),
+        "out_of_scope_examples": examples(out_of_scope),
+    }
+
+
 class Athena(BaseAgent):
     name = "athena"
-    symbol = "AT"
-    display_name = "ATHENA"
-    role = "AI Strategy & Intent Parsing"
+    symbol = "FR"
+    display_name = "FRIGG"
+    role = "Strategy & Scope Interpretation"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         mode = (context or {}).get("mode", "passive")
@@ -41,6 +114,10 @@ class Athena(BaseAgent):
             "ai_available": False,
         }
 
+        declared_paths = _extract_declared_scope_paths(scope)
+        if declared_paths:
+            result["declared_paths"] = declared_paths
+
         api_key = os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
         if not api_key:
             await self.log("No AI API key configured. AI analysis skipped.", "warn")
@@ -49,7 +126,7 @@ class Athena(BaseAgent):
             return result
 
         try:
-            prompt = f"""You are ATHENA, the strategy module of the Yggdrasil authorized security workspace.
+            prompt = f"""You are FRIGG, the strategy module of the Yggdrasil authorized security workspace.
 Analyze this authorized security assessment mission and return a JSON object.
 
 Target: {target}
@@ -93,7 +170,7 @@ Only return valid JSON, no markdown, no preamble."""
         except Exception as e:
             await self.log(f"Credential extraction error ({e})", "warn")
 
-        await self.log("Mission parameters locked. Handing off to HERMES.", "success")
+        await self.log("Mission parameters locked. Handing off to HEIMDALL.", "success")
         return result
 
     async def _derive_credentials(self, scope: str) -> list:

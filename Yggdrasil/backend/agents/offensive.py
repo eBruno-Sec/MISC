@@ -18,7 +18,7 @@ import os
 import re
 import tempfile
 from html.parser import HTMLParser
-from urllib.parse import urlparse, parse_qs, urljoin
+from urllib.parse import urlparse, parse_qs, urlencode, urljoin, urlunparse
 
 # Curated wordlists first (fast, fetched at build time), full SecLists as fallback.
 SECLISTS_DIRS = [
@@ -143,6 +143,145 @@ PARAM_MINE_CANDIDATES = [
 class OffensiveEngine:
     """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
     self.add_finding (all from BaseAgent)."""
+
+    def _candidate_parameter_names(self, urls: list, declared_paths: list = None) -> list:
+        """Build a high-signal parameter wordlist from routes and scope hints."""
+        declared_paths = declared_paths or []
+        names = []
+
+        def add(name):
+            clean = re.sub(r"[^A-Za-z0-9_:-]", "", str(name or "")).strip()
+            if clean and clean not in names and len(clean) <= 64:
+                names.append(clean)
+
+        for u in urls or []:
+            parsed = urlparse(str(u))
+            for key in parse_qs(parsed.query).keys():
+                add(key)
+            for segment in parsed.path.split("/"):
+                for token in re.split(r"[^A-Za-z0-9]+", segment):
+                    if len(token) >= 3:
+                        add(token.lower())
+
+        for item in declared_paths:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "")
+            for segment in path.split("/"):
+                for token in re.split(r"[^A-Za-z0-9]+", segment):
+                    if len(token) >= 3:
+                        add(token.lower())
+
+            hints = " ".join(str(h) for h in (item.get("hints") or [])).lower()
+            if any(term in hints for term in ("sql", "injection")):
+                for name in ("searchTerm", "search", "q", "query", "id"):
+                    add(name)
+            if any(term in hints for term in ("xss", "cross-site", "reflected")):
+                for name in ("searchTerm", "search", "q", "callback", "return"):
+                    add(name)
+            if any(term in hints for term in ("xml", "xxe", "external entity")):
+                for name in ("stockApi", "xml", "url", "file", "path"):
+                    add(name)
+            if any(term in hints for term in ("idor", "bola", "access control", "object")):
+                for name in ("id", "userId", "account_id", "orderId", "productId"):
+                    add(name)
+            if any(term in hints for term in ("ssrf", "server-side request")):
+                for name in ("url", "uri", "callback", "stockApi", "endpoint"):
+                    add(name)
+
+        for name in (
+            "searchTerm", "productId", "stockApi", "xml", "account_id",
+            "userId", "orderId", *PARAM_MINE_CANDIDATES,
+        ):
+            add(name)
+        return names
+
+    def _declared_hints_for_route(self, route: str, declared_paths: list) -> list:
+        route_path = urlparse(route).path.rstrip("/") or "/"
+        hints = []
+        for item in declared_paths or []:
+            if not isinstance(item, dict):
+                continue
+            declared_path = str(item.get("path") or "").rstrip("/") or "/"
+            if route_path == declared_path or route_path.startswith(declared_path + "/"):
+                hints.extend(item.get("hints") or [])
+        return hints
+
+    def _prioritized_parameter_names(self, route: str, candidates: list, hints: list) -> list:
+        path = urlparse(route).path.lower()
+        hint_text = " ".join(str(h) for h in hints).lower()
+        priority = []
+
+        def add(name):
+            if name not in priority:
+                priority.append(name)
+
+        if "catalog" in path:
+            for name in ("searchTerm", "productId", "search", "q"):
+                add(name)
+        if "stock" in path:
+            for name in ("stockApi", "productId"):
+                add(name)
+        if any(term in hint_text for term in ("xml", "xxe", "external entity")):
+            for name in ("stockApi", "xml", "url", "file"):
+                add(name)
+        if any(term in hint_text for term in ("sql", "xss", "cross-site", "reflected")):
+            for name in ("searchTerm", "search", "q", "callback", "id"):
+                add(name)
+        for name in candidates:
+            add(name)
+        return priority
+
+    def generate_parameter_test_urls(self, base_url: str, routes: list,
+                                     declared_paths: list = None,
+                                     scope_rules: dict = None,
+                                     max_routes: int = 25,
+                                     max_urls: int = 200) -> list:
+        """Synthesize parameterized URLs for routes that crawlers find without params."""
+        from core.web_security import is_url_in_scope
+
+        declared_paths = declared_paths or []
+        base = base_url.rstrip("/")
+        route_pool = []
+
+        def add_route(route):
+            if not route:
+                return
+            full = str(route)
+            if not full.startswith(("http://", "https://")):
+                full = urljoin(base + "/", full.lstrip("/"))
+            if full not in route_pool:
+                route_pool.append(full)
+
+        for route in routes or []:
+            add_route(route)
+        for item in declared_paths:
+            if isinstance(item, dict):
+                add_route(item.get("path"))
+
+        out = []
+        for route in route_pool[:max_routes]:
+            if scope_rules is not None and not is_url_in_scope(route, base_url, scope_rules):
+                continue
+            parsed = urlparse(route)
+            if not parsed.scheme or not parsed.netloc:
+                continue
+            hints = self._declared_hints_for_route(route, declared_paths)
+            candidates = self._candidate_parameter_names([route], declared_paths)
+            for name in self._prioritized_parameter_names(route, candidates, hints):
+                test_url = urlunparse((
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path or "/",
+                    "",
+                    urlencode({name: "yggdrasil"}),
+                    "",
+                ))
+                if test_url not in out:
+                    out.append(test_url)
+                if len(out) >= max_urls:
+                    return out
+        return out
 
     # ── Crawl ────────────────────────────────────────────────────
     async def crawl(self, base_url: str, max_urls: int = 200) -> list:
@@ -1329,7 +1468,14 @@ class OffensiveEngine:
             await self.log(f"Redirect map: {len(edges)} redirect edge(s)", "info")
         return edges
 
-    async def run_offensive(self, base_url: str, extra_wordlists: list = None, credentials: dict = None) -> dict:
+    async def run_offensive(
+        self,
+        base_url: str,
+        extra_wordlists: list = None,
+        credentials: dict = None,
+        declared_paths: list = None,
+        scope_rules: dict = None,
+    ) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
         # Authenticate first (when creds are supplied) so the crawl and every
         # scanner reuse the session. Any failure degrades to unauthenticated.
@@ -1347,6 +1493,18 @@ class OffensiveEngine:
         spec_urls = await self.import_api_specs(base_url)  # OpenAPI/Swagger, if exposed
         urls = self._dedupe_by_params(
             list(dict.fromkeys(crawled + archived + mined + seeded + spec_urls)))
+        synthetic_urls = self.generate_parameter_test_urls(
+            base_url,
+            urls,
+            declared_paths=declared_paths,
+            scope_rules=scope_rules,
+        )
+        if synthetic_urls:
+            urls = self._dedupe_by_params(list(dict.fromkeys(urls + synthetic_urls)))
+            await self.log(
+                f"Declared scope paths seeded {len(synthetic_urls)} parameterized probe URL(s)",
+                "info",
+            )
         params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
