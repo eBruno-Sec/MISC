@@ -1,27 +1,30 @@
 # OPUS → CODEX INTEGRATION HANDOFF
 ## Olympus → Yggdrasil Migration Blueprint
 
-**Handoff version:** 1.0  •  **Prepared:** 2026-07-12  •  **Owner:** OPUS (principal architect)  •  **Consumer:** Codex
+**Handoff version:** 1.1  •  **Prepared:** 2026-07-12  •  **Revised:** 2026-07-13 (Yggdrasil now exists — reconciled against the real commit)  •  **Owner:** OPUS (principal architect)  •  **Consumer:** Codex
 
 > **This document is the sole authoritative source** for the Olympus → Yggdrasil integration. Codex must not deviate from the acceptance criteria, security requirements, or rollback semantics without an explicit OPUS revision.
 
 ---
 
-## PRIMARY UNCERTAINTY — READ FIRST
+## STATE UPDATE — READ FIRST (v1.1)
 
-**Yggdrasil does not exist as an accessible repository, workspace directory, or MCP-listed source at the time of this handoff.** I inspected:
+**Yggdrasil now exists.** It was committed to `origin/main` at **`d02915b` "Integrate Olympus capabilities into Yggdrasil"** after v1.0 of this blueprint was written. The earlier v1.0 premise (Yggdrasil absent, destination is green-field "NEW-Y") is **superseded**. I inspected the real committed tree (isolated worktree of `origin/main`), ran its tests, and diffed it against Olympus. This section, §4, §6, §21, and the manifest are reconciled to that reality; the "NEW-Y" spec language elsewhere is retained as the **forward roadmap** (WP-02…WP-16), which the committed cut has not yet delivered.
 
-- The primary working directory `/home/user/MISC` (contents: `olympus/`, plus 25+ unrelated toy projects — no `yggdrasil/`, `Yggdrasil/`, `YGG*`, or Norse-named platform folder).
-- The full `eBruno-Sec/MISC` git history back through `9200d3b` — zero commits mentioning Yggdrasil.
-- Every `.md`, `.txt`, `.json`, `.yml`, `.yaml`, `.py`, and `.tsx` in the workspace — the *only* string match for "Yggdrasil" is a single **comment** in `backend/agents/apollo.py:144` that credits Yggdrasil as an *inspirational prior* for coverage transparency:
-  > `"This is the coverage transparency Yggdrasil won on, kept honest"`
-- All repositories owned by `eBruno-Sec` via the remote lister — five repos, none named or aliased Yggdrasil (`MISC`, `cybersecurity-portfolio`, `cybersecurity-learning-portfolio`, `ai-agent-generator`, `web-app-generator`).
+**What Yggdrasil actually is (verified @ `d02915b`):** a **copy-fork of Olympus** into a top-level `Yggdrasil/` folder — same file tree — with: a rebrand (product name Yggdrasil; `localStorage` keys `yggdrasil_theme`/`yggdrasil_favorites`; agent emoji symbols → ASCII initials; frontend `brand.ts` renames the gods to Norse — ODIN/FRIGG/HEIMDALL/TYR/BROKKR/SKULD/SAGA — while the **backend keeps Greek** `display_name`s); a new `core/web_security.py` (scope-aware traversal/IDOR probe library); `core/mission_health.py`; the WP-10 report-retry surfacing; a Workbench UI; the correct backup filename `YGGDRASIL_backup_[YYYY-MM-DD]_[workspace-id].json`; and three new test files.
 
-**Interpretation adopted (auto-mode default).** The user's brief describes Olympus being *merged into* Yggdrasil "the existing Yggdrasil platform." Because Yggdrasil is not accessible, I treat it as a **destination platform to be specified in this document** — Codex will materialize Yggdrasil as a new codebase into which the Olympus subsystem is folded. Every place the brief asks for a Yggdrasil equivalent, I mark the equivalent **NEW-Y** (green-field, to be built) rather than fabricating an equivalence to a phantom codebase.
+**Verified PRESERVED (P0 safety contracts, my must-not-break list):** report engine raw-string script + nonce CSP + U+2028/9 escaping + `</`→`<\/` + 25 `html.escape` calls (F079/T-07); workbench scope guard → 400 off-scope (F088/T-03); at-rest header redaction (F085/T-08); Metis advisory-only, never hides findings (F065); target validation blocks `-`/shell chars (F013/T-01); backup restore-as-new-mission (F102).
 
-**If Yggdrasil actually exists and I could not see it**, Codex must halt on the very first work package and request a repository grant. This blueprint's manifest still applies to the Olympus side unchanged, but every "NEW-Y" tag becomes "compare against Yggdrasil actual" — the compatibility matrix flips from *specify* to *reconcile*.
+**Verified DEFECTS / gaps (drive §24 correction package):**
+- **C-1 (HIGH):** `backend/tests/test_web_security.py` calls `OffensiveEngine.generate_parameter_test_urls()` / `._candidate_parameter_names()` — methods that exist nowhere → 3 hard `AttributeError`s in any environment. The suite does **not** pass as committed.
+- **C-2 (HIGH):** `CODEX_IMPLEMENTATION_PACKAGE.md` describes a *different, uncommitted* build (claims v2 SHA-256 backup "Passed", endpoints `/backup/summary`,`/backup/import`,`/http-exchanges`, "22–23 tests passed") — none confirmable in `d02915b`. Treat that report as unreliable.
+- **C-3 (MED):** split-brand — UI shows Norse (SAGA/ODIN); backend + generated report show Greek (APOLLO/ARES) + `oly-print` ids. Customer report labels won't match the app the operator used.
+- **C-4 (MED):** WP-07 v2 backup integrity (SHA-256) is absent (`core/backup.py` is v1-only) despite being reported "Passed"; filename is correct so it's partial.
+- **C-6 (OBS):** landed on `main` as a copy-fork, not the shared-module extraction §16 recommends — a second Olympus copy that can drift.
 
-I flag this once, here, and proceed under the adopted interpretation.
+Deferred-and-disclosed (consistent with a P0-scoped cut): tenancy/Alembic (WP-02), Redis worker (WP-03), OIDC (WP-04), WS ticket (WP-05), object-storage reports (WP-06), secrets vault (WP-08), observability (WP-09), WP-11…WP-16.
+
+**Directive:** the integration is a fixable near-miss, not a rewrite. Execute **§24 (feature-enforcement & blocker clearance)** on a branch; do not merge; human approves. Owner decision still open: Greek vs Norse agent naming (C-3).
 
 ---
 
@@ -37,7 +40,7 @@ Olympus is a mature, self-hosted, Docker-native autonomous security assessment p
 - Report engine that emits nonce-CSP dark-themed HTML with client-side Print/HTML/MD/TXT/JSON export and a light/dark toggle.
 - 12k LOC across 47 source files. Nine backend test files exercising deterministic pieces. No Alembic migrations (create_all only).
 
-**Yggdrasil (NEW-Y, adopted spec).** The destination is a multi-product security operations platform. Olympus becomes the "Autonomous Assessment" product line inside Yggdrasil. The blueprint mandates:
+**Yggdrasil (as of v1.1 — now exists @ `origin/main` `d02915b`).** The committed cut is a **copy-fork of Olympus** into `Yggdrasil/` with a rebrand + `web_security.py` + WP-10 report-retry + Workbench UI + correct backup filename; P0 safety contracts preserved; suite currently red (C-1) and impl-report inaccurate (C-2). See the STATE UPDATE and §4.0 for the verified as-built. The forward roadmap below (tenancy, Alembic, worker, OIDC, object storage, observability) is **not yet delivered** and remains the mandate:
 
 1. Preserve every Olympus workflow verbatim; add nothing that isn't required to merge.
 2. Move Olympus's Postgres schema behind a `security_assessment` namespace / schema in Yggdrasil's shared Postgres.
@@ -149,7 +152,7 @@ olympus/
             └── Oracle.tsx                PortSwigger Academy solver UI
 ```
 
-**Yggdrasil map:** *not applicable — repository absent.* NEW-Y specification is in §16.
+**Yggdrasil map (as-committed @ `d02915b`):** mirrors the Olympus tree above under a top-level `Yggdrasil/` folder, plus: `Yggdrasil/backend/core/web_security.py`, `Yggdrasil/backend/core/mission_health.py`, `Yggdrasil/frontend/src/brand.ts`, `Yggdrasil/backend/tests/{test_approval_flow,test_backup_poc_report,test_web_security}.py`, `Yggdrasil/CODEX_IMPLEMENTATION_PACKAGE.md`, `Yggdrasil/YGGDRASIL_TO_OLYMPUS_HANDOFF.md`, and `Yggdrasil/yggdrasil.sh`. The forward module-extraction target (`yggdrasil-core/`, `-assessment/`, `-web/`, `-workers/`, `-migrations/`) in §16 is **not** how the committed cut is laid out (it's a copy-fork — C-6).
 
 ---
 
@@ -191,11 +194,26 @@ Any AI-bearing agent (Athena, Metis, Apollo executive summary, Oracle, Auth's lo
 
 ---
 
-## 4. Yggdrasil Architecture Summary (NEW-Y — adopted spec)
+## 4. Yggdrasil Architecture Summary
 
-Because Yggdrasil is not present, this section specifies the **minimum viable target architecture** Codex must build. This is deliberately conservative: it is *what Olympus needs Yggdrasil to be*, not an ambitious redesign.
+### 4.0 As-committed (real, @ `d02915b`) — what exists today
 
-### 4.1 Yggdrasil framing
+Yggdrasil today is **Olympus copied into `Yggdrasil/`** with a rebrand and a small set of additions. Runtime/topology, agents, DB model, and routes are **Olympus's** (see §3, §9, §10) — same 5-service Compose stack, same `create_all` (no Alembic yet), same single-user model (no tenancy yet). Deltas vs Olympus:
+
+- **Rebrand:** product name Yggdrasil; report/UI strings; `localStorage` keys `yggdrasil_theme`/`yggdrasil_favorites`; agent emoji symbols → ASCII initials (backend, e.g. `apollo.symbol="AP"`); `frontend/src/brand.ts` maps gods to **Norse** names/symbols (ODIN/FRIGG/HEIMDALL/TYR/BROKKR/SKULD/SAGA). **Backend `display_name`s remain Greek** — this is the C-3 split-brand defect.
+- **New backend module `core/web_security.py`:** scope-aware helpers — `is_url_in_scope` (host+path rules), `build_traversal_probes`/`build_idor_probes` (with `lab_mode`), `analyze_traversal_pair`/`analyze_idor_pair`, `generate_discovery_words`. A genuine security enhancement. (Its test file `test_web_security.py` is broken — C-1.)
+- **New `core/mission_health.py`**, **new `frontend/src/brand.ts`.**
+- **WP-10 delivered:** `apollo.py` returns `report_error`/`report_available`; Zeus forwards them in `mission_complete`; UI shows a "Report unavailable" banner + **Retry Report**.
+- **Backup:** filename now `YGGDRASIL_backup_[YYYY-MM-DD]_[workspace-id].json` (correct per §15); validator/endpoint remain Olympus **v1** (restore-as-new-mission preserved). v2 SHA-256 **not** present (C-4).
+- **Workbench UI** exposed as a mission tab over the (preserved) scoped replay/fuzz/access-check endpoints.
+- **Tests:** +`test_approval_flow.py`, +`test_backup_poc_report.py`, +`test_web_security.py` (the last is broken).
+
+**Not yet present (still roadmap):** tenancy/Alembic, Redis worker, OIDC, WS ticket auth, object-storage reports, secrets vault, observability, WP-11…WP-16. The §4.1 framing below is the **forward target**, not the current state.
+
+### 4.1 Yggdrasil framing (forward target — NEW-Y roadmap, not yet built)
+
+Deliberately conservative: *what Olympus needs Yggdrasil to become*, not an ambitious redesign.
+
 
 - **Product model:** Yggdrasil is a multi-module security operations platform. Modules include (day 1): the Olympus assessment engine (renamed internally to `yggdrasil-assessment`) and a shared **Norns** administrative console (identity, tenancy, audit). Additional modules (Bifrost, Mimir, etc.) are declared out of scope for this handoff.
 - **Naming:** the eight Greek gods stay named. Yggdrasil is the shell; Olympus's internals ship unchanged externally.
@@ -346,7 +364,7 @@ Legend: **works** = feature is present and functional per direct code inspection
 
 ## 6. Olympus → Yggdrasil Compatibility Matrix
 
-Because Yggdrasil is a green-field target, compatibility here means: *what Olympus contract does each Yggdrasil subsystem have to expose?*
+The committed Yggdrasil (`d02915b`) inherits Olympus's subsystems wholesale (copy-fork), so most contracts are **already exposed and verified preserved**; the rows below now read as *preserved (verified) / rebranded / still-roadmap*. "NEW-Y" targets that are not yet built are marked accordingly.
 
 | Olympus subsystem | Yggdrasil subsystem (NEW-Y) | Contract |
 |---|---|---|
@@ -980,7 +998,7 @@ Runbook: every WP's PR must include a `ROLLBACK.md` referenced here.
 
 ## 21. Known Uncertainties
 
-- **U-Yggdrasil.** Yggdrasil repo not accessible; NEW-Y is a specification, not a reconciliation.
+- **U-Yggdrasil (RESOLVED in v1.1).** Yggdrasil now exists at `origin/main` `d02915b` — a copy-fork of Olympus + rebrand + `web_security.py`/`mission_health.py`/`brand.ts` + WP-10 report-retry + Workbench UI + correct backup filename. Reconciled in the STATE UPDATE, §4.0, §6, and the manifest. Open sub-items carried forward: **C-1** suite fails as committed (`test_web_security` calls missing engine methods); **C-2** implementation report ≠ commit; **C-3** Greek/Norse split-brand; **C-4** v2 backup absent; **C-6** copy-fork vs module extraction. Roadmap WP-02…WP-16 not yet delivered.
 - **U-1 (CSV export).** `\n` collapsed to spaces in CSV cells for description/evidence/remediation/analyst_notes — potentially data-lossy. Fix in WP-10.
 - **U-2 (report render failure).** Apollo swallows the render exception (`apollo.py:65`) so a mission is "complete" with no report and only a log line. Fix in WP-10.
 - **U-3 (Alembic in requirements).** Alembic is in `requirements.txt` but no `alembic.ini` or `versions/` directory exists — it's imported but unused. Confirms `create_all`-only constraint; nothing to migrate today.
@@ -1025,18 +1043,43 @@ handoff_version: "1.0"
 source_product: "Olympus"
 destination_product: "Yggdrasil"
 assumptions:
-  - "Yggdrasil repository is not accessible; destination spec is NEW-Y (see section 16)."
-  - "Olympus current-state commit is authoritative; no code was modified during discovery."
-  - "Backup schema v1 is preserved across the first major Yggdrasil release."
+  - "v1.1: Yggdrasil now EXISTS at origin/main d02915b (copy-fork of Olympus + rebrand + additions); v1.0 'absent/NEW-Y' premise is superseded."
+  - "Committed Yggdrasil delivers a P0-scoped cut: safety contracts preserved; WP-02..WP-16 (tenancy/Alembic/worker/OIDC/observability/etc.) still roadmap."
+  - "Suite does NOT pass as committed (C-1); implementation report does not match the commit (C-2)."
+  - "Backup schema v1 preserved and restore-as-new-mission works; v2 SHA-256 (WP-07) not yet present (C-4)."
+  - "Agent naming is split: UI Norse (brand.ts) vs backend/report Greek (C-3) — owner must choose one."
 repositories:
   olympus:
     branch: "claude/olympus-yggdrasil-migration-m3ljlo"
     commit: "63e5960f418e1afe68c22e2184590c0a6b4b1a6e"
     path: "/home/user/MISC/olympus"
   yggdrasil:
-    branch: null      # repository absent at handoff time
-    commit: null
-    path: null
+    branch: "main"
+    commit: "d02915b"          # "Integrate Olympus capabilities into Yggdrasil"
+    path: "Yggdrasil/"
+    kind: "copy-fork of Olympus + rebrand + additions (not module extraction)"
+    verified: "worktree inspected, diffed vs Olympus, tests run 2026-07-13"
+critique_findings:
+  - id: C-1
+    severity: HIGH
+    blocking: true
+    detail: "test_web_security.py calls OffensiveEngine.generate_parameter_test_urls / ._candidate_parameter_names — methods absent; 3 env-independent errors; suite not green"
+  - id: C-2
+    severity: HIGH
+    blocking: true
+    detail: "CODEX_IMPLEMENTATION_PACKAGE.md claims v2 backup + /backup,/http-exchanges endpoints + all-pass; none confirmable at d02915b"
+  - id: C-3
+    severity: MEDIUM
+    blocking: false
+    detail: "UI Norse (brand.ts) vs backend/report Greek + oly-print ids; report labels mismatch UI"
+  - id: C-4
+    severity: MEDIUM
+    blocking: false
+    detail: "WP-07 v2 SHA-256 backup absent (backup.py v1-only) though reported passed; filename correct"
+  - id: C-6
+    severity: OBSERVATION
+    blocking: false
+    detail: "copy-fork on main, not shared-module extraction (§16); divergence risk"
 features:
   - id: F001
     name: "Mission create"
