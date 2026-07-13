@@ -73,30 +73,24 @@ function markRead(day) {
   localStorage.setItem(LS_READ, JSON.stringify([...s]));
 }
 
-// Auto-mark when a reader reaches the story page, then check for Day 3 completion
+// Auto-mark when a reader reaches the story page, celebrate on Day 20
 if (_currentDay) {
   markRead(_currentDay);
 
-  // After finishing the last free story, show a friendly upgrade nudge
-  if (_currentDay === FREE_DAYS && !isPremium()) {
-    const read = getReadStories();
-    const allFreeRead = [1, 2, 3].every(d => read.has(d));
-    if (allFreeRead) {
-      document.addEventListener('DOMContentLoaded', () => {
-        const wrapper = document.querySelector('.story-wrapper');
-        if (!wrapper) return;
-        const nudge = document.createElement('div');
-        nudge.className = 'free-complete-nudge';
-        nudge.innerHTML = `
-          <span class="nudge-icon">🌟</span>
-          <h3>You've read all 3 free stories!</h3>
-          <p>Your little reader is off to a wonderful start. Continue the journey with all 20 nights of courage, kindness, and wonder.</p>
-          <a href="../upgrade.html#pricing" class="nudge-btn">🌱 Unlock All 20 Stories</a>
-          <p class="nudge-sub">From $2.99/month · Cancel any time</p>
-        `;
-        wrapper.appendChild(nudge);
-      });
-    }
+  if (_currentDay === 20) {
+    document.addEventListener('DOMContentLoaded', () => {
+      const wrapper = document.querySelector('.story-wrapper');
+      if (!wrapper) return;
+      const nudge = document.createElement('div');
+      nudge.className = 'free-complete-nudge';
+      nudge.innerHTML = `
+        <span class="nudge-icon">🌟</span>
+        <h3>You finished all 20 stories!</h3>
+        <p>What an incredible journey. Your little reader has grown so much — in courage, kindness, and wonder. We're so proud of you both! 🌱</p>
+        <a href="../index.html" class="nudge-btn">🏠 Back to Little Seeds</a>
+      `;
+      wrapper.appendChild(nudge);
+    });
   }
 }
 
@@ -346,57 +340,6 @@ function toggleDrawer() {
   btn?.setAttribute('aria-expanded', isOpen);
   drawer.setAttribute('aria-hidden', !isOpen);
   document.body.style.overflow = isOpen ? 'hidden' : '';
-}
-
-// ── PREMIUM GATE (injected on locked story pages) ─────────────────────────────
-
-(function() {
-  if (!_currentDay || _currentDay <= FREE_DAYS || isPremium()) return;
-
-  const gate = document.createElement('div');
-  gate.className = 'premium-gate';
-  gate.id = 'premiumGate';
-  gate.innerHTML = `
-    <div class="premium-gate-card">
-      <span class="gate-icon" aria-hidden="true">🌙</span>
-      <h2>Continue the Journey</h2>
-      <p>Day ${_currentDay} is part of the full Little Seeds library — 20 stories to grow with, one magical night at a time.</p>
-      <a href="../upgrade.html#pricing" class="gate-btn-primary">🌱 Unlock All 20 Stories</a>
-      <button class="gate-btn-secondary" id="gateCodeToggle" onclick="showGateCodeEntry()">
-        Already a member? Enter code
-      </button>
-      <div class="gate-code-section" id="gateCodeSection" style="display:none">
-        <label for="gateCodeInput">Access Code</label>
-        <div class="gate-code-row">
-          <input type="text" id="gateCodeInput" placeholder="SEEDS2025" autocomplete="off" spellcheck="false" />
-          <button onclick="submitGateCode()">Unlock</button>
-        </div>
-        <p class="gate-err" id="gateErr"></p>
-      </div>
-      <a href="../index.html" class="gate-back">← Back to stories</a>
-    </div>
-  `;
-  document.body.appendChild(gate);
-  document.body.style.overflow = 'hidden';
-})();
-
-function showGateCodeEntry() {
-  document.getElementById('gateCodeSection').style.display = 'block';
-  document.getElementById('gateCodeToggle').style.display = 'none';
-  document.getElementById('gateCodeInput')?.focus();
-}
-
-function submitGateCode() {
-  const input = document.getElementById('gateCodeInput');
-  const err   = document.getElementById('gateErr');
-  if (!input) return;
-  if (unlockWithCode(input.value)) {
-    location.reload();
-  } else {
-    err.textContent = 'Invalid code — check your email after purchase.';
-    input.value = '';
-    input.focus();
-  }
 }
 
 // ── PARENTAL GATE (wrap any external link) ────────────────────────────────────

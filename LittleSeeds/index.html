@@ -110,6 +110,7 @@
       border-color: rgba(255,224,102,0.35);
       color: var(--moon);
     }
+
     /* ── STORIES DRAWER ── */
     .stories-drawer {
       position: fixed; top: 0; right: 0;
@@ -324,58 +325,29 @@
       color: rgba(255,248,240,0.75);
       font-weight: 600;
     }
-
-    /* ── FOOTER ── */
-    footer {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-      padding: 2rem 1rem;
-      border-top: 1px solid rgba(255,255,255,0.08);
-      color: rgba(255,248,240,0.72);
-      font-size: 0.85rem;
-      font-weight: 600;
-    }
-    footer span { color: var(--coral); }
-
-    /* ── RESPONSIVE ── */
-    @media (max-width: 640px) {
-      .story-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-    }
-
-    /* ── FREEMIUM BANNER ── */
-    .freemium-banner {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      background: rgba(76,175,125,0.1);
-      border: 1.5px solid rgba(76,175,125,0.28);
-      border-radius: 50px;
-      padding: 0.4rem 1.1rem;
-      font-size: 0.82rem;
-      font-weight: 800;
-      color: #6ee7b7;
-      letter-spacing: 0.04em;
-      max-width: fit-content;
-      margin: 0 auto 1.5rem;
-    }
-    .freemium-banner .sep { opacity: 0.4; }
-
-    /* ── HERO SECONDARY CTA ── */
-    .hero-cta-row { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
-    .hero-cta-sub {
-      font-size: 0.82rem;
-      color: rgba(255,248,240,0.45);
+    .story-card .read-time {
+      font-size: 0.72rem;
+      color: rgba(255,248,240,0.4);
       font-weight: 700;
-      cursor: pointer;
-      transition: color 0.15s;
-      background: none;
-      border: none;
-      font-family: var(--font-b);
-      letter-spacing: 0.02em;
+      margin-top: auto;
     }
-    .hero-cta-sub:hover { color: var(--moon); }
+
+    /* ── READ BADGE ── */
+    .story-card .card-badge {
+      position: absolute;
+      top: 12px; right: 10px;
+      border-radius: 20px;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.62rem;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .card-badge.read {
+      background: rgba(76,175,125,0.22);
+      border: 1px solid rgba(76,175,125,0.4);
+      color: #6ee7b7;
+    }
 
     /* ── PROGRESS TRACKER ── */
     .progress-row {
@@ -397,39 +369,22 @@
     .progress-bar-mini-fill { height: 100%; background: var(--moon); border-radius: 99px; transition: width 0.4s; }
     .progress-count { color: var(--moon); }
 
-    /* ── LOCKED CARD STATE ── */
-    .story-card.locked { opacity: 0.65; cursor: default; }
-    .story-card.locked:hover { transform: none; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.08); }
-    .story-card .card-badge {
-      position: absolute;
-      top: 12px; right: 10px;
-      border-radius: 20px;
-      padding: 0.15rem 0.55rem;
-      font-size: 0.62rem;
-      font-weight: 900;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
+    /* ── FOOTER ── */
+    footer {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 2rem 1rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,248,240,0.72);
+      font-size: 0.85rem;
+      font-weight: 600;
     }
-    .card-badge.free {
-      background: rgba(76,175,125,0.18);
-      border: 1px solid rgba(76,175,125,0.35);
-      color: #6ee7b7;
-    }
-    .card-badge.premium {
-      background: rgba(255,224,102,0.1);
-      border: 1px solid rgba(255,224,102,0.25);
-      color: var(--moon);
-    }
-    .card-badge.read {
-      background: rgba(76,175,125,0.22);
-      border: 1px solid rgba(76,175,125,0.4);
-      color: #6ee7b7;
-    }
-    .lock-icon {
-      position: absolute;
-      bottom: 10px; right: 10px;
-      font-size: 0.9rem;
-      opacity: 0.55;
+    footer span { color: var(--coral); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      .story-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
     }
 
     /* ── NIGHT CONTROLS (index page) ── */
@@ -473,170 +428,6 @@
     }
     .dimmer-sound-btn:hover { background: rgba(255,255,255,0.1); }
     .dimmer-sound-btn.playing { background: rgba(76,175,125,0.12); border-color: rgba(76,175,125,0.4); color: #6ee7b7; }
-
-    /* ── PREMIUM UPGRADE MODAL ── */
-    .premium-modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.75);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      z-index: 700;
-      display: flex; align-items: center; justify-content: center;
-      padding: 1rem;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.25s;
-    }
-    .premium-modal-overlay.open { opacity: 1; pointer-events: all; }
-    .premium-modal {
-      background: linear-gradient(160deg, #1a1040 0%, #2d1b6e 100%);
-      border: 2px solid rgba(255,224,102,0.28);
-      border-radius: 24px;
-      padding: 2.25rem 2rem 2rem;
-      max-width: 480px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 28px 80px rgba(0,0,0,0.75);
-      transform: translateY(20px);
-      transition: transform 0.25s;
-      max-height: 90dvh;
-      overflow-y: auto;
-    }
-    .premium-modal-overlay.open .premium-modal { transform: translateY(0); }
-    .premium-modal h2 {
-      font-family: var(--font-h);
-      font-size: 2rem;
-      color: var(--moon);
-      margin-bottom: 0.5rem;
-    }
-    .modal-sub {
-      color: var(--peach);
-      font-size: 0.97rem;
-      line-height: 1.65;
-      margin-bottom: 1.75rem;
-    }
-    .pricing-cards {
-      display: flex;
-      gap: 0.85rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-    .pricing-card {
-      flex: 1;
-      min-width: 140px;
-      border-radius: 16px;
-      padding: 1.25rem 1rem;
-      border: 2px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.04);
-      cursor: pointer;
-      position: relative;
-      transition: border-color 0.2s, background 0.2s;
-      text-align: left;
-    }
-    .pricing-card.popular {
-      border-color: rgba(255,224,102,0.42);
-      background: rgba(255,224,102,0.06);
-    }
-    .popular-tag {
-      position: absolute;
-      top: -11px; left: 50%; transform: translateX(-50%);
-      background: var(--moon);
-      color: #1a1040;
-      font-size: 0.65rem;
-      font-weight: 900;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      border-radius: 20px;
-      padding: 0.18rem 0.65rem;
-      white-space: nowrap;
-    }
-    .price {
-      font-family: var(--font-h);
-      font-size: 1.9rem;
-      color: var(--moon);
-      display: block;
-      margin-bottom: 0.15rem;
-    }
-    .price-label {
-      font-size: 0.75rem;
-      color: rgba(255,248,240,0.5);
-      font-weight: 700;
-      display: block;
-      margin-bottom: 0.85rem;
-    }
-    .price-features {
-      list-style: none;
-      padding: 0;
-      font-size: 0.82rem;
-      color: var(--peach);
-      line-height: 1.9;
-    }
-    .price-features li::before { content: '✓ '; color: var(--green); font-weight: 900; }
-    .modal-cta {
-      display: block;
-      width: 100%;
-      background: linear-gradient(135deg, var(--green), var(--teal));
-      color: #fff;
-      font-family: var(--font-h);
-      font-size: 1.2rem;
-      padding: 1rem;
-      border-radius: 50px;
-      border: none;
-      cursor: pointer;
-      box-shadow: 0 6px 22px rgba(76,175,125,0.4);
-      margin-bottom: 0.75rem;
-      transition: transform 0.18s, box-shadow 0.18s;
-      text-decoration: none;
-    }
-    .modal-cta:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(76,175,125,0.5); }
-    .modal-already {
-      font-size: 0.82rem;
-      color: rgba(255,248,240,0.45);
-      margin-bottom: 0.5rem;
-      cursor: pointer;
-      background: none; border: none;
-      font-family: var(--font-b);
-      transition: color 0.15s;
-    }
-    .modal-already:hover { color: var(--cream); }
-    .modal-code-row {
-      display: flex; gap: 0.5rem; margin-top: 0.65rem;
-    }
-    .modal-code-row input {
-      flex: 1;
-      background: rgba(255,255,255,0.07);
-      border: 1.5px solid rgba(255,255,255,0.14);
-      border-radius: 10px;
-      color: var(--cream);
-      font-family: var(--font-b);
-      font-size: 0.9rem;
-      padding: 0.6rem 0.8rem;
-      outline: none;
-      text-transform: uppercase;
-    }
-    .modal-code-row input:focus { border-color: var(--moon); }
-    .modal-code-row button {
-      background: rgba(255,224,102,0.14);
-      border: 1.5px solid rgba(255,224,102,0.3);
-      color: var(--moon);
-      font-family: var(--font-b);
-      font-size: 0.85rem;
-      font-weight: 800;
-      padding: 0.6rem 1rem;
-      border-radius: 10px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .modal-close {
-      background: none; border: none;
-      color: rgba(255,248,240,0.35); font-size: 0.85rem; cursor: pointer;
-      font-family: var(--font-b); padding: 0.4rem; transition: color 0.15s;
-      display: block; margin: 0.25rem auto 0;
-    }
-    .modal-close:hover { color: var(--cream); }
-    .modal-code-err { color: var(--coral); font-size: 0.82rem; margin-top: 0.5rem; min-height: 1.1em; }
-    @media (max-width: 420px) {
-      .pricing-cards { flex-direction: column; }
-    }
   </style>
 </head>
 <body>
@@ -680,15 +471,7 @@
     <span class="hero-moon">🌙</span>
     <h1>Little Seeds</h1>
     <p>20 magical bedtime stories that plant courage, kindness, and wonder — one quiet night at a time.</p>
-    <div class="freemium-banner">
-      <span>3 stories free</span>
-      <span class="sep">·</span>
-      <span>All 20 from $2.99/mo</span>
-    </div>
-    <div class="hero-cta-row">
-      <a href="./Story/Day1.html" class="hero-cta">🌱 Start Free Tonight</a>
-      <a href="./upgrade.html" class="hero-cta-sub">Unlock all 20 stories ✨</a>
-    </div>
+    <a href="./Story/Day1.html" class="hero-cta">🌱 Start Tonight's Story</a>
   </section>
 
   <!-- WAVY DIVIDER -->
@@ -727,7 +510,7 @@
   </section>
 
   <!-- STORY GRID -->
-  <section class="stories-section" id="upgrade">
+  <section class="stories-section" id="stories">
     <h2 class="section-title">📚 All 20 Stories</h2>
     <div class="progress-row" id="progressRow" style="display:none">
       <div class="progress-bar-mini"><div class="progress-bar-mini-fill" id="progressFill"></div></div>
@@ -735,47 +518,6 @@
     </div>
     <div class="story-grid" id="storyGrid"></div>
   </section>
-
-  <!-- PREMIUM UPGRADE MODAL -->
-  <div class="premium-modal-overlay" id="premiumModal" role="dialog" aria-modal="true" aria-label="Unlock Little Seeds" onclick="closePremiumModal(event)">
-    <div class="premium-modal">
-      <h2>🌟 Unlock Little Seeds</h2>
-      <p class="modal-sub">Give your child all 20 nights of courage, kindness, and wonder.<br>Cancel any time — no questions asked.</p>
-      <div class="pricing-cards">
-        <div class="pricing-card popular" id="planMonthly">
-          <span class="popular-tag">Best Value</span>
-          <span class="price">$2.99</span>
-          <span class="price-label">per month</span>
-          <ul class="price-features">
-            <li>All 20 stories</li>
-            <li>New stories monthly</li>
-            <li>Ambient rain sound</li>
-            <li>Night brightness control</li>
-          </ul>
-        </div>
-        <div class="pricing-card" id="planLifetime">
-          <span class="price">$4.99</span>
-          <span class="price-label">one-time forever</span>
-          <ul class="price-features">
-            <li>All 20 stories</li>
-            <li>Lifetime access</li>
-            <li>Ambient rain sound</li>
-            <li>Night brightness control</li>
-          </ul>
-        </div>
-      </div>
-      <a href="./upgrade.html#pricing" class="modal-cta" id="modalCtaBtn">🌱 See Plans &amp; Pricing</a>
-      <button class="modal-already" id="modalCodeToggle" onclick="showModalCodeEntry()">Already a member? Enter access code</button>
-      <div id="modalCodeSection" style="display:none">
-        <div class="modal-code-row">
-          <input type="text" id="modalCodeInput" placeholder="SEEDS2025" autocomplete="off" spellcheck="false" />
-          <button onclick="submitModalCode()">Unlock</button>
-        </div>
-        <p class="modal-code-err" id="modalCodeErr"></p>
-      </div>
-      <button class="modal-close" onclick="closePremiumModal()">No thanks, keep 3 free stories</button>
-    </div>
-  </div>
 
   <!-- FOOTER -->
   <footer>
@@ -788,35 +530,9 @@
       navigator.serviceWorker.register('./sw.js', { scope: '/MISC/LittleSeeds/' }).catch(() => {});
     }
 
-    // ── Post-purchase unlock (return from Gumroad/upgrade.html) ───────────────
-    // Gumroad redirects to upgrade.html?purchased=1 which sets ls_premium and
-    // then redirects here. This handles the edge case where the user lands here
-    // directly with the param (e.g. if they copied the URL).
-    (function() {
-      const p = new URLSearchParams(location.search);
-      if (p.get('purchased') === '1') {
-        localStorage.setItem('ls_premium', 'true');
-        history.replaceState(null, '', location.pathname);
-      }
-    })();
-
     // ── Constants ──────────────────────────────────────────────────────────────
-    const FREE_DAYS     = 3;
-    const LS_PREMIUM    = 'ls_premium';
-    const LS_READ       = 'ls_read';
-    const LS_BRIGHT     = 'ls_brightness';
-    // Demo access codes — swap for server-side verification before production
-    const ACCESS_CODES  = ['SEEDS2025', 'LITTLESEEDS', 'FAMILY2025'];
-
-    // ── Premium helpers ────────────────────────────────────────────────────────
-    function isPremium()        { return localStorage.getItem(LS_PREMIUM) === 'true'; }
-    function unlockWithCode(c)  {
-      if (ACCESS_CODES.includes(c.toUpperCase().trim())) {
-        localStorage.setItem(LS_PREMIUM, 'true');
-        return true;
-      }
-      return false;
-    }
+    const LS_READ   = 'ls_read';
+    const LS_BRIGHT = 'ls_brightness';
 
     // ── Reading progress ───────────────────────────────────────────────────────
     function getReadStories() {
@@ -909,50 +625,6 @@
       btn?.classList.add('playing');
     }
 
-    // ── Premium modal ──────────────────────────────────────────────────────────
-    function openPremiumModal() {
-      const m = document.getElementById('premiumModal');
-      m?.classList.add('open');
-      document.body.style.overflow = 'hidden';
-      // Open to #upgrade hash too
-      history.replaceState(null, '', '#upgrade');
-    }
-    function closePremiumModal(e) {
-      if (e && e.target !== document.getElementById('premiumModal')) return;
-      _closePremiumModal();
-    }
-    function _closePremiumModal() {
-      document.getElementById('premiumModal')?.classList.remove('open');
-      document.body.style.overflow = '';
-      if (location.hash === '#upgrade') history.replaceState(null, '', ' ');
-    }
-    function showModalCodeEntry() {
-      document.getElementById('modalCodeSection').style.display = 'block';
-      document.getElementById('modalCodeToggle').style.display = 'none';
-      document.getElementById('modalCodeInput')?.focus();
-    }
-    function submitModalCode() {
-      const input = document.getElementById('modalCodeInput');
-      const err   = document.getElementById('modalCodeErr');
-      if (!input) return;
-      if (unlockWithCode(input.value)) {
-        location.reload();
-      } else {
-        err.textContent = 'Invalid code — check your email after purchase.';
-        input.value = ''; input.focus();
-      }
-    }
-
-    // Auto-open modal if URL has #upgrade
-    if (location.hash === '#upgrade') {
-      document.addEventListener('DOMContentLoaded', () => setTimeout(openPremiumModal, 200));
-    }
-
-    // Escape key closes modal
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') _closePremiumModal();
-    });
-
     // ── Story data ─────────────────────────────────────────────────────────────
     const stories = [
       { day:1,  emoji:'🌰', title:'The Brave Seed and the Giant Oak',         theme:'Courage · Patience · Growth Mindset · Resilience',        accent:'#4caf7d', mins:5 },
@@ -977,59 +649,36 @@
       { day:20, emoji:'🧱', title:'Niko and the Falling Tower',                theme:'Resilience · Growth Mindset · Grit · Self-Compassion',    accent:'#ffe066', mins:5 },
     ];
 
-    // ── Story grid (with free/locked/read states) ──────────────────────────────
+    // ── Story grid ─────────────────────────────────────────────────────────────
     (function() {
-      const premium    = isPremium();
       const readStories = getReadStories();
-      const readCount  = readStories.size;
+      const readCount   = readStories.size;
 
-      // Show progress bar if any stories have been read
       if (readCount > 0) {
-        const progressRow  = document.getElementById('progressRow');
-        const progressFill = document.getElementById('progressFill');
+        const progressRow   = document.getElementById('progressRow');
+        const progressFill  = document.getElementById('progressFill');
         const progressCount = document.getElementById('progressCount');
-        if (progressRow)  progressRow.style.display = 'flex';
-        if (progressFill) progressFill.style.width   = `${(readCount / 20 * 100).toFixed(0)}%`;
+        if (progressRow)   progressRow.style.display = 'flex';
+        if (progressFill)  progressFill.style.width  = `${(readCount / 20 * 100).toFixed(0)}%`;
         if (progressCount) progressCount.textContent = readCount;
       }
 
       const grid = document.getElementById('storyGrid');
       stories.forEach(s => {
-        const free   = s.day <= FREE_DAYS;
-        const locked = !free && !premium;
-        const read   = readStories.has(s.day);
-
-        const el = document.createElement(locked ? 'div' : 'a');
-        if (!locked) el.href = `./Story/Day${s.day}.html`;
-        el.className = 'story-card' + (locked ? ' locked' : '');
-        el.style.setProperty('--card-accent', s.accent);
-
-        if (locked) {
-          el.setAttribute('role', 'button');
-          el.setAttribute('aria-label', `${s.title} — premium story. Click to unlock.`);
-          el.addEventListener('click', openPremiumModal);
-          el.style.cursor = 'pointer';
-        }
-
-        let badge = '';
-        if (read) {
-          badge = '<span class="card-badge read">✓ Read</span>';
-        } else if (free) {
-          badge = '<span class="card-badge free">Free</span>';
-        } else {
-          badge = '<span class="card-badge premium">Premium</span>';
-        }
-
-        el.innerHTML = `
-          ${badge}
+        const read = readStories.has(s.day);
+        const a = document.createElement('a');
+        a.href = `./Story/Day${s.day}.html`;
+        a.className = 'story-card';
+        a.style.setProperty('--card-accent', s.accent);
+        a.innerHTML = `
+          ${read ? '<span class="card-badge read">✓ Read</span>' : ''}
           <span class="day-badge">Day ${s.day}</span>
           <span class="story-emoji">${s.emoji}</span>
           <span class="story-title">${s.title}</span>
           <span class="story-theme">${s.theme}</span>
           <span class="read-time">~${s.mins} min read aloud</span>
-          ${locked ? '<span class="lock-icon" aria-hidden="true">🔒</span>' : ''}
         `;
-        grid.appendChild(el);
+        grid.appendChild(a);
       });
     })();
 
