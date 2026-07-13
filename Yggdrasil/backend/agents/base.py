@@ -168,7 +168,10 @@ class BaseAgent(ABC):
         # at launch, so auto-approve without pausing — but still record and log each
         # gate for the audit trail. Toggled per-mission (auto_approve) or globally
         # via YGGDRASIL_AUTO_APPROVE=1 (or legacy OLYMPUS_AUTO_APPROVE=1).
-        mission = await self.session.get(Mission, self.mission_id)
+        try:
+            mission = await self.session.get(Mission, self.mission_id)
+        except AttributeError:
+            mission = None
         mission_auto = bool(mission and (mission.context or {}).get("auto_approve"))
         env_auto = ((os.getenv("YGGDRASIL_AUTO_APPROVE") or os.getenv("OLYMPUS_AUTO_APPROVE") or "").strip().lower() in ("1", "true", "yes"))
         if mission_auto or env_auto:
@@ -177,6 +180,7 @@ class BaseAgent(ABC):
                 description=description, status="approved", resolved_at=datetime.utcnow(),
             )
             self.session.add(approval)
+            await self.session.flush()
             await self.session.commit()
             await self.log(f"Auto-authorized (pre-approved at launch): {action}", "info")
             if self.ws_manager:
@@ -194,6 +198,9 @@ class BaseAgent(ABC):
             status="pending",
         )
         self.session.add(approval)
+        await self.session.flush()
+        event = asyncio.Event()
+        self.approval_gates[approval.id] = event
         await self.session.execute(
             update(Mission)
             .where(Mission.id == self.mission_id)
@@ -212,9 +219,6 @@ class BaseAgent(ABC):
                 "description": description,
                 "timestamp": datetime.utcnow().isoformat(),
             })
-
-        event = asyncio.Event()
-        self.approval_gates[approval.id] = event
 
         # Hold here until a human authorizes or denies — by default, forever.
         # The mission must not proceed (or auto-deny) just because the operator
@@ -240,6 +244,10 @@ class BaseAgent(ABC):
 
         result = self.approval_results.pop(approval.id, False)
         self.approval_gates.pop(approval.id, None)
+        await self.log(
+            f"Approval {'granted' if result else 'denied'} for gate: {action}",
+            "info" if result else "warn",
+        )
         return result
 
     @abstractmethod

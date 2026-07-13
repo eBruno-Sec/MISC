@@ -130,7 +130,7 @@ export default function TopologyPanel(
         <div style={{ overflow: 'auto', border: '1px solid var(--border)', background: 'var(--bg)' }}>
           <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block', maxWidth: 'none' }}>
             <defs>
-              <marker id="oly-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+              <marker id="ygg-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M0,0 L8,4 L0,8 z" fill="var(--accent2)" />
               </marker>
             </defs>
@@ -165,7 +165,7 @@ export default function TopologyPanel(
               return (
                 <path key={`r${i}`} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
                   fill="none" stroke="var(--accent2)" strokeWidth={1.3} strokeDasharray="4 3"
-                  markerEnd="url(#oly-arrow)" opacity={0.85} />
+                  markerEnd="url(#ygg-arrow)" opacity={0.85} />
               )
             })}
           </svg>

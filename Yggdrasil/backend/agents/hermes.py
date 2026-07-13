@@ -57,7 +57,7 @@ NETWORK_SWEEP_PORTS = (
 # Non-web services that matter on a network sweep. severity=info means "reachable,
 # worth noting" (e.g. SSH); higher severities are genuine exposure risk. Web ports
 # (80/443/8080/8443/8000) are intentionally absent — those flow through the normal
-# web pipeline (httpx liveness → ARES), so we don't double-report them here.
+# web pipeline (httpx liveness -> TYR), so we don't double-report them here.
 NETWORK_SERVICE_RISK = {
     21: ("FTP", "medium", 5.3, "FTP transmits credentials and data in plaintext."),
     22: ("SSH", "info", 0.0, "SSH remote administration is reachable on this host."),
@@ -121,8 +121,8 @@ def parse_nmap_greppable(stdout: str) -> dict:
 class Hermes(BaseAgent):
     name = "hermes"
     symbol = "HE"
-    display_name = "HERMES"
-    role = "OSINT / Passive Recon"
+    display_name = "HEIMDALL"
+    role = "Recon"
 
     def _extract_domain(self, target: str) -> str:
         target = re.sub(r"^https?://", "", target)
@@ -495,7 +495,7 @@ class Hermes(BaseAgent):
         """nmap host discovery + curated service scan across a CIDR's IPs. Surfaces
         non-web hosts (SSH/RDP/SMB/DB) the web-liveness probe never sees, and flags
         exposed remote-access / database services. Returns an inventory list of
-        {ip, status, ports:[...]}. Service findings for web-host IPs are left to ARES
+        {ip, status, ports:[...]}. Service findings for web-host IPs are left to TYR
         (which deep-scans them) to avoid double-reporting; the inventory lists them."""
         # Arg-safety: IPs from expand_cidr never start with '-', but filter anyway so
         # nothing can be parsed as an nmap flag.
@@ -541,7 +541,7 @@ class Hermes(BaseAgent):
 
     async def _report_network_services(self, inventory: list, target: str, web_live: list) -> None:
         """Emit grouped findings for exposed non-web services + one inventory summary.
-        Web-host IPs are excluded from the service findings (ARES reports those); the
+        Web-host IPs are excluded from the service findings (TYR reports those); the
         inventory summary still lists every discovered host for completeness."""
         web_ips = {(h.get("host", "") or "").split(":")[0] for h in web_live}
 
@@ -584,7 +584,7 @@ class Hermes(BaseAgent):
             severity="info",
             description=(
                 f"nmap host discovery across {target} found {len(inventory)} live host(s). "
-                "This is the network-layer attack surface; web hosts are also assessed by ARES."),
+                "This is the network-layer attack surface; web hosts are also assessed by TYR."),
             evidence="\n".join(lines[:100]),
             remediation="Review each exposed service; decommission or firewall anything not required.",
         )

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { agentMeta } from '../brand'
 import { useWebSocket } from '../hooks/useWebSocket'
 import type { Mission, LogEntry, Finding, ApprovalRequest, MissionStatus, MissionNote, WSEvent, LiveHost } from '../types'
 import GodStatus from './GodStatus'
@@ -26,6 +27,23 @@ const STATUS_COLOR: Record<string, string> = {
 type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface' | 'workbench' | 'access' | 'topology'
 
 interface GodDef { key: string; name: string; symbol: string; role: string }
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'null'
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort().map(key =>
+      `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`
+    ).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
 
 export default function MissionControl() {
   const { id } = useParams<{ id: string }>()
@@ -141,12 +159,10 @@ export default function MissionControl() {
 
   useWebSocket(id || null, onWsEvent)
 
-  const downloadSession = () => {
+  const downloadSession = async () => {
     if (!mission) return
-    const snap = {
-      version: '1',
-      platform: 'YGGDRASIL',
-      exported_at: new Date().toISOString(),
+    const state = {
+      workspace_id: mission.id,
       mission,
       findings,
       logs: logs.slice(-500),
@@ -154,6 +170,14 @@ export default function MissionControl() {
       status,
       current_phase: currentPhase,
       live_hosts: liveHosts,
+    }
+    const snap = {
+      version: '2',
+      platform: 'YGGDRASIL',
+      workspace_id: mission.id,
+      exported_at: new Date().toISOString(),
+      state,
+      sha256: await sha256Hex(canonicalJson(state)),
     }
     const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -245,11 +269,11 @@ export default function MissionControl() {
               <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as JSON">JSON</a>
               <button
                 onClick={downloadSession}
-                title="Download full workspace backup as JSON"
-                aria-label="Download workspace backup"
+                title="Download Workspace Backup (.json)"
+                aria-label="Download Workspace Backup (.json)"
                 style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.75rem', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)', cursor: 'pointer' }}
               >
-                BACKUP
+                Download Workspace Backup (.json)
               </button>
             </div>
 
@@ -261,7 +285,7 @@ export default function MissionControl() {
             )}
             {status === 'complete' && !reportAvailable && reportError && (
               <button
-                onClick={() => handleRerun({ key: 'apollo', name: 'APOLLO', symbol: '', role: 'Reporting & Risk Analysis' })}
+                onClick={() => handleRerun(agentMeta('apollo'))}
                 title={reportError}
                 style={{ fontSize: '0.72rem', letterSpacing: '0.12em', padding: '0.35rem 0.9rem', background: 'var(--accent2-dim)', color: 'var(--accent2)', border: '1px solid var(--accent2)', fontFamily: 'var(--display)', fontWeight: 700, cursor: 'pointer' }}
               >

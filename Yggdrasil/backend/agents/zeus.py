@@ -7,9 +7,9 @@ from .base import BaseAgent
 
 class Zeus(BaseAgent):
     name = "zeus"
-    symbol = "Z"
-    display_name = "ZEUS"
-    role = "Mission Orchestrator"
+    symbol = "OD"
+    display_name = "ODIN"
+    role = "Orchestration"
 
     def _spawn(self, AgentClass):
         return AgentClass(
@@ -50,20 +50,20 @@ class Zeus(BaseAgent):
         await self.log(f"⚡ YGGDRASIL ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
 
         sequences = {
-            "passive": "ATHENA → HERMES → METIS → APOLLO",
-            "active": "ATHENA → HERMES → [GATE] → ARES → METIS → APOLLO",
-            "full": "ATHENA → HERMES → [GATE] → ARES → HEPHAESTUS → [GATE] → HADES → [GATE] → METIS → APOLLO",
+            "passive": "FRIGG → HEIMDALL → MIMIR → SAGA",
+            "active": "FRIGG → HEIMDALL → [GATE] → TYR → MIMIR → SAGA",
+            "full": "FRIGG → HEIMDALL → [GATE] → TYR → BROKKR → [GATE] → SKULD → [GATE] → MIMIR → SAGA",
         }
         await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
 
-        # ── ATHENA ──
+        # FRIGG
         from .athena import Athena
         await self._set_phase(MissionStatus.PLANNING, "athena")
         athena = self._spawn(Athena)
         ctx["athena"] = await athena.execute(target, {"mode": mode, "scope": scope})
 
         # If the operator wrote free-text scope notes but uploaded no structured
-        # scope rules, enforce the validated rules ATHENA derived from those notes.
+        # scope rules, enforce the validated rules FRIGG derived from those notes.
         # Structured rules (from a scope file) always win and are never overridden.
         if not (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
             ai_rules = (ctx.get("athena") or {}).get("scope_rules") or {}
@@ -75,13 +75,13 @@ class Zeus(BaseAgent):
                     "info",
                 )
 
-        # Move extracted credentials to a transient key so ARES can authenticate.
+        # Move extracted credentials to a transient key so TYR can authenticate.
         # Kept out of ctx["athena"] and never persisted; passwords are not logged.
         creds = (ctx.get("athena") or {}).pop("_credentials", None)
         if creds:
             ctx["_credentials"] = creds
 
-        # ── HERMES ──
+        # HEIMDALL
         from .hermes import Hermes
         await self._set_phase(MissionStatus.RECON, "hermes")
         hermes = self._spawn(Hermes)
@@ -90,7 +90,7 @@ class Zeus(BaseAgent):
         if mode == "passive":
             return await self._finalize(target, ctx)
 
-        # ── APPROVAL GATE: ARES ──
+        # APPROVAL GATE: TYR
         await self.log("Requesting authorization for active scanning phase", "warn")
         live = ctx["hermes"].get("live_hosts", [])
         host_preview = ", ".join(h["host"] for h in live[:5])
@@ -107,7 +107,7 @@ class Zeus(BaseAgent):
                          f"'{_creds[0].get('username', '?')}' and test the authenticated surface.")
         approved = await self.request_approval(
             action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, OWASP ZAP, IDOR/auth probes)",
-            description=f"Ares will run Nmap and Nuclei (with OAST), then engage the offensive engine on "
+            description=f"TYR will run Nmap and Nuclei (with OAST), then engage the offensive engine on "
                         f"the first {covered} of {len(live)} live host(s): {host_preview}{more}. "
                         f"Per host it builds the attack surface from the crawl, web archives and active "
                         f"parameter mining, then runs SQL injection, XSS, SSRF, SSTI, path traversal, "
@@ -119,7 +119,7 @@ class Zeus(BaseAgent):
             await self.log("Active scanning denied. Generating passive report.", "warn")
             return await self._finalize(target, ctx)
 
-        # ── ARES ──
+        # TYR
         from .ares import Ares
         await self._set_phase(MissionStatus.SCANNING, "ares")
         ares = self._spawn(Ares)
@@ -128,7 +128,7 @@ class Zeus(BaseAgent):
         if mode == "active":
             return await self._finalize(target, ctx)
 
-        # ── APPROVAL GATE: HEPHAESTUS ──
+        # APPROVAL GATE: BROKKR
         # Count real findings from the DB. ares["vulnerabilities"] is only the
         # nuclei template hits; the offensive engine (SQLi/XSS/SSRF/SSTI/ZAP/...)
         # writes straight to the findings table.
@@ -144,35 +144,35 @@ class Zeus(BaseAgent):
         vuln_count = _c.scalar() or 0
         approved = await self.request_approval(
             action="Exploitation Phase — Payload Preparation",
-            description=f"Hephaestus will forge targeted payloads for {vuln_count} high/critical "
+            description=f"BROKKR will forge targeted payloads for {vuln_count} high/critical "
                         f"finding(s). Exploitation only on authorized targets.",
         )
         if not approved:
             await self.log("Exploitation phase denied.", "warn")
             return await self._finalize(target, ctx)
 
-        # ── HEPHAESTUS ──
+        # BROKKR
         from .hephaestus import Hephaestus
         await self._set_phase(MissionStatus.EXPLOITING, "hephaestus")
         heph = self._spawn(Hephaestus)
         ctx["hephaestus"] = await heph.execute(target, ctx)
 
-        # ── APPROVAL GATE: HADES ──
+        # APPROVAL GATE: SKULD
         exploit_count = len(ctx["hephaestus"].get("exploitable_targets", []))
         if exploit_count == 0:
-            await self.log("No exploitable targets confirmed. Skipping Hades.", "info")
+            await self.log("No exploitable targets confirmed. Skipping SKULD.", "info")
             return await self._finalize(target, ctx)
 
         approved = await self.request_approval(
             action="Post-Exploitation Analysis",
-            description=f"Hades will analyze {exploit_count} confirmed exploitable targets for credential access, "
+            description=f"SKULD will analyze {exploit_count} confirmed exploitable targets for credential access, "
                         "persistence mechanisms, and lateral movement paths.",
         )
         if not approved:
             await self.log("Post-exploitation phase denied.", "warn")
             return await self._finalize(target, ctx)
 
-        # ── HADES ──
+        # SKULD
         from .hades import Hades
         await self._set_phase(MissionStatus.POST_EXPLOIT, "hades")
         hades = self._spawn(Hades)
@@ -183,13 +183,13 @@ class Zeus(BaseAgent):
     async def _finalize(self, target: str, ctx: dict) -> dict:
         await self._set_phase(MissionStatus.REPORTING, "apollo")
 
-        # ── METIS: AI triage + correlation before the report (no-op without AI key) ──
+        # MIMIR: AI triage + correlation before the report (no-op without AI key)
         try:
             from .metis import Metis
             metis = self._spawn(Metis)
             ctx["metis"] = await metis.execute(target, ctx)
         except Exception as e:
-            await self.log(f"METIS triage error: {e}", "warn")
+            await self.log(f"MIMIR triage error: {e}", "warn")
             ctx["metis"] = {}
 
         from .apollo import Apollo

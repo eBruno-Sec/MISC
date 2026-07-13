@@ -18,9 +18,9 @@ SEVERITY_MAP = {
 
 class Ares(BaseAgent, OffensiveEngine, AuthEngine):
     name = "ares"
-    symbol = "AR"
-    display_name = "ARES"
-    role = "Active Scanning & Vuln Assessment"
+    symbol = "TY"
+    display_name = "TYR"
+    role = "Active Assessment"
 
 
     def _scope_filter(self, hosts: list, scope_rules: dict) -> list:
@@ -126,13 +126,14 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                 f"Offensive engine: spider + OWASP scan across {len(offensive_targets)} "
                 f"live host(s) of {len(live_hosts)} (cap {max_hosts})", "info")
 
-            # Credentials for authenticated scanning (ATHENA extracts these from scope notes).
+            # Credentials for authenticated scanning (FRIGG extracts these from scope notes).
             creds_list = (context or {}).get("_credentials") or []
             credentials = creds_list[0] if isinstance(creds_list, list) and creds_list else (
                 creds_list if isinstance(creds_list, dict) else None)
             if credentials:
                 await self.log(
                     f"Authenticated scanning enabled (user: {credentials.get('username', '?')})", "info")
+            declared_paths = ((context or {}).get("athena") or {}).get("declared_paths") or []
 
             per_host = {}
             agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap",
@@ -144,7 +145,13 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                 await self.log(
                     f"[{idx}/{len(offensive_targets)}] Offensive pass on {host_url}", "info")
                 try:
-                    r = await self.run_offensive(host_url, content_lists, credentials)
+                    r = await self.run_offensive(
+                        host_url,
+                        content_lists,
+                        credentials,
+                        declared_paths=declared_paths,
+                        scope_rules=scope_rules,
+                    )
                 except Exception as e:
                     await self.log(f"Offensive engine error on {host_url}: {e}", "warn")
                     continue

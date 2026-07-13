@@ -16,16 +16,18 @@ from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalReque
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
 from core import poc, replay
-from core.backup import validate_backup, BackupError
+from core.backup import validate_backup, BackupError, summarize_backup
+from core.brand import agent_display_name, agent_symbol
 
 router = APIRouter()
 
-AGENT_SYMBOL = {
-    "zeus": "Z", "athena": "AT", "hermes": "HE", "ares": "AR",
-    "hephaestus": "HF", "hades": "HD", "apollo": "AP", "metis": "ME",
-}
-
 VALID_AGENTS = {"hermes", "ares", "hephaestus", "hades", "apollo", "athena"}
+SEVERITIES = ("critical", "high", "medium", "low", "info")
+
+
+def severity_counts_shape(partial: dict | None = None) -> dict:
+    partial = partial or {}
+    return {sev: int(partial.get(sev, 0) or 0) for sev in SEVERITIES}
 
 
 # ── Pydantic schemas ──────────────────────────────────────────
@@ -39,15 +41,21 @@ class MissionCreate(BaseModel):
 
 
 class RestoreBody(BaseModel):
-    # Mirrors the client "Download Progress (.json)" snapshot. Kept permissive
+    # Mirrors the client "Download Workspace Backup (.json)" snapshot. Kept permissive
     # (dicts/optional) so validation + normalization happens in core.backup, which
     # returns the precise reason surfaced by the UI's error banner.
     version: Optional[str] = None
     platform: Optional[str] = None
+    workspace_id: Optional[str] = None
+    exported_at: Optional[str] = None
+    sha256: Optional[str] = None
+    state: Optional[dict] = None
     mission: dict = {}
     findings: Optional[List[dict]] = None
     notes: Optional[List[dict]] = None
     logs: Optional[List[dict]] = None
+    http_exchanges: Optional[List[dict]] = None
+    exchanges: Optional[List[dict]] = None
     status: Optional[str] = None
     current_phase: Optional[str] = None
 
@@ -270,20 +278,7 @@ async def relaunch_mission(
         "relaunched_from": original.id,
     }
 
-@router.post("/restore")
-async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get_session)):
-    """Hydrate a mission from a Download-Progress (.json) backup.
-
-    The client validates + parses first; we re-validate strictly server-side
-    (core.backup.validate_backup) and import as a NEW mission (fresh UUID) so a
-    restore never overwrites a live mission. Findings/notes/logs are restored
-    verbatim. Rejects a corrupt file with 422 + a clear reason (the UI shows the
-    'Invalid or corrupted progress file' banner)."""
-    try:
-        norm = validate_backup(body.model_dump(), is_valid_target)
-    except BackupError as e:
-        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
-
+async def _import_backup_norm(norm: dict, session: AsyncSession):
     mission = Mission(
         target=norm["target"],
         scope=norm["scope"],
@@ -303,6 +298,8 @@ async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get
         session.add(MissionNote(mission_id=mission.id, **nd))
     for ld in norm["logs"]:
         session.add(AgentLog(mission_id=mission.id, **ld))
+    for ex in norm.get("exchanges", []):
+        session.add(HttpExchange(mission_id=mission.id, **ex))
 
     await session.commit()
     return {
@@ -313,8 +310,62 @@ async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get
             "findings": len(norm["findings"]),
             "notes": len(norm["notes"]),
             "logs": len(norm["logs"]),
+            "http_exchanges": len(norm.get("exchanges", [])),
         },
     }
+
+
+@router.post("/backup/summary")
+async def backup_summary(body: RestoreBody):
+    """Validate a workspace backup and return an operator-facing import summary."""
+    data = body.model_dump()
+    try:
+        if str(data.get("version")) == "2":
+            return {"valid": True, **summarize_backup(data)}
+        norm = validate_backup(data, is_valid_target)
+    except BackupError as e:
+        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
+    return {
+        "valid": True,
+        "workspace_id": "",
+        "target": norm["target"],
+        "mode": norm["mode"],
+        "findings": len(norm["findings"]),
+        "notes": len(norm["notes"]),
+        "logs": len(norm["logs"]),
+        "http_exchanges": len(norm.get("exchanges", [])),
+    }
+
+
+@router.post("/backup/import")
+async def import_backup(body: RestoreBody, session: AsyncSession = Depends(get_session)):
+    try:
+        norm = validate_backup(body.model_dump(), is_valid_target)
+        return await _import_backup_norm(norm, session)
+    except BackupError as e:
+        await session.rollback()
+        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
+    except Exception:
+        await session.rollback()
+        raise
+
+
+@router.post("/restore")
+async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get_session)):
+    """Hydrate a mission from a Download Workspace Backup (.json) file.
+
+    The client validates + parses first; we re-validate strictly server-side
+    and import as a NEW mission (fresh UUID) so a restore never overwrites a live
+    mission. v1 and v2 backups are accepted; corrupt v2 hashes are rejected."""
+    try:
+        norm = validate_backup(body.model_dump(), is_valid_target)
+        return await _import_backup_norm(norm, session)
+    except BackupError as e:
+        await session.rollback()
+        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
+    except Exception:
+        await session.rollback()
+        raise
 
 
 @router.get("")
@@ -342,7 +393,7 @@ async def list_missions(session: AsyncSession = Depends(get_session)):
             "status": m.status, "current_phase": m.current_phase,
             "created_at": m.created_at.isoformat(),
             "completed_at": m.completed_at.isoformat() if m.completed_at else None,
-            "severity_counts": counts.get(m.id, {}),
+            "severity_counts": severity_counts_shape(counts.get(m.id)),
         }
         for m in rows
     ]
@@ -386,7 +437,7 @@ async def get_mission(mission_id: str, session: AsyncSession = Depends(get_sessi
         "logs": [
             {
                 "id": l.id, "agent": l.agent,
-                "symbol": AGENT_SYMBOL.get(l.agent, "--"),
+                "symbol": agent_symbol(l.agent),
                 "level": l.level, "message": l.message,
                 "timestamp": l.timestamp.isoformat(),
             }
@@ -642,7 +693,7 @@ async def rerun_agent(
     await manager.broadcast(mission_id, {
         "type": "agent_rerun",
         "agent": agent_name,
-        "symbol": AGENT_SYMBOL.get(agent_name, "--"),
+        "symbol": agent_symbol(agent_name),
         "timestamp": datetime.utcnow().isoformat(),
     })
     return {"status": "queued", "agent": agent_name}
@@ -1094,7 +1145,7 @@ async def _mission_heartbeat(mission_id: str, zeus):
         try:
             await manager.broadcast(mission_id, {
                 "type": "log", "agent": "zeus", "symbol": "Z",
-                "display_name": "ZEUS", "level": "info",
+                "display_name": agent_display_name("zeus"), "level": "info",
                 "message": (f"Heartbeat: still working. Phase: {phase}. "
                             f"Elapsed {mm}m{ss:02d}s. A long-running step is in progress; hang tight."),
                 "timestamp": datetime.utcnow().isoformat(),
@@ -1190,8 +1241,8 @@ async def _run_single_agent(
             await manager.broadcast(mission_id, {
                 "type": "log",
                 "agent": agent_name,
-                "symbol": AGENT_SYMBOL.get(agent_name, "--"),
-                "display_name": agent_name.upper(),
+                "symbol": agent_symbol(agent_name),
+                "display_name": agent_display_name(agent_name),
                 "level": "error",
                 "message": f"Re-run failed: {e}",
                 "timestamp": datetime.utcnow().isoformat(),

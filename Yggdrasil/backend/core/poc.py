@@ -14,6 +14,7 @@ SENSITIVE_HEADERS = {
     "x-auth-token", "proxy-authorization", "x-csrf-token",
 }
 REDACTED = "<redacted>"
+REDACTION = REDACTED
 
 # httpx adds these; curl/the raw request sets them itself.
 _SKIP_CURL_HEADERS = {"host", "content-length"}
@@ -140,3 +141,37 @@ def mission_markdown(target: str, findings: list, exchanges_by_finding: dict,
         body.append(finding_markdown(f, exchanges_by_finding.get(f.get("id"), []), redact))
         body.append("\n---\n")
     return "\n".join(head + body).rstrip() + "\n"
+
+
+def render_markdown_poc(method: str, url: str, request_headers: dict = None,
+                        request_body: str = None, status_code: int = None,
+                        response_headers: dict = None,
+                        response_body: str = None, redact: bool = True) -> str:
+    """Compatibility wrapper for tests and older callers.
+
+    Newer code usually calls finding_markdown() with captured exchange dicts. This
+    helper keeps the simpler one-shot contract available.
+    """
+    ex = {
+        "method": method,
+        "url": url,
+        "request_headers": request_headers or {},
+        "request_body": request_body,
+        "status_code": status_code,
+        "response_status": status_code,
+        "response_headers": response_headers or {},
+        "response_body": response_body or "",
+    }
+    finding = {
+        "title": "Proof of concept",
+        "severity": "info",
+        "description": "",
+        "evidence": "",
+    }
+    markdown = finding_markdown(finding, [ex], redact=redact)
+    headers = redact_headers(response_headers or {}) if redact else (response_headers or {})
+    if headers:
+        markdown += "\n### Response headers\n\n```http\n"
+        markdown += "\n".join(f"{k}: {v}" for k, v in headers.items())
+        markdown += "\n```\n"
+    return markdown

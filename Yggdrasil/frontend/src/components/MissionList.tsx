@@ -7,7 +7,13 @@ import type { MissionSummary, Severity } from '../types'
 // caught before any upload. Returns a reason string, or null when the shape is OK.
 function validateBackupShape(data: any): string | null {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return 'not a JSON object'
-  if (String(data.version) !== '1') return 'unsupported or missing version'
+  if (!['1', '2'].includes(String(data.version))) return 'unsupported or missing version'
+  if (String(data.version) === '2') {
+    if (!data.state || typeof data.state !== 'object') return 'missing backup state'
+    if (!data.sha256 || typeof data.sha256 !== 'string') return 'missing backup hash'
+    if (!data.state.mission || typeof data.state.mission !== 'object') return 'missing mission record'
+    return null
+  }
   if (!data.mission || typeof data.mission !== 'object') return 'missing mission record'
   const target = typeof data.mission.target === 'string' ? data.mission.target.trim() : ''
   if (!target) return 'missing target'
@@ -99,8 +105,8 @@ export default function MissionList() {
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Read a .json backup, validate client-side, then hydrate via the server (which
-  // re-validates and imports as a new mission). Any failure -> one clear banner.
+  // Read a .json backup, validate client-side, request a server summary, then
+  // import as a new mission only after explicit confirmation.
   const handleFile = async (file: File) => {
     setImportErr(null)
     setImporting(true)
@@ -110,7 +116,12 @@ export default function MissionList() {
       try { data = JSON.parse(text) } catch { throw new Error('parse') }
       const problem = validateBackupShape(data)
       if (problem) throw new Error(problem)
-      const res = await api.restoreSession(data)
+      const summary = await api.backupSummary(data)
+      const ok = confirm(
+        `Import Workspace Backup (.json)?\n\nTarget: ${summary.target}\nMode: ${summary.mode || 'unknown'}\nFindings: ${summary.findings}\nNotes: ${summary.notes}\nLogs: ${summary.logs}\nHTTP exchanges: ${summary.http_exchanges}`
+      )
+      if (!ok) return
+      const res = await api.importBackup(data)
       navigate(`/mission/${res.id}`)
     } catch {
       setImportErr('Invalid or corrupted progress file')
@@ -190,7 +201,7 @@ export default function MissionList() {
         style={{ width: '100%', marginBottom: '0.75rem', fontSize: '0.85rem' }}
       />
 
-      {/* Restore a saved session. Drag-and-drop target + file picker (spec: State
+      {/* Import a workspace backup. Drag-and-drop target + file picker (spec: State
           Hydration). Validated client-side, then re-validated + imported server-side. */}
       <div
         onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -211,10 +222,10 @@ export default function MissionList() {
       >
         <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
           {importing
-            ? 'Restoring session…'
+            ? 'Importing workspace backup...'
             : dragOver
-              ? 'Drop the .json backup to restore'
-              : 'Restore a saved session — drag a backup here, or'}
+              ? 'Drop the workspace backup here'
+              : 'Import Workspace Backup (.json) - drag a backup here, or'}
         </span>
         <input
           ref={fileRef}
@@ -226,14 +237,14 @@ export default function MissionList() {
         <button
           onClick={() => fileRef.current?.click()}
           disabled={importing}
-          aria-label="Upload progress backup file"
+          aria-label="Import Workspace Backup (.json)"
           className="touch-target"
           style={{
             fontSize: '0.72rem', letterSpacing: '0.12em', padding: '0.4rem 0.9rem',
             border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)',
             cursor: importing ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
           }}
-        >↑ UPLOAD PROGRESS (.json)</button>
+        >Import Workspace Backup (.json)</button>
       </div>
 
       {importErr && (

@@ -1,18 +1,17 @@
 """
-METIS — AI triage and correlation.
+MIMIR - AI triage and correlation.
 
-Runs after all scanning, before APOLLO reports. Where the other gods produce raw
-findings from independent tools (nuclei, ZAP, sqlmap, dalfox, custom probes),
-METIS is the senior-analyst brain that reviews the whole set at once:
+Runs after all scanning, before SAGA reports. Where the other modules produce
+raw findings from independent tools (nuclei, ZAP, sqlmap, dalfox, custom
+probes), MIMIR reviews the whole set at once:
 
-  - suppresses likely false positives (conservatively, never a confirmed hit)
-  - maps each finding to CWE / OWASP for professional reporting
-  - chains related findings into higher-impact attack paths (the thing no
-    single scanner does): "exposed .env -> DB creds -> SQLi -> RCE"
+- suppresses likely false positives conservatively, never a confirmed hit
+- maps each finding to CWE / OWASP for professional reporting
+- chains related findings into higher-impact attack paths
 
-It is strictly additive and non-destructive: it only tags agent findings that
-have no tag yet (never manual or analyst-tagged findings), annotates notes, and
-adds synthesized Attack Path findings. With no AI key it is a no-op.
+It is strictly additive and non-destructive: it only annotates agent findings
+that have no tag yet, annotates notes, and adds synthesized Attack Path
+findings. With no AI key it is a no-op.
 """
 import json
 import os
@@ -27,9 +26,9 @@ from .athena import _extract_json
 
 class Metis(BaseAgent):
     name = "metis"
-    symbol = "ME"
-    display_name = "METIS"
-    role = "AI Triage & Correlation"
+    symbol = "MI"
+    display_name = "MIMIR"
+    role = "Triage & Correlation"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         result = {"flagged": 0, "mapped": 0, "chains": 0, "summary": ""}
@@ -64,7 +63,7 @@ class Metis(BaseAgent):
             for f in findings
         ]
 
-        prompt = f"""You are METIS, the triage and correlation brain of the Yggdrasil security workspace.
+        prompt = f"""You are MIMIR, the triage and correlation brain of the Yggdrasil security workspace.
 You receive raw findings from multiple scanners (nuclei, ZAP, sqlmap, dalfox, custom probes) against {target}.
 Review them like a senior penetration tester doing report QA, then return STRICT JSON.
 
@@ -98,23 +97,17 @@ Rules:
         mappings = data.get("mappings") if isinstance(data.get("mappings"), dict) else {}
         paths = data.get("attack_paths") if isinstance(data.get("attack_paths"), list) else []
 
-        # ── Possible false positives: ADVISORY ONLY ──
-        # Never auto-hide findings from the report. A scanner finding is the
-        # analyst's call, not the model's; METIS only annotates a suspicion so
-        # nothing is silently dropped. (An earlier version tagged these
-        # false_positive, which let the model gut whole reports.)
         flagged = 0
         for fid in fp_list:
             f = by_id.get(fid)
-            if not f or f.is_manual or f.tag:
+            if not f or getattr(f, "is_manual", False) or f.tag:
                 continue
-            note = "METIS: possible false positive — analyst should verify."
             if f.analyst_notes and "possible false positive" in f.analyst_notes:
                 continue
+            note = "MIMIR: possible false positive - analyst should verify."
             f.analyst_notes = (f.analyst_notes + "\n" + note) if f.analyst_notes else note
             flagged += 1
 
-        # ── CWE / OWASP mapping (append to notes, never overwrite) ──
         mapped = 0
         for fid, m in mappings.items():
             f = by_id.get(fid)
@@ -125,15 +118,14 @@ Rules:
             tags = " ".join(x for x in (cwe, owasp) if x)
             if not tags:
                 continue
-            if f.analyst_notes and "METIS classification" in f.analyst_notes:
+            if f.analyst_notes and "MIMIR classification" in f.analyst_notes:
                 continue
-            note = f"METIS classification: {tags}"
+            note = f"MIMIR classification: {tags}"
             f.analyst_notes = (f.analyst_notes + "\n" + note) if f.analyst_notes else note
             mapped += 1
 
         await self.session.commit()
 
-        # ── Attack paths (synthesized, additive findings) ──
         chains = 0
         sev_cvss = {"critical": 9.3, "high": 8.0, "medium": 5.5}
         for path in paths[:6]:
@@ -154,7 +146,7 @@ Rules:
                 description=narrative or "Correlated multi-step attack path across several findings.",
                 evidence=("Chained findings:\n" + linked) if linked else "Correlated from multiple findings.",
                 cvss_score=sev_cvss[sev],
-                remediation="Break the chain at any step; fixing the earliest (root) finding collapses the whole path.",
+                remediation="Break the chain at any step; fixing the earliest root finding collapses the path.",
             )
             chains += 1
 

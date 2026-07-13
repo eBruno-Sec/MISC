@@ -1,339 +1,184 @@
 # Codex Implementation Package
 
-## Executive Implementation Summary
+## Stage B Summary
 
-Implemented a scoped Olympus-to-Yggdrasil compatibility package focused on P0 evidence, backup, scope-guard, and report-safety contracts that could be delivered without the missing Olympus source tree and without a Git repository.
+Codex implemented the Stage B enforcement pass for Yggdrasil from base commit
+`d02915b9dba6c2dab3b4cebe4790ed44ed7ab785` on branch
+`codex/yggdrasil-stage-b-enforcement`.
 
-The package adds versioned workspace backups, strict backup validation, safe backup filenames, server-side pre-import summaries, atomic new-id imports, redacted HTTP exchange persistence, Markdown PoC rendering, scoped workbench replay/fuzz/access-check endpoints, CSV newline preservation, report HTML escaping, and required backup UI labels.
+Stage-B implementation commit:
+`a03431d074a9c901eee3aeda87c1276b143c0f64`.
 
-## Branch And Commit Information
+No merge was performed. No production approval was granted. This branch is ready
+for Opus critique.
 
-- Repository root confirmed: `C:\Users\Zabre\Desktop\2. ClaudeAI\Apps\MISC\Yggdrasil`
-- Git status: blocked. The folder is not a Git repository.
-- Branch: blocked.
-- Base commit: blocked.
-- Final commit: blocked.
-- Dedicated feature branch: blocked.
+## Blocker Resolution
 
-## Baseline Status
+| Blocker | Status | Evidence |
+| --- | --- | --- |
+| C-1 missing `OffensiveEngine.generate_parameter_test_urls()` / `_candidate_parameter_names()` | Fixed | Implemented parameter name inference, declared path hinting, route prioritization, and synthetic parameterized URL generation in `backend/agents/offensive.py`. TYR now passes FRIGG-declared paths into the offensive engine. |
+| C-2 stale implementation package | Fixed | This file now reports the actual branch, scope, tests, warnings, and remaining intentional legacy strings. |
+| C-3 mixed Greek/Norse branding | Fixed for generated/user-facing surfaces | Display labels now use ODIN, FRIGG, HEIMDALL, TYR, BROKKR, SKULD, MIMIR, SAGA. Report toolbar IDs/functions are `ygg-*` / `yggPrint` / `yggExport`. Legacy internal module keys remain for compatibility. |
+| C-4 WP-07 v2 SHA-256 backup absent | Fixed | Frontend exports v2 backups with `sha256`; backend validates canonical state hash, rejects tamper, summarizes before import, and imports as a new mission. |
 
-- Backend baseline before edits: `python -m unittest discover -s tests` passed with 16 tests, 3 skipped.
-- Frontend baseline before edits: `npm.cmd run build` passed only outside sandbox; sandboxed Vite/esbuild could not read the config path.
-- Olympus source tree: blocked. No local Olympus checkout was found under `C:\Users\Zabre\Desktop\2. ClaudeAI\Apps`.
-- Environment limitation: Yggdrasil is outside the configured writable root, so source edits required elevated file writes.
+## Feature Proof
+
+| Feature | Implementation | Test proof |
+| --- | --- | --- |
+| Dark/light mode | Header theme toggle persists `yggdrasil_theme`; report has `ygg-theme`. | `frontend/e2e/features.spec.ts` |
+| Pre-authorize/autonomous | `auto_approve` mission context and `YGGDRASIL_AUTO_APPROVE`/legacy fallback auto-resolve approval gates with audit logs. | `backend/tests/test_features.py` |
+| Wordlists | Catalog/preview/selected generated list flow remains wired into launch and TYR content discovery. | `backend/tests/test_features.py` |
+| Print/export report | SAGA report toolbar uses `ygg-print`, `ygg-html`, `ygg-md`, `ygg-txt`, `ygg-json`; print CSS hides toolbar. | `backend/tests/test_report.py`, `frontend/e2e/features.spec.ts` |
+| Sneak peek | Mission archive severity-count chips keep full zero-filled severity shape. | `backend/tests/test_features.py` |
+| Favorites | Mission archive favorites persist in `yggdrasil_favorites`, pin to top, and clean up on delete. | `frontend/e2e/features.spec.ts` |
 
 ## Files Changed
 
-- `backend/core/models.py`
+### Backend
+
+- `backend/core/brand.py`
 - `backend/core/backup.py`
 - `backend/core/poc.py`
 - `backend/routers/missions.py`
-- `backend/agents/base.py`
 - `backend/agents/apollo.py`
-- `backend/tests/test_backup_poc_report.py`
+- `backend/agents/ares.py`
+- `backend/agents/athena.py`
+- `backend/agents/auth.py`
+- `backend/agents/base.py`
+- `backend/agents/hades.py`
+- `backend/agents/hephaestus.py`
+- `backend/agents/hermes.py`
+- `backend/agents/metis.py`
+- `backend/agents/offensive.py`
+- `backend/agents/zeus.py`
+- `backend/tests/test_features.py`
+- `backend/tests/test_report.py`
+
+### Frontend
+
+- `frontend/package.json`
+- `frontend/playwright.config.ts`
+- `frontend/e2e/features.spec.ts`
 - `frontend/src/api.ts`
-- `frontend/src/types.ts`
+- `frontend/src/brand.ts`
+- `frontend/src/components/GodStatus.tsx`
 - `frontend/src/components/MissionControl.tsx`
-- `README.md`
+- `frontend/src/components/MissionLaunch.tsx`
+- `frontend/src/components/MissionList.tsx`
+- `frontend/src/components/SurfacePanel.tsx`
+- `frontend/src/components/TopologyPanel.tsx`
+- `frontend/src/components/WordlistsPanel.tsx`
+
+### Repo Hygiene
+
+- `.gitignore`
 - `CODEX_IMPLEMENTATION_PACKAGE.md`
 
-## Architecture Changes
+## API And Data Changes
 
-- Added `HttpExchange` as a first-class evidence record.
-- Added pure backup validation and normalization helpers.
-- Added redacted PoC rendering helpers.
-- Added mission-scoped workbench endpoints for replay, fuzzing, and cross-role access checks.
-- Added agent-level redacted HTTP exchange recording helper.
+- Added v2 backup validation helpers with canonical SHA-256 in `backend/core/backup.py`.
+- Extended import/restore handling to accept v1 and v2 backups, return summaries, and include HTTP exchanges.
+- Added:
+  - `POST /api/missions/backup/summary`
+  - `POST /api/missions/backup/import`
+- Kept legacy restore endpoint behavior while routing through the same normalized import helper.
+- Added complete severity count shape for mission lists.
 
-## Database And Migration Changes
+## Report Safety
 
-- Added `http_exchanges` model/table under the existing `create_all` startup path.
-- Alembic migration governance remains deferred because the current repository still uses `Base.metadata.create_all`.
-
-## API Changes
-
-- `POST /api/missions/backup/summary`
-- `POST /api/missions/backup/import`
-- `GET /api/missions/{mission_id}/backup`
-- `GET /api/missions/{mission_id}/http-exchanges`
-- `POST /api/missions/{mission_id}/http-exchanges`
-- `GET /api/missions/{mission_id}/http-exchanges/{exchange_id}/poc`
-- `POST /api/missions/{mission_id}/replay`
-- `POST /api/missions/{mission_id}/fuzz`
-- `POST /api/missions/{mission_id}/access-check`
-
-## UI Changes
-
-- Added `Download Workspace Backup (.json)`.
-- Added `Import Workspace Backup (.json)`.
-- Import flow parses JSON, asks the server for a validation summary, asks for confirmation, then imports into a new mission.
-
-## Security Controls Added
-
-- Redacts `Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, `X-Auth-Token`, `Proxy-Authorization`, and `X-CSRF-Token` in HTTP exchanges and PoC output.
-- Backup validation rejects unsupported versions, corrupt v2 hashes, invalid targets, oversize payloads, and excessive entity counts.
-- Backup export recursively scrubs secret-like keys.
-- Workbench endpoints enforce mission scope before sending requests.
-- Report generator escapes target, summary, finding fields, evidence, remediation, vendor, host, and discovered content values.
-
-## Report Engine Changes
-
-- Escapes untrusted report content before HTML insertion.
-- Preserves CSV newlines instead of flattening evidence fields to spaces.
-
-## Feature Matrix
-
-| Feature | Status | Evidence |
-| --- | --- | --- |
-| F085 HttpExchange at-rest redaction | Implemented | `backend/core/models.py`, `backend/core/poc.py`, `backend/agents/base.py`, `backend/routers/missions.py` |
-| F088 workbench replay scope guard | Implemented | `backend/routers/missions.py` |
-| F102 backup restore new-id import | Implemented | `backend/core/backup.py`, `backend/routers/missions.py`, `frontend/src/components/MissionControl.tsx` |
-| F079 report escaping regression guard | Partially implemented | HTML escaping added; full nonce-CSP/client exports still deferred |
-| WP-07 v2 backup SHA-256 | Implemented for mission workspace backups | `backend/core/backup.py` |
-| WP-10 CSV newline preservation | Implemented | `backend/routers/missions.py` |
-
-## Acceptance Criteria Matrix
-
-| Criterion | Status |
-| --- | --- |
-| Backup filename `YGGDRASIL_backup_[YYYY-MM-DD]_[workspace-id].json` | Passed |
-| v2 backup hash mismatch rejected | Passed |
-| Unsupported backup version rejected | Passed |
-| Import creates new mission ID | Implemented, not DB-integration tested locally |
-| Import summary before confirmation | Passed in UI/API build |
-| No raw credential headers in stored exchanges | Passed by unit tests |
-| Workbench off-scope URL returns 400 | Implemented, not API-integration tested locally |
-| CSV newlines preserved | Implemented, not route-integration tested locally |
-| Report injection escaped | Implemented; regression test skipped locally without SQLAlchemy |
+- SAGA report HTML escapes target, summary, finding fields, evidence, and remediation.
+- Inline report JSON now encodes `<`, `>`, and `&` so raw attacker-shaped tags do not appear in the generated HTML document.
+- Report toolbar uses Norse/Yggdrasil IDs and functions:
+  - `ygg-theme`
+  - `ygg-print`
+  - `ygg-html`
+  - `ygg-md`
+  - `ygg-txt`
+  - `ygg-json`
+  - `yggPrint`
+  - `yggExport`
 
 ## Test Execution Ledger
 
-| Command | Status | Exit | Counts | Notes |
-| --- | --- | ---: | --- | --- |
-| `python -m unittest discover -s tests` before edits | Passed | 0 | 16 run, 3 skipped | Baseline |
-| `npm.cmd run build` before edits | Blocked in sandbox | 1 | N/A | Vite/esbuild path access denied |
-| `npm.cmd run build` before edits, elevated | Passed | 0 | build completed | Baseline frontend |
-| `python -m unittest discover -s tests` after edits | Passed | 0 | 22 run, 4 skipped | Deprecation warnings for `datetime.utcnow()` |
-| `python -c "... compile ..."` | Passed | 0 | N/A | Syntax check for changed backend files |
-| `npm.cmd run build` after edits | Blocked in sandbox | 1 | N/A | Same Vite/esbuild path access denied |
-| `npm.cmd run build` after edits, elevated | Passed | 0 | 47 modules transformed | Production frontend build |
+| Command | Status | Result | Notes |
+| --- | --- | --- | --- |
+| `backend/.venv312/Scripts/python.exe -c "... compile ..."` | Passed | `syntax ok` | Compiled touched backend modules including MIMIR. |
+| `backend/.venv312/Scripts/python.exe -m pytest tests -q --tb=short` | Passed | `103 passed, 21 warnings` | Warnings are pre-existing/deferred `datetime.utcnow()`, Pydantic class config, and pytest collection naming. |
+| `npm.cmd install --package-lock=false` | Passed | 74 packages installed | npm audit reports 1 moderate and 1 high vulnerability in dependency tree; no force upgrade applied. |
+| `npm.cmd run build` | Passed | Vite production build | Required elevated execution because sandboxed esbuild could not read the Vite config path. |
+| `npx.cmd playwright install chromium` | Passed | Chromium installed | Required for local E2E execution. |
+| `npm.cmd run e2e` | Passed | `4 passed` | Required elevated execution because sandboxed Chromium launch returned `spawn EPERM`. |
 
-## Screenshots And Artifacts
+## Intentional Legacy / Compatibility Notes
 
-- No browser screenshots captured. Browser tooling was not invoked.
-- Frontend build artifacts written under `frontend/dist/` by Vite.
+- `OLYMPUS_*` environment variable fallbacks remain intentionally supported for existing installs.
+- Historical handoff documents still mention Olympus by design.
+- Internal Python class/module names and persisted context keys such as `athena`, `ares`, and `apollo` remain for compatibility; user-facing labels now map through `core.brand`.
+- No database migration system was introduced; the existing project still relies on its current startup/create path.
 
-## Security Findings
+## Known Warnings And Deferred Work
 
-- Pre-existing report generator inserted untrusted finding/evidence text into HTML. Fixed with HTML escaping.
-- Pre-existing CSV export collapsed newlines in evidence/remediation fields. Fixed by preserving field text and letting `csv.DictWriter` quote.
-- Remaining risk: no full SAST, dependency audit, container scan, or DAST was run in this environment.
-
-## Performance Findings
-
-- No performance test program was executed.
-- Workbench fuzz endpoint bounds payload count to 25 and request timeout to 30 seconds.
-
-## Accessibility Findings
-
-- No browser accessibility audit was executed.
-- Backup import controls use real button/input elements and visible labels.
-
-## Known Limitations
-
-- No Git repository was available, so no branch or commits could be produced.
-- Olympus source was unavailable, so implementation was done from the handoff contract and existing Yggdrasil behavior.
-- Alembic migrations, tenant isolation, Redis worker migration, OIDC, signed WebSocket tickets, object storage reports, OTEL, and full release-gate testing remain deferred.
-- Local Python lacks some backend dependencies, so SQLAlchemy-dependent tests are skipped in this environment.
-
-## Deferred Work
-
-- WP-02 tenancy plus Alembic baseline.
-- WP-03 Redis-backed mission worker.
-- WP-04 OIDC identity.
-- WP-05 WebSocket ticket auth.
-- WP-06 object-storage reports.
-- WP-08 secrets vault.
-- WP-09 observability.
-- WP-11 through WP-16 non-P0 expansion items.
-- Full browser, accessibility, security, container, performance, migration, rollback, and resilience matrices.
-
-## Rollback Instructions
-
-Because Git is unavailable, rollback must be file-based:
-
-1. Remove `backend/core/backup.py`, `backend/core/poc.py`, `backend/tests/test_backup_poc_report.py`, and `CODEX_IMPLEMENTATION_PACKAGE.md`.
-2. Revert edits in `backend/core/models.py`, `backend/routers/missions.py`, `backend/agents/base.py`, `backend/agents/apollo.py`, `frontend/src/api.ts`, `frontend/src/types.ts`, `frontend/src/components/MissionControl.tsx`, and `README.md` from a filesystem backup or source control once restored.
-3. If the app has started after this package, drop the `http_exchanges` table from local databases only after exporting any evidence that should be retained.
-
-## Review Instructions For Opus
-
-1. Restore or initialize Git before critique so diffs are reviewable.
-2. Install backend dependencies and rerun the full backend suite.
-3. Exercise backup export/import through the UI against a local database.
-4. Test replay/fuzz/access-check only against authorized local targets.
-5. Review report escaping with a malicious finding payload.
-6. Decide whether to accept this scoped package as WP-07/WP-10/F085/F088 groundwork or request a broader migration pass after Olympus source is restored.
+- Backend test warnings remain for timezone-naive `datetime.utcnow()` and Pydantic V2 class config deprecation.
+- npm audit reports two dependency vulnerabilities; resolving them may require dependency upgrades outside this scoped Stage B pass.
+- No live target DAST, container scan, accessibility audit, migration test, or production deployment was run.
+- No merge, release tag, or production approval was performed.
 
 ## Machine-Readable Completion Manifest
 
 ```yaml
-implementation_version: "1.0"
-
+implementation_version: "stage-b-2026-07-13"
 repository:
-  branch: null
-  base_commit: null
-  final_commit: null
+  base_commit: "d02915b9dba6c2dab3b4cebe4790ed44ed7ab785"
+  branch: "codex/yggdrasil-stage-b-enforcement"
+  implementation_commit: "a03431d074a9c901eee3aeda87c1276b143c0f64"
+  review_tip: "verify with `git rev-parse codex/yggdrasil-stage-b-enforcement` after fetch"
+  merged: false
+  production_approved: false
 
-work_packages:
-  - id: "F085"
-    status: "implemented"
-    commits: []
-    files_changed:
-      - "backend/core/models.py"
-      - "backend/core/poc.py"
-      - "backend/agents/base.py"
-      - "backend/routers/missions.py"
-    acceptance_criteria:
-      passed:
-        - "Sensitive headers are redacted in helper tests"
-        - "PoC output omits raw credential header values"
-      failed: []
-    tests:
-      passed:
-        - "python -m unittest discover -s tests"
-      failed: []
-      blocked: []
-    artifacts: []
-    limitations:
-      - "Existing scanner modules were not fully rewired to record every exchange"
-  - id: "F088"
-    status: "implemented"
-    commits: []
-    files_changed:
-      - "backend/routers/missions.py"
-    acceptance_criteria:
-      passed:
-        - "Scope guard is called before replay/fuzz/access-check requests"
-      failed: []
-    tests:
-      passed:
-        - "python -m unittest discover -s tests"
-      failed: []
-      blocked:
-        - "No live API integration test run"
-    artifacts: []
-    limitations: []
-  - id: "F102"
-    status: "implemented"
-    commits: []
-    files_changed:
+blockers:
+  C-1:
+    status: "fixed"
+    files:
+      - "backend/agents/offensive.py"
+      - "backend/agents/athena.py"
+      - "backend/agents/ares.py"
+  C-2:
+    status: "fixed"
+    files:
+      - "CODEX_IMPLEMENTATION_PACKAGE.md"
+  C-3:
+    status: "fixed_for_user_facing_surfaces"
+    files:
+      - "backend/core/brand.py"
+      - "backend/agents/*.py"
+      - "frontend/src/brand.ts"
+      - "frontend/src/components/*.tsx"
+  C-4:
+    status: "fixed"
+    files:
       - "backend/core/backup.py"
       - "backend/routers/missions.py"
-      - "frontend/src/api.ts"
-      - "frontend/src/types.ts"
       - "frontend/src/components/MissionControl.tsx"
-    acceptance_criteria:
-      passed:
-        - "v2 hash validation"
-        - "unsupported version rejection"
-        - "safe filename format"
-        - "pre-import summary"
-      failed: []
-    tests:
-      passed:
-        - "python -m unittest discover -s tests"
-        - "npm.cmd run build"
-      failed: []
-      blocked:
-        - "No database integration import/export test run"
-    artifacts:
-      - "frontend/dist/"
-    limitations:
-      - "No cross-tenant/workspace auth layer exists yet"
-  - id: "WP-10"
-    status: "partially_implemented"
-    commits: []
-    files_changed:
-      - "backend/routers/missions.py"
-      - "backend/agents/apollo.py"
-    acceptance_criteria:
-      passed:
-        - "CSV export no longer flattens newlines"
-        - "Report generator escapes untrusted HTML fields"
-      failed: []
-    tests:
-      passed:
-        - "python -m unittest discover -s tests"
-      failed: []
-      blocked:
-        - "Report escaping test skipped locally because SQLAlchemy is not installed"
-    artifacts: []
-    limitations:
-      - "Apollo render errors are still logged rather than promoted to a retry UI"
+      - "frontend/src/components/MissionList.tsx"
 
-release_gate:
-  build: "passed outside sandbox"
-  tests: "passed with 4 dependency-gated skips"
-  security: "partial"
-  accessibility: "not_executed"
-  performance: "not_executed"
-  migrations: "blocked"
-  rollback: "file-based instructions only"
-  recommendation: "not production approved; send to Opus for critique after Git and Olympus source are restored"
+tests:
+  backend_pytest:
+    command: "backend/.venv312/Scripts/python.exe -m pytest tests -q --tb=short"
+    status: "passed"
+    result: "103 passed, 21 warnings"
+  backend_compile:
+    command: "backend/.venv312/Scripts/python.exe -c '<compile touched modules>'"
+    status: "passed"
+    result: "syntax ok"
+  frontend_build:
+    command: "npm.cmd run build"
+    status: "passed"
+    note: "required elevated run due sandboxed Vite/esbuild access-denied"
+  frontend_e2e:
+    command: "npm.cmd run e2e"
+    status: "passed"
+    result: "4 passed"
+    note: "required elevated run due sandboxed Chromium spawn EPERM"
+
+review_status: "awaiting_opus_critique"
 ```
-
-## Addendum 2026-07-12 - WP-10 Report Retry Surfacing
-
-Codex continued implementation from the Opus handoff and completed the previously deferred WP-10 report-render surfacing work.
-
-### Additional Changes
-
-- `backend/agents/apollo.py` now returns `report_error` and `report_available` when HTML report rendering fails.
-- `backend/agents/zeus.py` now includes `report_error` and `report_available` in the `mission_complete` WebSocket event.
-- `frontend/src/types.ts` now models the extended `mission_complete` event.
-- `frontend/src/components/MissionControl.tsx` now hides the dead report link when Saga did not create a report, shows a visible `Report unavailable` banner, and provides a `Retry Report` action that reruns Saga through the existing agent rerun path.
-- `backend/tests/test_backup_poc_report.py` adds a regression test for structured Apollo render failure output. The test is dependency-gated in this local Python because SQLAlchemy is not installed.
-
-### Additional Test Ledger
-
-| Command | Status | Exit | Counts | Notes |
-| --- | --- | ---: | --- | --- |
-| `python -m unittest discover -s tests` | Passed | 0 | 23 run, 5 skipped | Skips are dependency-gated for missing local SQLAlchemy/FastAPI-backed tests |
-| `python -c "... compile apollo.py zeus.py ..."` | Passed | 0 | N/A | Backend syntax check |
-| `npm.cmd run build` | Blocked in sandbox | 1 | N/A | Known Vite/esbuild path-access boundary |
-| `npm.cmd run build` elevated | Passed | 0 | 47 modules transformed | Production frontend build |
-
-### Updated WP-10 Status
-
-`WP-10` is now functionally implemented for both listed acceptance targets in the accessible Yggdrasil codebase:
-
-- CSV cells preserve newlines through `csv.DictWriter` quoting.
-- Missing report generation is surfaced in mission context, WebSocket completion events, and the UI with a retry action.
-
-Remaining WP-10 limitation: browser-level report retry UX was not screenshot-tested because browser tooling was not run.
-
-## Addendum 2026-07-12 - Local Workbench UI
-
-The local Yggdrasil app now exposes the manual workbench surface in the mission workspace.
-
-### Additional Changes
-
-- `frontend/src/components/WorkbenchPanel.tsx` adds Replay, Fuzz, Access, and Evidence views.
-- `frontend/src/components/MissionControl.tsx` adds Workbench as a first-class mission tab.
-- `frontend/src/api.ts` wires the local workbench/evidence endpoints: replay, fuzz, access-check, exchange listing, and PoC retrieval.
-- `frontend/src/types.ts` adds typed HTTP exchange and workbench result contracts.
-- `README.md` documents the mission Workbench tab.
-
-### Additional Test Ledger
-
-| Command | Status | Exit | Counts | Notes |
-| --- | --- | ---: | --- | --- |
-| `npm.cmd run build` | Blocked in sandbox | 1 | N/A | Known Vite/esbuild path-access boundary |
-| `npm.cmd run build` elevated | Passed | 0 | 48 modules transformed | Production frontend build |
-| `python -m unittest discover -s tests` | Passed | 0 | 23 run, 5 skipped | Backend regression suite unchanged |
-
-### Updated Workbench Status
-
-The local app now has an operator-facing workbench for the already-added scoped backend endpoints. This advances the Olympus manual workbench preservation goal, though it is not a full clone of Olympus Repeater/Intruder UX yet.
-

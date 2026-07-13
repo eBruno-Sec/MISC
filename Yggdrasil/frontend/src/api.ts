@@ -43,11 +43,19 @@ export const api = {
   deleteMission: (id: string) =>
     req<{ deleted: boolean }>(`/missions/${id}`, { method: 'DELETE' }),
 
-  // Restore a mission from a Download-Progress (.json) backup. Server re-validates
+  // Restore a mission from a Download Workspace Backup (.json) file. Server re-validates
   // and imports as a NEW mission (fresh id); a 4xx surfaces as the import banner.
   restoreSession: (backup: unknown) =>
     req<{ id: string; target: string; status: string; restored: { findings: number; notes: number; logs: number } }>(
       '/missions/restore', { method: 'POST', body: JSON.stringify(backup) }
+    ),
+  backupSummary: (backup: unknown) =>
+    req<{ valid: boolean; target: string; mode: string; findings: number; notes: number; logs: number; http_exchanges: number }>(
+      '/missions/backup/summary', { method: 'POST', body: JSON.stringify(backup) }
+    ),
+  importBackup: (backup: unknown) =>
+    req<{ id: string; target: string; status: string; restored: { findings: number; notes: number; logs: number; http_exchanges: number } }>(
+      '/missions/backup/import', { method: 'POST', body: JSON.stringify(backup) }
     ),
 
   // Approvals

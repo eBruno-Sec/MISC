@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { AGENTS } from '../brand'
 import type { MissionMode, ParsedScope, ScopeRule, Wordlist } from '../types'
 
 const MODES: { id: MissionMode; label: string; desc: string; gates: string[] }[] = [
@@ -14,17 +15,17 @@ const MODES: { id: MissionMode; label: string; desc: string; gates: string[] }[]
     id: 'active',
     label: 'ACTIVE',
     desc: 'Passive recon + Ares runs Nmap and Nuclei templates on live targets.',
-    gates: ['ARES activation'],
+    gates: ['TYR activation'],
   },
   {
     id: 'full',
     label: 'FULL',
     desc: 'Complete assessment: recon -> scanning -> Hephaestus payload forge -> Hades post-exploit analysis.',
-    gates: ['ARES activation', 'HEPHAESTUS activation', 'HADES activation'],
+    gates: ['TYR activation', 'BROKKR activation', 'SKULD activation'],
   },
 ]
 
-const GODS = ['ZEUS', 'ATHENA', 'HERMES', 'ARES', 'HEPHAESTUS', 'HADES', 'APOLLO']
+const GODS = AGENTS.filter(agent => agent.key !== 'metis').map(agent => agent.name)
 
 const SCOPE_EXAMPLE = `# One target per line. Prefix - to exclude.
 example.com
@@ -341,7 +342,7 @@ export default function MissionLaunch() {
             })}
           </div>
           <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.5rem', lineHeight: 1.6 }}>
-            ARES pairs these with a target-specific list HEPHAESTUS generates from recon. Defaults preselected.
+            TYR pairs these with a target-specific list BROKKR generates from recon. Defaults preselected.
           </div>
         </div>
       )}

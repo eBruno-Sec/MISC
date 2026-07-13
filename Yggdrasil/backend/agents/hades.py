@@ -4,9 +4,9 @@ from .base import BaseAgent
 
 class Hades(BaseAgent):
     name = "hades"
-    symbol = "HD"
-    display_name = "HADES"
-    role = "Post-Exploitation & Persistence Analysis"
+    symbol = "SK"
+    display_name = "SKULD"
+    role = "Impact Review"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         hermes = (context or {}).get("hermes", {})

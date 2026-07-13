@@ -1,7 +1,7 @@
 """
 Yggdrasil authenticated-scanning engine.
 
-Credentials arrive in the mission scope notes; ATHENA extracts them. This engine
+Credentials arrive in the mission scope notes; FRIGG extracts them. This engine
 logs into the target web app and returns a session cookie that the crawler and
 every scanner reuse, so testing covers the authenticated surface.
 

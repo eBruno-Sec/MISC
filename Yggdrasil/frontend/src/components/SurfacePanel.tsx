@@ -3,7 +3,7 @@ import { api } from '../api'
 import type { SurfaceInventory } from '../types'
 
 // Read-only attack-surface inventory: deduped endpoints + params discovered by
-// ARES (crawl + archives + parameter mining). COPY yields the example URL to
+// TYR (crawl + archives + parameter mining). COPY yields the example URL to
 // paste into the request workbench (/replay, /fuzz) or curl.
 export default function SurfacePanel({ missionId }: { missionId: string }) {
   const [inv, setInv] = useState<SurfaceInventory | null>(null)
@@ -46,7 +46,7 @@ export default function SurfacePanel({ missionId }: { missionId: string }) {
 
       {endpoints.length === 0 && !error && (
         <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '1rem 0', lineHeight: 1.7 }}>
-          No attack surface recorded yet. It is captured when ARES runs its offensive pass
+          No attack surface recorded yet. It is captured when TYR runs its offensive pass
           (crawl + archives + parameter mining) during an active or full mission.
         </div>
       )}
