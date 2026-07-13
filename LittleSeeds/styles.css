@@ -393,3 +393,432 @@ footer span { color: var(--coral); }
   .chapter { padding: 1.25rem 1.25rem 1rem; }
   .chapter p { font-size: 1.05rem; }
 }
+
+/* ── NIGHT CONTROLS: dimmer button + popup ── */
+.dimmer-btn {
+  background: rgba(255,255,255,0.07);
+  border: 1.5px solid rgba(255,255,255,0.14);
+  color: var(--cream);
+  font-size: 1.1rem;
+  border-radius: 8px;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.dimmer-btn:hover {
+  background: rgba(255,224,102,0.1);
+  border-color: rgba(255,224,102,0.35);
+}
+.dimmer-popup {
+  position: fixed;
+  top: 62px; right: 1rem;
+  background: #0F0A2E;
+  border: 1px solid rgba(255,224,102,0.22);
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+  z-index: 500;
+  min-width: 230px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  display: none;
+}
+.dimmer-popup.open { display: block; }
+.dimmer-label {
+  font-size: 0.7rem;
+  color: rgba(255,248,240,0.45);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.65rem;
+}
+.dimmer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+.dimmer-row input[type=range] {
+  flex: 1;
+  accent-color: var(--moon);
+  cursor: pointer;
+}
+.dimmer-sound-btn {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: var(--cream);
+  font-family: var(--font-b);
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+}
+.dimmer-sound-btn:hover { background: rgba(255,255,255,0.1); }
+.dimmer-sound-btn.playing {
+  background: rgba(76,175,125,0.12);
+  border-color: rgba(76,175,125,0.4);
+  color: #6ee7b7;
+}
+
+/* ── PREMIUM GATE (full-screen overlay on locked story pages) ── */
+.premium-gate {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,6,32,0.97);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.premium-gate-card {
+  background: linear-gradient(160deg, #1a1040 0%, #2d1b6e 100%);
+  border: 2px solid rgba(255,224,102,0.28);
+  border-radius: 24px;
+  padding: 2.5rem 2rem 2rem;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 28px 80px rgba(0,0,0,0.75);
+}
+.premium-gate-card .gate-icon {
+  font-size: 3.5rem;
+  display: block;
+  margin-bottom: 1rem;
+}
+.premium-gate-card h2 {
+  font-family: var(--font-h);
+  font-size: 1.85rem;
+  color: var(--moon);
+  margin-bottom: 0.7rem;
+}
+.premium-gate-card > p {
+  font-size: 1rem;
+  color: var(--peach);
+  line-height: 1.65;
+  margin-bottom: 1.75rem;
+}
+.gate-btn-primary {
+  display: block;
+  width: 100%;
+  background: linear-gradient(135deg, var(--green), var(--teal));
+  color: #fff;
+  font-family: var(--font-h);
+  font-size: 1.15rem;
+  padding: 0.9rem 1rem;
+  border-radius: 50px;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 6px 22px rgba(76,175,125,0.4);
+  transition: transform 0.18s, box-shadow 0.18s;
+}
+.gate-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(76,175,125,0.5);
+}
+.gate-btn-secondary {
+  display: block;
+  width: 100%;
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.14);
+  color: var(--cream);
+  font-family: var(--font-b);
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 1rem;
+}
+.gate-btn-secondary:hover { background: rgba(255,255,255,0.1); }
+.gate-code-section {
+  border-top: 1px solid rgba(255,255,255,0.09);
+  padding-top: 1rem;
+  margin-top: 0.25rem;
+  text-align: left;
+}
+.gate-code-section label {
+  font-size: 0.72rem;
+  color: rgba(255,248,240,0.45);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.gate-code-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.gate-code-row input {
+  flex: 1;
+  background: rgba(255,255,255,0.07);
+  border: 1.5px solid rgba(255,255,255,0.14);
+  border-radius: 10px;
+  color: var(--cream);
+  font-family: var(--font-b);
+  font-size: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  outline: none;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.gate-code-row input:focus { border-color: var(--moon); }
+.gate-code-row button {
+  background: rgba(255,224,102,0.14);
+  border: 1.5px solid rgba(255,224,102,0.3);
+  color: var(--moon);
+  font-family: var(--font-b);
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.gate-code-row button:hover { background: rgba(255,224,102,0.25); }
+.gate-err {
+  color: var(--coral);
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+  min-height: 1.1em;
+}
+.gate-back {
+  display: inline-block;
+  color: rgba(255,248,240,0.38);
+  text-decoration: none;
+  font-size: 0.82rem;
+  margin-top: 1.25rem;
+  transition: color 0.15s;
+}
+.gate-back:hover { color: var(--cream); }
+
+/* ── PARENTAL GATE ── */
+.parental-gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.parental-gate-card {
+  background: #1a1040;
+  border: 2px solid rgba(255,224,102,0.3);
+  border-radius: 20px;
+  padding: 2rem 1.75rem;
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+}
+.parental-gate-card h3 {
+  font-family: var(--font-h);
+  color: var(--moon);
+  font-size: 1.45rem;
+  margin-bottom: 0.5rem;
+}
+.parental-gate-card > p {
+  color: var(--peach);
+  font-size: 0.95rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+.parental-gate-card .math-q {
+  font-family: var(--font-h);
+  font-size: 2.2rem;
+  color: var(--moon);
+  margin-bottom: 1rem;
+  letter-spacing: 0.05em;
+  text-shadow: 0 2px 14px rgba(255,224,102,0.35);
+}
+.parental-gate-card input[type=number] {
+  width: 100%;
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,224,102,0.28);
+  border-radius: 10px;
+  color: var(--cream);
+  font-size: 1.5rem;
+  font-family: var(--font-h);
+  text-align: center;
+  padding: 0.65rem;
+  outline: none;
+  margin-bottom: 0.85rem;
+  -moz-appearance: textfield;
+}
+.parental-gate-card input[type=number]::-webkit-outer-spin-button,
+.parental-gate-card input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+.parental-gate-card input[type=number]:focus { border-color: var(--moon); }
+.parental-gate-card > button {
+  width: 100%;
+  background: linear-gradient(135deg, var(--green), var(--teal));
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  font-family: var(--font-h);
+  font-size: 1.1rem;
+  padding: 0.75rem;
+  cursor: pointer;
+  margin-bottom: 0.4rem;
+  transition: transform 0.18s;
+}
+.parental-gate-card > button:hover { transform: translateY(-1px); }
+.gate-cancel {
+  background: none;
+  border: none;
+  color: rgba(255,248,240,0.38);
+  font-size: 0.82rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+  font-family: var(--font-b);
+  transition: color 0.15s;
+}
+.gate-cancel:hover { color: var(--cream); }
+
+/* ── FONT SIZE CONTROL (in dimmer popup) ── */
+.font-size-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.fz-btn {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: var(--cream);
+  font-family: var(--font-b);
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0.45rem 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.fz-btn:hover { background: rgba(255,255,255,0.12); }
+.fz-btn.active {
+  background: rgba(255,224,102,0.14);
+  border-color: rgba(255,224,102,0.38);
+  color: var(--moon);
+}
+
+/* Font size body classes — applied on story pages only */
+body.font-large .chapter p         { font-size: 1.32rem; }
+body.font-large .chapter h4        { font-size: 1.4rem; }
+body.font-large .reflect ul li     { font-size: 1.2rem; }
+body.font-xl    .chapter p         { font-size: 1.55rem; line-height: 2; }
+body.font-xl    .chapter h4        { font-size: 1.6rem; }
+body.font-xl    .reflect ul li     { font-size: 1.35rem; }
+@media (max-width: 640px) {
+  body.font-large .chapter p { font-size: 1.2rem; }
+  body.font-xl    .chapter p { font-size: 1.35rem; }
+}
+
+/* ── SHARE BUTTON ── */
+.share-btn {
+  background: rgba(255,255,255,0.07);
+  border: 1.5px solid rgba(255,255,255,0.14);
+  color: var(--cream);
+  font-size: 1rem;
+  border-radius: 8px;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.share-btn:hover {
+  background: rgba(76,175,125,0.12);
+  border-color: rgba(76,175,125,0.35);
+}
+
+/* ── TOAST NOTIFICATION ── */
+.ls-toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: rgba(15,10,46,0.97);
+  border: 1.5px solid rgba(76,175,125,0.4);
+  border-radius: 50px;
+  color: #6ee7b7;
+  font-family: var(--font-b);
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 0.65rem 1.5rem;
+  white-space: nowrap;
+  z-index: 800;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+}
+.ls-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── DAY 3 FREE-COMPLETE NUDGE ── */
+.free-complete-nudge {
+  margin-top: 3rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(76,175,125,0.1), rgba(26,188,156,0.07));
+  border: 2px solid rgba(76,175,125,0.28);
+  padding: 2.25rem 2rem;
+  text-align: center;
+  animation: fadeUp 0.5s ease both 0.3s;
+}
+.nudge-icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
+.free-complete-nudge h3 {
+  font-family: var(--font-h);
+  font-size: 1.6rem;
+  color: #6ee7b7;
+  margin-bottom: 0.65rem;
+}
+.free-complete-nudge > p {
+  color: var(--peach);
+  font-size: 1rem;
+  line-height: 1.65;
+  margin-bottom: 1.5rem;
+}
+.nudge-btn {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--green), var(--teal));
+  color: #fff;
+  font-family: var(--font-h);
+  font-size: 1.15rem;
+  padding: 0.85rem 2rem;
+  border-radius: 50px;
+  text-decoration: none;
+  box-shadow: 0 6px 22px rgba(76,175,125,0.4);
+  transition: transform 0.18s, box-shadow 0.18s;
+  margin-bottom: 0.75rem;
+}
+.nudge-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(76,175,125,0.5); }
+.nudge-sub {
+  font-size: 0.8rem;
+  color: rgba(255,248,240,0.4);
+  font-weight: 700;
+  margin-top: 0.5rem;
+}
+
+/* ── READING TIME BADGE (index page story cards) ── */
+.story-card .read-time {
+  font-size: 0.7rem;
+  color: rgba(255,248,240,0.4);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: auto;
+}
