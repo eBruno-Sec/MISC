@@ -290,7 +290,7 @@ class OffensiveEngine:
     # ── Crawl ────────────────────────────────────────────────────
     async def crawl(self, base_url: str, max_urls: int = 200) -> list:
         await self.log(f"Crawling {base_url} for endpoints and parameters (katana)", "info")
-        cmd = ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
+        cmd = ["katana", "-u", base_url, "-jc", "-jsl", "-kf", "all", "-aff", "-d", "3",
                "-c", "15", "-silent", "-nc", "-timeout", "10"]
         if self._cookie():
             cmd += ["-H", f"Cookie: {self._cookie()}"]
@@ -488,7 +488,7 @@ class OffensiveEngine:
             try:
                 sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch",
                               "--user-agent", BROWSER_USER_AGENT, "--tamper", SQLMAP_TAMPER,
-                              "--level", "2", "--risk", "2", "--smart",
+                              "--level", "3", "--risk", "2", "--smart",
                               "--technique", "BEUST", "--threads", "4",
                               "--timeout", "15", "--retries", "1",
                               "--output-dir", "/tmp/sqlmap_out"]
@@ -524,7 +524,7 @@ class OffensiveEngine:
             try:
                 forms_cmd = ["sqlmap", "-u", base_url, "--forms", "--crawl=1", "--batch",
                              "--user-agent", BROWSER_USER_AGENT, "--tamper", SQLMAP_TAMPER,
-                             "--level", "2", "--risk", "2", "--smart",
+                             "--level", "3", "--risk", "2", "--smart",
                              "--technique", "BEUST", "--threads", "4", "--timeout", "15",
                              "--retries", "1", "--crawl-exclude", "logout|logoff|signout",
                              "--output-dir", "/tmp/sqlmap_out"]
@@ -557,7 +557,8 @@ class OffensiveEngine:
         try:
             dalfox_cmd = ["dalfox", "file", url_file, "--format", "json",
                           "--silence", "--no-spinner", "--worker", "10", "--timeout", "10",
-                          "--user-agent", BROWSER_USER_AGENT, "--waf-evasion"]
+                          "--user-agent", BROWSER_USER_AGENT, "--waf-evasion",
+                          "--deep-domxss", "--mining-dom", "--mining-dict"]
             if self._cookie():
                 dalfox_cmd += ["-C", self._cookie()]
             stdout, stderr, rc = await self.run_command(dalfox_cmd, timeout=420)
@@ -615,7 +616,8 @@ class OffensiveEngine:
 
         try:
             nuclei_cmd = ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
-                          "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"]
+                          "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50",
+                          "-retries", "1"]
             if self._cookie():
                 nuclei_cmd += ["-H", f"Cookie: {self._cookie()}"]
             stdout, _, rc = await self.run_command(nuclei_cmd, timeout=420)
@@ -763,8 +765,10 @@ class OffensiveEngine:
         found = {}
         for wordlist in lists:
             ffuf_cmd = ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
-                        "-mc", "200,204,301,302,307,401,403", "-json", "-s",
-                        "-t", "40", "-timeout", "8"]
+                        "-mc", "200,204,301,302,307,401,403,405,500",
+                        "-ac", "-recursion", "-recursion-depth", "1",
+                        "-e", ".php,.bak,.old,.zip,.json,.txt,.config,.git,.env",
+                        "-json", "-s", "-t", "40", "-timeout", "8", "-maxtime", "240"]
             if self._cookie():
                 ffuf_cmd += ["-H", f"Cookie: {self._cookie()}"]
             stdout, _, rc = await self.run_command(ffuf_cmd, timeout=300)

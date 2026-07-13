@@ -452,7 +452,8 @@ class Hermes(BaseAgent):
         try:
             stdout, _, rc = await self.run_command(
                 ["httpx", "-l", tmp, "-json", "-silent", "-follow-redirects",
-                 "-title", "-tech-detect", "-cdn", "-timeout", "8", "-rl", "150", "-nc"],
+                 "-title", "-tech-detect", "-cdn", "-server", "-tls-grab", "-jarm", "-ip",
+                 "-timeout", "8", "-rl", "150", "-nc"],
                 timeout=300,
             )
             if rc == 127:

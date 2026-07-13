@@ -254,39 +254,52 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
         else:
             port_flag = ["--top-ports", "1000"]
             scan_desc = "top 1000 ports"
+        # Advanced nmap: aggressive version detection, OS fingerprinting, and the
+        # NSE vuln category (real CVE detection) + service auditing scripts, emitted
+        # as XML for rich parsing. Heavy scripts are gated so operators can dial back.
+        aggressive = os.getenv("YGGDRASIL_NMAP_AGGRESSIVE", "1").strip().lower() not in ("0", "false", "no")
+        scripts = "default,banner,http-title,http-headers,http-methods,ssl-cert"
+        if aggressive:
+            scripts += (",vuln,http-enum,http-security-headers,ssl-enum-ciphers,"
+                        "http-git,http-shellshock,http-sql-injection,http-dombased-xss")
+        nmap_cmd = ["nmap", "-sV", "--version-all", "-O", "--osscan-guess",
+                    "--script", scripts, "-T4", "--open", "--host-timeout", "240s",
+                    "-oX", "-"] + port_flag + host_args
+        # Optional IDS/IPS evasion (fragmentation + payload padding) — off by default.
+        if os.getenv("YGGDRASIL_NMAP_EVASION", "").strip().lower() in ("1", "true", "yes"):
+            nmap_cmd[1:1] = ["-f", "--data-length", "24"]
         await self.log(
-            f"Running Nmap service detection (-sV -sC) on {len(host_args)} host(s), {scan_desc}",
-            "info")
-        stdout, stderr, rc = await self.run_command(
-            ["nmap", "-sV", "-sC", "-T4", "--open", "-oG", "-"] + port_flag + host_args,
-            timeout=300,
-        )
+            f"Running advanced Nmap (-sV --version-all -O, NSE {'default+vuln' if aggressive else 'default'}) "
+            f"on {len(host_args)} host(s), {scan_desc}", "info")
+        stdout, stderr, rc = await self.run_command(nmap_cmd, timeout=900)
 
-        if rc != 0 and rc != 127:
-            await self.log(f"Nmap scan error: {stderr[:200]}", "warn")
+        if rc == 127:
+            await self.log("Nmap not available in this environment; skipping port scan", "warn")
+            return port_results
+        if rc != 0:
+            await self.log(f"Nmap finished with warnings: {stderr[:200]}", "warn")
 
-        if stdout:
-            current_host = None
-            for line in stdout.splitlines():
-                if line.startswith("Host:"):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        current_host = parts[1]
-                        port_results[current_host] = []
-                elif line.startswith("Ports:") and current_host:
-                    port_section = line.replace("Ports:", "").strip()
-                    for port_info in port_section.split(","):
-                        port_info = port_info.strip()
-                        parts = port_info.split("/")
-                        if len(parts) >= 7 and parts[1] == "open":
-                            port_results[current_host].append({
-                                "port": int(parts[0]),
-                                "state": parts[1],
-                                "proto": parts[2],
-                                "service": parts[4],
-                                "version": parts[6],
-                            })
-                            await self._check_dangerous_port(current_host, int(parts[0]), parts[4])
+        from core.nmap_parse import parse_nmap_xml, extract_findings
+        parsed = parse_nmap_xml(stdout)
+        for host, info in parsed.items():
+            port_results[host] = []
+            if info.get("os"):
+                await self.log(f"OS fingerprint {host}: {info['os']}", "info")
+            for p in info["ports"]:
+                ver = (p["product"] + " " + p["version"]).strip()
+                port_results[host].append({
+                    "port": p["port"], "state": "open", "proto": p["proto"],
+                    "service": p["service"], "version": ver,
+                })
+                await self._check_dangerous_port(host, p["port"], p["service"])
+        # NSE vuln-script hits (CVE) and weak-TLS results become findings.
+        vulns = extract_findings(parsed)
+        for vf in vulns:
+            await self.add_finding(
+                title=vf["title"], severity=vf["severity"], description=vf["description"],
+                evidence=vf["evidence"], cvss_score=vf.get("cvss", 0.0), remediation=vf["remediation"])
+        if vulns:
+            await self.log(f"Nmap NSE flagged {len(vulns)} vulnerability finding(s)", "success")
 
         if not port_results:
             await self.log("Nmap returned no results (tool may not be available in this environment)", "warn")
@@ -338,7 +351,7 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             # bugs (blind SSRF, blind SQLi, log4j-style RCE) via callback detection.
             stdout, stderr, rc = await self.run_command(
                 ["nuclei", "-l", tmpfile, "-severity", "critical,high,medium",
-                 "-json", "-silent", "-timeout", "10"],
+                 "-json", "-silent", "-timeout", "10", "-rl", "150", "-retries", "1"],
                 timeout=300,
             )
 
