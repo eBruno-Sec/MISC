@@ -1,8 +1,10 @@
 import asyncio
+import os
 import re
 from datetime import date, datetime
 import httpx
 from .base import BaseAgent
+from core.security import expand_cidr
 
 VENDOR_TXT_PATTERNS = {
     "google-site-verification": ("Google Workspace", "Productivity"),
@@ -44,11 +46,82 @@ SUBDOMAIN_CATEGORIES = {
     "api": ["api", "api-", "graphql", "rest", "gateway", "backend"],
 }
 
+# Curated port set for the CIDR network sweep: remote-access, file/DB, and web
+# services worth surfacing on a red-team host-discovery pass. Web ports are here
+# too so a host running only, say, 8080 still shows as alive.
+NETWORK_SWEEP_PORTS = (
+    "21,22,23,25,53,80,110,111,135,139,143,389,443,445,993,995,"
+    "1433,1521,2049,2375,3306,3389,5432,5900,5985,6379,8000,8080,8443,9200,11211,27017"
+)
+
+# Non-web services that matter on a network sweep. severity=info means "reachable,
+# worth noting" (e.g. SSH); higher severities are genuine exposure risk. Web ports
+# (80/443/8080/8443/8000) are intentionally absent — those flow through the normal
+# web pipeline (httpx liveness → ARES), so we don't double-report them here.
+NETWORK_SERVICE_RISK = {
+    21: ("FTP", "medium", 5.3, "FTP transmits credentials and data in plaintext."),
+    22: ("SSH", "info", 0.0, "SSH remote administration is reachable on this host."),
+    23: ("Telnet", "high", 7.5, "Telnet is unencrypted remote access; credentials are exposed."),
+    25: ("SMTP", "info", 0.0, "SMTP service reachable; check for open relay / user enumeration."),
+    111: ("rpcbind", "low", 3.7, "ONC RPC portmapper reachable; can enumerate RPC services (NFS, etc.)."),
+    135: ("MSRPC", "medium", 5.0, "Windows RPC endpoint mapper exposed."),
+    139: ("NetBIOS", "medium", 5.3, "NetBIOS session service exposed."),
+    389: ("LDAP", "medium", 5.3, "LDAP directory service reachable; may permit anonymous bind."),
+    445: ("SMB", "high", 8.1, "SMB exposed — EternalBlue / ransomware / null-session surface."),
+    1433: ("MSSQL", "high", 7.5, "Microsoft SQL Server port publicly accessible."),
+    1521: ("Oracle DB", "high", 7.5, "Oracle database listener publicly accessible."),
+    2049: ("NFS", "medium", 5.3, "NFS export service reachable; may allow unauthenticated mounts."),
+    2375: ("Docker API", "critical", 10.0, "Unauthenticated Docker daemon API — full host compromise."),
+    3306: ("MySQL", "high", 7.5, "MySQL/MariaDB port publicly accessible."),
+    3389: ("RDP", "critical", 9.8, "RDP publicly exposed — brute-force / BlueKeep risk."),
+    5432: ("PostgreSQL", "high", 7.5, "PostgreSQL port publicly accessible."),
+    5900: ("VNC", "high", 8.1, "VNC remote desktop exposed; often weak/no authentication."),
+    5985: ("WinRM", "medium", 5.9, "Windows Remote Management (WinRM) exposed."),
+    6379: ("Redis", "critical", 9.8, "Redis exposed — often unauthenticated, full data access."),
+    9200: ("Elasticsearch", "high", 8.1, "Elasticsearch port accessible; often unauthenticated."),
+    11211: ("Memcached", "medium", 5.3, "Memcached exposed; UDP amplification / data leakage risk."),
+    27017: ("MongoDB", "critical", 9.8, "MongoDB port accessible; often unauthenticated."),
+}
+
+
+def parse_nmap_greppable(stdout: str) -> dict:
+    """Parse nmap -oG output into {ip: {"status": "up", "ports": [ {port, proto,
+    service, version} ]}}. Pure (no I/O) so it can be unit-tested without nmap.
+
+    A host appears if nmap marked it Up (Status line) OR reported any open port.
+    Only open ports are kept."""
+    hosts: dict = {}
+    for line in (stdout or "").splitlines():
+        if not line.startswith("Host:"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        ip = parts[1]
+        entry = hosts.setdefault(ip, {"status": "unknown", "ports": []})
+        if "Status: Up" in line:
+            entry["status"] = "up"
+        elif "Status: Down" in line and entry["status"] == "unknown":
+            entry["status"] = "down"
+        if "Ports:" in line:
+            port_section = line.split("Ports:", 1)[1].split("Ignored State:")[0].strip()
+            for port_info in port_section.split(","):
+                fields = port_info.strip().split("/")
+                if len(fields) >= 7 and fields[1] == "open" and fields[0].isdigit():
+                    entry["status"] = "up"
+                    entry["ports"].append({
+                        "port": int(fields[0]),
+                        "proto": fields[2],
+                        "service": fields[4] or "unknown",
+                        "version": fields[6],
+                    })
+    return hosts
+
 
 class Hermes(BaseAgent):
     name = "hermes"
     symbol = "HE"
-    display_name = "HEIMDALL"
+    display_name = "HERMES"
     role = "OSINT / Passive Recon"
 
     def _extract_domain(self, target: str) -> str:
@@ -99,7 +172,17 @@ class Hermes(BaseAgent):
     async def execute(self, target: str, context: dict = None) -> dict:
         domain = self._extract_domain(target)
         _host, _port = self._extract_host_port(target)
-        await self.log(f"Passive recon initiated on {domain}", "info")
+        try:
+            cidr_cap = max(1, int(os.getenv("YGGDRASIL_CIDR_MAX_HOSTS") or os.getenv("OLYMPUS_CIDR_MAX_HOSTS") or "1024"))
+        except ValueError:
+            cidr_cap = 1024
+        cidr_hosts = expand_cidr(target, cap=cidr_cap)
+        if cidr_hosts:
+            await self.log(
+                f"CIDR target {target}: sweeping {len(cidr_hosts)} host(s) for live web services "
+                f"(cap {cidr_cap}; raise YGGDRASIL_CIDR_MAX_HOSTS for bigger ranges)", "info")
+        else:
+            await self.log(f"Passive recon initiated on {domain}", "info")
 
         result = {
             "target": target,
@@ -111,45 +194,107 @@ class Hermes(BaseAgent):
             "technologies": {},
             "vendors": [],
             "subdomain_categories": {},
+            "network_hosts": [],
         }
 
-        await self.log("WHOIS / RDAP lookup", "info")
-        result["whois"] = await self._rdap(domain)
-
-        await self.log("Certificate transparency enumeration via crt.sh", "info")
-        subs = await self._cert_transparency(domain)
-        result["subdomains"] = subs
-        await self.log(f"{len(subs)} unique subdomains discovered via CT logs", "success" if subs else "warn")
-
-        # Apply scope rules if provided
         scope_rules = (context or {}).get("scope_rules", {})
-        if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
-            filtered = self._apply_scope(subs, scope_rules)
-            removed = len(subs) - len(filtered)
-            if removed:
-                await self.log(f"Scope filter: removed {removed} out-of-scope subdomains", "info")
-            subs = filtered
+        subs = []
+
+        if cidr_hosts:
+            # Network sweep: no subdomain / DNS / WHOIS recon makes sense for an IP range.
+            all_hosts = cidr_hosts
+        else:
+            await self.log("WHOIS / RDAP lookup", "info")
+            result["whois"] = await self._rdap(domain)
+
+            await self.log("Subdomain enumeration: crt.sh + subfinder (OSINT) + DNS brute", "info")
+            ct_subs = await self._cert_transparency(domain)
+            osint_subs = await self._subfinder(domain)
+            brute_subs = await self._dns_bruteforce(domain)
+            subs = sorted(set(ct_subs) | set(osint_subs) | set(brute_subs))
             result["subdomains"] = subs
+            await self.log(
+                f"{len(subs)} unique subdomains "
+                f"(crt.sh {len(ct_subs)}, subfinder {len(osint_subs)}, brute {len(brute_subs)})",
+                "success" if subs else "warn",
+            )
 
-        if subs:
-            result["subdomain_categories"] = self._categorize_subdomains(subs)
-            await self._flag_sensitive_subdomains(domain, result["subdomain_categories"])
+            # Apply scope rules if provided
+            if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+                filtered = self._apply_scope(subs, scope_rules)
+                removed = len(subs) - len(filtered)
+                if removed:
+                    await self.log(f"Scope filter: removed {removed} out-of-scope subdomains", "info")
+                subs = filtered
+                result["subdomains"] = subs
 
-        await self.log("DNS record enumeration (A, MX, TXT, NS, SOA)", "info")
-        result["dns_records"] = await self._dns_enum(domain)
+            if subs:
+                result["subdomain_categories"] = self._categorize_subdomains(subs)
+                await self._flag_sensitive_subdomains(domain, result["subdomain_categories"])
 
-        all_hosts = list(set(subs + [domain]))
+            await self.log("DNS record enumeration (A, MX, TXT, NS, SOA)", "info")
+            result["dns_records"] = await self._dns_enum(domain)
+
+            all_hosts = list(dict.fromkeys(subs + [domain]))
         if all_hosts:
             await self.log(f"Probing {len(all_hosts)} hosts for liveness", "info")
-            live = await self._live_detection(all_hosts[:150], explicit_port=_port)
+            if cidr_hosts:
+                # Sweep the whole range (no [:150] cap — the operator asked for it).
+                live = await self._httpx_probe(all_hosts)
+                if not live:
+                    live = await self._live_detection(all_hosts)
+            elif _port:
+                # Preserve the explicit host:port probe path (e.g. local Juice Shop).
+                live = await self._live_detection(all_hosts[:150], explicit_port=_port)
+            else:
+                live = await self._httpx_probe(all_hosts[:2000])
+                if not live:
+                    live = await self._live_detection(all_hosts[:150])
+
+            # Explicit host:port target: always scan exactly that URL, even if the
+            # liveness probe could not confirm it. Pointing Yggdrasil at host:port must
+            # test host:port on the right scheme — never silently drop the port and
+            # fall back to https://host, which is how a live app reads as "0 hosts".
+            if _port and not cidr_hosts:
+                netloc = f"{_host}:{_port}"
+                if not any(h.get("host") == netloc for h in live):
+                    scheme = "https" if _port in (443, 8443) else "http"
+                    live.insert(0, {
+                        "host": netloc, "url": f"{scheme}://{netloc}",
+                        "status_code": None, "server": "", "unverified": True,
+                    })
+                    await self.log(
+                        f"⚠ Liveness unconfirmed for {netloc} — scanning it anyway over "
+                        f"{scheme}. If the report stays empty the scanner container cannot "
+                        f"reach it (app bound to localhost? different Docker network?).", "warn")
+
             if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
                 live = self._apply_scope(live, scope_rules)
             result["live_hosts"] = live
-            await self.log(f"{len(result['live_hosts'])} live hosts confirmed (scope-filtered)", "success")
+            if result["live_hosts"]:
+                await self.log(f"{len(result['live_hosts'])} live hosts confirmed", "success")
+            elif cidr_hosts:
+                await self.log(
+                    f"No live web hosts found across {target} ({len(all_hosts)} IPs swept). "
+                    "The range may have no HTTP/S services, or they are firewalled.", "warn")
+            else:
+                await self.log(
+                    "⚠ 0 live hosts confirmed — target appears unreachable from the scanner "
+                    "container. The report will be near-empty; this is a connectivity problem, "
+                    "not a clean target.", "warn")
 
         if result["live_hosts"]:
             await self.log("Technology fingerprinting on live hosts", "info")
             result["technologies"] = await self._fingerprint(result["live_hosts"])
+            await self._check_takeovers([h.get("host", "") for h in result["live_hosts"]])
+
+        # Network sweep: for a CIDR range, the web-liveness probe above only sees
+        # HTTP/S hosts. Run an nmap host-discovery + light service scan so boxes that
+        # expose only SSH/RDP/SMB/a database (no web server) are still found + reported.
+        if cidr_hosts:
+            result["network_hosts"] = await self._nmap_network_sweep(
+                cidr_hosts, target, web_live=result["live_hosts"]
+            )
 
         result["vendors"] = self._extract_vendors(result["dns_records"].get("TXT", []))
         if result["vendors"]:
@@ -220,7 +365,7 @@ class Hermes(BaseAgent):
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(
                     f"https://crt.sh/?q=%.{domain}&output=json",
-                    headers={"User-Agent": "Yggdrasil-Heimdall/1.0"},
+                    headers={"User-Agent": "YGGDRASIL-Hermes/1.0"},
                 )
                 if r.status_code == 200:
                     for entry in r.json():
@@ -231,6 +376,268 @@ class Hermes(BaseAgent):
         except Exception as e:
             await self.log(f"crt.sh query failed: {e}", "warn")
         return sorted(list(subs))
+
+    async def _subfinder(self, domain: str) -> list:
+        """Multi-source passive subdomain enumeration (30+ OSINT sources)."""
+        stdout, _, rc = await self.run_command(
+            ["subfinder", "-d", domain, "-silent", "-all"], timeout=180
+        )
+        if rc == 127:
+            await self.log("subfinder not installed; OSINT enum skipped", "warn")
+            return []
+        subs = set()
+        for line in stdout.splitlines():
+            s = line.strip().lower().lstrip("*.")
+            if s and "*" not in s and len(s) < 253 and (s == domain or s.endswith(f".{domain}")):
+                subs.add(s)
+        if subs:
+            await self.log(f"subfinder: {len(subs)} subdomains from OSINT sources", "info")
+        return sorted(subs)
+
+    async def _dns_bruteforce(self, domain: str, cap: int = 1500) -> list:
+        """Resolve a capped slice of the DNS wordlist to surface hosts no OSINT
+        source knows about. Wildcard-DNS aware so it does not flood false hits."""
+        import secrets as _secrets
+
+        wl = "/opt/wordlists/subdomains-top20000.txt"
+        if not os.path.exists(wl):
+            return []
+        try:
+            with open(wl, "r", errors="replace") as f:
+                words = [w.strip() for w in f if w.strip() and not w.startswith("#")][:cap]
+        except OSError:
+            return []
+        if not words:
+            return []
+
+        loop = asyncio.get_running_loop()
+        # Wildcard guard: if a random label resolves, only accept hits that
+        # resolve to a different address than the wildcard.
+        wildcard_ips = set()
+        try:
+            res = await loop.getaddrinfo(f"{_secrets.token_hex(6)}.{domain}", None)
+            wildcard_ips = {r[4][0] for r in res}
+        except Exception:
+            pass
+
+        sem = asyncio.Semaphore(100)
+
+        async def resolve(w):
+            host = f"{w}.{domain}"
+            async with sem:
+                try:
+                    res = await loop.getaddrinfo(host, None)
+                except Exception:
+                    return None
+            ips = {r[4][0] for r in res}
+            return host if ips and not ips.issubset(wildcard_ips) else None
+
+        results = await asyncio.gather(*[resolve(w) for w in words], return_exceptions=True)
+        found = [r for r in results if isinstance(r, str)]
+        if found:
+            await self.log(f"DNS brute: {len(found)} resolvable subdomains from {len(words)} candidates", "info")
+        return found
+
+    async def _httpx_probe(self, hosts: list) -> list:
+        """Liveness + fingerprint via the httpx binary: status, title, tech, CDN."""
+        import json as _json
+        import tempfile
+
+        if not hosts:
+            return []
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(hosts))
+            tmp = f.name
+        live = []
+        try:
+            stdout, _, rc = await self.run_command(
+                ["httpx", "-l", tmp, "-json", "-silent", "-follow-redirects",
+                 "-title", "-tech-detect", "-cdn", "-timeout", "8", "-rl", "150", "-nc"],
+                timeout=300,
+            )
+            if rc == 127:
+                await self.log("httpx binary not available; using library probe", "warn")
+                return []
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    j = _json.loads(line)
+                except Exception:
+                    continue
+                host = re.sub(r"^https?://", "", (j.get("input") or j.get("host") or "")).split("/")[0]
+                if not host:
+                    continue
+                live.append({
+                    "host": host,
+                    "url": j.get("url") or f"https://{host}",
+                    "status_code": j.get("status_code"),
+                    "server": j.get("webserver", ""),
+                    "x_powered_by": "",
+                    "content_length": j.get("content_length", 0),
+                    "final_url": j.get("url") or "",
+                    "title": j.get("title", ""),
+                    "tech": j.get("tech", []) or [],
+                    "cdn": j.get("cdn_name", ""),
+                    "headers": {},
+                })
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if live:
+            await self.log(f"httpx: {len(live)} live hosts fingerprinted", "info")
+        return live
+
+    async def _nmap_network_sweep(self, hosts: list, target: str, web_live: list = None) -> list:
+        """nmap host discovery + curated service scan across a CIDR's IPs. Surfaces
+        non-web hosts (SSH/RDP/SMB/DB) the web-liveness probe never sees, and flags
+        exposed remote-access / database services. Returns an inventory list of
+        {ip, status, ports:[...]}. Service findings for web-host IPs are left to ARES
+        (which deep-scans them) to avoid double-reporting; the inventory lists them."""
+        # Arg-safety: IPs from expand_cidr never start with '-', but filter anyway so
+        # nothing can be parsed as an nmap flag.
+        host_args = [h for h in dict.fromkeys(hosts) if h and not h.startswith("-")]
+        if not host_args:
+            return []
+
+        await self.log(
+            f"Network sweep: nmap host discovery + service scan across {len(host_args)} IP(s) "
+            f"in {target} (finds SSH/RDP/SMB/DB, not just web)", "info")
+
+        # -sT (TCP connect) needs no root; -sV --version-light grabs service banners;
+        # default host discovery still marks a host Up even with no open port in our
+        # set; --host-timeout stops a firewalled host from stalling the whole sweep.
+        stdout, stderr, rc = await self.run_command(
+            ["nmap", "-sT", "-sV", "--version-light", "-T4", "-n", "--open",
+             "--host-timeout", "60s", "-oG", "-", "-p", NETWORK_SWEEP_PORTS] + host_args,
+            timeout=900,
+        )
+        if rc == 127:
+            await self.log(
+                "nmap not available; network sweep skipped (web hosts already covered)", "warn")
+            return []
+        if not stdout:
+            await self.log(f"Network sweep produced no output ({stderr[:160]})", "warn")
+            return []
+
+        parsed = parse_nmap_greppable(stdout)
+        inventory = [
+            {"ip": ip, "status": "up", "ports": sorted(d.get("ports", []), key=lambda p: p["port"])}
+            for ip, d in sorted(parsed.items()) if d.get("status") == "up"
+        ]
+        if not inventory:
+            await self.log("Network sweep: no additional live hosts found", "info")
+            return []
+
+        with_ports = sum(1 for h in inventory if h["ports"])
+        await self.log(
+            f"Network sweep: {len(inventory)} live host(s), {with_ports} exposing scanned services",
+            "success")
+        await self._report_network_services(inventory, target, web_live or [])
+        return inventory
+
+    async def _report_network_services(self, inventory: list, target: str, web_live: list) -> None:
+        """Emit grouped findings for exposed non-web services + one inventory summary.
+        Web-host IPs are excluded from the service findings (ARES reports those); the
+        inventory summary still lists every discovered host for completeness."""
+        web_ips = {(h.get("host", "") or "").split(":")[0] for h in web_live}
+
+        # Group risky services across non-web hosts: one finding per service type, not
+        # one per host — a /24 sweep must not spawn hundreds of near-identical findings.
+        by_service: dict = {}   # port -> list[ip]
+        for host in inventory:
+            if host["ip"] in web_ips:
+                continue
+            for p in host["ports"]:
+                if p["port"] in NETWORK_SERVICE_RISK:
+                    by_service.setdefault(p["port"], []).append(host["ip"])
+
+        for port in sorted(by_service):
+            ips = by_service[port]
+            name, sev, cvss, desc = NETWORK_SERVICE_RISK[port]
+            verb = "Reachable" if sev == "info" else "Exposed"
+            await self.add_finding(
+                title=f"{name} {verb} on {len(ips)} host(s) ({target})",
+                severity=sev,
+                description=f"{desc} Found on port {port}/tcp during the network sweep.",
+                evidence=", ".join(f"{ip}:{port}" for ip in ips[:25]),
+                cvss_score=cvss if cvss else None,
+                remediation=(
+                    f"Confirm {name} exposure is intended; restrict port {port} to trusted "
+                    "management networks / VPN and require authentication."),
+            )
+
+        # Inventory summary so every discovered host lands in the report even if its
+        # services aren't individually risk-flagged (never hide recon results).
+        lines = []
+        for host in inventory:
+            if host["ports"]:
+                svc = ", ".join(f"{p['port']}/{p['service']}" for p in host["ports"][:12])
+            else:
+                svc = "up (no scanned service ports open)"
+            lines.append(f"{host['ip']}: {svc}")
+        await self.add_finding(
+            title=f"Network Sweep Inventory — {len(inventory)} live host(s) in {target}",
+            severity="info",
+            description=(
+                f"nmap host discovery across {target} found {len(inventory)} live host(s). "
+                "This is the network-layer attack surface; web hosts are also assessed by ARES."),
+            evidence="\n".join(lines[:100]),
+            remediation="Review each exposed service; decommission or firewall anything not required.",
+        )
+
+    async def _check_takeovers(self, hosts: list) -> None:
+        """Flag dangling subdomains (CNAME to an unclaimed service) via nuclei."""
+        import json as _json
+        import tempfile
+
+        hosts = [h for h in hosts if h][:200]
+        if not hosts:
+            return
+        await self.log(f"Checking {len(hosts)} hosts for subdomain takeover", "info")
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(hosts))
+            tmp = f.name
+        count = 0
+        try:
+            stdout, _, rc = await self.run_command(
+                ["nuclei", "-l", tmp, "-tags", "takeover", "-jsonl", "-silent",
+                 "-timeout", "10", "-rl", "50", "-nc"],
+                timeout=240,
+            )
+            if rc == 127:
+                await self.log("nuclei not available; takeover check skipped", "warn")
+                return
+            for line in stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    j = _json.loads(line)
+                except Exception:
+                    continue
+                info = j.get("info", {})
+                matched = j.get("matched-at") or j.get("host", "")
+                count += 1
+                await self.add_finding(
+                    title=f"Subdomain Takeover: {matched}",
+                    severity="high",
+                    description=(info.get("description")
+                                 or "A subdomain points via CNAME to an unclaimed third-party service. "
+                                    "An attacker can register that resource and serve content under your domain."),
+                    evidence=f"Host: {matched}\nTemplate: {j.get('template-id', '')}",
+                    cvss_score=8.1,
+                    remediation="Remove the dangling DNS record or reclaim the third-party resource it points to.",
+                )
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        await self.log(f"Takeover check complete: {count} finding(s)", "success" if count else "info")
 
     async def _dns_enum(self, domain: str) -> dict:
         records = {}
@@ -418,7 +825,7 @@ class Hermes(BaseAgent):
     async def _fingerprint(self, live_hosts: list) -> dict:
         tech_map = {}
         for h in live_hosts:
-            techs = []
+            techs = list(h.get("tech", []) or [])  # from httpx tech-detect
             if h.get("server"):
                 techs.append(h["server"])
             if h.get("x_powered_by"):

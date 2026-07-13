@@ -51,6 +51,11 @@ Copy `.env.example` to `.env` if present, then set what you need.
 | `DB_NAME` | PostgreSQL database name. Defaults to `yggdrasil`. |
 | `YGGDRASIL_API_KEY` | Optional API key for `/api` and `/ws`. |
 | `OLYMPUS_API_KEY` | Backward-compatible fallback for existing installs. |
+| `YGGDRASIL_AUTO_APPROVE` | Optional global pre-authorization for all HITL gates. Prefer the per-mission launch switch. |
+| `YGGDRASIL_APPROVAL_TIMEOUT` | `0` waits indefinitely. Positive seconds auto-denies after timeout. |
+| `YGGDRASIL_OFFENSIVE_MAX_HOSTS` | Active scan host cap. Defaults to `5`. |
+| `YGGDRASIL_CIDR_MAX_HOSTS` | CIDR expansion cap. Defaults to `1024`. |
+| `YGGDRASIL_HEARTBEAT_SECONDS` | Mission heartbeat interval. Defaults to `300`; `0` disables. |
 | `AI_PROVIDER` | `anthropic` or `openrouter`. |
 | `AI_API_KEY` | Enables Frigg strategy enrichment and Saga summaries. |
 | `AI_MODEL` | Optional model override. |
@@ -69,7 +74,7 @@ Approval gates do not auto-deny or auto-continue. They wait until an operator ex
 
 ## Mission Health
 
-Running assessments publish a one-minute heartbeat. The mission header shows the last function check, the active stage, and the current hold-up. The activity feed also receives heartbeat entries during long scans, so a quiet scan is distinguishable from a failed or stuck backend.
+Running assessments publish a five-minute heartbeat by default. The mission header shows the last function check, the active stage, and the current hold-up. The activity feed also receives heartbeat entries during long scans, so a quiet scan is distinguishable from a failed or stuck backend.
 
 ## Scope
 

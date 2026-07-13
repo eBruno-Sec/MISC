@@ -1,9 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
-import type { Mission, LogEntry, Finding, ApprovalRequest, MissionStatus, MissionNote, WSEvent, LiveHost, MissionHealth } from '../types'
-import { AGENT_ORDER, agentMeta, type AgentDef } from '../brand'
+import type { Mission, LogEntry, Finding, ApprovalRequest, MissionStatus, MissionNote, WSEvent, LiveHost } from '../types'
 import GodStatus from './GodStatus'
 import TerminalFeed from './TerminalFeed'
 import FindingsPanel from './FindingsPanel'
@@ -11,22 +10,22 @@ import ApprovalGate from './ApprovalGate'
 import TargetsPanel from './TargetsPanel'
 import NotesPanel from './NotesPanel'
 import RerunModal from './RerunModal'
+import WordlistsPanel from './WordlistsPanel'
+import SurfacePanel from './SurfacePanel'
 import WorkbenchPanel from './WorkbenchPanel'
+import AccessCheckPanel from './AccessCheckPanel'
+import TopologyPanel from './TopologyPanel'
 
 const STATUS_COLOR: Record<string, string> = {
-  pending: 'var(--text-dim)',
-  planning: 'var(--accent)',
-  recon: 'var(--accent)',
-  scanning: 'var(--gold)',
-  exploiting: 'var(--accent2)',
-  post_exploit: 'var(--accent2)',
-  reporting: 'var(--accent3)',
-  complete: 'var(--accent3)',
-  awaiting_approval: 'var(--gold)',
-  failed: 'var(--crit)',
+  pending: 'var(--text-dim)', planning: 'var(--accent)', recon: 'var(--accent)',
+  scanning: 'var(--gold)', exploiting: 'var(--accent2)', post_exploit: 'var(--accent2)',
+  reporting: 'var(--accent3)', complete: 'var(--accent3)',
+  awaiting_approval: 'var(--gold)', failed: 'var(--crit)',
 }
 
-type Tab = 'terminal' | 'targets' | 'workbench' | 'notes'
+type Tab = 'terminal' | 'targets' | 'notes' | 'wordlists' | 'surface' | 'workbench' | 'access' | 'topology'
+
+interface GodDef { key: string; name: string; symbol: string; role: string }
 
 export default function MissionControl() {
   const { id } = useParams<{ id: string }>()
@@ -41,12 +40,11 @@ export default function MissionControl() {
   const [currentPhase, setCurrentPhase] = useState<string | null>(null)
   const [completedPhases, setCompletedPhases] = useState<Set<string>>(new Set())
   const [liveHosts, setLiveHosts] = useState<LiveHost[]>([])
-  const [missionHealth, setMissionHealth] = useState<MissionHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('terminal')
-  const [rerunAgent, setRerunAgent] = useState<AgentDef | null>(null)
-  const backupFileRef = useRef<HTMLInputElement>(null)
-  const [importingBackup, setImportingBackup] = useState(false)
+  const [rerunGod, setRerunGod] = useState<GodDef | null>(null)
+  const [reportAvailable, setReportAvailable] = useState(true)
+  const [reportError, setReportError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -62,21 +60,14 @@ export default function MissionControl() {
       setCurrentPhase(terminal ? null : m.current_phase)
 
       const hosts: LiveHost[] = m.context?.hermes?.live_hosts || []
-      const activeTargets: LiveHost[] = (m.context?.ares?.active_targets || []).map((t: any) => ({
-        host: t.host,
-        url: t.url,
-        status_code: t.status_code ?? null,
-        server: t.source === 'primary_fallback' ? 'Primary target fallback scanned by Tyr' : 'Scanned by Tyr',
-        manually_added: t.source === 'manual',
-      }))
-      setLiveHosts(hosts.length ? hosts : activeTargets)
-      setMissionHealth(m.context?.mission_health || null)
+      setLiveHosts(hosts)
 
+      const phaseOrder = ['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']
       const phases = new Set<string>()
       if (m.status === 'complete') {
-        AGENT_ORDER.forEach(p => { if (m.context?.[p]) phases.add(p) })
+        phaseOrder.forEach(p => { if (m.context?.[p]) phases.add(p) })
       } else if (m.current_phase) {
-        AGENT_ORDER.slice(0, AGENT_ORDER.indexOf(m.current_phase)).forEach(p => phases.add(p))
+        phaseOrder.slice(0, phaseOrder.indexOf(m.current_phase)).forEach(p => phases.add(p))
       }
       setCompletedPhases(phases)
     } catch {}
@@ -84,12 +75,6 @@ export default function MissionControl() {
   }, [id])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    if (!id || ['complete', 'failed'].includes(status)) return
-    const timer = window.setInterval(load, 3000)
-    return () => window.clearInterval(timer)
-  }, [id, status, load])
 
   const onWsEvent = useCallback((event: WSEvent) => {
     switch (event.type) {
@@ -108,31 +93,26 @@ export default function MissionControl() {
       case 'status_change':
         setStatus(event.status)
         if (event.status === 'complete' || event.status === 'failed') {
+          // Terminal state: clear the active phase so no god card stays stuck on RUNNING
           setCurrentPhase(null)
           load()
           break
         }
         if (event.phase) {
           setCurrentPhase(event.phase)
+          const phaseOrder = ['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']
           setCompletedPhases(prev => {
-            const next = new Set(prev)
-            AGENT_ORDER.slice(0, AGENT_ORDER.indexOf(event.phase!)).forEach(p => next.add(p))
-            return next
+            const n = new Set(prev)
+            phaseOrder.slice(0, phaseOrder.indexOf(event.phase!)).forEach(p => n.add(p))
+            return n
           })
         }
         break
       case 'approval_required':
-        setStatus('awaiting_approval')
-        setCurrentPhase(event.agent)
-        setApprovals(prev => (
-          prev.some(a => a.id === event.approval_id)
-            ? prev
-            : [...prev, { id: event.approval_id, agent: event.agent, action: event.action, description: event.description, created_at: event.timestamp }]
-        ))
+        setApprovals(prev => [...prev, { id: event.approval_id, agent: event.agent, action: event.action, description: event.description, created_at: event.timestamp }])
         break
       case 'approval_resolved':
         setApprovals(prev => prev.filter(a => a.id !== event.approval_id))
-        load()
         break
       case 'targets_added':
         load()
@@ -145,20 +125,46 @@ export default function MissionControl() {
         setCurrentPhase(event.agent)
         break
       case 'mission_complete':
-      case 'mission_failed':
+        setReportAvailable(event.report_available ?? Boolean(event.report_path))
+        setReportError(event.report_error || null)
         setCurrentPhase(null)
-        setCompletedPhases(new Set(AGENT_ORDER))
+        setCompletedPhases(new Set(['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']))
         load()
         break
-      case 'mission_heartbeat':
-        setMissionHealth(event.health)
+      case 'mission_failed':
+        setCurrentPhase(null)
+        setCompletedPhases(new Set(['zeus', 'athena', 'hermes', 'ares', 'hephaestus', 'hades', 'apollo']))
+        load()
         break
     }
   }, [load])
 
   useWebSocket(id || null, onWsEvent)
 
-  const handleRerun = async (agent: AgentDef, targets?: string[], options?: object) => {
+  const downloadSession = () => {
+    if (!mission) return
+    const snap = {
+      version: '1',
+      platform: 'YGGDRASIL',
+      exported_at: new Date().toISOString(),
+      mission,
+      findings,
+      logs: logs.slice(-500),
+      notes,
+      status,
+      current_phase: currentPhase,
+      live_hosts: liveHosts,
+    }
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `YGGDRASIL_backup_${new Date().toISOString().split('T')[0]}_${mission.id.slice(0, 8).toUpperCase()}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const handleRerun = async (agent: GodDef, targets?: string[], options?: object) => {
     if (!id) return
     try {
       await api.rerunAgent(id, agent.key, targets, options)
@@ -167,88 +173,35 @@ export default function MissionControl() {
     }
   }
 
-  const handleBackupImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      alert('Backup file is too large. Maximum size is 2 MB.')
-      return
-    }
-    setImportingBackup(true)
-    try {
-      const payload = JSON.parse(await file.text())
-      const summary = await api.summarizeBackup(payload)
-      const confirmed = confirm(
-        `Import workspace backup?\n\nTarget: ${summary.target}\nMode: ${summary.mode}\nFindings: ${summary.findings}\nNotes: ${summary.notes}\nHTTP exchanges: ${summary.http_exchanges}\n\nImport creates a new assessment and does not overwrite this one.`
-      )
-      if (!confirmed) return
-      const imported = await api.importBackup(payload)
-      navigate(`/mission/${imported.id}`)
-    } catch (err: any) {
-      alert(err?.message || 'Backup import failed')
-    } finally {
-      setImportingBackup(false)
-    }
-  }
-
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', color: 'var(--text-dim)', fontSize: '0.9rem' }}>
-      Loading assessment...
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', color: 'var(--text-dim)', fontSize: '0.8rem' }}>
+      Loading mission...
     </div>
   )
-
   if (!mission) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', color: 'var(--accent2)', fontSize: '0.9rem' }}>
-      Assessment not found.
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', color: 'var(--accent2)', fontSize: '0.8rem' }}>
+      Mission not found.{' '}
       <button onClick={() => navigate('/')} style={{ color: 'var(--accent)', marginLeft: '1rem', cursor: 'pointer' }}>Back</button>
     </div>
   )
 
   const isLive = !['complete', 'failed'].includes(status)
   const color = STATUS_COLOR[status] || 'var(--text-dim)'
-  const heartbeatAge = missionHealth?.last_heartbeat_at
-    ? Math.max(0, Math.floor((Date.now() - new Date(missionHealth.last_heartbeat_at).getTime()) / 1000))
-    : null
-  const heartbeatLabel = !isLive
-    ? 'Finished'
-    : heartbeatAge === null
-      ? 'Starting'
-      : heartbeatAge <= 90
-        ? 'Live'
-        : heartbeatAge <= 180
-          ? 'Delayed'
-          : 'Check logs'
-  const heartbeatColor = heartbeatLabel === 'Live'
-    ? 'var(--accent3)'
-    : heartbeatLabel === 'Delayed'
-      ? 'var(--gold)'
-      : heartbeatLabel === 'Check logs'
-        ? 'var(--accent2)'
-        : 'var(--text-dim)'
-
-  const formatDuration = (seconds?: number | null) => {
-    if (seconds === undefined || seconds === null) return '0s'
-    const safe = Math.max(0, Math.floor(seconds))
-    const mins = Math.floor(safe / 60)
-    const secs = safe % 60
-    const hrs = Math.floor(mins / 60)
-    if (hrs > 0) return `${hrs}h ${mins % 60}m`
-    if (mins > 0) return `${mins}m ${secs}s`
-    return `${secs}s`
-  }
 
   const TabBtn = ({ id, label, count }: { id: Tab; label: string; count?: number }) => (
     <button
+      role="tab"
+      aria-selected={tab === id}
+      aria-controls="mc-tabpanel"
+      className="touch-target"
       onClick={() => setTab(id)}
       style={{
-        fontSize: '0.82rem',
-        padding: '0.65rem 0.9rem',
-        border: '1px solid',
-        borderColor: tab === id ? 'var(--accent)' : 'transparent',
-        background: tab === id ? 'var(--accent-dim)' : 'transparent',
+        fontSize: '0.68rem', letterSpacing: '0.15em', padding: '0.5rem 1rem',
+        border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+        borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent',
+        background: tab === id ? 'var(--accent-dim)' : 'var(--surface)',
         color: tab === id ? 'var(--accent)' : 'var(--text-dim)',
-        fontWeight: 750,
+        transition: 'all 0.1s',
       }}
     >
       {label}{count !== undefined ? ` (${count})` : ''}
@@ -257,151 +210,107 @@ export default function MissionControl() {
 
   const critCount = findings.filter(f => f.severity === 'critical' && f.tag !== 'false_positive').length
   const highCount = findings.filter(f => f.severity === 'high' && f.tag !== 'false_positive').length
-  const apolloResult = mission.context?.apollo || {}
-  const reportError = typeof apolloResult.report_error === 'string' && apolloResult.report_error ? apolloResult.report_error : ''
-  const reportAvailable = Boolean(apolloResult.report_path) && !reportError
-  const reportMissing = status === 'complete' && !reportAvailable
 
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
-        <div style={{
-          padding: '0.9rem 1.25rem',
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="eyebrow" style={{ marginBottom: '0.25rem' }}>
-              {mission.id.slice(0, 8).toUpperCase()} - {mission.mode.toUpperCase()} - {new Date(mission.created_at).toLocaleDateString()}
+      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)' }}>
+
+        {/* Mission header */}
+        <div style={{ padding: '0.75rem 1.5rem', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: '0.62rem', letterSpacing: '0.2em', color: 'var(--text-dim)', marginBottom: '0.2rem' }}>
+              {mission.id.slice(0, 8).toUpperCase()} · {mission.mode.toUpperCase()} · {new Date(mission.created_at).toLocaleDateString()}
             </div>
-            <div style={{ fontSize: '1.22rem', fontWeight: 850, color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {mission.target}
-            </div>
+            <div style={{ fontFamily: 'var(--display)', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-bright)' }}>{mission.target}</div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {/* Severity summary */}
             {(critCount > 0 || highCount > 0) && (
-              <div style={{ display: 'flex', gap: '0.45rem' }}>
-                {critCount > 0 && <span style={{ fontSize: '0.78rem', padding: '0.28rem 0.55rem', background: 'rgba(180,35,53,0.10)', border: '1px solid rgba(180,35,53,0.26)', borderRadius: '999px', color: 'var(--crit)', fontWeight: 750 }}>{critCount} critical</span>}
-                {highCount > 0 && <span style={{ fontSize: '0.78rem', padding: '0.28rem 0.55rem', background: 'rgba(198,83,72,0.10)', border: '1px solid rgba(198,83,72,0.26)', borderRadius: '999px', color: 'var(--high)', fontWeight: 750 }}>{highCount} high</span>}
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {critCount > 0 && <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', background: 'rgba(255,0,64,0.12)', border: '1px solid rgba(255,0,64,0.3)', color: 'var(--crit)' }}>{critCount} CRIT</span>}
+                {highCount > 0 && <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', background: 'rgba(255,61,107,0.12)', border: '1px solid rgba(255,61,107,0.3)', color: 'var(--high)' }}>{highCount} HIGH</span>}
               </div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color }}>
+            {/* Status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color }}>
               {isLive && <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: color, animation: 'pulse-border 1.5s ease infinite', display: 'inline-block' }} />}
-              <span style={{ fontSize: '0.82rem', fontWeight: 800 }}>{status.replace('_', ' ')}</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.1em' }}>{status.toUpperCase().replace('_', ' ')}</span>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.78rem', padding: '0.42rem 0.68rem', border: '1px solid var(--border2)', borderRadius: '999px', color: 'var(--text-dim)', background: 'var(--surface)', textDecoration: 'none' }} title="Export CSV">CSV</a>
-              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.78rem', padding: '0.42rem 0.68rem', border: '1px solid var(--border2)', borderRadius: '999px', color: 'var(--text-dim)', background: 'var(--surface)', textDecoration: 'none' }} title="Export JSON">JSON</a>
-              <a href={api.backupUrl(mission.id)} download style={{ fontSize: '0.78rem', padding: '0.42rem 0.68rem', border: '1px solid var(--border2)', borderRadius: '999px', color: 'var(--accent)', background: 'var(--surface)', textDecoration: 'none', fontWeight: 750 }}>
-                Download Workspace Backup (.json)
-              </a>
-              <input ref={backupFileRef} type="file" accept="application/json,.json" onChange={handleBackupImport} style={{ display: 'none' }} />
+            {/* Export */}
+            <div style={{ display: 'flex', gap: '1px' }}>
+              <a href={api.exportUrl(mission.id, 'csv')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as CSV">CSV</a>
+              <a href={api.exportUrl(mission.id, 'json')} download style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.65rem', border: '1px solid var(--border2)', color: 'var(--text-dim)', textDecoration: 'none' }} title="Export findings as JSON">JSON</a>
               <button
-                onClick={() => backupFileRef.current?.click()}
-                disabled={importingBackup}
-                style={{ fontSize: '0.78rem', padding: '0.42rem 0.68rem', border: '1px solid var(--border2)', borderRadius: '999px', color: 'var(--accent)', background: 'var(--surface)', fontWeight: 750 }}
+                onClick={downloadSession}
+                title="Download full workspace backup as JSON"
+                aria-label="Download workspace backup"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.1em', padding: '0.35rem 0.75rem', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)', cursor: 'pointer' }}
               >
-                {importingBackup ? 'Importing...' : 'Import Workspace Backup (.json)'}
+                BACKUP
               </button>
             </div>
 
+            {/* Report */}
             {status === 'complete' && reportAvailable && (
-              <a href={api.getReportUrl(mission.id)} target="_blank" rel="noopener noreferrer" className="primary-action" style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem' }}>
-                Report
+              <a href={api.getReportUrl(mission.id)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.72rem', letterSpacing: '0.12em', padding: '0.35rem 0.9rem', background: 'var(--accent3)', color: 'var(--bg)', fontFamily: 'var(--display)', fontWeight: 700, textDecoration: 'none' }}>
+                REPORT
               </a>
             )}
-            {reportMissing && (
+            {status === 'complete' && !reportAvailable && reportError && (
               <button
-                onClick={() => handleRerun(agentMeta('apollo'))}
-                style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', border: '1px solid rgba(184,129,54,0.35)', background: 'var(--gold-dim)', color: 'var(--gold)', fontWeight: 800 }}
-                title={reportError || 'Report is not available. Rerun Saga to retry report generation.'}
+                onClick={() => handleRerun({ key: 'apollo', name: 'APOLLO', symbol: '', role: 'Reporting & Risk Analysis' })}
+                title={reportError}
+                style={{ fontSize: '0.72rem', letterSpacing: '0.12em', padding: '0.35rem 0.9rem', background: 'var(--accent2-dim)', color: 'var(--accent2)', border: '1px solid var(--accent2)', fontFamily: 'var(--display)', fontWeight: 700, cursor: 'pointer' }}
               >
-                Retry Report
+                RETRY REPORT
               </button>
             )}
           </div>
         </div>
 
-        {isLive && (
-          <div style={{
-            padding: '0.55rem 1.25rem',
-            background: 'var(--surface2)',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            flexWrap: 'wrap',
-            fontSize: '0.8rem',
-            color: 'var(--text-dim)',
-            flexShrink: 0,
-          }}>
-            <span className="eyebrow" style={{ color: 'var(--text-dim)' }}>Function Check</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: heartbeatColor, fontWeight: 800 }}>
-              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: heartbeatColor, display: 'inline-block' }} />
-              {heartbeatLabel}
-            </span>
-            <span>
-              Last check: {heartbeatAge === null ? 'waiting for first 60s heartbeat' : `${formatDuration(heartbeatAge)} ago`}
-            </span>
-            <span style={{ color: 'var(--text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '720px' }}>
-              {missionHealth?.message || 'Yggdrasil is starting the mission monitor.'}
-            </span>
-          </div>
-        )}
-
-        {reportMissing && (
-          <div style={{
-            padding: '0.65rem 1.25rem',
-            background: 'var(--gold-dim)',
-            borderBottom: '1px solid rgba(184,129,54,0.25)',
-            color: 'var(--text)',
-            fontSize: '0.82rem',
-            lineHeight: 1.55,
-            flexShrink: 0,
-          }}>
-            <strong style={{ color: 'var(--gold)' }}>Report unavailable.</strong>{' '}
-            {reportError || 'Saga did not produce an HTML report.'} Use Retry Report to regenerate it from the preserved findings and evidence.
-          </div>
-        )}
-
+        {/* God status bar */}
         <div style={{ flexShrink: 0 }}>
           <GodStatus
             currentPhase={currentPhase}
             status={status}
             completedPhases={completedPhases}
-            onRerun={setRerunAgent}
+            onRerun={setRerunGod}
           />
         </div>
 
-        <div className="mission-workspace-grid">
-          <section className="soft-panel" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', padding: '0.55rem', gap: '0.35rem', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-              <TabBtn id="terminal" label="Activity" />
-              <TabBtn id="targets" label="Targets" count={liveHosts.length} />
-              <TabBtn id="workbench" label="Workbench" />
-              <TabBtn id="notes" label="Notes" count={notes.length || undefined} />
+        {/* Main layout: left panel (tabs) + right panel (findings).
+            .mc-main-grid owns the 60/40 columns so a media query can collapse
+            it to stacked rows on mobile (see index.css). */}
+        <div className="mc-main-grid">
+
+          {/* Left panel */}
+          <div className="mc-left-panel" style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {/* Tab bar */}
+            <div className="tab-strip" role="tablist" aria-label="Mission panels" style={{ display: 'flex', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <TabBtn id="terminal" label="TERMINAL" />
+              <TabBtn id="targets" label="TARGETS" count={liveHosts.length} />
+              <TabBtn id="notes" label="NOTES" count={notes.length || undefined} />
+              <TabBtn id="wordlists" label="WORDLISTS" />
+              <TabBtn id="surface" label="SURFACE" />
+              <TabBtn id="workbench" label="WORKBENCH" />
+              <TabBtn id="access" label="ACCESS" />
+              <TabBtn id="topology" label="TOPOLOGY" />
             </div>
 
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div id="mc-tabpanel" role="tabpanel" aria-label={`${tab} panel`} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {tab === 'terminal' && <TerminalFeed logs={logs} />}
               {tab === 'targets' && (
                 <TargetsPanel
                   missionId={mission.id}
                   liveHosts={liveHosts}
-                  onAgentRerun={(agent, targets) => handleRerun(agentMeta(agent), targets)}
+                  onAgentRerun={(agent, targets) => {
+                    const god = { key: agent, name: agent.toUpperCase(), symbol: '', role: '' }
+                    handleRerun(god, targets)
+                  }}
                 />
-              )}
-              {tab === 'workbench' && (
-                <WorkbenchPanel missionId={mission.id} target={mission.target} />
               )}
               {tab === 'notes' && (
                 <NotesPanel
@@ -410,10 +319,36 @@ export default function MissionControl() {
                   onDelete={noteId => setNotes(prev => prev.filter(n => n.id !== noteId))}
                 />
               )}
+              {tab === 'wordlists' && (
+                <div style={{ overflow: 'auto' }}>
+                  <WordlistsPanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'surface' && (
+                <div style={{ overflow: 'auto' }}>
+                  <SurfacePanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'workbench' && (
+                <div style={{ overflow: 'auto' }}>
+                  <WorkbenchPanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'access' && (
+                <div style={{ overflow: 'auto' }}>
+                  <AccessCheckPanel missionId={mission.id} />
+                </div>
+              )}
+              {tab === 'topology' && (
+                <div style={{ overflow: 'auto' }}>
+                  <TopologyPanel missionId={mission.id} target={mission.target} findings={findings} />
+                </div>
+              )}
             </div>
-          </section>
+          </div>
 
-          <section className="soft-panel" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Right panel: findings */}
+          <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <FindingsPanel
               missionId={mission.id}
               findings={findings}
@@ -421,10 +356,11 @@ export default function MissionControl() {
               onDelete={fid => setFindings(prev => prev.filter(f => f.id !== fid))}
               onAdd={f => setFindings(prev => [f, ...prev])}
             />
-          </section>
+          </div>
         </div>
       </div>
 
+      {/* Approval gate overlay */}
       {approvals.length > 0 && (
         <ApprovalGate
           missionId={mission.id}
@@ -433,14 +369,15 @@ export default function MissionControl() {
         />
       )}
 
-      {rerunAgent && (
+      {/* Re-run modal */}
+      {rerunGod && (
         <RerunModal
           missionId={mission.id}
-          agentName={rerunAgent.key}
-          agentSymbol={rerunAgent.symbol}
-          agentRole={rerunAgent.role}
-          onConfirm={(targets, options) => handleRerun(rerunAgent, targets, options)}
-          onClose={() => setRerunAgent(null)}
+          agentName={rerunGod.key}
+          agentSymbol={rerunGod.symbol}
+          agentRole={rerunGod.role}
+          onConfirm={(targets, options) => handleRerun(rerunGod, targets, options)}
+          onClose={() => setRerunGod(null)}
         />
       )}
     </>

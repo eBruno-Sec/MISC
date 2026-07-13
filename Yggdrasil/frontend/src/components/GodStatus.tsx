@@ -1,6 +1,21 @@
-import { AGENTS, type AgentDef } from '../brand'
+type GodState = 'idle' | 'active' | 'complete' | 'failed'
 
-type StageState = 'idle' | 'active' | 'complete' | 'failed'
+interface GodDef {
+  name: string
+  symbol: string
+  role: string
+  key: string
+}
+
+const GODS: GodDef[] = [
+  { key: 'zeus',        name: 'ZEUS',       symbol: 'Z',  role: 'Orchestrator' },
+  { key: 'athena',      name: 'ATHENA',     symbol: 'AT', role: 'AI Strategy' },
+  { key: 'hermes',      name: 'HERMES',     symbol: 'HE', role: 'OSINT / Recon' },
+  { key: 'ares',        name: 'ARES',       symbol: 'AR', role: 'Active Scanning' },
+  { key: 'hephaestus',  name: 'HEPHAESTUS', symbol: 'HF', role: 'Payload Forge' },
+  { key: 'hades',       name: 'HADES',      symbol: 'HD', role: 'Post-Exploit' },
+  { key: 'apollo',      name: 'APOLLO',     symbol: 'AP', role: 'Reporting' },
+]
 
 const RERUNNABLE = new Set(['hermes', 'ares', 'hephaestus', 'hades', 'apollo', 'athena'])
 
@@ -8,10 +23,10 @@ interface Props {
   currentPhase: string | null
   status: string
   completedPhases: Set<string>
-  onRerun?: (agent: AgentDef) => void
+  onRerun?: (god: GodDef) => void
 }
 
-function stageState(key: string, currentPhase: string | null, missionStatus: string, completedPhases: Set<string>): StageState {
+function godState(key: string, currentPhase: string | null, missionStatus: string, completedPhases: Set<string>): GodState {
   if (missionStatus === 'failed') return completedPhases.has(key) ? 'complete' : 'idle'
   if (completedPhases.has(key)) return 'complete'
   if (currentPhase === key) return 'active'
@@ -20,71 +35,50 @@ function stageState(key: string, currentPhase: string | null, missionStatus: str
 
 export default function GodStatus({ currentPhase, status, completedPhases, onRerun }: Props) {
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(7, minmax(112px, 1fr))',
-      gap: '0.7rem',
-      padding: '0.8rem 1rem',
-      background: 'var(--surface2)',
-      borderBottom: '1px solid var(--border)',
-      overflowX: 'auto',
-    }}>
-      {AGENTS.map(agent => {
-        const state = stageState(agent.key, currentPhase, status, completedPhases)
-        const color = state === 'active' ? agent.tint
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--border)' }}>
+      {GODS.map(g => {
+        const state = godState(g.key, currentPhase, status, completedPhases)
+        const color = state === 'active' ? 'var(--accent)'
           : state === 'complete' ? 'var(--accent3)'
           : state === 'failed' ? 'var(--crit)'
           : 'var(--text-dim)'
-        const canRerun = state === 'complete' && RERUNNABLE.has(agent.key) && !!onRerun
+        const canRerun = state === 'complete' && RERUNNABLE.has(g.key) && !!onRerun
 
         return (
-          <button
-            key={agent.key}
-            title={canRerun ? `Re-run ${agent.name}` : undefined}
-            onClick={canRerun ? () => onRerun!(agent) : undefined}
+          <div
+            key={g.key}
+            title={canRerun ? `Re-run ${g.name}` : undefined}
+            onClick={canRerun ? () => onRerun!(g) : undefined}
             style={{
-              background: state === 'active' ? 'var(--surface)' : 'rgba(255,255,255,0.72)',
-              padding: '0.75rem',
-              border: `1px solid ${state === 'idle' ? 'var(--border)' : color}`,
-              borderRadius: 'var(--radius)',
-              textAlign: 'left',
-              transition: 'border-color 0.2s, box-shadow 0.2s, transform 0.2s',
+              background: state === 'active' ? 'rgba(0,229,255,0.05)' : 'var(--surface)',
+              padding: '0.85rem 0.5rem',
+              borderBottom: `2px solid ${state === 'idle' ? 'transparent' : color}`,
+              textAlign: 'center',
+              transition: 'all 0.2s',
               cursor: canRerun ? 'pointer' : 'default',
-              boxShadow: state === 'active' ? '0 10px 24px rgba(47,117,102,0.12)' : 'none',
-              transform: state === 'active' ? 'translateY(-1px)' : 'none',
+              position: 'relative',
             }}
+            onMouseEnter={canRerun ? e => { e.currentTarget.style.background = 'rgba(57,255,20,0.05)' } : undefined}
+            onMouseLeave={canRerun ? e => { e.currentTarget.style.background = 'var(--surface)' } : undefined}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.45rem' }}>
-              <span style={{
-                width: '2rem',
-                height: '2rem',
-                borderRadius: '50%',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: `${color}18`,
-                color,
-                fontWeight: 850,
-                fontSize: '0.72rem',
-              }}>
-                {agent.symbol}
-              </span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 850, color: 'var(--text-bright)' }}>
-                  {agent.name}
-                </span>
-                <span style={{ display: 'block', fontSize: '0.68rem', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {agent.role}
-                </span>
-              </span>
+            <div style={{
+              fontSize: '1.3rem', marginBottom: '0.3rem',
+              filter: state === 'active' ? `drop-shadow(0 0 8px ${color})` : 'none',
+              animation: state === 'active' ? 'pulse-border 2s ease infinite' : 'none',
+            }}>
+              {g.symbol}
             </div>
-            <div style={{ fontSize: '0.68rem', color, fontWeight: 750 }}>
-              {state === 'active' && 'Running'}
-              {state === 'complete' && (canRerun ? 'Re-run available' : 'Done')}
-              {state === 'idle' && 'Idle'}
-              {state === 'failed' && 'Needs review'}
+            <div style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', color, marginBottom: '0.15rem' }}>
+              {g.name}
             </div>
-          </button>
+            <div style={{ fontSize: '0.55rem', color: 'var(--text-dim)', lineHeight: 1.3 }}>{g.role}</div>
+            <div style={{ marginTop: '0.35rem', fontSize: '0.55rem', letterSpacing: '0.08em', color }}>
+              {state === 'active'   && 'RUNNING'}
+              {state === 'complete' && (canRerun ? 'RE-RUN' : 'DONE')}
+              {state === 'idle'     && 'IDLE'}
+              {state === 'failed'   && 'ERR'}
+            </div>
+          </div>
         )
       })}
     </div>

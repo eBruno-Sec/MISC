@@ -1,29 +1,21 @@
 import os
 import json
-import html as html_lib
+import html as _html
+import secrets
 from datetime import datetime
 from core.ai_client import complete
 from core.config import settings
 from core.models import Finding
+from core.surface import build_inventory
 from sqlalchemy import select
 from .base import BaseAgent
 
 SEVERITY_COLORS = {
-    "critical": "#b42335",
-    "high": "#c65348",
-    "medium": "#b88136",
-    "low": "#3b7f8f",
-    "info": "#6f8078",
-}
-
-AGENT_DISPLAY = {
-    "zeus": "ODIN",
-    "athena": "FRIGG",
-    "hermes": "HEIMDALL",
-    "ares": "TYR",
-    "hephaestus": "BROKKR",
-    "hades": "SKULD",
-    "apollo": "SAGA",
+    "critical": "#ff0040",
+    "high": "#ff3d6b",
+    "medium": "#f59e0b",
+    "low": "#00e5ff",
+    "info": "#6a8a9a",
 }
 
 CVSS_MAP = {
@@ -37,8 +29,8 @@ CVSS_MAP = {
 
 class Apollo(BaseAgent):
     name = "apollo"
-    symbol = "SA"
-    display_name = "SAGA"
+    symbol = "AP"
+    display_name = "APOLLO"
     role = "Reporting & Risk Analysis"
 
     async def execute(self, target: str, context: dict = None) -> dict:
@@ -64,8 +56,7 @@ class Apollo(BaseAgent):
             await self.log(f"Executive summary generation failed: {e}. Using template.", "warn")
             exec_summary = self._default_summary(target, stats, context)
 
-        # Generate report. A render error must be visible and retryable, but it must not
-        # discard findings or block exports.
+        # Generate report (never fatal — a render error must not fail a completed mission)
         report_path = ""
         report_error = None
         try:
@@ -73,14 +64,14 @@ class Apollo(BaseAgent):
             await self.log(f"Report saved: {report_path}", "success")
         except Exception as e:
             report_error = str(e)
-            await self.log(f"Report generation failed: {e}. Findings are preserved and exportable; rerun Saga to retry.", "error")
+            await self.log(f"Report generation failed: {e}. Findings are preserved and exportable.", "error")
 
         await self.log(f"Mission assessment complete for {target}", "success")
 
         return {
             "report_path": report_path,
-            "report_error": report_error,
             "report_available": bool(report_path) and not report_error,
+            "report_error": report_error,
             "stats": stats,
             "total_findings": len(findings),
             "exec_summary": exec_summary,
@@ -97,7 +88,7 @@ class Apollo(BaseAgent):
                 f"{fnd.title} ({fnd.severity.upper()}) - {(fnd.description or '')[:100]}"
                 for fnd in sorted(findings, key=lambda x: CVSS_MAP.get(x.severity, 0), reverse=True)[:10]
             ]
-            prompt = f"""You are SAGA, the reporting module of the Yggdrasil security assessment workspace.
+            prompt = f"""You are APOLLO, the reporting module of the Yggdrasil security assessment workspace.
 Write a concise executive summary (3-4 paragraphs) for this authorized security assessment.
 
 Target: {target}
@@ -124,33 +115,137 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
     def _default_summary(self, target: str, stats: dict, context: dict) -> str:
         mode = (context or {}).get("athena", {}).get("mode", "passive")
         total = sum(stats.values())
-        if stats["critical"] or stats["high"]:
-            priority = (
-                "Immediate remediation focus should be directed at critical and high-severity findings "
-                "to reduce exposure."
-            )
-        elif stats["medium"]:
-            priority = (
-                "No critical or high-severity findings were recorded. Remediation should focus on the "
-                "medium-severity configuration and control gaps documented below."
-            )
-        elif total:
-            priority = (
-                "No critical, high, or medium-severity findings were recorded. Low and informational items "
-                "should be reviewed as part of routine hardening."
-            )
-        else:
-            priority = (
-                "No findings were recorded. Review active scan coverage below to confirm the assessment depth "
-                "matched the intended scope."
-            )
         return (
             f"This {mode} security assessment of {target} identified {total} findings across "
             f"{stats['critical']} critical, {stats['high']} high, {stats['medium']} medium, "
             f"and {stats['low']} low severity categories. "
-            f"{priority} "
+            f"Immediate remediation focus should be directed at critical and high-severity findings "
+            f"to reduce exposure. Medium findings represent configuration and best-practice gaps "
+            f"that should be addressed in a planned remediation cycle. "
             f"Full finding details, evidence, and remediation guidance are documented in this report."
         )
+
+    # OWASP probe modules the offensive engine runs (context["ares"]["offensive"]).
+    _MODULES = [
+        ("sqli", "SQL Injection"), ("xss", "Cross-Site Scripting"), ("ssrf", "SSRF"),
+        ("ssti", "Template Injection"), ("traversal", "Path Traversal"),
+        ("open_redirect", "Open Redirect"), ("cors", "CORS Misconfiguration"),
+        ("host_header", "Host-Header Injection"), ("auth", "Access Control / Auth"),
+        ("dast", "DAST (dalfox)"), ("zap", "OWASP ZAP Active Scan"),
+        ("content", "Content Discovery"), ("fuzz", "Parameter Auto-Fuzz"),
+        ("forms", "Form / POST Injection"),
+    ]
+    # Discovered paths worth a manual look (candidates, never auto-confirmed).
+    _INTERESTING = (
+        "admin", "login", "api", "graphql", "upload", "debug", "backup",
+        ".git", ".env", "config", "actuator", "swagger", "console",
+        "dashboard", "manager", "phpmyadmin", "wp-admin", "setup", "install",
+    )
+
+    def _recon_sections(self, context: dict, subdomains: list, live_hosts: list):
+        """Coverage panel, discovered content paths, and manual-test candidates —
+        all derived from REAL recon data (never fabricated). Returns three HTML
+        fragments (each may be ''). This is the coverage transparency Yggdrasil
+        won on, kept honest: it only reports numbers the agents actually produced."""
+        ares = (context or {}).get("ares", {}) or {}
+        if not ares:
+            return "", "", "", ""
+        offensive = ares.get("offensive", {}) or {}
+        directories = ares.get("directories", []) or []
+        nuclei_hits = len(ares.get("vulnerabilities", []) or [])
+        ran = bool(offensive)
+
+        # 1) Coverage metrics + OWASP module matrix
+        metrics = [
+            ("Subdomains discovered", len(subdomains or [])),
+            ("Live hosts", len(live_hosts or [])),
+            ("Hosts actively scanned", offensive.get("hosts_scanned", ares.get("targets_scanned", 0))),
+            ("URLs crawled", offensive.get("crawled_urls", 0)),
+            ("Content paths found", len(directories)),
+            ("Nuclei findings", nuclei_hits),
+        ]
+        metric_cells = "".join(
+            f'<div class="cov-cell"><div class="cov-num">{_html.escape(str(v))}</div>'
+            f'<div class="cov-label">{_html.escape(label)}</div></div>'
+            for label, v in metrics
+        )
+        rows = ""
+        for key, label in self._MODULES:
+            hits = len(offensive.get(key, []) or [])
+            state = "tested" if ran else "not run"
+            state_cls = "mod-ok" if ran else "mod-skip"
+            rows += (f'<tr><td>{_html.escape(label)}</td>'
+                     f'<td class="{state_cls}">{state}</td>'
+                     f'<td class="mod-hits">{hits if ran else "—"}</td></tr>')
+        coverage_html = (
+            '<div class="section"><h2>Assessment Coverage</h2>'
+            f'<div class="cov-grid">{metric_cells}</div>'
+            '<table class="cov-table"><thead><tr><th>OWASP Test Module</th>'
+            '<th>Status</th><th>Hits</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+        )
+
+        # 1b) Attack-surface inventory (deduped endpoints + params)
+        surface_html = ""
+        inventory = build_inventory(offensive.get("endpoints", []) or [])
+        if inventory:
+            param_eps = sum(1 for e in inventory if e["parameterized"])
+            erows = ""
+            for e in inventory[:200]:
+                params = ", ".join(e["params"][:12])
+                if len(e["params"]) > 12:
+                    params += f' +{len(e["params"]) - 12}'
+                erows += (f'<tr><td class="path-url">{_html.escape(e["path"])}</td>'
+                          f'<td class="surf-host">{_html.escape(e["host"])}</td>'
+                          f'<td class="surf-params">{_html.escape(params)}</td></tr>')
+            surface_html = (
+                f'<div class="section"><h2>Attack Surface ({len(inventory)} endpoints, '
+                f'{param_eps} parameterized)</h2>'
+                '<table class="path-table"><thead><tr><th>Path</th><th>Host</th>'
+                f'<th>Parameters</th></tr></thead><tbody>{erows}</tbody></table></div>'
+            )
+
+        # 2) Discovered content paths (real ffuf/crawl results)
+        paths_html = ""
+        if directories:
+            prows = ""
+            for d in directories[:250]:
+                st = d.get("status", 0)
+                cls = ("st-200" if st == 200 else "st-redir" if st in (301, 302)
+                       else "st-403" if st == 403 else "st-other")
+                prows += (f'<tr><td class="path-url">{_html.escape(d.get("url", ""))}</td>'
+                          f'<td class="{cls}">{_html.escape(str(st))}</td>'
+                          f'<td class="path-note">{_html.escape(d.get("note", "") or "")}</td></tr>')
+            paths_html = (
+                f'<div class="section"><h2>Discovered Content Paths ({len(directories)})</h2>'
+                '<table class="path-table"><thead><tr><th>Path</th><th>Status</th>'
+                f'<th>Note</th></tr></thead><tbody>{prows}</tbody></table></div>'
+            )
+
+        # 3) Manual test candidates (interesting paths -> manual review, NOT confirmed)
+        seen, cands = set(), []
+        for d in directories:
+            u = d.get("url", "")
+            low = u.lower()
+            kw = next((k for k in self._INTERESTING if k in low), None)
+            if kw and u not in seen:
+                seen.add(u)
+                cands.append((u, d.get("status", 0), kw))
+        candidates_html = ""
+        if cands:
+            items = "".join(
+                f'<li><input type="checkbox"> <span class="cand-url">{_html.escape(u)}</span>'
+                f' <span class="cand-kw">{_html.escape(kw)}</span>'
+                f' <span class="cand-st">HTTP {_html.escape(str(st))}</span></li>'
+                for u, st, kw in cands[:80]
+            )
+            candidates_html = (
+                '<div class="section"><h2>Manual Test Candidates</h2>'
+                '<p class="cand-note">Interesting paths surfaced by recon that warrant manual '
+                'review. These are <strong>candidates, not confirmed findings</strong>.</p>'
+                f'<ul class="cand-list">{items}</ul></div>'
+            )
+        return coverage_html, surface_html, paths_html, candidates_html
 
     async def _generate_html_report(self, target: str, findings: list, stats: dict, exec_summary: str, context: dict) -> str:
         mode = (context or {}).get("athena", {}).get("mode", "passive")
@@ -158,18 +253,12 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         vendors = (context or {}).get("hermes", {}).get("vendors", [])
         subdomains = (context or {}).get("hermes", {}).get("subdomains", [])
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
-        ares = (context or {}).get("ares", {})
-        active_targets = ares.get("active_targets", []) if isinstance(ares, dict) else []
-        active_target_count = len(active_targets) or (ares.get("targets_scanned", 0) if isinstance(ares, dict) else 0)
+        # Coverage transparency panels (real recon numbers only; empty in passive runs).
+        coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-        safe_target = html_lib.escape(str(target), quote=True)
-        safe_mode = html_lib.escape(str(mode).upper(), quote=True)
-        safe_now = html_lib.escape(now, quote=True)
-        safe_exec_paragraphs = chr(10).join(
-            f"<p>{html_lib.escape(p.strip(), quote=True)}</p>"
-            for p in (exec_summary or "").split(chr(10))
-            if p.strip()
-        )
+        # Per-report nonce so the report's own script runs while any injected
+        # inline script is blocked (defense in depth behind the html escaping).
+        nonce = secrets.token_urlsafe(16)
 
         sorted_findings = sorted(
             findings,
@@ -184,36 +273,37 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                 cvss = float(fnd.cvss_score) if fnd.cvss_score is not None else CVSS_MAP.get(fnd.severity.lower(), 0)
             except (TypeError, ValueError):
                 cvss = CVSS_MAP.get(fnd.severity.lower(), 0)
-            safe_severity = html_lib.escape(str(fnd.severity or "info").upper(), quote=True)
-            safe_title = html_lib.escape(str(fnd.title or "Untitled finding"), quote=True)
-            safe_description = html_lib.escape(str(fnd.description or "No description"), quote=True)
-            safe_evidence = html_lib.escape(str(fnd.evidence or ""), quote=True)
-            safe_remediation = html_lib.escape(str(fnd.remediation or ""), quote=True)
+            # Escape every finding field before it enters the HTML. Evidence,
+            # titles and descriptions can carry attacker-controlled scan content
+            # (XSS PoC payloads, response snippets, ZAP alert text, matched URLs).
+            sev = _html.escape((fnd.severity or "info").upper())
+            title = _html.escape(fnd.title or "")
+            found_by = _html.escape((fnd.found_by or "unknown").upper())
+            description = _html.escape(fnd.description or "No description")
             evidence_block = (
                 '<div class="field"><span class="field-label">EVIDENCE</span><pre>'
-                + safe_evidence
+                + _html.escape(fnd.evidence)
                 + "</pre></div>"
             ) if fnd.evidence else ""
             remediation_block = (
                 '<div class="field"><span class="field-label">REMEDIATION</span><p>'
-                + safe_remediation
+                + _html.escape(fnd.remediation)
                 + "</p></div>"
             ) if fnd.remediation else ""
-            found_by = html_lib.escape(AGENT_DISPLAY.get(fnd.found_by or "", (fnd.found_by or "unknown").upper()), quote=True)
             findings_html += f"""
             <div class="finding" id="finding-{i}">
                 <div class="finding-header">
                     <div>
-                        <span class="sev-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{safe_severity}</span>
-                        <span class="finding-title">{safe_title}</span>
+                        <span class="sev-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{sev}</span>
+                        <span class="finding-title">{title}</span>
                     </div>
                     <div class="finding-meta">
                         <span class="cvss">CVSS {cvss:.1f}</span>
-                        <span class="found-by">{found_by}</span>
+                        <span class="found-by">⊕ {found_by}</span>
                     </div>
                 </div>
                 <div class="finding-body">
-                    <div class="field"><span class="field-label">DESCRIPTION</span><p>{safe_description}</p></div>
+                    <div class="field"><span class="field-label">DESCRIPTION</span><p>{description}</p></div>
                     {evidence_block}
                     {remediation_block}
                 </div>
@@ -221,218 +311,347 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
 
         vendor_html = ""
         for v in vendors:
-            vname = html_lib.escape(str(v.get("vendor", "")), quote=True)
-            vcat = html_lib.escape(str(v.get("category", "")), quote=True)
+            vname = _html.escape(v.get("vendor", ""))
+            vcat = _html.escape(v.get("category", ""))
             vendor_html += f'<span class="vendor-tag">{vname} <span class="vendor-cat">{vcat}</span></span>'
 
-        # Build host/target section outside f-string: Python 3.11 cannot use dict["key"] syntax
+        # Build host section outside f-string: Python 3.11 cannot use dict["key"] syntax
         # inside single-quote f-string expressions
-        display_hosts = live_hosts or active_targets
-        host_section_title = "Live Hosts" if live_hosts else "Active Targets Tested"
-        if display_hosts:
+        if live_hosts:
             _host_items = ""
-            for h in display_hosts[:50]:
-                hhost = html_lib.escape(str(h.get("host", "")), quote=True)
-                hcode = html_lib.escape(str(h.get("status_code") or h.get("source", "scanned")), quote=True)
+            for h in live_hosts[:50]:
+                hhost = _html.escape(h.get("host", ""))
+                hcode = _html.escape(str(h.get("status_code") or ""))
                 _host_items += f'<div class="host-item"><span>{hhost}</span><span class="status-ok">{hcode}</span></div>'
             _host_section = (
-                f'<div class="section"><h2>{host_section_title} ({len(display_hosts)})</h2>'
+                f'<div class="section"><h2>Live Hosts ({len(live_hosts)})</h2>'
                 f'<div class="host-list">{_host_items}</div></div>'
             )
         else:
             _host_section = ""
 
-        offensive = ares.get("offensive", {}) if isinstance(ares, dict) else {}
-        coverage = offensive.get("coverage", {}) if isinstance(offensive, dict) else {}
-        if ares:
-            coverage_items = [
-                ("In-Scope URLs", coverage.get("in_scope_urls", offensive.get("crawled_urls", 0))),
-                ("Parameterized URLs", coverage.get("parameterized_urls", 0)),
-                ("Traversal Candidates", coverage.get("traversal_candidate_urls", 0)),
-                ("IDOR/BOLA Candidates", coverage.get("idor_candidate_urls", 0)),
-                ("Content Paths", coverage.get("content_paths_discovered", len(offensive.get("content", [])))),
-                ("Spider URLs", coverage.get("spider_urls", 0)),
-                ("Param-Mined URLs", coverage.get("param_mining_urls", 0)),
-                ("Generated Param URLs", coverage.get("generated_parameter_urls", 0)),
-                ("Param Wordlist", coverage.get("parameter_wordlist_size", 0)),
-                ("External Param Hits", coverage.get("external_parameter_candidates", 0)),
-                ("Hidden Params", coverage.get("hidden_parameter_candidates", 0)),
-                ("Declared Scope Paths", coverage.get("declared_scope_paths", 0)),
-                ("Declared Seed URLs", coverage.get("declared_seed_urls", 0)),
-                ("Auth Profiles", coverage.get("auth_profiles", 0)),
-            ]
-            module_items = [
-                ("SQLi", len(offensive.get("sqli", []))),
-                ("XSS", len(offensive.get("xss", []))),
-                ("DAST", len(offensive.get("dast", []))),
-                ("Auth/Exposure", len(offensive.get("auth", []))),
-                ("Dependencies", len(offensive.get("dependency", []))),
-                ("Manual Candidates", len(offensive.get("scope_candidates", []))),
-                ("Param Mining", len(offensive.get("param_mining", []))),
-                ("Generated Params", len(offensive.get("generated_params", []))),
-                ("Arjun/x8", len(offensive.get("external_params", []))),
-                ("Param Brute", len(offensive.get("hidden_params", []))),
-                ("Traversal", len(offensive.get("path_traversal", []))),
-                ("IDOR/BOLA", len(offensive.get("idor_bola", []))),
-            ]
-            coverage_html = "".join(
-                f'<div class="coverage-item"><div class="coverage-num">{value}</div><div class="coverage-label">{label}</div></div>'
-                for label, value in coverage_items
-            )
-            module_html = "".join(
-                f'<div class="coverage-item"><div class="coverage-num">{value}</div><div class="coverage-label">{label}</div></div>'
-                for label, value in module_items
-            )
-            notes = []
-            if coverage.get("traversal_candidate_urls", 0) == 0:
-                notes.append("Path traversal testing ran, but no file/path-like parameters were discovered to mutate.")
-            if coverage.get("idor_candidate_urls", 0) == 0:
-                notes.append("IDOR/BOLA testing ran, but no object-reference URLs were discovered.")
-            if coverage.get("auth_profiles", 0) < 2:
-                notes.append("Cross-role IDOR/BOLA confirmation needs at least two auth profiles; current run used heuristic checks only.")
-            note_html = "".join(f'<p class="coverage-note">{html_lib.escape(n, quote=True)}</p>' for n in notes)
-            _active_section = (
-                '<div class="section"><h2>Active Scan Coverage (TYR)</h2>'
-                f'<div class="coverage-grid">{coverage_html}</div>'
-                '<h3 class="subhead">Module Results</h3>'
-                f'<div class="coverage-grid">{module_html}</div>'
-                f'{note_html}</div>'
-            )
-        elif mode != "passive":
-            _active_section = (
-                '<div class="section"><h2>Active Scan Coverage (TYR)</h2>'
-                '<p class="coverage-note">Tyr results are absent from this report. Active scanning may have been denied, timed out, skipped, or failed before results were stored.</p>'
-                '</div>'
-            )
-        else:
-            _active_section = ""
-        content_hits = offensive.get("content", []) if isinstance(offensive, dict) else []
-        if content_hits:
-            _content_items = ""
-            for hit in content_hits[:80]:
-                url = html_lib.escape(str(hit.get("url", "")), quote=True)
-                status = html_lib.escape(str(hit.get("status", "?")), quote=True)
-                length = hit.get("length")
-                length_text = html_lib.escape(f" / {length} bytes", quote=True) if length is not None else ""
-                _content_items += (
-                    f'<div class="host-item"><span>{url}</span>'
-                    f'<span class="status-ok">{status}{length_text}</span></div>'
-                )
-            more = ""
-            if len(content_hits) > 80:
-                more = f'<p class="coverage-note">{len(content_hits) - 80} additional discovered paths omitted from this view.</p>'
-            _content_section = (
-                f'<div class="section"><h2>Discovered Content Paths ({len(content_hits)})</h2>'
-                f'<div class="host-list">{_content_items}</div>{more}</div>'
-            )
-        else:
-            _content_section = ""
+        report_payload = {
+            "target": target,
+            "mode": mode.upper(),
+            "date": now,
+            "mission_id": self.mission_id,
+            "summary": exec_summary,
+            "stats": {
+                "critical": stats.get("critical", 0),
+                "high": stats.get("high", 0),
+                "medium": stats.get("medium", 0),
+                "low": stats.get("low", 0),
+                "info": stats.get("info", 0),
+                "total": len(findings),
+            },
+            "findings": [
+                {
+                    "title": fnd.title,
+                    "severity": fnd.severity,
+                    "cvss": fnd.cvss_score,
+                    "found_by": fnd.found_by,
+                    "description": fnd.description or "",
+                    "evidence": fnd.evidence or "",
+                    "remediation": fnd.remediation or "",
+                }
+                for fnd in sorted_findings
+            ],
+        }
+        # ensure_ascii=False keeps unicode readable, but U+2028/U+2029 are legal in
+        # JSON yet are LINE TERMINATORS in JS — unescaped they break the `const REPORT =`
+        # literal (same syntax-error class as the newline bug). Escape them, plus </ to
+        # prevent a </script> breakout.
+        report_json = (
+            json.dumps(report_payload, ensure_ascii=False)
+            .replace("</", "<\\/")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
+
+        # No inline onclick handlers: they are wired via addEventListener in the
+        # nonce'd script below so the report can run under a strict CSP.
+        toolbar_html = (
+            '<div class="export-bar">'
+            '<button id="oly-theme">&#x2600; Light</button>'
+            '<button id="oly-print">&#x2399; Print</button>'
+            '<button id="oly-html">HTML</button>'
+            '<button id="oly-md">MD</button>'
+            '<button id="oly-txt">TXT</button>'
+            '<button id="oly-json">JSON</button>'
+            '</div>'
+        )
+
+        # RAW string (r"""): the JS below contains `\n` string literals. In a normal
+        # Python string those become real newlines, which land *inside* JS '...' quotes
+        # and make the whole script a syntax error (so no export/print/theme button
+        # wires up). Raw keeps them as literal backslash-n for JS to parse at runtime.
+        export_script = r"""<script nonce="__NONCE__">
+const REPORT = __REPORT_JSON__;
+function olyPrint(){ window.print(); }
+function dl(name, mime, text){
+  const b = new Blob([text], {type: mime});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a');
+  a.href = u; a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(u); }, 1000);
+}
+function fname(ext){
+  const t = (REPORT.target || 'report').replace(/[^a-z0-9.-]+/gi, '_');
+  return 'yggdrasil_' + t + '_' + (REPORT.mission_id || '').slice(0, 8) + '.' + ext;
+}
+function sevTag(x){ return (x || 'info').toUpperCase(); }
+function toTxt(){
+  const s = REPORT.stats, L = [];
+  L.push('YGGDRASIL SECURITY ASSESSMENT');
+  L.push('Target: ' + REPORT.target);
+  L.push('Mode: ' + REPORT.mode);
+  L.push('Date: ' + REPORT.date);
+  L.push('Report ID: ' + (REPORT.mission_id || ''));
+  L.push('');
+  L.push('FINDINGS: ' + s.critical + ' Critical, ' + s.high + ' High, ' + s.medium + ' Medium, ' + s.low + ' Low, ' + s.info + ' Info (Total ' + s.total + ')');
+  L.push('');
+  L.push('EXECUTIVE SUMMARY');
+  L.push(REPORT.summary || '');
+  L.push('');
+  L.push('FINDINGS DETAIL');
+  L.push('');
+  REPORT.findings.forEach(function(f, i){
+    L.push((i + 1) + '. [' + sevTag(f.severity) + '] ' + f.title);
+    if (f.cvss !== null && f.cvss !== undefined) L.push('   CVSS: ' + f.cvss);
+    if (f.found_by) L.push('   Source: ' + f.found_by);
+    if (f.description) L.push('   Description: ' + f.description);
+    if (f.evidence) { L.push('   Evidence:'); f.evidence.split('\n').forEach(function(e){ L.push('     ' + e); }); }
+    if (f.remediation) L.push('   Remediation: ' + f.remediation);
+    L.push('');
+  });
+  return L.join('\n');
+}
+function toMd(){
+  const s = REPORT.stats, L = [];
+  L.push('# Yggdrasil Security Assessment');
+  L.push('');
+  L.push('- **Target:** ' + REPORT.target);
+  L.push('- **Mode:** ' + REPORT.mode);
+  L.push('- **Date:** ' + REPORT.date);
+  L.push('- **Report ID:** ' + (REPORT.mission_id || ''));
+  L.push('');
+  L.push('| Critical | High | Medium | Low | Info | Total |');
+  L.push('|---|---|---|---|---|---|');
+  L.push('| ' + s.critical + ' | ' + s.high + ' | ' + s.medium + ' | ' + s.low + ' | ' + s.info + ' | ' + s.total + ' |');
+  L.push('');
+  L.push('## Executive Summary');
+  L.push('');
+  L.push(REPORT.summary || '');
+  L.push('');
+  L.push('## Findings');
+  L.push('');
+  REPORT.findings.forEach(function(f, i){
+    L.push('### ' + (i + 1) + '. ' + f.title);
+    L.push('');
+    var meta = '**Severity:** ' + sevTag(f.severity);
+    if (f.cvss !== null && f.cvss !== undefined) meta += '  |  **CVSS:** ' + f.cvss;
+    if (f.found_by) meta += '  |  **Source:** ' + f.found_by;
+    L.push(meta);
+    L.push('');
+    if (f.description) { L.push(f.description); L.push(''); }
+    if (f.evidence) { L.push('```'); L.push(f.evidence); L.push('```'); L.push(''); }
+    if (f.remediation) { L.push('**Remediation:** ' + f.remediation); L.push(''); }
+  });
+  return L.join('\n');
+}
+function olyExport(kind){
+  if (kind === 'json') return dl(fname('json'), 'application/json', JSON.stringify(REPORT, null, 2));
+  if (kind === 'md') return dl(fname('md'), 'text/markdown', toMd());
+  return dl(fname('txt'), 'text/plain', toTxt());
+}
+function toHtml(){
+  dl(fname('html'), 'text/html', '<!DOCTYPE html>' + document.documentElement.outerHTML);
+}
+var _lightMode = false;
+function toggleTheme(){
+  _lightMode = !_lightMode;
+  document.body.setAttribute('data-theme', _lightMode ? 'light' : '');
+  document.getElementById('oly-theme').innerHTML = _lightMode ? '◐ Dark' : '☀ Light';
+}
+document.getElementById('oly-print').addEventListener('click', olyPrint);
+document.getElementById('oly-html').addEventListener('click', toHtml);
+document.getElementById('oly-md').addEventListener('click', function(){ olyExport('md'); });
+document.getElementById('oly-txt').addEventListener('click', function(){ olyExport('txt'); });
+document.getElementById('oly-json').addEventListener('click', function(){ olyExport('json'); });
+document.getElementById('oly-theme').addEventListener('click', toggleTheme);
+</script>"""
+        # Nonce first (touches only the template's script tag), then inject the
+        # findings JSON so finding text can never collide with a placeholder.
+        export_script = export_script.replace("__NONCE__", nonce)
+        export_script = export_script.replace("__REPORT_JSON__", report_json)
+
+        # Escaped header/summary values. target is already validated (no angle
+        # brackets), but escape for defense in depth; exec_summary is model/text
+        # output and must be treated as untrusted before rendering.
+        esc_target = _html.escape(target)
+        esc_mode = _html.escape(mode.upper())
+        summary_html = chr(10).join(
+            f'<p>{_html.escape(p)}</p>' for p in exec_summary.split(chr(10)) if p.strip()
+        )
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Yggdrasil Report - {safe_target}</title>
+<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{nonce}'; object-src 'none'; base-uri 'none'">
+<title>Yggdrasil Report — {esc_target}</title>
 <style>
 :root {{
-  --bg: #f4f7f2; --surface: #ffffff; --surface2: #eef4f0;
-  --border: #d7e2dc; --accent: #2f7566; --accent2: #b85c50;
-  --accent3: #4f7c52; --gold: #b88136; --text: #34443d;
-  --text-dim: #6f8078; --text-bright: #14241e;
-  --font: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --mono: 'SFMono-Regular', Consolas, monospace;
+  --bg: #020608; --surface: #080e12; --surface2: #0c1820;
+  --border: #0e2535; --accent: #00e5ff; --accent2: #ff3d6b;
+  --accent3: #39ff14; --gold: #f59e0b; --text: #c8dde6;
+  --text-dim: #6a8a9a; --text-bright: #f0f8fc;
+  --mono: 'Courier New', monospace;
 }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ background: var(--bg); color: var(--text); font-family: var(--font); padding: 0; }}
+body {{ background: var(--bg); color: var(--text); font-family: var(--mono); padding: 0; }}
 .report-header {{ background: var(--surface); border-bottom: 1px solid var(--border); padding: 3rem; }}
-.report-header .classification {{ font-size: .72rem; letter-spacing: .12em; color: var(--accent3); margin-bottom: 1rem; text-transform: uppercase; font-weight: 800; }}
-.report-header h1 {{ font-size: 2.35rem; color: var(--text-bright); font-weight: 850; margin-bottom: .5rem; }}
-.report-header .subtitle {{ color: var(--text-dim); font-size: .92rem; }}
+.report-header .classification {{ font-size: .7rem; letter-spacing: .3em; color: var(--accent3); margin-bottom: 1rem; }}
+.report-header h1 {{ font-size: 2.5rem; color: var(--text-bright); font-weight: 900; letter-spacing: -.02em; margin-bottom: .5rem; }}
+.report-header .subtitle {{ color: var(--text-dim); font-size: .85rem; }}
 .meta-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1px; background: var(--border); margin: 2rem 0 0; border: 1px solid var(--border); }}
 .meta-cell {{ background: var(--surface2); padding: 1rem 1.25rem; }}
 .meta-label {{ font-size: .65rem; letter-spacing: .2em; color: var(--text-dim); margin-bottom: .3rem; text-transform: uppercase; }}
 .meta-value {{ font-size: .9rem; color: var(--text-bright); }}
 .section {{ padding: 2.5rem 3rem; border-bottom: 1px solid var(--border); }}
-.section h2 {{ font-size: .72rem; letter-spacing: .12em; color: var(--accent2); text-transform: uppercase; margin-bottom: 1.5rem; }}
+.section h2 {{ font-size: .7rem; letter-spacing: .25em; color: var(--accent2); text-transform: uppercase; margin-bottom: 1.5rem; }}
 .exec-summary {{ font-size: .95rem; line-height: 2; color: var(--text); max-width: 900px; }}
 .exec-summary p {{ margin-bottom: 1rem; }}
 .stats-row {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); }}
 .stat {{ background: var(--surface); padding: 1.5rem; text-align: center; }}
-.stat-num {{ font-size: 2.5rem; font-weight: 850; line-height: 1; margin-bottom: .4rem; }}
-.stat-label {{ font-size: .68rem; letter-spacing: .08em; color: var(--text-dim); text-transform: uppercase; }}
+.stat-num {{ font-size: 2.5rem; font-weight: 900; line-height: 1; margin-bottom: .4rem; }}
+.stat-label {{ font-size: .65rem; letter-spacing: .15em; color: var(--text-dim); text-transform: uppercase; }}
 .finding {{ border: 1px solid var(--border); border-top: none; }}
 .finding:first-child {{ border-top: 1px solid var(--border); }}
 .finding-header {{ display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border); gap: 1rem; flex-wrap: wrap; }}
 .finding-title {{ font-size: .95rem; color: var(--text-bright); margin-left: .75rem; }}
 .finding-meta {{ display: flex; gap: 1rem; align-items: center; }}
-.sev-badge {{ font-size: .65rem; padding: .25rem .65rem; letter-spacing: .08em; white-space: nowrap; border-radius: 999px; }}
+.sev-badge {{ font-size: .65rem; padding: .25rem .65rem; letter-spacing: .15em; white-space: nowrap; }}
 .cvss {{ font-size: .75rem; color: var(--gold); }}
 .found-by {{ font-size: .7rem; color: var(--text-dim); }}
 .finding-body {{ padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }}
 .field-label {{ font-size: .65rem; letter-spacing: .2em; color: var(--accent); display: block; margin-bottom: .4rem; text-transform: uppercase; }}
 .finding-body p {{ font-size: .88rem; line-height: 1.9; color: var(--text); }}
-.finding-body pre {{ font-family: var(--mono); font-size: .78rem; background: var(--surface2); border: 1px solid var(--border); padding: 1rem; color: var(--text); overflow-x: auto; white-space: pre-wrap; line-height: 1.7; }}
+.finding-body pre {{ font-size: .78rem; background: var(--surface2); border: 1px solid var(--border); padding: 1rem; color: var(--accent3); overflow-x: auto; white-space: pre-wrap; line-height: 1.7; }}
 .vendor-tag {{ display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; padding: .25rem .65rem; background: rgba(0,229,255,.05); border: 1px solid rgba(0,229,255,.15); color: var(--accent); margin: .25rem; }}
 .vendor-cat {{ color: var(--text-dim); font-size: .65rem; }}
 .host-list {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .5rem; margin-top: 1rem; }}
 .host-item {{ background: var(--surface2); border: 1px solid var(--border); padding: .75rem 1rem; font-size: .82rem; display: flex; justify-content: space-between; }}
 .status-ok {{ color: var(--accent3); }}
-.coverage-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1rem; }}
-.coverage-item {{ background: var(--surface); padding: 1rem; min-height: 86px; }}
-.coverage-num {{ font-size: 1.8rem; font-weight: 850; color: var(--accent3); line-height: 1; margin-bottom: .45rem; }}
-.coverage-label {{ font-size: .66rem; letter-spacing: .08em; color: var(--text-dim); text-transform: uppercase; line-height: 1.5; }}
-.coverage-note {{ color: var(--text-dim); font-size: .82rem; line-height: 1.8; margin-top: .6rem; }}
-.subhead {{ color: var(--accent); font-size: .68rem; letter-spacing: .2em; text-transform: uppercase; margin: 1.5rem 0 1rem; }}
 .footer {{ padding: 2rem 3rem; text-align: center; font-size: .72rem; color: var(--text-dim); border-top: 1px solid var(--border); }}
+.export-bar {{ position: fixed; top: 1rem; right: 1rem; display: flex; gap: .5rem; z-index: 50; }}
+.export-bar button {{ font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; padding: .5rem .9rem; background: var(--surface2); color: var(--accent); border: 1px solid var(--accent); cursor: pointer; }}
+.export-bar button:hover {{ background: var(--accent); color: var(--bg); }}
+.cov-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1.5rem; }}
+.cov-cell {{ background: var(--surface); padding: 1.25rem; text-align: center; }}
+.cov-num {{ font-size: 1.8rem; font-weight: 900; color: var(--accent); line-height: 1; margin-bottom: .35rem; }}
+.cov-label {{ font-size: .62rem; letter-spacing: .12em; color: var(--text-dim); text-transform: uppercase; }}
+.cov-table, .path-table {{ width: 100%; border-collapse: collapse; font-size: .8rem; }}
+.cov-table th, .path-table th {{ text-align: left; padding: .6rem .8rem; color: var(--text-dim); font-size: .62rem; letter-spacing: .15em; text-transform: uppercase; border-bottom: 1px solid var(--border); }}
+.cov-table td, .path-table td {{ padding: .5rem .8rem; border-bottom: 1px solid var(--border); }}
+.mod-ok {{ color: var(--accent3); }}
+.mod-skip {{ color: var(--text-dim); }}
+.mod-hits {{ color: var(--gold); text-align: right; }}
+.path-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
+.path-note {{ color: var(--text-dim); font-size: .72rem; }}
+.surf-host {{ color: var(--text-dim); font-size: .72rem; }}
+.surf-params {{ color: var(--accent); font-size: .72rem; word-break: break-all; }}
+.st-200 {{ color: var(--accent3); }}
+.st-redir {{ color: var(--accent); }}
+.st-403 {{ color: var(--gold); }}
+.st-other {{ color: var(--text-dim); }}
+.cand-note {{ font-size: .82rem; color: var(--text-dim); margin-bottom: 1rem; }}
+.cand-note strong {{ color: var(--accent2); }}
+.cand-list {{ list-style: none; display: flex; flex-direction: column; gap: .4rem; }}
+.cand-list li {{ background: var(--surface2); border: 1px solid var(--border); padding: .55rem .8rem; font-size: .8rem; }}
+.cand-url {{ font-family: var(--mono); color: var(--text-bright); word-break: break-all; }}
+.cand-kw {{ color: var(--accent2); font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; margin-left: .4rem; }}
+.cand-st {{ color: var(--text-dim); font-size: .7rem; margin-left: .4rem; }}
+[data-theme="light"] {{
+  --bg: #ffffff; --surface: #f5f7fa; --surface2: #eaeef3;
+  --border: #cdd8e3; --border2: #a8bfcc;
+  --accent: #0055a5; --accent2: #cc0033; --accent3: #1a7a00; --gold: #8b5e00;
+  --text: #1a2d3e; --text-dim: #5a7585; --text-bright: #000c18;
+  --mono: 'Courier New', monospace;
+}}
+@media print {{
+  @page {{ margin: 1.5cm 2cm; size: A4; }}
+  :root {{
+    --bg: #ffffff; --surface: #f8f8f8; --surface2: #f0f0f0;
+    --border: #cccccc; --border2: #aaaaaa;
+    --accent: #0055a5; --accent2: #cc0033; --accent3: #1a7a00; --gold: #8b5e00;
+    --text: #111111; --text-dim: #555555; --text-bright: #000000;
+    --mono: 'Courier New', monospace;
+  }}
+  html, body {{ background: #ffffff !important; color: #111 !important; }}
+  .export-bar {{ display: none !important; }}
+  .report-header {{ background: #f5f7fa !important; border-bottom: 2px solid #cdd8e3 !important; }}
+  .meta-cell, .stat, .cov-cell, .host-item, .cand-list li {{ background: #f0f0f0 !important; }}
+  .finding-body pre {{ background: #f0f0f0 !important; color: #1a2d3e !important; }}
+  .finding, .section {{ break-inside: avoid; }}
+  .path-url {{ color: #111 !important; }}
+  a {{ color: #0055a5 !important; }}
+}}
 </style>
 </head>
 <body>
+{toolbar_html}
 <div class="report-header">
-  <div class="classification">AUTHORIZED SECURITY ASSESSMENT - YGGDRASIL PLATFORM</div>
+  <div class="classification">AUTHORIZED SECURITY ASSESSMENT - YGGDRASIL WORKSPACE</div>
   <h1>Security Assessment Report</h1>
-  <div class="subtitle">{safe_target} - {safe_mode} MODE - {safe_now}</div>
+  <div class="subtitle">{esc_target} — {esc_mode} MODE — {now}</div>
   <div class="meta-grid">
-    <div class="meta-cell"><div class="meta-label">Target</div><div class="meta-value">{safe_target}</div></div>
-    <div class="meta-cell"><div class="meta-label">Assessment Mode</div><div class="meta-value">{safe_mode}</div></div>
+    <div class="meta-cell"><div class="meta-label">Target</div><div class="meta-value">{esc_target}</div></div>
+    <div class="meta-cell"><div class="meta-label">Assessment Mode</div><div class="meta-value">{esc_mode}</div></div>
     <div class="meta-cell"><div class="meta-label">Live Hosts</div><div class="meta-value">{len(live_hosts)}</div></div>
-    <div class="meta-cell"><div class="meta-label">Active Targets Tested</div><div class="meta-value">{active_target_count}</div></div>
     <div class="meta-cell"><div class="meta-label">Subdomains</div><div class="meta-value">{len(subdomains)}</div></div>
     <div class="meta-cell"><div class="meta-label">Vendors Identified</div><div class="meta-value">{len(vendors)}</div></div>
-    <div class="meta-cell"><div class="meta-label">Report Date</div><div class="meta-value">{safe_now}</div></div>
+    <div class="meta-cell"><div class="meta-label">Report Date</div><div class="meta-value">{now}</div></div>
   </div>
 </div>
 
 <div class="section">
   <h2>Executive Summary</h2>
-  <div class="exec-summary">{safe_exec_paragraphs}</div>
+  <div class="exec-summary">{summary_html}</div>
 </div>
 
 <div class="section">
   <h2>Finding Statistics</h2>
   <div class="stats-row">
-    <div class="stat"><div class="stat-num" style="color:#b42335">{stats['critical']}</div><div class="stat-label">Critical</div></div>
-    <div class="stat"><div class="stat-num" style="color:#c65348">{stats['high']}</div><div class="stat-label">High</div></div>
-    <div class="stat"><div class="stat-num" style="color:#b88136">{stats['medium']}</div><div class="stat-label">Medium</div></div>
-    <div class="stat"><div class="stat-num" style="color:#3b7f8f">{stats['low']}</div><div class="stat-label">Low</div></div>
-    <div class="stat"><div class="stat-num" style="color:#6f8078">{stats['info']}</div><div class="stat-label">Info</div></div>
+    <div class="stat"><div class="stat-num" style="color:#ff0040">{stats['critical']}</div><div class="stat-label">Critical</div></div>
+    <div class="stat"><div class="stat-num" style="color:#ff3d6b">{stats['high']}</div><div class="stat-label">High</div></div>
+    <div class="stat"><div class="stat-num" style="color:#f59e0b">{stats['medium']}</div><div class="stat-label">Medium</div></div>
+    <div class="stat"><div class="stat-num" style="color:#00e5ff">{stats['low']}</div><div class="stat-label">Low</div></div>
+    <div class="stat"><div class="stat-num" style="color:#6a8a9a">{stats['info']}</div><div class="stat-label">Info</div></div>
   </div>
 </div>
 
+{coverage_html}
+
+{surface_html}
+
 {'<div class="section"><h2>Vendor Stack (Passive Intelligence)</h2>' + vendor_html + '</div>' if vendors else ''}
-
-{_active_section}
-
-{_content_section}
 
 <div class="section">
   <h2>Findings Detail ({len(sorted_findings)} total)</h2>
   {findings_html or '<p style="color:var(--text-dim)">No findings recorded.</p>'}
 </div>
 
+{paths_html}
+
+{candidates_html}
+
 {_host_section}
 
 <div class="footer">
-  Yggdrasil Security Assessment Workspace - Authorized Testing Only - Report ID: {self.mission_id[:8].upper()}
+  Yggdrasil Security Workspace - Authorized Testing Only — Report ID: {self.mission_id[:8].upper()}
 </div>
+{export_script}
 </body>
 </html>"""
 

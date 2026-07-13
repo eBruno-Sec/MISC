@@ -27,8 +27,6 @@ def _strip_platform_suffix(line: str):
 
 def _classify(identifier: str) -> str:
     i = identifier.strip()
-    if i.startswith("/") and not i.startswith("//"):
-        return "path"
     if re.match(r'^\d+$', i):
         return "ios_app_id"
     if re.match(r'^com\.[a-z]', i.lower()):
@@ -38,24 +36,6 @@ def _classify(identifier: str) -> str:
     if re.match(r'^https?://', i, re.I):
         return "url"
     return "domain"
-
-
-def _looks_like_scope_asset(identifier: str) -> bool:
-    i = identifier.strip()
-    if not i:
-        return False
-    if i.startswith("/") and not i.startswith("//"):
-        return True
-    if re.match(r'^https?://', i, re.I):
-        return True
-    if re.match(r'^\d+$', i):
-        return True
-    if re.match(r'^com\.[a-z]', i.lower()):
-        return True
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}(/\d+)?$', i):
-        return True
-    host = i.split("/")[0].split(":")[0].lstrip("*.")
-    return "." in host and " " not in host and "\t" not in host
 
 
 def _parse_target(raw: str) -> Optional[dict]:
@@ -74,8 +54,6 @@ def _parse_target(raw: str) -> Optional[dict]:
     # Mobile platform suffix
     line, platform = _strip_platform_suffix(line)
     if not line:
-        return None
-    if not _looks_like_scope_asset(line):
         return None
 
     return {"identifier": line, "type": platform or _classify(line)}

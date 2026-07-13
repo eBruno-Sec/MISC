@@ -46,19 +46,6 @@ export interface MissionNote {
   timestamp: string
 }
 
-export interface MissionHealth {
-  last_heartbeat_at: string
-  phase_started_at: string
-  phase_key: string
-  phase: string | null
-  phase_name: string
-  status: MissionStatus
-  state: 'running' | 'waiting' | 'complete' | 'failed'
-  elapsed_seconds: number
-  phase_elapsed_seconds: number
-  message: string
-}
-
 export interface LiveHost {
   host: string
   url: string
@@ -92,6 +79,7 @@ export interface MissionSummary {
   current_phase: string | null
   created_at: string
   completed_at: string | null
+  severity_counts?: Partial<Record<Severity, number>>
 }
 
 export interface ScopeRule {
@@ -117,63 +105,156 @@ export type WSEvent =
   | { type: 'approval_resolved'; approval_id: string; approved: boolean; timestamp: string }
   | { type: 'mission_complete'; report_path: string; report_available?: boolean; report_error?: string | null; stats: Record<Severity, number>; timestamp: string }
   | { type: 'mission_failed'; error: string; timestamp: string }
-  | { type: 'mission_heartbeat'; health: MissionHealth; timestamp: string }
   | { type: 'agent_rerun'; agent: string; symbol: string; timestamp: string }
   | { type: 'targets_added'; targets: string[]; timestamp: string }
   | { type: 'note_added'; note: MissionNote }
 
-export interface BackupSummary {
-  version: number
-  workspace_id: string
-  target: string
-  mode: string
-  findings: number
-  notes: number
-  logs: number
-  http_exchanges: number
-}
+// ── Wordlists ────────────────────────────────────────────────
+export type WordlistKind = 'curated' | 'generated'
 
-export interface HttpExchange {
+export interface Wordlist {
   id: string
-  mission_id: string
-  finding_id: string | null
-  label: string | null
-  method: string
-  url: string
-  request_headers: Record<string, string>
-  request_body: string | null
-  response_status: number | null
-  response_headers: Record<string, string>
-  response_body: string | null
-  timestamp: string
+  name: string
+  category: string
+  source: string
+  desc: string
+  kind: WordlistKind
+  path: string
+  exists: boolean
+  count: number
+  size: number
 }
 
+export interface WordlistCatalog {
+  wordlists: Wordlist[]
+  default_content_ids: string[]
+  total: number
+  available: number
+}
+
+// ── Oracle (PortSwigger lab solver) ──────────────────────────
+export interface OraclePayload {
+  label: string
+  value: string
+}
+
+export interface OraclePlan {
+  vulnerability: string
+  summary: string
+  difficulty: string
+  steps: string[]
+  payloads: OraclePayload[]
+  request: string | null
+  success_indicator: string
+  notes: string
+  raw?: string
+}
+
+export interface OracleAI {
+  provider: string
+  model: string
+  configured: boolean
+}
+
+export interface OracleResponse {
+  plan: OraclePlan
+  ai: OracleAI
+}
+
+export interface SurfaceEndpoint {
+  host: string
+  path: string
+  params: string[]
+  parameterized: boolean
+  example: string
+}
+
+export interface SurfaceCoverage {
+  subdomains?: number
+  live_hosts?: number
+  network_hosts?: number
+  hosts_scanned?: number
+  crawled_urls?: number
+  content_paths?: number
+  ai_endpoints?: number
+}
+
+export interface RedirectEdge {
+  from: string
+  to: string
+  status: number
+}
+
+export interface AiEndpoint {
+  host: string
+  path: string
+  example: string
+  params: string[]
+  tags: string[]
+}
+
+export interface SurfaceInventory {
+  coverage: SurfaceCoverage
+  endpoints: SurfaceEndpoint[]
+  ai_surface?: AiEndpoint[]
+  redirects?: RedirectEdge[]
+  total: number
+  parameterized: number
+}
+
+// ── Request workbench ────────────────────────────────────────
 export interface ReplayResult {
-  exchange_id: string
-  status_code: number
+  exchange_id: string | null
+  status: number
+  length: number
+  duration_ms: number
   headers: Record<string, string>
   body: string
 }
 
-export interface FuzzResultItem {
+export interface FuzzHit {
   payload: string
-  url: string
-  status_code?: number
+  status?: number
   length?: number
-  body_preview?: string
+  duration_ms?: number
+  reflected?: boolean
+  error_signatures?: string[]
+  score: number
   error?: string
 }
 
 export interface FuzzResult {
-  parameter: string
+  baseline: { status: number; length: number; duration_ms: number }
+  param: string
+  param_in: string
   count: number
-  results: FuzzResultItem[]
+  results: FuzzHit[]
 }
 
-export interface AccessCheckResult {
-  verdict: Record<string, any>
-  high_status: number
-  low_status: number
-  high_length: number
-  low_length: number
+// ── Cross-role access control ────────────────────────────────
+export interface AuthProfile {
+  id: string
+  name: string
+  role: string | null
+  headers: Record<string, string>
+  created_at: string | null
+}
+
+export interface AccessRow {
+  role: string
+  status?: number
+  length?: number
+  duration_ms?: number
+  is_owner?: boolean
+  is_anon?: boolean
+  flag?: string
+  error?: string
+}
+
+export interface AccessResult {
+  request: { method: string; url: string }
+  results: AccessRow[]
+  flags: string[]
+  verdict: string
+  anomaly: boolean
 }

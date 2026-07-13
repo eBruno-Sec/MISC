@@ -10,7 +10,6 @@ Configure in .env:
 Backward-compat: ANTHROPIC_API_KEY still works as a fallback.
 """
 import os
-import asyncio
 from typing import Optional
 
 
@@ -26,14 +25,10 @@ async def complete(prompt: str, max_tokens: int = 800, system: Optional[str] = N
         return ""
 
     try:
-        try:
-            timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "45"))
-        except ValueError:
-            timeout = 45.0
         if provider == "openrouter":
-            return await asyncio.wait_for(_openrouter(prompt, api_key, max_tokens, system), timeout=timeout)
+            return await _openrouter(prompt, api_key, max_tokens, system)
         else:
-            return await asyncio.wait_for(_anthropic(prompt, api_key, max_tokens, system), timeout=timeout)
+            return await _anthropic(prompt, api_key, max_tokens, system)
     except Exception as e:
         # Non-fatal: AI features degrade gracefully
         print(f"[ai_client] {provider} error: {type(e).__name__}: {e}", flush=True)
@@ -70,8 +65,8 @@ async def _openrouter(prompt: str, api_key: str, max_tokens: int, system: Option
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/eBruno-Sec/MISC/tree/main/yggdrasil",
-                "X-Title": "Yggdrasil Security Assessment Workspace",
+                "HTTP-Referer": "https://github.com/eBruno-Sec/MISC/tree/main/Yggdrasil",
+                "X-Title": "Yggdrasil Security Workspace",
             },
             json={"model": model, "max_tokens": max_tokens, "messages": messages},
         )

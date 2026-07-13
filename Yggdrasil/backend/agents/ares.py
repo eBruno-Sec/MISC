@@ -1,9 +1,10 @@
 import asyncio
 import json
+import os
 import re
-from urllib.parse import urlparse
 from .base import BaseAgent
 from .offensive import OffensiveEngine
+from .auth import AuthEngine
 
 SEVERITY_MAP = {
     "critical": ("critical", 9.5),
@@ -15,42 +16,21 @@ SEVERITY_MAP = {
 }
 
 
-class Ares(BaseAgent, OffensiveEngine):
+class Ares(BaseAgent, OffensiveEngine, AuthEngine):
     name = "ares"
-    symbol = "TY"
-    display_name = "TYR"
-    role = "Active Assessment"
+    symbol = "AR"
+    display_name = "ARES"
+    role = "Active Scanning & Vuln Assessment"
 
 
     def _scope_filter(self, hosts: list, scope_rules: dict) -> list:
-        def host_rules(rules: list) -> list:
-            result = []
-            for rule in rules or []:
-                ident = (rule.get("identifier") or "").strip()
-                rule_type = (rule.get("type") or "").lower().strip()
-                if rule_type in ("path", "url_path") or (ident.startswith("/") and not ident.startswith("//")):
-                    continue
-                clean = ident
-                if clean.startswith(("http://", "https://")):
-                    clean = urlparse(clean).netloc
-                clean = clean.split("/")[0].split(":")[0].lstrip("*.")
-                is_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", clean))
-                is_hostname = "." in clean and " " not in clean and "\t" not in clean
-                if not (is_ip or is_hostname):
-                    continue
-                result.append(rule)
-            return result
-
-        in_rules = host_rules(scope_rules.get("in_scope", []))
-        out_rules = host_rules(scope_rules.get("out_of_scope", []))
+        in_rules = scope_rules.get("in_scope", [])
+        out_rules = scope_rules.get("out_of_scope", [])
 
         def matches(host: str, rules: list) -> bool:
             h = host.lower()
             for rule in rules:
-                rid = rule.get("identifier", "").lower().strip()
-                if rid.startswith(("http://", "https://")):
-                    rid = urlparse(rid).netloc
-                rid = rid.split("/")[0].split(":")[0].lstrip("*.")
+                rid = rule.get("identifier", "").lower().lstrip("*.")
                 if not rid:
                     continue
                 if h == rid or h.endswith("." + rid):
@@ -72,41 +52,26 @@ class Ares(BaseAgent, OffensiveEngine):
         live_hosts = hermes.get("live_hosts", [])
         domain = hermes.get("domain", target)
         scope_rules = (context or {}).get("scope_rules", {})
-        options = (context or {}).get("_options", {})
-        athena = (context or {}).get("athena", {})
-        declared_paths = athena.get("declared_paths", []) if isinstance(athena, dict) else []
-        used_primary_fallback = False
         if scope_rules and (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
             live_hosts = self._scope_filter(live_hosts, scope_rules)
             await self.log(f"Scope enforced: {len(live_hosts)} targets in scope", "info")
 
         if not live_hosts:
-            await self.log("No live hosts from Heimdall. Scanning primary target only.", "warn")
+            await self.log("No live hosts from Hermes. Scanning primary target only.", "warn")
             live_hosts = [{"host": domain, "url": f"https://{domain}"}]
-            used_primary_fallback = True
 
         await self.log(f"Active assessment of {len(live_hosts)} targets initiated", "info")
 
         result = {
             "targets_scanned": len(live_hosts),
-            "active_targets": [
-                {
-                    "host": h.get("host", ""),
-                    "url": h.get("url", ""),
-                    "status_code": h.get("status_code"),
-                    "source": "primary_fallback" if used_primary_fallback else "heimdall",
-                }
-                for h in live_hosts
-            ],
             "port_results": {},
             "vulnerabilities": [],
             "directories": [],
             "service_findings": [],
         }
 
-        # Nmap port scan
-        await self.log("Running Nmap service detection (-sV --top-ports 1000)", "info")
-        hosts_str = " ".join(h["host"] for h in live_hosts[:20])
+        # Nmap port scan (truthful scan log emitted inside _nmap_scan once the port
+        # selection — explicit :port vs --top-ports 1000 — is actually known)
         result["port_results"] = await self._nmap_scan(live_hosts[:20])
 
         # Nuclei vulnerability scan
@@ -123,26 +88,131 @@ class Ares(BaseAgent, OffensiveEngine):
         primary_url = live_hosts[0]["url"] if live_hosts else f"https://{domain}"
         result["directories"] = await self._dir_enum(primary_url)
 
-        # ── Offensive engine: active injection + access-control testing ──
-        # Only run when we actually reached a live web host.
+        # ── Wordlists: generate a target-specific list from recon, resolve selection ──
+        content_lists = None
+        try:
+            from core import wordlists as wl
+            selected_ids = (scope_rules or {}).get("wordlist_ids")
+            wl.build_target_list(self.mission_id, hermes, [d.get("url", "") for d in result["directories"]])
+            content_lists = wl.content_wordlists_for(self.mission_id, hermes, selected_ids)
+            if content_lists:
+                await self.log(f"Using {len(content_lists)} wordlist(s) for content discovery", "info")
+        except Exception as e:
+            await self.log(f"Wordlist prep failed ({e}); using engine defaults", "warn")
+
+        # ── Offensive engine: spider + OWASP testing on each live host ──
+        # Crawl, injection/access-control probes and a full OWASP ZAP active scan
+        # run per host. Full active scans are heavy, so cap how many hosts we hit
+        # (YGGDRASIL_OFFENSIVE_MAX_HOSTS, default 5). Runs sequentially — ZAP is a
+        # single shared daemon and concurrent active scans would contend.
+        result["offensive"] = {}
         if live_hosts:
             try:
-                result["offensive"] = await self.run_offensive(
-                    primary_url,
-                    scope_rules=scope_rules,
-                    options=options,
-                    declared_paths=declared_paths,
-                )
+                max_hosts = max(1, int(os.getenv("YGGDRASIL_OFFENSIVE_MAX_HOSTS") or os.getenv("OLYMPUS_OFFENSIVE_MAX_HOSTS") or "5"))
+            except ValueError:
+                max_hosts = 5
+
+            seen_hosts = set()
+            offensive_targets = []
+            for h in live_hosts:
+                hk = h.get("host", "")
+                if hk and hk not in seen_hosts:
+                    seen_hosts.add(hk)
+                    offensive_targets.append(h)
+                if len(offensive_targets) >= max_hosts:
+                    break
+
+            await self.log(
+                f"Offensive engine: spider + OWASP scan across {len(offensive_targets)} "
+                f"live host(s) of {len(live_hosts)} (cap {max_hosts})", "info")
+
+            # Credentials for authenticated scanning (ATHENA extracts these from scope notes).
+            creds_list = (context or {}).get("_credentials") or []
+            credentials = creds_list[0] if isinstance(creds_list, list) and creds_list else (
+                creds_list if isinstance(creds_list, dict) else None)
+            if credentials:
+                await self.log(
+                    f"Authenticated scanning enabled (user: {credentials.get('username', '?')})", "info")
+
+            per_host = {}
+            agg = {k: [] for k in ("sqli", "xss", "dast", "auth", "traversal", "zap",
+                                   "content", "ssrf", "ssti", "open_redirect", "cors",
+                                   "host_header", "fuzz", "forms", "endpoints", "redirects")}
+            total_urls = 0
+            for idx, h in enumerate(offensive_targets, 1):
+                host_url = h.get("url") or f"https://{h.get('host')}"
+                await self.log(
+                    f"[{idx}/{len(offensive_targets)}] Offensive pass on {host_url}", "info")
+                try:
+                    r = await self.run_offensive(host_url, content_lists, credentials)
+                except Exception as e:
+                    await self.log(f"Offensive engine error on {host_url}: {e}", "warn")
+                    continue
+                per_host[h.get("host", host_url)] = r
+                total_urls += r.get("crawled_urls", 0)
+                for k in agg:
+                    agg[k].extend(r.get(k, []) or [])
+
+            result["offensive"] = {
+                "hosts_scanned": len(per_host),
+                "crawled_urls": total_urls,
+                "per_host": per_host,
+                **agg,
+            }
+            # Deduplicated attack-surface inventory across all offensive hosts.
+            result["offensive"]["endpoints"] = list(
+                dict.fromkeys(result["offensive"].get("endpoints", []))
+            )[:3000]
+
+            # AI/LLM attack-surface tagging (deterministic, no requests): mark chat/
+            # completion/embedding/tool-call/MCP/vector-DB endpoints so the operator
+            # knows where to run manual LLM red-teaming.
+            try:
+                from core import surface as _surface, ai_surface as _ai
+                inv = _surface.build_inventory(result["offensive"]["endpoints"])
+                ai_eps = _ai.build_ai_surface(inv)
+                result["offensive"]["ai_surface"] = ai_eps
+                if ai_eps:
+                    await self._report_ai_surface(ai_eps)
             except Exception as e:
-                await self.log(f"Offensive engine error: {e}", "warn")
-                result["offensive"] = {}
+                await self.log(f"AI-surface tagging skipped: {e}", "warn")
         else:
             await self.log("No live web host reached; offensive engine skipped", "warn")
-            result["offensive"] = {}
 
         total_vulns = len(result["vulnerabilities"])
         await self.log(f"Active assessment complete. {total_vulns} nuclei findings + offensive engine results.", "success")
         return result
+
+    async def _report_ai_surface(self, ai_eps: list) -> None:
+        """One advisory finding for the discovered AI/LLM endpoints (candidates for
+        manual prompt-injection / jailbreak / data-exfil testing). Advisory only."""
+        by_tag: dict = {}
+        for e in ai_eps:
+            for t in e.get("tags", []):
+                by_tag.setdefault(t, 0)
+                by_tag[t] += 1
+        tag_summary = ", ".join(f"{t}×{n}" for t, n in sorted(by_tag.items()))
+        lines = []
+        for e in ai_eps[:60]:
+            row = f"{e.get('host', '')}{e.get('path', '')}  [{','.join(e.get('tags', []))}]"
+            if e.get("params"):
+                row += f"  params: {', '.join(e['params'])}"
+            lines.append(row)
+        await self.log(f"AI/LLM attack surface: {len(ai_eps)} endpoint(s) ({tag_summary})", "info")
+        await self.add_finding(
+            title=f"AI / LLM Attack Surface Detected ({len(ai_eps)} endpoint(s))",
+            severity="info",
+            description=(
+                "Endpoints matching AI/LLM patterns (chat, completion, embedding, tool-call, "
+                "MCP, vector-DB) were discovered. These are prime candidates for manual LLM "
+                "red-teaming: prompt injection, jailbreak, system-prompt extraction, and "
+                f"context/training-data exfiltration. Categories: {tag_summary}."),
+            evidence="\n".join(lines),
+            remediation=(
+                "Apply input/output guardrails, isolate the system prompt, enforce rate limits "
+                "and per-user quotas on AI endpoints, and validate against the OWASP LLM Top 10 "
+                "(LLM01 prompt injection, LLM06 sensitive information disclosure)."),
+        )
 
     def _split_hp(self, hp: str):
         if ":" in hp and hp.count(":") == 1:
@@ -163,11 +233,23 @@ class Ares(BaseAgent, OffensiveEngine):
             if port:
                 explicit_ports.add(port)
         host_args = list(dict.fromkeys(bare_hosts))  # dedupe, keep order
+        # Defense-in-depth: an enumerated host (crt.sh SAN, scope file) must never
+        # be parsed as an nmap flag. Drop anything starting with '-'. Real hosts
+        # never do; is_valid_target already blocks this for user-supplied targets.
+        host_args = [h for h in host_args if h and not h.startswith("-")]
+        if not host_args:
+            await self.log("No scannable hosts after argument-safety filter", "warn")
+            return port_results
 
         if explicit_ports:
             port_flag = ["-p", ",".join(sorted(explicit_ports))]
+            scan_desc = f"port(s) {','.join(sorted(explicit_ports))}"
         else:
             port_flag = ["--top-ports", "1000"]
+            scan_desc = "top 1000 ports"
+        await self.log(
+            f"Running Nmap service detection (-sV -sC) on {len(host_args)} host(s), {scan_desc}",
+            "info")
         stdout, stderr, rc = await self.run_command(
             ["nmap", "-sV", "-sC", "-T4", "--open", "-oG", "-"] + port_flag + host_args,
             timeout=300,
@@ -245,9 +327,11 @@ class Ares(BaseAgent, OffensiveEngine):
 
         findings = []
         try:
+            # interactsh (OAST) left ENABLED so nuclei catches blind/out-of-band
+            # bugs (blind SSRF, blind SQLi, log4j-style RCE) via callback detection.
             stdout, stderr, rc = await self.run_command(
                 ["nuclei", "-l", tmpfile, "-severity", "critical,high,medium",
-                 "-json", "-silent", "-no-interactsh", "-timeout", "10"],
+                 "-json", "-silent", "-timeout", "10"],
                 timeout=300,
             )
 

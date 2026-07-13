@@ -45,6 +45,12 @@ services:
       OLYMPUS_API_KEY: ${OLYMPUS_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       REPORTS_DIR: /app/reports
+
+      YGGDRASIL_AUTO_APPROVE: ${YGGDRASIL_AUTO_APPROVE:-}
+      YGGDRASIL_APPROVAL_TIMEOUT: ${YGGDRASIL_APPROVAL_TIMEOUT:-0}
+      YGGDRASIL_OFFENSIVE_MAX_HOSTS: ${YGGDRASIL_OFFENSIVE_MAX_HOSTS:-5}
+      YGGDRASIL_CIDR_MAX_HOSTS: ${YGGDRASIL_CIDR_MAX_HOSTS:-1024}
+      YGGDRASIL_HEARTBEAT_SECONDS: ${YGGDRASIL_HEARTBEAT_SECONDS:-300}
     # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
     # No host port is published, reducing the unauthenticated attack surface.
     expose:

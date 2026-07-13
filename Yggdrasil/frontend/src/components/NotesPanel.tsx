@@ -61,7 +61,7 @@ export default function NotesPanel({ missionId, notes, onDelete }: Props) {
                 onClick={() => del(n.id)}
                 style={{ fontSize: '0.7rem', color: 'var(--text-dim)', cursor: 'pointer' }}
                 title="Delete note"
-              >Delete</button>
+              >✕</button>
             </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text)', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {n.content}

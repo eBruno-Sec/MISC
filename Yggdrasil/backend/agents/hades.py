@@ -4,16 +4,16 @@ from .base import BaseAgent
 
 class Hades(BaseAgent):
     name = "hades"
-    symbol = "SK"
-    display_name = "SKULD"
-    role = "Impact Review"
+    symbol = "HD"
+    display_name = "HADES"
+    role = "Post-Exploitation & Persistence Analysis"
 
     async def execute(self, target: str, context: dict = None) -> dict:
         hermes = (context or {}).get("hermes", {})
         ares = (context or {}).get("ares", {})
         hephaestus = (context or {}).get("hephaestus", {})
 
-        await self.log("Analyzing impact landscape", "info")
+        await self.log("Analyzing post-exploitation landscape", "info")
 
         result = {
             "lateral_movement_paths": [],
@@ -56,7 +56,7 @@ class Hades(BaseAgent):
         await self._generate_findings(result)
 
         await self.log(
-            f"Impact review complete. "
+            f"Post-exploitation analysis complete. "
             f"{len(result['lateral_movement_paths'])} lateral paths | "
             f"{len(result['persistence_vectors'])} persistence vectors | "
             f"Impact: {result['impact_analysis'].get('blast_radius', 'unknown')}",

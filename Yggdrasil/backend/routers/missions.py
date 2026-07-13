@@ -2,79 +2,30 @@ import asyncio
 import csv
 import io
 import json
-from contextlib import suppress
 from datetime import datetime
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-from typing import Optional, List, Any
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
 
 from core.database import get_session, AsyncSessionLocal
-from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange
+from core.models import Mission, MissionStatus, AgentLog, Finding, ApprovalRequest, MissionNote, HttpExchange, AuthProfile
 from routers.ws import manager
 from core.security import is_valid_target, validate_targets
-from core.mission_health import mission_heartbeat_loop, record_mission_health
-from core.backup import (
-    BackupValidationError, build_backup_payload, safe_backup_filename,
-    summarize_backup, validate_backup_payload,
-)
-from core.poc import redact_headers, render_markdown_poc
-from core.web_security import analyze_idor_pair, is_url_in_scope
+from core import poc, replay
+from core.backup import validate_backup, BackupError
 
 router = APIRouter()
 
 AGENT_SYMBOL = {
-    "zeus": "OD", "athena": "FR", "hermes": "HE", "ares": "TY",
-    "hephaestus": "BR", "hades": "SK", "apollo": "SA",
-}
-
-AGENT_DISPLAY = {
-    "zeus": "ODIN", "athena": "FRIGG", "hermes": "HEIMDALL", "ares": "TYR",
-    "hephaestus": "BROKKR", "hades": "SKULD", "apollo": "SAGA",
+    "zeus": "Z", "athena": "AT", "hermes": "HE", "ares": "AR",
+    "hephaestus": "HF", "hades": "HD", "apollo": "AP", "metis": "ME",
 }
 
 VALID_AGENTS = {"hermes", "ares", "hephaestus", "hades", "apollo", "athena"}
-
-
-def _approval_lost_message(approval: ApprovalRequest | None = None) -> str:
-    action = f" for '{approval.action}'" if approval else ""
-    return (
-        f"Approval gate{action} is no longer active. The backend was likely restarted "
-        "while this mission was waiting, so the in-memory task that could continue "
-        "the scan is gone. Relaunch the mission to start a fresh run."
-    )
-
-
-async def _mark_orphaned_approval(
-    session: AsyncSession,
-    mission: Mission,
-    approval: ApprovalRequest | None,
-) -> str:
-    message = _approval_lost_message(approval)
-    now = datetime.utcnow()
-
-    if approval and approval.status == "pending":
-        approval.status = "stale"
-        approval.resolved_at = now
-
-    if mission.status not in (MissionStatus.COMPLETE, MissionStatus.FAILED):
-        mission.status = MissionStatus.FAILED
-        mission.current_phase = None
-        mission.completed_at = now
-
-    session.add(AgentLog(
-        mission_id=mission.id,
-        agent="zeus",
-        level="error",
-        message=message,
-    ))
-    await session.commit()
-    return message
 
 
 # ── Pydantic schemas ──────────────────────────────────────────
@@ -84,6 +35,21 @@ class MissionCreate(BaseModel):
     scope: str = ""
     mode: str = "passive"
     scope_rules: dict = {}
+    auto_approve: bool = False   # pre-authorize all HITL gates (autonomous run)
+
+
+class RestoreBody(BaseModel):
+    # Mirrors the client "Download Progress (.json)" snapshot. Kept permissive
+    # (dicts/optional) so validation + normalization happens in core.backup, which
+    # returns the precise reason surfaced by the UI's error banner.
+    version: Optional[str] = None
+    platform: Optional[str] = None
+    mission: dict = {}
+    findings: Optional[List[dict]] = None
+    notes: Optional[List[dict]] = None
+    logs: Optional[List[dict]] = None
+    status: Optional[str] = None
+    current_phase: Optional[str] = None
 
 
 class ApprovalResolve(BaseModel):
@@ -116,7 +82,7 @@ class NoteCreate(BaseModel):
 
 class AddTargetsBody(BaseModel):
     targets: List[str]
-    run_scan: bool = False              # immediately kick Tyr on these targets
+    run_scan: bool = False              # immediately kick Ares on these targets
 
 
 class AgentRunBody(BaseModel):
@@ -124,100 +90,54 @@ class AgentRunBody(BaseModel):
     options: dict = {}                   # e.g. {"nmap_flags": "-p 80,443", "nuclei_tags": "cve"}
 
 
-class BackupImportBody(BaseModel):
-    payload: dict[str, Any]
-
-
-class HttpExchangeCreate(BaseModel):
-    label: Optional[str] = None
-    finding_id: Optional[str] = None
-    method: str = "GET"
-    url: str
-    request_headers: dict[str, Any] = {}
-    request_body: Optional[str] = None
-    response_status: Optional[int] = None
-    response_headers: dict[str, Any] = {}
-    response_body: Optional[str] = None
-
-
 class ReplayBody(BaseModel):
     method: str = "GET"
     url: str
-    headers: dict[str, Any] = {}
+    headers: dict = {}
     body: Optional[str] = None
-    timeout: int = 15
+    follow_redirects: bool = False
+    save: bool = True                    # persist as HttpExchange evidence
+    finding_id: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class FuzzBody(BaseModel):
     method: str = "GET"
     url: str
-    parameter: str
-    payloads: List[str]
-    headers: dict[str, Any] = {}
-    timeout: int = 10
+    headers: dict = {}
+    body: Optional[str] = None
+    param: str
+    param_in: str = "query"              # query | body | header
+    payloads: Optional[List[str]] = None
+    wordlist_id: Optional[str] = None    # e.g. "sqli", "xss", "lfi" (curated lists)
+    follow_redirects: bool = False
+    max_payloads: int = 200
+
+
+class DiffBody(BaseModel):
+    a_id: str
+    b_id: str
+
+
+class ProfileBody(BaseModel):
+    name: str                            # unique label, e.g. "user-a"
+    role: Optional[str] = None           # human role, e.g. "standard user", "admin"
+    headers: dict = {}                   # auth headers for this session (Cookie / Authorization / ...)
 
 
 class AccessCheckBody(BaseModel):
     method: str = "GET"
     url: str
-    high_priv_headers: dict[str, Any] = {}
-    low_priv_headers: dict[str, Any] = {}
     body: Optional[str] = None
-    timeout: int = 15
+    extra_headers: dict = {}             # non-auth headers common to every role
+    profile_ids: List[str] = []          # roles to test the request as
+    owner_profile_id: Optional[str] = None   # the account that legitimately owns the object
+    include_anon: bool = True            # also send with no auth (control)
+    follow_redirects: bool = False
+    save: bool = True                    # capture each role's response as evidence
 
 
 # ── Helper: serialise findings ────────────────────────────────
-
-def _base_url(mission: Mission) -> str:
-    target = mission.target.strip()
-    if target.startswith(("http://", "https://")):
-        return target
-    return f"https://{target}"
-
-
-def _ensure_url_in_mission_scope(mission: Mission, url: str) -> None:
-    if not is_url_in_scope(url, _base_url(mission), mission.scope_rules or {}):
-        raise HTTPException(400, "Target host is outside this mission's scope")
-
-
-def _exchange_dict(exchange: HttpExchange) -> dict:
-    return {
-        "id": exchange.id,
-        "mission_id": exchange.mission_id,
-        "finding_id": exchange.finding_id,
-        "label": exchange.label,
-        "method": exchange.method,
-        "url": exchange.url,
-        "request_headers": exchange.request_headers or {},
-        "request_body": exchange.request_body,
-        "response_status": exchange.response_status,
-        "response_headers": exchange.response_headers or {},
-        "response_body": exchange.response_body,
-        "timestamp": exchange.timestamp.isoformat(),
-    }
-
-
-def _mutate_query_param(url: str, parameter: str, value: str) -> str:
-    parsed = urlparse(url)
-    pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    seen = False
-    mutated = []
-    for key, old in pairs:
-        if key == parameter:
-            mutated.append((key, value))
-            seen = True
-        else:
-            mutated.append((key, old))
-    if not seen:
-        mutated.append((parameter, value))
-    return urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
-
-
-async def _send_workbench_request(method: str, url: str, headers: dict[str, Any], body: str | None, timeout: int) -> httpx.Response:
-    bounded_timeout = max(1, min(int(timeout or 15), 30))
-    async with httpx.AsyncClient(follow_redirects=False, timeout=bounded_timeout) as client:
-        return await client.request((method or "GET").upper(), url, headers={str(k): str(v) for k, v in (headers or {}).items()}, content=body)
-
 
 def _finding_dict(f: Finding) -> dict:
     return {
@@ -236,76 +156,36 @@ def _finding_dict(f: Finding) -> dict:
     }
 
 
-# ── Mission CRUD ──────────────────────────────────────────────
-
-# Workspace backup
-
-@router.post("/backup/summary")
-async def backup_summary(body: BackupImportBody):
-    try:
-        return summarize_backup(body.payload)
-    except BackupValidationError as exc:
-        raise HTTPException(422, str(exc))
-
-
-@router.post("/backup/import")
-async def import_backup(
-    body: BackupImportBody,
-    session: AsyncSession = Depends(get_session),
-):
-    try:
-        data = validate_backup_payload(body.payload)
-    except BackupValidationError as exc:
-        raise HTTPException(422, str(exc))
-
-    mission = Mission(
-        target=data["mission"]["target"],
-        scope=data["mission"]["scope"],
-        mode=data["mission"]["mode"],
-        status=MissionStatus.COMPLETE,
-        scope_rules=data["mission"]["scope_rules"],
-        context={
-            **data["mission"]["context"],
-            "backup_import": {
-                "source_workspace_id": data["workspace_id"],
-                "imported_at": datetime.utcnow().isoformat(),
-                "version": data["version"],
-            },
-        },
-        completed_at=datetime.utcnow(),
-    )
-    try:
-        session.add(mission)
-        await session.flush()
-        for item in data["findings"]:
-            session.add(Finding(mission_id=mission.id, **item))
-        for item in data["notes"]:
-            session.add(MissionNote(mission_id=mission.id, **item))
-        for item in data["logs"]:
-            session.add(AgentLog(mission_id=mission.id, **item))
-        for item in data["http_exchanges"]:
-            item = dict(item)
-            item.pop("finding_id", None)
-            session.add(HttpExchange(mission_id=mission.id, **item))
-        session.add(AgentLog(
-            mission_id=mission.id,
-            agent="import",
-            level="info",
-            message=f"Workspace backup imported from {data['workspace_id']} with {len(data['findings'])} findings",
-        ))
-        await session.commit()
-        await session.refresh(mission)
-    except Exception:
-        await session.rollback()
-        raise
-
+def _exchange_dict(ex: HttpExchange) -> dict:
     return {
-        "id": mission.id,
-        "target": mission.target,
-        "status": mission.status,
-        "imported_from": data["workspace_id"],
+        "id": ex.id,
+        "finding_id": ex.finding_id,
+        "method": ex.method,
+        "url": ex.url,
+        "request_headers": ex.request_headers or {},
+        "request_body": ex.request_body,
+        "status_code": ex.status_code,
+        "response_headers": ex.response_headers or {},
+        "response_body": ex.response_body,
+        "duration_ms": ex.duration_ms,
+        "source": ex.source,
+        "notes": ex.notes,
+        "redacted": ex.redacted,
+        "created_at": ex.created_at.isoformat(),
     }
 
+
+async def _exchanges_by_finding(session: AsyncSession, mission_id: str) -> dict:
+    rows = (await session.execute(
+        select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(HttpExchange.created_at)
+    )).scalars().all()
+    grouped: dict = {}
+    for ex in rows:
+        grouped.setdefault(ex.finding_id, []).append(_exchange_dict(ex))
+    return grouped
+
+
+# ── Mission CRUD ──────────────────────────────────────────────
 
 @router.post("")
 async def create_mission(
@@ -323,6 +203,7 @@ async def create_mission(
         mode=body.mode,
         status=MissionStatus.PENDING,
         scope_rules=body.scope_rules,
+        context={"auto_approve": bool(body.auto_approve)},  # pre-authorize gates (no schema change)
     )
     session.add(mission)
     await session.commit()
@@ -341,6 +222,7 @@ async def create_mission(
 
     return {"id": mission.id, "target": mission.target, "status": mission.status}
 
+
 @router.post("/{mission_id}/relaunch")
 async def relaunch_mission(
     mission_id: str,
@@ -352,95 +234,125 @@ async def relaunch_mission(
     if not original:
         raise HTTPException(404, "Mission not found")
 
-    new_mission = Mission(
+    context = dict(original.context or {})
+    context.update({
+        "relaunched_from": original.id,
+        "relaunched_at": datetime.utcnow().isoformat(),
+    })
+
+    mission = Mission(
         target=original.target,
-        scope=original.scope or "",
+        scope=original.scope,
         mode=original.mode,
         status=MissionStatus.PENDING,
         scope_rules=original.scope_rules or {},
-        context={"relaunched_from": mission_id},
+        context=context,
     )
-    session.add(new_mission)
+    session.add(mission)
     await session.commit()
-    await session.refresh(new_mission)
+    await session.refresh(mission)
 
     background_tasks.add_task(
         _run_mission,
-        new_mission.id,
-        new_mission.target,
-        new_mission.mode,
-        new_mission.scope or "",
-        new_mission.scope_rules or {},
+        mission.id,
+        mission.target,
+        mission.mode,
+        mission.scope,
+        mission.scope_rules or {},
         request.app.state.approval_gates,
         request.app.state.approval_results,
     )
 
-    await manager.broadcast(new_mission.id, {
-        "type": "log",
-        "agent": "zeus",
-        "symbol": AGENT_SYMBOL.get("zeus", "âš¡"),
-        "display_name": AGENT_DISPLAY.get("zeus", "ODIN"),
-        "level": "info",
-        "message": f"Mission relaunched from {mission_id[:8].upper()}",
-        "timestamp": datetime.utcnow().isoformat(),
-    })
-
     return {
-        "id": new_mission.id,
-        "target": new_mission.target,
-        "status": new_mission.status,
-        "relaunched_from": mission_id,
+        "id": mission.id,
+        "target": mission.target,
+        "status": mission.status,
+        "relaunched_from": original.id,
     }
+
+@router.post("/restore")
+async def restore_mission(body: RestoreBody, session: AsyncSession = Depends(get_session)):
+    """Hydrate a mission from a Download-Progress (.json) backup.
+
+    The client validates + parses first; we re-validate strictly server-side
+    (core.backup.validate_backup) and import as a NEW mission (fresh UUID) so a
+    restore never overwrites a live mission. Findings/notes/logs are restored
+    verbatim. Rejects a corrupt file with 422 + a clear reason (the UI shows the
+    'Invalid or corrupted progress file' banner)."""
+    try:
+        norm = validate_backup(body.model_dump(), is_valid_target)
+    except BackupError as e:
+        raise HTTPException(422, f"Invalid or corrupted progress file: {e}")
+
+    mission = Mission(
+        target=norm["target"],
+        scope=norm["scope"],
+        mode=norm["mode"],
+        status=norm["status"],
+        current_phase=norm["current_phase"],
+        scope_rules=norm["scope_rules"],
+        # flag the provenance without a schema change (context JSON, per constraints)
+        context={**norm["context"], "imported": True, "imported_at": datetime.utcnow().isoformat()},
+    )
+    session.add(mission)
+    await session.flush()  # assign mission.id before inserting children
+
+    for fd in norm["findings"]:
+        session.add(Finding(mission_id=mission.id, **fd))
+    for nd in norm["notes"]:
+        session.add(MissionNote(mission_id=mission.id, **nd))
+    for ld in norm["logs"]:
+        session.add(AgentLog(mission_id=mission.id, **ld))
+
+    await session.commit()
+    return {
+        "id": mission.id,
+        "target": mission.target,
+        "status": mission.status,
+        "restored": {
+            "findings": len(norm["findings"]),
+            "notes": len(norm["notes"]),
+            "logs": len(norm["logs"]),
+        },
+    }
+
 
 @router.get("")
 async def list_missions(session: AsyncSession = Depends(get_session)):
     rows = (await session.execute(
         select(Mission).order_by(desc(Mission.created_at)).limit(100)
     )).scalars().all()
+
+    # Severity counts per mission (for the list "peek" badges). One grouped query,
+    # scoped to just the listed missions so it stays bounded.
+    counts: dict = {}
+    ids = [m.id for m in rows]
+    if ids:
+        count_rows = (await session.execute(
+            select(Finding.mission_id, Finding.severity, func.count())
+            .where(Finding.mission_id.in_(ids))
+            .group_by(Finding.mission_id, Finding.severity)
+        )).all()
+        for mid, sev, n in count_rows:
+            counts.setdefault(mid, {})[sev or "info"] = n
+
     return [
         {
             "id": m.id, "target": m.target, "mode": m.mode,
             "status": m.status, "current_phase": m.current_phase,
             "created_at": m.created_at.isoformat(),
             "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+            "severity_counts": counts.get(m.id, {}),
         }
         for m in rows
     ]
 
 
 @router.get("/{mission_id}")
-async def get_mission(
-    mission_id: str,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-):
+async def get_mission(mission_id: str, session: AsyncSession = Depends(get_session)):
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
-
-    pending = (await session.execute(
-        select(ApprovalRequest).where(
-            ApprovalRequest.mission_id == mission_id,
-            ApprovalRequest.status == "pending",
-        )
-    )).scalars().all()
-
-    active_gate_ids = set(getattr(request.app.state, "approval_gates", {}).keys())
-    stale_pending = [a for a in pending if a.id not in active_gate_ids]
-    if mission.status == MissionStatus.AWAITING_APPROVAL and stale_pending:
-        await _mark_orphaned_approval(session, mission, stale_pending[0])
-        await manager.broadcast(mission_id, {
-            "type": "approval_resolved",
-            "approval_id": stale_pending[0].id,
-            "approved": False,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
-        await manager.broadcast(mission_id, {
-            "type": "mission_failed",
-            "error": _approval_lost_message(stale_pending[0]),
-            "timestamp": datetime.utcnow().isoformat(),
-        })
-        pending = []
 
     findings = (await session.execute(
         select(Finding).where(Finding.mission_id == mission_id).order_by(desc(Finding.timestamp))
@@ -450,9 +362,18 @@ async def get_mission(
         select(AgentLog).where(AgentLog.mission_id == mission_id).order_by(AgentLog.timestamp)
     )).scalars().all()
 
+    pending = (await session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.mission_id == mission_id,
+            ApprovalRequest.status == "pending",
+        )
+    )).scalars().all()
+
     notes = (await session.execute(
         select(MissionNote).where(MissionNote.mission_id == mission_id).order_by(MissionNote.timestamp)
     )).scalars().all()
+
+    ex_by_finding = await _exchanges_by_finding(session, mission_id)
 
     return {
         "id": mission.id, "target": mission.target, "scope": mission.scope,
@@ -461,7 +382,7 @@ async def get_mission(
         "scope_rules": mission.scope_rules,
         "created_at": mission.created_at.isoformat(),
         "completed_at": mission.completed_at.isoformat() if mission.completed_at else None,
-        "findings": [_finding_dict(f) for f in findings],
+        "findings": [{**_finding_dict(f), "exchanges": ex_by_finding.get(f.id, [])} for f in findings],
         "logs": [
             {
                 "id": l.id, "agent": l.agent,
@@ -508,35 +429,15 @@ async def resolve_approval(
     if not approval or approval.mission_id != mission_id:
         raise HTTPException(404, "Approval request not found")
 
-    if approval.status != "pending":
-        return {"status": approval.status, "approved": approval.status == "approved"}
-
-    gates: dict = request.app.state.approval_gates
-    results: dict = request.app.state.approval_results
-    if approval_id not in gates:
-        mission = await session.get(Mission, mission_id)
-        if mission:
-            message = await _mark_orphaned_approval(session, mission, approval)
-            await manager.broadcast(mission_id, {
-                "type": "approval_resolved",
-                "approval_id": approval_id,
-                "approved": False,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            await manager.broadcast(mission_id, {
-                "type": "mission_failed",
-                "error": message,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            return {"status": "stale", "approved": False, "detail": message}
-        raise HTTPException(409, _approval_lost_message(approval))
-
     approval.status = "approved" if body.approved else "denied"
     approval.resolved_at = datetime.utcnow()
     await session.commit()
 
-    results[approval_id] = body.approved
-    gates[approval_id].set()
+    gates: dict = request.app.state.approval_gates
+    results: dict = request.app.state.approval_results
+    if approval_id in gates:
+        results[approval_id] = body.approved
+        gates[approval_id].set()
 
     await manager.broadcast(mission_id, {
         "type": "approval_resolved",
@@ -753,6 +654,7 @@ async def rerun_agent(
 async def export_findings(
     mission_id: str,
     format: str = "json",
+    redact: bool = True,
     session: AsyncSession = Depends(get_session),
 ):
     mission = await session.get(Mission, mission_id)
@@ -778,11 +680,11 @@ async def export_findings(
             writer.writerow({
                 "id": f.id, "title": f.title, "severity": f.severity,
                 "cvss_score": f.cvss_score or "", "tag": f.tag or "",
-                "description": f.description or "",
-                "evidence": f.evidence or "",
-                "remediation": f.remediation or "",
+                "description": (f.description or "").replace("\n", " "),
+                "evidence": (f.evidence or "").replace("\n", " "),
+                "remediation": (f.remediation or "").replace("\n", " "),
                 "found_by": f.found_by or "", "is_manual": f.is_manual,
-                "analyst_notes": f.analyst_notes or "",
+                "analyst_notes": (f.analyst_notes or "").replace("\n", " "),
                 "timestamp": f.timestamp.isoformat(),
             })
         buf.seek(0)
@@ -790,6 +692,22 @@ async def export_findings(
             iter([buf.read()]),
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+        )
+
+    if format in ("md", "markdown"):
+        # Copy-ready PoC report: findings + captured request/response, curl and
+        # raw HTTP repro. Sensitive headers redacted unless redact=false.
+        ex_by_finding = await _exchanges_by_finding(session, mission_id)
+        md = poc.mission_markdown(
+            mission.target,
+            [_finding_dict(f) for f in findings],
+            ex_by_finding,
+            redact=redact,
+        )
+        return StreamingResponse(
+            iter([md]),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.md"'},
         )
 
     # JSON default
@@ -808,201 +726,302 @@ async def export_findings(
     )
 
 
-# ── Report ────────────────────────────────────────────────────
-
-@router.get("/{mission_id}/backup")
-async def export_backup(mission_id: str, session: AsyncSession = Depends(get_session)):
-    mission = await session.get(Mission, mission_id)
-    if not mission:
-        raise HTTPException(404, "Mission not found")
-
-    findings = (await session.execute(select(Finding).where(Finding.mission_id == mission_id))).scalars().all()
-    notes = (await session.execute(select(MissionNote).where(MissionNote.mission_id == mission_id))).scalars().all()
-    logs = (await session.execute(select(AgentLog).where(AgentLog.mission_id == mission_id))).scalars().all()
-    exchanges = (await session.execute(select(HttpExchange).where(HttpExchange.mission_id == mission_id))).scalars().all()
-
-    payload = build_backup_payload(
-        workspace_id=mission.id,
-        mission={
-            "id": mission.id,
-            "target": mission.target,
-            "scope": mission.scope,
-            "mode": mission.mode,
-            "scope_rules": mission.scope_rules or {},
-            "context": mission.context or {},
-        },
-        findings=[_finding_dict(f) for f in findings],
-        notes=[{"id": n.id, "content": n.content, "timestamp": n.timestamp.isoformat()} for n in notes],
-        logs=[{"id": l.id, "agent": l.agent, "level": l.level, "message": l.message, "raw_output": l.raw_output, "timestamp": l.timestamp.isoformat()} for l in logs],
-        exchanges=[_exchange_dict(e) for e in exchanges],
+@router.get("/{mission_id}/findings/{finding_id}/poc")
+async def finding_poc(
+    mission_id: str,
+    finding_id: str,
+    redact: bool = True,
+    session: AsyncSession = Depends(get_session),
+):
+    """Copy-ready Markdown PoC for a single finding (curl + raw HTTP + evidence)."""
+    finding = await session.get(Finding, finding_id)
+    if not finding or finding.mission_id != mission_id:
+        raise HTTPException(404, "Finding not found")
+    exchanges = (await session.execute(
+        select(HttpExchange).where(HttpExchange.finding_id == finding_id).order_by(HttpExchange.created_at)
+    )).scalars().all()
+    md = poc.finding_markdown(
+        _finding_dict(finding),
+        [_exchange_dict(e) for e in exchanges],
+        redact=redact,
     )
-    content = json.dumps(payload, indent=2, default=str)
     return StreamingResponse(
-        iter([content]),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{safe_backup_filename(mission.id)}"'},
+        iter([md]),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="poc_{finding_id[:8]}.md"'},
     )
 
 
-@router.get("/{mission_id}/http-exchanges")
-async def list_http_exchanges(mission_id: str, session: AsyncSession = Depends(get_session)):
+@router.get("/{mission_id}/exchanges")
+async def list_exchanges(mission_id: str, session: AsyncSession = Depends(get_session)):
+    """All captured HTTP request/response evidence for a mission."""
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
     rows = (await session.execute(
-        select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(desc(HttpExchange.timestamp)).limit(200)
+        select(HttpExchange).where(HttpExchange.mission_id == mission_id).order_by(HttpExchange.created_at)
     )).scalars().all()
-    return [_exchange_dict(row) for row in rows]
+    return {"exchanges": [_exchange_dict(e) for e in rows], "total": len(rows)}
 
 
-@router.post("/{mission_id}/http-exchanges")
-async def add_http_exchange(
-    mission_id: str,
-    body: HttpExchangeCreate,
-    session: AsyncSession = Depends(get_session),
-):
+@router.get("/{mission_id}/surface")
+async def get_surface(mission_id: str, session: AsyncSession = Depends(get_session)):
+    """Attack-surface inventory: deduped endpoints + params discovered during the
+    run (crawl + archives + param mining). Pivot each into /fuzz or /access-check."""
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
-    _ensure_url_in_mission_scope(mission, body.url)
-
-    exchange = HttpExchange(
-        mission_id=mission_id,
-        finding_id=body.finding_id,
-        label=body.label,
-        method=(body.method or "GET").upper(),
-        url=body.url,
-        request_headers=redact_headers(body.request_headers),
-        request_body=body.request_body,
-        response_status=body.response_status,
-        response_headers=redact_headers(body.response_headers),
-        response_body=body.response_body,
-    )
-    session.add(exchange)
-    await session.commit()
-    await session.refresh(exchange)
-    return _exchange_dict(exchange)
-
-
-@router.get("/{mission_id}/http-exchanges/{exchange_id}/poc")
-async def get_http_exchange_poc(mission_id: str, exchange_id: str, session: AsyncSession = Depends(get_session)):
-    exchange = await session.get(HttpExchange, exchange_id)
-    if not exchange or exchange.mission_id != mission_id:
-        raise HTTPException(404, "HTTP exchange not found")
+    from core.surface import build_inventory
+    from core.ai_surface import build_ai_surface
+    surface = (mission.context or {}).get("surface", {}) or {}
+    inventory = build_inventory(surface.get("endpoints", []) or [])
+    ai_eps = build_ai_surface(inventory)
+    coverage = dict(surface.get("coverage", {}) or {})
+    coverage["ai_endpoints"] = len(ai_eps)
     return {
-        "markdown": render_markdown_poc(
-            exchange.method,
-            exchange.url,
-            exchange.request_headers or {},
-            exchange.request_body,
-            exchange.response_status,
-            exchange.response_headers or {},
-            exchange.response_body,
-        )
+        "coverage": coverage,
+        "endpoints": inventory,
+        "ai_surface": ai_eps,
+        "redirects": surface.get("redirects", []),
+        "total": len(inventory),
+        "parameterized": sum(1 for e in inventory if e["parameterized"]),
     }
 
 
+# ── Request workbench (replay / fuzz / diff) ──────────────────────
+
+def _host_in_scope(mission: Mission, url: str) -> bool:
+    """Keep the workbench scoped to the mission's target (and its subdomains) so
+    it cannot be used as an open request relay against arbitrary hosts."""
+    from urllib.parse import urlparse
+    import re as _re
+    parsed = urlparse(url if "://" in url else "http://" + url)
+    host = parsed.netloc.split(":")[0].lower()
+    if not host or not is_valid_target(host):
+        return False
+    th = _re.sub(r"^https?://", "", (mission.target or "").lower()).split("/")[0].split(":")[0]
+    if not th:
+        return True
+    return host == th or host.endswith("." + th) or th.endswith("." + host)
+
+
 @router.post("/{mission_id}/replay")
-async def replay_request(mission_id: str, body: ReplayBody, session: AsyncSession = Depends(get_session)):
+async def replay_request(
+    mission_id: str,
+    body: ReplayBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Repeater: send an analyst-crafted request, capture the response, and (by
+    default) store it as PoC evidence."""
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
-    _ensure_url_in_mission_scope(mission, body.url)
-    try:
-        response = await _send_workbench_request(body.method, body.url, body.headers, body.body, body.timeout)
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Replay request failed: {exc}")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
 
-    exchange = HttpExchange(
-        mission_id=mission_id,
-        label="Workbench replay",
-        method=(body.method or "GET").upper(),
-        url=body.url,
-        request_headers=redact_headers(body.headers),
-        request_body=body.body,
-        response_status=response.status_code,
-        response_headers=redact_headers(dict(response.headers)),
-        response_body=response.text[:200000],
-    )
-    session.add(exchange)
-    await session.commit()
-    await session.refresh(exchange)
+    try:
+        async with replay.client(follow_redirects=body.follow_redirects) as c:
+            res = await replay.send(c, body.method, body.url, body.headers, body.body)
+    except Exception as e:
+        raise HTTPException(502, f"Request failed: {e}")
+
+    exchange_id = None
+    if body.save:
+        ex = HttpExchange(
+            mission_id=mission_id, finding_id=body.finding_id,
+            method=body.method.upper(), url=body.url,
+            request_headers=poc.redact_headers(body.headers or {}),
+            request_body=body.body,
+            status_code=res["status"],
+            response_headers=poc.redact_headers(res["headers"]),
+            response_body=((res["body"] or "")[:4000] or None),
+            duration_ms=res["duration_ms"], source="replay",
+            notes=body.notes, redacted=True,
+        )
+        session.add(ex)
+        await session.commit()
+        exchange_id = ex.id
+
     return {
-        "exchange_id": exchange.id,
-        "status_code": response.status_code,
-        "headers": redact_headers(dict(response.headers)),
-        "body": response.text[:200000],
+        "exchange_id": exchange_id,
+        "status": res["status"],
+        "length": res["length"],
+        "duration_ms": res["duration_ms"],
+        "headers": res["headers"],
+        "body": (res["body"] or "")[:8000],
     }
 
 
 @router.post("/{mission_id}/fuzz")
-async def fuzz_request(mission_id: str, body: FuzzBody, session: AsyncSession = Depends(get_session)):
+async def fuzz_param(
+    mission_id: str,
+    body: FuzzBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Intruder: fire a payload list at one parameter and rank by anomaly."""
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
-    payloads = [str(p) for p in body.payloads[:25]]
-    if not payloads:
-        raise HTTPException(400, "At least one payload is required")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
 
-    results = []
-    for payload in payloads:
-        url = _mutate_query_param(body.url, body.parameter, payload)
-        _ensure_url_in_mission_scope(mission, url)
-        try:
-            response = await _send_workbench_request(body.method, url, body.headers, None, body.timeout)
-            results.append({
-                "payload": payload,
-                "url": url,
-                "status_code": response.status_code,
-                "length": len(response.content),
-                "body_preview": response.text[:500],
-            })
-        except httpx.HTTPError as exc:
-            results.append({"payload": payload, "url": url, "error": str(exc)})
-    return {"parameter": body.parameter, "count": len(results), "results": results}
+    payloads = list(body.payloads or [])
+    if not payloads and body.wordlist_id:
+        from core import wordlists as wl
+        path = wl.path_for_id(body.wordlist_id)
+        if path:
+            try:
+                with open(path, "r", errors="replace") as f:
+                    payloads = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            except OSError:
+                payloads = []
+    if not payloads:
+        raise HTTPException(400, "Provide payloads or a valid wordlist_id")
+    payloads = payloads[: max(1, min(body.max_payloads, replay.MAX_PAYLOADS))]
+
+    if body.param_in not in ("query", "body", "header"):
+        raise HTTPException(400, "param_in must be query, body, or header")
+
+    try:
+        async with replay.client(follow_redirects=body.follow_redirects) as c:
+            out = await replay.fuzz(c, body.method, body.url, body.headers, body.body,
+                                    body.param, body.param_in, payloads)
+    except Exception as e:
+        raise HTTPException(502, f"Fuzz run failed: {e}")
+    return out
+
+
+@router.post("/{mission_id}/diff")
+async def diff_exchanges(
+    mission_id: str,
+    body: DiffBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Diff two captured exchanges: status / length / header / body deltas."""
+    a = await session.get(HttpExchange, body.a_id)
+    b = await session.get(HttpExchange, body.b_id)
+    if not a or not b or a.mission_id != mission_id or b.mission_id != mission_id:
+        raise HTTPException(404, "Exchange not found")
+
+    def _summary(ex):
+        return {"status": ex.status_code, "length": len(ex.response_body or ""),
+                "duration_ms": ex.duration_ms, "headers": ex.response_headers or {},
+                "body": ex.response_body or ""}
+
+    return replay.diff_responses(_summary(a), _summary(b))
+
+
+# ── Auth profiles + cross-role access control (IDOR / BOLA / BFLA) ─
+
+def _profile_dict(p: AuthProfile) -> dict:
+    """Never echo raw session material back over the API — redact header values."""
+    return {
+        "id": p.id, "name": p.name, "role": p.role,
+        "headers": poc.redact_headers(p.headers or {}),
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+@router.post("/{mission_id}/profiles")
+async def create_profile(
+    mission_id: str,
+    body: ProfileBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Register a named session/role (its auth headers) for cross-role testing."""
+    mission = await session.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(404, "Mission not found")
+    p = AuthProfile(mission_id=mission_id, name=body.name, role=body.role,
+                    headers=body.headers or {})
+    session.add(p)
+    await session.commit()
+    return _profile_dict(p)
+
+
+@router.get("/{mission_id}/profiles")
+async def list_profiles(mission_id: str, session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(
+        select(AuthProfile).where(AuthProfile.mission_id == mission_id).order_by(AuthProfile.created_at)
+    )).scalars().all()
+    return {"profiles": [_profile_dict(p) for p in rows], "total": len(rows)}
+
+
+@router.delete("/{mission_id}/profiles/{profile_id}")
+async def delete_profile(mission_id: str, profile_id: str, session: AsyncSession = Depends(get_session)):
+    p = await session.get(AuthProfile, profile_id)
+    if not p or p.mission_id != mission_id:
+        raise HTTPException(404, "Profile not found")
+    await session.delete(p)
+    await session.commit()
+    return {"deleted": profile_id}
 
 
 @router.post("/{mission_id}/access-check")
-async def access_check(mission_id: str, body: AccessCheckBody, session: AsyncSession = Depends(get_session)):
+async def access_check(
+    mission_id: str,
+    body: AccessCheckBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Send the SAME request as each role (+ anon) and flag broken access control.
+
+    Point this at a request that returns one account's object/function. If another
+    role — or anon — gets the owner's response, that's a candidate IDOR/BOLA/BFLA.
+    Every response is captured as evidence; findings stay analyst-confirmed."""
     mission = await session.get(Mission, mission_id)
     if not mission:
         raise HTTPException(404, "Mission not found")
-    _ensure_url_in_mission_scope(mission, body.url)
-    try:
-        high = await _send_workbench_request(body.method, body.url, body.high_priv_headers, body.body, body.timeout)
-        low = await _send_workbench_request(body.method, body.url, body.low_priv_headers, body.body, body.timeout)
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Access check failed: {exc}")
+    if not _host_in_scope(mission, body.url):
+        raise HTTPException(400, "Target host is outside this mission's scope")
 
-    verdict = analyze_idor_pair(high, low, cross_role=True) or {
-        "severity": "info",
-        "confidence": "low",
-        "reason": "Responses did not show a strong cross-role access-control signal.",
-    }
-    for label, headers, response in (
-        ("Access check high privilege", body.high_priv_headers, high),
-        ("Access check low privilege", body.low_priv_headers, low),
-    ):
-        session.add(HttpExchange(
-            mission_id=mission_id,
-            label=label,
-            method=(body.method or "GET").upper(),
-            url=body.url,
-            request_headers=redact_headers(headers),
-            request_body=body.body,
-            response_status=response.status_code,
-            response_headers=redact_headers(dict(response.headers)),
-            response_body=response.text[:200000],
-        ))
-    await session.commit()
+    # Build the roster of (label, headers, is_owner, is_anon) to test.
+    roster = []
+    if body.include_anon:
+        roster.append(("anon (no auth)", dict(body.extra_headers or {}), False, True))
+    for pid in body.profile_ids:
+        p = await session.get(AuthProfile, pid)
+        if not p or p.mission_id != mission_id:
+            continue
+        h = dict(body.extra_headers or {})
+        h.update(p.headers or {})
+        roster.append((p.role or p.name, h, pid == body.owner_profile_id, not (p.headers or {})))
+    if not roster:
+        raise HTTPException(400, "Provide profile_ids (and/or include_anon) to test")
+
+    results = []
+    async with replay.client(follow_redirects=body.follow_redirects) as c:
+        for label, headers, is_owner, is_anon in roster:
+            try:
+                r = await replay.send(c, body.method, body.url, headers, body.body)
+            except Exception as e:
+                results.append({"role": label, "error": str(e), "is_owner": is_owner})
+                continue
+            entry = {"role": label, "status": r["status"], "length": r["length"],
+                     "duration_ms": r["duration_ms"], "is_owner": is_owner, "is_anon": is_anon}
+            results.append(entry)
+            if body.save:
+                ex = HttpExchange(
+                    mission_id=mission_id, method=body.method.upper(), url=body.url,
+                    request_headers=poc.redact_headers(headers),
+                    request_body=body.body, status_code=r["status"],
+                    response_headers=poc.redact_headers(r["headers"]),
+                    response_body=((r["body"] or "")[:4000] or None),
+                    duration_ms=r["duration_ms"], source="access-check",
+                    notes=f"role={label}" + (" (owner)" if is_owner else ""), redacted=True,
+                )
+                session.add(ex)
+    if body.save:
+        await session.commit()
+
+    verdict = replay.access_verdict(results)
     return {
-        "verdict": verdict,
-        "high_status": high.status_code,
-        "low_status": low.status_code,
-        "high_length": len(high.content),
-        "low_length": len(low.content),
+        "request": {"method": body.method.upper(), "url": body.url},
+        "results": results,
+        **verdict,
     }
 
+
+# ── Report ────────────────────────────────────────────────────
 
 @router.get("/{mission_id}/report")
 async def get_report(mission_id: str):
@@ -1029,6 +1048,7 @@ async def _run_mission(
             approval_gates=approval_gates,
             approval_results=approval_results,
         )
+        hb_task = asyncio.create_task(_mission_heartbeat(mission_id, zeus))
         try:
             await zeus.execute(target, {"mode": mode, "scope": scope, "scope_rules": scope_rules})
         except Exception as e:
@@ -1041,6 +1061,46 @@ async def _run_mission(
                 "type": "mission_failed", "error": str(e),
                 "timestamp": datetime.utcnow().isoformat(),
             })
+        finally:
+            hb_task.cancel()
+            try:
+                await hb_task
+            except BaseException:
+                pass
+
+
+async def _mission_heartbeat(mission_id: str, zeus):
+    """Periodic 'still working' pulse to the live terminal so a long-running phase
+    (nmap / nuclei / ZAP / sqlmap) never looks frozen. Broadcast-only (no DB write,
+    so it can't contend with the mission's async session). Interval via
+    YGGDRASIL_HEARTBEAT_SECONDS (or legacy OLYMPUS_HEARTBEAT_SECONDS; default 300s / 5 min; 0 disables)."""
+    import os
+    import time
+    try:
+        interval = float(os.getenv("YGGDRASIL_HEARTBEAT_SECONDS") or os.getenv("OLYMPUS_HEARTBEAT_SECONDS") or "300")
+    except ValueError:
+        interval = 300.0
+    if interval <= 0:
+        return
+    start = time.monotonic()
+    while True:
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
+        elapsed = int(time.monotonic() - start)
+        mm, ss = divmod(elapsed, 60)
+        phase = str(getattr(zeus, "current_phase_label", "working")).upper()
+        try:
+            await manager.broadcast(mission_id, {
+                "type": "log", "agent": "zeus", "symbol": "Z",
+                "display_name": "ZEUS", "level": "info",
+                "message": (f"Heartbeat: still working. Phase: {phase}. "
+                            f"Elapsed {mm}m{ss:02d}s. A long-running step is in progress; hang tight."),
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
 
 
 async def _run_single_agent(
@@ -1050,7 +1110,7 @@ async def _run_single_agent(
     approval_gates: dict,
     approval_results: dict,
 ):
-    """Re-run a single stage outside of the main orchestration sequence."""
+    """Re-run a single god outside of the Zeus sequence."""
     AGENT_MAP = {
         "hermes": "agents.hermes.Hermes",
         "ares": "agents.ares.Ares",
@@ -1060,93 +1120,84 @@ async def _run_single_agent(
         "athena": "agents.athena.Athena",
     }
 
-    heartbeat_task = asyncio.create_task(mission_heartbeat_loop(mission_id, manager))
-    try:
-        async with AsyncSessionLocal() as session:
-            mission = await session.get(Mission, mission_id)
-            if not mission:
-                return
+    async with AsyncSessionLocal() as session:
+        mission = await session.get(Mission, mission_id)
+        if not mission:
+            return
 
-            # Update status to show agent is running
-            from sqlalchemy import update
-            await session.execute(
-                update(Mission).where(Mission.id == mission_id)
-                .values(status=MissionStatus.SCANNING, current_phase=agent_name)
+        # Update status to show agent is running
+        from sqlalchemy import update
+        await session.execute(
+            update(Mission).where(Mission.id == mission_id)
+            .values(status=MissionStatus.SCANNING, current_phase=agent_name)
+        )
+        await session.commit()
+
+        await manager.broadcast(mission_id, {
+            "type": "status_change",
+            "status": MissionStatus.SCANNING,
+            "phase": agent_name,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+        try:
+            import importlib
+            module_path, class_name = AGENT_MAP[agent_name].rsplit(".", 1)
+            mod = importlib.import_module(module_path)
+            AgentClass = getattr(mod, class_name)
+
+            agent = AgentClass(
+                session=session,
+                mission_id=mission_id,
+                ws_manager=manager,
+                approval_gates=approval_gates,
+                approval_results=approval_results,
             )
-            await session.commit()
-            await record_mission_health(mission_id, manager, allow_terminal=True)
+
+            # Build context from stored mission context
+            ctx = dict(mission.context or {})
+
+            # Override live targets if specified
+            target_override = overrides.get("targets")
+            if target_override and agent_name in ("ares", "hermes"):
+                ctx.setdefault("hermes", {})["live_hosts"] = [
+                    {"host": t, "url": f"https://{t}"} for t in target_override
+                ]
+
+            # Pass custom options into context for agents that respect them
+            ctx["_options"] = overrides.get("options", {})
+
+            result = await agent.execute(mission.target, ctx)
+
+            # Merge result back into mission context
+            fresh_mission = await session.get(Mission, mission_id)
+            if fresh_mission:
+                new_ctx = dict(fresh_mission.context or {})
+                new_ctx[agent_name] = result
+                fresh_mission.context = new_ctx
+                fresh_mission.status = MissionStatus.COMPLETE
+                fresh_mission.current_phase = None
+                await session.commit()
 
             await manager.broadcast(mission_id, {
                 "type": "status_change",
-                "status": MissionStatus.SCANNING,
-                "phase": agent_name,
+                "status": MissionStatus.COMPLETE,
+                "phase": None,
                 "timestamp": datetime.utcnow().isoformat(),
             })
 
-            try:
-                import importlib
-                module_path, class_name = AGENT_MAP[agent_name].rsplit(".", 1)
-                mod = importlib.import_module(module_path)
-                AgentClass = getattr(mod, class_name)
-
-                agent = AgentClass(
-                    session=session,
-                    mission_id=mission_id,
-                    ws_manager=manager,
-                    approval_gates=approval_gates,
-                    approval_results=approval_results,
-                )
-
-                # Build context from stored mission context
-                ctx = dict(mission.context or {})
-
-                # Override live targets if specified
-                target_override = overrides.get("targets")
-                if target_override and agent_name in ("ares", "hermes"):
-                    ctx.setdefault("hermes", {})["live_hosts"] = [
-                        {"host": t, "url": f"https://{t}"} for t in target_override
-                    ]
-
-                # Pass custom options into context for agents that respect them
-                ctx["_options"] = overrides.get("options", {})
-
-                result = await agent.execute(mission.target, ctx)
-
-                # Merge result back into mission context
-                fresh_mission = await session.get(Mission, mission_id)
-                if fresh_mission:
-                    new_ctx = dict(fresh_mission.context or {})
-                    new_ctx[agent_name] = result
-                    fresh_mission.context = new_ctx
-                    fresh_mission.status = MissionStatus.COMPLETE
-                    fresh_mission.current_phase = None
-                    await session.commit()
-                    await record_mission_health(mission_id, manager, allow_terminal=True)
-
-                await manager.broadcast(mission_id, {
-                    "type": "status_change",
-                    "status": MissionStatus.COMPLETE,
-                    "phase": None,
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-
-            except Exception as e:
-                await manager.broadcast(mission_id, {
-                    "type": "log",
-                    "agent": agent_name,
-                    "symbol": AGENT_SYMBOL.get(agent_name, "--"),
-                    "display_name": AGENT_DISPLAY.get(agent_name, agent_name.upper()),
-                    "level": "error",
-                    "message": f"Re-run failed: {e}",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-                await session.execute(
-                    update(Mission).where(Mission.id == mission_id)
-                    .values(status=MissionStatus.COMPLETE, current_phase=None)
-                )
-                await session.commit()
-                await record_mission_health(mission_id, manager, allow_terminal=True)
-    finally:
-        heartbeat_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await heartbeat_task
+        except Exception as e:
+            await manager.broadcast(mission_id, {
+                "type": "log",
+                "agent": agent_name,
+                "symbol": AGENT_SYMBOL.get(agent_name, "--"),
+                "display_name": agent_name.upper(),
+                "level": "error",
+                "message": f"Re-run failed: {e}",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            await session.execute(
+                update(Mission).where(Mission.id == mission_id)
+                .values(status=MissionStatus.COMPLETE, current_phase=None)
+            )
+            await session.commit()

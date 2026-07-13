@@ -1,17 +1,15 @@
-import asyncio
-from contextlib import suppress
+import os
 from datetime import datetime
 from sqlalchemy import update
 from core.models import Mission, MissionStatus
-from core.mission_health import mission_heartbeat_loop, record_mission_health
 from .base import BaseAgent
 
 
 class Zeus(BaseAgent):
     name = "zeus"
-    symbol = "OD"
-    display_name = "ODIN"
-    role = "Assessment Orchestrator"
+    symbol = "Z"
+    display_name = "ZEUS"
+    role = "Mission Orchestrator"
 
     def _spawn(self, AgentClass):
         return AgentClass(
@@ -22,20 +20,11 @@ class Zeus(BaseAgent):
             approval_results=self.approval_results,
         )
 
-    def _brokkr_input_counts(self, ares: dict) -> tuple[int, int]:
-        if not isinstance(ares, dict):
-            return 0, 0
-        template_count = len(ares.get("vulnerabilities", []) or [])
-        offensive = ares.get("offensive", {}) if isinstance(ares.get("offensive", {}), dict) else {}
-        candidate_count = 0
-        for key in ("sqli", "xss", "dast", "auth", "dependency", "scope_candidates", "path_traversal", "idor_bola"):
-            candidate_count += len(offensive.get(key, []) or [])
-        return template_count, candidate_count
-
     async def _set_phase(self, status: str, phase: str = None):
         values = {"status": status}
         if phase:
             values["current_phase"] = phase
+            self.current_phase_label = phase   # read by the mission heartbeat
         if status in (MissionStatus.COMPLETE, MissionStatus.FAILED):
             values["completed_at"] = datetime.utcnow()
         await self.session.execute(
@@ -50,146 +39,202 @@ class Zeus(BaseAgent):
                 "phase": phase,
                 "timestamp": datetime.utcnow().isoformat(),
             })
-        await record_mission_health(self.mission_id, self.ws_manager, allow_terminal=True)
-
-    async def _persist_context(self, ctx: dict):
-        mission = await self.session.get(Mission, self.mission_id)
-        if not mission:
-            return
-        current = dict(mission.context or {})
-        health = current.get("mission_health")
-        current.update(ctx)
-        if health:
-            current["mission_health"] = health
-        mission.context = current
-        await self.session.commit()
 
     async def execute(self, target: str, context: dict = None) -> dict:
-        heartbeat_task = asyncio.create_task(mission_heartbeat_loop(self.mission_id, self.ws_manager))
-        try:
-            mode = (context or {}).get("mode", "passive")
-            scope = (context or {}).get("scope", "")
-            scope_rules = (context or {}).get("scope_rules", {})
-            ctx = {"scope_rules": scope_rules}
+        mode = (context or {}).get("mode", "passive")
+        scope = (context or {}).get("scope", "")
+        scope_rules = (context or {}).get("scope_rules", {})
+        ctx = {"scope_rules": scope_rules}
 
-            await self._set_phase(MissionStatus.PLANNING, "zeus")
-            await self.log(f"Yggdrasil online - Target: {target} | Mode: {mode.upper()}", "info")
+        await self._set_phase(MissionStatus.PLANNING, "zeus")
+        await self.log(f"⚡ YGGDRASIL ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
 
-            sequences = {
-                "passive": "FRIGG -> HEIMDALL -> SAGA",
-                "active": "FRIGG -> HEIMDALL -> [GATE] -> TYR -> SAGA",
-                "full": "FRIGG -> HEIMDALL -> [GATE] -> TYR -> BROKKR -> [GATE] -> SKULD -> [GATE] -> SAGA",
-            }
-            await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
+        sequences = {
+            "passive": "ATHENA → HERMES → METIS → APOLLO",
+            "active": "ATHENA → HERMES → [GATE] → ARES → METIS → APOLLO",
+            "full": "ATHENA → HERMES → [GATE] → ARES → HEPHAESTUS → [GATE] → HADES → [GATE] → METIS → APOLLO",
+        }
+        await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
 
-            from .athena import Athena
-            await self._set_phase(MissionStatus.PLANNING, "athena")
-            athena = self._spawn(Athena)
-            ctx["athena"] = await athena.execute(
-                target,
-                {"mode": mode, "scope": scope, "scope_rules": scope_rules},
-            )
-            await self._persist_context(ctx)
+        # ── ATHENA ──
+        from .athena import Athena
+        await self._set_phase(MissionStatus.PLANNING, "athena")
+        athena = self._spawn(Athena)
+        ctx["athena"] = await athena.execute(target, {"mode": mode, "scope": scope})
 
-            from .hermes import Hermes
-            await self._set_phase(MissionStatus.RECON, "hermes")
-            hermes = self._spawn(Hermes)
-            ctx["hermes"] = await hermes.execute(target, ctx)
-            await self._persist_context(ctx)
+        # If the operator wrote free-text scope notes but uploaded no structured
+        # scope rules, enforce the validated rules ATHENA derived from those notes.
+        # Structured rules (from a scope file) always win and are never overridden.
+        if not (scope_rules.get("in_scope") or scope_rules.get("out_of_scope")):
+            ai_rules = (ctx.get("athena") or {}).get("scope_rules") or {}
+            if ai_rules.get("in_scope") or ai_rules.get("out_of_scope"):
+                ctx["scope_rules"] = ai_rules
+                await self.log(
+                    f"Enforcing AI-derived scope from notes: "
+                    f"{len(ai_rules.get('in_scope', []))} in / {len(ai_rules.get('out_of_scope', []))} out",
+                    "info",
+                )
 
-            if mode == "passive":
-                return await self._finalize(target, ctx)
+        # Move extracted credentials to a transient key so ARES can authenticate.
+        # Kept out of ctx["athena"] and never persisted; passwords are not logged.
+        creds = (ctx.get("athena") or {}).pop("_credentials", None)
+        if creds:
+            ctx["_credentials"] = creds
 
-            await self.log("Requesting authorization for active assessment phase", "warn")
-            live = ctx["hermes"].get("live_hosts", [])
-            host_preview = ", ".join(h["host"] for h in live[:5])
-            more = f" (+{len(live)-5} more)" if len(live) > 5 else ""
-            approved = await self.request_approval(
-                action="Active Assessment + Web App Testing (Nmap, Nuclei, sqlmap, dalfox, traversal, IDOR/BOLA)",
-                description=f"Tyr will run Nmap and Nuclei, then engage the offensive engine "
-                            f"(crawl + SQL injection, XSS, DAST, path traversal/LFI, IDOR/BOLA, "
-                            f"content discovery, and sensitive-endpoint checks) against {len(live)} live target(s): {host_preview}{more}. "
-                            f"This performs real, non-destructive injection testing. Authorized targets only.",
-            )
-            if not approved:
-                await self.log("Active assessment denied. Generating passive report.", "warn")
-                return await self._finalize(target, ctx)
+        # ── HERMES ──
+        from .hermes import Hermes
+        await self._set_phase(MissionStatus.RECON, "hermes")
+        hermes = self._spawn(Hermes)
+        ctx["hermes"] = await hermes.execute(target, ctx)
 
-            from .ares import Ares
-            await self._set_phase(MissionStatus.SCANNING, "ares")
-            ares = self._spawn(Ares)
-            ctx["ares"] = await ares.execute(target, ctx)
-            await self._persist_context(ctx)
-
-            if mode == "active":
-                return await self._finalize(target, ctx)
-
-            vuln_count, web_candidate_count = self._brokkr_input_counts(ctx.get("ares", {}))
-            approved = await self.request_approval(
-                action="Payload Preparation",
-                description=(
-                    f"Brokkr will prepare targeted payloads for {vuln_count} template finding(s) "
-                    f"and {web_candidate_count} Tyr web finding/candidate(s). "
-                    "Exploitation only on authorized targets."
-                ),
-            )
-            if not approved:
-                await self.log("Payload preparation denied.", "warn")
-                return await self._finalize(target, ctx)
-
-            from .hephaestus import Hephaestus
-            await self._set_phase(MissionStatus.EXPLOITING, "hephaestus")
-            heph = self._spawn(Hephaestus)
-            ctx["hephaestus"] = await heph.execute(target, ctx)
-            await self._persist_context(ctx)
-
-            exploit_count = len(ctx["hephaestus"].get("exploitable_targets", []))
-            candidate_count = len(ctx["hephaestus"].get("candidate_targets", []))
-            if exploit_count == 0:
-                suffix = f" {candidate_count} candidate target(s) retained for manual validation." if candidate_count else ""
-                await self.log(f"No confirmed exploitable targets. Skipping Skuld.{suffix}", "info")
-                return await self._finalize(target, ctx)
-
-            approved = await self.request_approval(
-                action="Impact Review",
-                description=f"Skuld will analyze {exploit_count} confirmed exploitable targets for credential access, "
-                            "persistence mechanisms, and lateral movement paths.",
-            )
-            if not approved:
-                await self.log("Impact review denied.", "warn")
-                return await self._finalize(target, ctx)
-
-            from .hades import Hades
-            await self._set_phase(MissionStatus.POST_EXPLOIT, "hades")
-            hades = self._spawn(Hades)
-            ctx["hades"] = await hades.execute(target, ctx)
-            await self._persist_context(ctx)
-
+        if mode == "passive":
             return await self._finalize(target, ctx)
-        finally:
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
+
+        # ── APPROVAL GATE: ARES ──
+        await self.log("Requesting authorization for active scanning phase", "warn")
+        live = ctx["hermes"].get("live_hosts", [])
+        host_preview = ", ".join(h["host"] for h in live[:5])
+        more = f" (+{len(live)-5} more)" if len(live) > 5 else ""
+        try:
+            max_hosts = max(1, int(os.getenv("YGGDRASIL_OFFENSIVE_MAX_HOSTS") or os.getenv("OLYMPUS_OFFENSIVE_MAX_HOSTS") or "5"))
+        except ValueError:
+            max_hosts = 5
+        covered = min(len(live), max_hosts)
+        auth_note = ""
+        _creds = ctx.get("_credentials")
+        if isinstance(_creds, list) and _creds:
+            auth_note = (f" Authenticated scanning is ENABLED: Yggdrasil will log in as "
+                         f"'{_creds[0].get('username', '?')}' and test the authenticated surface.")
+        approved = await self.request_approval(
+            action="Active Scanning + Exploitation (Nmap, Nuclei, sqlmap, dalfox, OWASP ZAP, IDOR/auth probes)",
+            description=f"Ares will run Nmap and Nuclei (with OAST), then engage the offensive engine on "
+                        f"the first {covered} of {len(live)} live host(s): {host_preview}{more}. "
+                        f"Per host it builds the attack surface from the crawl, web archives and active "
+                        f"parameter mining, then runs SQL injection, XSS, SSRF, SSTI, path traversal, "
+                        f"open-redirect, CORS, host-header, DAST and IDOR/sensitive-endpoint checks plus a "
+                        f"full OWASP ZAP active scan against each discovered URL.{auth_note} Real, "
+                        f"non-destructive (read-only) testing. Authorized targets only.",
+        )
+        if not approved:
+            await self.log("Active scanning denied. Generating passive report.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── ARES ──
+        from .ares import Ares
+        await self._set_phase(MissionStatus.SCANNING, "ares")
+        ares = self._spawn(Ares)
+        ctx["ares"] = await ares.execute(target, ctx)
+
+        if mode == "active":
+            return await self._finalize(target, ctx)
+
+        # ── APPROVAL GATE: HEPHAESTUS ──
+        # Count real findings from the DB. ares["vulnerabilities"] is only the
+        # nuclei template hits; the offensive engine (SQLi/XSS/SSRF/SSTI/ZAP/...)
+        # writes straight to the findings table.
+        from sqlalchemy import select, func, or_
+        from core.models import Finding
+        _c = await self.session.execute(
+            select(func.count()).select_from(Finding).where(
+                Finding.mission_id == self.mission_id,
+                Finding.severity.in_(("critical", "high")),
+                or_(Finding.tag.is_(None), Finding.tag != "false_positive"),
+            )
+        )
+        vuln_count = _c.scalar() or 0
+        approved = await self.request_approval(
+            action="Exploitation Phase — Payload Preparation",
+            description=f"Hephaestus will forge targeted payloads for {vuln_count} high/critical "
+                        f"finding(s). Exploitation only on authorized targets.",
+        )
+        if not approved:
+            await self.log("Exploitation phase denied.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── HEPHAESTUS ──
+        from .hephaestus import Hephaestus
+        await self._set_phase(MissionStatus.EXPLOITING, "hephaestus")
+        heph = self._spawn(Hephaestus)
+        ctx["hephaestus"] = await heph.execute(target, ctx)
+
+        # ── APPROVAL GATE: HADES ──
+        exploit_count = len(ctx["hephaestus"].get("exploitable_targets", []))
+        if exploit_count == 0:
+            await self.log("No exploitable targets confirmed. Skipping Hades.", "info")
+            return await self._finalize(target, ctx)
+
+        approved = await self.request_approval(
+            action="Post-Exploitation Analysis",
+            description=f"Hades will analyze {exploit_count} confirmed exploitable targets for credential access, "
+                        "persistence mechanisms, and lateral movement paths.",
+        )
+        if not approved:
+            await self.log("Post-exploitation phase denied.", "warn")
+            return await self._finalize(target, ctx)
+
+        # ── HADES ──
+        from .hades import Hades
+        await self._set_phase(MissionStatus.POST_EXPLOIT, "hades")
+        hades = self._spawn(Hades)
+        ctx["hades"] = await hades.execute(target, ctx)
+
+        return await self._finalize(target, ctx)
 
     async def _finalize(self, target: str, ctx: dict) -> dict:
-        from .apollo import Apollo
         await self._set_phase(MissionStatus.REPORTING, "apollo")
+
+        # ── METIS: AI triage + correlation before the report (no-op without AI key) ──
+        try:
+            from .metis import Metis
+            metis = self._spawn(Metis)
+            ctx["metis"] = await metis.execute(target, ctx)
+        except Exception as e:
+            await self.log(f"METIS triage error: {e}", "warn")
+            ctx["metis"] = {}
+
+        from .apollo import Apollo
         apollo = self._spawn(Apollo)
         ctx["apollo"] = await apollo.execute(target, ctx)
-        await self._persist_context(ctx)
+
+        # Persist a small, secret-free surface/coverage summary so the attack-surface
+        # inventory is queryable after the run. Deliberately NOT the whole ctx: that
+        # holds _credentials (a password) and set() objects that aren't JSON-safe.
+        try:
+            ares = ctx.get("ares", {}) or {}
+            off = ares.get("offensive", {}) or {}
+            hermes = ctx.get("hermes", {}) or {}
+            summary = {
+                "endpoints": [str(u) for u in (off.get("endpoints") or []) if isinstance(u, str)][:3000],
+                "redirects": [r for r in (off.get("redirects") or []) if isinstance(r, dict)][:300],
+                "coverage": {
+                    "subdomains": len(hermes.get("subdomains", []) or []),
+                    "live_hosts": len(hermes.get("live_hosts", []) or []),
+                    "network_hosts": len(hermes.get("network_hosts", []) or []),
+                    "hosts_scanned": off.get("hosts_scanned", ares.get("targets_scanned", 0)),
+                    "crawled_urls": off.get("crawled_urls", 0),
+                    "content_paths": len(ares.get("directories", []) or []),
+                },
+            }
+            fresh = await self.session.get(Mission, self.mission_id)
+            if fresh:
+                merged = dict(fresh.context or {})
+                merged["surface"] = summary
+                fresh.context = merged
+                await self.session.commit()
+        except Exception as e:
+            await self.log(f"Surface summary persist skipped: {e}", "warn")
 
         await self._set_phase(MissionStatus.COMPLETE)
-        await self.log("Yggdrasil assessment complete", "success")
+        await self.log("⚡ YGGDRASIL MISSION COMPLETE", "success")
 
         if self.ws_manager:
-            apollo_result = ctx.get("apollo", {})
-            report_path = apollo_result.get("report_path", "")
+            report_path = ctx.get("apollo", {}).get("report_path", "")
             await self.ws_manager.broadcast(self.mission_id, {
                 "type": "mission_complete",
                 "report_path": report_path,
-                "report_available": bool(report_path) and not apollo_result.get("report_error"),
-                "report_error": apollo_result.get("report_error"),
-                "stats": apollo_result.get("stats", {}),
+                "report_available": ctx.get("apollo", {}).get("report_available", bool(report_path)),
+                "report_error": ctx.get("apollo", {}).get("report_error"),
+                "stats": ctx.get("apollo", {}).get("stats", {}),
                 "timestamp": datetime.utcnow().isoformat(),
             })
 

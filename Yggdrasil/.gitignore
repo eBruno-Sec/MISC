@@ -1,0 +1,9 @@
+# Local environment
+.env
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+
+# Frontend dependencies/build
+frontend/node_modules/
+frontend/dist/

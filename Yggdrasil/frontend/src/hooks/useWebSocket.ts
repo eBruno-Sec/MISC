@@ -11,7 +11,13 @@ export function useWebSocket(missionId: string | null, onEvent: (e: WSEvent) => 
     if (!missionId) return
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${window.location.host}/ws/${missionId}`
+    // Match the REST client: send the API key as a query param when one is set
+    // (WebSockets cannot send custom headers). No-op when unset (localhost default).
+    const key = typeof localStorage !== 'undefined'
+      ? (localStorage.getItem('yggdrasil_api_key') || localStorage.getItem('olympus_api_key') || '')
+      : ''
+    const qs = key ? `?api_key=${encodeURIComponent(key)}` : ''
+    const url = `${proto}://${window.location.host}/ws/${missionId}${qs}`
 
     try {
       const socket = new WebSocket(url)
