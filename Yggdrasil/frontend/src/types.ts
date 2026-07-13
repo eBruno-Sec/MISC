@@ -1,0 +1,179 @@
+export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
+export type MissionMode = 'passive' | 'active' | 'full'
+export type LogLevel = 'info' | 'warn' | 'error' | 'success'
+export type FindingTag = 'confirmed' | 'false_positive' | 'reported' | 'fixed' | null
+
+export type MissionStatus =
+  | 'pending' | 'planning' | 'recon' | 'scanning'
+  | 'exploiting' | 'post_exploit' | 'reporting'
+  | 'complete' | 'awaiting_approval' | 'failed'
+
+export interface Finding {
+  id: string
+  title: string
+  severity: Severity
+  description: string | null
+  evidence: string | null
+  cvss_score: number | null
+  remediation: string | null
+  found_by: string | null
+  tag: FindingTag
+  is_manual: boolean
+  analyst_notes: string | null
+  timestamp: string
+}
+
+export interface LogEntry {
+  id: string
+  agent: string
+  symbol: string
+  level: LogLevel
+  message: string
+  timestamp: string
+}
+
+export interface ApprovalRequest {
+  id: string
+  agent: string
+  action: string
+  description: string | null
+  created_at: string
+}
+
+export interface MissionNote {
+  id: string
+  content: string
+  timestamp: string
+}
+
+export interface MissionHealth {
+  last_heartbeat_at: string
+  phase_started_at: string
+  phase_key: string
+  phase: string | null
+  phase_name: string
+  status: MissionStatus
+  state: 'running' | 'waiting' | 'complete' | 'failed'
+  elapsed_seconds: number
+  phase_elapsed_seconds: number
+  message: string
+}
+
+export interface LiveHost {
+  host: string
+  url: string
+  status_code: number | null
+  server: string
+  manually_added?: boolean
+}
+
+export interface Mission {
+  id: string
+  target: string
+  scope: string
+  mode: MissionMode
+  status: MissionStatus
+  current_phase: string | null
+  scope_rules: { in_scope: ScopeRule[]; out_of_scope: ScopeRule[] } | null
+  created_at: string
+  completed_at: string | null
+  findings: Finding[]
+  logs: LogEntry[]
+  pending_approvals: ApprovalRequest[]
+  notes: MissionNote[]
+  context: Record<string, any>
+}
+
+export interface MissionSummary {
+  id: string
+  target: string
+  mode: MissionMode
+  status: MissionStatus
+  current_phase: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface ScopeRule {
+  identifier: string
+  type: string
+}
+
+export interface ParsedScope {
+  in_scope: ScopeRule[]
+  out_of_scope: ScopeRule[]
+  format_detected: string
+  total_in: number
+  total_out: number
+}
+
+export type WSEvent =
+  | { type: 'log'; agent: string; symbol: string; display_name: string; level: LogLevel; message: string; timestamp: string }
+  | { type: 'finding'; severity: Severity; title: string; found_by: string; display_name: string; timestamp: string }
+  | { type: 'finding_updated'; finding_id: string; tag: FindingTag; severity: Severity; timestamp: string }
+  | { type: 'finding_deleted'; finding_id: string }
+  | { type: 'status_change'; status: MissionStatus; phase: string | null; timestamp: string }
+  | { type: 'approval_required'; approval_id: string; agent: string; display_name: string; symbol: string; action: string; description: string; timestamp: string }
+  | { type: 'approval_resolved'; approval_id: string; approved: boolean; timestamp: string }
+  | { type: 'mission_complete'; report_path: string; report_available?: boolean; report_error?: string | null; stats: Record<Severity, number>; timestamp: string }
+  | { type: 'mission_failed'; error: string; timestamp: string }
+  | { type: 'mission_heartbeat'; health: MissionHealth; timestamp: string }
+  | { type: 'agent_rerun'; agent: string; symbol: string; timestamp: string }
+  | { type: 'targets_added'; targets: string[]; timestamp: string }
+  | { type: 'note_added'; note: MissionNote }
+
+export interface BackupSummary {
+  version: number
+  workspace_id: string
+  target: string
+  mode: string
+  findings: number
+  notes: number
+  logs: number
+  http_exchanges: number
+}
+
+export interface HttpExchange {
+  id: string
+  mission_id: string
+  finding_id: string | null
+  label: string | null
+  method: string
+  url: string
+  request_headers: Record<string, string>
+  request_body: string | null
+  response_status: number | null
+  response_headers: Record<string, string>
+  response_body: string | null
+  timestamp: string
+}
+
+export interface ReplayResult {
+  exchange_id: string
+  status_code: number
+  headers: Record<string, string>
+  body: string
+}
+
+export interface FuzzResultItem {
+  payload: string
+  url: string
+  status_code?: number
+  length?: number
+  body_preview?: string
+  error?: string
+}
+
+export interface FuzzResult {
+  parameter: string
+  count: number
+  results: FuzzResultItem[]
+}
+
+export interface AccessCheckResult {
+  verdict: Record<string, any>
+  high_status: number
+  low_status: number
+  high_length: number
+  low_length: number
+}
