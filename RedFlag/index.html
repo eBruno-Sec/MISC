@@ -956,91 +956,107 @@ function renderCopy(tmpl, mode) {
 const CLICK_POINTS = [3, 2, 1, 0];
 
 const ARCHETYPES = {
-  A: { name:"The Avoidant",       tagline:"Fear of Closeness",       color:"#3E7098", colorDark:"#5A98C0", subtypes:["The Ghost-in-Waiting","The Contrarian / Debater","The 'Right Person, Wrong Time' Martyr"], wound:"The Avoidant doesn't lack the capacity for love. They fear what love costs. Intimacy and threat got wired together early — and distance became armor that turned invisible over time." },
-  C: { name:"The Consumer",       tagline:"Hungry for Validation",    color:"#B03020", colorDark:"#E0655A", subtypes:["The Love-Bomber","The Main Character","The Collector / Rotator"], wound:"The Consumer learned early that love was conditional — earned through performance. The adult version is a relationship style built around the hunt for proof: proof that they're chosen, special, not replaced." },
-  U: { name:"The Under-Functioner",tagline:"Fear of Accountability", color:"#9A6B15", colorDark:"#C89030", subtypes:["The Project (Fixer-Upper)","The Peter Pan (Forever Child)"], wound:"For the Under-Functioner, being fully responsible for a relationship feels like being set up to fail. The system runs slightly below full capacity — never enough to be abandoned, never enough to be held accountable." },
-  S: { name:"The Secure Attacher",tagline:"The Healthy Baseline",     color:"#2E7D46", colorDark:"#4B9C65", subtypes:["The Secure Partner"], wound:"This is not the absence of history — it is the presence of repair. Security is not ease. It is the capacity to hold hard feelings without letting them run the relationship." },
+  A: { name:"The Avoidant", tagline:"Fear of Closeness", color:"#3E7098", colorDark:"#5A98C0",
+    plain:"Pulls away when things get close. Distance feels safer than risking rejection.",
+    subtypes:["The Ghost-in-Waiting","The Contrarian / Debater","The 'Right Person, Wrong Time' Martyr"],
+    subtypeDescs:["Rarely leaves, but never fully commits. The relationship lives in a permanent 'almost.'","Uses arguments and logic to avoid real emotional closeness. Being right feels safer than being close.","There's always a reason real commitment can't happen right now — timing, life stage, circumstances."],
+    wound:"The Avoidant doesn't lack the capacity for love. They fear what love costs. Intimacy and threat got wired together early — and distance became armor that turned invisible over time." },
+  C: { name:"The Consumer", tagline:"Hungry for Validation", color:"#B03020", colorDark:"#E0655A",
+    plain:"Needs constant proof of being wanted. The relationship is about getting reassurance, not giving connection.",
+    subtypes:["The Love-Bomber","The Main Character","The Collector / Rotator"],
+    subtypeDescs:["Overwhelming at the start — intense attention, big gestures, fast declarations. Then pulls back once you're hooked.","The relationship runs on their needs. Your feelings and problems come second.","Keeps options open. Needs to feel chosen by more than one person to feel okay."],
+    wound:"The Consumer learned early that love was conditional — earned through performance. The adult version is a relationship style built around the hunt for proof: proof that they're chosen, special, not replaced." },
+  U: { name:"The Under-Functioner", tagline:"Fear of Accountability", color:"#9A6B15", colorDark:"#C89030",
+    plain:"Avoids full responsibility. Relies on a partner to carry more than their share of the relationship.",
+    subtypes:["The Project (Fixer-Upper)","The Peter Pan (Forever Child)"],
+    subtypeDescs:["Always close to being ready, never quite there. Needs someone to believe in their potential.","Avoids adult responsibility with charm. Never quite finishes growing up."],
+    wound:"For the Under-Functioner, being fully responsible for a relationship feels like being set up to fail. The system runs slightly below full capacity — never enough to be abandoned, never enough to be held accountable." },
+  S: { name:"The Secure Attacher", tagline:"The Healthy Baseline", color:"#2E7D46", colorDark:"#4B9C65",
+    plain:"Handles closeness, conflict, and distance without needing to control the outcome.",
+    subtypes:["The Secure Partner"],
+    subtypeDescs:["Consistent, honest, and able to handle hard conversations without falling apart or shutting down."],
+    wound:"This is not the absence of history — it is the presence of repair. Security is not ease. It is the capacity to hold hard feelings without letting them run the relationship." },
 };
 
 const ATTACHMENT_QUESTIONS = [
   { id:"Q1", title:"The Boundary Test",
-    partnerScenario:"You tell your partner you need this weekend to yourself — you love them, you just need to recharge. Rank how their response would most likely go.",
-    selfScenario:"Your partner tells you they need this weekend to themselves — they love you, they just need to recharge. Rank how your response would most likely go.",
+    partnerScenario:"You tell your partner you need this weekend alone to recharge — you love them, you just need some space. How do they most likely react?",
+    selfScenario:"Your partner tells you they need this weekend alone to recharge — they love you, they just need some space. How do you most likely react?",
     opts:[
-      { key:"A", text:"{THEY_UC} say \"Fine, no problem\" — almost too easily. No temperature shift in either direction. You couldn't tell if {THEY} were hurt, relieved, or completely indifferent." },
-      { key:"C", text:"{THEY_UC} don't argue — but {THEIR} energy shifts. Quieter, slightly withdrawn. By the weekend {THEYVE} spent half {THEIR} alone time managing how {THEY} feel about the alone time." },
-      { key:"U", text:"{THEY_UC} agree — then text three times that day anyway. Not urgently, just checking in. {THEY_UC} forgot the terms of what was asked for." },
-      { key:"S", text:"\"Of course — let me know when you're ready to reconnect.\" No fallout, no undercurrent. {THEY_UC} meant it." },
+      { key:"A", text:"{THEY_UC} say 'no problem' — quickly and easily. Hard to tell if {THEY} are hurt, happy, or just don't care." },
+      { key:"C", text:"{THEY_UC} say okay, but go quiet. By the weekend {THEY} have spent more time thinking about the distance than enjoying it." },
+      { key:"U", text:"{THEY_UC} agree — then text a few times during the weekend anyway. {THEY} forgot what was asked." },
+      { key:"S", text:"'Of course — just let me know when you're back.' No tension, no drama. {THEY_UC} really meant it." },
     ]
   },
   { id:"Q2", title:"The Conflict Test",
-    partnerScenario:"You bring up something small that bothered you — a comment they made, something minor they missed. Rank how they'd most likely respond.",
-    selfScenario:"Your partner brings up something small that bothered them — a comment you made, something you missed. Rank how you'd most likely respond.",
+    partnerScenario:"You bring up something small that bothered you — a comment they made, something they forgot. How do they most likely respond?",
+    selfScenario:"Your partner brings up something small that bothered them — a comment you made, something you forgot. How do you most likely respond?",
     opts:[
-      { key:"A", text:"{THEY_UC} acknowledge it briefly — \"yeah, fair\" — and want to move past it immediately. Technically resolved. But you don't feel heard. {THEY_UC} are slightly cooler for the rest of the day." },
-      { key:"C", text:"{THEY_UC} spiral. What started as your grievance becomes a conversation about whether {THEYRE} a bad partner. Somehow you end up reassuring {THEM} about the thing {THEY} did." },
-      { key:"U", text:"{THEY_UC} apologize immediately and enthusiastically. Then do the exact same thing two weeks later." },
-      { key:"S", text:"{THEY_UC} listen, acknowledge it without collapsing or deflecting, and the air actually clears. The rupture gets repaired." },
+      { key:"A", text:"{THEY_UC} say 'yeah, fair' and want to move on fast. The issue closes quickly — but it doesn't feel fully resolved. {THEY_UC} are a little cold for the rest of the day." },
+      { key:"C", text:"{THEY_UC} make it about {THEIR} own feelings. The conversation turns into whether {THEYRE} a bad partner. The original problem gets forgotten." },
+      { key:"U", text:"{THEY_UC} say sorry right away — a lot. Then do the same thing again two weeks later." },
+      { key:"S", text:"{THEY_UC} really listen, say sorry without drama, and the tension actually clears. The problem gets fixed." },
     ]
   },
   { id:"Q3", title:"The Communication Test",
-    partnerScenario:"You've been apart for three days — different schedules, sporadic contact. When you reconnect, what's the vibe from their side?",
-    selfScenario:"You've been apart for three days — different schedules, sporadic contact. What's your vibe when you reconnect?",
+    partnerScenario:"You've been apart for three days — busy schedules, not much contact. When you reconnect, what's their vibe?",
+    selfScenario:"You've been apart from your partner for three days — busy schedules, not much contact. What's your vibe when you reconnect?",
     opts:[
-      { key:"A", text:"{THEY_UC} pick up like nothing happened — warm, present, no reference to the gap. The distance clearly didn't register the same way for {THEM}." },
-      { key:"C", text:"There's a coolness to thaw. Nothing explicit — {THEYD} deny it if asked — but the limited contact left a mark. Some relational maintenance required before things feel even." },
-      { key:"U", text:"{THEY_UC} also went quiet. Nobody reached out first. There's a weird texture to the reconnection that neither of you is naming." },
-      { key:"S", text:"{THEY_UC} checked in when it felt natural — not constantly, not absent. The reconnection feels easy. No accumulation, no residue." },
+      { key:"A", text:"{THEY_UC} act like nothing happened — warm, normal, no mention of the time apart. The distance didn't seem to affect {THEM} at all." },
+      { key:"C", text:"{THEY} are a little cold when you reconnect. Nothing is said, but the low contact left a mark. Things need to be smoothed over first." },
+      { key:"U", text:"{THEY_UC} also went quiet. Nobody reached out first. The reconnection feels a little strange but neither person says why." },
+      { key:"S", text:"{THEY_UC} checked in when it felt right — not too much, not too little. Reconnecting is easy. No leftover tension." },
     ]
   },
-  { id:"Q4", title:"The Intimacy Spike",
-    partnerScenario:"You shared something heavy — a real fear, something you've never told anyone. In the days immediately after, how do they show up?",
-    selfScenario:"Your partner shared something heavy — a real fear, something they've never told anyone. How do you show up in the days after?",
+  { id:"Q4", title:"The Intimacy Test",
+    partnerScenario:"You shared something personal — a real fear, something you've never told anyone. How do they show up in the days after?",
+    selfScenario:"Your partner shared something personal — a real fear, something they've never told anyone. How do you show up in the days after?",
     opts:[
-      { key:"A", text:"{THEY_UC} were present in the moment — kind, the right words. But in the days after {THEYRE} slightly more distant, like the closeness raised the stakes in a way {THEYRE} quietly managing." },
-      { key:"C", text:"{THEY_UC} immediately matched your vulnerability with {THEIR} own — something bigger. The focus shifted before you'd finished processing. Connection, technically. But also a takeover." },
-      { key:"U", text:"{THEY_UC} were exactly right in the moment. And then nothing. No follow-up, no \"hey, how are you feeling about what you shared?\" It just evaporated." },
-      { key:"S", text:"{THEY_UC} sat in it with you. Asked a real follow-up question. Checked in two days later without being prompted. The thing you shared didn't disappear." },
+      { key:"A", text:"{THEY_UC} said the right things in the moment — kind, present. But in the days after {THEY} are a little more distant, like the closeness made {THEM} nervous." },
+      { key:"C", text:"{THEY_UC} quickly shared something big of {THEIR} own. The focus shifted to {THEM} before the first moment was done." },
+      { key:"U", text:"{THEY_UC} were great in the moment. Then nothing. No follow-up. {THEY} didn't bring it up again." },
+      { key:"S", text:"{THEY_UC} sat with it. Asked a real follow-up question. Checked in a couple of days later without being asked." },
     ]
   },
   { id:"Q5", title:"The Accountability Test",
-    partnerScenario:"You told them something they said hurt you. Rank how they'd most likely respond.",
-    selfScenario:"Your partner told you that something you said hurt them. Rank how you'd most likely respond.",
+    partnerScenario:"You told them something they said hurt you. How do they most likely respond?",
+    selfScenario:"Your partner told you something you said hurt them. How do you most likely respond?",
     opts:[
-      { key:"A", text:"{THEY_UC} apologize briefly and cleanly, then want to move on. Any attempt to stay in the conversation reads as relitigating. The closure feels imposed more than earned." },
-      { key:"C", text:"{THEIR} hurt becomes evidence of something {THEY} need to process about {THEMSELVES}. By the end, you're comforting {THEM} about the thing {THEY} did." },
-      { key:"U", text:"{THEY_UC} find the angle where it was actually complicated — or you're too sensitive — or {THEY} didn't mean it that way. The apology, if it comes, arrives with conditions." },
-      { key:"S", text:"{THEY_UC} hear it. Take responsibility without collapsing or making it about {THEM}. The air is genuinely different afterward." },
+      { key:"A", text:"{THEY_UC} say sorry quickly and want to move on. Any more talking feels like going over it again. The issue closes before it feels resolved." },
+      { key:"C", text:"{THEY_UC} bring up how {THEY} feel. The conversation shifts to whether {THEYRE} a bad partner. The original problem gets lost." },
+      { key:"U", text:"{THEY_UC} find a reason it wasn't really {THEIR} fault — or that the other person is too sensitive. The sorry, if it comes, has excuses attached." },
+      { key:"S", text:"{THEY_UC} really hear it. Say sorry without making it dramatic. The air is actually different after." },
     ]
   },
   { id:"Q6", title:"The Crisis Test",
-    partnerScenario:"Something genuinely terrible happened — work, family, health. You're not okay and you told them. How do they show up?",
-    selfScenario:"Something genuinely terrible happened to your partner — work, family, health. They told you they're not okay. How do you show up?",
+    partnerScenario:"Something bad happened to you — work, family, health. You told them you're not okay. How do they show up?",
+    selfScenario:"Something bad happened to your partner — work, family, health. They told you they're not okay. How do you show up?",
     opts:[
-      { key:"A", text:"{THEY_UC} acknowledge it — maybe try to solve it — then give you space. More space than you wanted. {THEY_UC} meant well. It felt like being handled rather than held." },
-      { key:"C", text:"Initially present and attentive — but the conversation finds its way to {THEIR} parallel stress, or advice you didn't ask for, or a comparison that quietly shrinks what you're going through." },
-      { key:"U", text:"Warm in the moment. But no follow-up comes. If you need more, you'd have to ask explicitly. The burden of receiving support stays with you." },
-      { key:"S", text:"{THEY_UC} showed up — actually there, not just technically. Asked what you needed. Checked in unprompted the next day." },
+      { key:"A", text:"{THEY_UC} listen and maybe try to fix it — then give space. More space than was wanted. {THEY_UC} meant well, but it felt like being handled, not supported." },
+      { key:"C", text:"{THEY_UC} are there at first — but the conversation slowly moves to {THEIR} own stress, or advice nobody asked for, or a comparison that makes the problem feel smaller." },
+      { key:"U", text:"{THEY_UC} are warm in the moment. No follow-up comes. More support would need to be asked for directly." },
+      { key:"S", text:"{THEY_UC} actually showed up — really there, not just going through the motions. Asked what was needed. Checked in the next day without being told to." },
     ]
   },
   { id:"Q7", title:"The Integration Test",
-    partnerScenario:"A few months in. Rank which best describes their approach to bringing you into their world — friends, family, social life.",
-    selfScenario:"A few months in. Rank which best describes your approach to bringing them into your world — friends, family, social life.",
+    partnerScenario:"A few months in. How do they bring you into their world — friends, family, social life?",
+    selfScenario:"A few months in. How do you bring them into your world — friends, family, social life?",
     opts:[
-      { key:"A", text:"Slow. {THEYVE} met one of {THEIR} friends, maybe, in a low-stakes way. The relationship still exists somewhat in a bubble {THEY} haven't opened." },
-      { key:"C", text:"Fast and curated. {THEYVE} met everyone — but it felt like a rollout. Deliberate. You were the subject of scene-setting before you arrived." },
-      { key:"U", text:"Lots of \"we should all get together soon\" that never becomes actual plans. {THEIR} friends know you exist. You haven't actually met them." },
-      { key:"S", text:"It happened naturally. {THEYVE} introduced you to the people who matter. With warmth and easy context. No performance, no avoidance." },
+      { key:"A", text:"Slowly. {THEYVE} introduced you to maybe one friend, in a low-key way. The relationship still feels a little separate from {THEIR} real life." },
+      { key:"C", text:"Fast, but it felt planned. {THEYVE} introduced you to everyone — but the introductions felt like a performance. The scene was set before you arrived." },
+      { key:"U", text:"Lots of 'we should all hang out soon' that never actually happens. {THEIR} friends know you exist. You haven't actually met them." },
+      { key:"S", text:"It happened naturally. {THEYVE} introduced you to the people who matter, with easy and warm context. No big performance, no avoidance." },
     ]
   },
-  { id:"Q8", title:"The Pace Test",
-    partnerScenario:"You had a real conversation about where things are going. Rank which best describes their approach.",
-    selfScenario:"You had a real conversation about where things are going. Rank which best describes your approach.",
+  { id:"Q8", title:"The Future Test",
+    partnerScenario:"You had a real talk about where things are going. How do they approach it?",
+    selfScenario:"You had a real talk about where things are going. How do you approach it?",
     opts:[
-      { key:"A", text:"{THEY_UC} engaged warmly but kept everything slightly vague — abstract, philosophical, unresolved. {THEY_UC} seemed comfortable leaving it there. Nothing landed concrete." },
-      { key:"C", text:"Very enthusiastic — lots of future language, declarations. But push on specifics — logistics, real timelines, actual decisions — and the conversation goes fuzzy." },
-      { key:"U", text:"Deflection or defensiveness. \"Why does it need a label?\" Or {THEY} agreed to something {THEY} clearly hadn't thought through and would revisit when convenient." },
-      { key:"S", text:"Direct. {THEY_UC} said where {THEY} actually are, including where {THEYRE} uncertain. You left knowing where you stood." },
+      { key:"A", text:"{THEY_UC} talked warmly but kept things vague — general ideas, nothing concrete. {THEY_UC} seemed comfortable leaving things unclear." },
+      { key:"C", text:"Very positive — lots of future talk, big statements. But when you ask for real specifics — timelines, actual plans — the conversation gets fuzzy." },
+      { key:"U", text:"{THEY_UC} got defensive or changed the subject. 'Why does it need a label?' Or {THEY} agreed to something {THEY} hadn't really thought through." },
+      { key:"S", text:"Direct. {THEY_UC} said where {THEY} actually stand — including what {THEYRE} still unsure about. The conversation had a real answer." },
     ]
   },
 ];
@@ -2088,8 +2104,10 @@ function AttachmentQuiz({ mode, onComplete }) {
   );
 }
 
-function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
-  const [copied, setCopied] = useState(false);
+function AttachmentResults({ result, mode, onRestart }) {
+  const [copied,         setCopied]         = useState(false);
+  const [expandedArc,    setExpandedArc]    = useState(null);
+  const [expandedSubtype,setExpandedSubtype] = useState(null);
   const arc        = ARCHETYPES[result.primary];
   const secArc     = result.secondary ? ARCHETYPES[result.secondary] : null;
   const { dark }   = useContext(ThemeCtx);
@@ -2102,6 +2120,8 @@ function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
       .then(()=>{ setCopied(true); setTimeout(()=>setCopied(false), 2200); })
       .catch(()=>{});
   }
+  function toggleArc(k) { setExpandedArc(p => p===k ? null : k); setExpandedSubtype(null); }
+  function toggleSubtype(i) { setExpandedSubtype(p => p===i ? null : i); }
 
   return (
     <div className="container view">
@@ -2113,26 +2133,40 @@ function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
 
       {result.blend && secArc && (
         <div className="blend-callout">
-          <strong>Blend detected — {arc.name} + {secArc.name}</strong>
-          <p style={{margin:"4px 0 0",fontSize:13}}>These two archetypes scored within 4 points of each other — likely a blend, not a clean single read.</p>
+          <strong>Blend — {arc.name} + {secArc.name}</strong>
+          <p style={{margin:"4px 0 0",fontSize:13}}>These two types are very close in score. You likely show both.</p>
         </div>
       )}
 
-      <div className="attach-bars">
+      <div className="attach-bars" style={{marginTop:20}}>
+        <div style={{fontSize:11,fontFamily:"var(--mono)",letterSpacing:".08em",color:"var(--ink-faint)",marginBottom:12,textTransform:"uppercase"}}>Tap any type to learn more</div>
         {sortedKeys.map(k => {
-          const a   = ARCHETYPES[k];
-          const s   = result.scores[k];
-          const col = dark ? a.colorDark : a.color;
+          const a      = ARCHETYPES[k];
+          const s      = result.scores[k];
+          const col    = dark ? a.colorDark : a.color;
+          const isOpen = expandedArc === k;
           return (
-            <div key={k} className="attach-bar-row">
-              <div>
-                <div className="attach-bar-name" style={{color:col}}>{a.name}</div>
-                <div className="attach-bar-track">
-                  <div className="attach-bar-fill" style={{width:s.pct+"%",background:col}}/>
+            <div key={k} style={{marginBottom:8}}>
+              <div onClick={()=>toggleArc(k)} style={{cursor:"pointer"}}>
+                <div className="attach-bar-row">
+                  <div>
+                    <div className="attach-bar-name" style={{color:col}}>{a.name}</div>
+                    <div className="attach-bar-track">
+                      <div className="attach-bar-fill" style={{width:s.pct+"%",background:col}}/>
+                    </div>
+                  </div>
+                  <div className="attach-bar-pct">{s.pct}%</div>
+                  <div className="attach-bar-meta">
+                    <div className="attach-bar-label">{s.label}</div>
+                    <div style={{fontSize:10,color:"var(--ink-faint)",marginTop:2}}>{isOpen?"▲":"▼"}</div>
+                  </div>
                 </div>
               </div>
-              <div className="attach-bar-pct">{s.pct}%</div>
-              <div className="attach-bar-meta"><div className="attach-bar-label">{s.label}</div></div>
+              {isOpen && (
+                <div style={{padding:"10px 14px",background:"var(--bg-2)",borderRadius:"var(--radius)",margin:"4px 0 4px",fontSize:13,lineHeight:1.65,color:"var(--ink-dim)",borderLeft:"3px solid "+col}}>
+                  {a.plain}
+                </div>
+              )}
             </div>
           );
         })}
@@ -2144,10 +2178,22 @@ function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
       </div>
 
       <div style={{marginTop:18}}>
-        <div style={{fontSize:11,fontFamily:"var(--mono)",letterSpacing:".08em",color:"var(--ink-faint)",marginBottom:10,textTransform:"uppercase"}}>{arc.subtypes.length===1?"Subtype":"Subtypes"}</div>
+        <div style={{fontSize:11,fontFamily:"var(--mono)",letterSpacing:".08em",color:"var(--ink-faint)",marginBottom:10,textTransform:"uppercase"}}>{arc.subtypes.length===1?"Subtype — tap to learn more":"Subtypes — tap to learn more"}</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {arc.subtypes.map((s,i)=><span key={i} className="subtype-badge">{s}</span>)}
+          {arc.subtypes.map((s,i)=>(
+            <button key={i} className={"subtype-badge"+(expandedSubtype===i?" active":"")}
+              style={{cursor:"pointer",borderColor:expandedSubtype===i?arcColor:"var(--line)"}}
+              onClick={()=>toggleSubtype(i)}>
+              {s}
+            </button>
+          ))}
         </div>
+        {expandedSubtype !== null && arc.subtypeDescs[expandedSubtype] && (
+          <div style={{marginTop:10,padding:"10px 14px",background:"var(--bg-2)",borderRadius:"var(--radius)",fontSize:13,lineHeight:1.65,color:"var(--ink-dim)",borderLeft:"3px solid "+arcColor}}>
+            <strong style={{color:arcColor,display:"block",marginBottom:4}}>{arc.subtypes[expandedSubtype]}</strong>
+            {arc.subtypeDescs[expandedSubtype]}
+          </div>
+        )}
       </div>
 
       <div className="share-area" style={{marginTop:26}}>
@@ -2157,7 +2203,6 @@ function AttachmentResults({ result, mode, onRestart, onTakeRedFlags }) {
 
       <div style={{marginTop:24,display:"flex",flexWrap:"wrap",gap:10,paddingBottom:40}}>
         <button className="btn btn-ghost" onClick={onRestart}>↺ Retake Quiz</button>
-        {onTakeRedFlags && <button className="btn btn-ghost" onClick={onTakeRedFlags}>Take the Red Flag Quiz →</button>}
       </div>
     </div>
   );
