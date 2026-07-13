@@ -61,6 +61,10 @@ Copy `.env.example` to `.env` if present, then set what you need.
 | `AI_MODEL` | Optional model override. |
 | `SECRET_KEY` | Change before exposing beyond localhost. |
 | `DB_USER` / `DB_PASSWORD` | PostgreSQL credentials. Existing defaults are preserved for local compatibility. |
+| `ZAP_URL` | OWASP ZAP daemon address. `docker-compose` sets this to `http://zap:8090` automatically. |
+| `ZAP_API_KEY` | Optional. The bundled `zap` service disables its own API key check by default, so this can stay blank; set it only if you've hardened ZAP's own config with a matching key. |
+| `YGGDRASIL_NMAP_AGGRESSIVE` | `1` (default) adds nmap's NSE vuln category and service-audit scripts. Set `0` for a lighter, faster scan. |
+| `YGGDRASIL_NMAP_EVASION` | `1` enables IDS/IPS evasion (fragmented packets, padded payloads). Off by default. |
 
 ## Assessment Modes
 

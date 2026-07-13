@@ -59,3 +59,39 @@ def test_build_ai_surface_filters_and_shapes():
 def test_empty_input():
     assert build_ai_surface([]) == []
     assert build_ai_surface(None) == []
+
+
+# ── Item 8 regression: root + noisy mined-param list must not false-positive ──
+def test_root_with_noisy_generic_mined_params_not_flagged():
+    # Exact shape of the reported bug: crawl root "/" carries a huge auto-mined
+    # candidate parameter list (PARAM_MINE_CANDIDATES-style) that happens to
+    # include the generic word "message" — that alone must never tag the root
+    # as an LLM chat endpoint.
+    noisy_params = [
+        "account_id", "action", "admin", "body", "callback", "cmd", "comment",
+        "content", "data", "debug", "dest", "dir", "doc", "download", "email",
+        "exec", "export", "field", "file", "filter", "format", "id", "import",
+        "include", "key", "lang", "limit", "message", "mode", "name", "next",
+        "offset", "order", "orderId", "page", "path", "preview", "print",
+        "productId", "q", "query", "redirect", "ref", "report", "return", "s",
+        "search", "searchTerm", "sort", "source", "start", "step", "stockApi",
+        "target", "template", "test", "title", "token", "trk", "type", "url",
+        "user", "userId", "username", "value", "view", "xml",
+    ]
+    assert classify_endpoint("/", noisy_params) == []
+
+
+def test_root_with_two_weak_llm_params_together_is_flagged():
+    # A real second signal alongside "message" (not just generic mining noise)
+    # should still be caught — the fix requires corroboration, not silence.
+    assert classify_endpoint("/", ["message", "prompt"]) == ["llm-chat"]
+
+
+def test_single_generic_weak_param_never_tags_any_path():
+    assert classify_endpoint("/contact", ["message"]) == []
+    assert classify_endpoint("/support/widget", ["prompt"]) == []
+
+
+def test_distinctive_param_alone_still_tags():
+    assert classify_endpoint("/api/v9/unusual-name", ["system_prompt"]) == ["llm-completion"]
+    assert classify_endpoint("/api/v9/unusual-name", ["max_tokens"]) == ["llm-completion"]

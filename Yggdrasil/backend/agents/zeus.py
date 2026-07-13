@@ -49,10 +49,29 @@ class Zeus(BaseAgent):
         await self._set_phase(MissionStatus.PLANNING, "zeus")
         await self.log(f"⚡ YGGDRASIL ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
 
+        # Scanner health check: confirm the tools this mission depends on are
+        # actually present before running it, and remember the result so SAGA can
+        # render a "Coverage Limitations" section instead of a silent gap.
+        try:
+            from core.tooling import check_all_tools, format_warnings
+            tool_status = await check_all_tools()
+            ctx["tooling"] = tool_status
+            warnings = format_warnings(tool_status)
+            if warnings:
+                await self.log(
+                    f"Scanner coverage warning: {len(warnings)} tool(s) unavailable "
+                    f"({', '.join(sorted(n for n, i in tool_status.items() if not i.get('available')))})",
+                    "warn")
+            else:
+                await self.log("Scanner health check: all tools available", "info")
+        except Exception as e:
+            await self.log(f"Scanner health check failed to run: {e}", "warn")
+            ctx["tooling"] = {}
+
         sequences = {
             "passive": "FRIGG → HEIMDALL → MIMIR → SAGA",
             "active": "FRIGG → HEIMDALL → [GATE] → TYR → MIMIR → SAGA",
-            "full": "FRIGG → HEIMDALL → [GATE] → TYR → BROKKR → [GATE] → SKULD → [GATE] → MIMIR → SAGA",
+            "full": "FRIGG → HEIMDALL → [GATE] → TYR → MIMIR → [GATE] → BROKKR → [GATE] → SKULD → SAGA",
         }
         await self.log(f"Sequence: {sequences.get(mode, sequences['passive'])}", "info")
 
@@ -125,26 +144,33 @@ class Zeus(BaseAgent):
         ares = self._spawn(Ares)
         ctx["ares"] = await ares.execute(target, ctx)
 
+        # MIMIR runs right after TYR — before the BROKKR gate — so its false-
+        # positive triage, CWE/OWASP mapping, and correlated Attack Path findings
+        # are available for BROKKR to forge from and for SKULD's gating decision.
+        await self._set_phase(MissionStatus.SCANNING, "metis")
+        await self._run_mimir(target, ctx)
+
         if mode == "active":
             return await self._finalize(target, ctx)
 
         # APPROVAL GATE: BROKKR
-        # Count real findings from the DB. ares["vulnerabilities"] is only the
-        # nuclei template hits; the offensive engine (SQLi/XSS/SSRF/SSTI/ZAP/...)
-        # writes straight to the findings table.
-        from sqlalchemy import select, func, or_
+        # Preview count uses the same actionability rule BROKKR itself applies
+        # (critical/high always; medium real injection/access-control signals;
+        # MIMIR Attack Path findings) so the gate text matches what BROKKR forges.
+        from sqlalchemy import select, or_
         from core.models import Finding
-        _c = await self.session.execute(
-            select(func.count()).select_from(Finding).where(
+        from core.triage import is_actionable_finding, skuld_trigger_reasons
+        _rows = await self.session.execute(
+            select(Finding.title, Finding.severity).where(
                 Finding.mission_id == self.mission_id,
-                Finding.severity.in_(("critical", "high")),
                 or_(Finding.tag.is_(None), Finding.tag != "false_positive"),
             )
         )
-        vuln_count = _c.scalar() or 0
+        _all = _rows.all()
+        vuln_count = sum(1 for title, sev in _all if is_actionable_finding(title, sev))
         approved = await self.request_approval(
             action="Exploitation Phase — Payload Preparation",
-            description=f"BROKKR will forge targeted payloads for {vuln_count} high/critical "
+            description=f"BROKKR will forge targeted payloads for {vuln_count} actionable "
                         f"finding(s). Exploitation only on authorized targets.",
         )
         if not approved:
@@ -157,16 +183,31 @@ class Zeus(BaseAgent):
         heph = self._spawn(Hephaestus)
         ctx["hephaestus"] = await heph.execute(target, ctx)
 
-        # APPROVAL GATE: SKULD
+        # APPROVAL GATE: SKULD — run when BROKKR confirmed exploitable targets,
+        # MIMIR correlated an attack path, or the mission already carries confirmed
+        # (not merely suspected) sensitive-file or injection evidence. Mere SPF/
+        # DMARC hygiene findings or a generic AI-surface note never trigger this.
         exploit_count = len(ctx["hephaestus"].get("exploitable_targets", []))
-        if exploit_count == 0:
-            await self.log("No exploitable targets confirmed. Skipping SKULD.", "info")
+        mimir_chains = (ctx.get("metis") or {}).get("chains", 0)
+        _hc_rows = await self.session.execute(
+            select(Finding.title, Finding.severity).where(
+                Finding.mission_id == self.mission_id,
+                Finding.severity.in_(("critical", "high")),
+                or_(Finding.tag.is_(None), Finding.tag != "false_positive"),
+            )
+        )
+        high_conf_findings = [{"title": t, "severity": s} for t, s in _hc_rows.all()]
+        reasons = skuld_trigger_reasons(exploit_count, mimir_chains, high_conf_findings)
+        if not reasons:
+            await self.log(
+                "No exploitable targets, attack paths, or confirmed high-severity "
+                "evidence. Skipping SKULD.", "info")
             return await self._finalize(target, ctx)
 
         approved = await self.request_approval(
             action="Post-Exploitation Analysis",
-            description=f"SKULD will analyze {exploit_count} confirmed exploitable targets for credential access, "
-                        "persistence mechanisms, and lateral movement paths.",
+            description="SKULD will analyze confirmed exploitable targets for credential access, "
+                        f"persistence mechanisms, and lateral movement paths. Triggers: {'; '.join(reasons)}.",
         )
         if not approved:
             await self.log("Post-exploitation phase denied.", "warn")
@@ -180,10 +221,15 @@ class Zeus(BaseAgent):
 
         return await self._finalize(target, ctx)
 
-    async def _finalize(self, target: str, ctx: dict) -> dict:
-        await self._set_phase(MissionStatus.REPORTING, "apollo")
-
-        # MIMIR: AI triage + correlation before the report (no-op without AI key)
+    async def _run_mimir(self, target: str, ctx: dict):
+        """MIMIR triage + correlation (no-op without an AI key). Idempotent per
+        mission run — call sites: right after TYR in full/active mode (so BROKKR/
+        SKULD gating can consume attack-path correlation), and as a safety net
+        inside _finalize for paths that never reach TYR (passive mode, or the TYR
+        gate itself denied)."""
+        if ctx.get("_mimir_ran"):
+            return
+        ctx["_mimir_ran"] = True
         try:
             from .metis import Metis
             metis = self._spawn(Metis)
@@ -191,6 +237,13 @@ class Zeus(BaseAgent):
         except Exception as e:
             await self.log(f"MIMIR triage error: {e}", "warn")
             ctx["metis"] = {}
+
+    async def _finalize(self, target: str, ctx: dict) -> dict:
+        await self._set_phase(MissionStatus.REPORTING, "apollo")
+
+        # Safety net: passive mode and the TYR-denied path never reach TYR, so
+        # MIMIR never ran above. Idempotent — a no-op wherever it already ran.
+        await self._run_mimir(target, ctx)
 
         from .apollo import Apollo
         apollo = self._spawn(Apollo)

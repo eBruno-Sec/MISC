@@ -6,8 +6,14 @@ from core.web_security import (
     analyze_traversal_pair,
     build_idor_probes,
     build_traversal_probes,
+    classify_sensitive_path_hit,
     generate_discovery_words,
     is_url_in_scope,
+)
+
+GENERIC_SPA_SHELL = (
+    '<!DOCTYPE html><html><head><title>App</title></head>'
+    '<body><div id="root">Loading...</div><script src="/app.js"></script></body></html>'
 )
 
 
@@ -147,6 +153,84 @@ class WebSecurityTests(unittest.TestCase):
         )
         self.assertIn("https://ginandjuice.shop/catalog/product/stock?stockApi=yggdrasil", urls)
         self.assertTrue(any("xml=" in url for url in urls))
+
+
+class SensitivePathValidationTests(unittest.TestCase):
+    """Item 7: HTTP 200 alone must never mean 'high severity'. A catch-all SPA
+    router returning the same generic shell for every path must be rejected or
+    downgraded, never reported as a confirmed .env/.git/config/backup exposure."""
+
+    def test_generic_spa_200_rejected_for_env(self):
+        self.assertIsNone(
+            classify_sensitive_path_hit("/.env", 200, GENERIC_SPA_SHELL))
+
+    def test_generic_spa_200_rejected_for_git_head(self):
+        self.assertIsNone(
+            classify_sensitive_path_hit("/.git/HEAD", 200, GENERIC_SPA_SHELL))
+
+    def test_generic_spa_200_rejected_for_git_config(self):
+        self.assertIsNone(
+            classify_sensitive_path_hit("/.git/config", 200, GENERIC_SPA_SHELL))
+
+    def test_generic_spa_200_rejected_for_config_php(self):
+        self.assertIsNone(
+            classify_sensitive_path_hit("/config.php", 200, GENERIC_SPA_SHELL))
+
+    def test_generic_spa_200_rejected_for_backup(self):
+        self.assertIsNone(
+            classify_sensitive_path_hit("/backup.zip", 200, GENERIC_SPA_SHELL,
+                                        content_type="text/html"))
+
+    def test_non_200_always_suppressed(self):
+        self.assertIsNone(classify_sensitive_path_hit("/.env", 404, "KEY=value"))
+        self.assertIsNone(classify_sensitive_path_hit("/.env", 403, "KEY=value"))
+
+    def test_real_env_kv_content_is_high(self):
+        body = "DB_PASSWORD=hunter2\nAPI_KEY=sk-abc123\nDEBUG=true\n"
+        hit = classify_sensitive_path_hit("/.env", 200, body)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "high")
+        self.assertIn("Environment", hit["title"])
+
+    def test_real_git_head_content_is_high(self):
+        hit = classify_sensitive_path_hit("/.git/HEAD", 200, "ref: refs/heads/main\n")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "high")
+
+    def test_real_git_config_content_is_high(self):
+        body = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
+        hit = classify_sensitive_path_hit("/.git/config", 200, body)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "high")
+
+    def test_real_php_config_content_is_high(self):
+        body = "<?php\ndefine('DB_HOST', 'localhost');\n$config = ['debug' => true];\n"
+        hit = classify_sensitive_path_hit("/config.php", 200, body)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "high")
+
+    def test_real_directory_listing_backup_is_high(self):
+        body = "<html><title>Index of /backup</title><body>backup-2024.tar.gz</body></html>"
+        hit = classify_sensitive_path_hit("/backup/", 200, body)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "high")
+
+    def test_baseline_differential_suppresses_catch_all(self):
+        # Even a body that isn't the "generic SPA" pattern is suppressed if it's
+        # near-identical to a definitely-nonexistent baseline path on the same host.
+        weird_but_consistent_shell = "<pre>404 page not found, try again</pre>" * 5
+        hit = classify_sensitive_path_hit(
+            "/.env", 200, weird_but_consistent_shell,
+            baseline_body=weird_but_consistent_shell)
+        self.assertIsNone(hit)
+
+    def test_unrecognized_path_generic_html_suppressed(self):
+        self.assertIsNone(classify_sensitive_path_hit("/debug", 200, GENERIC_SPA_SHELL))
+
+    def test_unrecognized_path_non_generic_becomes_low_candidate(self):
+        hit = classify_sensitive_path_hit("/debug", 200, "DEBUG MODE: verbose=true, trace=on")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["severity"], "low")
 
 
 if __name__ == "__main__":

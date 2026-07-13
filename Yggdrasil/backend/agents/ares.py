@@ -202,8 +202,19 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
         lines = []
         for e in ai_eps[:60]:
             row = f"{e.get('host', '')}{e.get('path', '')}  [{','.join(e.get('tags', []))}]"
-            if e.get("params"):
-                row += f"  params: {', '.join(e['params'])}"
+            # Dedupe case-insensitively and cap the count — the crawl/param-mining
+            # pipeline can attach dozens of generic candidate names to one endpoint,
+            # which drowns the one or two params that actually justify the AI tag.
+            seen_p, params = set(), []
+            for p in (e.get("params") or []):
+                key = str(p).lower()
+                if key and key not in seen_p:
+                    seen_p.add(key)
+                    params.append(p)
+            if params:
+                shown = sorted(params)[:15]
+                more = f" (+{len(params) - 15} more)" if len(params) > 15 else ""
+                row += f"  params: {', '.join(shown)}{more}"
             lines.append(row)
         await self.log(f"AI/LLM attack surface: {len(ai_eps)} endpoint(s) ({tag_summary})", "info")
         await self.add_finding(
@@ -381,7 +392,7 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                         "description": description,
                     })
 
-                    await self.add_finding(
+                    created = await self.add_finding(
                         title=f"[Nuclei] {name}",
                         severity=mapped_sev,
                         description=description or f"Nuclei template {template} matched on {matched_at}",
@@ -389,6 +400,9 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                         cvss_score=cvss,
                         remediation=remediation or "Review and patch the identified vulnerability.",
                     )
+                    if matched_at and created:
+                        await self._capture_proof(
+                            matched_at, created.id, notes=f"Nuclei template match: {name}")
                 except json.JSONDecodeError:
                     continue
         except Exception as e:
@@ -433,15 +447,12 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                     status = hit.get("status", 0)
                     dirs.append({"url": url, "status": status})
 
+                    # ffuf's JSON doesn't include the body, so a URL-substring match on
+                    # a bare status==200 (the old check) proves nothing — a catch-all SPA
+                    # returns the same shell for every path. Follow up with a real GET
+                    # and validate the BODY before calling it a sensitive-file exposure.
                     if status == 200 and any(s in url for s in [".env", ".git", "config", "backup"]):
-                        await self.add_finding(
-                            title=f"Sensitive File/Path Exposed: {url}",
-                            severity="high",
-                            description=f"Potentially sensitive path returned HTTP {status}",
-                            evidence=f"GET {url} -> {status}",
-                            cvss_score=7.5,
-                            remediation="Restrict access via web server config. Remove sensitive files from webroot.",
-                        )
+                        await self._validate_and_report_sensitive_hit(url)
                     elif status == 403:
                         dirs[-1]["note"] = "Forbidden (exists but restricted)"
                 except json.JSONDecodeError:
@@ -463,22 +474,10 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
 
             # Check for default credentials on common services
             if 80 in port_nums or 443 in port_nums:
-                # Check for exposed .git
-                try:
-                    import httpx as _httpx
-                    async with _httpx.AsyncClient(timeout=5, verify=False) as c:
-                        r = await c.get(f"{host_info['url']}/.git/HEAD")
-                        if r.status_code == 200 and "ref:" in r.text:
-                            await self.add_finding(
-                                title=f"Exposed .git Directory on {host}",
-                                severity="high",
-                                description="Git repository is publicly accessible. Source code exposure risk.",
-                                evidence=f"GET {host_info['url']}/.git/HEAD -> 200 OK",
-                                cvss_score=7.5,
-                                remediation="Block access to .git/ via web server rules or move repo outside webroot.",
-                            )
-                            findings.append({"type": "git_exposed", "host": host})
-                except Exception:
-                    pass
+                # Check for exposed .git — validated (real git ref/config content,
+                # not just HTTP 200) and captured via the shared sensitive-path helper.
+                fnd = await self._validate_and_report_sensitive_hit(f"{host_info['url']}/.git/HEAD")
+                if fnd:
+                    findings.append({"type": "git_exposed", "host": host})
 
         return findings

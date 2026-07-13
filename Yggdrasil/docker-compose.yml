@@ -25,6 +25,24 @@ services:
       timeout: 3s
       retries: 5
 
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    restart: unless-stopped
+    # Daemon mode, reachable from other containers (host 0.0.0.0), API open to
+    # the internal Docker network (addr.name/.regex) with its own key check
+    # disabled — same "no host port published, internal-network-only" posture
+    # as the backend service below, since ZAP is a same-network scan helper, not
+    # a public-facing service. Set ZAP_API_KEY (optional; see .env.example) if
+    # you want the backend to send an API key anyway for defense in depth — ZAP
+    # itself does not require it in this default configuration.
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8090
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+      -config api.disablekey=true
+    expose:
+      - "8090"
+
   backend:
     build:
       context: ./backend
@@ -51,6 +69,11 @@ services:
       YGGDRASIL_OFFENSIVE_MAX_HOSTS: ${YGGDRASIL_OFFENSIVE_MAX_HOSTS:-5}
       YGGDRASIL_CIDR_MAX_HOSTS: ${YGGDRASIL_CIDR_MAX_HOSTS:-1024}
       YGGDRASIL_HEARTBEAT_SECONDS: ${YGGDRASIL_HEARTBEAT_SECONDS:-300}
+      # OWASP ZAP active-scan daemon (see the zap service above). ZAP_API_KEY is
+      # optional — the zap service's default config does not require one; set it
+      # only if you've also hardened zap's own command with a matching api.key.
+      ZAP_URL: http://zap:8090
+      ZAP_API_KEY: ${ZAP_API_KEY:-}
     # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
     # No host port is published, reducing the unauthenticated attack surface.
     expose:
@@ -60,6 +83,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # service_started (not service_healthy): ZAP's own daemon init can take a
+      # while, and offensive.py's zap_active_scan already polls ZAP's API with
+      # its own bounded retry/timeout before using it. The backend must not block
+      # its own startup — or every other scan phase — waiting on ZAP to warm up.
+      zap:
+        condition: service_started
     volumes:
       - reports:/app/reports
     cap_add:

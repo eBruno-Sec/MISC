@@ -141,7 +141,10 @@ SQL_ERROR_SIGNATURES = (
 # family -> (severity, cvss, remediation, description)
 _META = {
     "sqli_error":  ("high", 8.2, "Use parameterized queries / prepared statements; never build SQL from input.",
-                    "A crafted value provoked a database error, proving the parameter is concatenated into a SQL query — an attacker can read or modify the database."),
+                    "A crafted value provoked a database error signature — a server-side injection signal "
+                    "indicating the parameter reaches a SQL query unfiltered. This is a single-error-based "
+                    "signal, not a confirmed exploit: it has not been validated by sqlmap, extraction, or "
+                    "replay. Confirm with sqlmap or the workbench before treating it as exploitable."),
     "sqli_bool":   ("high", 8.2, "Use parameterized queries; the parameter alters query logic.",
                     "A boolean SQL condition changed the response deterministically (TRUE mirrored the page, FALSE diverged), confirming blind SQL injection — data can be extracted a bit at a time."),
     "sqli_time":   ("high", 8.6, "Use parameterized queries; the parameter reaches the SQL engine unfiltered.",
@@ -236,7 +239,7 @@ def evaluate(family, payload, resp_text, status=200, elapsed=None, resp_headers=
     if family == "sqli_error":
         hit = next((s for s in SQL_ERROR_SIGNATURES if s in low and s not in base_low), None)
         if hit:
-            return _v("sqli_error", "SQL Injection (error-based)",
+            return _v("sqli_error", "Suspected SQL Injection (error-based signal)",
                       f"DB error signature '{hit}' returned for payload {payload!r} (HTTP {status})")
 
     elif family == "sqli_time":

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.database import engine, Base
 from core.schema_compat import ensure_schema_compatibility
+from core.tooling import check_all_tools, format_warnings
 from routers import missions, ws, scope, wordlists, oracle
 from core.security import require_api_key, api_key_enabled
 from fastapi import Depends
@@ -17,6 +18,21 @@ async def lifespan(app: FastAPI):
 
     if not api_key_enabled():
         print("[YGGDRASIL][WARN] YGGDRASIL_API_KEY is not set; API auth is DISABLED. Set it in .env for anything beyond localhost.")
+
+    # Scanner health check: log availability/version for every tool the engine
+    # shells out to, so a missing binary is a loud startup warning instead of a
+    # silently empty findings section three phases into a mission. Never blocks
+    # startup on failure — a check error just means "unknown", not a crash.
+    try:
+        tool_status = await check_all_tools()
+        for name, info in sorted(tool_status.items()):
+            state = f"v{info['version']}" if info.get("available") else "NOT AVAILABLE"
+            print(f"[YGGDRASIL][TOOLING] {name}: {state}")
+        for warning in format_warnings(tool_status):
+            print(f"[YGGDRASIL][WARN] {warning}")
+    except Exception as e:
+        print(f"[YGGDRASIL][WARN] Scanner health check failed to run: {e}")
+
     app.state.approval_gates: dict[str, asyncio.Event] = {}
     app.state.approval_results: dict[str, bool] = {}
 

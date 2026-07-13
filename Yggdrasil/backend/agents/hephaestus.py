@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from core import wordlists as wl
 from core.models import Finding
+from core.triage import is_actionable_finding
 from .base import BaseAgent
 
 
@@ -39,8 +40,11 @@ class Hephaestus(BaseAgent):
         )
         all_findings = [f for f in rows.scalars().all()
                         if (f.tag or "").lower() != "false_positive"]
-        actionable = [f for f in all_findings
-                      if (f.severity or "").lower() in ("critical", "high")]
+        # Actionable = critical/high always, medium real injection/access-control
+        # signals (SQLi/XSS/traversal/SSRF/SSTI/IDOR/...), and MIMIR "Attack Path:"
+        # findings regardless of severity. Plain hygiene findings (SPF/DMARC/
+        # staging exposure) never qualify on their own — only if MIMIR chains them.
+        actionable = [f for f in all_findings if is_actionable_finding(f.title, f.severity)]
 
         await self.log(
             f"Forging from {len(actionable)} actionable finding(s) of {len(all_findings)} total "

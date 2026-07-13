@@ -24,19 +24,28 @@ AI_PATH_SIGNATURES = [
                    r"/weaviate\b", r"/milvus\b", r"/vectors?\b"]),
 ]
 
-# Query/body param names that strongly imply an LLM endpoint.
-LLM_STRONG_PARAMS = {
-    "prompt", "messages", "message", "completion", "temperature", "max_tokens",
-    "top_p", "system_prompt", "presence_penalty", "frequency_penalty",
+# Query/body param names that imply an LLM endpoint, split by how distinctive
+# they are. A generic scanner's auto-mined parameter wordlist can legitimately
+# contain a word like "message" for an app that has nothing to do with AI (a
+# contact form, a chat-support widget) — a SINGLE weak-tier hit must never tag an
+# endpoint (that's exactly the false positive that flagged a bare "/" root purely
+# because a mined param list happened to include "message"). Distinctive params
+# are essentially unique to LLM APIs and tag alone; weak params need each other.
+LLM_DISTINCTIVE_PARAMS = {
+    "messages", "system_prompt", "presence_penalty", "frequency_penalty",
+    "top_p", "max_tokens",
 }
+LLM_WEAK_PARAMS = {"prompt", "message", "completion", "temperature"}
 
 
 def classify_endpoint(path: str, params=None) -> list:
     """Return the sorted AI category tags for one endpoint (empty if not AI-ish).
 
-    Path signatures give the category; strong LLM param names both add a signal and
-    disambiguate chat vs completion. sse-stream is only tagged when there is already
-    another AI signal, to avoid flagging generic /stream or /events endpoints."""
+    Path signatures give the category outright. Param-based tagging requires a
+    real signal: at least one distinctive LLM param, or two-or-more weak ones
+    together — never a single generic weak param alone (see LLM_WEAK_PARAMS).
+    sse-stream is only tagged when there is already another AI signal, to avoid
+    flagging generic /stream or /events endpoints."""
     p = (path or "").lower()
     tags = set()
     for cat, patterns in AI_PATH_SIGNATURES:
@@ -44,7 +53,11 @@ def classify_endpoint(path: str, params=None) -> list:
             tags.add(cat)
 
     lp = {str(x).lower() for x in (params or [])}
-    if lp & LLM_STRONG_PARAMS:
+    distinctive = lp & LLM_DISTINCTIVE_PARAMS
+    weak = lp & LLM_WEAK_PARAMS
+    strong_param_combo = bool(distinctive) or len(weak) >= 2
+
+    if strong_param_combo:
         if "messages" in lp or "message" in lp or "/chat" in p:
             tags.add("llm-chat")
         else:

@@ -451,18 +451,22 @@ class OffensiveEngine:
         return out
 
     # ── SQL injection ────────────────────────────────────────────
-    async def _emit_sqlmap_hits(self, combined: str, tag: str = "") -> list:
-        """Parse sqlmap output for confirmed injection points and raise a finding
-        for each. Shared by the GET-parameter and form passes."""
+    async def _emit_sqlmap_hits(self, combined: str, tag: str = "", proof_urls: list = None) -> list:
+        """Parse sqlmap output for CONFIRMED injection points (sqlmap itself
+        extracted a Type/Title for the parameter) and raise a finding for each.
+        This is the one case that may legitimately say "confirmed" per the
+        truthfulness rule: sqlmap actually confirmed it, not just an error smell.
+        Shared by the GET-parameter and form passes."""
         found = []
+        proof_urls = proof_urls or []
         vuln_blocks = re.findall(
             r"Parameter:\s*(.+?)\s*\((\w+)\).*?Type:\s*(.+?)\n.*?Title:\s*(.+?)\n",
             combined, re.DOTALL,
         )
         for param, method, sqli_type, title in vuln_blocks:
             found.append({"parameter": param.strip(), "method": method, "type": sqli_type.strip()})
-            await self.add_finding(
-                title=f"SQL Injection: {param.strip()} ({method}){tag}",
+            fnd = await self.add_finding(
+                title=f"SQL Injection (sqlmap-confirmed): {param.strip()} ({method}){tag}",
                 severity="critical",
                 description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
                             f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
@@ -472,6 +476,12 @@ class OffensiveEngine:
                 remediation="Use parameterized queries / prepared statements. Never concatenate "
                             "user input into SQL. Apply least-privilege DB accounts and a WAF.",
             )
+            proof_url = next((u for u in proof_urls if f"{param.strip()}=" in u), None) or (
+                proof_urls[0] if proof_urls else None)
+            if proof_url and fnd:
+                await self._capture_proof(
+                    proof_url, fnd.id,
+                    notes=f"sqlmap-confirmed SQL injection on parameter '{param.strip()}'")
         return found
 
     async def test_sqli(self, base_url: str, urls: list) -> list:
@@ -500,16 +510,28 @@ class OffensiveEngine:
                     self._mark_tool_missing("sqli")
                     return findings
                 combined = stdout + stderr
-                findings += await self._emit_sqlmap_hits(combined)
+                findings += await self._emit_sqlmap_hits(combined, proof_urls=param_urls)
                 if not findings and "is vulnerable" in combined.lower():
-                    await self.add_finding(
-                        title="Possible SQL Injection (manual confirm)",
-                        severity="high",
-                        description="sqlmap flagged a potential injection point. Manual confirmation advised.",
+                    # sqlmap's heuristic hinted at injection but never extracted a
+                    # confirmed Type/Title — this is NOT a confirmed finding. Truthful
+                    # language only: "suspected... pending validation", not "confirmed".
+                    fnd = await self.add_finding(
+                        title="Suspected SQL Injection (sqlmap heuristic, pending validation)",
+                        severity="medium",
+                        description="sqlmap's heuristic output suggested a possible injection point, "
+                                    "but did not extract a confirmed injection type/technique. This is "
+                                    "a server-side injection signal pending validation, not a confirmed "
+                                    "exploit — confirm with a follow-up sqlmap run or the workbench "
+                                    "replay tool before treating it as exploitable.",
                         evidence=combined[-400:],
-                        cvss_score=7.5,
-                        remediation="Parameterize queries; review flagged endpoint.",
+                        cvss_score=5.9,
+                        remediation="Parameterize queries; manually confirm the flagged endpoint "
+                                    "before treating it as exploitable.",
                     )
+                    if param_urls and fnd:
+                        await self._capture_proof(
+                            param_urls[0], fnd.id,
+                            notes="sqlmap heuristic hit; unconfirmed, needs manual validation")
             except Exception as e:
                 await self.log(f"sqlmap error: {e}", "warn")
             finally:
@@ -532,7 +554,8 @@ class OffensiveEngine:
                     forms_cmd += ["--cookie", self._cookie()]
                 fstdout, fstderr, frc = await self.run_command(forms_cmd, timeout=600)
                 if frc != 127:
-                    findings += await self._emit_sqlmap_hits(fstdout + fstderr, " [form]")
+                    findings += await self._emit_sqlmap_hits(fstdout + fstderr, " [form]",
+                                                              proof_urls=[base_url])
             except Exception as e:
                 await self.log(f"sqlmap forms error: {e}", "warn")
 
@@ -580,7 +603,7 @@ class OffensiveEngine:
                     if severity == "info":
                         continue
                     findings.append({"param": param, "type": xss_type, "poc": poc})
-                    await self.add_finding(
+                    fnd = await self.add_finding(
                         title=f"Cross-Site Scripting ({xss_type}): {param}",
                         severity="high",
                         description=f"dalfox confirmed {xss_type} XSS on parameter '{param}'. "
@@ -591,6 +614,10 @@ class OffensiveEngine:
                         remediation="Context-aware output encoding, a strict Content-Security-Policy, "
                                     "and input validation. Escape on output, not just input.",
                     )
+                    proof_url = poc if str(poc).startswith("http") else hit.get("url", "")
+                    if proof_url and fnd:
+                        await self._capture_proof(
+                            proof_url, fnd.id, notes=f"dalfox-confirmed {xss_type} XSS on '{param}'")
                 except json.JSONDecodeError:
                     continue
 
@@ -638,7 +665,7 @@ class OffensiveEngine:
                     name = info.get("name", fnd.get("template-id", "DAST finding"))
                     matched = fnd.get("matched-at", "")
                     findings.append({"name": name, "severity": sev, "url": matched})
-                    await self.add_finding(
+                    created = await self.add_finding(
                         title=f"[DAST] {name}",
                         severity=sev,
                         description=info.get("description", f"Nuclei DAST matched {name}"),
@@ -646,6 +673,9 @@ class OffensiveEngine:
                         cvss_score=cvss,
                         remediation=info.get("remediation", "Review and patch the injection point."),
                     )
+                    if matched and created:
+                        await self._capture_proof(
+                            matched, created.id, notes=f"Nuclei DAST match: {name}")
                 except json.JSONDecodeError:
                     continue
             await self.log(f"Nuclei DAST complete: {len(findings)} findings", "success" if findings else "info")
@@ -698,32 +728,25 @@ class OffensiveEngine:
                     except Exception:
                         continue
 
-        # Exposed sensitive endpoints frequently paying on bounties
-        sensitive = ["/.git/config", "/.env", "/actuator/health", "/actuator/env",
+        # Exposed sensitive endpoints frequently paying on bounties. HTTP 200 alone
+        # proves nothing (a catch-all SPA returns the same shell for every path) —
+        # _validate_and_report_sensitive_hit fetches each path and only creates a
+        # finding when the BODY actually looks like the thing the path name claims.
+        sensitive = ["/.git/config", "/.git/HEAD", "/.env", "/actuator/health", "/actuator/env",
                      "/api/swagger.json", "/swagger-ui/", "/graphql", "/server-status",
                      "/.well-known/security.txt", "/debug", "/metrics"]
-        async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=False, headers=self._auth_headers()) as c:
-            for path in sensitive:
-                try:
-                    r = await c.get(base_url.rstrip("/") + path)
-                    if r.status_code == 200 and len(r.content) > 20:
-                        sev = "high" if path in ("/.env", "/.git/config", "/actuator/env") else "medium"
-                        cvss = 7.5 if sev == "high" else 5.3
-                        findings.append({"type": "exposure", "path": path})
-                        _f = await self.add_finding(
-                            title=f"Sensitive Endpoint Exposed: {path}",
-                            severity=sev,
-                            description=f"{path} is publicly accessible and returned content. "
-                                        "This can leak secrets, source, internal config, or API schemas.",
-                            evidence=f"GET {path} -> 200 ({len(r.content)} bytes)",
-                            cvss_score=cvss,
-                            remediation="Restrict or remove the endpoint. Move secrets to env/secret managers "
-                                        "and block metadata/debug routes at the edge.",
-                        )
-                        await self.capture(r, finding_id=(_f.id if _f else None),
-                                           notes=f"Sensitive endpoint {path} publicly accessible")
-                except Exception:
-                    continue
+        baseline_body = ""
+        try:
+            async with httpx.AsyncClient(timeout=6, verify=False, headers=self._auth_headers()) as c:
+                br = await c.get(base_url.rstrip("/") + f"/__ygg_nonexistent_{os.urandom(4).hex()}__")
+                baseline_body = br.text or ""
+        except Exception:
+            pass
+        for path in sensitive:
+            hit_fnd = await self._validate_and_report_sensitive_hit(
+                base_url.rstrip("/") + path, baseline_body=baseline_body)
+            if hit_fnd:
+                findings.append({"type": "exposure", "path": path})
 
         # GraphQL introspection (common high-value finding)
         try:
@@ -1346,8 +1369,9 @@ class OffensiveEngine:
                             continue
                         budget -= 1
                         fired["msg"] = None
+                        nav_resp = None
                         try:
-                            await page.goto(turl, wait_until="load", timeout=8000)
+                            nav_resp = await page.goto(turl, wait_until="load", timeout=8000)
                             await page.wait_for_timeout(300)
                         except Exception:
                             continue
@@ -1366,6 +1390,17 @@ class OffensiveEngine:
                                 remediation=("Sanitize/encode before DOM sinks (innerHTML, document.write, eval); "
                                              "apply a strict Content-Security-Policy."))
                             findings.append({"param": pname, "family": "dom_xss", "payload": pl})
+                            try:
+                                await self.add_exchange(
+                                    method="GET", url=turl, finding_id=(fnd.id if fnd else None),
+                                    status_code=(nav_resp.status if nav_resp else None),
+                                    response_headers=(dict(nav_resp.headers) if nav_resp else {}),
+                                    response_body=(f"(DOM execution confirmed via headless browser; "
+                                                   f"alert() fired carrying marker {DOM_MARKER})"),
+                                    source="dom_xss",
+                                    notes=f"DOM XSS ({loc}) — headless Chromium executed the payload")
+                            except Exception:
+                                pass
                 await browser.close()
         except Exception as e:
             await self.log(f"DOM XSS scan error: {e}", "warn")
@@ -1396,7 +1431,7 @@ class OffensiveEngine:
             return []
 
         await self.log(f"OAST: out-of-band probing via listener on port {listener.port}", "info")
-        pending = {}   # token -> (clean_url, param, klass)
+        pending = {}   # token -> (clean_url, param, klass, representative_injection_url)
         try:
             async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
                                          headers=self._auth_headers()) as c:
@@ -1413,6 +1448,7 @@ class OffensiveEngine:
                             tok = listener.new_token()
                             bundle = oob_payloads(listener.url_for(tok))
                             pls = bundle["ssrf"] if klass == "oob_ssrf" else bundle["cmdi"][:4]
+                            rep_url = None
                             for pl in pls:
                                 if budget <= 0:
                                     break
@@ -1420,18 +1456,19 @@ class OffensiveEngine:
                                 m = dict(params)
                                 m[pname] = [pl]
                                 target = urlunparse(parsed._replace(query=urlencode(m, doseq=True)))
+                                rep_url = target   # last-tried variant stands in as the proof request
                                 try:
                                     await c.get(target)
                                 except Exception:
                                     pass
-                            pending[tok] = (clean, pname, klass)
+                            pending[tok] = (clean, pname, klass, rep_url)
                 await asyncio.sleep(4)   # let asynchronous callbacks arrive
         finally:
             await listener.stop()
 
         from core.payloads import _META
         findings = []
-        for tok, (url, pname, klass) in pending.items():
+        for tok, (url, pname, klass, rep_url) in pending.items():
             if listener.got(tok):
                 sev, cvss, rem, desc = _META[klass]
                 title = ("Blind SSRF (out-of-band confirmed)" if klass == "oob_ssrf"
@@ -1441,6 +1478,11 @@ class OffensiveEngine:
                     evidence=f"URL: {url}\nParameter: {pname}\nOut-of-band callback received (token {tok})",
                     cvss_score=cvss, remediation=rem)
                 findings.append({"param": pname, "family": klass, "url": url})
+                if rep_url and fnd:
+                    await self._capture_proof(
+                        rep_url, fnd.id,
+                        notes=(f"Representative out-of-band injection request for token {tok} "
+                               "(blind — the OOB callback confirms it, not this response body)"))
         await self.log(f"OAST scan complete: {len(findings)} out-of-band confirmation(s)",
                        "success" if findings else "info")
         return findings
@@ -1897,7 +1939,7 @@ class OffensiveEngine:
                     ev.append("CWE-" + str(g["cwe"]))
                 ev.append("Affected URLs" + (f" (first 40 of {count})" if count > 40 else "") + ":")
                 ev.extend("  " + u for u in shown)
-                await self.add_finding(
+                zap_fnd = await self.add_finding(
                     title=f"[ZAP] {name}" + (f" ({count} instances)" if count > 1 else ""),
                     severity=sev,
                     description=(g["description"] or f"OWASP ZAP flagged {name}.")[:1500],
@@ -1905,6 +1947,16 @@ class OffensiveEngine:
                     cvss_score=cvss,
                     remediation=(g["solution"] or "Review the ZAP alert and apply the recommended fix.")[:900],
                 )
+                # ZAP already made the request; reconstruct the exchange from its own
+                # alert data instead of re-requesting (request data available -> attach it).
+                if shown and zap_fnd:
+                    try:
+                        await self.add_exchange(
+                            method="GET", url=shown[0], finding_id=zap_fnd.id,
+                            response_body=(g["evidence"] or g["attack"] or "")[:4000] or None,
+                            source="zap", notes=f"OWASP ZAP alert: {name} ({risk})")
+                    except Exception:
+                        pass
 
             await self.log(f"OWASP ZAP scan complete: {len(findings)} alerts (High/Med/Low)",
                            "success" if findings else "info")
@@ -1958,6 +2010,54 @@ class OffensiveEngine:
         if not hasattr(self, "_tools_missing"):
             self._tools_missing = set()
         self._tools_missing.add(key)
+
+    async def _capture_proof(self, url: str, finding_id: str, notes: str,
+                              method: str = "GET", data: dict = None):
+        """Best-effort verification request to attach reproducible HttpExchange
+        proof to a finding confirmed by an external tool (sqlmap/dalfox/nuclei) that
+        hands back parsed output rather than a live httpx Response. Never raises —
+        a failed proof fetch only means no exchange is attached; it never affects
+        the finding itself."""
+        if not url:
+            return None
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                r = await c.post(url, data=data or {}) if method == "POST" else await c.get(url)
+            return await self.capture(r, finding_id=finding_id, notes=notes)
+        except Exception:
+            return None
+
+    async def _validate_and_report_sensitive_hit(self, url: str, baseline_body: str = ""):
+        """Follow up a status=200 sensitive-looking path with a real GET, validate
+        the BODY (not just the status code) via core.web_security.
+        classify_sensitive_path_hit, and only then create a finding — with
+        HttpExchange proof attached. Returns the created Finding, or None when the
+        request failed or the hit didn't validate (suppressed as a false positive).
+        Shared by every 'sensitive path' check in the engine so there is exactly one
+        body-validation implementation instead of several ad-hoc ones."""
+        from urllib.parse import urlparse as _urlparse
+        from core.web_security import classify_sensitive_path_hit
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                r = await c.get(url)
+        except Exception:
+            return None
+        hit = classify_sensitive_path_hit(
+            _urlparse(url).path, r.status_code, r.text or "",
+            content_type=r.headers.get("content-type", ""), baseline_body=baseline_body)
+        if not hit:
+            return None
+        fnd = await self.add_finding(
+            title=hit["title"], severity=hit["severity"], description=hit["description"],
+            evidence=f"GET {url} -> HTTP {r.status_code}\n{hit.get('evidence', '')}",
+            cvss_score=hit["cvss"], remediation=hit["remediation"])
+        await self.capture(r, finding_id=(fnd.id if fnd else None),
+                           notes=f"Sensitive path validated: {hit['title']}")
+        return fnd
 
     def _build_module_status(self, result: dict, waf_detected: bool) -> dict:
         """Per-module honesty for the SAGA report: separate 'tested' from

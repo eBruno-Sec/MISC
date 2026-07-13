@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from core.ai_client import complete
 from core.models import Finding
+from core.triage import sanitize_attack_path
 from .base import BaseAgent
 from .athena import _extract_json
 
@@ -83,6 +84,7 @@ Return ONLY this JSON shape:
 Rules:
 - Be conservative with false_positives (high precision). Never suppress a confirmed injection, exposed secret, or takeover.
 - Only propose attack_paths that are realistic given the findings; each must reference at least two finding ids.
+- Certainty language must match the underlying finding, not exceed it. A finding titled "Suspected...", "...signal", "...pending validation", or "possible..." is NOT confirmed — never describe it in a narrative or summary as "confirmed SQL injection", "confirmed RCE", "remote code execution", or "full/complete compromise" unless a referenced finding's own title already proves that (e.g. "...sqlmap-confirmed...", "...out-of-band confirmed...", "...execution confirmed...", "...boolean-based blind...", "...UNION-based..."). When a path rests only on suspected/signal-tier findings, its severity must be "medium" at most and the narrative must say the chain is unconfirmed.
 - No prose, no markdown, only the JSON object."""
 
         try:
@@ -137,8 +139,18 @@ Rules:
             sev = str(path.get("severity", "high")).lower()
             if sev not in sev_cvss:
                 sev = "high"
-            narrative = str(path.get("narrative", "")).strip()
             ids = [i for i in (path.get("finding_ids") or []) if i in by_id]
+
+            # Deterministic guard (not just a prompt instruction): if none of the
+            # chained findings are confirmed-tier by their OWN title/severity, cap
+            # this path at medium and prepend an unconfirmed disclaimer — regardless
+            # of what certainty language the model used. See core.triage for the rule.
+            source_findings = {i: {"title": by_id[i].title, "severity": by_id[i].severity} for i in ids}
+            safe = sanitize_attack_path({"severity": sev, "narrative": path.get("narrative", ""),
+                                         "finding_ids": ids}, source_findings)
+            sev = safe["severity"]
+            narrative = str(safe.get("narrative", "")).strip()
+
             linked = "\n".join(f"- {by_id[i].title}" for i in ids)
             await self.add_finding(
                 title=f"Attack Path: {title}",

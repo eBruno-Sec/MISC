@@ -58,19 +58,6 @@ DEFAULT_DISCOVERY_WORDS = (
     "wp-admin", "wp-json/wp/v2/users", "wp-content/debug.log",
 )
 
-HIGH_VALUE_EXPOSURE_PATHS = {
-    "/.env": ("Environment file exposed", "high", "Move secrets out of webroot and block dotfiles at the edge."),
-    "/.git/config": ("Git config exposed", "high", "Block .git paths and remove repository metadata from webroot."),
-    "/.git/HEAD": ("Git repository exposed", "high", "Block .git paths and remove repository metadata from webroot."),
-    "/actuator/env": ("Spring actuator environment exposed", "high", "Disable or authenticate actuator env endpoints."),
-    "/actuator/health": ("Spring actuator health exposed", "medium", "Restrict actuator endpoints to trusted networks."),
-    "/swagger.json": ("API schema exposed", "medium", "Restrict API documentation in production if it reveals sensitive operations."),
-    "/openapi.json": ("OpenAPI schema exposed", "medium", "Restrict API documentation in production if it reveals sensitive operations."),
-    "/graphql": ("GraphQL endpoint discovered", "medium", "Review introspection, authorization, and query complexity controls."),
-    "/metrics": ("Metrics endpoint exposed", "medium", "Restrict metrics endpoints to trusted networks."),
-    "/server-status": ("Server status endpoint exposed", "medium", "Disable or restrict server-status."),
-}
-
 SENSITIVE_RESPONSE_WORDS = re.compile(
     r"(?i)(email|username|user_id|userid|account|tenant|invoice|order|"
     r"customer|address|phone|ssn|token|secret|api[_-]?key|role|admin)"
@@ -411,3 +398,178 @@ def normalize_discovered_url(base_url: str, word: str) -> str:
     if clean_path == "/.":
         clean_path = "/"
     return urlunparse(parsed._replace(path=clean_path, query="", fragment=""))
+
+
+# ── Sensitive-path body validation ────────────────────────────────
+# HTTP 200 alone proves nothing — a catch-all SPA router returns the same shell
+# for every path, including /.env and /.git/HEAD. These validators require the
+# BODY to actually look like the thing the path name claims before a hit is
+# treated as high severity. A path that returns 200 but fails validation is
+# either suppressed or downgraded to a low/info manual-review candidate.
+_ENV_KV_RE = re.compile(r"^[A-Z_][A-Z0-9_]{2,}\s*=\s*\S+", re.MULTILINE)
+_SECRET_KEYWORDS_RE = re.compile(
+    r"(API[_-]?KEY|SECRET[_-]?KEY|SECRET|PASSWORD|DB_PASS|ACCESS_TOKEN|PRIVATE_KEY|AWS_(?:ACCESS|SECRET))",
+    re.IGNORECASE,
+)
+_GIT_HEAD_RE = re.compile(r"^ref:\s*refs/|^[0-9a-f]{40}\s*$", re.MULTILINE)
+_GIT_CONFIG_RE = re.compile(r"\[core\]|repositoryformatversion", re.IGNORECASE)
+_ACTUATOR_ENV_RE = re.compile(r'"propertySources"|"activeProfiles"', re.IGNORECASE)
+_ACTUATOR_HEALTH_RE = re.compile(r'"status"\s*:\s*"(UP|DOWN)"', re.IGNORECASE)
+_API_SCHEMA_RE = re.compile(r'"(swagger|openapi)"\s*:|("paths"\s*:.*"info"\s*:)', re.IGNORECASE | re.DOTALL)
+_APACHE_STATUS_RE = re.compile(r"apache server status|scoreboard", re.IGNORECASE)
+_PROMETHEUS_METRICS_RE = re.compile(r"^# (HELP|TYPE) ", re.MULTILINE)
+_SECURITY_TXT_RE = re.compile(r"^Contact:", re.MULTILINE | re.IGNORECASE)
+_PHP_CONFIG_RE = re.compile(r"<\?php|define\s*\(|\$config\b", re.IGNORECASE)
+# Deliberately narrow: a bare <html> tag is not a useful "generic page" signal —
+# a real directory listing or backup index page is legitimately HTML too. What
+# actually characterizes a catch-all SPA shell is its client-side mount point,
+# which a directory listing / config file / backup page would never contain.
+_GENERIC_HTML_RE = re.compile(
+    r"<div id=[\"'](root|app|__next|___gatsby)[\"']", re.IGNORECASE
+)
+_DIR_LISTING_RE = re.compile(r"Index of /|<title>Index of", re.IGNORECASE)
+_ARCHIVE_CT_RE = re.compile(r"zip|x-tar|gzip|octet-stream|x-7z|x-rar", re.IGNORECASE)
+
+
+def _sensitive_hit(title: str, severity: str, cvss: float, description: str,
+                    remediation: str, evidence: str = "") -> dict:
+    return {"title": title, "severity": severity, "cvss": cvss,
+            "description": description, "remediation": remediation, "evidence": evidence}
+
+
+def classify_sensitive_path_hit(path: str, status_code: int, body: str,
+                                 content_type: str = "", baseline_body: str = "") -> dict | None:
+    """Validate a candidate sensitive-path hit's BODY before treating it as a real
+    exposure. Returns a finding-shape dict (title/severity/cvss/description/
+    remediation/evidence) for a validated hit, or None to suppress — either the
+    path doesn't match a recognized sensitive category, or the body doesn't back
+    up the claim (most commonly: a generic SPA/HTML shell returned for every path).
+
+    `baseline_body`, if supplied, is the body of a definitely-nonexistent path on
+    the same host; a near-identical body is a strong signal of catch-all routing
+    and suppresses the hit regardless of path name (defense in depth beyond the
+    per-type checks below)."""
+    if status_code != 200:
+        return None
+    body = body or ""
+    content_type = (content_type or "").lower()
+    low_path = (path or "").lower()
+
+    if baseline_body and len(baseline_body) > 40 and _body_similarity(body, baseline_body) >= 0.92:
+        return None
+
+    if low_path.endswith(".env"):
+        if _ENV_KV_RE.search(body) or _SECRET_KEYWORDS_RE.search(body):
+            return _sensitive_hit(
+                "Environment file exposed", "high", 8.6,
+                "The .env file returned real KEY=VALUE configuration/secret-shaped content.",
+                "Move secrets out of the webroot; block dotfiles at the edge; rotate any leaked credentials.",
+                evidence="Body matched environment-variable / secret-keyword pattern.")
+        return None
+
+    if low_path.endswith("/.git/head") or low_path.endswith(".git/head"):
+        if _GIT_HEAD_RE.search(body):
+            return _sensitive_hit(
+                "Git repository exposed (.git/HEAD)", "high", 7.5,
+                ".git/HEAD returned a real git ref, confirming the .git directory is web-accessible.",
+                "Block /.git/ at the edge and remove repository metadata from the webroot.",
+                evidence="Body matched a git ref / commit-hash pattern.")
+        return None
+
+    if low_path.endswith("/.git/config") or low_path.endswith(".git/config"):
+        if _GIT_CONFIG_RE.search(body):
+            return _sensitive_hit(
+                "Git config exposed", "high", 7.5,
+                ".git/config returned real git configuration content.",
+                "Block /.git/ at the edge and remove repository metadata from the webroot.",
+                evidence="Body matched [core] / repositoryformatversion.")
+        return None
+
+    if "actuator/env" in low_path:
+        if _ACTUATOR_ENV_RE.search(body):
+            return _sensitive_hit(
+                "Spring actuator environment exposed", "high", 8.1,
+                "The actuator env endpoint returned real Spring property-source data.",
+                "Disable or authenticate actuator env endpoints.",
+                evidence="Body matched Spring Boot actuator env JSON shape.")
+        return None
+
+    if "actuator/health" in low_path:
+        if _ACTUATOR_HEALTH_RE.search(body):
+            return _sensitive_hit(
+                "Spring actuator health exposed", "medium", 5.3,
+                "The actuator health endpoint returned a real UP/DOWN status payload.",
+                "Restrict actuator endpoints to trusted networks.",
+                evidence="Body matched actuator health status JSON.")
+        return None
+
+    if "swagger" in low_path or "openapi" in low_path:
+        if _API_SCHEMA_RE.search(body):
+            return _sensitive_hit(
+                "API schema exposed", "medium", 5.3,
+                "The endpoint returned a real OpenAPI/Swagger schema document.",
+                "Restrict API documentation in production if it reveals sensitive operations.",
+                evidence="Body matched swagger/openapi schema shape.")
+        return None
+
+    if "server-status" in low_path:
+        if _APACHE_STATUS_RE.search(body):
+            return _sensitive_hit(
+                "Apache server-status exposed", "medium", 5.3,
+                "mod_status returned real scoreboard/server-status content.",
+                "Disable or restrict server-status to trusted networks.",
+                evidence="Body matched Apache Server Status page markers.")
+        return None
+
+    if "metrics" in low_path:
+        if _PROMETHEUS_METRICS_RE.search(body):
+            return _sensitive_hit(
+                "Metrics endpoint exposed", "medium", 5.3,
+                "The endpoint returned real Prometheus-format metrics.",
+                "Restrict metrics endpoints to trusted networks.",
+                evidence="Body matched Prometheus exposition format (# HELP/# TYPE).")
+        return None
+
+    if "security.txt" in low_path:
+        if _SECURITY_TXT_RE.search(body):
+            return _sensitive_hit(
+                "security.txt present", "info", 0.0,
+                "A well-known security.txt was found (informational, not a vulnerability).",
+                "No action required; this is expected disclosure-policy metadata.",
+                evidence="Body matched RFC 9116 Contact: field.")
+        return None
+
+    if "config" in low_path and not any(s in low_path for s in ("actuator", "swagger", "openapi")):
+        if _PHP_CONFIG_RE.search(body) and not _GENERIC_HTML_RE.search(body):
+            return _sensitive_hit(
+                "Configuration file exposed", "high", 7.5,
+                "The path returned real configuration-file content (PHP tags / config directives), "
+                "not a generic page.",
+                "Move configuration files out of the webroot; restrict access at the edge.",
+                evidence="Body matched PHP config markers and did not match a generic HTML shell.")
+        return None
+
+    if "backup" in low_path or low_path.endswith((".bak", ".zip", ".tar", ".tar.gz", ".sql", ".old")):
+        if not _GENERIC_HTML_RE.search(body) and (
+            _ARCHIVE_CT_RE.search(content_type)
+            or _DIR_LISTING_RE.search(body)
+            or re.search(r"backup|dump", body, re.IGNORECASE)
+        ):
+            return _sensitive_hit(
+                "Backup/archive exposed", "high", 7.5,
+                "The path returned archive/backup-shaped content (directory listing, archive "
+                "content-type, or backup marker), not a generic page.",
+                "Remove backup/archive files from the webroot; restrict access at the edge.",
+                evidence="Body/content-type matched a backup or directory-listing signature.")
+        return None
+
+    # Unrecognized path category (e.g. /debug): only surface as a low-confidence
+    # manual-review candidate, and only if the body isn't the generic app shell.
+    if _GENERIC_HTML_RE.search(body):
+        return None
+    return _sensitive_hit(
+        f"Endpoint reachable: {path}", "low", 3.1,
+        f"{path} returned HTTP 200 with content that does not look like the site's generic page. "
+        "Manual review recommended to determine sensitivity.",
+        "Review whether this endpoint should be publicly reachable; restrict if not intended.",
+        evidence="No specific sensitive-content signature matched; recorded as a low-confidence candidate.")

@@ -260,6 +260,30 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             )
         return coverage_html, surface_html, paths_html, candidates_html
 
+    def _tooling_section(self, context: dict) -> str:
+        """Scanner health as a report section: which tools were actually present
+        for this mission. Empty string when the tooling check never ran (e.g. a
+        mission started before this check existed) or nothing was missing to warn
+        about wouldn't be worth a section — only rendered when something's absent."""
+        tooling = (context or {}).get("tooling") or {}
+        if not tooling:
+            return ""
+        missing = sorted(name for name, info in tooling.items() if not (info or {}).get("available"))
+        if not missing:
+            return ""
+        rows = "".join(
+            f"<tr><td>{_html.escape(name)}</td><td class=\"mod-skip\">unavailable</td></tr>"
+            for name in missing
+        )
+        return (
+            '<div class="section"><h2>Coverage Limitations</h2>'
+            '<p class="cand-note">The following scanner tool(s) were not available in this run\'s '
+            'environment. Checks that depend on them were skipped or reported as tool_unavailable — '
+            'their absence in the findings above means <strong>not tested</strong>, not clean.</p>'
+            f'<table class="cov-table"><thead><tr><th>Tool</th><th>Status</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+        )
+
     async def _generate_html_report(self, target: str, findings: list, stats: dict, exec_summary: str, context: dict) -> str:
         mode = (context or {}).get("athena", {}).get("mode", "passive")
         mission_summary = (context or {}).get("athena", {}).get("mission_summary", "")
@@ -268,6 +292,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
         # Coverage transparency panels (real recon numbers only; empty in passive runs).
         coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
+        tooling_html = self._tooling_section(context)
         now = utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
         # inline script is blocked (defense in depth behind the html escaping).
@@ -648,6 +673,8 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 </div>
 
 {coverage_html}
+
+{tooling_html}
 
 {surface_html}
 
