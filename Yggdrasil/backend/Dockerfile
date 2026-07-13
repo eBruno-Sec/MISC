@@ -58,6 +58,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Headless Chromium for the DOM-XSS pass. Degrades gracefully: if the browser
+# download is blocked at build time, the DOM scan reports "tool unavailable"
+# rather than failing the build.
+RUN playwright install --with-deps chromium || echo "playwright chromium skipped"
+
 COPY . .
 
 # Built-in payload lists (SQLi / XSS / passwords) shipped with the repo so the

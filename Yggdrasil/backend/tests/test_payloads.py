@@ -118,3 +118,22 @@ def test_lfi_wrapper_detects_php_source_leak_differential():
 def test_xss_attribute_handler_context_detected():
     pl = f"\" autofocus onfocus={CANARY} x=\""
     assert evaluate("xss", pl, f"<input value=\"{pl}\">") is not None
+
+
+# ── UNION-based SQLi: marker returned as a row, not raw reflection ──
+def test_union_marker_returned_as_row_hits():
+    from core.payloads import UNION_MARKER
+    pl = f"' UNION SELECT '{UNION_MARKER}'-- -"
+    # DB echoes only the SELECTed marker value (payload itself not reflected) -> UNION SQLi
+    assert evaluate("sqli_union", pl, f"<td>{UNION_MARKER}</td>", base_text="<td>ygg1</td>") is not None
+
+
+def test_union_raw_reflection_is_not_union():
+    from core.payloads import UNION_MARKER
+    pl = f"' UNION SELECT '{UNION_MARKER}'-- -"
+    # whole payload reflected verbatim => reflection, not data extraction
+    assert evaluate("sqli_union", pl, f"you searched for {pl}") is None
+
+
+def test_union_in_probe_plan():
+    assert any(f == "sqli_union" for f, _ in probe_families(include_time=False))

@@ -1263,6 +1263,184 @@ class OffensiveEngine:
                     del tokens[token]
         return found
 
+    async def _launch_chromium(self, pw):
+        """Launch headless Chromium. Prefer Playwright's own build (matches the image
+        `playwright install chromium`); fall back to any chromium already present under
+        PLAYWRIGHT_BROWSERS_PATH whose build number may differ from the pinned version
+        (common on prebuilt CI images)."""
+        args = ["--no-sandbox", "--disable-dev-shm-usage"]
+        try:
+            return await pw.chromium.launch(headless=True, args=args)
+        except Exception:
+            import glob
+            root = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
+            for exe in sorted(glob.glob(os.path.join(root, "chromium-*/chrome-linux/chrome")), reverse=True):
+                try:
+                    return await pw.chromium.launch(headless=True, args=args, executable_path=exe)
+                except Exception:
+                    continue
+            raise
+
+    # ── DOM-based XSS via a real headless browser ────────────────
+    async def dom_xss_scan(self, urls, cap=40, budget=200) -> list:
+        """Drive headless Chromium to confirm real JavaScript EXECUTION — catching
+        DOM-based XSS (client-side sinks that never touch the server response) and
+        upgrading reflected candidates to execution-confirmed. Injects into each query
+        parameter and the URL fragment. Degrades gracefully without Playwright."""
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            await self.log("Playwright not installed; DOM XSS scan skipped", "warn")
+            self._mark_tool_missing("dom")
+            return []
+        from core.payloads import DOM_MARKER, dom_payloads
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:cap]
+        if not param_urls:
+            await self.log("DOM XSS: no parameterized endpoints", "info")
+            return []
+
+        await self.log(f"DOM XSS: driving headless Chromium against {len(param_urls)} endpoint(s)", "info")
+        findings, seen = [], set()
+        payloads = dom_payloads()
+        fired = {"msg": None}
+
+        def _on_dialog(d):
+            fired["msg"] = d.message
+            asyncio.ensure_future(d.dismiss())
+
+        try:
+            async with async_playwright() as pw:
+                browser = await self._launch_chromium(pw)
+                headers = {"User-Agent": BROWSER_USER_AGENT}
+                if self._cookie():
+                    headers["Cookie"] = self._cookie()
+                context = await browser.new_context(ignore_https_errors=True, extra_http_headers=headers)
+                page = await context.new_page()
+                page.on("dialog", _on_dialog)
+                page.on("pageerror", lambda e: None)
+
+                for u in param_urls:
+                    if budget <= 0:
+                        break
+                    parsed = urlparse(u)
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    cases = []
+                    for pname in list(params.keys())[:5]:
+                        for pl in payloads:
+                            m = dict(params)
+                            m[pname] = [pl]
+                            cases.append((pname, pl, urlunparse(parsed._replace(query=urlencode(m, doseq=True)))))
+                    for pl in payloads:      # URL fragment — the classic DOM sink
+                        cases.append(("#fragment", pl, u + "#" + pl))
+
+                    for pname, pl, turl in cases:
+                        if budget <= 0:
+                            break
+                        dedupe = (parsed.path, pname)
+                        if dedupe in seen:
+                            continue
+                        budget -= 1
+                        fired["msg"] = None
+                        try:
+                            await page.goto(turl, wait_until="load", timeout=8000)
+                            await page.wait_for_timeout(300)
+                        except Exception:
+                            continue
+                        if fired["msg"] and DOM_MARKER in str(fired["msg"]):
+                            seen.add(dedupe)
+                            loc = "URL fragment (#)" if pname == "#fragment" else f"parameter {pname}"
+                            fnd = await self.add_finding(
+                                title=f"DOM-based XSS (execution confirmed): {pname}",
+                                severity="high",
+                                description=("A headless browser executed injected JavaScript via "
+                                             f"{loc}, confirming XSS with real execution — including DOM "
+                                             "sinks that never appear in the server response."),
+                                evidence=f"URL: {urlunparse(parsed._replace(query=''))}\nInjection: {loc}\n"
+                                         f"Payload: {pl}\nalert() fired carrying marker {DOM_MARKER}",
+                                cvss_score=7.7,
+                                remediation=("Sanitize/encode before DOM sinks (innerHTML, document.write, eval); "
+                                             "apply a strict Content-Security-Policy."))
+                            findings.append({"param": pname, "family": "dom_xss", "payload": pl})
+                await browser.close()
+        except Exception as e:
+            await self.log(f"DOM XSS scan error: {e}", "warn")
+
+        await self.log(f"DOM XSS scan complete: {len(findings)} execution-confirmed",
+                       "success" if findings else "info")
+        return findings
+
+    # ── Out-of-band (OAST) blind SSRF / command injection ────────
+    async def oast_scan(self, urls, budget=300) -> list:
+        """Stand up an out-of-band callback listener, inject payloads that make a
+        vulnerable target reach back to it (blind SSRF via URL params, blind OS
+        command injection via curl/wget), then correlate any interaction to the exact
+        injection point. Degrades gracefully; if the target cannot route back to the
+        listener, nothing is reported (the honest outcome)."""
+        import httpx
+        from core.oast import OASTListener
+        from core.payloads import oob_payloads
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:80]
+        if not param_urls:
+            return []
+        try:
+            listener = await OASTListener().start()
+        except Exception as e:
+            await self.log(f"OAST listener could not start; out-of-band scan skipped ({e})", "warn")
+            self._mark_tool_missing("oob")
+            return []
+
+        await self.log(f"OAST: out-of-band probing via listener on port {listener.port}", "info")
+        pending = {}   # token -> (clean_url, param, klass)
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for u in param_urls:
+                    if budget <= 0:
+                        break
+                    parsed = urlparse(u)
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    clean = urlunparse(parsed._replace(query=""))
+                    for pname in list(params.keys())[:6]:
+                        for klass in ("oob_ssrf", "oob_cmdi"):
+                            if budget <= 0:
+                                break
+                            tok = listener.new_token()
+                            bundle = oob_payloads(listener.url_for(tok))
+                            pls = bundle["ssrf"] if klass == "oob_ssrf" else bundle["cmdi"][:4]
+                            for pl in pls:
+                                if budget <= 0:
+                                    break
+                                budget -= 1
+                                m = dict(params)
+                                m[pname] = [pl]
+                                target = urlunparse(parsed._replace(query=urlencode(m, doseq=True)))
+                                try:
+                                    await c.get(target)
+                                except Exception:
+                                    pass
+                            pending[tok] = (clean, pname, klass)
+                await asyncio.sleep(4)   # let asynchronous callbacks arrive
+        finally:
+            await listener.stop()
+
+        from core.payloads import _META
+        findings = []
+        for tok, (url, pname, klass) in pending.items():
+            if listener.got(tok):
+                sev, cvss, rem, desc = _META[klass]
+                title = ("Blind SSRF (out-of-band confirmed)" if klass == "oob_ssrf"
+                         else "Blind OS Command Injection (out-of-band confirmed)")
+                fnd = await self.add_finding(
+                    title=f"{title}: {pname}", severity=sev, description=desc,
+                    evidence=f"URL: {url}\nParameter: {pname}\nOut-of-band callback received (token {tok})",
+                    cvss_score=cvss, remediation=rem)
+                findings.append({"param": pname, "family": klass, "url": url})
+        await self.log(f"OAST scan complete: {len(findings)} out-of-band confirmation(s)",
+                       "success" if findings else "info")
+        return findings
+
     # ── Form discovery + POST/body injection ─────────────────────
     async def discover_forms(self, urls: list, cap_pages: int = 25) -> list:
         """Fetch crawled pages, parse their <form>s, and return testable specs
@@ -1781,11 +1959,12 @@ class OffensiveEngine:
         """Per-module honesty for the SAGA report: separate 'tested' from
         'tool_unavailable' (binary missing) and 'blocked' (WAF ate the traffic),
         so a 0 that means 'inconclusive' is never rendered as 'clean'."""
-        binary_backed = {"sqli", "xss", "dast", "content", "zap", "forms"}
+        binary_backed = {"sqli", "xss", "dast", "content", "zap", "forms", "dom", "oob"}
         missing = getattr(self, "_tools_missing", set())
         status = {}
         for key in ("sqli", "xss", "dast", "auth", "traversal", "zap", "content",
-                    "ssrf", "ssti", "open_redirect", "cors", "host_header", "fuzz", "forms"):
+                    "ssrf", "ssti", "open_redirect", "cors", "host_header", "fuzz", "forms",
+                    "dom", "oob"):
             if key in missing:
                 status[key] = "tool_unavailable"
             elif len(result.get(key) or []):
@@ -1849,7 +2028,7 @@ class OffensiveEngine:
 
         # Run injection / access-control classes concurrently where safe.
         (sqli, xss, dast, auth, trav, disco,
-         ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits) = await asyncio.gather(
+         ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits, domx, oob) = await asyncio.gather(
             self.test_sqli(base_url, urls),
             self.test_xss(urls),
             self.nuclei_dast(urls),
@@ -1863,6 +2042,8 @@ class OffensiveEngine:
             self.test_host_header(base_url),
             self.deep_fuzz(urls, base_url=base_url),
             self.test_forms(forms),
+            self.dom_xss_scan(urls),
+            self.oast_scan(urls),
             return_exceptions=True,
         )
 
@@ -1891,6 +2072,8 @@ class OffensiveEngine:
             "host_header": _safe(hosthdr),
             "fuzz": _safe(fuzz),
             "forms": _safe(formhits),
+            "dom": _safe(domx),
+            "oob": _safe(oob),
         }
         # WAF/CDN awareness: if a large share of active probes were bounced, the
         # binary tools' "0 findings" is INCONCLUSIVE (blocked), not "clean".
@@ -1926,6 +2109,7 @@ class OffensiveEngine:
             )
 
         total = sum(len(_safe(v)) for v in
-                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits))
+                    (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr,
+                     fuzz, formhits, domx, oob))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

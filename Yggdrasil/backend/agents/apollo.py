@@ -136,6 +136,8 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         ("content", "Content Discovery"),
         ("fuzz", "Deep Param Fuzz (SQLi/XSS/SSTI/CMDi/HPP)"),
         ("forms", "Form / POST Injection"),
+        ("dom", "DOM XSS (headless browser)"),
+        ("oob", "Out-of-Band (blind SSRF / CMDi)"),
     ]
     # Discovered paths worth a manual look (candidates, never auto-confirmed).
     _INTERESTING = (
