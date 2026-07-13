@@ -18,7 +18,7 @@ import os
 import re
 import tempfile
 from html.parser import HTMLParser
-from urllib.parse import urlparse, parse_qs, urlencode, urljoin, urlunparse
+from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlunparse
 
 from core.evasion import (
     SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
@@ -982,6 +982,188 @@ class OffensiveEngine:
         return await self._param_probe(urls, payloads, self._injection_verdict,
                                        cap=25, per_params=4)
 
+    # ── Deep per-parameter fuzz: every parameter, every endpoint ──
+    async def deep_fuzz(self, urls, budget=2500, time_budget=20,
+                        max_endpoints=200, max_params=30, concurrency=6) -> list:
+        """Bug-bounty-style deep fuzz. For EVERY parameter of EVERY discovered
+        endpoint, fire the full payload library — SQLi (error + time-based blind),
+        reflected XSS, SSTI, OS command injection, path traversal, CRLF — with
+        WAF-evasion variants, then an HTTP Parameter Pollution pass per endpoint.
+        Detection is differential (probe vs a benign baseline) to cut false
+        positives; a global request budget guarantees termination on large surfaces;
+        endpoints run with bounded concurrency so 'test everything' stays feasible."""
+        from core.payloads import probe_families
+
+        param_urls = [u for u in urls if "?" in u and "=" in u][:max_endpoints]
+        if not param_urls:
+            await self.log("Deep fuzz: no parameterized endpoints to test", "info")
+            return []
+
+        plan = probe_families(include_time=True)
+        state = {"budget": budget, "time_budget": time_budget}
+        seen = set()
+        await self.log(
+            f"Deep fuzz: firing {len(plan)} payloads/param (SQLi/XSS/SSTI/CMDi/traversal/"
+            f"CRLF + HPP) across {len(param_urls)} endpoints", "info")
+
+        import httpx
+        sem = asyncio.Semaphore(concurrency)
+        findings = []
+        async with httpx.AsyncClient(timeout=12, verify=False, follow_redirects=True,
+                                     headers=self._auth_headers()) as c:
+            async def do_endpoint(u):
+                async with sem:
+                    return await self._fuzz_endpoint(c, u, plan, state, seen, max_params)
+            results = await asyncio.gather(*[do_endpoint(u) for u in param_urls],
+                                           return_exceptions=True)
+        for res in results:
+            if isinstance(res, list):
+                findings += res
+
+        await self.log(
+            f"Deep fuzz complete: {len(findings)} confirmed injection(s); "
+            f"{state['budget']} request budget remaining",
+            "success" if findings else "info")
+        return findings
+
+    async def _fuzz_endpoint(self, c, u, plan, state, seen, max_params):
+        parsed = urlparse(u)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        if not params or state["budget"] <= 0:
+            return []
+        base = await self._fuzz_baseline(c, parsed, params)
+        out = []
+        for pname in list(params.keys())[:max_params]:
+            if state["budget"] <= 0:
+                break
+            dkey = (parsed.netloc, parsed.path, pname.lower())
+            if dkey in seen:
+                continue
+            seen.add(dkey)
+            out += await self._fuzz_param(c, parsed, params, pname, base, plan, state)
+        out += await self._hpp_probe(c, parsed, params, base, state)
+        return out
+
+    async def _fuzz_baseline(self, c, parsed, params):
+        """Benign request for this endpoint — the differential reference for error,
+        timing and marker detection."""
+        import time as _time
+        benign = {k: ["ygg1"] for k in params}
+        target = urlunparse(parsed._replace(query=urlencode(benign, doseq=True)))
+        t0 = _time.perf_counter()
+        try:
+            r = await c.get(target)
+            return {"text": r.text or "", "status": r.status_code,
+                    "elapsed": _time.perf_counter() - t0}
+        except Exception:
+            return {"text": "", "status": 0, "elapsed": 0.0}
+
+    async def _fuzz_param(self, c, parsed, params, pname, base, plan, state):
+        import time as _time
+        from core.payloads import evaluate
+        from core.evasion import payload_variants
+        found, families_hit = [], set()
+        clean_url = urlunparse(parsed._replace(query=""))
+        for family, payload in plan:
+            if state["budget"] <= 0:
+                break
+            if family in families_hit:
+                continue
+            is_time = family.endswith("_time")
+            if is_time and state["time_budget"] <= 0:
+                continue
+            if family == "sqli_error":
+                variants = payload_variants(payload, "sql", 2)
+            elif family == "xss":
+                variants = payload_variants(payload, "xss", 2)
+            else:
+                variants = [payload]
+            for pl in variants:
+                if state["budget"] <= 0:
+                    break
+                mutated = dict(params)
+                mutated[pname] = [pl]
+                target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
+                state["budget"] -= 1
+                if is_time:
+                    state["time_budget"] -= 1
+                t0 = _time.perf_counter()
+                try:
+                    r = await c.get(target)
+                except Exception:
+                    continue
+                elapsed = _time.perf_counter() - t0
+                self._probe_requests = getattr(self, "_probe_requests", 0) + 1
+                if looks_waf_blocked(r.status_code, r.headers, getattr(r, "text", "")):
+                    self._waf_blocks = getattr(self, "_waf_blocks", 0) + 1
+                verdict = evaluate(family, pl, r.text, r.status_code, elapsed, r.headers,
+                                   base.get("text", ""), base.get("status", 200), base.get("elapsed"))
+                if verdict:
+                    fnd = await self.add_finding(
+                        title=f"{verdict['title']}: {pname}",
+                        severity=verdict["severity"],
+                        description=verdict["description"],
+                        evidence=f"URL: {clean_url}\nParameter: {pname}\nPayload: {pl}\n{verdict['evidence']}",
+                        cvss_score=verdict["cvss"],
+                        remediation=verdict["remediation"],
+                    )
+                    await self.capture(r, finding_id=(fnd.id if fnd else None),
+                                       notes=f"{verdict['title']} on parameter '{pname}'")
+                    found.append({"param": pname, "family": family, "payload": pl})
+                    families_hit.add(family)
+                    break
+        return found
+
+    async def _hpp_probe(self, c, parsed, params, base, state):
+        """HTTP Parameter Pollution: duplicate a parameter (benign + payload, both
+        orders). Backends disagree on which copy wins (first / last / concatenated);
+        if a polluted request triggers a hit the single value did not, that pollution
+        is exploitable (WAF/validation bypass, access-control confusion)."""
+        from core.payloads import evaluate, CANARY, family_description
+        found = []
+        probes = [("sqli_error", "'"), ("sqli_error", "' OR 1=1-- -"), ("xss", f"<{CANARY}>")]
+        base_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+        for pname in list(params.keys())[:8]:
+            if state["budget"] <= 0:
+                break
+            hit = False
+            for family, payload in probes:
+                if hit or state["budget"] <= 0:
+                    break
+                for order in ("last", "first"):
+                    if state["budget"] <= 0:
+                        break
+                    others = [(k, v) for k, v in base_pairs if k != pname]
+                    dup = ([(pname, "ygg1"), (pname, payload)] if order == "last"
+                           else [(pname, payload), (pname, "ygg1")])
+                    q = urlencode(others + dup, doseq=True)
+                    target = urlunparse(parsed._replace(query=q))
+                    state["budget"] -= 1
+                    try:
+                        r = await c.get(target)
+                    except Exception:
+                        continue
+                    self._probe_requests = getattr(self, "_probe_requests", 0) + 1
+                    verdict = evaluate(family, payload, r.text, r.status_code, None, r.headers,
+                                       base.get("text", ""), base.get("status", 200), None)
+                    if verdict:
+                        fnd = await self.add_finding(
+                            title=f"HTTP Parameter Pollution -> {verdict['title']}: {pname}",
+                            severity=verdict["severity"],
+                            description=("A duplicated query parameter reached a vulnerable sink that the "
+                                         "single parameter did not, confirming HTTP Parameter Pollution. "
+                                         + family_description(verdict["family"])),
+                            evidence=f"Polluted query: {q}\n{verdict['evidence']}",
+                            cvss_score=verdict["cvss"],
+                            remediation="Canonicalize or reject duplicate parameter keys server-side before use.",
+                        )
+                        await self.capture(r, finding_id=(fnd.id if fnd else None),
+                                           notes=f"HPP on parameter '{pname}'")
+                        found.append({"param": pname, "family": "hpp", "payload": payload})
+                        hit = True
+                        break
+        return found
+
     # ── Form discovery + POST/body injection ─────────────────────
     async def discover_forms(self, urls: list, cap_pages: int = 25) -> list:
         """Fetch crawled pages, parse their <form>s, and return testable specs
@@ -1580,7 +1762,7 @@ class OffensiveEngine:
             self.test_open_redirect(urls),
             self.test_cors(base_url, urls),
             self.test_host_header(base_url),
-            self.auto_fuzz(urls),
+            self.deep_fuzz(urls),
             self.test_forms(forms),
             return_exceptions=True,
         )
