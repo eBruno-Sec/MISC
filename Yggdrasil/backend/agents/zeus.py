@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from core.timeutil import utcnow
 from sqlalchemy import update
 from core.models import Mission, MissionStatus
 from .base import BaseAgent
@@ -26,7 +26,7 @@ class Zeus(BaseAgent):
             values["current_phase"] = phase
             self.current_phase_label = phase   # read by the mission heartbeat
         if status in (MissionStatus.COMPLETE, MissionStatus.FAILED):
-            values["completed_at"] = datetime.utcnow()
+            values["completed_at"] = utcnow()
         await self.session.execute(
             update(Mission).where(Mission.id == self.mission_id).values(**values)
         )
@@ -37,7 +37,7 @@ class Zeus(BaseAgent):
                 "type": "status_change",
                 "status": status,
                 "phase": phase,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
 
     async def execute(self, target: str, context: dict = None) -> dict:
@@ -235,7 +235,7 @@ class Zeus(BaseAgent):
                 "report_available": ctx.get("apollo", {}).get("report_available", bool(report_path)),
                 "report_error": ctx.get("apollo", {}).get("report_error"),
                 "stats": ctx.get("apollo", {}).get("stats", {}),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
 
         return ctx

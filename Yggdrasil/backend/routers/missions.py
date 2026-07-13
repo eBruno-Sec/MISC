@@ -2,7 +2,7 @@ import asyncio
 import csv
 import io
 import json
-from datetime import datetime
+from core.timeutil import utcnow
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
@@ -245,7 +245,7 @@ async def relaunch_mission(
     context = dict(original.context or {})
     context.update({
         "relaunched_from": original.id,
-        "relaunched_at": datetime.utcnow().isoformat(),
+        "relaunched_at": utcnow().isoformat(),
     })
 
     mission = Mission(
@@ -287,7 +287,7 @@ async def _import_backup_norm(norm: dict, session: AsyncSession):
         current_phase=norm["current_phase"],
         scope_rules=norm["scope_rules"],
         # flag the provenance without a schema change (context JSON, per constraints)
-        context={**norm["context"], "imported": True, "imported_at": datetime.utcnow().isoformat()},
+        context={**norm["context"], "imported": True, "imported_at": utcnow().isoformat()},
     )
     session.add(mission)
     await session.flush()  # assign mission.id before inserting children
@@ -481,7 +481,7 @@ async def resolve_approval(
         raise HTTPException(404, "Approval request not found")
 
     approval.status = "approved" if body.approved else "denied"
-    approval.resolved_at = datetime.utcnow()
+    approval.resolved_at = utcnow()
     await session.commit()
 
     gates: dict = request.app.state.approval_gates
@@ -494,7 +494,7 @@ async def resolve_approval(
         "type": "approval_resolved",
         "approval_id": approval_id,
         "approved": body.approved,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     })
     return {"status": "resolved", "approved": body.approved}
 
@@ -558,7 +558,7 @@ async def update_finding(
         "finding_id": finding_id,
         "tag": finding.tag,
         "severity": finding.severity,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     })
     return _finding_dict(finding)
 
@@ -648,7 +648,7 @@ async def add_targets(
     await manager.broadcast(mission_id, {
         "type": "targets_added",
         "targets": targets,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     })
 
     if body.run_scan:
@@ -694,7 +694,7 @@ async def rerun_agent(
         "type": "agent_rerun",
         "agent": agent_name,
         "symbol": agent_symbol(agent_name),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     })
     return {"status": "queued", "agent": agent_name}
 
@@ -766,7 +766,7 @@ async def export_findings(
         "mission_id": mission_id,
         "target": mission.target,
         "mode": mission.mode,
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": utcnow().isoformat(),
         "findings": [_finding_dict(f) for f in findings],
     }
     content = json.dumps(payload, indent=2, default=str)
@@ -1110,7 +1110,7 @@ async def _run_mission(
             await session.commit()
             await manager.broadcast(mission_id, {
                 "type": "mission_failed", "error": str(e),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
         finally:
             hb_task.cancel()
@@ -1148,7 +1148,7 @@ async def _mission_heartbeat(mission_id: str, zeus):
                 "display_name": agent_display_name("zeus"), "level": "info",
                 "message": (f"Heartbeat: still working. Phase: {phase}. "
                             f"Elapsed {mm}m{ss:02d}s. A long-running step is in progress; hang tight."),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
         except Exception:
             pass
@@ -1188,7 +1188,7 @@ async def _run_single_agent(
             "type": "status_change",
             "status": MissionStatus.SCANNING,
             "phase": agent_name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         })
 
         try:
@@ -1234,7 +1234,7 @@ async def _run_single_agent(
                 "type": "status_change",
                 "status": MissionStatus.COMPLETE,
                 "phase": None,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
 
         except Exception as e:
@@ -1245,7 +1245,7 @@ async def _run_single_agent(
                 "display_name": agent_display_name(agent_name),
                 "level": "error",
                 "message": f"Re-run failed: {e}",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
             await session.execute(
                 update(Mission).where(Mission.id == mission_id)

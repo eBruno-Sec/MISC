@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Text, DateTime, Float, Integer, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from core.timeutil import utcnow
 import uuid
 
 from core.database import Base
@@ -42,8 +42,8 @@ class Mission(Base):
     current_phase = Column(String, nullable=True)
     context = Column(JSON, default=dict)
     scope_rules = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     completed_at = Column(DateTime, nullable=True)
 
     logs = relationship("AgentLog", back_populates="mission", cascade="all, delete-orphan")
@@ -63,7 +63,7 @@ class AgentLog(Base):
     level = Column(String, default="info")
     message = Column(Text, nullable=False)
     raw_output = Column(Text, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
 
     mission = relationship("Mission", back_populates="logs")
 
@@ -84,7 +84,7 @@ class Finding(Base):
     tag = Column(String, nullable=True)           # confirmed | false_positive | reported | fixed
     is_manual = Column(Boolean, default=False)    # added manually by user
     analyst_notes = Column(Text, nullable=True)   # inline analyst commentary
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
 
     mission = relationship("Mission", back_populates="findings")
     exchanges = relationship("HttpExchange", back_populates="finding", cascade="all, delete-orphan")
@@ -113,7 +113,7 @@ class HttpExchange(Base):
     source = Column(String, nullable=True)          # tool/agent that produced it
     notes = Column(Text, nullable=True)
     redacted = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     mission = relationship("Mission", back_populates="exchanges")
     finding = relationship("Finding", back_populates="exchanges")
@@ -132,7 +132,7 @@ class AuthProfile(Base):
     name = Column(String, nullable=False)
     role = Column(String, nullable=True)
     headers = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     mission = relationship("Mission", back_populates="auth_profiles")
 
@@ -143,7 +143,7 @@ class MissionNote(Base):
     id = Column(String, primary_key=True, default=_uuid)
     mission_id = Column(String, ForeignKey("missions.id"), nullable=False)
     content = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
 
     mission = relationship("Mission", back_populates="notes")
 
@@ -157,7 +157,7 @@ class ApprovalRequest(Base):
     action = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String, default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)
 
     mission = relationship("Mission", back_populates="approvals")

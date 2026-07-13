@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import asyncio
 import os
-from datetime import datetime
+from core.timeutil import utcnow
 from core.models import AgentLog, Finding, ApprovalRequest, Mission, MissionStatus, HttpExchange
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
@@ -46,7 +46,7 @@ class BaseAgent(ABC):
                 "display_name": self.display_name,
                 "level": level,
                 "message": message,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
 
     async def add_finding(
@@ -78,7 +78,7 @@ class BaseAgent(ABC):
                 "title": title,
                 "found_by": self.name,
                 "display_name": self.display_name,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
         return finding
 
@@ -177,7 +177,7 @@ class BaseAgent(ABC):
         if mission_auto or env_auto:
             approval = ApprovalRequest(
                 mission_id=self.mission_id, agent=self.name, action=action,
-                description=description, status="approved", resolved_at=datetime.utcnow(),
+                description=description, status="approved", resolved_at=utcnow(),
             )
             self.session.add(approval)
             await self.session.flush()
@@ -186,7 +186,7 @@ class BaseAgent(ABC):
             if self.ws_manager:
                 await self.ws_manager.broadcast(self.mission_id, {
                     "type": "approval_resolved", "approval_id": approval.id,
-                    "approved": True, "timestamp": datetime.utcnow().isoformat(),
+                    "approved": True, "timestamp": utcnow().isoformat(),
                 })
             return True
 
@@ -217,7 +217,7 @@ class BaseAgent(ABC):
                 "symbol": self.symbol,
                 "action": action,
                 "description": description,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
             })
 
         # Hold here until a human authorizes or denies — by default, forever.

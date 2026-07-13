@@ -2,7 +2,7 @@ import os
 import json
 import html as _html
 import secrets
-from datetime import datetime
+from core.timeutil import utcnow
 from core.ai_client import complete
 from core.brand import agent_display_name
 from core.config import settings
@@ -256,7 +256,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         live_hosts = (context or {}).get("hermes", {}).get("live_hosts", [])
         # Coverage transparency panels (real recon numbers only; empty in passive runs).
         coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        now = utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
         # inline script is blocked (defense in depth behind the html escaping).
         nonce = secrets.token_urlsafe(16)

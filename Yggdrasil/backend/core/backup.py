@@ -14,6 +14,8 @@ import json
 import re
 from datetime import date, datetime, timezone
 
+from core.timeutil import utcnow
+
 SUPPORTED_VERSIONS = {"1"}
 PAYLOAD_SUPPORTED_VERSIONS = {"2"}
 MAX_FINDINGS = 5000
@@ -159,11 +161,11 @@ def _parse_dt(v):
     """Best-effort ISO-8601 -> naive UTC datetime. Falls back to now() on anything
     missing or malformed (the models store naive datetimes, so strip any tzinfo)."""
     if not v:
-        return datetime.utcnow()
+        return utcnow()
     try:
         return datetime.fromisoformat(str(v).replace("Z", "+00:00")).replace(tzinfo=None)
     except (TypeError, ValueError):
-        return datetime.utcnow()
+        return utcnow()
 
 
 def _as_float(v):

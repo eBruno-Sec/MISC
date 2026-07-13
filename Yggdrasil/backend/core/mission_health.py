@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime
 
+from core.timeutil import utcnow
+
 from core.database import AsyncSessionLocal
 from core.models import AgentLog, Mission, MissionStatus
 
@@ -69,7 +71,7 @@ async def record_mission_health(
     log: bool = False,
     allow_terminal: bool = False,
 ) -> dict | None:
-    now = datetime.utcnow()
+    now = utcnow()
     log_event = None
 
     async with AsyncSessionLocal() as session:

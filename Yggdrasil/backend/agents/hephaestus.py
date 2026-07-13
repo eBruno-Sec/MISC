@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from core.timeutil import utcnow
 
 from sqlalchemy import select
 
@@ -91,7 +91,7 @@ class Hephaestus(BaseAgent):
             "exploitable_count": len(result["exploitable_targets"]),
             "wordlists": [w["id"] for w in result["wordlists_created"]],
             "wordlist_entries": sum(w["count"] for w in result["wordlists_created"]),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
         await self.log(

@@ -18,7 +18,7 @@ catalog alongside the curated sets, selectable per mission.
 """
 import os
 import re
-from datetime import datetime
+from core.timeutil import utcnow
 
 from core.config import settings
 
@@ -264,7 +264,7 @@ def write_list(name: str, words: list) -> dict:
         "id": f"gen:{slug}", "name": slug, "category": "generated",
         "source": "YGGDRASIL", "desc": "Target-specific, built from recon.",
         "kind": "generated", "path": path, "exists": True,
-        "count": count, "size": size, "created": datetime.utcnow().isoformat(),
+        "count": count, "size": size, "created": utcnow().isoformat(),
     }
 
 
