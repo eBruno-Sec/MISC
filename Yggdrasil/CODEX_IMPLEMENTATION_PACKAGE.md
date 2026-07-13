@@ -6,6 +6,9 @@ Codex implemented the Stage B enforcement pass for Yggdrasil from base commit
 `d02915b9dba6c2dab3b4cebe4790ed44ed7ab785` on branch
 `codex/yggdrasil-stage-b-enforcement`.
 
+Stage-B implementation commit:
+`a03431d074a9c901eee3aeda87c1276b143c0f64`.
+
 No merge was performed. No production approval was granted. This branch is ready
 for Opus critique.
 
@@ -127,7 +130,8 @@ implementation_version: "stage-b-2026-07-13"
 repository:
   base_commit: "d02915b9dba6c2dab3b4cebe4790ed44ed7ab785"
   branch: "codex/yggdrasil-stage-b-enforcement"
-  final_commit: "reported by git after commit creation"
+  implementation_commit: "a03431d074a9c901eee3aeda87c1276b143c0f64"
+  review_tip: "verify with `git rev-parse codex/yggdrasil-stage-b-enforcement` after fetch"
   merged: false
   production_approved: false
 
