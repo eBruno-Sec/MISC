@@ -1,0 +1,79 @@
+name: yggdrasil
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-yggdrasil}
+      POSTGRES_USER: ${DB_USER:-yggdrasil}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-yggdrasil_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-yggdrasil} -d ${DB_NAME:-yggdrasil}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-yggdrasil}:${DB_PASSWORD:-yggdrasil_secret}@postgres:5432/${DB_NAME:-yggdrasil}
+      REDIS_URL: redis://redis:6379
+      # AI provider (anthropic or openrouter). All optional; blank disables AI.
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      # Backward-compat: still forwarded if set
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      YGGDRASIL_API_KEY: ${YGGDRASIL_API_KEY:-}
+      OLYMPUS_API_KEY: ${OLYMPUS_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      REPORTS_DIR: /app/reports
+    # Backend is reached only through the nginx proxy (frontend:3000 -> /api, /ws).
+    # No host port is published, reducing the unauthenticated attack surface.
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - reports:/app/reports
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # Lets the backend reach services on the host (e.g. a local Juice Shop
+    # at host.docker.internal:42000). Works on Docker Desktop and Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  reports:

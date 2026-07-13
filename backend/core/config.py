@@ -1,0 +1,15 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    database_url: str = "postgresql+asyncpg://yggdrasil:yggdrasil_secret@localhost:5432/yggdrasil"
+    redis_url: str = "redis://localhost:6379"
+    anthropic_api_key: str = ""
+    secret_key: str = "dev-secret"
+    reports_dir: str = "/app/reports"
+
+    class Config:
+        env_file = ".env"
+
+
+settings = Settings()
