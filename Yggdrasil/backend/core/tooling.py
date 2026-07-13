@@ -14,13 +14,19 @@ import re
 
 import httpx
 
-# name -> (version command, regex to pull the version string out of stdout+stderr)
+# name -> (version command, regex to pull the version string out of stdout+stderr).
+# nuclei/katana/subfinder are all ProjectDiscovery tools sharing the same CLI
+# banner format ("... Current Version: vX.Y.Z ..."), not a tool-name-prefixed
+# one — a tool-specific pattern like "Katana Version:" silently misses and falls
+# back to "unknown" (observed in production for katana/subfinder). Match the
+# real shared banner instead.
+_PD_VERSION_RE = r"[Cc]urrent [Vv]ersion:\s*v?(\S+)"
 CLI_TOOLS = {
     "nmap":      (["nmap", "--version"],    r"Nmap version (\S+)"),
-    "nuclei":    (["nuclei", "-version"],   r"[Nn]uclei\s+(?:Engine\s+)?[Vv]ersion[:\s]+(\S+)"),
+    "nuclei":    (["nuclei", "-version"],   _PD_VERSION_RE),
     "ffuf":      (["ffuf", "-V"],           r"ffuf version:\s*(\S+)"),
-    "subfinder": (["subfinder", "-version"], r"[Ss]ubfinder\s+(?:Engine\s+)?[Vv]ersion[:\s]+(\S+)"),
-    "katana":    (["katana", "-version"],   r"[Kk]atana\s+(?:Engine\s+)?[Vv]ersion[:\s]+(\S+)"),
+    "subfinder": (["subfinder", "-version"], _PD_VERSION_RE),
+    "katana":    (["katana", "-version"],   _PD_VERSION_RE),
     "dalfox":    (["dalfox", "version"],    r"(\d+\.\d+\.\d+)"),
     "sqlmap":    (["sqlmap", "--version"],  r"(\d+(?:\.\d+){1,2}(?:#\S+)?)"),
 }
@@ -55,22 +61,38 @@ async def check_cli_tools(tools: dict = None) -> dict:
             continue
         blob = (stdout or "") + (stderr or "")
         m = re.search(pattern, blob)
-        results[name] = {"available": True, "version": (m.group(1) if m else "unknown")}
+        version = m.group(1) if m else "unknown"
+        # Defensive: some tools' captured version already carries a leading v/V
+        # (e.g. ProjectDiscovery's "vX.Y.Z"); callers that format their own "vX.Y.Z"
+        # display string would otherwise double it up into "vvX.Y.Z". Store bare.
+        if version != "unknown" and version[:1] in ("v", "V"):
+            version = version[1:]
+        results[name] = {"available": True, "version": version}
     return results
 
 
-async def check_zap(zap_url: str = None, api_key: str = None) -> dict:
-    """Probe the OWASP ZAP daemon — a separate service, not a CLI binary."""
+async def check_zap(zap_url: str = None, api_key: str = None,
+                     retries: int = 4, delay: float = 2.0) -> dict:
+    """Probe the OWASP ZAP daemon — a separate service, not a CLI binary, and one
+    with a real startup window: its container reports "started" well before its
+    API daemon is actually listening (it's a full JVM app, not an instant-exec
+    binary). A single-shot check run right after `docker compose up` reliably
+    catches it mid-boot and reports a false negative that then sits in the
+    startup log forever. Retries briefly (default: up to ~4 tries / ~6s of sleep
+    plus per-attempt timeouts) before giving up — bounded, not "block forever"."""
     zap_url = (zap_url or os.getenv("ZAP_URL", "http://zap:8090")).rstrip("/")
     api_key = api_key if api_key is not None else os.getenv("ZAP_API_KEY", "")
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            params = {"apikey": api_key} if api_key else {}
-            r = await c.get(f"{zap_url}/JSON/core/view/version/", params=params)
-            if r.status_code == 200:
-                return {"available": True, "version": (r.json() or {}).get("version", "unknown")}
-    except Exception:
-        pass
+    params = {"apikey": api_key} if api_key else {}
+    for attempt in range(max(1, retries)):
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get(f"{zap_url}/JSON/core/view/version/", params=params)
+                if r.status_code == 200:
+                    return {"available": True, "version": (r.json() or {}).get("version", "unknown")}
+        except Exception:
+            pass
+        if attempt < retries - 1:
+            await asyncio.sleep(delay)
     return {"available": False, "version": None}
 
 
