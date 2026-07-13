@@ -120,8 +120,12 @@ class AuthEngine:
         return getattr(self, "_auth_cookie", None)
 
     def _auth_headers(self) -> dict:
+        from core.evasion import BROWSER_USER_AGENT
+        headers = {"User-Agent": BROWSER_USER_AGENT}
         c = self._cookie()
-        return {"Cookie": c} if c else {}
+        if c:
+            headers["Cookie"] = c
+        return headers
 
     def _extract_form(self, html: str) -> str:
         forms = re.findall(r"<form\b.*?</form>", html, re.IGNORECASE | re.DOTALL)

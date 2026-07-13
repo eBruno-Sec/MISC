@@ -6,19 +6,68 @@ from core.ai_client import complete
 from .base import BaseAgent
 
 
+def _close_truncated_json(s: str):
+    """Best-effort repair for JSON cut off by a token cap: walk the string tracking
+    string/escape state and brace depth, then append the missing closers. Returns a
+    candidate string, or None when the input was not actually truncated."""
+    stack, in_str, escape = [], False, False
+    for ch in s:
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    if not stack and not in_str:
+        return None  # not a truncation problem — leave it for the caller to raise
+    if in_str:
+        fixed = s + '"'
+    else:
+        fixed = s.rstrip().rstrip(",")
+    return fixed + "".join(reversed(stack))
+
+
 def _extract_json(text: str):
-    """Pull a JSON object from an LLM response that may wrap it in prose or ```json fences."""
-    import re
-    t = text.strip()
-    # strip code fences
+    """Pull a JSON object from an LLM response that may wrap it in prose or ```json
+    fences. Tolerant of the common LLM malformations that used to hard-crash MIMIR
+    triage — code fences, trailing commas, literal control chars in strings, and
+    minor truncation — raising the last decode error only if every repair fails."""
+    t = (text or "").strip()
     t = re.sub(r"^```(?:json)?\s*", "", t)
     t = re.sub(r"\s*```$", "", t)
-    # if there's surrounding prose, grab the outermost {...}
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
         t = t[start:end + 1]
-    return json.loads(t)
+
+    # trailing-comma repair: {"a":1,} -> {"a":1} ,  [1,2,] -> [1,2]
+    repaired = re.sub(r",(\s*[}\]])", r"\1", t)
+
+    last_err = None
+    for cand in (t, repaired):
+        for strict in (True, False):   # strict=False tolerates raw newlines in strings
+            try:
+                return json.loads(cand, strict=strict)
+            except (json.JSONDecodeError, ValueError) as e:
+                last_err = e
+
+    salvaged = _close_truncated_json(repaired)
+    if salvaged is not None:
+        try:
+            return json.loads(salvaged, strict=False)
+        except (json.JSONDecodeError, ValueError) as e:
+            last_err = e
+    raise last_err or ValueError("no JSON object found")
 
 
 def _extract_declared_scope_paths(scope: str) -> list:

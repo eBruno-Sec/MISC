@@ -171,13 +171,22 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             for label, v in metrics
         )
         rows = ""
+        status_map = offensive.get("module_status") or {}
         for key, label in self._MODULES:
             hits = len(offensive.get(key, []) or [])
-            state = "tested" if ran else "not run"
-            state_cls = "mod-ok" if ran else "mod-skip"
+            st = status_map.get(key)
+            if st == "tool_unavailable":
+                state, state_cls = "skipped — tool unavailable", "mod-skip"
+            elif st == "blocked":
+                state, state_cls = "blocked by WAF — inconclusive", "mod-skip"
+            elif ran:
+                state, state_cls = "tested", "mod-ok"
+            else:
+                state, state_cls = "not run", "mod-skip"
+            hits_cell = "—" if (st == "tool_unavailable" or not ran) else hits
             rows += (f'<tr><td>{_html.escape(label)}</td>'
-                     f'<td class="{state_cls}">{state}</td>'
-                     f'<td class="mod-hits">{hits if ran else "—"}</td></tr>')
+                     f'<td class="{state_cls}">{_html.escape(state)}</td>'
+                     f'<td class="mod-hits">{hits_cell}</td></tr>')
         coverage_html = (
             '<div class="section"><h2>Assessment Coverage</h2>'
             f'<div class="cov-grid">{metric_cells}</div>'

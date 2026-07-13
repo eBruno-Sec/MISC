@@ -20,6 +20,10 @@ import tempfile
 from html.parser import HTMLParser
 from urllib.parse import urlparse, parse_qs, urlencode, urljoin, urlunparse
 
+from core.evasion import (
+    SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
+)
+
 # Curated wordlists first (fast, fetched at build time), full SecLists as fallback.
 SECLISTS_DIRS = [
     "/opt/wordlists/raft-medium-directories.txt",
@@ -476,12 +480,14 @@ class OffensiveEngine:
 
         # (1) GET-parameter SQLi
         if param_urls:
-            await self.log(f"Testing {len(param_urls)} endpoints for SQL injection (sqlmap)", "info")
+            await self.log(f"Testing {len(param_urls)} endpoints for SQL injection "
+                           f"(sqlmap, WAF-evasion tamper: {SQLMAP_TAMPER})", "info")
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
                 f.write("\n".join(param_urls))
                 url_file = f.name
             try:
-                sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch", "--random-agent",
+                sqlmap_cmd = ["sqlmap", "-m", url_file, "--batch",
+                              "--user-agent", BROWSER_USER_AGENT, "--tamper", SQLMAP_TAMPER,
                               "--level", "2", "--risk", "2", "--smart",
                               "--technique", "BEUST", "--threads", "4",
                               "--timeout", "15", "--retries", "1",
@@ -491,6 +497,7 @@ class OffensiveEngine:
                 stdout, stderr, rc = await self.run_command(sqlmap_cmd, timeout=600)
                 if rc == 127:
                     await self.log("sqlmap not available; SQLi testing skipped", "warn")
+                    self._mark_tool_missing("sqli")
                     return findings
                 combined = stdout + stderr
                 findings += await self._emit_sqlmap_hits(combined)
@@ -516,7 +523,8 @@ class OffensiveEngine:
             await self.log("Testing forms for SQL injection (sqlmap --forms)", "info")
             try:
                 forms_cmd = ["sqlmap", "-u", base_url, "--forms", "--crawl=1", "--batch",
-                             "--random-agent", "--level", "2", "--risk", "2", "--smart",
+                             "--user-agent", BROWSER_USER_AGENT, "--tamper", SQLMAP_TAMPER,
+                             "--level", "2", "--risk", "2", "--smart",
                              "--technique", "BEUST", "--threads", "4", "--timeout", "15",
                              "--retries", "1", "--crawl-exclude", "logout|logoff|signout",
                              "--output-dir", "/tmp/sqlmap_out"]
@@ -539,7 +547,7 @@ class OffensiveEngine:
             await self.log("No parameterized URLs to test for XSS", "info")
             return []
 
-        await self.log(f"Testing {len(param_urls)} endpoints for XSS (dalfox)", "info")
+        await self.log(f"Testing {len(param_urls)} endpoints for XSS (dalfox, WAF-evasion)", "info")
         findings = []
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -548,12 +556,14 @@ class OffensiveEngine:
 
         try:
             dalfox_cmd = ["dalfox", "file", url_file, "--format", "json",
-                          "--silence", "--no-spinner", "--worker", "10", "--timeout", "10"]
+                          "--silence", "--no-spinner", "--worker", "10", "--timeout", "10",
+                          "--user-agent", BROWSER_USER_AGENT, "--waf-evasion"]
             if self._cookie():
                 dalfox_cmd += ["-C", self._cookie()]
             stdout, stderr, rc = await self.run_command(dalfox_cmd, timeout=420)
             if rc == 127:
                 await self.log("dalfox not available; XSS testing skipped", "warn")
+                self._mark_tool_missing("xss")
                 return []
 
             for line in stdout.splitlines():
@@ -760,6 +770,7 @@ class OffensiveEngine:
             stdout, _, rc = await self.run_command(ffuf_cmd, timeout=300)
             if rc == 127:
                 await self.log("ffuf not available; content discovery skipped", "warn")
+                self._mark_tool_missing("content")
                 return []
             for line in stdout.splitlines():
                 try:
@@ -869,10 +880,11 @@ class OffensiveEngine:
 
     # ── Generic single-parameter probe ───────────────────────────
     async def _param_probe(self, urls, payloads, detector, name_filter=None,
-                           cap=30, per_params=3, follow=True) -> list:
+                           cap=30, per_params=3, follow=True, budget=600) -> list:
         """For each parameterized URL, replace one parameter at a time with each
         payload, request it, and run detector(payload, response) -> dict|None.
-        Shared by the SSRF, SSTI and open-redirect probes."""
+        Shared by the SSRF, SSTI and open-redirect probes. `budget` caps total
+        requests so evasion-expanded payload sets can't explode the request count."""
         from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
         import httpx
 
@@ -892,6 +904,9 @@ class OffensiveEngine:
                         continue
                     seen.add(key)
                     for pl in payloads:
+                        if budget <= 0:
+                            return findings
+                        budget -= 1
                         mutated = dict(params)
                         mutated[pname] = [pl]
                         target = urlunparse(parsed._replace(query=urlencode(mutated, doseq=True)))
@@ -899,6 +914,9 @@ class OffensiveEngine:
                             r = await c.get(target)
                         except Exception:
                             continue
+                        self._probe_requests = getattr(self, "_probe_requests", 0) + 1
+                        if looks_waf_blocked(r.status_code, r.headers, getattr(r, "text", "")):
+                            self._waf_blocks = getattr(self, "_waf_blocks", 0) + 1
                         verdict = detector(pl, r)
                         if verdict:
                             findings.append({"param": pname, "url": u, "payload": pl})
@@ -957,9 +975,11 @@ class OffensiveEngine:
 
     # ── Auto-fuzz: fast deterministic injection-signal sweep ─────
     async def auto_fuzz(self, urls: list) -> list:
-        """Fire the injection payload set at every query parameter, flagging error
-        signatures, unencoded reflection, and file-read markers. Reuses _param_probe."""
-        return await self._param_probe(urls, INJECT_PAYLOADS, self._injection_verdict,
+        """Fire the injection payload set plus WAF-evasion variants at every query
+        parameter, flagging error signatures, unencoded reflection, and file-read
+        markers. Reuses _param_probe."""
+        payloads = expand_payloads(INJECT_PAYLOADS, "generic", 2)
+        return await self._param_probe(urls, payloads, self._injection_verdict,
                                        cap=25, per_params=4)
 
     # ── Form discovery + POST/body injection ─────────────────────
@@ -1290,6 +1310,7 @@ class OffensiveEngine:
                         await asyncio.sleep(5)
                 if not ready:
                     await self.log("OWASP ZAP not reachable; skipping ZAP active scan", "warn")
+                    self._mark_tool_missing("zap")
                     return []
 
                 ver = (await _get(c, "/JSON/core/view/version/", {})).get("version", "?")
@@ -1468,6 +1489,32 @@ class OffensiveEngine:
             await self.log(f"Redirect map: {len(edges)} redirect edge(s)", "info")
         return edges
 
+    def _mark_tool_missing(self, key: str):
+        """Record that a binary-backed module could not run because its tool was
+        absent — so the report says 'tool unavailable', never a false 'tested 0'."""
+        if not hasattr(self, "_tools_missing"):
+            self._tools_missing = set()
+        self._tools_missing.add(key)
+
+    def _build_module_status(self, result: dict, waf_detected: bool) -> dict:
+        """Per-module honesty for the SAGA report: separate 'tested' from
+        'tool_unavailable' (binary missing) and 'blocked' (WAF ate the traffic),
+        so a 0 that means 'inconclusive' is never rendered as 'clean'."""
+        binary_backed = {"sqli", "xss", "dast", "content", "zap", "forms"}
+        missing = getattr(self, "_tools_missing", set())
+        status = {}
+        for key in ("sqli", "xss", "dast", "auth", "traversal", "zap", "content",
+                    "ssrf", "ssti", "open_redirect", "cors", "host_header", "fuzz", "forms"):
+            if key in missing:
+                status[key] = "tool_unavailable"
+            elif len(result.get(key) or []):
+                status[key] = "tested"
+            elif waf_detected and key in binary_backed:
+                status[key] = "blocked"
+            else:
+                status[key] = "tested"
+        return status
+
     async def run_offensive(
         self,
         base_url: str,
@@ -1477,6 +1524,10 @@ class OffensiveEngine:
         scope_rules: dict = None,
     ) -> dict:
         await self.log(f"⚔ Offensive engine engaged against {base_url}", "info")
+        # Evasion/WAF-awareness counters for this run (read by the probes below).
+        self._tools_missing = set()
+        self._waf_blocks = 0
+        self._probe_requests = 0
         # Authenticate first (when creds are supplied) so the crawl and every
         # scanner reuse the session. Any failure degrades to unauthenticated.
         self._auth_cookie = await self.authenticate(base_url, credentials) if credentials else None
@@ -1560,6 +1611,39 @@ class OffensiveEngine:
             "fuzz": _safe(fuzz),
             "forms": _safe(formhits),
         }
+        # WAF/CDN awareness: if a large share of active probes were bounced, the
+        # binary tools' "0 findings" is INCONCLUSIVE (blocked), not "clean".
+        waf_detected = (
+            self._probe_requests >= 12
+            and self._waf_blocks >= 8
+            and self._waf_blocks / max(1, self._probe_requests) >= 0.5
+        )
+        result["waf_detected"] = waf_detected
+        result["module_status"] = self._build_module_status(result, waf_detected)
+
+        if waf_detected:
+            await self.log(
+                f"WAF/CDN blocking detected ({self._waf_blocks}/{self._probe_requests} probes bounced); "
+                "active results are INCONCLUSIVE, not clean", "warn")
+            await self.add_finding(
+                title="Target Appears WAF/CDN-Protected (active results inconclusive)",
+                severity="info",
+                description=(
+                    "A large share of active probes were rejected by a WAF/CDN "
+                    f"({self._waf_blocks} of {self._probe_requests}). Automated injection tools were "
+                    "likely blocked before reaching the application, so a '0 findings' result for "
+                    "those modules does NOT mean the target is clean — it means the checks were "
+                    "inconclusive. Yggdrasil already presents a browser User-Agent, a sqlmap tamper "
+                    "chain, and dalfox WAF-evasion; getting real coverage past this needs custom "
+                    "tamper scripts, request throttling, or a source IP the target owner allowlists."),
+                evidence=f"Blocked probes: {self._waf_blocks}/{self._probe_requests}",
+                cvss_score=0.0,
+                remediation=(
+                    "For coverage, coordinate a WAF allowlist / test window with the target owner. "
+                    "For defense, confirm the WAF is in blocking (not monitor-only) mode and validate "
+                    "it against real evasion payloads, not just naive scanners."),
+            )
+
         total = sum(len(_safe(v)) for v in
                     (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr, fuzz, formhits))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
