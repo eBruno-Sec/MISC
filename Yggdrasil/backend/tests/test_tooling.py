@@ -1,15 +1,24 @@
-"""Tests for core.tooling: CLI tool version parsing (including the ProjectDiscovery
-shared-banner fix and the double-'v' regression) and ZAP's boot-race retry.
+"""Tests for core.tooling: CLI tool version parsing and ZAP's boot-race retry.
 
-Prompted by a real production observation: `docker compose exec backend curl
-http://zap:8090/...` succeeded immediately after `docker compose up`, but the
-startup log's one-shot check_zap() reported NOT AVAILABLE — ZAP's daemon hadn't
-finished booting yet when the single-shot check ran a few seconds earlier.
+Prompted by two real production observations, in order:
+1. `docker compose exec backend curl http://zap:8090/...` succeeded immediately
+   after `docker compose up`, but the startup log's one-shot check_zap() reported
+   NOT AVAILABLE — ZAP's daemon hadn't finished booting when the single-shot
+   check ran a few seconds earlier.
+2. After fixing (1), nuclei still showed "vunknown" in production while katana
+   and subfinder correctly showed real versions. The fix that made katana/
+   subfinder work had WRONGLY assumed nuclei shares their "Current Version:"
+   banner — real captured output (`nuclei -version 2>&1`) shows nuclei prints
+   its own "Nuclei Engine Version:" line instead. The version-parsing tests
+   below deliberately import CLI_TOOLS and exercise each tool's ACTUAL
+   registered (cmd, pattern) entry — not a hand-typed duplicate pattern — so a
+   test can no longer pass while the real shipped config is broken, which is
+   exactly how the nuclei regression slipped through the first time.
 """
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from core.tooling import check_cli_tools, check_zap, format_warnings
+from core.tooling import CLI_TOOLS, check_cli_tools, check_zap, format_warnings
 
 
 class FakeProc:
@@ -21,6 +30,17 @@ class FakeProc:
 
 
 class CliToolVersionParsingTests(unittest.IsolatedAsyncioTestCase):
+    async def _check_real(self, name, stdout=b"", stderr=b"", returncode=0):
+        """Run check_cli_tools against `name`'s ACTUAL entry in CLI_TOOLS (the
+        real command + regex Yggdrasil ships), not a pattern reconstructed by
+        the test. This is the whole point: a test that types out its own
+        "equivalent" pattern can drift from production and pass while the real
+        config is broken (exactly what happened with nuclei)."""
+        cmd, pattern = CLI_TOOLS[name]
+        with patch("asyncio.create_subprocess_exec",
+                   AsyncMock(return_value=FakeProc(stdout, stderr, returncode))):
+            return await check_cli_tools({name: (cmd, pattern)})
+
     async def _check_one(self, name, cmd, pattern, stdout=b"", stderr=b"", returncode=0):
         with patch("asyncio.create_subprocess_exec",
                    AsyncMock(return_value=FakeProc(stdout, stderr, returncode))):
@@ -31,38 +51,48 @@ class CliToolVersionParsingTests(unittest.IsolatedAsyncioTestCase):
             results = await check_cli_tools({"nope": (["nope", "-v"], r"(\S+)")})
         self.assertEqual(results["nope"], {"available": False, "version": None})
 
-    async def test_nmap_style_version_parsed_bare(self):
-        results = await self._check_one(
-            "nmap", ["nmap", "--version"], r"Nmap version (\S+)",
-            stdout=b"Nmap version 7.95 ( https://nmap.org )\n")
+    async def test_nmap_real_output_parsed_bare(self):
+        results = await self._check_real(
+            "nmap", stdout=b"Nmap version 7.95 ( https://nmap.org )\n")
         self.assertEqual(results["nmap"], {"available": True, "version": "7.95"})
 
-    async def test_projectdiscovery_shared_banner_parsed_for_katana(self):
-        # The real bug: katana's actual output uses the shared PD banner
-        # ("Current Version:"), not a "Katana Version:" tool-specific line — the
-        # old per-tool pattern silently missed and fell back to "unknown".
-        from core.tooling import _PD_VERSION_RE
+    async def test_nuclei_real_engine_version_banner_parsed(self):
+        # Real captured production output — nuclei's OWN format, confirmed to
+        # differ from katana/subfinder's shared "Current Version:" banner.
+        stdout = (
+            b"[INF] Nuclei Engine Version: v3.3.5\n"
+            b"[INF] Nuclei Config Directory: /root/.config/nuclei\n"
+            b"[INF] Nuclei Cache Directory: /root/.cache/nuclei\n"
+            b"[INF] PDCP Directory: /root/.pdcp\n"
+        )
+        results = await self._check_real("nuclei", stdout=stdout)
+        self.assertEqual(results["nuclei"], {"available": True, "version": "3.3.5"})
+
+    async def test_katana_real_projectdiscovery_shared_banner_parsed(self):
         stdout = (
             b"\n     _mm_\n"
             b"[INF] Current Version: v1.1.0\n"
             b"[INF] Latest Version: v1.1.2\n"
         )
-        results = await self._check_one("katana", ["katana", "-version"], _PD_VERSION_RE, stdout=stdout)
+        results = await self._check_real("katana", stdout=stdout)
         self.assertEqual(results["katana"], {"available": True, "version": "1.1.0"})
 
-    async def test_projectdiscovery_shared_banner_parsed_for_subfinder(self):
-        from core.tooling import _PD_VERSION_RE
-        stdout = b"[INF] Current Version: v2.6.6\n"
-        results = await self._check_one("subfinder", ["subfinder", "-version"], _PD_VERSION_RE, stdout=stdout)
+    async def test_subfinder_real_projectdiscovery_shared_banner_parsed(self):
+        results = await self._check_real(
+            "subfinder", stdout=b"[INF] Current Version: v2.6.6\n")
         self.assertEqual(results["subfinder"], {"available": True, "version": "2.6.6"})
 
+    async def test_nuclei_and_katana_do_not_share_a_regex(self):
+        # Guard against re-introducing the exact bug: nuclei's pattern must NOT
+        # accidentally be the same object/string as katana's shared-banner one.
+        self.assertNotEqual(CLI_TOOLS["nuclei"][1], CLI_TOOLS["katana"][1])
+
     async def test_leading_v_never_doubles_up(self):
-        # Regression: a captured version that already starts with "v" (e.g. from
-        # nuclei's real output) must be stored bare, not re-prefixed downstream
-        # into "vv3.3.5" the way the startup log previously showed.
-        results = await self._check_one(
-            "nuclei", ["nuclei", "-version"], r"[Vv]ersion:\s*v?(\S+)",
-            stdout=b"Nuclei Engine Version: v3.3.5\n")
+        # Regression: a captured version that already starts with "v" must be
+        # stored bare, not re-prefixed downstream into "vv3.3.5" the way the
+        # startup log previously showed for nuclei.
+        results = await self._check_real(
+            "nuclei", stdout=b"[INF] Nuclei Engine Version: v3.3.5\n")
         self.assertEqual(results["nuclei"]["version"], "3.3.5")
         self.assertFalse(results["nuclei"]["version"].startswith("v"))
 

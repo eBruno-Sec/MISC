@@ -15,18 +15,23 @@ import re
 import httpx
 
 # name -> (version command, regex to pull the version string out of stdout+stderr).
-# nuclei/katana/subfinder are all ProjectDiscovery tools sharing the same CLI
-# banner format ("... Current Version: vX.Y.Z ..."), not a tool-name-prefixed
-# one — a tool-specific pattern like "Katana Version:" silently misses and falls
-# back to "unknown" (observed in production for katana/subfinder). Match the
-# real shared banner instead.
-_PD_VERSION_RE = r"[Cc]urrent [Vv]ersion:\s*v?(\S+)"
+# ProjectDiscovery tools do NOT share one banner format — confirmed against real
+# production output. katana/subfinder print "Current Version: vX.Y.Z"; nuclei
+# prints its own "Nuclei Engine Version: vX.Y.Z" line instead. A shared pattern
+# silently misses nuclei (verified: `nuclei -version` real output below), so
+# each tool gets the pattern actually confirmed against its own real output —
+# no more assuming one PD tool's format for another.
+#   $ nuclei -version 2>&1
+#   [INF] Nuclei Engine Version: v3.3.5
+#   [INF] Nuclei Config Directory: /root/.config/nuclei
+#   ...
+_PD_SHARED_VERSION_RE = r"[Cc]urrent [Vv]ersion:\s*v?(\S+)"
 CLI_TOOLS = {
     "nmap":      (["nmap", "--version"],    r"Nmap version (\S+)"),
-    "nuclei":    (["nuclei", "-version"],   _PD_VERSION_RE),
+    "nuclei":    (["nuclei", "-version"],   r"[Nn]uclei\s+[Ee]ngine\s+[Vv]ersion:\s*v?(\S+)"),
     "ffuf":      (["ffuf", "-V"],           r"ffuf version:\s*(\S+)"),
-    "subfinder": (["subfinder", "-version"], _PD_VERSION_RE),
-    "katana":    (["katana", "-version"],   _PD_VERSION_RE),
+    "subfinder": (["subfinder", "-version"], _PD_SHARED_VERSION_RE),
+    "katana":    (["katana", "-version"],   _PD_SHARED_VERSION_RE),
     "dalfox":    (["dalfox", "version"],    r"(\d+\.\d+\.\d+)"),
     "sqlmap":    (["sqlmap", "--version"],  r"(\d+(?:\.\d+){1,2}(?:#\S+)?)"),
 }
