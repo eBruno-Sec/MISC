@@ -156,8 +156,11 @@ class ReflectedXssTests(unittest.IsolatedAsyncioTestCase):
                                                  ["http://t/rest/products/search?q=x"])
         self.assertTrue(any(h["type"] == "xss-reflected-api" for h in hits))
 
-    async def test_json_reflection_not_flagged(self):
-        # Same raw reflection but a JSON content-type is not executable -> no XSS.
+    async def test_json_reflection_flagged_low_confidence(self):
+        # Report-everything: raw reflection in a JSON (non-HTML) response isn't
+        # directly executable, so it's reported as a LOW-confidence candidate,
+        # not a HIGH reflected-XSS.
+        from core.models import Finding
         ares = _ares()
 
         def get(url, headers):
@@ -166,7 +169,8 @@ class ReflectedXssTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(ares, "capture", AsyncMock(return_value=None)):
             hits = await ares._api_reflected_xss(FakeClient(get=get),
                                                  ["http://t/rest/products/search?q=x"])
-        self.assertEqual(hits, [])
+        self.assertTrue(any(h["type"] == "reflection-candidate" and h["severity"] == "low" for h in hits))
+        self.assertFalse(any(h["type"] == "xss-reflected-api" for h in hits))
 
 
 @unittest.skipUnless(HAS_SQLALCHEMY, "SQLAlchemy not available")
