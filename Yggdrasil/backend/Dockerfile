@@ -17,7 +17,13 @@ RUN ( go install github.com/BishopFox/jsluice/cmd/jsluice@latest \
 RUN go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2 \
     && cp "$(go env GOPATH)/bin/osv-scanner" /out/ || echo "osv-scanner build skipped"
 
-FROM python:3.11-slim
+# Pinned to bookworm (Debian 12) deliberately: Playwright officially supports it,
+# so `playwright install --with-deps chromium` resolves the right OS packages.
+# The unpinned python:3.11-slim now tracks Debian trixie (13), which Playwright
+# does NOT support -- it falls back to Ubuntu font packages (ttf-unifont,
+# ttf-ubuntu-font-family) that don't exist there and fails the browser install,
+# silently disabling the DOM-XSS scan.
+FROM python:3.11-slim-bookworm
 
 # Without this, Python block-buffers stdout/stderr whenever they're not a TTY
 # (always true inside a container) — print()-based startup logs (including the
@@ -98,7 +104,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Headless Chromium for the DOM-XSS pass. Degrades gracefully: if the browser
 # download is blocked at build time, the DOM scan reports "tool unavailable"
 # rather than failing the build.
-RUN playwright install --with-deps chromium || echo "playwright chromium skipped"
+RUN python -m playwright install --with-deps chromium \
+    || python -m playwright install chromium \
+    || echo "playwright chromium skipped"
 
 COPY . .
 
