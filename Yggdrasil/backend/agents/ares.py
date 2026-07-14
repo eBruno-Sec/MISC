@@ -443,10 +443,18 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
             f.write(wordlist)
             wl = f.name
 
+        # Detect SPA/catch-all up front so shell 200s aren't reported as real
+        # paths (the Juice Shop case: /admin, /.git, /.env all return the shell).
+        catch_all = await self._ensure_catch_all(base_url)
+        baseline = catch_all.sample if catch_all else ""
+
         try:
+            # -ac (auto-calibration): ffuf learns the catch-all response from
+            # random paths and filters matches, so a SPA that 200s everything
+            # yields real hits instead of the whole wordlist.
             stdout, _, rc = await self.run_command(
                 ["ffuf", "-u", f"{base_url}/FUZZ", "-w", wl,
-                 "-mc", "200,301,302,403", "-json", "-s"],
+                 "-mc", "200,301,302,403", "-ac", "-json", "-s"],
                 timeout=120,
             )
 
@@ -459,14 +467,19 @@ class Ares(BaseAgent, OffensiveEngine, AuthEngine):
                     hit = json.loads(line)
                     url = hit.get("url", "")
                     status = hit.get("status", 0)
+                    # Second-layer catch-all guard: even past -ac, verify a 200
+                    # isn't just the shell before listing it as a discovered path.
+                    if status == 200 and await self._hit_is_catch_all(url):
+                        continue
                     dirs.append({"url": url, "status": status})
 
                     # ffuf's JSON doesn't include the body, so a URL-substring match on
                     # a bare status==200 (the old check) proves nothing — a catch-all SPA
                     # returns the same shell for every path. Follow up with a real GET
-                    # and validate the BODY before calling it a sensitive-file exposure.
+                    # and validate the BODY (against the shell baseline) before calling
+                    # it a sensitive-file exposure.
                     if status == 200 and any(s in url for s in [".env", ".git", "config", "backup"]):
-                        await self._validate_and_report_sensitive_hit(url)
+                        await self._validate_and_report_sensitive_hit(url, baseline_body=baseline)
                     elif status == 403:
                         dirs[-1]["note"] = "Forbidden (exists but restricted)"
                 except json.JSONDecodeError:
