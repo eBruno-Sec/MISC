@@ -1,0 +1,55 @@
+# TBHM source attribution.
+#
+# Yggdrasil's TBHM integration is a DISTILLED methodology + generated catalogs,
+# not a verbatim copy of the source material. The checklist items, parameter
+# names, and payload-family guidance below are derived from the public
+# methodology; large prose sections of the source are NOT reproduced in the
+# product. Where a catalog is generated from a source wordlist, we ship a
+# bounded, normalized, de-duplicated subset — never the raw multi-hundred-MB
+# file at runtime.
+#
+# If you extend these catalogs from the source, keep this boundary: distill and
+# attribute, do not bulk-copy.
+
+sources:
+  - id: tbhm
+    name: The Bug Hunter's Methodology (TBHM)
+    author: Jason Haddix (@jhaddix)
+    url: https://github.com/jhaddix/tbhm
+    type: methodology
+    license_note: >-
+      License not explicitly stated in the source repo at time of integration.
+      Treated as reference-only: distilled into checklist items and catalogs
+      with attribution; verbatim prose is not shipped in the product.
+    used_for:
+      - Fast Testing Checklist (checklist.yaml)
+      - parameter families / seeding ideas (params.yaml)
+      - payload-family selection guidance (payload_profiles.yaml)
+
+  - id: wahh
+    name: The Web Application Hacker's Handbook — Task Checklist
+    author: Dafydd Stuttard, Marcus Pinto
+    type: methodology
+    license_note: >-
+      The Fast Testing Checklist in the TBHM repo is described by its author as
+      a combination of his own methodology and the WAHH task checklist. Items
+      are reworded/mapped to Yggdrasil phases, not reproduced verbatim.
+    used_for:
+      - Fast Testing Checklist (checklist.yaml)
+
+  - id: owasp_top25_params
+    name: OWASP Top-25 Parameters (per vulnerability class)
+    type: parameter_list
+    used_for:
+      - core/parameter_intelligence.py family classification
+      - params.yaml curated defaults
+
+  - id: assetnote_style_param_corpus
+    name: Marker-templated parameter corpus (v4/all2.txt)
+    type: parameter_wordlist
+    license_note: >-
+      Parsed OFFLINE into normalized, de-duplicated, frequency-ranked parameter
+      names. Only a bounded top-N subset is shipped (params.yaml deep list); the
+      raw ~1.3M-line marker file is never loaded into the running product.
+    used_for:
+      - params.yaml deep parameter catalog

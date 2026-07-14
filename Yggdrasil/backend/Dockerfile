@@ -1,3 +1,19 @@
+# ── Go builder stage: gau (URL discovery) + jsluice (JS endpoint/secret
+# extraction). Both are Go tools without prebuilt release binaries we can rely
+# on (jsluice ships source-only; it also needs cgo/tree-sitter and a C
+# compiler, which the golang image already provides). Building them here keeps
+# the final runtime image free of a ~500MB Go toolchain. Each build is guarded
+# with `|| echo skipped` and the binaries are collected into /out, so a
+# transient build failure degrades to "tool absent" (a runtime graceful skip)
+# instead of failing the whole image build.
+FROM golang:1.22-bookworm AS gobuild
+RUN mkdir -p /out
+RUN go install github.com/lc/gau/v2/cmd/gau@v2.2.4 \
+    && cp "$(go env GOPATH)/bin/gau" /out/ || echo "gau build skipped"
+RUN ( go install github.com/BishopFox/jsluice/cmd/jsluice@latest \
+      || go install github.com/BishopFox/jsluice@latest ) \
+    && cp "$(go env GOPATH)/bin/jsluice" /out/ || echo "jsluice build skipped"
+
 FROM python:3.11-slim
 
 # Without this, Python block-buffers stdout/stderr whenever they're not a TTY
@@ -11,6 +27,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap whois curl wget unzip dnsutils netcat-openbsd jq procps \
     git python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# gau + jsluice from the Go builder stage. Directory copy (not per-file) so a
+# skipped build — which leaves /out without that binary — still yields a valid
+# COPY; the binary is simply absent and the runtime skips that tool gracefully.
+COPY --from=gobuild /out/ /usr/local/bin/
 
 # ── ProjectDiscovery + fuzzing binaries ──────────────────────────
 RUN wget -q "https://github.com/projectdiscovery/subfinder/releases/download/v2.6.6/subfinder_2.6.6_linux_amd64.zip" \
@@ -43,6 +64,12 @@ RUN wget -q "https://github.com/hahwul/dalfox/releases/download/v2.9.2/dalfox_2.
 RUN git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git /opt/sqlmap \
     && printf '#!/bin/sh\npython3 /opt/sqlmap/sqlmap.py "$@"\n' > /usr/local/bin/sqlmap \
     && chmod +x /usr/local/bin/sqlmap || echo "sqlmap skipped"
+
+# ── Secret detection: trufflehog (verified secret scanning over downloaded
+# JS/config/filesystem, authorized targets only). Prebuilt binary via the
+# official install script; degrades gracefully if the fetch is blocked.
+RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+    | sh -s -- -b /usr/local/bin || echo "trufflehog skipped"
 
 # ── Curated wordlists ────────────────────────────────────────────
 # A hand-picked, verified subset (~660KB) instead of the full 1GB+ SecLists

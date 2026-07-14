@@ -41,7 +41,21 @@ CLI_TOOLS = {
     "httpx":     (["httpx", "-version"],    _PD_SHARED_VERSION_RE),
     "dalfox":    (["dalfox", "version"],    r"(\d+\.\d+\.\d+)"),
     "sqlmap":    (["sqlmap", "--version"],  r"(\d+(?:\.\d+){1,2}(?:#\S+)?)"),
+    # Optional/deep-profile additions. Version flags chosen so they exit fast
+    # without blocking on stdin (an unknown flag makes each tool error-and-exit
+    # rather than wait for piped input); when the regex misses, check_cli_tools
+    # still marks the tool available on any non-127 exit, so presence detection
+    # never depends on parsing a version string these tools don't reliably emit.
+    "gau":        (["gau", "--version"],       r"v?(\d+\.\d+\.\d+)"),
+    "trufflehog": (["trufflehog", "--version"], r"(\d+\.\d+\.\d+)"),
+    "jsluice":    (["jsluice", "--version"],   r"v?(\d+\.\d+\.\d+)"),
 }
+
+# Optional/deep-profile tools: absence is expected on a lightweight deployment
+# and must not be reported as a scary "missing core tool" warning. They still
+# appear in the coverage map (available true/false) so the UI can show
+# ran/skipped/missing, but format_warnings() stays quiet about them.
+OPTIONAL_TOOLS = frozenset({"gau", "trufflehog", "jsluice"})
 
 
 async def _run(cmd: list, timeout: int = 15) -> tuple:
@@ -117,11 +131,15 @@ async def check_all_tools() -> dict:
 
 
 def format_warnings(results: dict) -> list:
-    """One human-readable warning line per unavailable tool. Empty list when
-    everything's present."""
+    """One human-readable warning line per unavailable REQUIRED tool. Empty list
+    when every required tool is present. Optional/deep-profile tools (gau,
+    trufflehog, jsluice) are intentionally excluded — their absence is a normal
+    lightweight-deployment state, not a misconfiguration, so warning about them
+    would train operators to ignore the warnings that actually matter. They
+    still show up in the coverage map for ran/skipped/missing display."""
     return [
         f"{name} is not available — checks that depend on it will be skipped "
         "or reported as tool_unavailable, not tested."
         for name, info in sorted(results.items())
-        if not (info or {}).get("available")
+        if not (info or {}).get("available") and name not in OPTIONAL_TOOLS
     ]

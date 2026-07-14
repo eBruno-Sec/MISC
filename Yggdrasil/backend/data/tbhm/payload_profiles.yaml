@@ -1,0 +1,79 @@
+# TBHM-derived payload-family policy.
+#
+# This is the POLICY + reference layer. The concrete payloads the engine fires
+# live in core/parameter_intelligence.payloads_for_family(); this file records
+# which families are safe-by-default vs. gated, the guardrail for each, and a
+# few TBHM-attributed reference payloads. tbhm.py exposes it so the report and
+# the engine agree on what "default mode" is allowed to send.
+#
+# Guardrail summary (enforced in code, documented here):
+#   - No destructive payloads, ever.
+#   - RCE payloads: harmless commands only (id/whoami/OAST DNS), and only when
+#     authorized=True. Never in default mode without explicit approval.
+#   - SSRF internal/metadata probes: only when authorized=True. The OAST
+#     callback variant is allowed whenever a listener exists (one outbound hit
+#     to a tester-controlled host, never target/cloud infra).
+#   - File-upload tests: harmless canary files only.
+source: tbhm
+
+families:
+  xss:
+    default: true
+    requires_authorization: false
+    guardrail: Non-destructive canaries/breakers only; no data exfiltration payloads.
+    strategy: >-
+      Context-aware: reflected canary to confirm round-trip, attribute breakers
+      for quoted contexts, scriptless (svg/img) payloads to survive naive
+      blacklists, and a DOM/hash canary for client-side sinks.
+    reference_payloads:
+      # Public multi-context polyglots cited in TBHM's XSS section (attribution:
+      # Rsnake, Ashar Javed, Mathias Karlsson). Reference only.
+      - 'jaVasCript:/*-/*`/*\`/*''/*"/**/(/* */oNcliCk=alert() )//'
+      - '"><svg onload=alert(1)>'
+
+  sqli:
+    default: true
+    requires_authorization: false
+    guardrail: >-
+      Read-only probes: error/boolean/time/UNION. Never stacked writes,
+      DROP/DELETE/UPDATE, or file writes. "Confirmed" only when sqlmap itself
+      confirms — never from an error smell.
+    strategy: Error-based, boolean differential, DB-specific time-delay, UNION column probe.
+
+  lfi:
+    default: true
+    requires_authorization: false
+    guardrail: Read-only traversal to canary files (etc/passwd, win.ini); no write/RFI include of remote code.
+    strategy: Platform-variant traversal, URL/double-encoded bypasses, PHP filter wrapper for source disclosure.
+
+  open_redirect:
+    default: true
+    requires_authorization: false
+    guardrail: Redirect target is a controlled non-resolving example domain; no live phishing infra.
+    strategy: Absolute, protocol-relative, backslash, and malformed-scheme bypasses.
+
+  ssrf:
+    default: partial          # OAST callback allowed by default; internal probes gated
+    requires_authorization: true
+    guardrail: >-
+      OAST callback allowed whenever a listener exists (one hit to a
+      tester-controlled host). Localhost/cloud-metadata/file:// probes only when
+      authorized=True (lab/authorized engagements).
+    strategy: Out-of-band callback first; internal/metadata reads only under authorization.
+
+  rce:
+    default: false
+    requires_authorization: true
+    guardrail: >-
+      Withheld entirely unless authorized=True. Then harmless identity commands
+      only (id/whoami/$(id)) or a blind OAST DNS lookup. Never destructive, never
+      a shell, never file writes.
+    strategy: Harmless identity command reflection, or blind confirmation via DNS callback.
+
+  file_upload:
+    default: false
+    requires_authorization: true
+    guardrail: >-
+      Canary files only (harmless content, benign extension/polyglot to probe
+      filter behavior). No web shells, no executable payloads.
+    strategy: Upload a benign canary, observe storage path/content-type handling; manual escalation only.

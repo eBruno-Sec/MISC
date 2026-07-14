@@ -21,6 +21,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlunparse
 
 from core import parameter_intelligence as pi
+from core import tbhm
 from core.evasion import (
     SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
 )
@@ -143,6 +144,103 @@ PARAM_MINE_CANDIDATES = [
     "target", "dest", "preview", "download", "doc", "report", "print", "export",
     "import", "name", "value", "content", "message", "comment", "title", "body",
 ]
+
+
+# ── JS/secret tool output parsers (pure, unit-testable — no I/O, no subprocess).
+# jsluice and trufflehog both emit newline-delimited JSON; a line that doesn't
+# parse (banner, progress, blank) is skipped, never raised, so malformed or
+# version-shifted output degrades to "fewer results", not a crashed scan. ──────
+def redact_secret(raw: str) -> str:
+    """Show enough to recognize a secret without printing it in full: first 4
+    and last 2 characters, middle masked. Short strings are fully masked."""
+    s = str(raw or "").strip()
+    if len(s) <= 8:
+        return "*" * len(s)
+    return f"{s[:4]}{'*' * (len(s) - 6)}{s[-2:]}"
+
+
+def parse_jsluice_secrets(stdout: str) -> list:
+    """jsluice secrets -> [{"kind","severity","secret","raw"}]. Each JSON line is
+    like {"kind":"aws","severity":"high","data":{...}|"AKIA...","context":...}."""
+    out = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        kind = str(obj.get("kind") or obj.get("type") or "secret").strip()
+        sev = str(obj.get("severity") or "medium").strip().lower()
+        data = obj.get("data")
+        if isinstance(data, dict):
+            raw = data.get("key") or data.get("secret") or data.get("match") or json.dumps(data)
+        else:
+            raw = data or obj.get("match") or obj.get("secret") or ""
+        raw = str(raw)
+        if not raw:
+            continue
+        out.append({"kind": kind, "severity": sev, "secret": redact_secret(raw), "raw": raw})
+    return out
+
+
+def parse_jsluice_urls(stdout: str) -> list:
+    """jsluice urls -> [endpoint strings], deduped, first-seen order. Each JSON
+    line is like {"url":"/api/v1/x","method":"POST","type":"fetch",...}."""
+    seen, out = set(), []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        u = str(obj.get("url") or "").strip()
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def parse_trufflehog_output(stdout: str) -> list:
+    """trufflehog filesystem --json -> [{"detector","verified","severity",
+    "secret","raw","file"}]. Verified hits are rated high (a live, working
+    credential); unverified are medium (still a real pattern match worth
+    review). Skips trufflehog's own non-result JSON lines (which lack a
+    DetectorName)."""
+    out = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        detector = obj.get("DetectorName")
+        if not detector:
+            continue
+        verified = bool(obj.get("Verified"))
+        raw = str(obj.get("Raw") or obj.get("Redacted") or "")
+        if not raw:
+            continue
+        file = ""
+        try:
+            file = (obj.get("SourceMetadata", {}).get("Data", {})
+                    .get("Filesystem", {}).get("file", "")) or ""
+        except Exception:
+            file = ""
+        out.append({
+            "detector": str(detector),
+            "verified": verified,
+            "severity": "high" if verified else "medium",
+            "secret": redact_secret(raw),
+            "raw": raw,
+            "file": file,
+        })
+    return out
 
 
 class OffensiveEngine:
@@ -430,6 +528,54 @@ class OffensiveEngine:
             "success" if param_urls else "info",
         )
         # Parameterized URLs first (highest test value), then the rest, capped.
+        ordered = param_urls + [u for u in urls if not ("?" in u and "=" in u)]
+        return ordered[:cap]
+
+    async def gather_gau_urls(self, base_url: str, cap: int = 2500) -> list:
+        """Harvest historical URLs via gau (getallurls) — an optional/deep tool.
+
+        Complements gather_archive_urls (which queries only Wayback CDX): gau
+        unions Wayback, Common Crawl, the URLScan dataset, and (when a key is
+        set) OTX, so it surfaces parameterized endpoints those single sources
+        miss. Fully passive — gau reads public archive datasets, never touching
+        the target. Absent binary -> graceful skip (recorded so the report says
+        'tool unavailable', not a false 'found nothing'). Its output feeds the
+        same param-intelligence classification as every other discovery source."""
+        host = urlparse(base_url).netloc.split(":")[0]
+        if not host:
+            return []
+        await self.log(f"Historical URL discovery for {host} (gau: Wayback + CommonCrawl + URLScan)", "info")
+        # Positional host (gau uses it directly instead of blocking on stdin);
+        # --subs also pulls subdomain URLs; --blacklist drops static assets at
+        # the source. Bounded timeout so a slow archive dataset can't stall recon.
+        cmd = ["gau", "--threads", "5", "--subs",
+               "--blacklist", "ttf,woff,woff2,eot,svg,png,jpg,jpeg,gif,ico,css,map",
+               host]
+        stdout, stderr, rc = await self.run_command(cmd, timeout=120)
+        if rc == 127:
+            self._mark_tool_missing("gau")
+            await self.log("gau not available; skipping (Wayback CDX discovery still ran)", "info")
+            return []
+        if rc != 0 and not stdout.strip():
+            await self.log(f"gau produced no output ({(stderr or '').strip()[:120]}); continuing", "info")
+            return []
+
+        found = set()
+        for line in stdout.splitlines():
+            u = line.strip()
+            if not u.startswith("http"):
+                continue
+            path = u.lower().split("?", 1)[0]
+            if path.endswith(ARCHIVE_SKIP_EXT):
+                continue
+            found.add(u)
+
+        urls = list(found)
+        param_urls = [u for u in urls if "?" in u and "=" in u]
+        await self.log(
+            f"gau discovery: {len(urls)} historical URLs, {len(param_urls)} with parameters",
+            "success" if param_urls else "info",
+        )
         ordered = param_urls + [u for u in urls if not ("?" in u and "=" in u)]
         return ordered[:cap]
 
@@ -1778,7 +1924,10 @@ class OffensiveEngine:
                             return None
                         return cand if canary in (r.text or "") else None
 
-                results = await asyncio.gather(*[probe(cand) for cand in PARAM_MINE_CANDIDATES])
+                # Built-in candidates + the TBHM catalog (curated names by
+                # default; the bounded deep catalog when YGGDRASIL_TBHM_DEEP=1).
+                candidates = list(dict.fromkeys(PARAM_MINE_CANDIDATES + tbhm.param_catalog()))
+                results = await asyncio.gather(*[probe(cand) for cand in candidates])
         except Exception:
             return []
 
@@ -2016,6 +2165,165 @@ class OffensiveEngine:
             await self.log(f"Redirect map: {len(edges)} redirect edge(s)", "info")
         return edges
 
+    async def js_secret_scan(self, base_url: str, urls: list, cap_files: int = 30) -> list:
+        """Fetch same-host JavaScript, then mine it two ways (both optional/deep
+        tools, both graceful-skip when absent):
+
+          * jsluice — extracts request endpoints and regex/AST-matched secrets
+            (API keys, tokens) straight from the JS.
+          * trufflehog — scans the downloaded files for known secret patterns.
+            Verification is DISABLED by default (set YGGDRASIL_TRUFFLEHOG_VERIFY=1
+            to enable): live verification sends each discovered secret to its
+            third-party provider to test it, and authorized-target testing must
+            not leak the target's own credentials to outside services without an
+            explicit operator opt-in.
+
+        Every secret finding gets the fetched JS response attached as an
+        HttpExchange (reproducible proof of where the secret was served).
+        Returns a list of finding-summary dicts (also persisted via add_finding).
+        With both tools absent, the pass is skipped cleanly — never a false
+        'no secrets found'."""
+        import httpx
+        base_host = urlparse(base_url).netloc
+
+        # 1) Collect same-host .js URLs from the discovered surface + landing page.
+        js_urls = []
+        for u in [base_url] + list(urls or []):
+            p = urlparse(u)
+            host_ok = (not p.netloc) or p.netloc == base_host
+            if host_ok and p.path.lower().endswith(".js"):
+                js_urls.append(urljoin(base_url, u) if not p.netloc else u)
+        try:
+            async with httpx.AsyncClient(timeout=10, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                r = await c.get(base_url)
+                for m in re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', r.text or "", re.I):
+                    absu = urljoin(base_url, m)
+                    pp = urlparse(absu)
+                    if pp.netloc == base_host and pp.path.lower().endswith(".js"):
+                        js_urls.append(absu)
+        except Exception:
+            pass
+        js_urls = list(dict.fromkeys(js_urls))[:cap_files]
+        if not js_urls:
+            return []
+
+        await self.log(
+            f"JS analysis: fetching {len(js_urls)} same-host script(s) for endpoint/secret extraction "
+            "(jsluice + trufflehog)", "info")
+
+        # 2) Download to a temp dir; remember which URL each local file came from.
+        #    The dir is always removed afterward (finally) — downloaded JS is
+        #    scratch, and trufflehog only needs it during its run.
+        import shutil
+        tmpdir = tempfile.mkdtemp(prefix="ygg_js_")
+        file_to_url = {}
+        try:
+            try:
+                async with httpx.AsyncClient(timeout=12, verify=False, follow_redirects=True,
+                                             headers=self._auth_headers()) as c:
+                    for i, ju in enumerate(js_urls):
+                        try:
+                            r = await c.get(ju)
+                        except Exception:
+                            continue
+                        if r.status_code != 200 or not r.text:
+                            continue
+                        base = re.sub(r"[^A-Za-z0-9._-]", "_",
+                                      (urlparse(ju).path.rsplit("/", 1)[-1] or "script"))[:60]
+                        if not base.endswith(".js"):
+                            base += ".js"
+                        fpath = os.path.join(tmpdir, f"{i:03d}_{base}")
+                        try:
+                            with open(fpath, "w", encoding="utf-8", errors="replace") as fh:
+                                fh.write(r.text[:2_000_000])
+                            file_to_url[fpath] = ju
+                        except Exception:
+                            continue
+            except Exception as e:
+                await self.log(f"JS fetch failed ({e}); skipping JS analysis", "warn")
+                return []
+
+            if not file_to_url:
+                return []
+
+            files = list(file_to_url.keys())
+            findings = []
+            any_tool_ran = False
+
+            # 3a) jsluice: endpoints (informational — logged) + secrets (findings).
+            js_out, js_err, js_rc = await self.run_command(["jsluice", "urls", *files], timeout=90)
+            if js_rc == 127:
+                self._mark_tool_missing("jsluice")
+            else:
+                any_tool_ran = True
+                endpoints = parse_jsluice_urls(js_out)
+                if endpoints:
+                    await self.log(f"jsluice: {len(endpoints)} endpoint(s) extracted from JS "
+                                   f"(e.g. {', '.join(endpoints[:5])})", "info")
+                sec_out, _, sec_rc = await self.run_command(["jsluice", "secrets", *files], timeout=90)
+                if sec_rc != 127:
+                    for s in parse_jsluice_secrets(sec_out):
+                        findings.append(await self._emit_secret_finding(
+                            detector=s["kind"], severity=s["severity"], redacted=s["secret"],
+                            source_url=js_urls[0], tool="jsluice", verified=False))
+
+            # 3b) trufflehog: verified/unverified secrets across the whole JS dir.
+            verify = (os.getenv("YGGDRASIL_TRUFFLEHOG_VERIFY", "").strip().lower() in ("1", "true", "yes"))
+            th_cmd = ["trufflehog", "filesystem", tmpdir, "--json", "--no-update"]
+            th_cmd.append("--no-verification" if not verify else "--results=verified,unknown")
+            th_out, th_err, th_rc = await self.run_command(th_cmd, timeout=150)
+            if th_rc == 127:
+                self._mark_tool_missing("trufflehog")
+            else:
+                any_tool_ran = True
+                for s in parse_trufflehog_output(th_out):
+                    src_url = file_to_url.get(s.get("file"), js_urls[0])
+                    findings.append(await self._emit_secret_finding(
+                        detector=s["detector"], severity=s["severity"], redacted=s["secret"],
+                        source_url=src_url, tool="trufflehog", verified=s["verified"]))
+
+            if not any_tool_ran:
+                await self.log("jsluice/trufflehog not available; JS secret analysis skipped", "info")
+            else:
+                real = [f for f in findings if f]
+                await self.log(
+                    f"JS secret analysis complete: {len(real)} secret finding(s) across "
+                    f"{len(file_to_url)} script(s)", "success" if real else "info")
+            return [f for f in findings if f]
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    async def _emit_secret_finding(self, detector: str, severity: str, redacted: str,
+                                    source_url: str, tool: str, verified: bool):
+        """Create one secret-exposure finding with the serving JS response attached
+        as HttpExchange proof. Only the redacted secret is stored — never the raw
+        value — so the report itself doesn't become a secret-leaking artifact."""
+        vtag = "VERIFIED live" if verified else "unverified (pattern match)"
+        title = f"Exposed Secret in JavaScript: {detector} ({vtag})"
+        sev = severity if severity in ("critical", "high", "medium", "low") else "medium"
+        cvss = {"critical": 9.1, "high": 8.2, "medium": 5.3, "low": 3.1}.get(sev, 5.3)
+        finding = await self.add_finding(
+            title=title,
+            severity=sev,
+            description=(
+                f"{tool} identified a {detector} secret served in client-side JavaScript at "
+                f"{source_url}. {'The credential was verified as live against its provider.' if verified else 'Pattern-matched; validate before treating as live.'} "
+                "Secrets shipped in JS are readable by anyone who loads the page."),
+            evidence=f"Tool: {tool}\nDetector: {detector}\nStatus: {vtag}\nRedacted value: {redacted}\nSource: {source_url}",
+            cvss_score=cvss,
+            remediation=(
+                "Revoke and rotate the exposed credential immediately, then move it server-side. "
+                "Client-delivered JavaScript is public; no secret belongs in it."),
+        )
+        try:
+            await self._capture_proof(source_url, finding.id,
+                                      notes=f"{tool} secret hit ({detector})")
+        except Exception:
+            pass
+        return {"title": title, "severity": sev, "detector": detector,
+                "verified": verified, "tool": tool}
+
     def _mark_tool_missing(self, key: str):
         """Record that a binary-backed module could not run because its tool was
         absent — so the report says 'tool unavailable', never a false 'tested 0'."""
@@ -2089,6 +2397,15 @@ class OffensiveEngine:
                 status[key] = "blocked"
             else:
                 status[key] = "tested"
+        # JS secret analysis is backed by two optional tools; it's only
+        # 'tool_unavailable' when BOTH jsluice and trufflehog are absent (either
+        # one present still yields real coverage).
+        if {"jsluice", "trufflehog"}.issubset(missing):
+            status["js_secrets"] = "tool_unavailable"
+        elif len(result.get("js_secrets") or []):
+            status["js_secrets"] = "tested"
+        else:
+            status["js_secrets"] = "tested"
         return status
 
     async def run_offensive(
@@ -2112,14 +2429,16 @@ class OffensiveEngine:
                 f"⚠ Authenticated scanning requested but login failed on {base_url}; "
                 f"testing the UNAUTHENTICATED surface only", "warn")
         # Attack surface = active crawl (katana) + passive archive discovery
-        # (Wayback) + active param mining (arjun style), collapsed by param set.
+        # (Wayback CDX + gau's multi-source archives) + active param mining
+        # (arjun style), collapsed by param set.
         crawled = await self.crawl(base_url)
         archived = await self.gather_archive_urls(base_url)
+        gau_urls = await self.gather_gau_urls(base_url)  # optional/deep: multi-source archives
         mined = await self.mine_params(base_url)
         seeded = await self.seed_endpoints(base_url)     # API/SPA endpoints crawlers miss
         spec_urls = await self.import_api_specs(base_url)  # OpenAPI/Swagger, if exposed
         urls = self._dedupe_by_params(
-            list(dict.fromkeys(crawled + archived + mined + seeded + spec_urls)))
+            list(dict.fromkeys(crawled + archived + gau_urls + mined + seeded + spec_urls)))
         synthetic_urls = self.generate_parameter_test_urls(
             base_url,
             urls,
@@ -2199,6 +2518,15 @@ class OffensiveEngine:
         # with every endpoint our crawl found so ZAP scans each URL, not just root.
         zap = await self.zap_active_scan(base_url, seed_urls=urls)
 
+        # JS endpoint/secret extraction (jsluice + trufflehog): optional/deep,
+        # graceful-skip when the tools are absent. Runs after discovery so it
+        # sees every .js the crawl surfaced.
+        try:
+            jssec = await self.js_secret_scan(base_url, urls)
+        except Exception as e:
+            await self.log(f"JS secret analysis error: {e}", "warn")
+            jssec = []
+
         result = {
             "crawled_urls": len(urls),
             "endpoints": urls[:2000],   # real attack surface for the inventory
@@ -2219,6 +2547,7 @@ class OffensiveEngine:
             "forms": _safe(formhits),
             "dom": _safe(domx),
             "oob": _safe(oob),
+            "js_secrets": _safe(jssec),
         }
         # WAF/CDN awareness: if a large share of active probes were bounced, the
         # binary tools' "0 findings" is INCONCLUSIVE (blocked), not "clean".
@@ -2255,6 +2584,6 @@ class OffensiveEngine:
 
         total = sum(len(_safe(v)) for v in
                     (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr,
-                     fuzz, formhits, domx, oob))
+                     fuzz, formhits, domx, oob, jssec))
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

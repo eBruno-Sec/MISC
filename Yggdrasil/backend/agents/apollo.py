@@ -260,6 +260,58 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             )
         return coverage_html, surface_html, paths_html, candidates_html
 
+    def _tbhm_checklist_section(self) -> str:
+        """TBHM / WAHH Fast Testing Checklist as coverage transparency: which test
+        classes the automated pass targets (automated), which it flags but that
+        need manual confirmation (partial), and which require a human tester
+        (manual review). This is METHODOLOGY coverage, not per-finding status —
+        it tells the operator exactly what Yggdrasil did and did not attempt, so
+        an empty findings list is never mistaken for 'fully tested, all clean'.
+        Attribution: Jason Haddix TBHM + WAHH task checklist (see data/tbhm)."""
+        try:
+            from core import tbhm
+            cats = tbhm.checklist()
+            summary = tbhm.checklist_coverage_summary()
+            credit = tbhm.attribution_line()
+        except Exception:
+            return ""
+        if not cats:
+            return ""
+        badge = {
+            "automated": ("mod-ok", "Automated"),
+            "partial": ("st-redir", "Partial — verify"),
+            "manual": ("mod-skip", "Manual review"),
+        }
+        blocks = ""
+        for cat in cats:
+            rows = ""
+            for it in (cat.get("items") or []):
+                cov = str(it.get("coverage") or "manual").lower()
+                cls, label = badge.get(cov, badge["manual"])
+                note = it.get("note") or ""
+                extra = f" — {note}" if note else ""
+                rows += (
+                    f'<tr><td>{_html.escape(str(it.get("text", "")))}{_html.escape(extra)}</td>'
+                    f'<td class="{cls}">{_html.escape(label)}</td>'
+                    f'<td class="surf-host">{_html.escape(str(it.get("agent") or "—"))}</td></tr>'
+                )
+            blocks += (
+                f'<h3>{_html.escape(str(cat.get("title") or ""))}</h3>'
+                '<table class="cov-table"><thead><tr><th>Test</th><th>Coverage</th>'
+                f'<th>Stage</th></tr></thead><tbody>{rows}</tbody></table>'
+            )
+        summ = (f'{summary.get("automated", 0)} automated · {summary.get("partial", 0)} partial · '
+                f'{summary.get("manual", 0)} manual review · {summary.get("total", 0)} checks total')
+        return (
+            '<div class="section"><h2>TBHM Fast Testing Checklist</h2>'
+            f'<p class="cand-note">{_html.escape(summ)}. Coverage is methodological: '
+            '<strong>automated</strong> classes were attempted this run, <strong>partial</strong> '
+            'classes are flagged but need manual confirmation, and <strong>manual review</strong> '
+            'classes require a tester. An empty findings list means "nothing automatically confirmed", '
+            f'not "fully tested". {_html.escape(credit)}.</p>'
+            f'{blocks}</div>'
+        )
+
     def _tooling_section(self, context: dict) -> str:
         """Scanner health as a report section: which tools were actually present
         for this mission. Empty string when the tooling check never ran (e.g. a
@@ -293,6 +345,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         # Coverage transparency panels (real recon numbers only; empty in passive runs).
         coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
         tooling_html = self._tooling_section(context)
+        tbhm_html = self._tbhm_checklist_section()
         now = utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
         # inline script is blocked (defense in depth behind the html escaping).
@@ -688,6 +741,8 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 {paths_html}
 
 {candidates_html}
+
+{tbhm_html}
 
 {_host_section}
 

@@ -1,0 +1,417 @@
+# TBHM / WAHH Fast Testing Checklist, mapped to Yggdrasil coverage.
+#
+# Each item records how Yggdrasil covers it:
+#   coverage: automated | partial | manual
+#   agent:    the Yggdrasil stage/tool responsible (Norse display names), or ""
+#   mode:     default | deep | manual  (when the covering check runs)
+#
+# The report renders these as covered / partial / manual / not-applicable so an
+# operator sees exactly what the automated pass did and did NOT do. See
+# references.yaml for attribution (Jason Haddix TBHM + WAHH task checklist).
+source: tbhm + wahh
+
+categories:
+  - id: recon
+    title: App Recon and Analysis
+    items:
+      - id: map-visible-content
+        text: Map visible content
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+      - id: discover-hidden-content
+        text: Discover hidden & default content (directory/file brute force)
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: debug-parameters
+        text: Test for debug parameters
+        coverage: partial
+        agent: TYR
+        mode: deep
+        note: Covered by parameter mining (debug/test/env candidates); deeper set in deep mode.
+      - id: data-entry-points
+        text: Identify data entry points
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+      - id: identify-technologies
+        text: Identify the technologies used
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+      - id: research-known-vulns
+        text: Research existing vulnerabilities in the technology
+        coverage: partial
+        agent: TYR
+        mode: default
+        note: nuclei templates + MIMIR correlation; not a substitute for manual CVE research.
+      - id: tech-wordlists
+        text: Gather wordlists specific to the technology
+        coverage: automated
+        agent: BROKKR
+        mode: default
+      - id: spider-attack-surface
+        text: Map the attack surface automatically (spider)
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+      - id: identify-js-files
+        text: Identify all JavaScript files for later analysis
+        coverage: automated
+        agent: TYR
+        mode: default
+        note: jsluice endpoint/secret extraction over same-host JS.
+
+  - id: access-auth
+    title: Access — Authentication
+    items:
+      - id: password-quality
+        text: Test password quality rules
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: username-enumeration
+        text: Test for username enumeration
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: password-guessing
+        text: Test resilience to password guessing
+        coverage: partial
+        agent: BROKKR
+        mode: manual
+        note: Target-flavored credential wordlist generated; actual guessing is operator-gated.
+      - id: account-recovery
+        text: Test any account recovery function
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: remember-me
+        text: Test any "remember me" function
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: impersonation
+        text: Test any impersonation function
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: username-uniqueness
+        text: Test username uniqueness
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: credential-distribution
+        text: Check for unsafe distribution of credentials
+        coverage: partial
+        agent: TYR
+        mode: default
+        note: Secrets-in-JS detection (jsluice/trufflehog) covers hardcoded credential exposure.
+      - id: fail-open
+        text: Test for fail-open conditions
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: multi-stage-auth
+        text: Test any multi-stage mechanisms
+        coverage: manual
+        agent: ""
+        mode: manual
+
+  - id: access-session
+    title: Access — Session Handling
+    items:
+      - id: token-meaning
+        text: Test tokens for meaning
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: token-predictability
+        text: Test tokens for predictability
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: token-transmission
+        text: Check for insecure transmission of tokens
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: token-in-logs
+        text: Check for disclosure of tokens in logs
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: token-session-mapping
+        text: Check mapping of tokens to sessions
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: session-termination
+        text: Check session termination
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: session-fixation
+        text: Check for session fixation
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: csrf
+        text: Check for cross-site request forgery
+        coverage: partial
+        agent: TYR
+        mode: default
+        note: ZAP/form analysis flags missing anti-CSRF tokens; exploitability confirmation is manual.
+      - id: cookie-scope
+        text: Check cookie scope
+        coverage: partial
+        agent: TYR
+        mode: default
+
+  - id: access-controls
+    title: Access — Access Controls
+    items:
+      - id: understand-access-control
+        text: Understand the access control requirements
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: control-effectiveness
+        text: Test effectiveness of controls, using multiple accounts
+        coverage: automated
+        agent: TYR
+        mode: default
+        note: Cross-role IDOR/BOLA/BFLA testing when auth profiles are supplied.
+      - id: insecure-access-methods
+        text: Test for insecure access control methods (request params, Referer, etc.)
+        coverage: partial
+        agent: TYR
+        mode: default
+
+  - id: input
+    title: Handling of Input
+    items:
+      - id: fuzz-parameters
+        text: Fuzz all request parameters
+        coverage: automated
+        agent: TYR
+        mode: default
+        note: Parameter-intelligence-prioritized fuzzing; deep param catalog in deep mode.
+      - id: sql-injection
+        text: Test for SQL injection
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: reflected-data
+        text: Identify all reflected data
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: reflected-xss
+        text: Test for reflected XSS
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: http-header-injection
+        text: Test for HTTP header injection
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: arbitrary-redirection
+        text: Test for arbitrary redirection
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: stored-attacks
+        text: Test for stored attacks
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: os-command-injection
+        text: Test for OS command injection
+        coverage: partial
+        agent: TYR
+        mode: manual
+        note: Harmless-command RCE probes only, and only under explicit authorization.
+      - id: path-traversal
+        text: Test for path traversal
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: script-injection
+        text: Test for script injection
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: file-inclusion
+        text: Test for file inclusion
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: smtp-injection
+        text: Test for SMTP injection
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: native-flaws
+        text: Test for native software flaws (buffer overflow, integer, format string)
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: soap-injection
+        text: Test for SOAP injection
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: ldap-injection
+        text: Test for LDAP injection
+        coverage: partial
+        agent: TYR
+        mode: deep
+        note: nuclei templates where applicable; otherwise manual.
+      - id: xpath-injection
+        text: Test for XPath injection
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: ssrf-redirects
+        text: Test for SSRF and HTTP redirects in all redirecting parameters
+        coverage: automated
+        agent: TYR
+        mode: default
+
+  - id: logic
+    title: Application Logic
+    items:
+      - id: logic-attack-surface
+        text: Identify the logic attack surface
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: client-side-data
+        text: Test transmission of data via the client
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: client-side-validation
+        text: Test for reliance on client-side input validation
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: thick-client
+        text: Test any thick-client components (Java, ActiveX, Flash)
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: multi-stage-logic
+        text: Test multi-stage processes for logic flaws
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: incomplete-input
+        text: Test handling of incomplete input
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: trust-boundaries
+        text: Test trust boundaries
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: transaction-logic
+        text: Test transaction logic
+        coverage: manual
+        agent: ""
+        mode: manual
+
+  - id: hosting
+    title: Application Hosting
+    items:
+      - id: shared-infra-segregation
+        text: Test segregation in shared infrastructures
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: asp-segregation
+        text: Test segregation between ASP-hosted applications
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: web-server-vulns
+        text: Test for web server vulnerabilities
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+        note: nmap service/version + nuclei.
+      - id: default-credentials
+        text: Default credentials
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: default-content
+        text: Default content
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: dangerous-http-methods
+        text: Dangerous HTTP methods
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: proxy-functionality
+        text: Proxy functionality
+        coverage: manual
+        agent: ""
+        mode: manual
+      - id: vhost-misconfig
+        text: Virtual hosting misconfiguration
+        coverage: partial
+        agent: TYR
+        mode: default
+        note: Host-header injection probe.
+      - id: web-server-bugs
+        text: Bugs in web server software
+        coverage: automated
+        agent: HEIMDALL
+        mode: default
+
+  - id: misc
+    title: Miscellaneous
+    items:
+      - id: dom-based
+        text: Check for DOM-based attacks
+        coverage: automated
+        agent: TYR
+        mode: default
+      - id: frame-injection
+        text: Check for frame injection
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: local-privacy
+        text: Check for local privacy vulnerabilities (persistent cookies, caching)
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: sensitive-data-in-url
+        text: Sensitive data in URL parameters
+        coverage: partial
+        agent: MIMIR
+        mode: default
+      - id: autocomplete-forms
+        text: Forms with autocomplete enabled
+        coverage: partial
+        agent: TYR
+        mode: default
+      - id: information-leakage
+        text: Follow up any information leakage
+        coverage: partial
+        agent: TYR
+        mode: default
+        note: Secret-in-JS + nuclei exposure templates; manual follow-up expected.
+      - id: weak-ssl
+        text: Check for weak SSL ciphers
+        coverage: manual
+        agent: ""
+        mode: manual
