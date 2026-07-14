@@ -89,6 +89,25 @@ class Hephaestus(BaseAgent):
 
         result["payloads_generated"].extend(self._generic_web_payloads(technologies))
 
+        # Dependency-driven validation plans: turn KNOWN-vulnerable components
+        # (evidence-backed, with a mapped safe test family) into targeted
+        # follow-up validation targets. These are SAFE test plans, never
+        # exploits; SKULD runs them under its own gating and exploit validation
+        # stays manual-approval-only.
+        offensive = ares.get("offensive", {}) or {}
+        dep_payloads, dep_targets, dep_plans = self._dependency_validation_plans(
+            offensive.get("dependencies", []))
+        if dep_payloads:
+            result["payloads_generated"].extend(dep_payloads)
+        for t in dep_targets:
+            if t not in result["exploitable_targets"]:
+                result["exploitable_targets"].append(t)
+        if dep_plans:
+            result["dependency_plans"] = dep_plans
+            await self.log(
+                f"Forged {len(dep_plans)} dependency validation plan(s) from vulnerable "
+                f"component(s): {', '.join(p['component'] for p in dep_plans[:6])}", "info")
+
         result["forge_report"] = {
             "domain": domain,
             "total_payloads": len(result["payloads_generated"]),
@@ -105,6 +124,67 @@ class Hephaestus(BaseAgent):
             "success",
         )
         return result
+
+    # Safe validation payloads/actions per follow-up family (from
+    # core.dependency_intel.library_probe_families). None of these are exploits:
+    # DOM/prototype/SSTI probes are canary reads, file-upload/auth/stored are
+    # flagged for manual/safe checks, and nuclei_cve_template just points TYR at
+    # the matching CVE template.
+    _DEP_FAMILY_PLAYS = {
+        "dom_xss": ("DOM-XSS", ["#<img src=x onerror=yggdomxss(1)>", "#javascript:yggdomxss(1)"]),
+        "prototype_pollution": ("PrototypePollution",
+                                ["?__proto__[yggpp]=1", "?constructor[prototype][yggpp]=1"]),
+        "csti": ("CSTI", ["{{7*7}}", "{{constructor.constructor('return 1')()}}"]),
+        "ssti": ("SSTI", ["{{7*7}}", "${7*7}", "#{7*7}"]),
+        "stored_xss": ("StoredXSS-manual", ["<svg onload=yggstored(1)> (submit via a form field, then verify persistence)"]),
+        "file_upload": ("FileUpload-manual", ["upload a harmless canary file (benign content/extension); observe handling"]),
+        "auth_session": ("AuthSession-manual", ["review token entropy, session fixation, and logout invalidation"]),
+        "nuclei_cve_template": ("Nuclei-CVE", ["run nuclei with the matched CVE/GHSA template id"]),
+    }
+
+    def _dependency_validation_plans(self, dependencies: list):
+        """Turn evidence-backed, known-vulnerable components into SAFE follow-up
+        validation plans. Returns (payloads, targets, plans). A component only
+        becomes an exploitable target when it has real evidence (confirmed/high
+        confidence), a matched CVE, AND a mapped safe test family (the spec's
+        'enough evidence and a safe validation path' bar). No exploit payloads
+        are ever emitted here."""
+        payloads, targets, plans = [], [], []
+        for dep in dependencies or []:
+            if not dep.get("vuln_ids"):
+                continue
+            if dep.get("confidence") not in ("confirmed", "high"):
+                continue
+            families = dep.get("probe_families") or []
+            if not families:
+                continue
+            target = dep.get("location") or ""
+            fams_done = []
+            for fam in families:
+                kind, plays = self._DEP_FAMILY_PLAYS.get(fam, ("", []))
+                if not kind:
+                    continue
+                fams_done.append(fam)
+                for pl in plays:
+                    payloads.append({
+                        "type": f"DepValidation-{kind}",
+                        "payload": pl,
+                        "target": target,
+                        "note": (f"Safe validation for {dep['component']}@{dep.get('version','?')} "
+                                 f"({', '.join(dep['vuln_ids'][:3])})"),
+                    })
+            if fams_done:
+                if target and target not in targets:
+                    targets.append(target)
+                plans.append({
+                    "component": dep["component"],
+                    "version": dep.get("version", ""),
+                    "vuln_ids": dep.get("vuln_ids", []),
+                    "families": fams_done,
+                    "target": target,
+                    "validation": "safe-only (exploit validation requires explicit approval)",
+                })
+        return payloads, targets, plans
 
     def _build_credentials(self, domain: str, vendors: list, technologies: dict) -> list:
         words = set()

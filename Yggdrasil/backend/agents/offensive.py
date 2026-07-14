@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlu
 
 from core import parameter_intelligence as pi
 from core import tbhm
+from core import dependency_intel as di
 from core.evasion import (
     SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
 )
@@ -2324,6 +2325,284 @@ class OffensiveEngine:
         return {"title": title, "severity": sev, "detector": detector,
                 "verified": verified, "tool": tool}
 
+    # ── Dependency / software-composition analysis (SCA) ─────────────────────
+    _OSV_ECOSYSTEMS = frozenset({"npm", "PyPI", "Go", "Maven", "RubyGems",
+                                 "crates.io", "Packagist", "NuGet"})
+
+    def _sca_deep(self) -> bool:
+        return (os.getenv("YGGDRASIL_DEEP_SCAN", "").strip().lower() in ("1", "true", "yes"))
+
+    def _add_component(self, store: dict, comp: dict):
+        """Keep the strongest-confidence detection per (name, version)."""
+        key = (comp["name"], comp["version"])
+        rank = {di.CONFIRMED: 3, di.HIGH: 2, di.LOW: 1}
+        prev = store.get(key)
+        if prev is None or rank.get(comp["confidence"], 0) > rank.get(prev["confidence"], 0):
+            store[key] = comp
+
+    async def _osv_lookup(self, comp: dict) -> list:
+        """Query osv.dev for one component's known vulns. Passive: sends only the
+        package name + version (not secrets) to a public vuln DB. Gated on
+        cve_eligible() (never a guessed version) and a real OSV ecosystem;
+        cached per (name, version, ecosystem); never raises."""
+        if not di.cve_eligible(comp) or comp.get("ecosystem") not in self._OSV_ECOSYSTEMS:
+            return []
+        key = (comp["name"], comp["version"], comp["ecosystem"])
+        if key in self._osv_cache:
+            return self._osv_cache[key]
+        import httpx
+        vulns = []
+        try:
+            payload = di.build_osv_query(comp["name"], comp["version"], comp["ecosystem"])
+            async with httpx.AsyncClient(timeout=12) as c:
+                r = await c.post("https://api.osv.dev/v1/query", json=payload)
+            if r.status_code == 200:
+                vulns = di.parse_osv_response(r.json())
+        except Exception:
+            vulns = []
+        self._osv_cache[key] = vulns
+        return vulns
+
+    async def dependency_scan(self, base_url: str, urls: list, cap_js: int = 30) -> list:
+        """Dependency / vulnerable-component detection (SCA).
+
+        Default mode (passive): fingerprint client-side libraries from the
+        landing page (headers + <script src>) and from served JS bodies
+        (retire.js-style banners), detect publicly-exposed dependency manifests,
+        and map every EVIDENCE-BACKED (confirmed/high-confidence, exact-version)
+        component to CVE/GHSA/OSV ids via the OSV database. No exploit execution.
+
+        Deep mode (YGGDRASIL_DEEP_SCAN=1): also parse source maps (packages +
+        original source paths) and run osv-scanner over any downloaded manifest.
+
+        Guardrails: a CVE is never attached to a guessed version (see
+        dependency_intel.cve_eligible); exploit validation is never run here
+        (findings are validation='passive' / 'manual-required'). Returns a list
+        of structured dependency findings (also persisted + surfaced for BROKKR/
+        SAGA in result['dependencies'])."""
+        import httpx
+        self._osv_cache = {}
+        deep = self._sca_deep()
+        base_host = urlparse(base_url).netloc
+        components = {}
+
+        # 1) Landing page: response headers + <script src> fingerprints.
+        landing_html, landing_headers = "", {}
+        try:
+            async with httpx.AsyncClient(timeout=10, verify=False, follow_redirects=True,
+                                         headers=self._auth_headers()) as c:
+                r = await c.get(base_url)
+                landing_html, landing_headers = (r.text or ""), dict(r.headers)
+        except Exception:
+            pass
+        for comp in di.fingerprint_headers(landing_headers):
+            self._add_component(components, comp)
+        for comp in di.fingerprint_html(landing_html, base_url):
+            self._add_component(components, comp)
+
+        # 2) Same-host JS bodies: content-banner (confirmed) + filename (high),
+        #    plus source maps in deep mode.
+        js_urls = self._collect_js_urls(base_url, urls, landing_html, base_host, cap_js)
+        source_map_endpoints = []
+        if js_urls:
+            await self.log(f"Dependency scan: fingerprinting {len(js_urls)} script(s) for library versions", "info")
+            try:
+                async with httpx.AsyncClient(timeout=12, verify=False, follow_redirects=True,
+                                             headers=self._auth_headers()) as c:
+                    for ju in js_urls:
+                        try:
+                            jr = await c.get(ju)
+                        except Exception:
+                            continue
+                        if jr.status_code != 200 or not jr.text:
+                            continue
+                        for comp in di.fingerprint_js_content(jr.text, ju):
+                            self._add_component(components, comp)
+                        for comp in di.fingerprint_url(ju):
+                            self._add_component(components, comp)
+                        if deep:
+                            ep = await self._parse_source_map(c, ju)
+                            source_map_endpoints.extend(ep)
+            except Exception as e:
+                await self.log(f"Dependency JS fingerprinting error: {e}", "warn")
+
+        # 3) Exposed dependency manifests (+ their pinned components).
+        manifest_findings, manifest_components = await self.detect_exposed_manifests(base_url, deep)
+
+        # 4) OSV lookup for every evidence-backed component (client-side +
+        #    manifest-pinned), then emit findings.
+        dep_findings = []
+        all_components = list(components.values()) + manifest_components
+        vuln_count = 0
+        for comp in all_components:
+            vulns = await self._osv_lookup(comp)
+            finding = di.make_dependency_finding(comp, vulns, validation=di.PASSIVE)
+            finding["probe_families"] = di.library_probe_families(comp["name"])
+            dep_findings.append(finding)
+            if vulns:
+                vuln_count += 1
+                await self._emit_dependency_finding(finding)
+
+        # osv-scanner over downloaded manifests (deep) is handled inside
+        # detect_exposed_manifests; its findings are already in manifest_findings.
+        findings = manifest_findings + [f for f in dep_findings if f.get("vuln_ids")]
+
+        if deep and source_map_endpoints:
+            await self.log(
+                f"Source maps exposed {len(set(source_map_endpoints))} original source path(s) "
+                f"(e.g. {', '.join(sorted(set(source_map_endpoints))[:5])})", "info")
+
+        detected = len(all_components)
+        await self.log(
+            f"Dependency scan complete: {detected} component(s) fingerprinted, "
+            f"{vuln_count} with known CVEs, {len(manifest_findings)} exposed manifest(s)",
+            "success" if (vuln_count or manifest_findings) else "info")
+
+        self._dependency_findings = dep_findings
+        self._source_map_endpoints = list(dict.fromkeys(source_map_endpoints))
+        return dep_findings
+
+    def _collect_js_urls(self, base_url, urls, landing_html, base_host, cap):
+        js = []
+        for u in [base_url] + list(urls or []):
+            p = urlparse(u)
+            if ((not p.netloc) or p.netloc == base_host) and p.path.lower().endswith(".js"):
+                js.append(urljoin(base_url, u) if not p.netloc else u)
+        for src in di.extract_script_srcs(landing_html):
+            absu = urljoin(base_url, src)
+            pp = urlparse(absu)
+            if pp.netloc == base_host and pp.path.lower().endswith(".js"):
+                js.append(absu)
+        return list(dict.fromkeys(js))[:cap]
+
+    async def _parse_source_map(self, client, js_url) -> list:
+        """Deep mode: fetch <js>.map, parse packages + original source paths.
+        Returns endpoint hints; never raises."""
+        try:
+            r = await client.get(js_url + ".map")
+            if r.status_code != 200 or not r.text:
+                return []
+            parsed = di.parse_source_map(r.text)
+            return parsed.get("endpoints", [])
+        except Exception:
+            return []
+
+    async def detect_exposed_manifests(self, base_url: str, deep: bool):
+        """Probe for publicly-reachable dependency manifests. Each real hit is an
+        information-disclosure finding; pinned components inside are returned for
+        OSV lookup. In deep mode, run osv-scanner over the downloaded file too.
+        Returns (findings, components)."""
+        import httpx
+        root = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
+        # Default probes a high-signal subset; deep mode probes the full list.
+        paths = di.MANIFEST_PATHS if deep else [
+            "/package.json", "/package-lock.json", "/composer.json", "/composer.lock",
+            "/requirements.txt", "/Gemfile.lock", "/.spdx.json", "/sbom.json"]
+        findings, components = [], []
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False, follow_redirects=False,
+                                         headers=self._auth_headers()) as c:
+                for path in paths:
+                    try:
+                        r = await c.get(root + path)
+                    except Exception:
+                        continue
+                    if r.status_code != 200:
+                        continue
+                    meta = di.classify_manifest(path)
+                    if not meta or not di.looks_like_manifest_body(meta["kind"], r.text):
+                        continue
+                    sev = "medium" if meta["exact_versions"] else "low"
+                    created = await self.add_finding(
+                        title=f"Exposed Dependency Manifest: {path}",
+                        severity=sev,
+                        description=(f"A {meta['ecosystem']} dependency manifest ({meta['kind']}) is "
+                                     f"publicly reachable at {path}. It discloses the exact dependency "
+                                     "set (and versions), letting an attacker map known-vulnerable "
+                                     "components without any guessing."),
+                        evidence=f"URL: {root + path}\nStatus: 200\nFirst bytes: {(r.text or '')[:200]}",
+                        cvss_score=5.3 if sev == "medium" else 3.1,
+                        remediation="Do not serve dependency manifests/lockfiles from the web root; "
+                                    "restrict them to the build environment.")
+                    if created:
+                        await self.capture(r, finding_id=created.id, notes=f"Exposed manifest {path}")
+                    findings.append({"path": path, "ecosystem": meta["ecosystem"]})
+                    for row in di.parse_manifest(path, r.text):
+                        if row.get("exact"):
+                            components.append(di.make_component(
+                                name=row["name"], version=row["version"], ecosystem=meta["ecosystem"],
+                                source=f"manifest:{meta['kind']}", confidence=di.CONFIRMED,
+                                evidence=f"{row['name']}@{row['version']} in {path}", location=root + path))
+                    if deep:
+                        await self._osv_scanner_manifest(meta["kind"], r.text)
+        except Exception as e:
+            await self.log(f"Manifest exposure probe error: {e}", "warn")
+        if findings:
+            await self.log(f"Exposed manifests: {len(findings)} ({', '.join(f['path'] for f in findings)})", "warn")
+        return findings, components
+
+    async def _osv_scanner_manifest(self, kind: str, body: str):
+        """Deep mode: run osv-scanner over a downloaded manifest for the fullest
+        CVE match (it understands every lockfile format). Graceful-skip when the
+        binary is absent; findings are folded in via the shared emitter path."""
+        import tempfile as _tf
+        fname = kind if "." in kind else kind + ".json"
+        tmpd = _tf.mkdtemp(prefix="ygg_sca_")
+        fpath = os.path.join(tmpd, fname)
+        try:
+            with open(fpath, "w", encoding="utf-8", errors="replace") as fh:
+                fh.write(body[:4_000_000])
+            out, _, rc = await self.run_command(
+                ["osv-scanner", "--format", "json", "--lockfile", fpath], timeout=120)
+            if rc == 127:
+                self._mark_tool_missing("osv-scanner")
+                return
+            for comp, vulns in di.parse_osv_scanner_output(out):
+                if vulns:
+                    finding = di.make_dependency_finding(comp, vulns, validation=di.PASSIVE)
+                    finding["probe_families"] = di.library_probe_families(comp["name"])
+                    await self._emit_dependency_finding(finding)
+        except Exception as e:
+            await self.log(f"osv-scanner error: {e}", "warn")
+        finally:
+            import shutil
+            shutil.rmtree(tmpd, ignore_errors=True)
+
+    async def _emit_dependency_finding(self, finding: dict):
+        """Persist one vulnerable-dependency finding with evidence + proof.
+        Titles distinguish 'Vulnerable Component Detected' (version evidence
+        only) from a validated exploit path (never claimed here)."""
+        title = di.dependency_finding_title(finding, validated=False)
+        sev = finding.get("severity", "info")
+        if finding.get("vuln_ids") and sev in ("info", "unknown"):
+            sev = "medium"
+        cvss = {"critical": 9.1, "high": 7.8, "medium": 5.5, "low": 3.1,
+                "info": 0.0, "unknown": 5.0}.get(sev, 5.0)
+        ids = ", ".join(finding.get("vuln_ids", [])[:8]) or "none"
+        fixed = ", ".join(finding.get("fixed_versions", [])[:5]) or "see advisory"
+        ev = (f"Component: {finding['component']}@{finding.get('version') or '?'}\n"
+              f"Ecosystem: {finding.get('ecosystem', '')}\n"
+              f"Detected via: {finding.get('detection_source', '')} "
+              f"(confidence: {finding.get('confidence', '')})\n"
+              f"CVE/GHSA/OSV: {ids}\nFixed in: {fixed}\n"
+              f"Validation: {finding.get('validation', 'passive')}\n"
+              f"Location: {finding.get('location', '')}\n"
+              f"Evidence: {finding.get('evidence', '')}")
+        created = await self.add_finding(
+            title=title, severity=sev,
+            description=(f"{finding['component']} {finding.get('version') or ''} is a "
+                         f"known-vulnerable component. {finding.get('exploitability_notes', '')}"),
+            evidence=ev, cvss_score=cvss,
+            remediation=f"Upgrade {finding['component']} to a fixed version ({fixed}).")
+        if finding.get("location") and created:
+            try:
+                await self._capture_proof(
+                    finding["location"], created.id,
+                    notes=f"Dependency evidence: {finding['component']}@{finding.get('version') or '?'}")
+            except Exception:
+                pass
+        return created
+
     def _mark_tool_missing(self, key: str):
         """Record that a binary-backed module could not run because its tool was
         absent — so the report says 'tool unavailable', never a false 'tested 0'."""
@@ -2406,6 +2685,10 @@ class OffensiveEngine:
             status["js_secrets"] = "tested"
         else:
             status["js_secrets"] = "tested"
+        # Dependency/SCA runs on built-in fingerprinting + the OSV API, so it's
+        # always 'tested' (osv-scanner only deepens deep-mode manifest coverage,
+        # its absence never zeroes the pass).
+        status["dependencies"] = "tested"
         return status
 
     async def run_offensive(
@@ -2527,6 +2810,15 @@ class OffensiveEngine:
             await self.log(f"JS secret analysis error: {e}", "warn")
             jssec = []
 
+        # Dependency / SCA pass: fingerprint components, detect exposed manifests,
+        # map evidence-backed versions to CVEs (OSV). Passive by default.
+        try:
+            deps = await self.dependency_scan(base_url, urls)
+        except Exception as e:
+            await self.log(f"Dependency scan error: {e}", "warn")
+            deps = []
+        dep_vuln_findings = [d for d in deps if d.get("vuln_ids")]
+
         result = {
             "crawled_urls": len(urls),
             "endpoints": urls[:2000],   # real attack surface for the inventory
@@ -2548,6 +2840,8 @@ class OffensiveEngine:
             "dom": _safe(domx),
             "oob": _safe(oob),
             "js_secrets": _safe(jssec),
+            "dependencies": deps if isinstance(deps, list) else [],
+            "source_map_endpoints": getattr(self, "_source_map_endpoints", []),
         }
         # WAF/CDN awareness: if a large share of active probes were bounced, the
         # binary tools' "0 findings" is INCONCLUSIVE (blocked), not "clean".
@@ -2584,6 +2878,6 @@ class OffensiveEngine:
 
         total = sum(len(_safe(v)) for v in
                     (sqli, xss, dast, auth, trav, zap, ssrf, ssti, oredir, cors, hosthdr,
-                     fuzz, formhits, domx, oob, jssec))
+                     fuzz, formhits, domx, oob, jssec)) + len(dep_vuln_findings)
         await self.log(f"⚔ Offensive engine complete: {total} injection/access/DAST findings across {len(urls)} URLs", "success")
         return result

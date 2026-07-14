@@ -13,11 +13,12 @@ from core.tooling import CLI_TOOLS, OPTIONAL_TOOLS, check_cli_tools, format_warn
 
 class OptionalToolRegistrationTests(unittest.TestCase):
     def test_new_tools_registered(self):
-        for name in ("gau", "trufflehog", "jsluice"):
+        for name in ("gau", "trufflehog", "jsluice", "osv-scanner"):
             self.assertIn(name, CLI_TOOLS)
 
     def test_optional_set_matches(self):
-        self.assertEqual(OPTIONAL_TOOLS, frozenset({"gau", "trufflehog", "jsluice"}))
+        self.assertEqual(OPTIONAL_TOOLS,
+                         frozenset({"gau", "trufflehog", "jsluice", "osv-scanner"}))
 
     def test_version_commands_are_non_blocking_flags(self):
         # Each uses a --version-style flag (exits fast) rather than a bare

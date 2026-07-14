@@ -46,16 +46,17 @@ CLI_TOOLS = {
     # rather than wait for piped input); when the regex misses, check_cli_tools
     # still marks the tool available on any non-127 exit, so presence detection
     # never depends on parsing a version string these tools don't reliably emit.
-    "gau":        (["gau", "--version"],       r"v?(\d+\.\d+\.\d+)"),
-    "trufflehog": (["trufflehog", "--version"], r"(\d+\.\d+\.\d+)"),
-    "jsluice":    (["jsluice", "--version"],   r"v?(\d+\.\d+\.\d+)"),
+    "gau":         (["gau", "--version"],        r"v?(\d+\.\d+\.\d+)"),
+    "trufflehog":  (["trufflehog", "--version"], r"(\d+\.\d+\.\d+)"),
+    "jsluice":     (["jsluice", "--version"],    r"v?(\d+\.\d+\.\d+)"),
+    "osv-scanner": (["osv-scanner", "--version"], r"(\d+\.\d+\.\d+)"),
 }
 
 # Optional/deep-profile tools: absence is expected on a lightweight deployment
 # and must not be reported as a scary "missing core tool" warning. They still
 # appear in the coverage map (available true/false) so the UI can show
 # ran/skipped/missing, but format_warnings() stays quiet about them.
-OPTIONAL_TOOLS = frozenset({"gau", "trufflehog", "jsluice"})
+OPTIONAL_TOOLS = frozenset({"gau", "trufflehog", "jsluice", "osv-scanner"})
 
 
 async def _run(cmd: list, timeout: int = 15) -> tuple:

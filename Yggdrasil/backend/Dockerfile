@@ -13,6 +13,9 @@ RUN go install github.com/lc/gau/v2/cmd/gau@v2.2.4 \
 RUN ( go install github.com/BishopFox/jsluice/cmd/jsluice@latest \
       || go install github.com/BishopFox/jsluice@latest ) \
     && cp "$(go env GOPATH)/bin/jsluice" /out/ || echo "jsluice build skipped"
+# osv-scanner: SCA over exposed/downloaded dependency manifests + SBOMs.
+RUN go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2 \
+    && cp "$(go env GOPATH)/bin/osv-scanner" /out/ || echo "osv-scanner build skipped"
 
 FROM python:3.11-slim
 

@@ -260,6 +260,64 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             )
         return coverage_html, surface_html, paths_html, candidates_html
 
+    def _dependency_section(self, context: dict) -> str:
+        """Vulnerable-dependency / SCA report section. Reports vulnerable
+        components SEPARATELY from confirmed exploitation: a component with only
+        version evidence is shown as 'detected (not validated)', and the wording
+        only ever escalates to a validated exploit path when a safe validation
+        actually proved it. Empty when no dependencies were fingerprinted."""
+        ares = (context or {}).get("ares", {}) or {}
+        offensive = ares.get("offensive", {}) or {}
+        deps = offensive.get("dependencies", []) or []
+        if not deps:
+            return ""
+        vulnerable = [d for d in deps if d.get("vuln_ids")]
+        detected_only = [d for d in deps if not d.get("vuln_ids")]
+
+        rows = ""
+        for d in sorted(vulnerable, key=lambda x: CVSS_MAP.get(str(x.get("severity", "")).lower(), 0), reverse=True):
+            validated = bool(d.get("validated"))
+            status = ("Validated exploit path" if validated
+                      else "Vulnerable component detected (not validated)")
+            status_cls = "mod-ok" if validated else "mod-skip"
+            cves = ", ".join(d.get("vuln_ids", [])[:6]) or "-"
+            fixed = ", ".join(d.get("fixed_versions", [])[:4]) or "see advisory"
+            rows += (
+                f'<tr><td class="path-url">{_html.escape(str(d.get("component","")))}@'
+                f'{_html.escape(str(d.get("version","") or "?"))}</td>'
+                f'<td>{_html.escape(cves)}</td>'
+                f'<td>{_html.escape(fixed)}</td>'
+                f'<td class="surf-params">{_html.escape(str(d.get("detection_source","")))} '
+                f'({_html.escape(str(d.get("confidence","")))})</td>'
+                f'<td class="{status_cls}">{_html.escape(status)}</td></tr>'
+            )
+        vuln_table = (
+            '<table class="cov-table"><thead><tr><th>Component</th><th>CVE/GHSA/OSV</th>'
+            '<th>Fixed in</th><th>Detected via</th><th>Status</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>' if rows else
+            '<p class="cand-note">No known-vulnerable components matched by version evidence.</p>'
+        )
+        detected_note = ""
+        if detected_only:
+            names = ", ".join(f'{_html.escape(str(d.get("component","")))}@{_html.escape(str(d.get("version","") or "?"))}'
+                              for d in detected_only[:30])
+            detected_note = (
+                f'<p class="cand-note">{len(detected_only)} other component(s) fingerprinted with '
+                f'no known vulns at the detected version: {names}.</p>')
+        sm = offensive.get("source_map_endpoints", []) or []
+        sm_note = ""
+        if sm:
+            sm_note = (f'<p class="cand-note">Source maps exposed {len(sm)} original source path(s) '
+                       f'(deep mode): {_html.escape(", ".join(sm[:20]))}.</p>')
+        return (
+            '<div class="section"><h2>Vulnerable Dependencies (SCA)</h2>'
+            '<p class="cand-note">Vulnerable components are reported separately from confirmed '
+            'exploitation. "Detected" means a known-vulnerable version was fingerprinted from served '
+            'evidence; it is <strong>not</strong> a proof of exploitability in this deployment. Exploit '
+            'validation is gated behind explicit approval.</p>'
+            f'{vuln_table}{detected_note}{sm_note}</div>'
+        )
+
     def _tbhm_checklist_section(self) -> str:
         """TBHM / WAHH Fast Testing Checklist as coverage transparency: which test
         classes the automated pass targets (automated), which it flags but that
@@ -345,6 +403,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
         # Coverage transparency panels (real recon numbers only; empty in passive runs).
         coverage_html, surface_html, paths_html, candidates_html = self._recon_sections(context, subdomains, live_hosts)
         tooling_html = self._tooling_section(context)
+        dependency_html = self._dependency_section(context)
         tbhm_html = self._tbhm_checklist_section()
         now = utcnow().strftime("%Y-%m-%d %H:%M UTC")
         # Per-report nonce so the report's own script runs while any injected
@@ -741,6 +800,8 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 {paths_html}
 
 {candidates_html}
+
+{dependency_html}
 
 {tbhm_html}
 
