@@ -20,6 +20,7 @@ import tempfile
 from html.parser import HTMLParser
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlunparse
 
+from core import parameter_intelligence as pi
 from core.evasion import (
     SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
 )
@@ -1615,7 +1616,12 @@ class OffensiveEngine:
                         "evidence": "Cloud metadata signature reflected in the response body."}
             return None
 
-        f = await self._param_probe(urls, canaries, det, name_filter=SSRF_PARAMS, cap=30, follow=True)
+        # Union with parameter_intelligence's fuller OWASP-derived SSRF set
+        # (e.g. "stockapi", "validate", "html" aren't in the older local
+        # SSRF_PARAMS above) so a real SSRF-relevant parameter doesn't go
+        # untested just because it's missing from the smaller original list.
+        f = await self._param_probe(urls, canaries, det, name_filter=SSRF_PARAMS | pi.SSRF_PARAMS,
+                                    cap=30, follow=True)
         await self.log(f"SSRF probing complete: {len(f)} confirmed", "success" if f else "info")
         return f
 
@@ -1660,7 +1666,13 @@ class OffensiveEngine:
                         "evidence": f"Location: {loc[:200]}"}
             return None
 
-        f = await self._param_probe(urls, payloads, det, name_filter=REDIRECT_PARAMS,
+        # Union with parameter_intelligence's fuller OWASP-derived open-redirect
+        # set (e.g. "rurl", "redirect_url", "return_to", "image_url" aren't in
+        # the older local REDIRECT_PARAMS above) so a real redirect-relevant
+        # parameter doesn't go untested just because it's missing from the
+        # smaller original list.
+        f = await self._param_probe(urls, payloads, det,
+                                    name_filter=REDIRECT_PARAMS | pi.OPEN_REDIRECT_PARAMS,
                                     cap=40, follow=False)
         await self.log(f"Open-redirect probing complete: {len(f)} confirmed", "success" if f else "info")
         return f
@@ -2120,6 +2132,35 @@ class OffensiveEngine:
                 f"Declared scope paths seeded {len(synthetic_urls)} parameterized probe URL(s)",
                 "info",
             )
+
+        # Parameter intelligence: classify every observed parameter into the
+        # vulnerability families it's a high-signal candidate for (OWASP
+        # Top-25 lists + IDOR/SSRF app-context additions) and generate
+        # probe URLs that mutate the REAL observed parameter in place on its
+        # REAL path — never a root-only `/?param=...` guess when a real
+        # path+param context is known. This directly targets sqlmap/dalfox/
+        # the SSRF/traversal/open-redirect probes below, which each cap how
+        # many of `urls` they actually test — better-prioritized URLs here
+        # means the right parameters survive that cap instead of getting
+        # crowded out by low-signal noise.
+        family_probes = pi.generate_family_probe_urls(
+            base_urls=[base_url], observed_urls=urls, max_per_family=25)
+        family_probe_urls = [u for probes in family_probes.values() for u in probes]
+        if family_probe_urls:
+            # Deliberately NOT routed through _dedupe_by_params: that collapses
+            # by (path, param-NAMES) regardless of value, which is right for
+            # crawl-derived near-duplicates (id=1 vs id=2 from pagination) but
+            # wrong here — mutating the SAME already-observed parameter to a
+            # new value on its SAME path is the entire point of a targeted
+            # probe, and dedupe-by-name would silently discard it as a
+            # "duplicate" of the original observed value.
+            urls = list(dict.fromkeys(urls + family_probe_urls))
+        priorities = pi.prioritize_params(urls)
+        await self.log(pi.summary_log_line(urls), "info")
+        for fam in ("sqli", "ssrf", "xss", "lfi", "rce", "open_redirect"):
+            if priorities.get(fam):
+                await self.log(pi.priority_log_line(fam, priorities), "info")
+
         params = len([u for u in urls if "?" in u and "=" in u])
         await self.log(
             f"Attack surface: {len(urls)} unique endpoints ({params} parameterized) "
