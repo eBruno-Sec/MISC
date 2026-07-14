@@ -653,6 +653,7 @@ class OffensiveEngine:
             fnd = await self.add_finding(
                 title=f"SQL Injection (sqlmap-confirmed): {param.strip()} ({method}){tag}",
                 severity="critical",
+                confidence="confirmed",
                 description=f"SQL injection confirmed by sqlmap on parameter '{param.strip()}'. "
                             f"Injection type: {sqli_type.strip()}. An attacker can read or modify "
                             f"the database, extract credentials, and potentially achieve RCE.",
@@ -703,6 +704,7 @@ class OffensiveEngine:
                     fnd = await self.add_finding(
                         title="Suspected SQL Injection (sqlmap heuristic, pending validation)",
                         severity="medium",
+                        confidence="low",
                         description="sqlmap's heuristic output suggested a possible injection point, "
                                     "but did not extract a confirmed injection type/technique. This is "
                                     "a server-side injection signal pending validation, not a confirmed "
@@ -2179,6 +2181,7 @@ class OffensiveEngine:
                 zap_fnd = await self.add_finding(
                     title=f"[ZAP] {name}" + (f" ({count} instances)" if count > 1 else ""),
                     severity=sev,
+                    confidence="high",   # ZAP's active scanner directly observed it
                     description=(g["description"] or f"OWASP ZAP flagged {name}.")[:1500],
                     evidence="\n".join(ev)[:4000],
                     cvss_score=cvss,
@@ -2389,6 +2392,7 @@ class OffensiveEngine:
         finding = await self.add_finding(
             title=title,
             severity=sev,
+            confidence="confirmed" if verified else "medium",
             description=(
                 f"{tool} identified a {detector} secret served in client-side JavaScript at "
                 f"{source_url}. {'The credential was verified as live against its provider.' if verified else 'Pattern-matched; validate before treating as live.'} "
@@ -2670,8 +2674,12 @@ class OffensiveEngine:
               f"Validation: {finding.get('validation', 'passive')}\n"
               f"Location: {finding.get('location', '')}\n"
               f"Evidence: {finding.get('evidence', '')}")
+        # A CVE matched against an exact, evidence-backed version is high
+        # confidence; a version guessed from a filename is lower.
+        dep_conf = "high" if finding.get("confidence") in ("confirmed", "high") else "low"
         created = await self.add_finding(
             title=title, severity=sev,
+            confidence=dep_conf,
             description=(f"{finding['component']} {finding.get('version') or ''} is a "
                          f"known-vulnerable component. {finding.get('exploitability_notes', '')}"),
             evidence=ev, cvss_score=cvss,
@@ -2807,6 +2815,7 @@ class OffensiveEngine:
                     self._api_token = getattr(self, "_api_token", None) or self._extract_jwt(body)
                     fnd = await self.add_finding(
                         title="SQL Injection — authentication bypass (login API)",
+                        confidence="confirmed",
                         severity="critical",
                         description=(f"A SQL-injection payload in the login identifier field of {ep} "
                                      "returned a valid authentication token, while a benign invalid "
@@ -2830,6 +2839,7 @@ class OffensiveEngine:
                 if SQL_ERROR_RE.search(body):
                     await self.add_finding(
                         title="SQL Injection (error-based) in login API",
+                        confidence="confirmed",
                         severity="high",
                         description=(f"The login endpoint {ep} returned a database error when its "
                                      "identifier field received a single quote, confirming the input "
@@ -2889,6 +2899,7 @@ class OffensiveEngine:
                 if SQL_ERROR_RE.search(ri.text or "") and not SQL_ERROR_RE.search(rb.text or ""):
                     fnd = await self.add_finding(
                         title="SQL Injection (error-based) in API parameter",
+                        confidence="confirmed",
                         severity="high",
                         description=(f"Parameter '{k}' on {parsed.path} returned a database error when "
                                      "given a single quote, while a benign value did not. The input "
@@ -2931,6 +2942,7 @@ class OffensiveEngine:
                         self._api_token = getattr(self, "_api_token", None) or self._extract_jwt(txt)
                         fnd = await self.add_finding(
                             title="NoSQL Injection — authentication bypass (login API)",
+                            confidence="confirmed",
                             severity="critical",
                             description=(f"A NoSQL operator ({json.dumps(op)}) in the login identifier "
                                          f"of {ep} returned a valid session, bypassing authentication. "
@@ -2951,6 +2963,7 @@ class OffensiveEngine:
                     if aa.NOSQLI_ERROR_RE.search(txt):
                         await self.add_finding(
                             title="NoSQL Injection (error-based) in login API",
+                            confidence="confirmed",
                             severity="high",
                             description=f"{ep} surfaced a NoSQL/database driver error when its login "
                                         "field received an operator object, confirming unsanitized input "
@@ -2983,24 +2996,43 @@ class OffensiveEngine:
                 except Exception:
                     continue
                 ct = r.headers.get("content-type", "")
-                if aa.unencoded_reflection(r.text or "") and aa.xss_context(ct) == "html":
+                if not aa.unencoded_reflection(r.text or ""):
+                    continue
+                if aa.xss_context(ct) == "html":
                     fnd = await self.add_finding(
                         title="Reflected Cross-Site Scripting (XSS) in API parameter",
                         severity="high",
+                        confidence="high",
                         description=(f"Parameter '{k}' on {parsed.path} reflects input unencoded into "
                                      "an HTML response, so an attacker-supplied script executes in the "
                                      "victim's browser."),
                         evidence=f"GET {parsed.path}?{k}={aa.XSS_PROBE}\nCanary reflected unencoded in a text/html response.",
                         cvss_score=6.1,
                         remediation="Contextually output-encode all reflected input; set a strict CSP.")
-                    try:
-                        await self.capture(r, finding_id=fnd.id if fnd else None,
-                                           notes=f"Reflected XSS on {k}")
-                    except Exception:
-                        pass
                     findings.append({"type": "xss-reflected-api", "url": u, "param": k, "severity": "high"})
-                    hit = True
-                    break
+                else:
+                    # Report-everything: raw reflection in a non-HTML (e.g. JSON)
+                    # response isn't directly executable, but if a client-side sink
+                    # renders it, it's DOM XSS. Surface it, labeled LOW confidence.
+                    fnd = await self.add_finding(
+                        title="Unencoded input reflection in API response (possible XSS via client sink)",
+                        severity="low",
+                        confidence="low",
+                        description=(f"Parameter '{k}' on {parsed.path} is reflected unencoded in a "
+                                     f"{ct or 'non-HTML'} response. Not directly executable, but if the "
+                                     "SPA renders this value into the DOM without encoding it becomes "
+                                     "DOM-based XSS. Manual review of the client-side sink is warranted."),
+                        evidence=f"GET {parsed.path}?{k}={aa.XSS_PROBE}\nCanary reflected unencoded (content-type: {ct}).",
+                        cvss_score=3.1,
+                        remediation="Encode on output at the client sink; validate/encode server-side too.")
+                    findings.append({"type": "reflection-candidate", "url": u, "param": k, "severity": "low"})
+                try:
+                    await self.capture(r, finding_id=fnd.id if fnd else None,
+                                       notes=f"Reflection on {k}")
+                except Exception:
+                    pass
+                hit = True
+                break
             if hit:
                 continue
         return findings
@@ -3031,6 +3063,7 @@ class OffensiveEngine:
                     if aa.ssti_evaluated(ri.text or "", rb.text or "", marker):
                         fnd = await self.add_finding(
                             title="Server-Side Template Injection (SSTI) in API parameter",
+                            confidence="confirmed",
                             severity="high",
                             description=(f"Parameter '{k}' on {parsed.path} evaluated a template "
                                          f"expression ({payload} -> {marker}), so input is rendered as "
@@ -3113,6 +3146,7 @@ class OffensiveEngine:
         if alg == "none":
             await self.add_finding(
                 title="JWT accepts 'alg: none' (unsigned tokens trusted)",
+                confidence="confirmed",
                 severity="critical",
                 description="The application issued/accepts a JWT with alg=none, so tokens are not "
                             "cryptographically verified and can be forged arbitrarily.",
@@ -3125,6 +3159,7 @@ class OffensiveEngine:
         if secret:
             await self.add_finding(
                 title="JWT signed with a weak/guessable secret (forgeable)",
+                confidence="confirmed",
                 severity="high",
                 description=(f"The HS256 JWT signature verifies under the known/weak secret "
                              f"'{secret}'. An attacker who guesses the secret forges tokens for any "
@@ -3149,6 +3184,7 @@ class OffensiveEngine:
                 if accepted:
                     fnd = await self.add_finding(
                         title="JWT 'alg: none' forgery accepted by the server",
+                        confidence="confirmed",
                         severity="critical",
                         description=(f"A forged alg=none token was accepted at {path}, returning "
                                      "authenticated data that an unauthenticated request does not. "
@@ -3197,6 +3233,7 @@ class OffensiveEngine:
                         and not aa.looks_like_object(r_none.text or ""):
                     fnd = await self.add_finding(
                         title="Insecure Direct Object Reference (IDOR / BOLA)",
+                        confidence="confirmed",
                         severity="high",
                         description=(f"As a regular authenticated user, {other_path} returned another "
                                      "object's data that an unauthenticated request cannot access and "

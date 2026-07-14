@@ -661,6 +661,7 @@ class Hermes(BaseAgent):
             await self.add_finding(
                 title="DMARC Record Missing",
                 severity="medium",
+                confidence="confirmed",   # DNS query directly confirms absence
                 description=f"No DMARC record found for {domain}. Domain susceptible to email spoofing.",
                 evidence="dig _dmarc returned no results",
                 cvss_score=5.3,
@@ -674,6 +675,7 @@ class Hermes(BaseAgent):
             await self.add_finding(
                 title="SPF Record Missing",
                 severity="medium",
+                confidence="confirmed",   # DNS query directly confirms absence
                 description=f"No SPF record on {domain}. Risk of email spoofing.",
                 evidence="No TXT record containing v=spf1",
                 cvss_score=5.3,

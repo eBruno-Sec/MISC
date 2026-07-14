@@ -72,6 +72,7 @@ class FindingCreate(BaseModel):
     evidence: Optional[str] = None
     cvss_score: Optional[float] = None
     remediation: Optional[str] = None
+    confidence: Optional[str] = None    # confirmed | high | medium | low
 
 
 class FindingUpdate(BaseModel):
@@ -82,6 +83,7 @@ class FindingUpdate(BaseModel):
     cvss_score: Optional[float] = None
     remediation: Optional[str] = None
     tag: Optional[str] = None           # confirmed | false_positive | reported | fixed | null
+    confidence: Optional[str] = None    # confirmed | high | medium | low
     analyst_notes: Optional[str] = None
 
 
@@ -153,6 +155,7 @@ def _finding_dict(f: Finding) -> dict:
         "id": f.id,
         "title": f.title,
         "severity": f.severity,
+        "confidence": f.confidence or "medium",
         "description": f.description,
         "evidence": f.evidence,
         "cvss_score": f.cvss_score,
@@ -512,6 +515,7 @@ async def add_finding(
     if not mission:
         raise HTTPException(404, "Mission not found")
 
+    from core.models import Confidence
     finding = Finding(
         mission_id=mission_id,
         title=body.title,
@@ -521,6 +525,7 @@ async def add_finding(
         cvss_score=body.cvss_score,
         remediation=body.remediation,
         found_by="analyst",
+        confidence=(body.confidence or Confidence.infer(body.severity)).lower(),
         is_manual=True,
     )
     session.add(finding)
@@ -723,7 +728,7 @@ async def export_findings(
     if format == "csv":
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=[
-            "id", "title", "severity", "cvss_score", "tag",
+            "id", "title", "severity", "confidence", "cvss_score", "tag",
             "description", "evidence", "remediation", "found_by",
             "is_manual", "analyst_notes", "timestamp",
         ])
@@ -731,6 +736,7 @@ async def export_findings(
         for f in findings:
             writer.writerow({
                 "id": f.id, "title": f.title, "severity": f.severity,
+                "confidence": f.confidence or "medium",
                 "cvss_score": f.cvss_score or "", "tag": f.tag or "",
                 "description": (f.description or "").replace("\n", " "),
                 "evidence": (f.evidence or "").replace("\n", " "),

@@ -57,7 +57,13 @@ class BaseAgent(ABC):
         evidence: str = None,
         cvss_score: float = None,
         remediation: str = None,
+        confidence: str = None,
     ):
+        # Every finding is reported; `confidence` labels how sure we are. When a
+        # caller doesn't set it, infer a sensible default from severity so no
+        # finding is ever unlabeled.
+        from core.models import Confidence
+        conf = (confidence or Confidence.infer(severity)).lower()
         finding = Finding(
             mission_id=self.mission_id,
             title=title,
@@ -67,6 +73,7 @@ class BaseAgent(ABC):
             cvss_score=cvss_score,
             remediation=remediation,
             found_by=self.name,
+            confidence=conf,
         )
         self.session.add(finding)
         await self.session.commit()
@@ -75,6 +82,7 @@ class BaseAgent(ABC):
             await self.ws_manager.broadcast(self.mission_id, {
                 "type": "finding",
                 "severity": severity,
+                "confidence": conf,
                 "title": title,
                 "found_by": self.name,
                 "display_name": self.display_name,

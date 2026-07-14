@@ -4,7 +4,7 @@ import html as _html
 import secrets
 from core.timeutil import utcnow
 from core.ai_client import complete
-from core.brand import agent_display_name
+from core.brand import agent_display_name, RELEASE as _RELEASE
 from core.config import settings
 from core.models import Finding
 from core.surface import build_inventory
@@ -427,6 +427,10 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
             # titles and descriptions can carry attacker-controlled scan content
             # (XSS PoC payloads, response snippets, ZAP alert text, matched URLs).
             sev = _html.escape((fnd.severity or "info").upper())
+            conf = (getattr(fnd, "confidence", None) or "medium").lower()
+            conf_color = {"confirmed": "#22c55e", "high": "#3b82f6",
+                          "medium": "#f59e0b", "low": "#6a8a9a"}.get(conf, "#6a8a9a")
+            conf_label = "CONFIRMED" if conf == "confirmed" else f"{conf.upper()} CONFIDENCE"
             title = _html.escape(fnd.title or "")
             found_by = _html.escape(agent_display_name(fnd.found_by))
             description = _html.escape(fnd.description or "No description")
@@ -445,6 +449,7 @@ Use plain text, no markdown headers, no bullet points. 3-4 tight paragraphs."""
                 <div class="finding-header">
                     <div>
                         <span class="sev-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{sev}</span>
+                        <span class="sev-badge" style="background:{conf_color}20;color:{conf_color};border:1px solid {conf_color}40">{conf_label}</span>
                         <span class="finding-title">{title}</span>
                     </div>
                     <div class="finding-meta">
@@ -794,6 +799,11 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 
 <div class="section">
   <h2>Findings Detail ({len(sorted_findings)} total)</h2>
+  <p class="cand-note">Every finding is reported and labeled by confidence so nothing is hidden and
+  nothing is over-claimed: <strong style="color:#22c55e">CONFIRMED</strong> = actively proven/exploited;
+  <strong style="color:#3b82f6">HIGH</strong> = strong tool/differential signal, not exploited;
+  <strong style="color:#f59e0b">MEDIUM</strong> = heuristic/pattern match;
+  <strong style="color:#6a8a9a">LOW</strong> = weak or single signal, warrants manual review.</p>
   {findings_html or '<p style="color:var(--text-dim)">No findings recorded.</p>'}
 </div>
 
@@ -808,7 +818,7 @@ body {{ background: var(--bg); color: var(--text); font-family: var(--mono); pad
 {_host_section}
 
 <div class="footer">
-  Yggdrasil Security Workspace - Authorized Testing Only — Report ID: {self.mission_id[:8].upper()}
+  Yggdrasil Security Workspace [{_RELEASE}] - Authorized Testing Only — Report ID: {self.mission_id[:8].upper()}
 </div>
 {export_script}
 </body>

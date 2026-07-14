@@ -47,7 +47,8 @@ class Zeus(BaseAgent):
         ctx = {"scope_rules": scope_rules}
 
         await self._set_phase(MissionStatus.PLANNING, "zeus")
-        await self.log(f"⚡ YGGDRASIL ONLINE — Target: {target} | Mode: {mode.upper()}", "info")
+        from core.brand import RELEASE
+        await self.log(f"⚡ YGGDRASIL ONLINE [{RELEASE}] — Target: {target} | Mode: {mode.upper()}", "info")
 
         # Scanner health check: confirm the tools this mission depends on are
         # actually present before running it, and remember the result so SAGA can

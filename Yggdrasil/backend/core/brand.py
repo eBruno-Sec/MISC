@@ -5,6 +5,10 @@ mission context and API clients keep working. User-facing labels are Norse to
 match the Yggdrasil UI and README.
 """
 
+# Release codename for this revision of the platform. Bumped per named
+# milestone; shown in the startup banner and the report footer.
+RELEASE = "Aang"
+
 AGENTS = {
     "zeus": {"name": "ODIN", "symbol": "OD", "role": "Orchestration"},
     "athena": {"name": "FRIGG", "symbol": "FR", "role": "Strategy"},

@@ -6,6 +6,15 @@ from sqlalchemy import text
 # "cannot insert multiple commands into a prepared statement" and would abort
 # backend startup. The DO $$...$$ block is one statement and stays whole.
 _COMPAT_STATEMENTS = (
+    # Findings gain a confidence label (Aang): every finding is reported, labeled
+    # by how sure we are. Added WITHOUT a DDL default so existing rows come out
+    # NULL and the severity-based backfill below actually applies (a DEFAULT would
+    # pre-fill every legacy row 'medium' and the backfill would match nothing).
+    # New rows get the model-side default; _finding_dict coalesces any NULL.
+    "ALTER TABLE findings ADD COLUMN IF NOT EXISTS confidence VARCHAR",
+    "UPDATE findings SET confidence = 'high' WHERE confidence IS NULL AND severity IN ('critical','high')",
+    "UPDATE findings SET confidence = 'medium' WHERE confidence IS NULL AND severity = 'medium'",
+    "UPDATE findings SET confidence = 'low' WHERE confidence IS NULL",
     "ALTER TABLE http_exchanges ADD COLUMN IF NOT EXISTS status_code INTEGER",
     "ALTER TABLE http_exchanges ADD COLUMN IF NOT EXISTS duration_ms INTEGER",
     "ALTER TABLE http_exchanges ADD COLUMN IF NOT EXISTS source VARCHAR",

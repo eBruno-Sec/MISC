@@ -31,6 +31,38 @@ class FindingTag:
     FIXED = "fixed"
 
 
+class Confidence:
+    """How sure Yggdrasil is that a finding is real. Every finding is REPORTED;
+    the label tells the analyst how much to trust it, so nothing is hidden and
+    nothing is over-claimed.
+      confirmed - actively proven/exploited (differential bypass, DB error with a
+                  clean control, template evaluated, forged token accepted, IDOR
+                  differential, sqlmap-confirmed).
+      high      - strong tool/differential signal, not exploited (active ZAP
+                  alert, raw HTML reflection, exact-version CVE).
+      medium    - heuristic / pattern match (missing header, tech fingerprint,
+                  exposed manifest, unverified secret).
+      low       - weak or single signal; needs manual review (reachable path,
+                  possible reflection in a non-HTML context, suspected-pending).
+    """
+    CONFIRMED = "confirmed"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    ORDER = {"confirmed": 0, "high": 1, "medium": 2, "low": 3}
+
+    @staticmethod
+    def infer(severity: str) -> str:
+        """Default label when a finding site doesn't set one explicitly, derived
+        from severity so every finding still carries a sensible confidence."""
+        s = (severity or "info").lower()
+        if s in ("critical", "high"):
+            return "high"
+        if s == "medium":
+            return "medium"
+        return "low"
+
+
 class Mission(Base):
     __tablename__ = "missions"
 
@@ -80,6 +112,9 @@ class Finding(Base):
     cvss_score = Column(Float, nullable=True)
     remediation = Column(Text, nullable=True)
     found_by = Column(String, nullable=True)
+    # How sure we are it's real: confirmed | high | medium | low. Every finding is
+    # reported; this labels trust rather than gating disclosure.
+    confidence = Column(String, default="medium")
     # Pentester workflow fields
     tag = Column(String, nullable=True)           # confirmed | false_positive | reported | fixed
     is_manual = Column(Boolean, default=False)    # added manually by user
