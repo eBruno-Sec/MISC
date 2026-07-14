@@ -1,4 +1,5 @@
 import asyncio
+import os
 import csv
 import io
 import json
@@ -1101,15 +1102,33 @@ async def _run_mission(
         )
         hb_task = asyncio.create_task(_mission_heartbeat(mission_id, zeus))
         try:
-            await zeus.execute(target, {"mode": mode, "scope": scope, "scope_rules": scope_rules})
-        except Exception as e:
+            # Wall-clock watchdog: a single wedged step (e.g. a saturated shared
+            # ZAP daemon that stops answering status polls) must never leave a
+            # mission stuck at "scanning" forever. asyncio.wait_for cancels the
+            # whole agent pipeline past the cap and we fail the mission cleanly.
+            # Tunable via YGGDRASIL_MISSION_TIMEOUT seconds (default 2700 = 45m;
+            # <=0 disables the watchdog).
+            try:
+                _mt = float(os.getenv("YGGDRASIL_MISSION_TIMEOUT") or "2700")
+            except ValueError:
+                _mt = 2700.0
+            _coro = zeus.execute(target, {"mode": mode, "scope": scope, "scope_rules": scope_rules})
+            if _mt > 0:
+                await asyncio.wait_for(_coro, timeout=_mt)
+            else:
+                await _coro
+        except (asyncio.TimeoutError, Exception) as e:
             from sqlalchemy import update
+            timed_out = isinstance(e, asyncio.TimeoutError)
+            msg = (f"Mission exceeded the {int(_mt)}s watchdog timeout and was aborted "
+                   "(a long-running step wedged; see the last phase logged)."
+                   if timed_out else str(e))
             await session.execute(
                 update(Mission).where(Mission.id == mission_id).values(status=MissionStatus.FAILED)
             )
             await session.commit()
             await manager.broadcast(mission_id, {
-                "type": "mission_failed", "error": str(e),
+                "type": "mission_failed", "error": msg,
                 "timestamp": utcnow().isoformat(),
             })
         finally:

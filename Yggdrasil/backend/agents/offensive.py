@@ -17,6 +17,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from html.parser import HTMLParser
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlunparse
 
@@ -39,6 +40,15 @@ SECLISTS_DIRS = [
 # host so the active scanner covers each URL/parameter katana found, not just the
 # root. Kept bounded so seeding does not dwarf the scan itself.
 MAX_ZAP_SEED = 200
+
+# Reliability guards for the shared ZAP daemon. There is ONE ZAP service behind
+# the whole platform, so two concurrent missions driving it at once saturate it
+# and a status poll can wedge. Serialize access with a process-global lock, cap
+# every individual ZAP API call, and cap the whole ZAP phase by wall-clock so it
+# can never stall a mission (which the mission watchdog would otherwise have to
+# abort). All three are the lesson learned from Olympus: keep ZAP load bounded.
+_ZAP_LOCK = asyncio.Lock()
+_ZAP_CALL_TIMEOUT = float(os.getenv("YGGDRASIL_ZAP_CALL_TIMEOUT") or "45")  # per API call
 
 # Common API / SPA endpoints a JS crawler misses. Single-page apps (Angular/React,
 # e.g. OWASP Juice Shop) render routes client-side and keep the real attack surface
@@ -1959,11 +1969,35 @@ class OffensiveEngine:
             return p
 
         async def _get(c, path, params):
-            r = await c.get(f"{zap_url}{path}", params=_p(params))
-            r.raise_for_status()
-            return r.json()
+            # Hard per-call cap via wait_for: httpx's own timeout can fail to fire
+            # if a saturated ZAP dribbles bytes to keep the read alive, so a
+            # status poll could otherwise block a mission indefinitely. wait_for
+            # cancels the call outright past the cap.
+            async def _do():
+                r = await c.get(f"{zap_url}{path}", params=_p(params))
+                r.raise_for_status()
+                return r.json()
+            return await asyncio.wait_for(_do(), timeout=_ZAP_CALL_TIMEOUT)
+
+        # Total wall-clock budget for the whole ZAP phase (default 20 min). Every
+        # poll loop below checks this deadline, so ZAP can never run away.
+        try:
+            _budget = float(os.getenv("YGGDRASIL_ZAP_BUDGET") or "1200")
+        except ValueError:
+            _budget = 1200.0
 
         findings = []
+        alerts = []
+        # Serialize: only one mission drives the single shared ZAP daemon at a
+        # time. Bounded acquire — if another mission holds ZAP past the budget,
+        # skip ZAP for this mission rather than queueing behind it forever.
+        try:
+            await asyncio.wait_for(_ZAP_LOCK.acquire(), timeout=max(60.0, _budget))
+        except asyncio.TimeoutError:
+            await self.log("ZAP busy with another mission past budget; skipping ZAP active scan "
+                           "(avoids saturating the shared daemon)", "warn")
+            return []
+        _deadline = time.monotonic() + _budget
         try:
             async with httpx.AsyncClient(timeout=30, verify=False) as c:
                 # ZAP may still be booting when the first mission runs.
@@ -2012,6 +2046,8 @@ class OffensiveEngine:
                     seeds = same_host[:MAX_ZAP_SEED]
                     seeded = 0
                     for u in seeds:
+                        if time.monotonic() > _deadline:
+                            break
                         try:
                             await _get(c, "/JSON/core/action/accessUrl/",
                                        {"url": u, "followRedirects": "true"})
@@ -2025,6 +2061,8 @@ class OffensiveEngine:
                 spider_id = (await _get(c, "/JSON/spider/action/scan/", {"url": base_url, "recurse": "true"})).get("scan")
                 await self.log("ZAP spider crawling", "info")
                 for _ in range(40):
+                    if time.monotonic() > _deadline:
+                        break
                     await asyncio.sleep(5)
                     st = (await _get(c, "/JSON/spider/view/status/", {"scanId": spider_id})).get("status", "0")
                     if int(st) >= 100:
@@ -2032,6 +2070,8 @@ class OffensiveEngine:
 
                 # Let the passive scanner drain the spidered records.
                 for _ in range(12):
+                    if time.monotonic() > _deadline:
+                        break
                     recs = (await _get(c, "/JSON/pscan/view/recordsToScan/", {})).get("recordsToScan", "0")
                     if int(recs) == 0:
                         break
@@ -2046,6 +2086,14 @@ class OffensiveEngine:
                     await self.log("ZAP active scan running (slow phase)", "info")
                     last = -1
                     for _ in range(150):
+                        if time.monotonic() > _deadline:
+                            await self.log("ZAP active scan hit the time budget; stopping and "
+                                           "collecting alerts found so far", "warn")
+                            try:
+                                await _get(c, "/JSON/ascan/action/stop/", {"scanId": ascan_id})
+                            except Exception:
+                                pass
+                            break
                         await asyncio.sleep(5)
                         sti = int((await _get(c, "/JSON/ascan/view/status/", {"scanId": ascan_id})).get("status", "0"))
                         if sti >= last + 25 and sti < 100:
@@ -2122,8 +2170,15 @@ class OffensiveEngine:
 
             await self.log(f"OWASP ZAP scan complete: {len(findings)} alerts (High/Med/Low)",
                            "success" if findings else "info")
+        except asyncio.TimeoutError:
+            await self.log("ZAP call timed out (daemon unresponsive); returning alerts collected "
+                           "so far and moving on", "warn")
         except Exception as e:
             await self.log(f"ZAP active scan error: {e}", "warn")
+        finally:
+            # Always release the shared-daemon lock so a later mission can use ZAP.
+            if _ZAP_LOCK.locked():
+                _ZAP_LOCK.release()
 
         return findings
 

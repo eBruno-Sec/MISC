@@ -69,6 +69,12 @@ services:
       YGGDRASIL_OFFENSIVE_MAX_HOSTS: ${YGGDRASIL_OFFENSIVE_MAX_HOSTS:-5}
       YGGDRASIL_CIDR_MAX_HOSTS: ${YGGDRASIL_CIDR_MAX_HOSTS:-1024}
       YGGDRASIL_HEARTBEAT_SECONDS: ${YGGDRASIL_HEARTBEAT_SECONDS:-300}
+      # Reliability guards: mission wall-clock watchdog + ZAP phase/call caps, so
+      # a wedged step (e.g. a saturated shared ZAP daemon) can never hang a
+      # mission at "scanning" forever.
+      YGGDRASIL_MISSION_TIMEOUT: ${YGGDRASIL_MISSION_TIMEOUT:-2700}
+      YGGDRASIL_ZAP_BUDGET: ${YGGDRASIL_ZAP_BUDGET:-1200}
+      YGGDRASIL_ZAP_CALL_TIMEOUT: ${YGGDRASIL_ZAP_CALL_TIMEOUT:-45}
       # OWASP ZAP active-scan daemon (see the zap service above). ZAP_API_KEY is
       # optional — the zap service's default config does not require one; set it
       # only if you've also hardened zap's own command with a matching api.key.
