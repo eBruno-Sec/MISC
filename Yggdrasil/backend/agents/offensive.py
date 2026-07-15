@@ -2718,25 +2718,40 @@ class OffensiveEngine:
         except Exception:
             return None
 
-    # ── API-aware injection (JSON APIs, not just query strings) ──────────────
+    # ── Injection on real endpoints (JSON APIs AND traditional params) ───────
     def _api_endpoints(self, base_url: str, urls: list) -> list:
-        """Same-host REST/API-shaped endpoints from the crawl (/rest/, /api/,
-        /graphql, /v1..). These are where a SPA's real vulns live; the engine's
-        other probes target query strings on the SPA root, which just returns the
-        shell."""
+        """Same-host endpoints worth injecting: REST/API-shaped paths (/rest/,
+        /api/, /graphql, /v1..) AND any traditional parameterized endpoint
+        (/catalog?category=, /blog/post?postId=). Restricting to /rest+/api names
+        was the bug that made a whole scan of a query-string app (ginandjuice)
+        test ZERO endpoints. Parameterized endpoints are prioritized by how many
+        injection families their params classify into (category/search/id/... >
+        random params) so the per-family caps below spend on the best targets."""
         base_host = urlparse(base_url).netloc
-        out, seen = [], set()
+        api_named, param_eps, seen = [], [], set()
         for u in urls or []:
             p = urlparse(u)
             if p.netloc and p.netloc != base_host:
                 continue
-            low = p.path.lower()
-            if re.search(r"(^|/)(rest|api|graphql|v\d+)(/|$)", low):
-                key = (p.path, tuple(sorted(parse_qs(p.query).keys())))
-                if key not in seen:
-                    seen.add(key)
-                    out.append(u if p.netloc else urljoin(base_url, u))
-        return out
+            is_api = bool(re.search(r"(^|/)(rest|api|graphql|v\d+)(/|$)", p.path.lower()))
+            has_params = "?" in u and "=" in u
+            if not (is_api or has_params):
+                continue
+            key = (p.path, tuple(sorted(parse_qs(p.query).keys())))
+            if key in seen:
+                continue
+            seen.add(key)
+            full = u if p.netloc else urljoin(base_url, u)
+            (api_named if is_api else param_eps).append(full)
+
+        def _family_score(u):
+            fams = set()
+            for name in parse_qs(urlparse(u).query).keys():
+                fams |= pi.classify_param(name)
+            # more injectable families first (negated: sort ascending)
+            return -len(fams & {"sqli", "xss", "ssrf", "lfi", "rce", "open_redirect", "idor"})
+        param_eps.sort(key=_family_score)
+        return list(dict.fromkeys(api_named + param_eps))
 
     def _login_endpoints(self, base_url: str, api_urls: list) -> list:
         """Login/auth endpoints to test for auth-bypass SQLi, from the crawl plus
@@ -2767,7 +2782,7 @@ class OffensiveEngine:
         api_urls = self._api_endpoints(base_url, urls)
         findings = []
         self._api_token = None
-        await self.log(f"API attack suite: probing {len(api_urls)} REST/API endpoint(s) "
+        await self.log(f"API attack suite: probing {len(api_urls)} parameterized/API endpoint(s) "
                        "(login SQLi/NoSQLi, error-based SQLi, reflected XSS, SSTI, JWT, IDOR)", "info")
 
         try:
@@ -2878,44 +2893,72 @@ class OffensiveEngine:
                                        '"jwt"', '"sessionid"', '"accesstoken"'))
 
     async def _api_get_sqli(self, c, api_urls: list) -> list:
-        """Error-based SQLi on API GET parameters: send a single quote in each
-        parameter and flag a response that surfaces a DB error a benign value
-        never produces."""
+        """Error-based SQLi on GET parameters, two high-precision signals:
+
+          1. A DB error string (SQL_ERROR_RE) on a single quote that a benign
+             value never produces.
+          2. A quote-BREAKS/quote-FIXES differential: a single quote breaks the
+             query (server 5xx or error) while a DOUBLED quote (escapes back to a
+             valid string literal) works again like the benign value. This is the
+             signal on apps whose 500 page carries NO SQL text (e.g. ginandjuice:
+             category=x' -> 500, category=x'' -> 200). The balanced-quote recovery
+             is what proves SQL string context, not a param that just errors on
+             any odd input.
+        """
         findings = []
-        param_eps = [u for u in api_urls if "?" in u and "=" in u][:25]
+        param_eps = [u for u in api_urls if "?" in u and "=" in u][:40]
         for u in param_eps:
             parsed = urlparse(u)
             pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            hit = False
             for i, (k, _v) in enumerate(pairs):
-                benign = list(pairs)
-                benign[i] = (k, "ygg9137")
-                inj = list(pairs)
-                inj[i] = (k, "ygg9137'")
+                def _mut(val):
+                    m = list(pairs)
+                    m[i] = (k, val)
+                    return urlunparse(parsed._replace(query=urlencode(m)))
                 try:
-                    rb = await c.get(urlunparse(parsed._replace(query=urlencode(benign))))
-                    ri = await c.get(urlunparse(parsed._replace(query=urlencode(inj))))
+                    rb = await c.get(_mut("ygg9137"))
+                    ri = await c.get(_mut("ygg9137'"))
                 except Exception:
                     continue
-                if SQL_ERROR_RE.search(ri.text or "") and not SQL_ERROR_RE.search(rb.text or ""):
-                    fnd = await self.add_finding(
-                        title="SQL Injection (error-based) in API parameter",
-                        confidence="confirmed",
-                        severity="high",
-                        description=(f"Parameter '{k}' on {parsed.path} returned a database error when "
-                                     "given a single quote, while a benign value did not. The input "
-                                     "reaches a SQL query unsanitized."),
-                        evidence=(f"GET {parsed.path}?{k}=ygg9137'  -> DB error\n"
-                                  f"GET {parsed.path}?{k}=ygg9137   -> clean"),
-                        cvss_score=8.2,
-                        remediation="Use parameterized queries / an ORM; never concatenate request "
-                                    "parameters into SQL.")
+                err_signal = SQL_ERROR_RE.search(ri.text or "") and not SQL_ERROR_RE.search(rb.text or "")
+                # quote-differential: single-quote breaks, doubled-quote recovers.
+                broke = (ri.status_code >= 500) or SQL_ERROR_RE.search(ri.text or "")
+                diff_signal = False
+                if broke and rb.status_code < 500:
                     try:
-                        await self.capture(ri, finding_id=fnd.id if fnd else None,
-                                           notes=f"Error-based SQLi on {k}")
+                        rbal = await c.get(_mut("ygg9137''"))
+                        diff_signal = (rbal.status_code < 500 and rbal.status_code == rb.status_code
+                                       and not SQL_ERROR_RE.search(rbal.text or ""))
                     except Exception:
-                        pass
-                    findings.append({"type": "sqli-error-api", "url": u, "param": k, "severity": "high"})
-                    break  # one param confirmation per endpoint
+                        diff_signal = False
+                if not (err_signal or diff_signal):
+                    continue
+                how = ("a database error" if err_signal else
+                       f"a server error (HTTP {ri.status_code}) that a doubled quote recovers from")
+                fnd = await self.add_finding(
+                    title="SQL Injection (error-based) in API parameter",
+                    confidence="confirmed",
+                    severity="high",
+                    description=(f"Parameter '{k}' on {parsed.path} produced {how} when given a single "
+                                 "quote, while a benign value did not. Input reaches a SQL query "
+                                 "unsanitized."),
+                    evidence=(f"GET {parsed.path}?{k}=ygg9137'   -> {'DB error' if err_signal else f'HTTP {ri.status_code}'}\n"
+                              f"GET {parsed.path}?{k}=ygg9137''  -> recovers (valid string literal)\n"
+                              f"GET {parsed.path}?{k}=ygg9137    -> HTTP {rb.status_code} (clean)"),
+                    cvss_score=8.2,
+                    remediation="Use parameterized queries / an ORM; never concatenate request "
+                                "parameters into SQL.")
+                try:
+                    await self.capture(ri, finding_id=fnd.id if fnd else None,
+                                       notes=f"Error-based SQLi on {k}")
+                except Exception:
+                    pass
+                findings.append({"type": "sqli-error-api", "url": u, "param": k, "severity": "high"})
+                hit = True
+                break  # one param confirmation per endpoint
+            if hit:
+                continue
         return findings
 
     @staticmethod
@@ -2983,7 +3026,7 @@ class OffensiveEngine:
         (unencoded) in an HTML response. HTML-context only, to avoid flagging a
         JSON API that merely echoes input (not executable)."""
         findings = []
-        eps = [u for u in api_urls if "?" in u and "=" in u][:25]
+        eps = [u for u in api_urls if "?" in u and "=" in u][:40]
         for u in eps:
             parsed = urlparse(u)
             pairs = parse_qsl(parsed.query, keep_blank_values=True)
@@ -3041,7 +3084,7 @@ class OffensiveEngine:
         """Server-side template injection on API GET params: a 7*7 payload that
         evaluates to 49 in the response but not in a benign control."""
         findings = []
-        eps = [u for u in api_urls if "?" in u and "=" in u][:20]
+        eps = [u for u in api_urls if "?" in u and "=" in u][:30]
         for u in eps:
             parsed = urlparse(u)
             pairs = parse_qsl(parsed.query, keep_blank_values=True)

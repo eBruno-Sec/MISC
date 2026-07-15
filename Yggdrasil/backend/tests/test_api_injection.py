@@ -69,8 +69,22 @@ class EndpointSelectionTests(unittest.TestCase):
         self.assertIn("http://t/rest/products/search?q=x", eps)
         self.assertIn("http://t/api/Users", eps)
         self.assertIn("http://t/graphql", eps)
-        self.assertNotIn("http://t/about", eps)
+        self.assertNotIn("http://t/about", eps)     # no params, not api -> excluded
         self.assertNotIn("http://t/main.js", eps)
+
+    def test_traditional_parameterized_endpoints_included_and_prioritized(self):
+        # The ginandjuice bug: /catalog?category= is not /rest or /api named but
+        # must still be tested. High-injection-family params sort ahead of junk.
+        ares = _make_ares()
+        urls = ["http://t/about", "http://t/x?junkparam=1",
+                "http://t/catalog?category=Juice", "http://t/blog/post?postId=3"]
+        eps = ares._api_endpoints("http://t", urls)
+        self.assertIn("http://t/catalog?category=Juice", eps)
+        self.assertIn("http://t/blog/post?postId=3", eps)
+        self.assertNotIn("http://t/about", eps)
+        # category (sqli+xss+lfi families) ranks ahead of an unknown junk param.
+        self.assertLess(eps.index("http://t/catalog?category=Juice"),
+                        eps.index("http://t/x?junkparam=1"))
 
     def test_login_endpoints_include_defaults_and_discovered(self):
         ares = _make_ares()
@@ -166,6 +180,39 @@ class ApiGetSqliTests(unittest.IsolatedAsyncioTestCase):
                 ["http://t/rest/products/search?q=test"])
         self.assertEqual(hits, [])
         self.assertFalse([o for o in ares.session.added if isinstance(o, Finding)])
+
+    async def test_status_differential_quote_breaks_and_recovers(self):
+        # The ginandjuice case: single quote -> 500 (generic page, NO SQL string),
+        # doubled quote -> 200 (recovers). This must be caught by the differential.
+        from core.models import Finding
+        ares = _make_ares()
+
+        def get_router(url):
+            if "%27%27" in url:                       # doubled quote recovers
+                return FakeResp(200, "<html>ok</html>")
+            if "%27" in url:                          # single quote breaks (no SQL text!)
+                return FakeResp(500, "<html>Internal Server Error</html>")
+            return FakeResp(200, "<html>ok</html>")   # benign
+
+        with patch.object(ares, "capture", AsyncMock(return_value=None)):
+            hits = await ares._api_get_sqli(FakeClient(get_router=get_router),
+                                            ["http://t/catalog?category=Juice"])
+        self.assertTrue(any(h["type"] == "sqli-error-api" for h in hits))
+
+    async def test_no_fp_when_any_input_500s(self):
+        # A param that 500s on the doubled quote too is not SQL string context.
+        from core.models import Finding
+        ares = _make_ares()
+
+        def get_router(url):
+            if "%27" in url:      # both single and doubled quote 500
+                return FakeResp(500, "<html>err</html>")
+            return FakeResp(200, "<html>ok</html>")
+
+        with patch.object(ares, "capture", AsyncMock(return_value=None)):
+            hits = await ares._api_get_sqli(FakeClient(get_router=get_router),
+                                            ["http://t/catalog?category=Juice"])
+        self.assertEqual(hits, [])
 
 
 if __name__ == "__main__":
