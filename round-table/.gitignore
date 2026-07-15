@@ -1,0 +1,21 @@
+# secrets / local config
+.env
+config.yaml
+
+# runtime data
+data/
+output/
+runs/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# os / editor
+.DS_Store
+Thumbs.db

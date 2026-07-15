@@ -1,0 +1,42 @@
+name: round-table
+
+services:
+  roundtable:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: round-table:latest
+    restart: unless-stopped
+    ports:
+      - "${ROUNDTABLE_PORT:-3000}:8000"
+    environment:
+      # ── AI (optional) ── leave AI_API_KEY blank to run fully rule-based.
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # ── scan knobs (sane defaults) ──
+      ROUNDTABLE_THREADS: ${ROUNDTABLE_THREADS:-10}
+      ROUNDTABLE_HTTP_TIMEOUT: ${ROUNDTABLE_HTTP_TIMEOUT:-8}
+      ROUNDTABLE_NUCLEI_SEVERITY: ${ROUNDTABLE_NUCLEI_SEVERITY:-medium,high,critical}
+      ROUNDTABLE_PORTS: ${ROUNDTABLE_PORTS:-80,443,8080,8443,8888,3000,5000,9090,9200,27017,6379,5432,3306,2375,5601}
+    volumes:
+      - rt_data:/app/data
+    # nmap SYN scans need raw sockets.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    # Lets the backend reach a target you host on the machine (e.g. a local lab
+    # at host.docker.internal:PORT). Works on Docker Desktop and Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  rt_data:
