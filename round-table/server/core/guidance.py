@@ -706,8 +706,24 @@ RULES = [
 ]
 
 
+def sort_guidance(items: list[dict]) -> list[dict]:
+    """De-dupe by id and sort most-severe / most-confident first."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for g in items:
+        gid = g.get("id")
+        if gid in seen:
+            continue
+        seen.add(gid)
+        out.append(g)
+    out.sort(key=lambda g: (-SEVERITY_RANK.get(g["severity"], 0), -g["confidence"]))
+    return out
+
+
 def build_guidance(recon: dict) -> list[dict]:
     """Run every rule over the recon context and return sorted, de-duped guidance."""
+    from . import remediation as remediation_mod
+
     out: list[dict] = []
     seen: set[str] = set()
     for rule in RULES:
@@ -716,11 +732,11 @@ def build_guidance(recon: dict) -> list[dict]:
                 if g["id"] in seen:
                     continue
                 seen.add(g["id"])
+                g["remediation"] = remediation_mod.remediation_for(g)  # Spec 5 fix snippets
                 out.append(g)
         except Exception as e:  # a broken rule must never sink the mission
             print(f"[guidance] rule {rule.__name__} failed: {type(e).__name__}: {e}", flush=True)
-    out.sort(key=lambda g: (-SEVERITY_RANK.get(g["severity"], 0), -g["confidence"]))
-    return out
+    return sort_guidance(out)
 
 
 def guidance_stats(guidance: list[dict]) -> dict[str, Any]:

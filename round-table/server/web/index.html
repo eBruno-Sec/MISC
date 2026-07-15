@@ -55,19 +55,58 @@
                     placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com"></textarea>
         </details>
 
+        <details class="field scope" id="opts">
+          <summary>Scan options</summary>
+
+          <div class="opt-group" role="group" aria-label="Tools">
+            <span class="opt-label">Tools</span>
+            <div class="toolgrid" id="toolgrid">
+              <label class="chk"><input type="checkbox" data-tool="subfinder" checked> subfinder</label>
+              <label class="chk"><input type="checkbox" data-tool="amass" checked> amass</label>
+              <label class="chk"><input type="checkbox" data-tool="httpx" checked> httpx</label>
+              <label class="chk"><input type="checkbox" data-tool="nmap" checked> nmap</label>
+              <label class="chk"><input type="checkbox" data-tool="ffuf" checked> ffuf</label>
+              <label class="chk"><input type="checkbox" data-tool="nuclei" checked> nuclei</label>
+            </div>
+          </div>
+
+          <div class="opt-group">
+            <span class="opt-label">Speed</span>
+            <div class="segbtn" id="speed-seg" role="radiogroup" aria-label="Scan speed">
+              <button type="button" class="seg on" data-speed="fast" role="radio" aria-checked="true">Fast</button>
+              <button type="button" class="seg" data-speed="slow" role="radio" aria-checked="false">Slow (rate-limited)</button>
+            </div>
+            <p class="help">Slow adds rate-limiting, delays, and jitter for production targets.</p>
+          </div>
+
+          <label class="chk optrow"><input type="checkbox" id="opt-preauth" checked> Pre-authorize active phases</label>
+          <label class="chk optrow"><input type="checkbox" id="opt-loop"> 3-step iterative recon loop</label>
+          <label class="chk optrow"><input type="checkbox" id="opt-redteam"> AI RedTeam mode (OWASP LLM Top 10)</label>
+          <div class="field" id="redteam-ep" hidden>
+            <label for="opt-endpoint">AI endpoint (optional)</label>
+            <input id="opt-endpoint" type="text" inputmode="url" autocomplete="off"
+                   placeholder="https://target/v1/chat/completions" />
+          </div>
+        </details>
+
         <button id="launch-btn" class="btn btn-primary" type="button">Launch Mission</button>
         <p id="launch-msg" class="msg" role="status" aria-live="polite"></p>
 
         <div class="draft">
-          <h3>Draft state</h3>
+          <h3>Draft &amp; progress</h3>
           <div class="draft-actions">
-            <button id="draft-save" class="btn btn-soft btn-sm" type="button" title="Download the current form as a .json backup">⬇ Save Draft (.json)</button>
-            <button id="draft-load" class="btn btn-soft btn-sm" type="button" title="Restore a saved .json draft">⬆ Load Draft (.json)</button>
+            <button id="draft-save" class="btn btn-soft btn-sm" type="button" title="Download the current form inputs as a .json draft">⬇ Save Draft</button>
+            <button id="draft-load" class="btn btn-soft btn-sm" type="button" title="Restore a saved .json draft">⬆ Load Draft</button>
             <input id="draft-file" type="file" accept="application/json,.json" hidden />
           </div>
+          <div class="draft-actions">
+            <button id="prog-save" class="btn btn-soft btn-sm" type="button" title="Download the full selected mission (config, findings, graph, logs)">⬇ Save Progress</button>
+            <button id="prog-load" class="btn btn-soft btn-sm" type="button" title="Restore a full mission from .json, offline">⬆ Load Progress</button>
+            <input id="prog-file" type="file" accept="application/json,.json" hidden />
+          </div>
           <div id="draft-drop" class="draft-drop" role="button" tabindex="0"
-               aria-label="Drop a saved draft .json file here, or press Enter to browse">
-            Drag &amp; drop a <code>.json</code> draft here
+               aria-label="Drop a draft or progress .json file here, or press Enter to browse">
+            Drag &amp; drop a <code>.json</code> draft or progress file
           </div>
           <div id="draft-error" class="banner banner-error" role="alert" hidden></div>
         </div>

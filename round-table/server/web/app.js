@@ -44,15 +44,25 @@ window.addEventListener('DOMContentLoaded', () => {
   $('target').addEventListener('keydown', e => { if (e.key === 'Enter') launch(); });
   $('target').addEventListener('input', validateTarget);
 
-  // Draft state engine (client-side .json backup/restore)
+  // Scan options: speed segmented control + AI RedTeam endpoint reveal
+  document.querySelectorAll('#speed-seg .seg').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#speed-seg .seg').forEach(x => { x.classList.remove('on'); x.setAttribute('aria-checked', 'false'); });
+    b.classList.add('on'); b.setAttribute('aria-checked', 'true');
+  });
+  $('opt-redteam').addEventListener('change', () => { $('redteam-ep').hidden = !$('opt-redteam').checked; });
+
+  // Draft (form) + Progress (full mission) .json backup/restore
   $('draft-save').onclick = saveDraft;
   $('draft-load').onclick = () => $('draft-file').click();
   $('draft-file').addEventListener('change', e => { loadDraftFromFile(e.target.files[0]); e.target.value = ''; });
+  $('prog-save').onclick = saveProgress;
+  $('prog-load').onclick = () => $('prog-file').click();
+  $('prog-file').addEventListener('change', e => { loadProgressFromFile(e.target.files[0]); e.target.value = ''; });
   (() => {
     const dz = $('draft-drop');
     ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); }));
     ['dragleave', 'dragend'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('drag')));
-    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); loadDraftFromFile(e.dataTransfer.files[0]); });
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); loadAnyFromFile(e.dataTransfer.files[0]); });
     dz.addEventListener('click', () => $('draft-file').click());
     dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('draft-file').click(); } });
   })();
@@ -191,19 +201,117 @@ function loadDraftFromFile(file) {
   reader.readAsText(file);
 }
 
+/* ── progress engine: full-mission .json backup / offline restore (Spec 7) ── */
+function currentProgress() {
+  return {
+    app: 'round-table', type: 'progress', version: DRAFT_VERSION,
+    saved_at: new Date().toISOString(),
+    config: (state.mission && state.mission.config) || buildConfig(),
+    ui: { tab: state.tab, sevFilter: [...state.sevFilter], topoTypes: state.topoTypes ? [...state.topoTypes] : null },
+    mission: state.mission,
+  };
+}
+function saveProgress() {
+  if (!state.mission) { toast('Open a mission first'); return; }
+  const blob = new Blob([JSON.stringify(currentProgress(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ROUND_TABLE_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Progress saved');
+}
+function validateProgress(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  if (o.type !== 'progress' || typeof o.version !== 'number') return false;
+  const m = o.mission;
+  if (!m || typeof m !== 'object' || typeof m.target !== 'string') return false;
+  if (!m.result || typeof m.result !== 'object') return false;
+  return true;
+}
+function hydrateProgress(o) {
+  state.imported = true;
+  state.mission = o.mission;
+  state.currentId = o.mission.id || ('import_' + Date.now());
+  state.guidance = (o.mission.result && o.mission.result.guidance) || [];
+  if (o.config) applyConfig(o.config);
+  if (o.ui && Array.isArray(o.ui.sevFilter)) state.sevFilter = new Set(o.ui.sevFilter);
+  if (state.ws) { try { state.ws.close(); } catch (_) {} }
+  $('no-mission').classList.add('hidden');
+  $('mission-view').classList.remove('hidden');
+  $('feed').innerHTML = '<div class="ln"><span class="info">Imported mission (offline) — live feed unavailable.</span></div>';
+  renderHead(); renderOverview(); renderPlaybooks(); renderReportLinks();
+  draftError(false);
+  setTab((o.ui && o.ui.tab) || 'overview');
+  toast('Progress restored (offline)');
+}
+function loadProgressFromFile(file) {
+  draftError(false); if (!file) return;
+  if (file.size > 30 * 1024 * 1024) { draftError(true); return; }
+  const reader = new FileReader();
+  reader.onload = () => { let o; try { o = JSON.parse(reader.result); } catch (_) { draftError(true); return; } if (!validateProgress(o)) { draftError(true); return; } hydrateProgress(o); };
+  reader.onerror = () => draftError(true);
+  reader.readAsText(file);
+}
+// Drop zone accepts either a form draft or a full progress file.
+function loadAnyFromFile(file) {
+  draftError(false); if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let o; try { o = JSON.parse(reader.result); } catch (_) { draftError(true); return; }
+    if (validateProgress(o)) return hydrateProgress(o);
+    if (validateDraft(o)) return hydrateDraft(o.data);
+    draftError(true);
+  };
+  reader.onerror = () => draftError(true);
+  reader.readAsText(file);
+}
+
+/* ── run config (tool toggles, speed, pre-auth, loop, redteam) ── */
+function buildConfig() {
+  const tools = {};
+  document.querySelectorAll('#toolgrid input[data-tool]').forEach(cb => { tools[cb.dataset.tool] = cb.checked; });
+  const seg = document.querySelector('#speed-seg .seg.on');
+  return {
+    tools,
+    speed: (seg && seg.dataset.speed) || 'fast',
+    pre_authorized: $('opt-preauth').checked,
+    recon_loop: $('opt-loop').checked,
+    ai_redteam: $('opt-redteam').checked,
+    ai_endpoint: $('opt-endpoint').value.trim(),
+    max_loops: 3,
+  };
+}
+function applyConfig(c) {
+  if (!c) return;
+  document.querySelectorAll('#toolgrid input[data-tool]').forEach(cb => {
+    if (c.tools && cb.dataset.tool in c.tools) cb.checked = !!c.tools[cb.dataset.tool];
+  });
+  document.querySelectorAll('#speed-seg .seg').forEach(b => {
+    const on = b.dataset.speed === (c.speed || 'fast');
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  $('opt-preauth').checked = c.pre_authorized !== false;
+  $('opt-loop').checked = !!c.recon_loop;
+  $('opt-redteam').checked = !!c.ai_redteam;
+  $('redteam-ep').hidden = !c.ai_redteam;
+  $('opt-endpoint').value = c.ai_endpoint || '';
+}
+
 /* ── missions ── */
 async function launch() {
   const btn = $('launch-btn');
   const target = $('target').value.trim();
   const mode = $('mode').value;
   const scope_text = $('scope').value.trim() || null;
+  const config = buildConfig();
   const msg = $('launch-msg');
   if (!target) { msg.textContent = 'Enter a target domain.'; msg.className = 'msg err'; $('target').focus(); return; }
   if (!validateTarget()) { msg.textContent = 'Fix the target format first.'; msg.className = 'msg err'; $('target').focus(); return; }
   msg.textContent = 'Launching…'; msg.className = 'msg';
   btn.disabled = true; btn.classList.add('is-loading');
   try {
-    const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target, mode, scope_text }) });
+    const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target, mode, scope_text, config }) });
     msg.textContent = `Launched ${r.target} (${r.mode})`; msg.className = 'msg ok';
     await loadMissions();
     selectMission(r.id);
@@ -261,7 +369,7 @@ function timeago(ts) {
 }
 
 async function selectMission(id) {
-  state.currentId = id; state.topoRendered = false;
+  state.currentId = id; state.topoRendered = false; state.imported = false;
   $('no-mission').classList.add('hidden');
   $('mission-view').classList.remove('hidden');
   renderMissionList();
@@ -294,6 +402,16 @@ function renderHead() {
   const st = $('m-status'); st.textContent = m.status; st.className = 'pill status ' + m.status;
   $('m-id').textContent = '#' + m.id;
   $('pb-count').textContent = state.guidance.length || '';
+
+  const meta = document.querySelector('.mission-meta');
+  meta.querySelectorAll('.m-flag').forEach(e => e.remove());
+  const cfg = m.config || (m.result && m.result.config) || {};
+  const flags = [];
+  if (cfg.speed) flags.push(cfg.speed === 'slow' ? 'slow' : 'fast');
+  if (cfg.recon_loop) flags.push('loop×' + (cfg.max_loops || 3));
+  if (cfg.ai_redteam) flags.push('AI RedTeam');
+  if (state.imported) flags.push('imported');
+  flags.forEach(f => { const s = document.createElement('span'); s.className = 'pill m-flag'; s.textContent = f; meta.appendChild(s); });
 }
 
 /* ── websocket feed ── */
@@ -398,6 +516,11 @@ function cardHTML(g) {
        <pre>${esc(cs.cmd)}</pre></div>`;
   }).join('');
   const refs = (g.references || []).map(r => `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>`).join('');
+  const rem = g.remediation ? `<div class="pb-block remediation"><strong>Remediation (fix)</strong>
+      <p>${esc(g.remediation.summary)}</p>
+      ${(g.remediation.fixes || []).map(f => `<div class="fix"><div class="cs-desc"><span>${esc(f.label)}</span>
+         <button class="copybtn" data-copy="${esc(f.code)}">copy</button></div><pre>${esc(f.code)}</pre></div>`).join('')}
+    </div>` : '';
   return `<div class="pb" data-gid="${g.id}">
     <div class="pb-head" style="border-left-color:${c}" data-expand="1">
       <span class="sev-tag" style="background:${c}">${esc(g.severity)}</span>
@@ -411,6 +534,7 @@ function cardHTML(g) {
       ${steps ? `<div class="pb-block"><strong>How to test</strong><ol>${steps}</ol></div>` : ''}
       ${payloads ? `<div class="pb-block payloads"><strong>Recommended payloads / injections</strong><ul>${payloads}</ul></div>` : ''}
       ${curls ? `<div class="pb-block"><strong>Step-by-step cURL</strong>${curls}</div>` : ''}
+      ${rem}
       <p class="pb-tools"><strong>Tools:</strong> ${esc((g.tools || []).join(', '))}</p>
       ${refs ? `<p class="pb-refs"><strong>References:</strong> ${refs}</p>` : ''}
       <div class="pb-cta"><button class="btn btn-ghost" data-tocurl="${esc(g.surface)}">Open in cURL console →</button></div>
@@ -427,7 +551,11 @@ function expand(pb, force) {
 /* ── topology ── */
 function renderTopology() {
   if (!window.Topology) return;
-  api('/api/missions/' + state.currentId + '/topology').then(data => {
+  const inline = state.mission && state.mission.result && state.mission.result.topology;
+  if (inline && inline.nodes) { _drawTopology(inline); return; }
+  api('/api/missions/' + state.currentId + '/topology').then(_drawTopology);
+}
+function _drawTopology(data) {
     const nodes = data.nodes || [];
     if (!nodes.length) {
       $('topo-legend').innerHTML = '<span class="muted">No topology yet — launch an Active/Full mission.</span>';
@@ -450,7 +578,6 @@ function renderTopology() {
       onNodeClick: n => { if (n.meta && n.meta.gid) jumpTo(n.meta.gid); },
     });
     state.topoRendered = true;
-  });
 }
 
 /* ── curl console ── */

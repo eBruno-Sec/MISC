@@ -13,7 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-from ..core import ai_client, db, guidance as guidance_mod
+from ..core import ai_client, db, guidance as guidance_mod, runconfig
 from . import active as active_mod
 from . import passive as passive_mod
 
@@ -60,6 +60,7 @@ def execute(mission_id: str, hub) -> None:
     target = m["target"]
     mode = m["mode"]
     scope = m["scope"] or {}
+    config = runconfig.normalize(m.get("config"))
 
     def log(message, level="info", phase="mission"):
         hub.emit(mission_id, level, phase, message)
@@ -80,13 +81,18 @@ def execute(mission_id: str, hub) -> None:
 
         # ── active (active/full only) ───────────────────────────────────────
         if mode in ("active", "full") and _scope_allows_active(scope):
+            en = [t for t, on in config["tools"].items() if on]
             log("── Galahad // active enumeration ──", "hdr", "active")
-            log("Active packets will be sent to in-scope hosts.", "warn", "active")
+            log(f"Active packets to in-scope hosts · speed={config['speed']} · tools: {', '.join(en) or 'none'}", "warn", "active")
             tee = _Tee(sys.stdout, lambda ln: hub.emit(mission_id, "trace", "active", ln))
             old = sys.stdout
             sys.stdout = tee
             try:
-                active_mod.run_active(target, run_dir, recon, log, cfg_from_env())
+                active_mod.run_active(target, run_dir, recon, log, cfg_from_env(), config)
+                # ── 3-step iterative recon loop (opt-in) ──
+                if config.get("recon_loop"):
+                    from . import loop as loop_mod
+                    loop_mod.run_recon_loop(target, run_dir, recon, log, cfg_from_env(), config)
             finally:
                 sys.stdout = old
             hub.push(mission_id, {"type": "phase_done", "phase": "active"})
@@ -96,6 +102,12 @@ def execute(mission_id: str, hub) -> None:
         # ── guidance (the buff) ─────────────────────────────────────────────
         log("── Test-Guidance engine ──", "hdr", "guidance")
         playbook = guidance_mod.build_guidance(recon)
+        # ── AI RedTeam: OWASP-LLM-Top-10 advisory playbooks (opt-in) ──
+        if config.get("ai_redteam"):
+            from ..core import guidance_llm
+            llm_pb = guidance_llm.build_llm_guidance(recon, config)
+            log(f"AI RedTeam: {len(llm_pb)} LLM playbooks (OWASP LLM Top 10)", "ok", "guidance")
+            playbook = guidance_mod.sort_guidance(playbook + llm_pb)
         gstats = guidance_mod.guidance_stats(playbook)
         log(f"generated {gstats['total']} test playbooks: {gstats['by_severity']}", "ok", "guidance")
 
@@ -110,6 +122,9 @@ def execute(mission_id: str, hub) -> None:
             "nuclei": len(recon.get("nuclei", [])),
             "guidance": gstats,
             "mode": mode,
+            "speed": config["speed"],
+            "recon_loop": config["recon_loop"],
+            "ai_redteam": config["ai_redteam"],
         }
 
         # ── optional AI executive summary ───────────────────────────────────
@@ -131,6 +146,7 @@ def execute(mission_id: str, hub) -> None:
             "stats": stats,
             "ai": ai_block,
             "ai_info": ai_client.ai_info(),
+            "config": config,
         }
         db.update_mission(mission_id, status="completed", result=result, error=None)
         hub.push(mission_id, {"type": "done", "status": "completed", "stats": stats})

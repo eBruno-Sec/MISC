@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from ..core import db, report as report_mod, scope as scope_mod
+from ..core import db, report as report_mod, runconfig, scope as scope_mod
 from ..core.hub import hub
 
 router = APIRouter()
@@ -19,6 +19,7 @@ class LaunchRequest(BaseModel):
     target: str = Field(..., min_length=1)
     mode: str = "passive"
     scope_text: Optional[str] = None
+    config: Optional[dict] = None
 
 
 @router.post("")
@@ -37,11 +38,12 @@ async def launch(req: LaunchRequest):
     if not scope.get("in_scope"):
         scope["in_scope"] = [host, f"*.{host}"]
 
-    mid = db.create_mission(target, mode, scope)
+    run_config = runconfig.normalize(req.config)
+    mid = db.create_mission(target, mode, scope, run_config)
     db.add_event(mid, "info", "mission", f"Mission queued for {target} ({mode} mode)")
     # Fire-and-forget; hub serializes execution behind a lock.
     asyncio.create_task(hub.run_mission(mid))
-    return {"id": mid, "target": target, "mode": mode, "status": "queued", "scope": scope}
+    return {"id": mid, "target": target, "mode": mode, "status": "queued", "scope": scope, "config": run_config}
 
 
 @router.get("")

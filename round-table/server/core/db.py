@@ -60,6 +60,12 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_events_mission ON events(mission_id);
             """
         )
+        # Additive migration: run_config lives in its own column. Safe to run
+        # every boot — ignored once the column exists.
+        try:
+            c.execute("ALTER TABLE missions ADD COLUMN config_json TEXT")
+        except sqlite3.OperationalError:
+            pass
         c.commit()
 
 
@@ -72,15 +78,15 @@ def new_id() -> str:
 
 
 # ── missions ────────────────────────────────────────────────────────────────
-def create_mission(target: str, mode: str, scope: dict[str, Any]) -> str:
+def create_mission(target: str, mode: str, scope: dict[str, Any], config: Optional[dict[str, Any]] = None) -> str:
     mid = new_id()
     ts = now()
     with _lock:
         c = _connect()
         c.execute(
-            "INSERT INTO missions (id,target,mode,status,created_at,updated_at,scope_json,result_json)"
-            " VALUES (?,?,?,?,?,?,?,?)",
-            (mid, target, mode, "queued", ts, ts, json.dumps(scope), json.dumps({})),
+            "INSERT INTO missions (id,target,mode,status,created_at,updated_at,scope_json,result_json,config_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (mid, target, mode, "queued", ts, ts, json.dumps(scope), json.dumps({}), json.dumps(config or {})),
         )
         c.commit()
     return mid
@@ -93,6 +99,8 @@ def update_mission(mid: str, **fields: Any) -> None:
         fields["result_json"] = json.dumps(fields.pop("result"), default=str)
     if "scope" in fields:
         fields["scope_json"] = json.dumps(fields.pop("scope"), default=str)
+    if "config" in fields:
+        fields["config_json"] = json.dumps(fields.pop("config"), default=str)
     fields["updated_at"] = now()
     cols = ", ".join(f"{k}=?" for k in fields)
     with _lock:
@@ -102,6 +110,8 @@ def update_mission(mid: str, **fields: Any) -> None:
 
 
 def _row_to_mission(row: sqlite3.Row) -> dict[str, Any]:
+    keys = row.keys()
+    cfg = row["config_json"] if "config_json" in keys else None
     return {
         "id": row["id"],
         "target": row["target"],
@@ -111,6 +121,7 @@ def _row_to_mission(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": row["updated_at"],
         "error": row["error"],
         "scope": json.loads(row["scope_json"] or "{}"),
+        "config": json.loads(cfg or "{}"),
         "result": json.loads(row["result_json"] or "{}"),
     }
 

@@ -24,8 +24,38 @@ def _wordlist() -> str:
     return str(local)
 
 
-def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict) -> dict:
-    threads = int(cfg.get("threads", 10))
+def _ensure_target_live(target: str, recon: dict, log) -> None:
+    """
+    httpx can intermittently miss a single host:port target (esp. via the docker
+    host-gateway). Guarantee the target is registered as a live host by reusing
+    passive recon's own HTTP probe result, so results are deterministic.
+    """
+    from ..core.scope import normalize_target
+
+    hp = normalize_target(target)
+    if any(hp in (h.get("url") or "") for h in recon.get("live_hosts", [])):
+        return
+    http = recon.get("http") or {}
+    if http.get("ok"):
+        url = (http.get("final_url") or (("https://" if http.get("is_https") else "http://") + hp)).rstrip("/")
+        recon.setdefault("live_hosts", []).append({
+            "url": url,
+            "status-code": http.get("status"),
+            "title": "",
+            "tech": [],
+            "webserver": (http.get("headers") or {}).get("server", ""),
+        })
+        log(f"target registered as live host from passive HTTP probe: {url}", "ok", "active")
+
+
+def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict, run_config: dict = None) -> dict:
+    from ..core import runconfig
+
+    rc = runconfig.normalize(run_config)
+    sp = runconfig.speed_profile(rc)
+    en = lambda t: runconfig.tool_enabled(rc, t)
+
+    threads = int(sp["threads"] or cfg.get("threads", 10))
     timeout = int(cfg.get("timeout", 8))
     severity = cfg.get("nuclei_severity", "medium,high,critical")
     ports = cfg.get("ports", "80,443,8080,8443,8888,3000,5000,9090,9200,27017,6379,5432,3306,2375,5601")
@@ -35,11 +65,15 @@ def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict) -> dict:
     if port and port not in ports.split(","):
         ports = f"{port},{ports}"  # make sure the target's own port is scanned
 
-    tools = {t: GAL.has(t) for t in ("subfinder", "amass", "httpx", "nmap", "ffuf", "gobuster", "nuclei")}
-    log(f"tool availability: {', '.join(t for t, ok in tools.items() if ok) or 'none'}", "info", "active")
+    enabled = [t for t in runconfig.TOOLS if en(t)]
+    log(f"enabled tools: {', '.join(enabled) or 'none'}  ·  speed={rc['speed']}", "info", "active")
 
     log("Subdomain enumeration (subfinder + amass)", phase="active")
-    new_subs = GAL.phase_subdomain_enum(host, run_dir, threads)
+    if en("subfinder") or en("amass"):
+        new_subs = GAL.phase_subdomain_enum(host, run_dir, threads, use_subfinder=en("subfinder"), use_amass=en("amass"))
+    else:
+        new_subs = []
+        log("subdomain enumeration disabled by toggles", "info", "active")
     all_subs = sorted(set(recon.get("subdomains", []) + new_subs))
     recon["all_subdomains"] = all_subs
     # Always probe the exact target (incl. host:port) so a single app is detected
@@ -48,21 +82,27 @@ def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict) -> dict:
     log(f"{len(all_subs)} subdomains (+ target) → probing {len(probe)}", "ok", "active")
 
     log("Live host detection (httpx)", phase="active")
-    live = GAL.phase_live_hosts(probe, run_dir, threads, timeout)
+    if en("httpx"):
+        live = GAL.phase_live_hosts(probe, run_dir, threads, timeout, extra=sp["httpx_extra"])
+    else:
+        live = []
+        log("httpx disabled by toggle — no live-host detection", "info", "active")
     recon["live_hosts"] = live
+    _ensure_target_live(target, recon, log)
+    live = recon["live_hosts"]
     log(f"{len(live)} live hosts", "ok", "active")
 
     log("Port scan (nmap)", phase="active")
-    recon["nmap"] = GAL.phase_port_scan(host, run_dir, ports)  # host only (nmap can't take :port)
+    recon["nmap"] = GAL.phase_port_scan(host, run_dir, ports, timing=sp["nmap_timing"]) if en("nmap") else {}
     log(f"{len(recon['nmap'].get('open_ports', []))} open ports", "ok", "active")
 
     log("Directory discovery (ffuf/gobuster)", phase="active")
-    recon["dir_bust"] = GAL.phase_dir_bust(live, run_dir, wordlist, threads)
+    recon["dir_bust"] = GAL.phase_dir_bust(live, run_dir, wordlist, threads, extra=sp["ffuf_extra"]) if en("ffuf") else {}
     total_paths = sum(len(v) for v in recon["dir_bust"].values())
     log(f"{total_paths} paths across {len(recon['dir_bust'])} hosts", "ok", "active")
 
     log("Vulnerability signatures (nuclei)", phase="active")
-    recon["nuclei"] = GAL.phase_nuclei(host, live, run_dir, severity)
+    recon["nuclei"] = GAL.phase_nuclei(host, live, run_dir, severity, extra=sp["nuclei_extra"]) if en("nuclei") else []
     log(f"{len(recon['nuclei'])} nuclei findings", "ok", "active")
 
     log("CORS + exposed-VCS checks", phase="active")

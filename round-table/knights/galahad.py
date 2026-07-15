@@ -40,27 +40,31 @@ def read_lines(path):
     return [l.strip() for l in p.read_text().splitlines() if l.strip()]
 
 # ─── SUBDOMAIN ENUM ────────────────────────────────────────────────────────────
-def phase_subdomain_enum(domain, run_dir, threads):
+def phase_subdomain_enum(domain, run_dir, threads, use_subfinder=True, use_amass=True):
     info("Subdomain enumeration (subfinder + amass)...")
     all_subs = set()
 
     # subfinder
     sf_out = run_dir / "subfinder_subs.txt"
-    if has("subfinder"):
+    if use_subfinder and has("subfinder"):
         run_cmd(f"subfinder -d {domain} -silent -o {sf_out} -t {threads}", timeout=180)
         subs = read_lines(sf_out)
         all_subs.update(subs)
         ok(f"subfinder: {len(subs)} subdomains")
+    elif not use_subfinder:
+        info("subfinder disabled by toggle — skipping")
     else:
         warn("subfinder not found — skipping")
 
     # amass passive only (no active brute-force to stay safe by default)
     am_out = run_dir / "amass_subs.txt"
-    if has("amass"):
+    if use_amass and has("amass"):
         run_cmd(f"amass enum -passive -d {domain} -o {am_out} -timeout 3", timeout=240)
         subs = read_lines(am_out)
         all_subs.update(subs)
         ok(f"amass: {len(subs)} subdomains")
+    elif not use_amass:
+        info("amass disabled by toggle — skipping")
     else:
         warn("amass not found — skipping")
 
@@ -71,7 +75,7 @@ def phase_subdomain_enum(domain, run_dir, threads):
     return sorted(all_subs)
 
 # ─── LIVE HOST DETECTION ───────────────────────────────────────────────────────
-def phase_live_hosts(subs, run_dir, threads, timeout):
+def phase_live_hosts(subs, run_dir, threads, timeout, extra=""):
     info("Live host detection via httpx...")
     if not has("httpx"):
         warn("httpx not found — skipping live host detection")
@@ -91,8 +95,8 @@ def phase_live_hosts(subs, run_dir, threads, timeout):
         f"httpx -l {sub_input} -silent "
         f"-status-code -title -tech-detect -content-length -web-server "
         f"-json -o {live_json} "
-        f"-threads {threads} -timeout {timeout}"
-    )
+        f"-threads {threads} -timeout {timeout} {extra}"
+    ).strip()
     run_cmd(cmd, timeout=300)
 
     hosts = []
@@ -119,7 +123,7 @@ def phase_live_hosts(subs, run_dir, threads, timeout):
     return hosts
 
 # ─── PORT SCAN ─────────────────────────────────────────────────────────────────
-def phase_port_scan(domain, run_dir, ports):
+def phase_port_scan(domain, run_dir, ports, timing="-T4"):
     info(f"Port scan via nmap (ports: {ports})...")
     if not has("nmap"):
         warn("nmap not found — skipping port scan")
@@ -129,7 +133,7 @@ def phase_port_scan(domain, run_dir, ports):
     nmap_txt = run_dir / "nmap_scan.txt"
 
     cmd = (
-        f"nmap -sV -sC -T4 -p {ports} "
+        f"nmap -sV -sC {timing} -p {ports} "
         f"--open -oX {nmap_out} -oN {nmap_txt} {domain}"
     )
     rc, stdout, _ = run_cmd(cmd, timeout=300)
@@ -147,7 +151,48 @@ def phase_port_scan(domain, run_dir, ports):
     return result
 
 # ─── DIRECTORY BUST ────────────────────────────────────────────────────────────
-def phase_dir_bust(live_hosts, run_dir, wordlist, threads):
+def _catch_all_sig(url, timeout=6):
+    """
+    Probe a random non-existent path. If the app answers it as if it existed
+    (SPA catch-all / soft-404), return that (status,length) signature so we can
+    filter identical directory-busting hits. Redirects are NOT followed, to
+    match ffuf/gobuster behaviour.
+    """
+    import urllib.request, urllib.error, ssl, random, string
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    rand = "rt_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=22))
+    ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=ctx))
+    req = urllib.request.Request(f"{url.rstrip('/')}/{rand}", headers={"User-Agent": "RoundTable/1.0"})
+    try:
+        with opener.open(req, timeout=timeout) as r:
+            return {"status": getattr(r, "status", 200), "length": len(r.read(2_000_000))}
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read(2_000_000)
+        except Exception:
+            body = b""
+        return {"status": e.code, "length": len(body)}
+    except Exception:
+        return None
+
+
+def _is_catch_all(finding, sig):
+    if not sig:
+        return False
+    if finding.get("status") != sig["status"]:
+        return False
+    fl = finding.get("length")
+    if fl is None:
+        return True  # same status, no length info (gobuster) → treat as catch-all
+    return abs(fl - sig["length"]) <= max(24, int(sig["length"] * 0.05))
+
+
+def phase_dir_bust(live_hosts, run_dir, wordlist, threads, extra=""):
     info("Directory busting via ffuf...")
     if not live_hosts:
         warn("No live hosts to bust")
@@ -158,22 +203,28 @@ def phase_dir_bust(live_hosts, run_dir, wordlist, threads):
         return {}
 
     results = {}
-    # Limit to top 5 most interesting hosts to avoid scan flooding
-    targets = live_hosts[:5]
+    targets = live_hosts[:5]  # limit to avoid scan flooding
 
     for host in targets:
-        url = host.get("url","")
+        url = host.get("url", "")
         if not url:
             continue
-        safe_name = url.replace("https://","").replace("http://","").replace("/","_").replace(":","_")
-        out_json  = run_dir / f"ffuf_{safe_name}.json"
+
+        # Soft-404 / SPA catch-all calibration: apps that 200 on everything.
+        sig = _catch_all_sig(url)
+        if sig:
+            info(f"catch-all signature for {url}: status={sig['status']} len~{sig['length']} (will filter matches)")
+
+        safe_name = url.replace("https://", "").replace("http://", "").replace("/", "_").replace(":", "_")
+        out_json = run_dir / f"ffuf_{safe_name}.json"
 
         if has("ffuf"):
+            # -ac = ffuf auto-calibration (its own wildcard/soft-404 filter).
             cmd = (
                 f"ffuf -u {url}/FUZZ -w {wordlist} "
-                f"-t {threads} -mc 200,201,301,302,401,403 "
-                f"-o {out_json} -of json -s"
-            )
+                f"-t {threads} -mc 200,201,301,302,401,403 -ac "
+                f"-o {out_json} -of json -s {extra}"
+            ).strip()
         else:
             out_txt = run_dir / f"gobuster_{safe_name}.txt"
             cmd = (
@@ -190,14 +241,23 @@ def phase_dir_bust(live_hosts, run_dir, wordlist, threads):
             try:
                 if has("ffuf"):
                     data = json.loads(out_json.read_text())
-                    findings = [{"url": r.get("url",""), "status": r.get("status",0), "length": r.get("length",0)}
-                                for r in data.get("results",[])]
+                    findings = [{"url": r.get("url", ""), "status": r.get("status", 0), "length": r.get("length", 0)}
+                                for r in data.get("results", [])]
                 else:
                     for line in out_json.read_text().splitlines():
                         if line.strip():
                             findings.append({"url": line.strip()})
-            except:
+            except Exception:
                 pass
+
+        # Post-filter catch-all matches (belt-and-suspenders over ffuf -ac; also
+        # covers gobuster). If nearly everything matches, drop it all as noise.
+        raw = len(findings)
+        filtered = [f for f in findings if not _is_catch_all(f, sig)]
+        dropped = raw - len(filtered)
+        if dropped:
+            warn(f"{url}: filtered {dropped}/{raw} catch-all/soft-404 hits")
+        findings = filtered
 
         results[url] = findings
         if findings:
@@ -208,7 +268,7 @@ def phase_dir_bust(live_hosts, run_dir, wordlist, threads):
     return results
 
 # ─── NUCLEI SCAN ───────────────────────────────────────────────────────────────
-def phase_nuclei(domain, live_hosts, run_dir, severity):
+def phase_nuclei(domain, live_hosts, run_dir, severity, extra=""):
     info(f"Nuclei vulnerability scan (severity: {severity})...")
     if not has("nuclei"):
         warn("nuclei not found — skipping vuln scan")
@@ -226,8 +286,8 @@ def phase_nuclei(domain, live_hosts, run_dir, severity):
         f"-severity {severity} "
         f"-o {nuclei_out} "
         f"-jsonl -je {nuclei_json} "
-        f"-silent -nc"
-    )
+        f"-silent -nc {extra}"
+    ).strip()
     run_cmd(cmd, timeout=600)
 
     findings = []
