@@ -134,6 +134,39 @@ def _normalize_cdn_name(name):
     return n[:-3] if n.endswith(".js") else n
 
 
+# Flexible filename fallback: catches versions written with '_' or '-' separators
+# that the strict per-lib regexes miss, e.g. PortSwigger's ginandjuice ships the
+# vulnerable AngularJS as `angular_1-7-7.js`. Known libs only (anchored on the
+# name) so it can't misread a random file, and the version separators are
+# normalized to dots for OSV.
+_FLEX_LIB_ECOSYSTEM = {
+    "jquery-ui": "npm", "jquery-migrate": "npm", "jquery": "npm",
+    "angularjs": "npm", "angular": "npm", "react-dom": "npm", "react": "npm",
+    "bootstrap": "npm", "lodash": "npm", "underscore": "npm", "moment": "npm",
+    "handlebars": "npm", "vue": "npm", "backbone": "npm", "knockout": "npm",
+    "d3": "npm", "axios": "npm", "dompurify": "npm", "ckeditor": "npm",
+    "tinymce": "npm", "swiper": "npm",
+}
+_FLEX_NAME_ALIAS = {"angularjs": "angular"}  # OSV npm package for AngularJS 1.x
+_FLEX_NAMES_BY_LEN = sorted(_FLEX_LIB_ECOSYSTEM, key=len, reverse=True)
+_FLEX_VER = r"(\d+[._-]\d+(?:[._-]\d+)?(?:[-.]?(?:alpha|beta|rc)\d*)?)"
+
+
+def _normalize_version(v):
+    return re.sub(r"[-_]", ".", v or "")
+
+
+def _flex_fingerprint_filename(fname):
+    """(name, ecosystem, normalized_version) for a known lib in `fname` written
+    with any version separator, or None."""
+    low = (fname or "").lower()
+    for known in _FLEX_NAMES_BY_LEN:
+        m = re.search(re.escape(known) + r"[-_.]v?" + _FLEX_VER, low)
+        if m:
+            return _FLEX_NAME_ALIAS.get(known, known), _FLEX_LIB_ECOSYSTEM[known], _normalize_version(m.group(1))
+    return None
+
+
 def extract_script_srcs(html):
     """Every <script src="..."> URL in an HTML document, in order."""
     return re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html or "", re.I)
@@ -190,6 +223,13 @@ def fingerprint_url(url):
                 name=sig["name"], version=m.group(1), ecosystem=sig["ecosystem"],
                 source="script-filename", confidence=HIGH, evidence=url, location=url))
             break
+    if not out:
+        flex = _flex_fingerprint_filename(path.rsplit("/", 1)[-1])
+        if flex:
+            name, eco, ver = flex
+            out.append(make_component(
+                name=name, version=ver, ecosystem=eco,
+                source="script-filename", confidence=HIGH, evidence=url, location=url))
     return out
 
 

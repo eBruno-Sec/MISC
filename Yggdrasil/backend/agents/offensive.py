@@ -2794,6 +2794,8 @@ class OffensiveEngine:
                 findings += await self._api_get_sqli(c, api_urls)
                 findings += await self._api_reflected_xss(c, api_urls)
                 findings += await self._api_ssti(c, api_urls)
+                findings += await self._api_crlf(c, api_urls)
+                findings += await self._api_xxe(c, base_url, urls)
 
                 # Authenticated classes need a session. Get a regular user token
                 # by best-effort provisioning (register+login); JWT analysis also
@@ -3126,6 +3128,109 @@ class OffensiveEngine:
                         break
                 if hit:
                     break
+        return findings
+
+    async def _api_crlf(self, c, api_urls: list) -> list:
+        """HTTP response header injection (CRLF): a parameter value carrying a
+        CRLF + a marker header that then appears in the RESPONSE headers proves
+        the value is reflected into the header block unsanitized."""
+        findings = []
+        eps = [u for u in api_urls if "?" in u and "=" in u][:30]
+        for u in eps:
+            parsed = urlparse(u)
+            pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            hit = False
+            for i, (k, _v) in enumerate(pairs):
+                marker = "yggc" + os.urandom(3).hex()
+                m = list(pairs)
+                m[i] = (k, aa.crlf_payload(marker))
+                try:
+                    r = await c.get(urlunparse(parsed._replace(query=urlencode(m))))
+                except Exception:
+                    continue
+                if aa.crlf_injected(getattr(r, "headers", {}), marker):
+                    fnd = await self.add_finding(
+                        title="HTTP Response Header Injection (CRLF)",
+                        severity="high",
+                        confidence="confirmed",
+                        description=(f"Parameter '{k}' on {parsed.path} is reflected into the response "
+                                     "headers without stripping CR/LF, so an attacker can inject "
+                                     "arbitrary headers (and split the response), enabling cache "
+                                     "poisoning, header-based XSS, and cookie injection."),
+                        evidence=f"GET {parsed.path} with {k}=...<CRLF>{aa.CRLF_HEADER_NAME}: {marker}  "
+                                 f"-> injected header echoed in the response.",
+                        cvss_score=6.1,
+                        remediation="Strip CR/LF (and reject control characters) from any value placed "
+                                    "into a response header; use a framework header API that encodes them.")
+                    try:
+                        await self.capture(r, finding_id=fnd.id if fnd else None,
+                                           notes=f"CRLF header injection on {k}")
+                    except Exception:
+                        pass
+                    findings.append({"type": "crlf-header-injection", "url": u, "param": k, "severity": "high"})
+                    hit = True
+                    break
+            if hit:
+                continue
+        return findings
+
+    async def _api_xxe(self, c, base_url: str, urls: list) -> list:
+        """XML external entity injection: POST an XXE payload (local-file external
+        entity) to XML-accepting endpoints (stock check / soap / xml import) and
+        flag when the served file's content comes back in the response. Reads a
+        harmless world-readable file only; never writes."""
+        findings = []
+        base_host = urlparse(base_url).netloc
+        cands = []
+        for u in urls or []:
+            p = urlparse(u)
+            if p.netloc and p.netloc != base_host:
+                continue
+            if re.search(r"(stock|/xml|soap|/import|/feed|/rss|checkstock|productstock)", p.path, re.I):
+                cands.append(u.split("?")[0] if not p.netloc else u.split("?")[0])
+        for d in ("/catalog/product/stock", "/product/stock", "/rest/stock",
+                  "/api/stock", "/stockcheck", "/soap", "/xml"):
+            cands.append(urljoin(base_url, d))
+        cands = list(dict.fromkeys(cands))[:10]
+        if not cands:
+            return findings
+        xml_hdr = {"Content-Type": "application/xml"}
+        benign = ('<?xml version="1.0" encoding="UTF-8"?>'
+                  '<stockCheck><productId>1</productId><storeId>1</storeId></stockCheck>')
+        for ep in cands:
+            try:
+                rb = await c.post(ep, content=benign, headers=xml_hdr)
+                bbody = rb.text or ""
+            except Exception:
+                bbody = ""
+            hit = False
+            for payload in aa.xxe_payloads():
+                try:
+                    r = await c.post(ep, content=payload, headers=xml_hdr)
+                except Exception:
+                    continue
+                if aa.xxe_file_read(r.text or "", bbody):
+                    fnd = await self.add_finding(
+                        title="XML External Entity (XXE) — local file disclosure",
+                        severity="critical",
+                        confidence="confirmed",
+                        description=(f"{ep} parsed an XML external entity and returned the contents of a "
+                                     "local server file in its response. XXE enables local file read, "
+                                     "SSRF, and (blind) data exfiltration."),
+                        evidence=f"POST {ep} with an external-entity DTD referencing file:///etc/passwd "
+                                 "-> file contents reflected in the response.",
+                        cvss_score=9.1,
+                        remediation="Disable external entity/DTD processing in the XML parser "
+                                    "(FEATURE_SECURE_PROCESSING / disallow-doctype-decl).")
+                    try:
+                        await self.capture(r, finding_id=fnd.id if fnd else None, notes="XXE file read")
+                    except Exception:
+                        pass
+                    findings.append({"type": "xxe", "url": ep, "severity": "critical"})
+                    hit = True
+                    break
+            if hit:
+                break  # one XXE confirmation is enough
         return findings
 
     async def _provision_session(self, c, base_url: str, api_urls: list):
