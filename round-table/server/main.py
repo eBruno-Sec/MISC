@@ -6,6 +6,7 @@ Zero-config: SQLite storage, recon tools baked into the image, optional AI.
 Recon & advisory only — Round Table never exploits.
 """
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,8 +26,14 @@ async def lifespan(app: FastAPI):
     db.init_db()
     hub.bind_loop(asyncio.get_running_loop())
     info = ai_client.ai_info()
-    print(f"[roundtable] up · AI={'on' if info['enabled'] else 'off'} "
-          f"({info['provider']}/{info['model'] if info['enabled'] else 'n/a'})", flush=True)
+    port = os.getenv("ROUNDTABLE_PORT", "3000")
+    ai_line = f"on ({info['provider']}/{info['model']})" if info["enabled"] else "off (rule-based, fully functional)"
+    bar = "=" * 54
+    # ASCII only: some Windows consoles use cp1252 and would crash on emoji.
+    print(f"\n  {bar}\n"
+          f"  ROUND TABLE is up  ->  open  http://localhost:{port}\n"
+          f"  AI: {ai_line}\n"
+          f"  {bar}\n", flush=True)
     yield
 
 

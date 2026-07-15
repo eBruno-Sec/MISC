@@ -1,5 +1,6 @@
 """Mission lifecycle: create/launch, inspect, guidance, topology, reports."""
 import asyncio
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -26,12 +27,15 @@ async def launch(req: LaunchRequest):
     if mode not in VALID_MODES:
         raise HTTPException(400, f"mode must be one of {sorted(VALID_MODES)}")
     target = scope_mod.normalize_target(req.target)
-    if not target or "." not in target:
-        raise HTTPException(400, "target must be a valid domain (e.g. example.com)")
+    # Accept a domain, a bare host / container name, or host:port
+    # (e.g. example.com, juice-shop:3000, host.docker.internal:42000).
+    if not target or not re.match(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$", target):
+        raise HTTPException(400, "target must be a domain, host, or host:port (e.g. example.com or juice-shop:3000)")
 
+    host, _ = scope_mod.split_host_port(target)
     scope = scope_mod.parse_scope_text(req.scope_text) if req.scope_text else scope_mod.default_scope(target)
     if not scope.get("in_scope"):
-        scope["in_scope"] = [target, f"*.{target}"]
+        scope["in_scope"] = [host, f"*.{host}"]
 
     mid = db.create_mission(target, mode, scope)
     db.add_event(mid, "info", "mission", f"Mission queued for {target} ({mode} mode)")

@@ -42,6 +42,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
   $('launch-btn').onclick = launch;
   $('target').addEventListener('keydown', e => { if (e.key === 'Enter') launch(); });
+  $('target').addEventListener('input', validateTarget);
+
+  // Draft state engine (client-side .json backup/restore)
+  $('draft-save').onclick = saveDraft;
+  $('draft-load').onclick = () => $('draft-file').click();
+  $('draft-file').addEventListener('change', e => { loadDraftFromFile(e.target.files[0]); e.target.value = ''; });
+  (() => {
+    const dz = $('draft-drop');
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); }));
+    ['dragleave', 'dragend'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('drag')));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); loadDraftFromFile(e.dataTransfer.files[0]); });
+    dz.addEventListener('click', () => $('draft-file').click());
+    dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('draft-file').click(); } });
+  })();
 
   document.querySelectorAll('.tab').forEach(b => b.onclick = () => setTab(b.dataset.tab));
   document.querySelectorAll('.ctab').forEach(b => b.onclick = () => {
@@ -53,6 +67,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   $('pb-search').addEventListener('input', e => { state.search = e.target.value.toLowerCase(); renderPlaybooks(); });
   $('topo-reset').onclick = () => window.Topology && window.Topology.recenter();
+  $('topo-zin').onclick = () => window.Topology && window.Topology.zoom(1.25);
+  $('topo-zout').onclick = () => window.Topology && window.Topology.zoom(0.8);
 
   ['c-method', 'c-url', 'c-headers', 'c-body', 'c-insecure', 'c-follow'].forEach(id =>
     $(id).addEventListener('input', updateCurlCmd));
@@ -60,8 +76,13 @@ window.addEventListener('DOMContentLoaded', () => {
   $('c-send').onclick = sendCurl;
   $('c-copy').onclick = () => copy($('c-cmd').textContent);
 
+  initTheme();
+  $('theme-toggle').onclick = toggleTheme;
+
   // Delegated clicks (payloads/cURL can contain quotes, so no inline handlers).
   document.addEventListener('click', e => {
+    const lc = e.target.closest('.loadcurlbtn');
+    if (lc) { loadReq(parseCurl(lc.dataset.loadcurl)); return; }
     const cp = e.target.closest('.copybtn');
     if (cp && cp.dataset.copy !== undefined) { copy(cp.dataset.copy); return; }
     const tc = e.target.closest('[data-tocurl]');
@@ -70,6 +91,20 @@ window.addEventListener('DOMContentLoaded', () => {
     if (eh) { expand(eh.parentNode); return; }
   });
 });
+
+/* ── theme ── */
+function initTheme() {
+  const t = localStorage.getItem('rt-theme') || 'dark';
+  document.documentElement.dataset.theme = t;
+  const b = $('theme-toggle'); if (b) b.textContent = t === 'light' ? '☾' : '☀';
+}
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('rt-theme', t);
+  $('theme-toggle').textContent = t === 'light' ? '☾' : '☀';
+  if (state.tab === 'topology') renderTopology();
+}
 
 async function health() {
   try { await api('/api/health'); $('health-dot').className = 'dot ok'; }
@@ -84,20 +119,96 @@ async function loadConfig() {
   } catch (_) {}
 }
 
+/* ── target validation (inline, real-time) ── */
+function validateTarget() {
+  const el = $('target'), field = $('field-target'), st = $('target-status');
+  const v = el.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+  field.classList.remove('is-error', 'is-valid'); st.textContent = ''; st.className = 'field-status';
+  if (!v) { el.removeAttribute('aria-invalid'); return true; }
+  const ok = /^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$/.test(v);
+  el.setAttribute('aria-invalid', ok ? 'false' : 'true');
+  if (ok) { field.classList.add('is-valid'); st.textContent = 'Looks good'; st.className = 'field-status ok'; }
+  else { field.classList.add('is-error'); st.textContent = 'Enter a domain, host, or host:port'; st.className = 'field-status err'; }
+  return ok;
+}
+
+/* ── draft state engine (deterministic .json export / validated import) ── */
+const DRAFT_VERSION = 1;
+function currentDraft() {
+  return {
+    app: 'round-table', type: 'mission_draft', version: DRAFT_VERSION,
+    saved_at: new Date().toISOString(),
+    data: { target: $('target').value, mode: $('mode').value, scope_text: $('scope').value },
+  };
+}
+function saveDraft() {
+  const blob = new Blob([JSON.stringify(currentDraft(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `FORM_draft_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Draft saved');
+}
+function validateDraft(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  if (o.type !== 'mission_draft') return false;
+  if (typeof o.version !== 'number') return false;
+  if (typeof o.saved_at !== 'string') return false;
+  const d = o.data;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+  if (typeof d.target !== 'string') return false;
+  if (!['passive', 'active', 'full'].includes(d.mode)) return false;
+  if (!(typeof d.scope_text === 'string' || d.scope_text == null)) return false;
+  return true;
+}
+function draftError(show) {
+  const b = $('draft-error');
+  if (show) { b.textContent = 'Invalid or corrupted draft file'; b.hidden = false; }
+  else { b.hidden = true; b.textContent = ''; }
+}
+function hydrateDraft(d) {
+  $('target').value = d.target || '';
+  $('mode').value = ['passive', 'active', 'full'].includes(d.mode) ? d.mode : 'passive';
+  $('scope').value = d.scope_text || '';
+  if (d.scope_text) { const sc = document.querySelector('.scope'); if (sc) sc.open = true; }
+  draftError(false); validateTarget();
+  toast('Draft restored');
+}
+function loadDraftFromFile(file) {
+  draftError(false);
+  if (!file) return;
+  if (!/\.json$/i.test(file.name || '') && file.type !== 'application/json') { draftError(true); return; }
+  if (file.size > 2 * 1024 * 1024) { draftError(true); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    let obj;
+    try { obj = JSON.parse(reader.result); } catch (_) { draftError(true); return; }
+    if (!validateDraft(obj)) { draftError(true); return; }
+    hydrateDraft(obj.data);
+  };
+  reader.onerror = () => draftError(true);
+  reader.readAsText(file);
+}
+
 /* ── missions ── */
 async function launch() {
+  const btn = $('launch-btn');
   const target = $('target').value.trim();
   const mode = $('mode').value;
   const scope_text = $('scope').value.trim() || null;
   const msg = $('launch-msg');
-  if (!target) { msg.textContent = 'Enter a target domain.'; msg.className = 'msg err'; return; }
+  if (!target) { msg.textContent = 'Enter a target domain.'; msg.className = 'msg err'; $('target').focus(); return; }
+  if (!validateTarget()) { msg.textContent = 'Fix the target format first.'; msg.className = 'msg err'; $('target').focus(); return; }
   msg.textContent = 'Launching…'; msg.className = 'msg';
+  btn.disabled = true; btn.classList.add('is-loading');
   try {
     const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target, mode, scope_text }) });
     msg.textContent = `Launched ${r.target} (${r.mode})`; msg.className = 'msg ok';
     await loadMissions();
     selectMission(r.id);
   } catch (e) { msg.textContent = 'Error: ' + e.message; msg.className = 'msg err'; }
+  finally { btn.disabled = false; btn.classList.remove('is-loading'); }
 }
 
 async function loadMissions() {
@@ -113,7 +224,10 @@ function renderMissionList() {
     const dots = SEV.filter(s => bs[s]).map(s =>
       `<span class="sevdot" style="background:${SEV_COLOR[s]}" title="${s}: ${bs[s]}"></span>`).join('');
     return `<div class="mcard ${m.id === state.currentId ? 'active' : ''}" onclick="selectMission('${m.id}')">
-      <div class="mt">${esc(m.target)}</div>
+      <div class="mtop">
+        <div class="mt">${esc(m.target)}</div>
+        <button class="delbtn" title="Delete mission" onclick="event.stopPropagation();deleteMission('${m.id}')">✕</button>
+      </div>
       <div class="mrow">
         <span class="status ${m.status}">${m.status}</span>
         <span class="muted">${m.mode}</span>
@@ -121,6 +235,21 @@ function renderMissionList() {
       <div class="mrow"><div class="sevdots">${dots}</div><span class="muted">${timeago(m.created_at)}</span></div>
     </div>`;
   }).join('');
+}
+
+async function deleteMission(id) {
+  if (!confirm('Delete this mission and all its data? This cannot be undone.')) return;
+  try {
+    await api('/api/missions/' + id, { method: 'DELETE' });
+    if (state.currentId === id) {
+      state.currentId = null; state.mission = null; state.guidance = [];
+      if (state.ws) { try { state.ws.close(); } catch (_) {} }
+      $('mission-view').classList.add('hidden');
+      $('no-mission').classList.remove('hidden');
+    }
+    await loadMissions();
+    toast('Mission deleted');
+  } catch (e) { toast('Delete failed: ' + e.message); }
 }
 
 function timeago(ts) {
@@ -261,10 +390,13 @@ function cardHTML(g) {
   const steps = (g.how_to_test || []).map(s => `<li>${esc(s)}</li>`).join('');
   const payloads = (g.payloads || []).map(p =>
     `<li><code>${esc(p)}</code> <button class="copybtn" data-copy="${esc(p)}">copy</button></li>`).join('');
-  const curls = (g.curl_steps || []).map(cs =>
-    `<div class="curlstep"><div class="cs-desc"><span>${esc(cs.desc)}</span>
-       <button class="copybtn" data-copy="${esc(cs.cmd)}">copy</button></div>
-       <pre>${esc(cs.cmd)}</pre></div>`).join('');
+  const curls = (g.curl_steps || []).map(cs => {
+    const isCurl = /^\s*curl\b/.test(cs.cmd || '');
+    const load = isCurl ? `<button class="loadcurlbtn" data-loadcurl="${esc(cs.cmd)}" title="Load method/URL/headers/body into the cURL console">→ console</button>` : '';
+    return `<div class="curlstep"><div class="cs-desc"><span>${esc(cs.desc)}</span>
+       <span class="cs-btns">${load}<button class="copybtn" data-copy="${esc(cs.cmd)}">copy</button></span></div>
+       <pre>${esc(cs.cmd)}</pre></div>`;
+  }).join('');
   const refs = (g.references || []).map(r => `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>`).join('');
   return `<div class="pb" data-gid="${g.id}">
     <div class="pb-head" style="border-left-color:${c}" data-expand="1">
@@ -296,16 +428,27 @@ function expand(pb, force) {
 function renderTopology() {
   if (!window.Topology) return;
   api('/api/missions/' + state.currentId + '/topology').then(data => {
-    if (!data.nodes || !data.nodes.length) {
+    const nodes = data.nodes || [];
+    if (!nodes.length) {
       $('topo-legend').innerHTML = '<span class="muted">No topology yet — launch an Active/Full mission.</span>';
+      $('topo-filter').innerHTML = '';
     } else {
       $('topo-legend').innerHTML = SEV.map(s =>
-        `<span><i style="background:${SEV_COLOR[s]}"></i>${s}</span>`).join('') +
-        '<span class="muted">· ● domain / host / port / endpoint</span>';
+        `<span><i style="background:${SEV_COLOR[s]}"></i>${s}</span>`).join('');
+      const types = [...new Set(nodes.map(n => n.type))].filter(t => t !== 'domain');
+      state.topoTypes = new Set(types); // reset to all visible on (re)render
+      $('topo-filter').innerHTML = types.map(t =>
+        `<label class="tfilter"><input type="checkbox" data-ttype="${t}" checked> ${t} (${nodes.filter(n => n.type === t).length})</label>`).join('');
+      $('topo-filter').querySelectorAll('input[data-ttype]').forEach(cb => cb.onchange = () => {
+        if (cb.checked) state.topoTypes.add(cb.dataset.ttype); else state.topoTypes.delete(cb.dataset.ttype);
+        window.Topology.setVisibleTypes(new Set([...state.topoTypes, 'domain']));
+      });
     }
-    window.Topology.render($('topo-canvas'), data, { onNodeClick: n => {
-      if (n.meta && n.meta.gid) jumpTo(n.meta.gid);
-    }});
+    const labelColor = getComputedStyle(document.documentElement).getPropertyValue('--topo-label').trim() || '#cbd5e1';
+    window.Topology.render($('topo-canvas'), data, {
+      labelColor,
+      onNodeClick: n => { if (n.meta && n.meta.gid) jumpTo(n.meta.gid); },
+    });
     state.topoRendered = true;
   });
 }
@@ -347,6 +490,54 @@ async function sendCurl() {
   } catch (e) { st.textContent = '✕ ' + e.message; st.className = 'curl-status bad'; }
 }
 function toCurl(url) { setTab('curl'); $('c-url').value = url.replace('{payload}', 'FUZZ'); updateCurlCmd(); }
+
+// Tokenize a shell command respecting single/double quotes (our curl strings
+// are shlex-single-quoted), then extract method/url/headers/body.
+function tokenizeCmd(cmd) {
+  const toks = []; let cur = '', q = null, has = false;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (q) { if (ch === q) q = null; else cur += ch; continue; }
+    if (ch === "'" || ch === '"') { q = ch; has = true; continue; }
+    if (/\s/.test(ch)) { if (cur || has) { toks.push(cur); cur = ''; has = false; } continue; }
+    cur += ch; has = true;
+  }
+  if (cur || has) toks.push(cur);
+  return toks;
+}
+function parseCurl(cmd) {
+  const t = tokenizeCmd(cmd);
+  const res = { method: '', url: '', headers: {}, body: null, follow: false, insecure: false, head: false };
+  const takesArg = new Set(['-o', '-w', '-D', '--max-time', '-m', '-e', '-b', '-A', '-u', '-x', '--connect-timeout', '-y', '-Y']);
+  for (let i = 0; i < t.length; i++) {
+    const a = t[i];
+    if (a === 'curl') continue;
+    if (a === '-X' || a === '--request') res.method = (t[++i] || '').toUpperCase();
+    else if (a === '-H' || a === '--header') { const h = t[++i] || ''; const j = h.indexOf(':'); if (j > 0) res.headers[h.slice(0, j).trim()] = h.slice(j + 1).trim(); }
+    else if (a === '-d' || a === '--data' || a === '--data-raw' || a === '--data-binary' || a === '--data-ascii') res.body = t[++i] || '';
+    else if (a === '-L' || a === '--location') res.follow = true;
+    else if (a === '-k' || a === '--insecure') res.insecure = true;
+    else if (a === '-I' || a === '--head') res.head = true;
+    else if (a === '--url') res.url = t[++i] || '';
+    else if (takesArg.has(a)) i++;                 // skip flag + its argument
+    else if (a.startsWith('-')) { /* boolean flag, ignore */ }
+    else if (/^https?:\/\//i.test(a) || a.includes('://')) res.url = a;
+  }
+  if (!res.method) res.method = res.head ? 'HEAD' : (res.body != null ? 'POST' : 'GET');
+  return res;
+}
+function loadReq(req) {
+  setTab('curl');
+  const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+  $('c-method').value = methods.includes(req.method) ? req.method : 'GET';
+  $('c-url').value = (req.url || '').replace('{payload}', 'FUZZ');
+  $('c-headers').value = Object.entries(req.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+  $('c-body').value = req.body || '';
+  $('c-follow').checked = !!req.follow;
+  $('c-insecure').checked = req.insecure !== false;
+  updateCurlCmd();
+  toast('Loaded into cURL console');
+}
 
 /* ── report ── */
 function renderReportLinks() {

@@ -17,6 +17,7 @@
       </div>
     </div>
     <div class="topbar-right">
+      <button id="theme-toggle" class="iconbtn" title="Toggle light / dark">☀</button>
       <span id="ai-badge" class="badge badge-muted">AI: …</span>
       <span id="health-dot" class="dot" title="backend"></span>
     </div>
@@ -25,24 +26,51 @@
   <div class="layout">
     <!-- ─── sidebar ─── -->
     <aside class="sidebar">
-      <section class="launch">
-        <h2>New Mission</h2>
-        <label>Target domain
-          <input id="target" type="text" placeholder="example.com" autocomplete="off" />
-        </label>
-        <label>Mode
-          <select id="mode">
+      <section class="launch" aria-labelledby="nm-heading">
+        <h2 id="nm-heading">New Mission</h2>
+
+        <div class="field" id="field-target">
+          <label for="target">Target domain</label>
+          <input id="target" name="target" type="text" inputmode="url" autocomplete="off"
+                 spellcheck="false" placeholder="example.com"
+                 aria-describedby="target-help target-status" />
+          <p id="target-help" class="help">Domain, host, or <code>host:port</code> — e.g. <code>juice-shop:3000</code>.</p>
+          <p id="target-status" class="field-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode" name="mode" aria-describedby="mode-help">
             <option value="passive">Passive — public data only (safe)</option>
             <option value="active">Active — enumerate live surface</option>
             <option value="full">Full — active + everything</option>
           </select>
-        </label>
-        <details class="scope">
-          <summary>Scope (optional)</summary>
-          <textarea id="scope" rows="4" placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com"></textarea>
+          <p id="mode-help" class="help">Passive is safe anywhere. Active/Full send packets to in-scope hosts.</p>
+        </div>
+
+        <details class="field scope">
+          <summary>Scope <span class="help" style="display:inline">(optional)</span></summary>
+          <label for="scope" class="sr-only">Scope rules</label>
+          <textarea id="scope" name="scope" rows="4"
+                    placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com"></textarea>
         </details>
-        <button id="launch-btn" class="btn btn-primary">Launch Mission</button>
-        <p id="launch-msg" class="msg"></p>
+
+        <button id="launch-btn" class="btn btn-primary" type="button">Launch Mission</button>
+        <p id="launch-msg" class="msg" role="status" aria-live="polite"></p>
+
+        <div class="draft">
+          <h3>Draft state</h3>
+          <div class="draft-actions">
+            <button id="draft-save" class="btn btn-soft btn-sm" type="button" title="Download the current form as a .json backup">⬇ Save Draft (.json)</button>
+            <button id="draft-load" class="btn btn-soft btn-sm" type="button" title="Restore a saved .json draft">⬆ Load Draft (.json)</button>
+            <input id="draft-file" type="file" accept="application/json,.json" hidden />
+          </div>
+          <div id="draft-drop" class="draft-drop" role="button" tabindex="0"
+               aria-label="Drop a saved draft .json file here, or press Enter to browse">
+            Drag &amp; drop a <code>.json</code> draft here
+          </div>
+          <div id="draft-error" class="banner banner-error" role="alert" hidden></div>
+        </div>
       </section>
 
       <section class="missions">
@@ -110,8 +138,13 @@
         <!-- topology -->
         <section class="panel hidden" data-panel="topology">
           <div class="topo-toolbar">
-            <span class="muted">Nodes colored by highest test severity. Drag to rearrange · hover for detail · click an endpoint to jump to its playbook.</span>
-            <button id="topo-reset" class="btn btn-ghost">Re-center</button>
+            <span class="muted">Scroll to zoom · drag background to pan · drag a node to move it · click an endpoint to open its playbook.</span>
+            <div class="topo-btns">
+              <div id="topo-filter" class="topo-filter"></div>
+              <button id="topo-zout" class="btn btn-ghost" title="Zoom out">−</button>
+              <button id="topo-zin" class="btn btn-ghost" title="Zoom in">＋</button>
+              <button id="topo-reset" class="btn btn-ghost">Re-center</button>
+            </div>
           </div>
           <div class="topo-wrap"><canvas id="topo-canvas"></canvas></div>
           <div id="topo-legend" class="topo-legend"></div>

@@ -21,11 +21,21 @@ def normalize_target(raw: str) -> str:
     return t.strip("/").strip()
 
 
+def split_host_port(target: str) -> tuple[str, str]:
+    """'juice-shop:3000' -> ('juice-shop', '3000'); 'example.com' -> ('example.com', '')."""
+    t = normalize_target(target)
+    if ":" in t:
+        h, _, p = t.rpartition(":")
+        if p.isdigit() and h:
+            return h, p
+    return t, ""
+
+
 def default_scope(target: str) -> dict:
-    """Apex domain + all subdomains are in scope by default for a mission."""
-    apex = normalize_target(target)
+    """Host (port-stripped) + all subdomains are in scope by default for a mission."""
+    host, _ = split_host_port(target)
     return {
-        "in_scope": [apex, f"*.{apex}"],
+        "in_scope": [host, f"*.{host}"],
         "out_of_scope": [],
         "allow_active": False,
     }

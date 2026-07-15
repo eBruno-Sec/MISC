@@ -1,6 +1,9 @@
 # ── stage 1: build the Go recon tools (subfinder / httpx / nuclei / ffuf) ──
-FROM golang:1.22-bookworm AS tools
-ENV GOBIN=/out CGO_ENABLED=0
+# Base must be >= the newest tool's required Go (subfinder 2.14 needs 1.24).
+# GOTOOLCHAIN=auto lets `go install` fetch a newer toolchain if a tool bumps
+# its requirement again, so @latest keeps working without another image bump.
+FROM golang:1.24-bookworm AS tools
+ENV GOBIN=/out CGO_ENABLED=0 GOTOOLCHAIN=auto
 RUN mkdir -p /out && \
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
     go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
@@ -16,9 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       nmap curl ca-certificates dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=tools /out/subfinder /out/httpx /out/nuclei /out/ffuf /usr/local/bin/
+# Keep the Go recon tools in their own dir with PATH priority, so a pip package
+# that ships a same-named console script (e.g. Python's `httpx`) can never
+# shadow the ProjectDiscovery binaries.
+COPY --from=tools /out/subfinder /out/httpx /out/nuclei /out/ffuf /opt/pdtools/
 
-ENV PYTHONUNBUFFERED=1 \
+ENV PATH="/opt/pdtools:${PATH}" \
+    PYTHONUNBUFFERED=1 \
     HOME=/root \
     ROUNDTABLE_DATA_DIR=/app/data \
     ROUNDTABLE_WORDLIST=/app/wordlists/common.txt

@@ -232,22 +232,40 @@ def phase_nuclei(domain, live_hosts, run_dir, severity):
 
     findings = []
     if nuclei_json.exists():
-        for line in nuclei_json.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        raw = nuclei_json.read_text().strip()
+        if raw:
+            parsed = None
             try:
-                findings.append(json.loads(line))
-            except:
-                pass
-    elif nuclei_out.exists():
+                # -je writes a JSON array; -jsonl writes one object per line.
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, list):
+                findings = [x for x in parsed if isinstance(x, dict)]
+            elif isinstance(parsed, dict):
+                findings = [parsed]
+            else:
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        if isinstance(obj, dict):
+                            findings.append(obj)
+                    except Exception:
+                        pass
+    if not findings and nuclei_out.exists():
         findings = [{"raw": l} for l in nuclei_out.read_text().splitlines() if l.strip()]
 
     ok(f"Nuclei findings: {len(findings)}")
     for f in findings[:10]:
-        name  = f.get("info",{}).get("name","") or f.get("raw","")[:80]
-        sev   = f.get("info",{}).get("severity","?")
-        host  = f.get("host","")
+        if not isinstance(f, dict):
+            continue
+        info_b = f.get("info", {}) if isinstance(f.get("info"), dict) else {}
+        name  = info_b.get("name", "") or str(f.get("raw", ""))[:80]
+        sev   = info_b.get("severity", "?")
+        host  = f.get("host", "")
         color = R if sev in ("critical","high") else Y if sev == "medium" else G
         print(f"    {color}[{sev.upper()}]{RST} {name}  {C}{host}{RST}")
     return findings
