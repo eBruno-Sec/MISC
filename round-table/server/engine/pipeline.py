@@ -121,6 +121,15 @@ def execute(mission_id: str, hub) -> None:
             llm_pb = guidance_llm.build_llm_guidance(recon, config)
             log(f"AI RedTeam: {len(llm_pb)} LLM playbooks (OWASP LLM Top 10)", "ok", "guidance")
             playbook = guidance_mod.sort_guidance(playbook + llm_pb)
+
+        # ── intuition: heuristic hunches + JS endpoint mining (INFO tier) ──
+        from ..core import intuition
+        hunches = intuition.build_intuition(recon, config)
+        if hunches:
+            log(f"Intuition: {len(hunches)} hunch(es) from endpoints/JS/signals", "info", "guidance")
+            playbook = guidance_mod.sort_guidance(playbook + hunches)
+        recon["_intuition_count"] = len(hunches)
+
         gstats = guidance_mod.guidance_stats(playbook)
         log(f"generated {gstats['total']} test playbooks: {gstats['by_severity']}", "ok", "guidance")
 
@@ -134,6 +143,7 @@ def execute(mission_id: str, hub) -> None:
             "open_ports": len(recon.get("nmap", {}).get("open_ports", [])),
             "nuclei": len(recon.get("nuclei", [])),
             "confirmed": len(recon.get("confirmed", [])),
+            "hunches": recon.get("_intuition_count", 0),
             "guidance": gstats,
             "mode": mode,
             "speed": config["speed"],

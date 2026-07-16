@@ -449,6 +449,7 @@ function renderOverview() {
     ['Live hosts', stats.live_hosts || 0, ''],
     ['Open ports', stats.open_ports || 0, ''],
     ['Confirmed', stats.confirmed || 0, stats.confirmed ? 'sev-HIGH' : ''],
+    ['Hunches', stats.hunches || 0, stats.hunches ? 'sev-INFO' : ''],
     ['Playbooks', (stats.guidance && stats.guidance.total) || 0, ''],
   ];
   SEV.forEach(s => { if (bs[s]) cells.push([s, bs[s], 'sev-' + s]); });
@@ -525,13 +526,14 @@ function cardHTML(g) {
     <div class="pb-head" style="border-left-color:${c}" data-expand="1">
       <span class="sev-tag" style="background:${c}">${esc(g.severity)}</span>
       ${g.confirmed ? '<span class="confirmed-tag">✓ CONFIRMED</span>' : ''}
+      ${g.hunch ? '<span class="hunch-tag">💡 HUNCH</span>' : ''}
       <h4>${esc(g.title)}</h4>
       <span class="conf-tag">${esc(g.confidence_label)} · ${g.confidence}% · ${esc(g.wstg || '')}</span>
     </div>
     <div class="pb-body hidden">
       <p><strong>Where:</strong> <code>${esc(g.surface)}</code></p>
       ${(g.challenges && g.challenges.length) ? `<p><strong>Juice Shop challenges:</strong> ${esc(g.challenges.join(' · '))}</p>` : ''}
-      <p><strong>Evidence:</strong> ${esc(g.evidence)}</p>
+      <p><strong>${g.hunch ? 'Why this caught the eye' : 'Evidence'}:</strong> ${esc(g.evidence)}</p>
       <p><strong>What to test:</strong> ${esc(g.what_to_test)}</p>
       ${steps ? `<div class="pb-block"><strong>How to test</strong><ol>${steps}</ol></div>` : ''}
       ${payloads ? `<div class="pb-block payloads"><strong>Recommended payloads / injections</strong><ul>${payloads}</ul></div>` : ''}

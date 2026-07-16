@@ -55,7 +55,8 @@ async def _anthropic(prompt: str, api_key: str, max_tokens: int, system: Optiona
     if system:
         kwargs["system"] = system
     resp = await client.messages.create(**kwargs)
-    return resp.content[0].text.strip()
+    text = resp.content[0].text if resp.content else ""
+    return (text or "").strip()
 
 
 async def _openrouter(prompt: str, api_key: str, max_tokens: int, system: Optional[str]) -> str:
@@ -89,4 +90,6 @@ async def _openrouter(prompt: str, api_key: str, max_tokens: int, system: Option
     choices = data.get("choices")
     if not choices:
         raise RuntimeError(f"OpenRouter returned no choices: {str(data)[:300]}")
-    return choices[0]["message"]["content"].strip()
+    # Some models (esp. free ones) return null content — don't crash on it.
+    content = (choices[0].get("message") or {}).get("content")
+    return (content or "").strip()
