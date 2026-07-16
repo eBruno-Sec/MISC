@@ -23,17 +23,17 @@
     </div>
   </header>
 
-  <div class="layout">
-    <!-- ─── sidebar ─── -->
-    <aside class="sidebar">
-      <section class="launch" aria-labelledby="nm-heading">
-        <h2 id="nm-heading">New Mission</h2>
+  <!-- ══════════════ SETUP VIEW ══════════════ -->
+  <main id="view-setup" class="view">
+    <div class="setup">
+      <section class="launch-card" aria-labelledby="nm-heading">
+        <h2 id="nm-heading">Configure target</h2>
+        <p id="rescan-note" class="help hidden"></p>
 
         <div class="field" id="field-target">
-          <label for="target">Target domain</label>
+          <label for="target">Target</label>
           <input id="target" name="target" type="text" inputmode="url" autocomplete="off"
-                 spellcheck="false" placeholder="example.com"
-                 aria-describedby="target-help target-status" />
+                 spellcheck="false" placeholder="example.com" aria-describedby="target-help target-status" />
           <p id="target-help" class="help">Domain, host, or <code>host:port</code> — e.g. <code>juice-shop:3000</code>.</p>
           <p id="target-status" class="field-status" role="status" aria-live="polite"></p>
         </div>
@@ -48,16 +48,15 @@
           <p id="mode-help" class="help">Passive is safe anywhere. Active/Full send packets to in-scope hosts.</p>
         </div>
 
-        <details class="field scope">
-          <summary>Scope <span class="help" style="display:inline">(optional)</span></summary>
+        <details class="field disclose scope">
+          <summary>Scope <span class="dim">(optional)</span></summary>
           <label for="scope" class="sr-only">Scope rules</label>
           <textarea id="scope" name="scope" rows="4"
                     placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com"></textarea>
         </details>
 
-        <details class="field scope" id="opts">
+        <details class="field disclose" id="opts">
           <summary>Scan options</summary>
-
           <div class="opt-group" role="group" aria-label="Tools">
             <span class="opt-label">Tools</span>
             <div class="toolgrid" id="toolgrid">
@@ -69,19 +68,18 @@
               <label class="chk"><input type="checkbox" data-tool="nuclei" checked> nuclei</label>
             </div>
           </div>
-
           <div class="opt-group">
             <span class="opt-label">Speed</span>
             <div class="segbtn" id="speed-seg" role="radiogroup" aria-label="Scan speed">
               <button type="button" class="seg on" data-speed="fast" role="radio" aria-checked="true">Fast</button>
-              <button type="button" class="seg" data-speed="slow" role="radio" aria-checked="false">Slow (rate-limited)</button>
+              <button type="button" class="seg" data-speed="slow" role="radio" aria-checked="false">Slow</button>
             </div>
-            <p class="help">Slow adds rate-limiting, delays, and jitter for production targets.</p>
           </div>
-
-          <label class="chk optrow"><input type="checkbox" id="opt-preauth" checked> Pre-authorize active phases</label>
-          <label class="chk optrow"><input type="checkbox" id="opt-loop"> 3-step iterative recon loop</label>
-          <label class="chk optrow"><input type="checkbox" id="opt-redteam"> AI RedTeam mode (OWASP LLM Top 10)</label>
+          <div class="opt-group">
+            <label class="chk optrow"><input type="checkbox" id="opt-preauth" checked> Pre-authorize active phases</label>
+            <label class="chk optrow"><input type="checkbox" id="opt-loop"> 3-step iterative recon loop</label>
+            <label class="chk optrow"><input type="checkbox" id="opt-redteam"> AI RedTeam (OWASP LLM Top 10)</label>
+          </div>
           <div class="field" id="redteam-ep" hidden>
             <label for="opt-endpoint">AI endpoint (optional)</label>
             <input id="opt-endpoint" type="text" inputmode="url" autocomplete="off"
@@ -89,19 +87,17 @@
           </div>
         </details>
 
-        <button id="launch-btn" class="btn btn-primary" type="button">Launch Mission</button>
+        <button id="launch-btn" class="btn btn-primary btn-block" type="button">Launch Mission</button>
         <p id="launch-msg" class="msg" role="status" aria-live="polite"></p>
 
-        <div class="draft">
-          <h3>Draft &amp; progress</h3>
+        <details class="disclose draft">
+          <summary>Draft &amp; progress files</summary>
           <div class="draft-actions">
             <button id="draft-save" class="btn btn-soft btn-sm" type="button" title="Download the current form inputs as a .json draft">⬇ Save Draft</button>
             <button id="draft-load" class="btn btn-soft btn-sm" type="button" title="Restore a saved .json draft">⬆ Load Draft</button>
             <input id="draft-file" type="file" accept="application/json,.json" hidden />
-          </div>
-          <div class="draft-actions">
-            <button id="prog-save" class="btn btn-soft btn-sm" type="button" title="Download the full selected mission (config, findings, graph, logs)">⬇ Save Progress</button>
-            <button id="prog-load" class="btn btn-soft btn-sm" type="button" title="Restore a full mission from .json, offline">⬆ Load Progress</button>
+            <button id="prog-save" class="btn btn-soft btn-sm" type="button" title="Download the full selected mission">⬇ Save Progress</button>
+            <button id="prog-load" class="btn btn-soft btn-sm" type="button" title="Restore a full mission from .json">⬆ Load Progress</button>
             <input id="prog-file" type="file" accept="application/json,.json" hidden />
           </div>
           <div id="draft-drop" class="draft-drop" role="button" tabindex="0"
@@ -109,137 +105,128 @@
             Drag &amp; drop a <code>.json</code> draft or progress file
           </div>
           <div id="draft-error" class="banner banner-error" role="alert" hidden></div>
+        </details>
+      </section>
+
+      <section class="recent">
+        <h2>Recent missions</h2>
+        <div id="mission-list" class="mission-grid"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ══════════════ MISSION DASHBOARD ══════════════ -->
+  <main id="view-mission" class="view hidden">
+    <div class="mission-bar">
+      <button id="back-setup" class="btn btn-ghost btn-sm" title="Back to target setup">‹ New scan</button>
+      <div class="mission-title">
+        <h2 id="m-target">—</h2>
+        <div class="mission-meta">
+          <span id="m-mode" class="pill"></span>
+          <span id="m-status" class="pill"></span>
+          <span id="m-id" class="muted"></span>
+        </div>
+      </div>
+      <button id="rescan-btn" class="btn btn-soft btn-sm" title="Reconfigure this target and relaunch">↻ Rescan</button>
+    </div>
+
+    <div class="tabbar">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="playbooks">Playbooks <span id="pb-count" class="count"></span></button>
+      <button class="tab" data-tab="topology">Topology</button>
+      <button class="tab" data-tab="logs">Logs</button>
+      <button class="tab" data-tab="curl">cURL Console</button>
+      <button class="tab" data-tab="report">Report</button>
+    </div>
+
+    <div class="panels">
+      <!-- overview -->
+      <section class="panel" data-panel="overview">
+        <div id="statgrid" class="statgrid"></div>
+        <div id="ai-summary" class="ai-summary hidden"></div>
+        <h3 class="sec-h">Top playbooks</h3>
+        <div id="top-playbooks" class="top-playbooks"></div>
+      </section>
+
+      <!-- playbooks -->
+      <section class="panel hidden" data-panel="playbooks">
+        <div class="filters">
+          <input id="pb-search" type="text" placeholder="filter by title, host, tag…" />
+          <div class="sevfilter" id="sevfilter"></div>
+        </div>
+        <div id="playbooks" class="playbooks"></div>
+      </section>
+
+      <!-- topology -->
+      <section class="panel hidden" data-panel="topology">
+        <div class="topo-toolbar">
+          <span class="muted small">Scroll to zoom · drag background to pan · drag a node · click an endpoint to open its playbook.</span>
+          <div class="topo-btns">
+            <div id="topo-filter" class="topo-filter"></div>
+            <button id="topo-zout" class="btn btn-ghost btn-sm" title="Zoom out">−</button>
+            <button id="topo-zin" class="btn btn-ghost btn-sm" title="Zoom in">＋</button>
+            <button id="topo-reset" class="btn btn-ghost btn-sm">Re-center</button>
+          </div>
+        </div>
+        <div class="topo-wrap"><canvas id="topo-canvas"></canvas></div>
+        <div id="topo-legend" class="topo-legend"></div>
+      </section>
+
+      <!-- logs -->
+      <section class="panel hidden" data-panel="logs">
+        <div id="feed" class="feed feed-full"></div>
+      </section>
+
+      <!-- curl console -->
+      <section class="panel hidden" data-panel="curl">
+        <div class="curl-console">
+          <div class="curl-left">
+            <div class="curl-row">
+              <select id="c-method">
+                <option>GET</option><option>POST</option><option>PUT</option>
+                <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+              </select>
+              <input id="c-url" type="text" placeholder="https://target/endpoint?param=value" />
+            </div>
+            <label class="mini">Headers (one per line, <code>Name: value</code>)</label>
+            <textarea id="c-headers" rows="4" placeholder="User-Agent: RoundTable&#10;Origin: https://evil.example"></textarea>
+            <label class="mini">Body</label>
+            <textarea id="c-body" rows="3" placeholder="raw request body (optional)"></textarea>
+            <div class="curl-opts">
+              <label><input type="checkbox" id="c-follow" /> follow redirects</label>
+              <label><input type="checkbox" id="c-insecure" checked /> insecure (-k)</label>
+              <button id="c-send" class="btn btn-primary btn-sm">Send</button>
+              <button id="c-copy" class="btn btn-ghost btn-sm">Copy curl</button>
+            </div>
+            <pre id="c-cmd" class="curl-cmd"></pre>
+            <p class="muted small">Requests are constrained to the mission scope (or the host you type). A manual verification aid — you craft the request.</p>
+          </div>
+          <div class="curl-right">
+            <div id="c-status" class="curl-status muted">No request sent yet.</div>
+            <div class="curl-resp">
+              <div class="curl-tabs">
+                <button class="ctab active" data-ctab="body">Body</button>
+                <button class="ctab" data-ctab="headers">Headers</button>
+              </div>
+              <pre id="c-resp-body" class="curl-out"></pre>
+              <pre id="c-resp-headers" class="curl-out hidden"></pre>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="missions">
-        <h2>Missions</h2>
-        <div id="mission-list" class="mission-list"></div>
+      <!-- report -->
+      <section class="panel hidden" data-panel="report">
+        <div class="report-actions">
+          <a id="r-html" class="btn btn-primary btn-sm" target="_blank" rel="noopener">Open HTML report ↗</a>
+          <a id="r-md" class="btn btn-ghost btn-sm">Download Markdown</a>
+          <a id="r-csv" class="btn btn-ghost btn-sm">Download CSV</a>
+          <a id="r-json" class="btn btn-ghost btn-sm">Download JSON</a>
+        </div>
+        <iframe id="r-frame" class="report-frame" title="report preview"></iframe>
       </section>
-    </aside>
-
-    <!-- ─── main ─── -->
-    <main class="main">
-      <div id="no-mission" class="empty">
-        <div class="empty-inner">
-          <span class="big">⚔</span>
-          <h2>Seat a knight at the table</h2>
-          <p>Launch a mission on the left. Round Table maps the attack surface and hands you a
-             per-endpoint test playbook: what to test, how, which payloads, confidence, tools,
-             and step-by-step cURL. You run the tests.</p>
-        </div>
-      </div>
-
-      <div id="mission-view" class="hidden">
-        <div class="mission-head">
-          <div>
-            <h2 id="m-target">—</h2>
-            <div class="mission-meta">
-              <span id="m-mode" class="pill"></span>
-              <span id="m-status" class="pill"></span>
-              <span id="m-id" class="muted"></span>
-            </div>
-          </div>
-          <div class="tabbar">
-            <button class="tab active" data-tab="overview">Overview</button>
-            <button class="tab" data-tab="playbooks">Playbooks <span id="pb-count" class="count"></span></button>
-            <button class="tab" data-tab="topology">Topology</button>
-            <button class="tab" data-tab="curl">cURL Console</button>
-            <button class="tab" data-tab="report">Report</button>
-          </div>
-        </div>
-
-        <!-- overview -->
-        <section class="panel" data-panel="overview">
-          <div id="statgrid" class="statgrid"></div>
-          <div class="two-col">
-            <div>
-              <h3>Live feed</h3>
-              <div id="feed" class="feed"></div>
-            </div>
-            <div>
-              <h3>Top playbooks</h3>
-              <div id="top-playbooks" class="top-playbooks"></div>
-            </div>
-          </div>
-          <div id="ai-summary" class="ai-summary hidden"></div>
-        </section>
-
-        <!-- playbooks -->
-        <section class="panel hidden" data-panel="playbooks">
-          <div class="filters">
-            <input id="pb-search" type="text" placeholder="filter by title, host, tag…" />
-            <div class="sevfilter" id="sevfilter"></div>
-          </div>
-          <div id="playbooks" class="playbooks"></div>
-        </section>
-
-        <!-- topology -->
-        <section class="panel hidden" data-panel="topology">
-          <div class="topo-toolbar">
-            <span class="muted">Scroll to zoom · drag background to pan · drag a node to move it · click an endpoint to open its playbook.</span>
-            <div class="topo-btns">
-              <div id="topo-filter" class="topo-filter"></div>
-              <button id="topo-zout" class="btn btn-ghost" title="Zoom out">−</button>
-              <button id="topo-zin" class="btn btn-ghost" title="Zoom in">＋</button>
-              <button id="topo-reset" class="btn btn-ghost">Re-center</button>
-            </div>
-          </div>
-          <div class="topo-wrap"><canvas id="topo-canvas"></canvas></div>
-          <div id="topo-legend" class="topo-legend"></div>
-        </section>
-
-        <!-- curl console -->
-        <section class="panel hidden" data-panel="curl">
-          <div class="curl-console">
-            <div class="curl-left">
-              <div class="curl-row">
-                <select id="c-method">
-                  <option>GET</option><option>POST</option><option>PUT</option>
-                  <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
-                </select>
-                <input id="c-url" type="text" placeholder="https://target/endpoint?param=value" />
-              </div>
-              <label class="mini">Headers (one per line, <code>Name: value</code>)</label>
-              <textarea id="c-headers" rows="4" placeholder="User-Agent: RoundTable&#10;Origin: https://evil.example"></textarea>
-              <label class="mini">Body</label>
-              <textarea id="c-body" rows="3" placeholder="raw request body (optional)"></textarea>
-              <div class="curl-opts">
-                <label><input type="checkbox" id="c-follow" /> follow redirects</label>
-                <label><input type="checkbox" id="c-insecure" checked /> insecure (-k)</label>
-                <button id="c-send" class="btn btn-primary">Send</button>
-                <button id="c-copy" class="btn btn-ghost">Copy curl</button>
-              </div>
-              <pre id="c-cmd" class="curl-cmd"></pre>
-              <p class="muted small">Requests are constrained to the mission scope (or the host you type). This is a manual verification aid — you craft the request.</p>
-            </div>
-            <div class="curl-right">
-              <div id="c-status" class="curl-status muted">No request sent yet.</div>
-              <div class="curl-resp">
-                <div class="curl-tabs">
-                  <button class="ctab active" data-ctab="body">Body</button>
-                  <button class="ctab" data-ctab="headers">Headers</button>
-                </div>
-                <pre id="c-resp-body" class="curl-out"></pre>
-                <pre id="c-resp-headers" class="curl-out hidden"></pre>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- report -->
-        <section class="panel hidden" data-panel="report">
-          <div class="report-actions">
-            <a id="r-html" class="btn btn-primary" target="_blank" rel="noopener">Open HTML report ↗</a>
-            <a id="r-md" class="btn btn-ghost">Download Markdown</a>
-            <a id="r-csv" class="btn btn-ghost">Download CSV</a>
-            <a id="r-json" class="btn btn-ghost">Download JSON</a>
-          </div>
-          <iframe id="r-frame" class="report-frame" title="report preview"></iframe>
-        </section>
-      </div>
-    </main>
-  </div>
+    </div>
+  </main>
 
   <div id="toast" class="toast hidden"></div>
 

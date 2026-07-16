@@ -88,6 +88,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   initTheme();
   $('theme-toggle').onclick = toggleTheme;
+  $('back-setup').onclick = newScan;
+  $('rescan-btn').onclick = rescan;
 
   // Delegated clicks (payloads/cURL can contain quotes, so no inline handlers).
   document.addEventListener('click', e => {
@@ -237,11 +239,10 @@ function hydrateProgress(o) {
   if (o.config) applyConfig(o.config);
   if (o.ui && Array.isArray(o.ui.sevFilter)) state.sevFilter = new Set(o.ui.sevFilter);
   if (state.ws) { try { state.ws.close(); } catch (_) {} }
-  $('no-mission').classList.add('hidden');
-  $('mission-view').classList.remove('hidden');
   $('feed').innerHTML = '<div class="ln"><span class="info">Imported mission (offline) — live feed unavailable.</span></div>';
   renderHead(); renderOverview(); renderPlaybooks(); renderReportLinks();
   draftError(false);
+  showMission();
   setTab((o.ui && o.ui.tab) || 'overview');
   toast('Progress restored (offline)');
 }
@@ -352,8 +353,7 @@ async function deleteMission(id) {
     if (state.currentId === id) {
       state.currentId = null; state.mission = null; state.guidance = [];
       if (state.ws) { try { state.ws.close(); } catch (_) {} }
-      $('mission-view').classList.add('hidden');
-      $('no-mission').classList.remove('hidden');
+      showSetup();
     }
     await loadMissions();
     toast('Mission deleted');
@@ -368,14 +368,49 @@ function timeago(ts) {
   return Math.floor(s / 86400) + 'd ago';
 }
 
+/* ── view navigation (Setup ⇄ Mission dashboard) ── */
+function showSetup() {
+  $('view-setup').classList.remove('hidden');
+  $('view-mission').classList.add('hidden');
+  window.scrollTo(0, 0);
+  loadMissions();
+}
+function showMission() {
+  $('view-mission').classList.remove('hidden');
+  $('view-setup').classList.add('hidden');
+  window.scrollTo(0, 0);
+}
+function newScan() {
+  $('rescan-note').classList.add('hidden');
+  showSetup();
+}
+function rescan() {
+  const m = state.mission; if (!m) return;
+  $('target').value = m.target || '';
+  $('mode').value = m.mode || 'passive';
+  const sc = m.scope || {};
+  const inList = (sc.in_scope || []);
+  const outList = (sc.out_of_scope || []).map(x => '!' + x);
+  // Only pre-fill scope if the user had set custom rules (not the auto default).
+  const auto = inList.length === 2 && inList.some(x => x.startsWith('*.'));
+  $('scope').value = auto ? '' : [...inList, ...outList].join('\n');
+  applyConfig(m.config || (m.result && m.result.config));
+  validateTarget();
+  const note = $('rescan-note');
+  note.textContent = `↻ Rescan of ${m.target} — review settings, then click Launch Mission.`;
+  note.classList.remove('hidden');
+  const opts = document.getElementById('opts'); if (opts) opts.open = true;
+  showSetup();
+  $('launch-btn').focus();
+}
+
 async function selectMission(id) {
   state.currentId = id; state.topoRendered = false; state.imported = false;
-  $('no-mission').classList.add('hidden');
-  $('mission-view').classList.remove('hidden');
   renderMissionList();
   $('feed').innerHTML = '';
   connectWS(id);
   await refreshMission();
+  showMission();
   setTab('overview');
 }
 
