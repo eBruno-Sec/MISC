@@ -1,0 +1,36 @@
+# ════════════════════════════════════════════════════════════════════
+# ROUND TABLE // local practice targets (isolated lab)
+#
+# A SEPARATE compose project so rebuilding the Round Table app never stops
+# these. Deliberately vulnerable apps — for AUTHORIZED local testing only.
+#
+#   Start:  docker compose -f docker-compose.targets.yml up -d
+#   Stop:   docker compose -f docker-compose.targets.yml down
+#   Status: docker compose -f docker-compose.targets.yml ps
+#
+# From the Round Table dashboard, scan them via the Docker host gateway:
+#   OWASP Juice Shop  ->  host.docker.internal:42000
+#   DVWA              ->  host.docker.internal:42001
+#   VAmPI (vuln API)  ->  host.docker.internal:42002
+# (bound to 127.0.0.1 only, so they are not exposed to your network.)
+# ════════════════════════════════════════════════════════════════════
+name: rt-targets
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:42000:3000"
+
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:42001:80"
+
+  vampi:
+    image: erev0s/vampi:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:42002:5000"
