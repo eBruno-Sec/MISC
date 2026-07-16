@@ -21,6 +21,24 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 SEV_RANK = guidance_mod.SEVERITY_RANK
 
 
+def _norm_url(u: str) -> str:
+    """Canonicalize a URL so host and host:443 (or :80) collapse to one:
+    drop the default port for the scheme and strip a trailing path slash.
+    Used to de-duplicate live hosts and directory-busting results."""
+    from urllib.parse import urlparse, urlunparse
+    try:
+        p = urlparse(u if "://" in u else "https://" + u)
+        host = (p.hostname or "").lower()
+        if not host:
+            return u.rstrip("/")
+        port = p.port
+        default = (p.scheme == "https" and port == 443) or (p.scheme == "http" and port == 80)
+        netloc = host if (port is None or default) else f"{host}:{port}"
+        return urlunparse((p.scheme, netloc, (p.path or "").rstrip("/"), "", p.query, ""))
+    except Exception:
+        return u.rstrip("/")
+
+
 class _Tee(io.TextIOBase):
     """Forward captured stdout to the real console and the mission feed, line by line."""
 
@@ -110,6 +128,34 @@ def execute(mission_id: str, hub) -> None:
                 if len(best) < len(recon["live_hosts"]):
                     log(f"deduped live hosts: {len(recon['live_hosts'])} → {len(best)} (same app on multiple schemes/ports)", "info", "active")
                 recon["live_hosts"] = list(best.values())
+                for h in recon["live_hosts"]:
+                    if h.get("url"):
+                        h["url"] = _norm_url(h["url"])
+
+            # Collapse directory-busting results by canonical URL (host vs
+            # host:443) and case-insensitive path, so paths aren't double-reported
+            # (fixes /admin + :443/admin, and /ADMIN vs /Admin vs /admin).
+            if recon.get("dir_bust"):
+                merged: dict = {}
+                for base_u, paths in recon["dir_bust"].items():
+                    bucket = merged.setdefault(_norm_url(base_u), {})
+                    for p in paths or []:
+                        u = p.get("url") if isinstance(p, dict) else str(p)
+                        if not u:
+                            continue
+                        nu = _norm_url(u)
+                        k = nu.lower()
+                        cand = {**p, "url": nu} if isinstance(p, dict) else nu
+                        prev = bucket.get(k)
+                        if prev is None:
+                            bucket[k] = cand
+                        elif nu == k and (prev.get("url") if isinstance(prev, dict) else prev) != k:
+                            bucket[k] = cand  # prefer the all-lowercase path variant for display
+                before = sum(len(v or []) for v in recon["dir_bust"].values())
+                recon["dir_bust"] = {b: list(v.values()) for b, v in merged.items()}
+                after = sum(len(v) for v in recon["dir_bust"].values())
+                if after < before:
+                    log(f"deduped discovered paths: {before} → {after} (port/case variants)", "info", "active")
 
             # ── active detectors: CONFIRM real vulns on live hosts ──
             log("── Active detectors (confirm real vulns) ──", "hdr", "detect")

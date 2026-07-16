@@ -177,7 +177,7 @@ def build_intuition(recon: dict, config: dict = None) -> list[dict]:
         for rx, typ, title, why, what, how, tags in RULES:
             if re.search(rx, path):
                 key = f"{typ}"
-                dedupe = typ + "|" + (urlparse(ep).path or "/")
+                dedupe = typ + "|" + (urlparse(ep).path or "/").lower()
                 if dedupe in seen:
                     continue
                 seen.add(dedupe)

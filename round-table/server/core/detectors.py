@@ -16,8 +16,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import random
 import ssl
+import string
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -569,10 +572,72 @@ def d_tech_libs(base):
     return findings
 
 
+def d_reflection(base):
+    """
+    Safe reflection / template-injection probe. Sends a benign unique marker and
+    an arithmetic template payload to common query params on the root and CONFIRMS:
+      - reflected input echoed unencoded (a real reflected-XSS sink), or
+      - server-side template injection (7*7 evaluates to 49).
+    Benign only — no executing payloads are sent; weaponization stays the human's
+    job. (Client-side AngularJS CSTI is evaluated in-browser, so it is confirmed
+    by the headless-DAST phase, not here — this catches server-side reflection.)
+    """
+    tok = "rt" + "".join(random.choice(string.ascii_lowercase) for _ in range(6))
+    marker = f'{tok}x"><{tok}h>'            # <{tok}h> surviving raw ⇒ HTML injection
+    ssti_val = f'{tok}s{{{{7*7}}}}{tok}e'   # {tok}s49{tok}e ⇒ template evaluated
+    params = ["q", "search", "searchTerm", "query", "s", "keyword", "name", "id", "redirect"]
+    findings, seen_xss, seen_ssti = [], False, False
+    for p in params:
+        if seen_xss and seen_ssti:
+            break
+        if not seen_xss:
+            _, hdr, body = _get(f"{base}/?{p}=" + urllib.parse.quote(marker))
+            ct = (hdr.get("Content-Type") or hdr.get("content-type") or "").lower()
+            if body and "html" in ct and f"<{tok}h>" in body:
+                seen_xss = True
+                findings.append(_finding(
+                    key="reflect-xss", title="Reflected input echoed unencoded (XSS-confirmable)",
+                    category="Injection", severity="HIGH", surface=f"{base}/?{p}=", confidence=86,
+                    evidence=f"A benign HTML marker (<{tok}h>) injected via ?{p}= was reflected raw/unencoded in the HTML response.",
+                    what="The parameter is a reflected-XSS sink — a benign HTML tag survives unescaped. "
+                         "Weaponize with a script/event payload (manual); Round Table only proves reflection.",
+                    how=["Reproduce with the curl below and confirm the marker tag appears unescaped.",
+                         "Swap the marker for an executing payload and confirm it fires in a real browser.",
+                         "Report reflected XSS with the exact parameter and HTML context."],
+                    payloads=['"><img src=x onerror=alert(document.domain)>', "<svg onload=alert(document.domain)>"],
+                    tools=["Burp Suite", "browser", "curl"],
+                    curl_steps=[{"desc": "Reflect a benign marker", "cmd": f"curl -sS -k \"{base}/?{p}={marker}\""}],
+                    references=[{"title": "PortSwigger · Reflected XSS", "url": "https://portswigger.net/web-security/cross-site-scripting/reflected"}],
+                    remediation={"summary": "Context-encode all reflected output and add a strict Content-Security-Policy.", "fixes": []},
+                    tags=["xss", "reflected", "confirmed", "exploit-guidance"],
+                ))
+        if not seen_ssti:
+            _, _, body = _get(f"{base}/?{p}=" + urllib.parse.quote(ssti_val))
+            if body and f"{tok}s49{tok}e" in body:
+                seen_ssti = True
+                findings.append(_finding(
+                    key="ssti-confirm", title="Template expression evaluated (SSTI/CSTI confirmed)",
+                    category="Injection", severity="HIGH", surface=f"{base}/?{p}=", confidence=88,
+                    evidence=f"Injected {{{{7*7}}}} rendered as 49 (marker {tok}s49{tok}e) via ?{p}= — input reaches a template engine.",
+                    what="Input is evaluated by a template engine → SSTI (server, may reach RCE) or CSTI (client, → XSS). "
+                         "Fingerprint the engine and escalate manually.",
+                    how=["Confirm 49 appears where 7*7 was injected (see curl below).",
+                         "Fingerprint the engine (Jinja2/Twig/Freemarker/AngularJS) with engine-specific probes.",
+                         "Use the matching sandbox-escape to reach RCE (server) or JS execution (client)."],
+                    payloads=["{{7*7}}", "${7*7}", "#{7*7}", "{{constructor.constructor('alert(document.domain)')()}}"],
+                    tools=["tplmap (manual)", "Burp Suite", "curl"],
+                    curl_steps=[{"desc": "Evaluate 7*7", "cmd": f"curl -sS -k \"{base}/?{p}={ssti_val}\""}],
+                    references=[{"title": "PortSwigger · SSTI", "url": "https://portswigger.net/web-security/server-side-template-injection"}],
+                    remediation={"summary": "Never render user input as a template; use logic-less templates or a strict sandbox.", "fixes": []},
+                    tags=["ssti", "csti", "confirmed", "exploit-guidance"],
+                ))
+    return findings
+
+
 DETECTORS = [
     d_sqli_login, d_sqli_search, d_ftp, d_metrics, d_app_config,
     d_error_handling, d_scoreboard, d_rest_feedback, d_jwt, d_deprecated_b2b,
-    d_tech_libs,
+    d_tech_libs, d_reflection,
 ]
 
 

