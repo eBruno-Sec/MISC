@@ -180,6 +180,15 @@ def execute(mission_id: str, hub) -> None:
                 except Exception as e:
                     log(f"headless DAST skipped: {type(e).__name__}: {e}", "warn", "detect")
 
+            # ── confirmed injection testing on DISCOVERED params (SQLi/XSS/CRLF) ──
+            try:
+                from ..core import injection
+                inj = injection.run_injection_tests(recon, config, log)
+                if inj:
+                    confirmed.extend(inj)
+            except Exception as e:
+                log(f"injection testing skipped: {type(e).__name__}: {e}", "warn", "detect")
+
             recon["confirmed"] = confirmed
             log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
             hub.push(mission_id, {"type": "phase_done", "phase": "active"})
