@@ -10,7 +10,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -78,6 +78,23 @@ async def health():
 @app.get("/api/config")
 async def config():
     return {"ai": ai_client.ai_info(), "modes": ["passive", "active", "full"], "version": "2.0.0"}
+
+
+@app.post("/api/scope/import")
+async def import_scope(payload: dict = Body(...)):
+    """Parse a bug-bounty scope CSV (HackerOne structured scope) into Round Table
+    scope rules + scannable targets."""
+    from .core import scope as scope_mod
+
+    text = (payload or {}).get("csv", "") if isinstance(payload, dict) else ""
+    if not str(text).strip():
+        raise HTTPException(400, "empty CSV")
+    try:
+        return scope_mod.parse_bounty_scope_csv(str(text))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"could not parse CSV: {type(e).__name__}: {e}")
 
 
 # SPA last so it does not shadow the API / WS routes above.

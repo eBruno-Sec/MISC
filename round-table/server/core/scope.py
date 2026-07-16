@@ -103,3 +103,111 @@ def parse_scope_text(text: str) -> dict:
         else:
             bucket.append(normalize_target(entry))
     return {"in_scope": in_s, "out_of_scope": out_s, "allow_active": False}
+
+
+# ── bug-bounty scope CSV import (HackerOne structured scope) ─────────────────
+# Asset types that map to something Round Table can scan over HTTP. Mobile app
+# IDs, source-code repos, "OTHER", etc. are recorded but not scannable here.
+_WEB_ASSET_TYPES = {"URL", "WILDCARD", "DOMAIN", "IP_ADDRESS", "CIDR", "API"}
+
+
+def _normalize_rule(host: str) -> str:
+    """Canonicalize a scope host/pattern. Fix HackerOne's occasional malformed
+    wildcards ('*tiktokv.us' → '*.tiktokv.us') and keep proper '*.x' patterns."""
+    h = (host or "").strip().lower().strip(".")
+    if h.startswith("*.") or "/" in h:
+        return h
+    if h.startswith("*"):
+        return "*." + h[1:].lstrip(".")
+    return h
+
+
+def _split_identifier(ident: str) -> tuple[str, str]:
+    """Return (host, path) from a scope identifier that may be a bare host, a
+    wildcard, or a full URL with a path (e.g. https://x.com/minis/)."""
+    s = (ident or "").strip()
+    if "://" in s:
+        s = s.split("://", 1)[1]
+    s = s.split("@")[-1]
+    host, _, rest = s.partition("/")
+    path = "/" + rest if rest.strip("/") else ""
+    return host.strip().lower(), path
+
+
+def parse_bounty_scope_csv(text: str) -> dict:
+    """
+    Parse a bug-bounty scope CSV export (HackerOne structured scope) into Round
+    Table scope. Columns used: identifier, asset_type, eligible_for_submission
+    (falls back to eligible_for_bounty). Returns in/out scope rules, a list of
+    scannable target hosts, notes for things needing manual review, and a summary.
+    """
+    import csv
+    import io
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "identifier" not in reader.fieldnames:
+        raise ValueError("not a recognized scope CSV (missing an 'identifier' column)")
+
+    in_scope, out_scope, targets, skipped, notes = [], [], [], [], []
+    seen_in, seen_out, seen_t, asset_counts = set(), set(), set(), {}
+
+    def _add(bucket, seen, rule):
+        if rule and rule not in seen:
+            seen.add(rule)
+            bucket.append(rule)
+
+    for row in reader:
+        ident = (row.get("identifier") or "").strip()
+        if not ident:
+            continue
+        atype = (row.get("asset_type") or "URL").strip().upper()
+        asset_counts[atype] = asset_counts.get(atype, 0) + 1
+        elig_raw = row.get("eligible_for_submission")
+        if elig_raw is None or str(elig_raw).strip() == "":
+            elig_raw = row.get("eligible_for_bounty", "true")
+        eligible = str(elig_raw).strip().lower() in ("true", "1", "yes")
+
+        if atype not in _WEB_ASSET_TYPES:
+            skipped.append({"identifier": ident, "asset_type": atype})
+            continue
+
+        host, path = _split_identifier(ident)
+        rule = _normalize_rule(host)
+        if not rule:
+            skipped.append({"identifier": ident, "asset_type": atype})
+            continue
+
+        # A path-specific out-of-scope URL (e.g. .../minis/) can't be enforced by
+        # host-level scope — flag it for manual review instead of blocking the
+        # whole host (which may be in scope elsewhere).
+        if not eligible and path:
+            notes.append(f"path-specific out-of-scope, verify manually: {host}{path}")
+            continue
+
+        if eligible:
+            _add(in_scope, seen_in, rule)
+            t = rule[2:] if rule.startswith("*.") else rule
+            t = t.strip(".")
+            if t.startswith("www."):
+                t = t[4:]
+            if t and "/" not in t and t not in seen_t:
+                seen_t.add(t)
+                targets.append(t)
+        else:
+            _add(out_scope, seen_out, rule)
+
+    return {
+        "in_scope": in_scope,
+        "out_of_scope": out_scope,
+        "targets": targets,
+        "skipped": skipped,
+        "notes": notes,
+        "asset_counts": asset_counts,
+        "summary": {
+            "in_scope": len(in_scope),
+            "out_of_scope": len(out_scope),
+            "targets": len(targets),
+            "skipped": len(skipped),
+            "notes": len(notes),
+        },
+    }

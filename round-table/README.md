@@ -107,7 +107,10 @@ also supported (`AI_PROVIDER=anthropic`, `AI_MODEL=claude-sonnet-4-6`).
 ## Using it
 
 1. **Launch** — enter a domain, pick a mode, optionally paste a scope
-   (one entry per line; prefix `!` for out-of-scope). Hit **Launch Mission**.
+   (one entry per line; prefix `!` for out-of-scope) **or import a HackerOne
+   structured-scope CSV** (Scope ▸ *Import scope CSV*) — it maps in/out-of-scope
+   rules, pre-fills the scannable targets, and skips non-web assets (mobile app
+   IDs, etc.). Hit **Launch Mission**.
 2. **Watch** the live feed on the Overview tab as Percival/Galahad work.
 3. **Playbooks** — filter by severity or search; expand any card for the full
    how-to, payloads (copy buttons), and step-by-step cURL. Hit

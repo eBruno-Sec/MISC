@@ -50,9 +50,15 @@
 
         <details class="field disclose scope">
           <summary>Scope <span class="dim">(optional)</span></summary>
+          <div class="scope-import">
+            <button id="scope-import-btn" class="btn btn-soft btn-sm" type="button"
+                    title="Import a HackerOne structured-scope CSV export">⬆ Import scope CSV (HackerOne)</button>
+            <input id="scope-csv-file" type="file" accept=".csv,text/csv" hidden />
+          </div>
+          <p id="scope-import-msg" class="field-status" role="status" aria-live="polite"></p>
           <label for="scope" class="sr-only">Scope rules</label>
           <textarea id="scope" name="scope" rows="4"
-                    placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com"></textarea>
+                    placeholder="One entry per line. Prefix ! for out-of-scope.&#10;example.com&#10;*.example.com&#10;!admin.example.com&#10;— or import a HackerOne scope CSV above."></textarea>
         </details>
 
         <details class="field disclose" id="opts">

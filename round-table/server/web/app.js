@@ -51,6 +51,8 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   $('opt-redteam').addEventListener('change', () => { $('redteam-ep').hidden = !$('opt-redteam').checked; });
   $('auth-type').addEventListener('change', syncAuthFields);
+  $('scope-import-btn').onclick = () => $('scope-csv-file').click();
+  $('scope-csv-file').addEventListener('change', e => { importScopeCsv(e.target.files[0]); e.target.value = ''; });
 
   // Draft (form) + Progress (full mission) .json backup/restore
   $('draft-save').onclick = saveDraft;
@@ -273,6 +275,34 @@ function loadAnyFromFile(file) {
 }
 
 /* ── run config (tool toggles, speed, pre-auth, loop, redteam) ── */
+async function importScopeCsv(file) {
+  if (!file) return;
+  const msg = $('scope-import-msg');
+  msg.textContent = `Parsing ${file.name}…`; msg.className = 'field-status';
+  try {
+    const text = await file.text();
+    const r = await fetch('/api/scope/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv: text }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('server ' + r.status));
+    const lines = [];
+    (d.in_scope || []).forEach(s => lines.push(s));
+    (d.out_of_scope || []).forEach(s => lines.push('!' + s));
+    (d.notes || []).forEach(n => lines.push('# ' + n));
+    $('scope').value = lines.join('\n');
+    const sc = document.querySelector('.scope'); if (sc) sc.open = true;
+    if ((d.targets || []).length) { $('target').value = d.targets.join(', '); validateTarget(); }
+    const s = d.summary || {};
+    msg.textContent = `Imported ${s.in_scope || 0} in-scope · ${s.out_of_scope || 0} out-of-scope · `
+      + `${s.targets || 0} scannable target(s) pre-filled · skipped ${s.skipped || 0} non-web asset(s)`
+      + (s.notes ? ` · ${s.notes} note(s) to review` : '') + '. Trim targets before launching.';
+    msg.className = 'field-status ok';
+  } catch (err) {
+    msg.textContent = 'Import failed: ' + err.message; msg.className = 'field-status err';
+  }
+}
 function syncAuthFields() {
   const t = $('auth-type').value;
   $('auth-cookie-f').hidden = t !== 'cookie';
