@@ -145,7 +145,10 @@
         <div id="statgrid" class="statgrid"></div>
         <div class="ov-cols">
           <div>
-            <h3 class="sec-h">Live activity <span class="dim">· full feed in Logs</span></h3>
+            <div class="feed-head">
+              <h3 class="sec-h">Live activity <span class="dim">· full feed in Logs</span></h3>
+              <label class="chk feed-toggle"><input type="checkbox" id="autoscroll" checked> auto-scroll</label>
+            </div>
             <div id="feed-mini" class="feed feed-mini"></div>
           </div>
           <div>
@@ -183,6 +186,10 @@
 
       <!-- logs -->
       <section class="panel hidden" data-panel="logs">
+        <div class="feed-head">
+          <h3 class="sec-h">Live feed</h3>
+          <label class="chk feed-toggle"><input type="checkbox" id="autoscroll-logs" checked> auto-scroll</label>
+        </div>
         <div id="feed" class="feed feed-full"></div>
       </section>
 

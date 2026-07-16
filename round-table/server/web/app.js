@@ -10,7 +10,7 @@ const SEV_COLOR = {
 const state = {
   missions: [], currentId: null, mission: null,
   guidance: [], sevFilter: new Set(SEV), search: '', kindFilter: 'all',
-  ws: null, tab: 'overview', topoRendered: false,
+  ws: null, tab: 'overview', topoRendered: false, autoscroll: true,
 };
 
 const $ = id => document.getElementById(id);
@@ -90,6 +90,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('theme-toggle').onclick = toggleTheme;
   $('back-setup').onclick = newScan;
   $('rescan-btn').onclick = rescan;
+  ['autoscroll', 'autoscroll-logs'].forEach(id => $(id).addEventListener('change', e => setAutoscroll(e.target.checked)));
 
   // Delegated clicks (payloads/cURL can contain quotes, so no inline handlers).
   document.addEventListener('click', e => {
@@ -472,13 +473,17 @@ function appendFeed(d) {
   // Mirror into the Overview mini-feed and the full Logs feed.
   ['feed', 'feed-mini'].forEach(id => {
     const feed = $(id); if (!feed) return;
-    const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
     const div = document.createElement('div'); div.className = 'ln'; div.innerHTML = html;
     feed.appendChild(div);
-    if (near) feed.scrollTop = feed.scrollHeight;
+    if (state.autoscroll) feed.scrollTop = feed.scrollHeight;
   });
 }
 function clearFeeds() { ['feed', 'feed-mini'].forEach(id => { const f = $(id); if (f) f.innerHTML = ''; }); }
+function setAutoscroll(v) {
+  state.autoscroll = v;
+  ['autoscroll', 'autoscroll-logs'].forEach(id => { const c = $(id); if (c) c.checked = v; });
+  if (v) ['feed', 'feed-mini'].forEach(id => { const f = $(id); if (f) f.scrollTop = f.scrollHeight; });
+}
 
 /* ── overview ── */
 function renderOverview() {

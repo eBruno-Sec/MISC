@@ -356,6 +356,9 @@ select,#mode,#c-method{appearance:none;-webkit-appearance:none;padding-right:32p
 @media(max-width:900px){.ov-cols{grid-template-columns:1fr}}
 .feed-mini{height:320px}
 .ov-cols .top-playbooks{max-height:320px}
+.feed-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.feed-head .sec-h{margin:20px 0 10px}
+.feed-toggle{color:var(--muted);font-size:12px}
 
 /* ══ PRINT — strip chrome, clean high-contrast form/data on white ══ */
 @media print{
