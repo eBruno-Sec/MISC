@@ -31,7 +31,9 @@ required.
 | 🗺️ **2D topology** | Force-directed map of domain → hosts → ports → endpoints, colored by test severity. |
 | 📋 **Test playbooks** | Per surface: what to test, how, payloads, confidence, tools, step-by-step cURL, and WSTG / PortSwigger references. |
 | 🧪 **Advanced cURL console** | Compose &amp; send scope-guarded requests for manual verification; copy-paste `curl` for anything. |
-| 📄 **Reports** | One-click HTML, plus Markdown / CSV / JSON export. |
+| 🖥️ **Headless DAST** *(opt-in)* | Renders candidate URLs in real Chromium to **confirm** DOM XSS and client-side template injection (CSTI) — the things curl can't see. |
+| 🔑 **Authenticated scans** *(opt-in)* | Paste a session cookie / bearer / headers; the whole scan (httpx · ffuf · nuclei · detectors · DAST) runs logged-in to reach post-login surface. |
+| 📄 **Reports** | One-click HTML, plus Markdown / CSV / JSON export (session secrets redacted). |
 | 🤖 **AI (optional)** | Add an OpenRouter key for an executive summary + attack chains. Everything works without it. |
 
 The guidance engine is **100% rule-based** — knowledge distilled from OWASP WSTG,
@@ -65,7 +67,9 @@ Merlin     AI (optional)      executive summary + attack chains via OpenRouter/A
 
 ### Requirements
 Docker + Docker Compose. That's it. (Recon tools — subfinder, httpx, nuclei,
-ffuf, nmap — are built into the image.)
+ffuf, nmap — plus a headless Chromium for the opt-in DAST phase are built into
+the image. The Chromium layer makes the first build larger/slower; it's only
+exercised when a mission ticks **Headless DAST**.)
 
 ### Run it
 

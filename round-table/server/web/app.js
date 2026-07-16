@@ -296,6 +296,7 @@ function buildConfig() {
     speed: (seg && seg.dataset.speed) || 'fast',
     pre_authorized: $('opt-preauth').checked,
     recon_loop: $('opt-loop').checked,
+    headless_dast: $('opt-dast').checked,
     ai_redteam: $('opt-redteam').checked,
     ai_endpoint: $('opt-endpoint').value.trim(),
     max_loops: 3,
@@ -313,6 +314,7 @@ function applyConfig(c) {
   });
   $('opt-preauth').checked = c.pre_authorized !== false;
   $('opt-loop').checked = !!c.recon_loop;
+  $('opt-dast').checked = !!c.headless_dast;
   $('opt-redteam').checked = !!c.ai_redteam;
   $('redteam-ep').hidden = !c.ai_redteam;
   $('opt-endpoint').value = c.ai_endpoint || '';
@@ -502,6 +504,7 @@ function renderHead() {
   const flags = [];
   if (cfg.speed) flags.push(cfg.speed === 'slow' ? 'slow' : 'fast');
   if (cfg.recon_loop) flags.push('loop×' + (cfg.max_loops || 3));
+  if (cfg.headless_dast) flags.push('🖥 DAST');
   if (cfg.ai_redteam) flags.push('AI RedTeam');
   if (cfg.auth && cfg.auth.type && cfg.auth.type !== 'none') flags.push('🔑 authed');
   if (state.imported) flags.push('imported');

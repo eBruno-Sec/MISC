@@ -36,6 +36,13 @@ WORKDIR /app
 COPY server/requirements.txt /app/server/requirements.txt
 RUN pip install --no-cache-dir -r /app/server/requirements.txt
 
+# Headless-browser DAST engine: install Chromium + its OS dependencies for
+# Playwright. This is the heaviest layer (~350MB); it is only exercised when a
+# mission opts into the "Headless DAST" phase, but it's baked in so the platform
+# works out of the box with a single `docker up`.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN python -m playwright install --with-deps chromium
+
 # App code: the web platform + the reused Knights + CLI config.
 COPY server/ /app/server/
 COPY knights/ /app/knights/

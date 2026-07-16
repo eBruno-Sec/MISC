@@ -50,6 +50,7 @@ def normalize(raw: Any) -> dict[str, Any]:
         "max_loops": max_loops,
         "ai_redteam": bool(raw.get("ai_redteam", False)),
         "ai_endpoint": str(raw.get("ai_endpoint", "") or "").strip(),
+        "headless_dast": bool(raw.get("headless_dast", False)),
         "auth": _norm_auth(raw.get("auth")),
     }
 

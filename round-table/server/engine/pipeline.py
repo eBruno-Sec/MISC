@@ -169,6 +169,17 @@ def execute(mission_id: str, hub) -> None:
                 url = (h.get("url") or "").rstrip("/")
                 if url:
                     confirmed.extend(detectors.run_detectors(url, log, auth=auth_h))
+            # ── headless-browser DAST (opt-in): confirm client-side vulns ──
+            if config.get("headless_dast"):
+                try:
+                    from . import dast as dast_mod
+                    dast_findings = dast_mod.run_dast(recon, config, log)
+                    if dast_findings:
+                        confirmed.extend(dast_findings)
+                        log(f"headless DAST added {len(dast_findings)} confirmed client-side issue(s)", "ok", "detect")
+                except Exception as e:
+                    log(f"headless DAST skipped: {type(e).__name__}: {e}", "warn", "detect")
+
             recon["confirmed"] = confirmed
             log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
             hub.push(mission_id, {"type": "phase_done", "phase": "active"})
@@ -214,6 +225,7 @@ def execute(mission_id: str, hub) -> None:
             "speed": config["speed"],
             "recon_loop": config["recon_loop"],
             "ai_redteam": config["ai_redteam"],
+            "headless_dast": config.get("headless_dast", False),
         }
 
         # ── optional AI executive summary ───────────────────────────────────
