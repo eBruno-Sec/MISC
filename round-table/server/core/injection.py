@@ -29,7 +29,7 @@ from .detectors import _finding, _req
 MAX_TARGETS = 40
 TIME_BUDGET_S = 150
 MAX_REQUESTS = 400
-PAGES_PER_HOST = 8
+PAGES_PER_HOST = 12
 
 COMMON_PARAMS = [
     "id", "category", "cat", "categoryId", "productId", "product", "q", "query",
@@ -53,6 +53,7 @@ ACTION_RE = re.compile(r'action\s*=\s*["\']?([^"\'\s>]+)', re.I)
 METHOD_RE = re.compile(r'method\s*=\s*["\']?(get|post)', re.I)
 NAME_RE = re.compile(r'<(?:input|textarea|select)\b[^>]*\bname\s*=\s*["\']?([^"\'\s>]+)', re.I)
 HREF_RE = re.compile(r'(?:href|action)\s*=\s*["\']([^"\']*\?[^"\']+)["\']', re.I)
+LINK_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 
 
 def _rand(n=6):
@@ -140,7 +141,28 @@ def discover_targets(recon, auth, log):
     for ep in recon.get("js_endpoints") or []:
         for b in bases:
             add_page(b + ep if str(ep).startswith("/") else str(ep))
-    pages = pages[: PAGES_PER_HOST * len(bases)]
+
+    # Harvest internal links from the base pages (1-level crawl) so app routes
+    # like /catalog are found even when directory-busting missed them — this is
+    # what lets us reach app params (?category=) that only appear in the nav/links.
+    cap = PAGES_PER_HOST * len(bases)
+    for b in bases:
+        st, hd, html = _req("GET", b, headers=dict(auth or {}), retries=1)
+        if not (html and _is_html(hd)):
+            continue
+        links = LINK_RE.findall(html)[:200]
+        # add interesting routes (catalog/blog/product/…) before generic ones
+        links.sort(key=lambda h: 0 if any(k in h.lower() for k in INTERESTING) else 1)
+        for href in links:
+            if href.startswith(("mailto:", "tel:", "javascript:", "#")):
+                continue
+            u = urljoin(b, href).split("#")[0]
+            pr = urlparse(u)
+            if pr.hostname in hostset and pr.scheme in ("http", "https"):
+                add_page(urlunparse(pr._replace(query="", fragment="")))
+            if len(pages) >= cap:
+                break
+    pages = pages[:cap]
 
     real, common, seen = [], [], set()
 
