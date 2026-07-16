@@ -358,9 +358,29 @@ def _rule_takeover(recon: dict) -> Iterable[dict]:
         )
 
 
+def _is_public_domain(host: str) -> bool:
+    """DNS-policy checks (SPF/DMARC/CAA) only apply to real registrable domains,
+    not internal names, IPs, or host:port targets."""
+    host = (host or "").lower().strip().split(":")[0].strip(".")
+    if not host or "." not in host:
+        return False
+    if host in ("localhost", "host.docker.internal"):
+        return False
+    if host.endswith((".local", ".internal", ".lan", ".localhost", ".test",
+                      ".example", ".invalid", ".localdomain")):
+        return False
+    parts = host.split(".")
+    if all(p.isdigit() for p in parts):   # IPv4
+        return False
+    tld = parts[-1]
+    return len(tld) >= 2 and tld.isalpha()
+
+
 def _rule_email(recon: dict) -> Iterable[dict]:
     em = recon.get("email") or {}
-    dom = recon.get("target") or recon.get("domain") or ""
+    dom = (recon.get("domain") or recon.get("target") or "").split(":")[0]
+    if not _is_public_domain(dom):
+        return
     missing = []
     if not em.get("spf"): missing.append("SPF")
     if not em.get("dmarc"): missing.append("DMARC")
@@ -388,8 +408,8 @@ def _rule_email(recon: dict) -> Iterable[dict]:
 
 
 def _rule_caa(recon: dict) -> Iterable[dict]:
-    if not recon.get("caa_records"):
-        dom = recon.get("target") or recon.get("domain") or ""
+    dom = (recon.get("domain") or recon.get("target") or "").split(":")[0]
+    if not recon.get("caa_records") and _is_public_domain(dom):
         yield _finding(
             key="caa-missing", title="No CAA record — any CA may issue certificates", category="Config",
             wstg="WSTG-CRYP-XX", severity="LOW", confidence=35, surface=dom,

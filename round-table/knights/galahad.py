@@ -330,6 +330,23 @@ def phase_nuclei(domain, live_hosts, run_dir, severity, extra=""):
         print(f"    {color}[{sev.upper()}]{RST} {name}  {C}{host}{RST}")
     return findings
 
+# ─── VCS content validators (defeat SPA catch-all false positives) ─────────────
+def _looks_html(b):
+    s = (b or "").lstrip().lower()
+    return s.startswith("<!doctype") or s.startswith("<html") or "<script" in s[:300] or "<body" in s[:300]
+
+def _git_head_ok(b):
+    b = (b or "").strip()
+    return b.startswith("ref:") or (len(b) == 40 and all(c in "0123456789abcdef" for c in b.lower()))
+
+def _svn_entries_ok(b):
+    b = (b or "").strip()
+    return b[:12].strip().split("\n")[0].isdigit() or b.startswith("<?xml")
+
+def _hg_requires_ok(b):
+    return any(k in (b or "") for k in ("revlogv1", "dotencode", "fncache", "generaldelta", "sparserevlog", "store"))
+
+
 # ─── CORS & VCS CHECK ──────────────────────────────────────────────────────────
 def phase_misc_checks(domain, live_hosts, run_dir):
     info("Checking CORS misconfiguration and exposed VCS...")
@@ -364,20 +381,29 @@ def phase_misc_checks(domain, live_hosts, run_dir):
         except:
             pass
 
-        # VCS exposure
-        for path in ["/.git/HEAD", "/.svn/entries", "/.hg/store"]:
+        # VCS exposure — CONTENT-validated so a SPA catch-all (200-for-everything)
+        # cannot fake it. We confirm the body actually looks like VCS metadata.
+        for path, valid in [
+            ("/.git/HEAD", _git_head_ok),
+            ("/.svn/entries", _svn_entries_ok),
+            ("/.hg/requires", _hg_requires_ok),
+        ]:
             try:
                 req = urllib.request.Request(f"{url}{path}")
-                req.add_header("User-Agent","RoundTable/1.0")
+                req.add_header("User-Agent", "RoundTable/1.0")
                 with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
-                    if r.status == 200:
-                        findings.append({
-                            "type": "Exposed VCS",
-                            "url": f"{url}{path}",
-                            "severity": "HIGH",
-                            "detail": f"VCS path accessible: {path}",
-                        })
-                        err(f"[HIGH] Exposed VCS: {url}{path}")
+                    if r.status != 200:
+                        continue
+                    body = r.read(4096).decode("utf-8", "ignore")
+                    if _looks_html(body) or not valid(body):
+                        continue  # SPA catch-all / not real VCS content
+                    findings.append({
+                        "type": "Exposed VCS",
+                        "url": f"{url}{path}",
+                        "severity": "HIGH",
+                        "detail": f"VCS content confirmed at {path}",
+                    })
+                    err(f"[HIGH] Exposed VCS: {url}{path}")
             except:
                 pass
 

@@ -117,7 +117,7 @@ def run_recon_loop(target: str, run_dir: Path, recon: dict, log, cfg: dict, conf
     from .active import _wordlist
     wordlist = _wordlist()
 
-    target_host, _ = split_host_port(target)
+    target_host, target_port = split_host_port(target)
     max_loops = int(config.get("max_loops", 3))
     loop_log = []
     run_dir = Path(run_dir)
@@ -129,7 +129,9 @@ def run_recon_loop(target: str, run_dir: Path, recon: dict, log, cfg: dict, conf
         actions = []
 
         # ── rule: probe newly discovered web ports ──
-        if en("httpx"):
+        # Only for bare-domain targets. If the operator pointed at a specific
+        # host:port, don't wander to sibling ports (avoids self-scan + dupes).
+        if en("httpx") and not target_port:
             cands = _new_web_urls_from_ports(recon, target_host)
             if cands:
                 log(f"[loop {i}] probing {len(cands)} new web port(s)", "info", "loop")
