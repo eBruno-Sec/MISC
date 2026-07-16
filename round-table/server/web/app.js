@@ -239,7 +239,9 @@ function hydrateProgress(o) {
   if (o.config) applyConfig(o.config);
   if (o.ui && Array.isArray(o.ui.sevFilter)) state.sevFilter = new Set(o.ui.sevFilter);
   if (state.ws) { try { state.ws.close(); } catch (_) {} }
-  $('feed').innerHTML = '<div class="ln"><span class="info">Imported mission (offline) — live feed unavailable.</span></div>';
+  clearFeeds();
+  const note = '<div class="ln"><span class="info">Imported mission (offline) — live feed unavailable.</span></div>';
+  ['feed', 'feed-mini'].forEach(id => { const f = $(id); if (f) f.innerHTML = note; });
   renderHead(); renderOverview(); renderPlaybooks(); renderReportLinks();
   draftError(false);
   showMission();
@@ -407,7 +409,7 @@ function rescan() {
 async function selectMission(id) {
   state.currentId = id; state.topoRendered = false; state.imported = false;
   renderMissionList();
-  $('feed').innerHTML = '';
+  clearFeeds();
   connectWS(id);
   await refreshMission();
   showMission();
@@ -464,16 +466,19 @@ function connectWS(id) {
 }
 
 function appendFeed(d) {
-  const feed = $('feed');
   const cls = d.level || 'info';
   const time = new Date((d.ts || Date.now() / 1000) * 1000).toLocaleTimeString();
-  const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
-  const div = document.createElement('div');
-  div.className = 'ln';
-  div.innerHTML = `<span class="t">${time}</span><span class="${cls}">${esc(d.message)}</span>`;
-  feed.appendChild(div);
-  if (near) feed.scrollTop = feed.scrollHeight;
+  const html = `<span class="t">${time}</span><span class="${cls}">${esc(d.message)}</span>`;
+  // Mirror into the Overview mini-feed and the full Logs feed.
+  ['feed', 'feed-mini'].forEach(id => {
+    const feed = $(id); if (!feed) return;
+    const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    const div = document.createElement('div'); div.className = 'ln'; div.innerHTML = html;
+    feed.appendChild(div);
+    if (near) feed.scrollTop = feed.scrollHeight;
+  });
 }
+function clearFeeds() { ['feed', 'feed-mini'].forEach(id => { const f = $(id); if (f) f.innerHTML = ''; }); }
 
 /* ── overview ── */
 function renderOverview() {

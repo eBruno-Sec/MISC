@@ -352,6 +352,10 @@ select,#mode,#c-method{appearance:none;-webkit-appearance:none;padding-right:32p
 .sec-h{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:20px 0 10px}
 .feed-full{height:min(70vh,640px)}
 .tabbar{margin-bottom:16px}
+.ov-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.ov-cols{grid-template-columns:1fr}}
+.feed-mini{height:320px}
+.ov-cols .top-playbooks{max-height:320px}
 
 /* ══ PRINT — strip chrome, clean high-contrast form/data on white ══ */
 @media print{
