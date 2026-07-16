@@ -2,181 +2,178 @@
 
 Big rock smash. This book for small brain. Me help you.
 
-Round Table is hunting spear for bug bounty. You point spear at website. Spear find weak spot. Spear tell you where to hit.
+Round Table is hunting spear for bug bounty. You point spear at website. Spear
+look. Spear poke. Spear find weak spot. Spear DRAW YOU MAP how to hit.
 
-Five knight do work. You say one word. All knight go.
-
-```
-PERCIVAL   look at target from far. no touch. safe.
-GALAHAD    walk up. poke target. find open door.
-LANCELOT   smart brain. say what is worth hitting.
-GAWAIN     give you fight plan. step one. step two. you swing.
-EXCALIBUR  write it all on stone tablet. txt. word. json.
-```
-
-MERLIN is chief. MERLIN wake all knight. You only talk to MERLIN.
+Spear NOT throw rock for you. Spear only show where door weak and how to smash.
+You throw rock. You the hunter. This the rule of tribe. (Pentester rule. Bug
+bounty rule.)
 
 ---
 
-## GET THE SPEAR
+## GET THE SPEAR AND MAKE IT GO
 
-You use KALI. Good. Kali is best rock.
+You need DOCKER. Docker is magic cave that hold spear. Get Docker first.
+
+Then three word:
 
 ```bash
 git clone https://github.com/eBruno-Sec/MISC.git
 cd MISC/round-table
-python3 merlin.py --setup-only -t dummy.com
+./roundtable.sh
 ```
 
-That last line make MERLIN fix everything. MERLIN:
+Wait. Spear build itself. Drink water. When done, spear say:
 
-- clean your cave (update system)
-- get all tool (subfinder, nmap, nuclei, all of them)
-- get word list for smashing doors
-- make config file for you
+```
+open http://localhost:3000
+```
 
-You do nothing. MERLIN do. Wait. Drink water.
+Open that in browser. You see the round table. No install tool. No make
+database. All inside. You do nothing. Good caveman.
+
+Stop the spear:  `./roundtable.sh --stop`
+Watch spear talk: `./roundtable.sh --logs`
 
 ---
 
-## FEED THE SMART BRAIN
+## HUNT IN FIVE POKE
 
-LANCELOT and GAWAIN need brain juice. Brain juice come from OpenRouter. One key. Works with all AI.
+1. TYPE THE DOOR. Big box say "Target". Put target. Push **Launch Mission**.
+2. WATCH. Overview page show live feed. Spear talk while it hunt.
+3. READ PLAYBOOK. Click **Playbooks**. Each card = one weak door + how to smash.
+4. SEE MAP. Click **Topology**. Picture of all door. Red door = juicy.
+5. THROW ROCK. Click **cURL Console**. Craft rock. Throw. See what break.
 
-STEP 1. Go here. Make account. Get key.
-
-```
-https://openrouter.ai/keys
-```
-
-Key look like this: `sk-or-v1-longnoise`
-
-STEP 2. Open config file.
-
-```bash
-nano config.yaml
-```
-
-STEP 3. Find this line:
-
-```yaml
-api_key: "YOUR_KEY_HERE"
-```
-
-Put your key. Like this:
-
-```yaml
-api_key: "sk-or-v1-longnoise"
-```
-
-STEP 4. Press CTRL and O. Then ENTER. Then CTRL and X. Key saved. Good caveman.
-
-FREE brain juice (no shiny rock cost):
-
-```
-meta-llama/llama-3.3-70b-instruct:free
-```
-
-STRONG brain juice (cost tiny shiny rock, keep secret safe):
-
-```
-anthropic/claude-sonnet-4-6
-```
-
-Free brain juice may show your hunt to others. On real target, use strong brain. Keep secret.
+Then click **Report**. Take stone tablet home (HTML, word, json).
 
 ---
 
-## HUNT
+## THREE KIND OF FINDING. KNOW DIFFERENCE.
 
-Point spear. Full hunt. Look. Poke. Think. Plan. Write.
-
-```bash
-python3 merlin.py -t target.com
+```
+CONFIRMED   spear SURE. spear already saw door break. trust much.
+HUNCH       spear THINK maybe weak. spear point. you check by hand.
+ADVISORY    spear WARN. door look like other doors that break. good idea to test.
 ```
 
-Only look. No poke. Safe hunt.
-
-```bash
-python3 merlin.py -t target.com --passive
-```
-
-MERLIN stop before poke. MERLIN ask you first: "poke now? y or n". You say y only if target say you allowed. No poke where not allowed. Bad. Tribe angry. Ranger come.
-
-Pick different brain for one hunt:
-
-```bash
-python3 merlin.py -t target.com --model openai/gpt-4o
-```
-
-Skip clean cave. Faster:
-
-```bash
-python3 merlin.py -t target.com --skip-update
-```
-
-Skip fight plan:
-
-```bash
-python3 merlin.py -t target.com --no-playbook
-```
+Confirmed is best meat. But hunch find secret door other hunter miss. Read all
+three.
 
 ---
 
-## WHERE STONE TABLET GO
+## WHEN SPEAR FIND OLD BROKEN TOOL (library, technology)
 
-All hunt result go in `output/` cave. Folder have target name and time.
+Website built from many small tool. Old tool = cracked tool. Spear sniff them
+like Wappalyzer dog. When spear find old cracked tool (like AngularJS 1.7.7),
+the playbook now tell you:
 
 ```
-output/target.com_20250702_143022/
-   report_target.com.txt      the big story
-   report_target.com.docx     word story for tribe elder
-   subdomains.txt             all door found
-   live_hosts.txt             door that open
-   nuclei_results.txt         weak spot found
+POTENTIAL RISK:  what bad thing happen if hit  (and how bad. HIGH? MEDIUM?)
+CVE:             the tribe number for this crack
+PAYLOAD:         the EXACT rock to throw    e.g. {{constructor.constructor('alert(1)')()}}
+HOW:             step one, step two, where to throw, what you see when it break
+FIX:             how website owner patch it
 ```
 
-Read the txt. GAWAIN fight plan inside. Do step one. See what happen. Do step two.
+So YES — old broken tool findings show danger AND show how to smash. You still
+throw the rock yourself. Spear only hand you the rock and point at the door.
 
 ---
 
-## GAWAIN FIGHT PLAN. IMPORTANT.
+## MAKE HUNT BETTER. IMPORTANT. READ THIS.
 
-GAWAIN not poke target. GAWAIN only talk. GAWAIN give list.
+Small change = spear find much more meat. Do these:
+
+**1. GIVE EXACT DOOR.**
+Not just `juice-shop`. Say the room too: `juice-shop:3000`. Spear go straight
+to right room. For real target on internet, `ginandjuice.shop` work great (that
+one PortSwigger say everyone allowed to hunt — no permission needed).
+
+**2. PICK RIGHT MODE.**
+```
+PASSIVE  only look from far. no poke. safe anywhere. finds least.
+ACTIVE   walk up, poke door. finds more.
+FULL     poke everything. finds MOST.  <-- use this when you want all meat
+```
+Want spear to find all weak spot? Use **FULL**.
+
+**3. TURN ON THE LOOP.**
+Open "Scan options". Check the box **"3-step iterative recon loop"**. Now spear
+look, then LEARN from what it saw, then look AGAIN with new eyes. Three time.
+Find hidden door the one-look hunt miss. This the single best switch. Turn on.
+
+**4. GO SLOW WHEN YOU CAN.**
+In options, pick **Slow** not Fast. Slow spear knock every door careful. Fast
+spear skip some. Slow find more. Fast when you in hurry only.
+
+**5. FEED THE SMART BRAIN (optional but good).**
+Spear think better with brain juice. Brain juice = AI. It make the HUNCH
+findings (spear gut feeling). Get free key:
 
 ```
-STEP 1: hit this door
-  TARGET:   the exact door
-  WHY:      why door weak
-  DO:       exact rock to throw, exact way to throw
-  LOOK FOR: what you see when door break
-  IF FOUND: what it mean, what next
+https://openrouter.ai/keys        key look like  sk-or-v1-longnoise
 ```
 
-You throw rock yourself. One step. Then next step. Slow. Careful. You in control. Spear not throw for you.
+Put in `.env` file (copy `.env.example` to `.env` first):
+```env
+AI_PROVIDER=openrouter
+AI_API_KEY=sk-or-v1-longnoise
+AI_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+AI_BASE_URL=https://openrouter.ai/api/v1
+```
+Then `./roundtable.sh --rebuild`. No key? Spear still hunt fine. Key just add gut
+feeling. Free key may show your hunt to strangers — on real secret target use
+paid brain and keep quiet.
+
+**6. ONE APP AT A TIME FOR DEEP HUNT.**
+Spear can hunt many target in one go (type them with comma). But for DEEPEST
+hunt, point at ONE app. Spear dig deeper when it not split between many.
+
+**7. LET HUNT FINISH.**
+Do not close browser while feed still moving. Let spear finish all step. Then
+read report.
+
+**8. PRACTICE ON TRIBE DUMMY FIRST.**
+Repo carry a cave of broken practice apps. Safe to smash. Learn here first:
+```bash
+docker compose -f targets/docker-compose.yml up -d
+```
+Then hunt `host.docker.internal:42000` (Juice Shop) and friends. See
+`targets/README.md`.
 
 ---
 
-## RULE OF TRIBE
+## GAWAIN FIGHT PLAN. HOW TO USE.
 
-PERCIVAL only look from far. Always safe. No target know you there.
+Each playbook card is a fight plan:
 
-GALAHAD walk up and poke. This send rock at target. Only do this where target say ok. Bug bounty scope. You read rule first. You break rule, big trouble.
+```
+WHAT TO TEST:  the weak thing
+HOW TO TEST:   step one. step two. slow. careful.
+PAYLOAD:       exact rock (click copy button, rock jump to your hand)
+TOOL:          which tool throw this rock best
+cURL:          exact throw, copy paste, or push into cURL Console
+CONFIDENCE:    how sure spear is
+REFERENCE:     OWASP scroll, PortSwigger scroll — learn deeper
+```
 
-MERLIN always ask before GALAHAD poke. Say n if you not sure.
+Do step one. Watch what happen. Do step two. You in control. Spear never throw
+for you.
 
 ---
 
-## KNIGHT LIST
+## RULE OF TRIBE. DO NOT BREAK.
 
-```
-PERCIVAL   look far      DNS, crt.sh, WHOIS, headers
-GALAHAD    poke close    subfinder, amass, nmap, ffuf, nuclei
-LANCELOT   think         rank weak spot, make attack chain
-GAWAIN     plan          step by step fight list, you swing
-EXCALIBUR  write         txt, word, json tablet
-```
+- PASSIVE always safe. Target never know spear there.
+- ACTIVE and FULL send rock at target. Only smash door you ALLOWED to smash.
+  Bug bounty scope. Written permission. You break rule, big trouble, ranger come.
+- Spear ask before it poke (pre-authorize checkbox). Say no if you not sure.
+- Practice dummies in `targets/` bound to your own cave only. Not on internet.
+  Safe. Smash all you want.
+
+---
 
 Erwin Bruno make spear. Good hunter.
 
-Now go hunt. Smash bug. Get shiny rock.
+Now go hunt. Turn on the loop. Use FULL. Smash bug. Get shiny rock.
