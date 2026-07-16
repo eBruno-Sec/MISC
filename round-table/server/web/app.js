@@ -50,6 +50,7 @@ window.addEventListener('DOMContentLoaded', () => {
     b.classList.add('on'); b.setAttribute('aria-checked', 'true');
   });
   $('opt-redteam').addEventListener('change', () => { $('redteam-ep').hidden = !$('opt-redteam').checked; });
+  $('auth-type').addEventListener('change', syncAuthFields);
 
   // Draft (form) + Progress (full mission) .json backup/restore
   $('draft-save').onclick = saveDraft;
@@ -272,6 +273,20 @@ function loadAnyFromFile(file) {
 }
 
 /* ── run config (tool toggles, speed, pre-auth, loop, redteam) ── */
+function syncAuthFields() {
+  const t = $('auth-type').value;
+  $('auth-cookie-f').hidden = t !== 'cookie';
+  $('auth-bearer-f').hidden = t !== 'bearer';
+  $('auth-headers-f').hidden = t !== 'header';
+}
+function readAuth() {
+  const t = $('auth-type').value;
+  const auth = { type: t, cookie: '', bearer: '', headers: [] };
+  if (t === 'cookie') auth.cookie = $('auth-cookie').value.trim();
+  else if (t === 'bearer') auth.bearer = $('auth-bearer').value.trim();
+  else if (t === 'header') auth.headers = $('auth-headers').value.split('\n').map(s => s.trim()).filter(s => s.includes(':'));
+  return auth;
+}
 function buildConfig() {
   const tools = {};
   document.querySelectorAll('#toolgrid input[data-tool]').forEach(cb => { tools[cb.dataset.tool] = cb.checked; });
@@ -284,6 +299,7 @@ function buildConfig() {
     ai_redteam: $('opt-redteam').checked,
     ai_endpoint: $('opt-endpoint').value.trim(),
     max_loops: 3,
+    auth: readAuth(),
   };
 }
 function applyConfig(c) {
@@ -300,6 +316,12 @@ function applyConfig(c) {
   $('opt-redteam').checked = !!c.ai_redteam;
   $('redteam-ep').hidden = !c.ai_redteam;
   $('opt-endpoint').value = c.ai_endpoint || '';
+  const a = c.auth || { type: 'none' };
+  $('auth-type').value = ['none', 'cookie', 'bearer', 'header'].includes(a.type) ? a.type : 'none';
+  $('auth-cookie').value = a.cookie || '';
+  $('auth-bearer').value = a.bearer || '';
+  $('auth-headers').value = (a.headers || []).join('\n');
+  syncAuthFields();
 }
 
 /* ── batch launch: one mission per target (they queue and run serially) ── */
@@ -453,6 +475,16 @@ async function refreshMission() {
       $('c-url').value = (live[0] && live[0].url) || ('https://' + m.target);
       updateCurlCmd();
     }
+    // pre-fill the cURL console with the mission's session so manual
+    // verification is authenticated too (only if the operator hasn't typed any)
+    const cfg = m.config || (m.result && m.result.config) || {};
+    if (!$('c-headers').value.trim() && cfg.auth) {
+      const a = cfg.auth, lines = [];
+      if (a.type === 'cookie' && a.cookie) lines.push('Cookie: ' + a.cookie);
+      else if (a.type === 'bearer' && a.bearer) lines.push('Authorization: ' + (/^bearer /i.test(a.bearer) ? a.bearer : 'Bearer ' + a.bearer));
+      else if (a.type === 'header') (a.headers || []).forEach(h => lines.push(h));
+      if (lines.length) { $('c-headers').value = lines.join('\n'); updateCurlCmd(); }
+    }
   } catch (_) {}
 }
 
@@ -471,6 +503,7 @@ function renderHead() {
   if (cfg.speed) flags.push(cfg.speed === 'slow' ? 'slow' : 'fast');
   if (cfg.recon_loop) flags.push('loop×' + (cfg.max_loops || 3));
   if (cfg.ai_redteam) flags.push('AI RedTeam');
+  if (cfg.auth && cfg.auth.type && cfg.auth.type !== 'none') flags.push('🔑 authed');
   if (state.imported) flags.push('imported');
   flags.forEach(f => { const s = document.createElement('span'); s.className = 'pill m-flag'; s.textContent = f; meta.appendChild(s); });
 }

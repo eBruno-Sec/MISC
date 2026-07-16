@@ -29,11 +29,27 @@ _CTX.check_hostname = False
 _CTX.verify_mode = ssl.CERT_NONE
 UA = "RoundTable/2 detector"
 
+# Auth material for authenticated scans (session passthrough), set per run by
+# run_detectors(). Merged into every probe so detectors reach post-login surface.
+_AUTH_HEADERS: dict[str, str] = {}
+
+
+def _hlist_to_dict(headers) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for h in headers or []:
+        if isinstance(h, str) and ":" in h:
+            k, v = h.split(":", 1)
+            if k.strip():
+                out[k.strip()] = v.strip()
+    return out
+
 
 # ── low-level HTTP ──────────────────────────────────────────────────────────
 def _req(method, url, headers=None, data=None, timeout=12, retries=2):
     import time
     h = {"User-Agent": UA}
+    if _AUTH_HEADERS:
+        h.update(_AUTH_HEADERS)
     if headers:
         h.update(headers)
     body = None
@@ -641,7 +657,11 @@ DETECTORS = [
 ]
 
 
-def run_detectors(base: str, log=None) -> list[dict]:
+def run_detectors(base: str, log=None, auth=None) -> list[dict]:
+    global _AUTH_HEADERS
+    _AUTH_HEADERS = _hlist_to_dict(auth)
+    if _AUTH_HEADERS and log:
+        log(f"detectors: authenticated ({', '.join(_AUTH_HEADERS.keys())})", "info", "detect")
     base = base.rstrip("/")
     out = []
     js_ver = is_juice_shop(base)

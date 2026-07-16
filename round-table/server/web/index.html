@@ -85,6 +85,31 @@
             <input id="opt-endpoint" type="text" inputmode="url" autocomplete="off"
                    placeholder="https://target/v1/chat/completions" />
           </div>
+          <div class="opt-group" role="group" aria-label="Authentication">
+            <span class="opt-label">Authenticated scan <span class="dim">(optional — reach post-login surface)</span></span>
+            <select id="auth-type" aria-describedby="auth-help">
+              <option value="none">Unauthenticated</option>
+              <option value="cookie">Session cookie</option>
+              <option value="bearer">Bearer token</option>
+              <option value="header">Custom headers</option>
+            </select>
+            <div class="field" id="auth-cookie-f" hidden>
+              <label for="auth-cookie" class="sr-only">Session cookie</label>
+              <input id="auth-cookie" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="session=abc123; token=xyz" />
+            </div>
+            <div class="field" id="auth-bearer-f" hidden>
+              <label for="auth-bearer" class="sr-only">Bearer token</label>
+              <input id="auth-bearer" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="eyJhbGciOi…  (with or without 'Bearer ')" />
+            </div>
+            <div class="field" id="auth-headers-f" hidden>
+              <label for="auth-headers" class="sr-only">Custom headers</label>
+              <textarea id="auth-headers" rows="3"
+                        placeholder="One per line — Name: value&#10;Cookie: session=abc123&#10;X-API-Key: 9f8c…"></textarea>
+            </div>
+            <p id="auth-help" class="help">Log in manually, copy your session cookie / token, paste it here. It's attached to httpx, ffuf, nuclei and the active detectors, and sent only to in-scope hosts.</p>
+          </div>
         </details>
 
         <button id="launch-btn" class="btn btn-primary btn-block" type="button">Launch Mission</button>

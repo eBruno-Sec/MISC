@@ -102,6 +102,9 @@ def execute(mission_id: str, hub) -> None:
             en = [t for t, on in config["tools"].items() if on]
             log("── Galahad // active enumeration ──", "hdr", "active")
             log(f"Active packets to in-scope hosts · speed={config['speed']} · tools: {', '.join(en) or 'none'}", "warn", "active")
+            if runconfig.is_authenticated(config):
+                names = ", ".join(h.split(":", 1)[0] for h in runconfig.auth_headers(config))
+                log(f"Authenticated scan: session passthrough active ({names}) on httpx/ffuf/nuclei + detectors", "ok", "active")
             tee = _Tee(sys.stdout, lambda ln: hub.emit(mission_id, "trace", "active", ln))
             old = sys.stdout
             sys.stdout = tee
@@ -160,11 +163,12 @@ def execute(mission_id: str, hub) -> None:
             # ── active detectors: CONFIRM real vulns on live hosts ──
             log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
             from ..core import detectors
+            auth_h = runconfig.auth_headers(config)
             confirmed = []
             for h in recon.get("live_hosts", [])[:3]:
                 url = (h.get("url") or "").rstrip("/")
                 if url:
-                    confirmed.extend(detectors.run_detectors(url, log))
+                    confirmed.extend(detectors.run_detectors(url, log, auth=auth_h))
             recon["confirmed"] = confirmed
             log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
             hub.push(mission_id, {"type": "phase_done", "phase": "active"})

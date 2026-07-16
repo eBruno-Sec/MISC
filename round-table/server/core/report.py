@@ -214,5 +214,23 @@ def generate_csv(mission: dict) -> str:
     return buf.getvalue()
 
 
+def _redact_auth(result: dict) -> dict:
+    """Never let a session cookie/token leave in an exported report — redact the
+    auth secrets while keeping the fact that the scan was authenticated."""
+    import copy
+    r = copy.deepcopy(result) if isinstance(result, dict) else {}
+    cfg = r.get("config")
+    if isinstance(cfg, dict) and isinstance(cfg.get("auth"), dict):
+        a = cfg["auth"]
+        if a.get("cookie"):
+            a["cookie"] = "***redacted***"
+        if a.get("bearer"):
+            a["bearer"] = "***redacted***"
+        if a.get("headers"):
+            a["headers"] = [h.split(":", 1)[0] + ": ***redacted***" if ":" in h else "***redacted***"
+                            for h in a["headers"]]
+    return r
+
+
 def generate_json(mission: dict) -> str:
-    return json.dumps(mission.get("result", {}), indent=2, default=str)
+    return json.dumps(_redact_auth(mission.get("result", {})), indent=2, default=str)

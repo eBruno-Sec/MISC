@@ -23,6 +23,9 @@ _CTX = ssl.create_default_context()
 _CTX.check_hostname = False
 _CTX.verify_mode = ssl.CERT_NONE
 
+# Auth material for authenticated scans, set at the start of build_intuition().
+_AUTH_HEADERS: dict[str, str] = {}
+
 
 def _gid(*p):
     return "intu_" + hashlib.sha1("|".join(p).encode()).hexdigest()[:9]
@@ -56,7 +59,9 @@ def _hunch(*, key, title, surface, why, what, how, tags=None, payloads=None,
 # ── mine endpoints/routes from the JS bundle (the "realization" source) ─────
 def _fetch(url, timeout=8):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "RoundTable/2 intuition"})
+        h = {"User-Agent": "RoundTable/2 intuition"}
+        h.update(_AUTH_HEADERS)
+        req = urllib.request.Request(url, headers=h)
         with urllib.request.urlopen(req, timeout=timeout, context=_CTX) as r:
             return r.status, r.read(4_000_000).decode("utf-8", "ignore")
     except Exception:
@@ -156,6 +161,11 @@ def _reflects(recon: dict) -> bool:
 
 
 def build_intuition(recon: dict, config: dict = None) -> list[dict]:
+    global _AUTH_HEADERS
+    from . import runconfig
+    _AUTH_HEADERS = {h.split(":", 1)[0].strip(): h.split(":", 1)[1].strip()
+                     for h in runconfig.auth_headers(config or {}) if ":" in h}
+
     out: list[dict] = []
     seen: set[str] = set()
 
