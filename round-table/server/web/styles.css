@@ -161,8 +161,9 @@ select,#mode,#c-method{appearance:none;-webkit-appearance:none;padding-right:32p
 
 .missions{margin-top:22px}
 .mission-list{display:flex;flex-direction:column;gap:8px}
-.mcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.12s}
-.mcard:hover{border-color:var(--line2);background:#141d2c}
+.mcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;
+  transition:transform .12s, border-color .12s, background .12s, box-shadow .12s;position:relative}
+.mcard:hover{border-color:var(--accent);background:#141d2c;transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.28)}
 .mcard.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .mcard .mt{font-weight:600;font-size:13px;word-break:break-all}
 .mcard .mrow{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
@@ -226,6 +227,14 @@ select,#mode,#c-method{appearance:none;-webkit-appearance:none;padding-right:32p
 .sevfilter{display:flex;gap:6px;flex-wrap:wrap}
 .sevbtn{font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:#141d2c;color:var(--muted)}
 .sevbtn.on{color:#fff}
+.kindfilter{display:flex;gap:6px;flex-wrap:wrap;margin-right:6px;padding-right:10px;border-right:1px solid var(--line)}
+.kindbtn{font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:#141d2c;color:var(--muted);cursor:pointer}
+.kindbtn:hover{color:var(--txt)}
+.kindbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.kindbtn.on.kind-confirmed{background:var(--green);border-color:var(--green);color:#052e16}
+.kindbtn.on.kind-hunch{background:var(--cyan);border-color:var(--cyan);color:#083344}
+.kindbtn .kc{opacity:.65;font-weight:600}
+:root[data-theme="light"] .kindbtn{background:#e6ebf2;color:#475569}
 .playbooks{display:flex;flex-direction:column;gap:12px}
 .pb{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .pb-head{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;border-left:5px solid var(--info)}

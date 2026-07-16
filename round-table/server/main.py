@@ -59,6 +59,17 @@ app.include_router(curl_router.router, prefix="/api/curl", tags=["curl"])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
 
 
+@app.middleware("http")
+async def spa_no_cache(request, call_next):
+    # The SPA is served from disk and updated on every image rebuild. Tell the
+    # browser to always revalidate so a rebuild never shows stale UI.
+    resp = await call_next(request)
+    p = request.url.path
+    if p == "/" or p.endswith((".js", ".css", ".html")):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "online", "platform": "Round Table", "version": "2.0.0", "ai": ai_client.ai_info()}

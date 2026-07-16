@@ -9,7 +9,7 @@ const SEV_COLOR = {
 
 const state = {
   missions: [], currentId: null, mission: null,
-  guidance: [], sevFilter: new Set(SEV), search: '',
+  guidance: [], sevFilter: new Set(SEV), search: '', kindFilter: 'all',
   ws: null, tab: 'overview', topoRendered: false,
 };
 
@@ -524,9 +524,26 @@ function toggleSev(s) {
   renderPlaybooks();
 }
 
+function kindOf(g) { return g.confirmed ? 'confirmed' : (g.hunch ? 'hunch' : 'advisory'); }
+function renderKindFilter() {
+  const g = state.guidance;
+  const counts = {
+    all: g.length,
+    confirmed: g.filter(x => x.confirmed).length,
+    hunch: g.filter(x => x.hunch).length,
+    advisory: g.filter(x => !x.confirmed && !x.hunch).length,
+  };
+  const kinds = [['all', 'All'], ['confirmed', '✓ Confirmed'], ['hunch', '💡 Hunch'], ['advisory', 'Advisory']];
+  $('kindfilter').innerHTML = kinds.map(([k, label]) =>
+    `<button class="kindbtn kind-${k} ${state.kindFilter === k ? 'on' : ''}" onclick="setKind('${k}')">${label} <span class="kc">${counts[k]}</span></button>`).join('');
+}
+function setKind(k) { state.kindFilter = k; renderPlaybooks(); }
+
 function renderPlaybooks() {
   renderSevFilter();
+  renderKindFilter();
   const list = state.guidance.filter(g => {
+    if (state.kindFilter !== 'all' && kindOf(g) !== state.kindFilter) return false;
     if (!state.sevFilter.has(g.severity)) return false;
     if (state.search) {
       const hay = (g.title + ' ' + g.surface + ' ' + (g.tags || []).join(' ') + ' ' + g.category).toLowerCase();
