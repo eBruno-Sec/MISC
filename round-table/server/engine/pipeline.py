@@ -96,6 +96,21 @@ def execute(mission_id: str, hub) -> None:
             finally:
                 sys.stdout = old
 
+            # De-dupe live hosts by hostname (same app on :80/:443 → one entry,
+            # prefer https) so findings/topology aren't triplicated.
+            if recon.get("live_hosts"):
+                from urllib.parse import urlparse
+                best: dict = {}
+                for h in recon["live_hosts"]:
+                    u = h.get("url", "")
+                    host = urlparse(u).hostname or u
+                    cur = best.get(host)
+                    if cur is None or (u.startswith("https") and not (cur.get("url", "") or "").startswith("https")):
+                        best[host] = h
+                if len(best) < len(recon["live_hosts"]):
+                    log(f"deduped live hosts: {len(recon['live_hosts'])} → {len(best)} (same app on multiple schemes/ports)", "info", "active")
+                recon["live_hosts"] = list(best.values())
+
             # ── active detectors: CONFIRM real vulns on live hosts ──
             log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
             from ..core import detectors

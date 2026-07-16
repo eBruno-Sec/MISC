@@ -344,9 +344,187 @@ def d_deprecated_b2b(base):
     return None
 
 
+# ── technology + vulnerable-library fingerprinting (Wappalyzer / retire.js-style) ──
+import re as _re
+from urllib.parse import urljoin as _urljoin
+
+# lib name from a resource filename, version from the filename
+_FILE_LIB = [
+    (_re.compile(r"angular[._/-]?(\d+)[._-](\d+)[._-](\d+)", _re.I), "AngularJS"),
+    (_re.compile(r"jquery[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "jQuery"),
+    (_re.compile(r"bootstrap[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "Bootstrap"),
+    (_re.compile(r"lodash[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "Lodash"),
+    (_re.compile(r"handlebars[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "Handlebars"),
+    (_re.compile(r"moment[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "Moment.js"),
+    (_re.compile(r"(?:dompurify|purify)[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "DOMPurify"),
+    (_re.compile(r"vue[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "Vue"),
+    (_re.compile(r"react[._-]?v?(\d+)\.(\d+)\.(\d+)", _re.I), "React"),
+]
+# lib version from file CONTENT (for files whose name lacks a version)
+_CONTENT_LIB = [
+    (_re.compile(r"AngularJS v(\d+\.\d+\.\d+)"), "AngularJS"),
+    (_re.compile(r"full\s*:\s*['\"](\d+\.\d+\.\d+)['\"][\s\S]{0,80}?angular", _re.I), "AngularJS"),
+    (_re.compile(r"jQuery JavaScript Library v(\d+\.\d+\.\d+)"), "jQuery"),
+    (_re.compile(r"jQuery v(\d+\.\d+\.\d+)"), "jQuery"),
+    (_re.compile(r"exports\.version\s*=\s*['\"](\d+\.\d+\.\d+)['\"]"), "React"),
+    (_re.compile(r"Bootstrap v(\d+\.\d+\.\d+)"), "Bootstrap"),
+    (_re.compile(r"moment\.js version\s*:\s*(\d+\.\d+\.\d+)", _re.I), "Moment.js"),
+]
+
+
+def _ver_t(v):
+    p = [int(x) for x in _re.findall(r"\d+", v)[:3]]
+    return tuple(p + [0] * (3 - len(p)))
+
+
+def _lib_vuln(lib, ver):
+    """Return (severity, confidence, note, references, fix) if this version is known-vulnerable."""
+    v = _ver_t(ver)
+    R = lambda t, u: {"title": t, "url": u}
+    if lib == "AngularJS":
+        return ("HIGH", 88,
+                f"AngularJS {ver} is END-OF-LIFE (since Jan 2022) and affected by multiple XSS / sandbox-bypass "
+                f"CVEs (e.g. CVE-2020-7676, CVE-2019-10768, CVE-2022-25844).",
+                [R("AngularJS advisories (retire.js)", "https://github.com/RetireJS/retire.js"),
+                 R("CVE-2020-7676", "https://nvd.nist.gov/vuln/detail/CVE-2020-7676")],
+                "AngularJS 1.x is unsupported — migrate to a maintained framework. Until then, never bind untrusted input into AngularJS templates/expressions.")
+    if lib == "jQuery":
+        if v < (1, 9, 0):
+            return ("HIGH", 82, f"jQuery {ver}: multiple XSS / selector-injection issues. Upgrade to >= 3.5.0.",
+                    [R("CVE-2020-11022", "https://nvd.nist.gov/vuln/detail/CVE-2020-11022")], "Upgrade jQuery to >= 3.5.0.")
+        if v < (3, 4, 0):
+            return ("MEDIUM", 78, f"jQuery {ver}: CVE-2019-11358 (prototype pollution) + $() HTML XSS.",
+                    [R("CVE-2019-11358", "https://nvd.nist.gov/vuln/detail/CVE-2019-11358")], "Upgrade jQuery to >= 3.5.0.")
+        if v < (3, 5, 0):
+            return ("MEDIUM", 78, f"jQuery {ver}: CVE-2020-11022 / CVE-2020-11023 (XSS via htmlPrefilter).",
+                    [R("CVE-2020-11023", "https://nvd.nist.gov/vuln/detail/CVE-2020-11023")], "Upgrade jQuery to >= 3.5.0.")
+        return None
+    if lib == "Bootstrap":
+        if (v[0] == 3 and v < (3, 4, 1)) or (v[0] == 4 and v < (4, 3, 1)):
+            return ("MEDIUM", 76, f"Bootstrap {ver}: CVE-2019-8331 XSS via data-template in tooltip/popover.",
+                    [R("CVE-2019-8331", "https://nvd.nist.gov/vuln/detail/CVE-2019-8331")], "Upgrade Bootstrap to >= 4.3.1 (or 3.4.1).")
+        return None
+    if lib == "Lodash":
+        if v < (4, 17, 21):
+            return ("MEDIUM", 78, f"Lodash {ver}: prototype pollution / command injection (CVE-2020-8203, CVE-2021-23337).",
+                    [R("CVE-2021-23337", "https://nvd.nist.gov/vuln/detail/CVE-2021-23337")], "Upgrade lodash to >= 4.17.21.")
+        return None
+    if lib == "Handlebars":
+        if v < (4, 7, 7):
+            return ("HIGH", 80, f"Handlebars {ver}: prototype pollution leading to RCE (CVE-2019-19919, CVE-2021-23369).",
+                    [R("CVE-2021-23369", "https://nvd.nist.gov/vuln/detail/CVE-2021-23369")], "Upgrade Handlebars to >= 4.7.7.")
+        return None
+    if lib == "Moment.js":
+        if v < (2, 29, 4):
+            return ("MEDIUM", 74, f"Moment.js {ver}: ReDoS / path traversal (CVE-2022-24785, CVE-2022-31129).",
+                    [R("CVE-2022-31129", "https://nvd.nist.gov/vuln/detail/CVE-2022-31129")], "Upgrade moment to >= 2.29.4 or migrate to a maintained date library.")
+        return None
+    return None
+
+
+def d_tech_libs(base):
+    # Gather markup from the root + a few common routes so libraries loaded only
+    # on inner pages (e.g. AngularJS on /blog) are still detected.
+    hdrs0 = {}
+    html_all = ""
+    for i, path in enumerate(["", "/blog", "/catalog", "/login"]):
+        st, h, html = _get(base + path)
+        if i == 0:
+            hdrs0 = h or {}
+        if html:
+            html_all += "\n" + html
+    if not html_all.strip():
+        return []
+
+    resources, seen = [], set()
+    for tag in _re.findall(r'<(?:script|link|img)[^>]+(?:src|href)=["\']([^"\']+)["\']', html_all, _re.I):
+        u = _urljoin(base + "/", tag)
+        if u not in seen:
+            seen.add(u)
+            resources.append(u)
+
+    detected = {}  # lib -> (version, source_url)
+    for url in resources:
+        for pat, lib in _FILE_LIB:
+            m = pat.search(url)
+            if m and lib not in detected:
+                detected[lib] = (".".join(m.groups()), url)
+                break
+
+    # content-based version sniffing for JS files (bounded)
+    fetched = 0
+    for url in resources:
+        if fetched >= 10 or not url.lower().split("?")[0].endswith(".js"):
+            continue
+        _, _, body = _get(url)
+        if not body:
+            continue
+        fetched += 1
+        for pat, lib in _CONTENT_LIB:
+            if lib in detected:
+                continue
+            m = pat.search(body)
+            if m:
+                detected[lib] = (m.group(1), url)
+
+    techs = set()
+    low = {k.lower(): v for k, v in (hdrs0 or {}).items()}
+    if low.get("server"):
+        techs.add("Server: " + low["server"])
+    if low.get("x-powered-by"):
+        techs.add("X-Powered-By: " + low["x-powered-by"])
+    g = _re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']([^"\']+)', html_all, _re.I)
+    if g:
+        techs.add("Generator: " + g.group(1))
+    for lib, (ver, _u) in detected.items():
+        techs.add(f"{lib} {ver}")
+    if "ng-app" in html_all or "ng-controller" in html_all:
+        techs.add("AngularJS (markup)")
+    if "data-reactroot" in html_all or "_reactListening" in html_all:
+        techs.add("React (markup)")
+
+    findings = []
+    if techs:
+        findings.append(_finding(
+            key="tech-detect", title="Technologies detected (fingerprint)",
+            category="Technology", severity="INFO", surface=base, confidence=75,
+            evidence="Detected: " + " · ".join(sorted(techs)[:24]),
+            what="Component/version inventory (like Wappalyzer). Cross-check each version against known CVEs.",
+            how=["Confirm versions in the served JS/asset files.",
+                 "Run retire.js / OWASP Dependency-Check against the discovered libraries.",
+                 "Match server/framework banners to CVE / ExploitDB."],
+            tools=["retire.js", "Wappalyzer", "nuclei -t technologies", "curl"],
+            references=[{"title": "OWASP A06: Vulnerable & Outdated Components",
+                         "url": "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"}],
+            tags=["fingerprint", "tech"],
+        ))
+
+    for lib, (ver, url) in detected.items():
+        vres = _lib_vuln(lib, ver)
+        if not vres:
+            continue
+        sev, conf, note, refs, fix = vres
+        findings.append(_finding(
+            key=f"vuln-lib-{lib.lower()}", title=f"Vulnerable JS dependency: {lib} {ver}",
+            category="Vulnerable Components", severity=sev, surface=url, confidence=conf,
+            evidence=note + f"  (loaded from {url})",
+            what=f"The app ships {lib} {ver}, a version with known public vulnerabilities.",
+            how=[f"Confirm the version: curl {url}",
+                 "Look up the exact CVEs for this version (retire.js / Snyk / NVD).",
+                 "Assess whether the vulnerable code paths are reachable in the app before reporting impact."],
+            tools=["retire.js", "curl", "Burp Suite"],
+            curl_steps=[{"desc": "Fetch the library header", "cmd": f"curl -sS -k {url} | head -c 500"}],
+            references=refs,
+            remediation={"summary": fix, "fixes": []},
+            tags=["vuln-lib", "components", "fingerprint"],
+        ))
+    return findings
+
+
 DETECTORS = [
     d_sqli_login, d_sqli_search, d_ftp, d_metrics, d_app_config,
     d_error_handling, d_scoreboard, d_rest_feedback, d_jwt, d_deprecated_b2b,
+    d_tech_libs,
 ]
 
 
@@ -359,10 +537,13 @@ def run_detectors(base: str, log=None) -> list[dict]:
     for det in DETECTORS:
         try:
             f = det(base)
-            if f:
-                out.append(f)
+            items = f if isinstance(f, list) else ([f] if f else [])
+            for item in items:
+                out.append(item)
                 if log:
-                    log(f"CONFIRMED: {f['title']} [{', '.join(f.get('challenges', [])[:2])}]", "ok", "detect")
+                    tag = "CONFIRMED" if item.get("confirmed") else "DETECTED"
+                    chal = ", ".join(item.get("challenges", [])[:2])
+                    log(f"{tag}: {item['title']}" + (f" [{chal}]" if chal else ""), "ok", "detect")
         except Exception as e:
             if log:
                 log(f"detector {det.__name__} error: {type(e).__name__}", "warn", "detect")
