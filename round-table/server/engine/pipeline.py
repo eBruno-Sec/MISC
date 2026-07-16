@@ -95,6 +95,17 @@ def execute(mission_id: str, hub) -> None:
                     loop_mod.run_recon_loop(target, run_dir, recon, log, cfg_from_env(), config)
             finally:
                 sys.stdout = old
+
+            # ── active detectors: CONFIRM real vulns on live hosts ──
+            log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
+            from ..core import detectors
+            confirmed = []
+            for h in recon.get("live_hosts", [])[:3]:
+                url = (h.get("url") or "").rstrip("/")
+                if url:
+                    confirmed.extend(detectors.run_detectors(url, log))
+            recon["confirmed"] = confirmed
+            log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
             hub.push(mission_id, {"type": "phase_done", "phase": "active"})
         else:
             log("Passive mode: skipping active enumeration.", "info", "mission")
@@ -102,6 +113,8 @@ def execute(mission_id: str, hub) -> None:
         # ── guidance (the buff) ─────────────────────────────────────────────
         log("── Test-Guidance engine ──", "hdr", "guidance")
         playbook = guidance_mod.build_guidance(recon)
+        if recon.get("confirmed"):
+            playbook = guidance_mod.sort_guidance(recon["confirmed"] + playbook)
         # ── AI RedTeam: OWASP-LLM-Top-10 advisory playbooks (opt-in) ──
         if config.get("ai_redteam"):
             from ..core import guidance_llm
@@ -120,6 +133,7 @@ def execute(mission_id: str, hub) -> None:
             "live_hosts": len(recon.get("live_hosts", [])),
             "open_ports": len(recon.get("nmap", {}).get("open_ports", [])),
             "nuclei": len(recon.get("nuclei", [])),
+            "confirmed": len(recon.get("confirmed", [])),
             "guidance": gstats,
             "mode": mode,
             "speed": config["speed"],

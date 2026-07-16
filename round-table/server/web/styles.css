@@ -225,6 +225,7 @@ select,#mode,#c-method{appearance:none;-webkit-appearance:none;padding-right:32p
 .pb-head{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;border-left:5px solid var(--info)}
 .pb-head h4{margin:0;font-size:15px;flex:1}
 .sev-tag{font-size:10.5px;font-weight:800;color:#fff;padding:2px 8px;border-radius:6px}
+.confirmed-tag{font-size:10px;font-weight:800;color:#052e16;background:var(--green);padding:2px 8px;border-radius:6px;letter-spacing:.3px}
 .conf-tag{font-size:11px;color:var(--muted);white-space:nowrap}
 .pb-body{padding:0 14px 14px;font-size:13.5px;border-top:1px solid var(--line)}
 .pb-body p{margin:9px 0}
