@@ -302,15 +302,38 @@ function applyConfig(c) {
   $('opt-endpoint').value = c.ai_endpoint || '';
 }
 
+/* ── batch launch: one mission per target (they queue and run serially) ── */
+async function batchLaunch(targets, mode, scope_text, config) {
+  const btn = $('launch-btn'), msg = $('launch-msg');
+  msg.textContent = `Launching ${targets.length} missions…`; msg.className = 'msg';
+  btn.disabled = true; btn.classList.add('is-loading');
+  let ok = 0, first = null; const failed = [];
+  for (const t of targets) {
+    try {
+      const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target: t, mode, scope_text, config }) });
+      ok++; if (!first) first = r.id;
+    } catch (_) { failed.push(t); }
+  }
+  btn.disabled = false; btn.classList.remove('is-loading');
+  await loadMissions();
+  msg.textContent = `Launched ${ok}/${targets.length} missions (queued — they run one at a time).`
+    + (failed.length ? ` Skipped: ${failed.join(', ')}` : '');
+  msg.className = failed.length ? 'msg' : 'msg ok';
+  if (first) selectMission(first);
+}
+
 /* ── missions ── */
 async function launch() {
   const btn = $('launch-btn');
-  const target = $('target').value.trim();
   const mode = $('mode').value;
   const scope_text = $('scope').value.trim() || null;
   const config = buildConfig();
   const msg = $('launch-msg');
-  if (!target) { msg.textContent = 'Enter a target domain.'; msg.className = 'msg err'; $('target').focus(); return; }
+  // Batch: comma / space / newline separated → one mission per target.
+  const targets = $('target').value.trim().split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  if (!targets.length) { msg.textContent = 'Enter a target.'; msg.className = 'msg err'; $('target').focus(); return; }
+  if (targets.length > 1) return batchLaunch(targets, mode, scope_text, config);
+  const target = targets[0];
   if (!validateTarget()) { msg.textContent = 'Fix the target format first.'; msg.className = 'msg err'; $('target').focus(); return; }
   msg.textContent = 'Launching…'; msg.className = 'msg';
   btn.disabled = true; btn.classList.add('is-loading');
