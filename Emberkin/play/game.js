@@ -93,6 +93,76 @@ const dom = {};
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back'
 ].forEach(id => dom[id] = $(id));
 
+/* ================================================================== AUDIO
+   Fully synthesized with WebAudio — no asset files. Master volume follows the
+   settings slider. The context can only start after a user gesture. */
+let AC = null, master = null;
+function initAudio(){
+  if (AC) return;
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return; }
+  master = AC.createGain();
+  master.gain.value = settings.vol * 0.5;
+  master.connect(AC.destination);
+  // soft wind bed: looped filtered noise, very quiet
+  const buf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+  const wind = AC.createBufferSource(); wind.buffer = buf; wind.loop = true;
+  const lp = AC.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 320;
+  const wg = AC.createGain(); wg.gain.value = 0.05;
+  wind.connect(lp); lp.connect(wg); wg.connect(master); wind.start();
+  scheduleBird();
+}
+function setMasterVol(){ if (master) master.gain.value = settings.vol * 0.5; }
+function tone(freq, dur, {type='sine', vol=0.2, slide=null, delay=0}={}){
+  if (!AC) return;
+  const t0 = AC.currentTime + delay;
+  const o = AC.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t0+dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+  o.connect(g); g.connect(master);
+  o.start(t0); o.stop(t0+dur+0.02);
+}
+function noiseBurst(dur, {freq=1200, vol=0.25, delay=0}={}){
+  if (!AC) return;
+  const t0 = AC.currentTime + delay;
+  const b = AC.createBuffer(1, Math.max(1, AC.sampleRate*dur), AC.sampleRate);
+  const dd = b.getChannelData(0);
+  for (let i=0;i<dd.length;i++) dd[i] = Math.random()*2-1;
+  const n = AC.createBufferSource(); n.buffer = b;
+  const f = AC.createBiquadFilter(); f.type='bandpass'; f.frequency.value=freq; f.Q.value=0.8;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+  n.connect(f); f.connect(g); g.connect(master); n.start(t0);
+}
+function scheduleBird(){
+  if (!AC) return;
+  setTimeout(()=>{
+    if (G.phase==='playing'){
+      const f = 1400 + Math.random()*800;
+      tone(f, 0.12, {vol:0.05, slide:f*1.5});
+      tone(f*1.2, 0.1, {vol:0.04, slide:f*0.9, delay:0.15});
+    }
+    scheduleBird();
+  }, 5000 + Math.random()*9000);
+}
+const sfx = {
+  ui:       ()=> tone(660, 0.05, {type:'triangle', vol:0.07}),
+  swing:    ()=> noiseBurst(0.12, {freq:900, vol:0.12}),
+  hit:      ()=>{ tone(130, 0.09, {vol:0.3, slide:60}); noiseBurst(0.05, {freq:2400, vol:0.1}); },
+  dissolve: ()=> [523,659,784].forEach((f,i)=> tone(f, 0.5, {vol:0.06, delay:i*0.06})),
+  token:    ()=> tone(880, 0.09, {type:'square', vol:0.05, slide:1320}),
+  orb:      ()=> [392,494,587,740].forEach((f,i)=> tone(f, 0.2, {type:'triangle', vol:0.08, delay:i*0.07})),
+  transform:()=> noiseBurst(0.5, {freq:600, vol:0.2}),
+  eject:    ()=>{ noiseBurst(0.3, {freq:1400, vol:0.15}); tone(740, 0.25, {vol:0.08, slide:370}); },
+  attune:   ()=> [330,415,494,659].forEach((f,i)=> tone(f, 0.6, {vol:0.07, delay:i*0.05})),
+  hurt:     ()=> tone(220, 0.15, {type:'sawtooth', vol:0.1, slide:110}),
+};
+
 /* ============================================================ THREE.JS CORE */
 let renderer, scene, camera, clock;
 let player, playerParts, tainerMesh, mimicMesh;
@@ -109,6 +179,7 @@ const mechanisms = [];      // {id, elem, pos, r, done, apply(withVfx)}
 const platforms = [];       // walkable tops: {x, z, hw, hd, topY}
 let bossRef = null, bossChestSpawned = false;
 let lakeFrozen = false;
+let motes = null;           // drifting ambient light specks
 const DEEP_WATER_R = 8.4;   // unswimmable centre of the lake until frozen
 const world = new THREE.Group();
 
@@ -234,6 +305,37 @@ function buildWorld() {
   buildMechanisms();
   buildBossArena();
   spawnVariantEnemies();
+
+  // ambient life: grass tufts (instanced, cheap) and drifting light motes
+  const gGeo = new THREE.ConeGeometry(0.07, 0.4, 4);
+  const gMat = new THREE.MeshStandardMaterial({ color:0x5f9c46, roughness:1, flatShading:true });
+  const grass = new THREE.InstancedMesh(gGeo, gMat, 700);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const UP = new THREE.Vector3(0,1,0);
+  let gi = 0;
+  for (let i=0; i<1600 && gi<700; i++){
+    const a = Math.random()*Math.PI*2, rr = 5 + Math.random()*150;
+    const x = Math.cos(a)*rr, z = Math.sin(a)*rr;
+    if (Math.hypot(x-lakePos.x, z-lakePos.z) < 14) continue;
+    const s = 0.7 + Math.random()*0.9;
+    q.setFromAxisAngle(UP, Math.random()*Math.PI);
+    v.set(x, 0.18*s, z); sc.set(1, s, 1);
+    m4.compose(v, q, sc);
+    grass.setMatrixAt(gi++, m4);
+  }
+  grass.count = gi;
+  world.add(grass);
+
+  const mCount = 130;
+  const mPos = new Float32Array(mCount*3);
+  for (let i=0;i<mCount;i++){
+    const a = Math.random()*Math.PI*2, rr = Math.random()*120;
+    mPos[i*3] = Math.cos(a)*rr; mPos[i*3+1] = 0.6 + Math.random()*4.5; mPos[i*3+2] = Math.sin(a)*rr;
+  }
+  const mGeo = new THREE.BufferGeometry();
+  mGeo.setAttribute('position', new THREE.BufferAttribute(mPos, 3));
+  motes = new THREE.Points(mGeo, new THREE.PointsMaterial({ color:0xfff2c0, size:0.18, transparent:true, opacity:0.55 }));
+  world.add(motes);
 
   // wandering Stonekin near start (first combat)
   spawnEnemy(new THREE.Vector3(9, 0, 2), 'grumble');
@@ -770,6 +872,12 @@ let pointerLocked = false;
 let attackHeld = false;
 
 function bindInput(){
+  // browsers only allow audio after a user gesture — start it on the first one
+  const kick = ()=>{ initAudio(); removeEventListener('mousedown', kick); removeEventListener('keydown', kick); };
+  addEventListener('mousedown', kick);
+  addEventListener('keydown', kick);
+  // soft click on any button press
+  addEventListener('click', (e)=>{ if (e.target.closest('button')) sfx.ui(); }, true);
   addEventListener('keydown', (e)=>{
     const k = e.key.toLowerCase();
     keys[k] = true;
@@ -918,6 +1026,7 @@ const OPENING = [
 ];
 let cineIdx = 0;
 function startOpening(){
+  hide(dom['menu-sibling']);       // regardless of how fast the flow got here
   G.phase='cinematic'; cineIdx=0; show(dom.cinematic); playCine();
 }
 function playCine(){
@@ -1019,6 +1128,7 @@ function unlockElement(elem, ws){
   ws.sig.material.emissive.set(ELEMENTS[elem].color);
   ws.sig.material.emissiveIntensity = 1;
   ws.glow.intensity = 1.6;
+  sfx.attune();
   spawnBurst(ws.pos.clone().setY(3), ELEMENTS[elem].color, 34);
   setActiveElement(elem);
   refreshElementWheel();
@@ -1071,6 +1181,7 @@ function doAttack(){
   const c = CLASSES[G.klass];
   const dmgBase = inMimic ? 22 : Math.round(c.dmg * TIER_MULT[equippedWeapon().tier]) + (G.weaponLevel-1)*8;
   atkAnim = 1;
+  sfx.swing();
   if (!inMimic && c.ranged){
     fireProjectile(dmgBase);
   } else {
@@ -1141,6 +1252,8 @@ function damageEnemy(e, dmg){
   e.hp -= dmg * mult;
   e.hitCd = 0.12;
   e.state='chase'; e.target=player;
+  sfx.hit();
+  hitstop = Math.max(hitstop, e.boss ? 0.06 : 0.04);   // impact freeze-frame
   const fxCol = mult>1 ? 0xfff0a0 : (mult<1 ? 0x8a90a0 : 0xffffff);
   spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,1,0)), fxCol, mult>1?12:6, 0.5);
   if (e.hp<=0) defeatEnemy(e);
@@ -1163,6 +1276,7 @@ function dissolve(mesh){
   const p = mesh.position.clone().add(new THREE.Vector3(0,0.8,0));
   spawnBurst(p, 0xfff0c0, 30, 1.2, true);
   spawnBurst(p, 0xffd98a, 18, 1.6, true);
+  sfx.dissolve();
 }
 
 /* ------------------------------------------------------------- mimic orb */
@@ -1180,6 +1294,7 @@ function collectOrb(o){
   scene.remove(o.mesh);
   orbs.splice(orbs.indexOf(o),1);
   G.mimic.orbHeld = true;
+  sfx.orb();
   setMimicState('OrbAvailable');
   show(dom['orb-status']);
   toast('Mimic Orb held. Press F to Mirrorstep.', 'good', 2600);
@@ -1203,6 +1318,7 @@ function tryMimic(){
 function beginTransform(){
   const m = G.mimic;
   setMimicState('TransformationPending');
+  sfx.transform();
   // subtle local anticipation, then "server-confirmed" (local authority stand-in)
   spawnBurst(player.position.clone().add(new THREE.Vector3(0,1,0)), 0x9a7bd0, 24, 1);
   setMimicState('Transforming');
@@ -1226,6 +1342,7 @@ function beginEject(auto){
   const m = G.mimic;
   if (m.state!=='Transformed') return;
   setMimicState('EjectionPending');
+  sfx.eject();
   const pos = mimicMesh ? mimicMesh.position.clone() : player.position.clone();
   spawnBurst(pos.clone().add(new THREE.Vector3(0,1,0)), 0xc9b1f0, 24, 1.1);
   setMimicState('Ejecting');
@@ -1342,7 +1459,7 @@ function trialPass(){
 }
 
 /* ------------------------------------------------------------- progression */
-function addTokens(n){ G.tokens += n; updateHUD(); }
+function addTokens(n){ G.tokens += n; sfx.token(); updateHUD(); }
 function upgradeWeapon(){
   const cost = 10 + (G.weaponLevel-1)*8;
   if (G.tokens < cost){ toast(`Need ${cost} Emberlight to upgrade (${G.tokens} held).`, 'info', 2400); return; }
@@ -1424,8 +1541,10 @@ function updatePlayer(dt){
   if (moving){
     move.normalize();
     pv.x = move.x*speed; pv.z = move.z*speed;
-    body.rotation.y = Math.atan2(move.x, move.z);
   } else { pv.x*=0.7; pv.z*=0.7; }
+  // The character faces where the CAMERA looks: the mouse turns the body,
+  // WASD only translates it (strafe scheme). Attacks aim at the view centre.
+  body.rotation.y = Math.atan2(f.x, f.z);
 
   // stamina
   if (sprint && moving) G.stamina = Math.max(0, G.stamina - 26*dt);
@@ -1566,6 +1685,7 @@ function updateEnemies(dt){
 function damagePlayer(dmg){
   if (G.mimic.state==='Transformed') return;
   if (window.__dmgLog) window.__dmgLog.push(['player', dmg, new Error().stack.split('\n')[2]?.trim()]);
+  sfx.hurt();
   G.hp = Math.max(0, G.hp - dmg);
   updateHUD();
   if (!settings.motion) shake(0.25);
@@ -1851,7 +1971,7 @@ function clearWorld(){
   for (const p of projectiles){ scene.remove(p.mesh); } projectiles.length=0;
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
-  mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; hide(dom['boss-bar']);
+  mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
   if (player){ scene.remove(player); player=null; }
   if (tainerMesh){ scene.remove(tainerMesh); tainerMesh=null; }
   if (mimicMesh){ scene.remove(mimicMesh); mimicMesh=null; }
@@ -1901,7 +2021,7 @@ function bindButtons(){
   dom['set-cam'].oninput = e=>{ settings.cam=parseFloat(e.target.value); saveSettings(); };
   dom['set-invert'].onchange = e=>{ settings.invert=e.target.checked; saveSettings(); };
   dom['set-aim'].onchange = e=>{ settings.aim=e.target.checked; saveSettings(); };
-  dom['set-vol'].oninput = e=>{ settings.vol=parseFloat(e.target.value); saveSettings(); };
+  dom['set-vol'].oninput = e=>{ settings.vol=parseFloat(e.target.value); setMasterVol(); saveSettings(); };
 }
 
 /* hook class-confirm to build the world before opening cinematic already done;
@@ -1911,9 +2031,11 @@ function ensureWorld(){ if(!worldBuilt){ startFreshWorld(); worldBuilt=true; } }
 
 /* ================================================================= MAIN LOOP */
 let autosaveT = 0;
+let hitstop = 0;    // brief freeze-frame on landed hits (impact feel)
 function loop(){
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, clock?clock.getDelta():0.016);
+  if (hitstop > 0){ hitstop -= dt; if (renderer) renderer.render(scene, camera); return; }
   if (G.phase==='playing'){
     updatePlayer(dt);
     updateEnemies(dt);
@@ -1928,6 +2050,10 @@ function loop(){
   }
   updateParticles(dt);
   for (const s of spinners) s.rotation.z += dt*1.2;
+  if (motes && !settings.motion){
+    motes.rotation.y += dt*0.008;
+    motes.position.y = Math.sin(performance.now()*0.0004)*0.35;
+  }
   if (renderer) renderer.render(scene, camera);
 }
 function updateProjectiles(dt){
@@ -2015,6 +2141,7 @@ function installDevHooks(){
     chestsState: ()=> ({...G.chests}),
     viewYaw: ()=> yaw,
     view: ()=> ({ yaw:+yaw.toFixed(3), pitch:+pitch.toFixed(3), camDist }),
+    facing: ()=> player ? +player.rotation.y.toFixed(3) : null,
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
