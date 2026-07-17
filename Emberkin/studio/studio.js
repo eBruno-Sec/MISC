@@ -328,12 +328,12 @@ function tick(){
   const dt = Math.min(0.05, clock.getDelta());
   for (const o of S.objects){ if (o.mesh.userData.spin) o.mesh.userData.spin.rotation.z += dt; }
   if (P.active && P.kid){
-    // walk
-    const f = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-    const r = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,Math.cos(yaw+Math.PI/2));
+    // walk — camera sits at +[sin(yaw),cos(yaw)] from the kid, so screen-forward is the negation
+    const f = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    const r = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));   // screen-right
     const mv = new THREE.Vector3();
     if (keys['w']) mv.add(f); if (keys['s']) mv.sub(f);
-    if (keys['a']) mv.add(r); if (keys['d']) mv.sub(r);
+    if (keys['a']) mv.sub(r); if (keys['d']) mv.add(r);
     if (mv.lengthSq()>0.01){ mv.normalize(); P.kid.position.addScaledVector(mv, 6*dt); P.kid.rotation.y=Math.atan2(mv.x,mv.z); }
     if (keys[' '] && P.grounded){ P.vel.y=8.5; P.grounded=false; }
     P.vel.y -= 22*dt; P.kid.position.y += P.vel.y*dt;

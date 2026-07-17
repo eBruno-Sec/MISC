@@ -1398,14 +1398,15 @@ function updatePlayer(dt){
   const sprint = keys['shift'] && G.stamina>0 && !transformed;
   const speed = baseSpeed * (sprint?1.7:1);
 
-  // camera-relative input
-  const f = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-  const r = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,Math.cos(yaw+Math.PI/2));
+  // camera-relative input — the camera sits at +[sin(yaw),cos(yaw)] from the
+  // player, so screen-forward (into the scene) is the negation of that vector
+  const f = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const r = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));   // screen-right
   const move = new THREE.Vector3();
   if (keys['w']) move.add(f);
   if (keys['s']) move.sub(f);
-  if (keys['a']) move.add(r);
-  if (keys['d']) move.sub(r);
+  if (keys['a']) move.sub(r);
+  if (keys['d']) move.add(r);
   // arrow keys rotate camera (accessibility/no-mouse fallback)
   if (keys['arrowleft']) yaw += 1.6*dt*settings.cam;
   if (keys['arrowright']) yaw -= 1.6*dt*settings.cam;
@@ -2000,6 +2001,7 @@ function installDevHooks(){
     gear: ()=> ({ owned:[...G.owned], equipped:G.equipped, power:weaponPower(equippedWeapon()) }),
     warp: (x,z)=>{ player.position.set(x,0,z); },
     chestsState: ()=> ({...G.chests}),
+    viewYaw: ()=> yaw,
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
