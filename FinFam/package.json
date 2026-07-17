@@ -1,0 +1,12 @@
+{
+  "name": "nestegghero",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A GitHub-hostable financial education app for learning retirement basics safely.",
+  "scripts": {
+    "build": "node tests/domain.test.mjs",
+    "serve": "node tools/serve.mjs 4173",
+    "test": "node tests/domain.test.mjs"
+  }
+}

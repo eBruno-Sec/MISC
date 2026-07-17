@@ -1,0 +1,17 @@
+{
+  "name": "NestEggHero",
+  "short_name": "NestEggHero",
+  "description": "A retirement learning lab for source-labeled financial education.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ed",
+  "theme_color": "#1f6f5b",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
