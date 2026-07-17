@@ -112,6 +112,28 @@ function initAudio(){
   const wg = AC.createGain(); wg.gain.value = 0.05;
   wind.connect(lp); lp.connect(wg); wg.connect(master); wind.start();
   scheduleBird();
+  startMusic();
+}
+/* gentle generative score: a slow I-vi-V-ii pad with a wandering pentatonic
+   melody on top. Only plays in-game; volumes sit under the sound effects. */
+const MUSIC_SCALE = [262, 294, 330, 392, 440, 523, 587, 659];
+let musicOn = false;
+function startMusic(){
+  if (musicOn || !AC) return;
+  musicOn = true;
+  let step = 0;
+  const bar = ()=>{
+    if (G.phase === 'playing'){
+      const root = MUSIC_SCALE[[0,5,4,1][Math.floor(step/4)%4]] / 2;
+      tone(root,     2.6, {type:'sine', vol:0.035});
+      tone(root*1.5, 2.6, {type:'sine', vol:0.02, delay:0.05});
+      const mel = MUSIC_SCALE[(step*3 + step%5) % MUSIC_SCALE.length];
+      tone(mel, 0.9, {type:'triangle', vol:0.028, delay:0.3 + Math.random()*0.4});
+      step++;
+    }
+    setTimeout(bar, 2400);
+  };
+  bar();
 }
 function setMasterVol(){ if (master) master.gain.value = settings.vol * 0.5; }
 function tone(freq, dur, {type='sine', vol=0.2, slide=null, delay=0}={}){
@@ -223,6 +245,40 @@ function buildLights() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 }
 
+/* ------------------------------------------------------------------ terrain
+   Rolling hills from layered sines, flattened around every gameplay site so
+   quests, camps, mechanisms, and arenas sit on level ground. terrainH(x,z) is
+   the single source of truth for ground height — mesh, physics, AI, camera. */
+const FLAT_ZONES = [];
+function initFlatZones(){
+  FLAT_ZONES.length = 0;
+  const add = (x,z,r)=> FLAT_ZONES.push({x,z,r});
+  add(-22,14,17);                                   // lake, shore, spawn, rime mech
+  add(6,-6,10); add(14,-16,10);                     // first wardstone, ice wall
+  add(26,-46,18); add(26,-70,12);                   // camp + goal
+  add(26,-92,20); add(26,-78,10);                   // boss arena + gate
+  add(-4,40,12); add(-4,58,10); add(-4,70,10); add(-2,82,10);   // Pell + trial corridor
+  add(58,44,13); add(-48,-42,13);                   // basin, loam site
+  add(34,-30,12); add(-40,-34,12); add(48,34,12); add(-10,60,12); // wardstones
+  add(16,-22,8); add(30,-26,8); add(37,-33,8);      // variant packs
+  add(-14,56,8); add(-7,64,8); add(44,30,8); add(-36,-28,8); add(-44,-30,8);
+  add(9,2,10); add(13,5,8); add(4,8,8);             // starter grumbles
+}
+function terrainH(x,z){
+  let h = Math.sin(x*0.045)*Math.cos(z*0.05)*1.8
+        + Math.sin(x*0.012+1.7)*Math.sin(z*0.017+0.6)*2.6
+        + Math.sin((x+z)*0.09)*0.5;
+  h = Math.max(0, h + 0.6);
+  let mask = 1;
+  for (const f of FLAT_ZONES){
+    const d = Math.hypot(x-f.x, z-f.z);
+    if (d < f.r) return 0;
+    const t = (d - f.r) / 12;
+    if (t < 1) mask = Math.min(mask, t*t*(3-2*t));
+  }
+  return h * mask;
+}
+
 /* ------------------------------------------------------------ world builder */
 const MAT = {}; // shared materials
 function mkMat(){
@@ -240,21 +296,21 @@ function mkMat(){
 
 function buildWorld() {
   mkMat();
+  initFlatZones();
   scene.add(world);
 
-  // ground
-  const groundGeo = new THREE.CircleGeometry(200, 64);
+  // rolling-hill ground: a displaced plane; terrainH is the same function
+  // the physics, AI, and camera sample every frame
+  const groundGeo = new THREE.PlaneGeometry(420, 420, 110, 110);
+  const gp = groundGeo.attributes.position;
+  for (let i=0; i<gp.count; i++){
+    // after rotation.x = -PI/2: world x = local x, world z = -local y
+    gp.setZ(i, terrainH(gp.getX(i), -gp.getY(i)));
+  }
+  groundGeo.computeVertexNormals();
   const ground = new THREE.Mesh(groundGeo, MAT.grass);
   ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
   world.add(ground);
-
-  // subtle patches
-  for (let i=0;i<40;i++){
-    const r = 8 + Math.random()*160, a = Math.random()*Math.PI*2;
-    const patch = new THREE.Mesh(new THREE.CircleGeometry(3+Math.random()*7, 12), MAT.grass2);
-    patch.rotation.x = -Math.PI/2; patch.position.set(Math.cos(a)*r, 0.02, Math.sin(a)*r);
-    world.add(patch);
-  }
 
   // lake (fishing spot) — a low disc of water
   lakePos = new THREE.Vector3(-22, 0, 14);
@@ -319,7 +375,7 @@ function buildWorld() {
     if (Math.hypot(x-lakePos.x, z-lakePos.z) < 14) continue;
     const s = 0.7 + Math.random()*0.9;
     q.setFromAxisAngle(UP, Math.random()*Math.PI);
-    v.set(x, 0.18*s, z); sc.set(1, s, 1);
+    v.set(x, 0.18*s + terrainH(x,z), z); sc.set(1, s, 1);
     m4.compose(v, q, sc);
     grass.setMatrixAt(gi++, m4);
   }
@@ -330,7 +386,8 @@ function buildWorld() {
   const mPos = new Float32Array(mCount*3);
   for (let i=0;i<mCount;i++){
     const a = Math.random()*Math.PI*2, rr = Math.random()*120;
-    mPos[i*3] = Math.cos(a)*rr; mPos[i*3+1] = 0.6 + Math.random()*4.5; mPos[i*3+2] = Math.sin(a)*rr;
+    const mx = Math.cos(a)*rr, mz = Math.sin(a)*rr;
+    mPos[i*3] = mx; mPos[i*3+1] = terrainH(mx,mz) + 0.6 + Math.random()*4.5; mPos[i*3+2] = mz;
   }
   const mGeo = new THREE.BufferGeometry();
   mGeo.setAttribute('position', new THREE.BufferAttribute(mPos, 3));
@@ -355,7 +412,7 @@ function makeTree(x,z,s){
     blob.position.set((Math.random()-0.5)*s, (2.6+i*0.9)*s, (Math.random()-0.5)*s);
     blob.castShadow=true; g.add(blob);
   }
-  g.position.set(x,0,z);
+  g.position.set(x, terrainH(x,z), z);
   g.userData.collide = { r: 0.7*s }; // trunk collision
   colliders.push({ x, z, r:0.7*s });
   return g;
@@ -1185,6 +1242,9 @@ function doAttack(){
   if (!inMimic && c.ranged){
     fireProjectile(dmgBase);
   } else {
+    // small committed lunge toward the strike
+    const lf = new THREE.Vector3(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y));
+    pv.x += lf.x*2.4; pv.z += lf.z*2.4;
     meleeHit(inMimic ? 3.0 : c.range, inMimic ? 1.6 : c.arc, dmgBase);
   }
 }
@@ -1576,8 +1636,8 @@ function updatePlayer(dt){
   body.position.x = res.x; body.position.z = res.z;
   body.position.y += pv.y*dt;
 
-  // ground = 0, or the top of any platform we're above and falling onto
-  let groundY = 0;
+  // ground = terrain height, or the top of any platform we're above and falling onto
+  let groundY = terrainH(body.position.x, body.position.z);
   for (const pf of platforms){
     if (Math.abs(body.position.x-pf.x)<=pf.hw && Math.abs(body.position.z-pf.z)<=pf.hd &&
         body.position.y >= pf.topY-0.45 && pv.y<=0) groundY = Math.max(groundY, pf.topY);
@@ -1630,6 +1690,10 @@ function animateLimbs(body, moving, dt){
     const sw = moving ? Math.sin(t)* (settings.motion?0.4:0.7) : 0;
     parts.legL.rotation.x = sw; parts.legR.rotation.x = -sw;
     parts.armL.rotation.x = -sw*0.7; parts.armR.rotation.x = sw*0.7;
+    // body language: run bob + lean, gentle idle breathing
+    parts.torso.position.y = 1.15 + (moving ? Math.abs(Math.sin(t))*0.05 : Math.sin(t*0.4)*0.015);
+    parts.torso.rotation.x = moving ? 0.09 : 0;
+    parts.head.position.y = 1.82 + (moving ? Math.abs(Math.sin(t))*0.04 : 0);
     // attack swing
     if (atkAnim>0){ atkAnim=Math.max(0,atkAnim-dt*4); parts.armR.rotation.x = -1.4*atkAnim; }
     if (glideActive){ parts.armL.rotation.z=0.9; parts.armR.rotation.z=-0.9; parts.armL.rotation.x=0; parts.armR.rotation.x=0; }
@@ -1677,8 +1741,8 @@ function updateEnemies(dt){
       const to=new THREE.Vector3(e.home.x-e.mesh.position.x,0,e.home.z-e.mesh.position.z);
       if (to.length()>1){ to.normalize(); e.mesh.position.x+=to.x*e.speed*0.4*dt; e.mesh.position.z+=to.z*e.speed*0.4*dt; }
     }
-    // idle bob
-    e.mesh.position.y = Math.abs(Math.sin(e.wobble*3))*0.08;
+    // ground-follow + idle bob
+    e.mesh.position.y = terrainH(e.mesh.position.x, e.mesh.position.z) + Math.abs(Math.sin(e.wobble*3))*0.08;
     if (e.hitCd>0) e.mesh.scale.setScalar(1.12); else e.mesh.scale.setScalar(1);
   }
 }
@@ -1732,8 +1796,8 @@ function updateCamera(dt){
       if (dd < c.r+0.6) hitDist = Math.min(hitDist, proj-0.4);
     }
   }
-  if (desired.y<0.6) desired.y=0.6;
   const camPos = focus.clone().add(dir.multiplyScalar(Math.max(2.2, hitDist)));
+  camPos.y = Math.max(camPos.y, terrainH(camPos.x, camPos.z) + 0.5);   // never sink under a hill
 
   camera.position.lerp(camPos, 1-Math.pow(0.001, dt));
   if (shakeAmt>0){ camera.position.x += (Math.random()-0.5)*shakeAmt; camera.position.y += (Math.random()-0.5)*shakeAmt; shakeAmt=Math.max(0,shakeAmt-dt*2); }
@@ -2071,6 +2135,9 @@ function updateProjectiles(dt){
     }
     if (!hit && iceWall && !G.flags.iceMelted && p.elem==='cinder' &&
         Math.hypot(p.mesh.position.x-iceWall.position.x, p.mesh.position.z-iceWall.position.z) < 3.2){ meltIce(); hit=true; }
+    if (!hit && p.mesh.position.y < terrainH(p.mesh.position.x, p.mesh.position.z) + 0.1){
+      spawnBurst(p.mesh.position.clone(), 0xd9d0b8, 5, 0.4); hit=true;   // arrows bury into hillsides
+    }
     if (hit||p.life<=0){ scene.remove(p.mesh); projectiles.splice(i,1); }
   }
 }
@@ -2142,6 +2209,8 @@ function installDevHooks(){
     viewYaw: ()=> yaw,
     view: ()=> ({ yaw:+yaw.toFixed(3), pitch:+pitch.toFixed(3), camDist }),
     facing: ()=> player ? +player.rotation.y.toFixed(3) : null,
+    height: (x,z)=> +terrainH(x,z).toFixed(2),
+    playerY: ()=> player ? +player.position.y.toFixed(2) : null,
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
