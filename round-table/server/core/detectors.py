@@ -659,11 +659,28 @@ def d_reflection(base):
     return findings
 
 
-DETECTORS = [
+# Juice-Shop-aware detectors: they key off Juice Shop's specific endpoints
+# (/ftp, /rest/admin/..., /b2b/v2/orders, its login/search, etc.) so they ONLY
+# run once the target is fingerprinted as Juice Shop. Running them on an
+# arbitrary site produces false positives — many SPAs answer 200 with the same
+# shell for every path (a soft-404 catch-all), which naive path detectors
+# misread as "the endpoint exists".
+JUICE_DETECTORS = [
     d_sqli_login, d_sqli_search, d_ftp, d_metrics, d_app_config,
     d_error_handling, d_scoreboard, d_rest_feedback, d_jwt, d_deprecated_b2b,
-    d_tech_libs, d_reflection,
 ]
+# Target-agnostic detectors that validate their own evidence and are safe to run
+# anywhere (version fingerprint from served assets; reflection needs the marker
+# to actually echo/evaluate, so a static catch-all shell can't false-positive).
+GENERIC_DETECTORS = [d_tech_libs, d_reflection]
+DETECTORS = JUICE_DETECTORS + GENERIC_DETECTORS  # kept for compatibility
+
+
+def _is_soft_404(base: str) -> bool:
+    """True if the site answers 200 for a random non-existent path (SPA
+    catch-all). Path-existence detectors are meaningless against such a host."""
+    st, _, _ = _get(f"{base}/rt_nope_{random.randint(10**6, 10**7)}")
+    return st == 200
 
 
 def run_detectors(base: str, log=None, auth=None) -> list[dict]:
@@ -674,9 +691,16 @@ def run_detectors(base: str, log=None, auth=None) -> list[dict]:
     base = base.rstrip("/")
     out = []
     js_ver = is_juice_shop(base)
-    if log and js_ver:
-        log(f"detectors: OWASP Juice Shop confirmed (v{js_ver}) at {base}", "ok", "detect")
-    for det in DETECTORS:
+    if js_ver:
+        dets = JUICE_DETECTORS + GENERIC_DETECTORS
+        if log:
+            log(f"detectors: OWASP Juice Shop confirmed (v{js_ver}) — full detector suite", "ok", "detect")
+    else:
+        dets = list(GENERIC_DETECTORS)
+        if log:
+            note = " (catch-all/soft-404 site)" if _is_soft_404(base) else ""
+            log(f"detectors: not Juice Shop{note} — generic detectors only (tech fingerprint, reflection)", "info", "detect")
+    for det in dets:
         try:
             f = det(base)
             items = f if isinstance(f, list) else ([f] if f else [])
