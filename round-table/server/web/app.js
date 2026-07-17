@@ -135,16 +135,27 @@ async function loadConfig() {
   } catch (_) {}
 }
 
-/* ── target validation (inline, real-time) ── */
+/* ── target validation (inline, real-time; accepts a list) ── */
 function validateTarget() {
   const el = $('target'), field = $('field-target'), st = $('target-status');
-  const v = el.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+  const raw = el.value.trim();
   field.classList.remove('is-error', 'is-valid'); st.textContent = ''; st.className = 'field-status';
-  if (!v) { el.removeAttribute('aria-invalid'); return true; }
-  const ok = /^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$/.test(v);
+  if (!raw) { el.removeAttribute('aria-invalid'); return true; }
+  const parts = raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  const clean = p => p.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+  const rx = /^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$/;
+  const bad = parts.map(clean).filter(v => v && !rx.test(v));
+  const ok = bad.length === 0;
   el.setAttribute('aria-invalid', ok ? 'false' : 'true');
-  if (ok) { field.classList.add('is-valid'); st.textContent = 'Looks good'; st.className = 'field-status ok'; }
-  else { field.classList.add('is-error'); st.textContent = 'Enter a domain, host, or host:port'; st.className = 'field-status err'; }
+  if (ok) {
+    field.classList.add('is-valid');
+    st.textContent = parts.length > 1 ? `${parts.length} targets, one report` : 'Looks good';
+    st.className = 'field-status ok';
+  } else {
+    field.classList.add('is-error');
+    st.textContent = 'Check format: ' + bad.slice(0, 3).join(', ');
+    st.className = 'field-status err';
+  }
   return ok;
 }
 
@@ -356,26 +367,6 @@ function applyConfig(c) {
   syncAuthFields();
 }
 
-/* ── batch launch: one mission per target (they queue and run serially) ── */
-async function batchLaunch(targets, mode, scope_text, config) {
-  const btn = $('launch-btn'), msg = $('launch-msg');
-  msg.textContent = `Launching ${targets.length} missions…`; msg.className = 'msg';
-  btn.disabled = true; btn.classList.add('is-loading');
-  let ok = 0, first = null; const failed = [];
-  for (const t of targets) {
-    try {
-      const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target: t, mode, scope_text, config }) });
-      ok++; if (!first) first = r.id;
-    } catch (_) { failed.push(t); }
-  }
-  btn.disabled = false; btn.classList.remove('is-loading');
-  await loadMissions();
-  msg.textContent = `Launched ${ok}/${targets.length} missions (queued — they run one at a time).`
-    + (failed.length ? ` Skipped: ${failed.join(', ')}` : '');
-  msg.className = failed.length ? 'msg' : 'msg ok';
-  if (first) selectMission(first);
-}
-
 /* ── missions ── */
 async function launch() {
   const btn = $('launch-btn');
@@ -383,17 +374,20 @@ async function launch() {
   const scope_text = $('scope').value.trim() || null;
   const config = buildConfig();
   const msg = $('launch-msg');
-  // Batch: comma / space / newline separated → one mission per target.
-  const targets = $('target').value.trim().split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  // Comma / space / newline separated targets all run in ONE mission and
+  // produce ONE consolidated report (the backend fans out internally).
+  const raw = $('target').value.trim();
+  const targets = raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
   if (!targets.length) { msg.textContent = 'Enter a target.'; msg.className = 'msg err'; $('target').focus(); return; }
-  if (targets.length > 1) return batchLaunch(targets, mode, scope_text, config);
-  const target = targets[0];
   if (!validateTarget()) { msg.textContent = 'Fix the target format first.'; msg.className = 'msg err'; $('target').focus(); return; }
-  msg.textContent = 'Launching…'; msg.className = 'msg';
+  msg.textContent = targets.length > 1 ? `Launching one mission over ${targets.length} targets…` : 'Launching…';
+  msg.className = 'msg';
   btn.disabled = true; btn.classList.add('is-loading');
   try {
-    const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target, mode, scope_text, config }) });
-    msg.textContent = `Launched ${r.target} (${r.mode})`; msg.className = 'msg ok';
+    const r = await api('/api/missions', { method: 'POST', body: JSON.stringify({ target: raw, mode, scope_text, config }) });
+    const n = (r.targets && r.targets.length) || 1;
+    msg.textContent = n > 1 ? `Launched one mission over ${n} targets (${r.mode})` : `Launched ${r.target} (${r.mode})`;
+    msg.className = 'msg ok';
     await loadMissions();
     selectMission(r.id);
   } catch (e) { msg.textContent = 'Error: ' + e.message; msg.className = 'msg err'; }
@@ -405,6 +399,12 @@ async function loadMissions() {
   catch (_) {}
 }
 
+/* short label for a mission target that may be a batch of many */
+function targetLabel(t) {
+  const parts = String(t || '').split(/\s*,\s*/).filter(Boolean);
+  return parts.length > 1 ? `${parts[0]} +${parts.length - 1} more` : (t || '');
+}
+
 function renderMissionList() {
   const box = $('mission-list');
   if (!state.missions.length) { box.innerHTML = '<p class="muted small">No missions yet.</p>'; return; }
@@ -414,7 +414,7 @@ function renderMissionList() {
       `<span class="sevdot" style="background:${SEV_COLOR[s]}" title="${s}: ${bs[s]}"></span>`).join('');
     return `<div class="mcard ${m.id === state.currentId ? 'active' : ''}" onclick="selectMission('${m.id}')">
       <div class="mtop">
-        <div class="mt">${esc(m.target)}</div>
+        <div class="mt" title="${esc(m.target)}">${esc(targetLabel(m.target))}</div>
         <button class="delbtn" title="Delete mission" onclick="event.stopPropagation();deleteMission('${m.id}')">✕</button>
       </div>
       <div class="mrow">
@@ -522,7 +522,8 @@ async function refreshMission() {
 
 function renderHead() {
   const m = state.mission;
-  $('m-target').textContent = m.target;
+  $('m-target').textContent = targetLabel(m.target);
+  $('m-target').title = m.target;
   $('m-mode').textContent = m.mode;
   const st = $('m-status'); st.textContent = m.status; st.className = 'pill status ' + m.status;
   $('m-id').textContent = '#' + m.id;
@@ -660,6 +661,7 @@ function cardHTML(g) {
   const steps = (g.how_to_test || []).map(s => `<li>${esc(s)}</li>`).join('');
   const payloads = (g.payloads || []).map(p =>
     `<li><code>${esc(p)}</code> <button class="copybtn" data-copy="${esc(p)}">copy</button></li>`).join('');
+  const bypass = (g.bypass || []).map(b => `<li>${esc(b)}</li>`).join('');
   const curls = (g.curl_steps || []).map(cs => {
     const isCurl = /^\s*curl\b/.test(cs.cmd || '');
     const load = isCurl ? `<button class="loadcurlbtn" data-loadcurl="${esc(cs.cmd)}" title="Load method/URL/headers/body into the cURL console">→ console</button>` : '';
@@ -688,7 +690,8 @@ function cardHTML(g) {
       <p><strong>What to test:</strong> ${esc(g.what_to_test)}</p>
       ${steps ? `<div class="pb-block"><strong>How to test</strong><ol>${steps}</ol></div>` : ''}
       ${payloads ? `<div class="pb-block payloads"><strong>Recommended payloads / injections</strong><ul>${payloads}</ul></div>` : ''}
-      ${curls ? `<div class="pb-block"><strong>Step-by-step cURL</strong>${curls}</div>` : ''}
+      ${bypass ? `<div class="pb-block bypass"><strong>WAF / filter bypass techniques</strong><ul>${bypass}</ul></div>` : ''}
+      ${curls ? `<div class="pb-block"><strong>Step-by-step cURL <span class="dim">(advanced cURL does the whole job)</span></strong>${curls}</div>` : ''}
       ${rem}
       <p class="pb-tools"><strong>Tools:</strong> ${esc((g.tools || []).join(', '))}</p>
       ${refs ? `<p class="pb-refs"><strong>References:</strong> ${refs}</p>` : ''}

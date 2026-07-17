@@ -24,6 +24,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from . import runconfig
 from .detectors import _finding, _req
+from .guidance import BYPASS
 
 # ── tuning (kept bounded so the phase stays fast) ───────────────────────────
 MAX_TARGETS = 40
@@ -230,7 +231,8 @@ def _test_sqli(url, method, param, auth, budget):
                      "sqlmap in confirm mode: sqlmap -u '<url>' -p " + param + " --batch"],
                 payloads=["'", "1' ORDER BY 1-- -", "1' UNION SELECT NULL-- -",
                           "1' AND (SELECT 1 FROM (SELECT SLEEP(5))x)-- -", "1'||pg_sleep(5)--"],
-                tools=["sqlmap", "Burp Suite", "curl"],
+                bypass=BYPASS["sqli"],
+                tools=["curl", "sqlmap"],
                 curl_steps=[{"desc": "Break the query", "cmd": f"curl -sS -k \"{_ex(url, method, param, chr(39))}\""},
                             {"desc": "Repair (proves SQL parsing)", "cmd": f"curl -sS -k \"{_ex(url, method, param, chr(39) + '-- -')}\""}],
                 references=[{"title": "PortSwigger · SQL injection", "url": "https://portswigger.net/web-security/sql-injection"}],
@@ -255,7 +257,8 @@ def _test_sqli(url, method, param, auth, budget):
                              "Use conditional time payloads to extract data bit by bit.",
                              "sqlmap --technique=T is well-suited to this."],
                         payloads=["1'||pg_sleep(5)--", "1' AND SLEEP(5)-- -", "1');WAITFOR DELAY '0:0:5'-- -"],
-                        tools=["sqlmap", "Burp Suite", "curl"],
+                        bypass=BYPASS["sqli"],
+                        tools=["curl", "sqlmap"],
                         references=[{"title": "PortSwigger · Blind SQLi", "url": "https://portswigger.net/web-security/sql-injection/blind"}],
                         remediation={"summary": "Use parameterized queries; never concatenate input into SQL.", "fixes": []},
                         tags=["sqli", "blind", "injection", "confirmed", "exploit-guidance"],
@@ -281,7 +284,8 @@ def _test_xss(url, method, param, auth, budget):
                  "Report reflected XSS with the exact parameter, context, and impact."],
             payloads=['"><img src=x onerror=alert(document.domain)>', "<svg onload=alert(document.domain)>",
                       "'-alert(document.domain)-'"],
-            tools=["Burp Suite", "browser", "curl"],
+            bypass=BYPASS["xss"],
+            tools=["curl", "browser"],
             curl_steps=[{"desc": "Reflect the canary", "cmd": f"curl -sS -k \"{_ex(url, method, param, canary)}\""}],
             references=[{"title": "PortSwigger · Reflected XSS", "url": "https://portswigger.net/web-security/cross-site-scripting/reflected"}],
             remediation={"summary": "Context-encode all reflected output; add a strict Content-Security-Policy.", "fixes": []},
@@ -306,7 +310,8 @@ def _test_crlf(url, method, param, auth, budget):
                  "Try injecting Set-Cookie (session fixation) or a body to attempt response splitting / cache poisoning.",
                  "Report with the concrete impact you can demonstrate."],
             payloads=["%0d%0aX-Injected: rt", "%0d%0aSet-Cookie: rt=1", "%0d%0a%0d%0a<script>alert(1)</script>"],
-            tools=["Burp Suite", "curl"],
+            bypass=BYPASS["crlf"],
+            tools=["curl"],
             curl_steps=[{"desc": "Inject a header via CRLF",
                          "cmd": f"curl -sS -k -i \"{_ex(url, method, param, '1%0d%0aX-Injected: rt')}\""}],
             references=[{"title": "OWASP · HTTP Response Splitting", "url": "https://owasp.org/www-community/attacks/HTTP_Response_Splitting"}],

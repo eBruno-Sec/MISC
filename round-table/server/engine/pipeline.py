@@ -71,6 +71,138 @@ def _scope_allows_active(scope: dict) -> bool:
     return True  # operator chose the mode explicitly at launch; mode gates active
 
 
+def _split_targets(target_field: str) -> list[str]:
+    """One mission can cover several targets (e.g. an imported program scope).
+    Split on commas/whitespace, dedupe, preserve order."""
+    seen, out = set(), []
+    for p in re.split(r"[,\s]+", (target_field or "").strip()):
+        p = p.strip()
+        if p and p.lower() not in seen:
+            seen.add(p.lower())
+            out.append(p)
+    return out
+
+
+def _safe_name(t: str) -> str:
+    return re.sub(r"[^a-z0-9._-]", "_", t.lower()) or "target"
+
+
+def _scan_target(target, mode, scope, config, run_dir, log, hub, mission_id):
+    """Full pipeline for ONE target: passive, optional active + confirm phases,
+    then the per-target playbook. Returns (recon, guidance)."""
+    recon: dict = {"target": target}
+
+    log("── Percival // passive recon ──", "hdr", "passive")
+    recon.update(passive_mod.run_passive(target, run_dir, log))
+
+    if mode in ("active", "full") and _scope_allows_active(scope):
+        en = [t for t, on in config["tools"].items() if on]
+        log("── Galahad // active enumeration ──", "hdr", "active")
+        log(f"Active packets to in-scope hosts · speed={config['speed']} · tools: {', '.join(en) or 'none'}", "warn", "active")
+        if runconfig.is_authenticated(config):
+            names = ", ".join(h.split(":", 1)[0] for h in runconfig.auth_headers(config))
+            log(f"Authenticated scan: session passthrough active ({names}) on httpx/ffuf/nuclei + detectors", "ok", "active")
+        tee = _Tee(sys.stdout, lambda ln: hub.emit(mission_id, "trace", "active", ln))
+        old = sys.stdout
+        sys.stdout = tee
+        try:
+            active_mod.run_active(target, run_dir, recon, log, cfg_from_env(), config)
+            if config.get("recon_loop"):
+                from . import loop as loop_mod
+                loop_mod.run_recon_loop(target, run_dir, recon, log, cfg_from_env(), config)
+        finally:
+            sys.stdout = old
+
+        # De-dupe live hosts by hostname (same app on :80/:443 -> one entry,
+        # prefer https) so findings/topology aren't triplicated.
+        if recon.get("live_hosts"):
+            from urllib.parse import urlparse
+            best: dict = {}
+            for h in recon["live_hosts"]:
+                u = h.get("url", "")
+                host = urlparse(u).hostname or u
+                cur = best.get(host)
+                if cur is None or (u.startswith("https") and not (cur.get("url", "") or "").startswith("https")):
+                    best[host] = h
+            if len(best) < len(recon["live_hosts"]):
+                log(f"deduped live hosts: {len(recon['live_hosts'])} -> {len(best)} (same app on multiple schemes/ports)", "info", "active")
+            recon["live_hosts"] = list(best.values())
+            for h in recon["live_hosts"]:
+                if h.get("url"):
+                    h["url"] = _norm_url(h["url"])
+
+        # Collapse directory-busting results by canonical URL (host vs host:443)
+        # and case-insensitive path, so paths aren't double-reported.
+        if recon.get("dir_bust"):
+            merged: dict = {}
+            for base_u, paths in recon["dir_bust"].items():
+                bucket = merged.setdefault(_norm_url(base_u), {})
+                for p in paths or []:
+                    u = p.get("url") if isinstance(p, dict) else str(p)
+                    if not u:
+                        continue
+                    nu = _norm_url(u)
+                    k = nu.lower()
+                    cand = {**p, "url": nu} if isinstance(p, dict) else nu
+                    prev = bucket.get(k)
+                    if prev is None:
+                        bucket[k] = cand
+                    elif nu == k and (prev.get("url") if isinstance(prev, dict) else prev) != k:
+                        bucket[k] = cand
+            before = sum(len(v or []) for v in recon["dir_bust"].values())
+            recon["dir_bust"] = {b: list(v.values()) for b, v in merged.items()}
+            after = sum(len(v) for v in recon["dir_bust"].values())
+            if after < before:
+                log(f"deduped discovered paths: {before} -> {after} (port/case variants)", "info", "active")
+
+        log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
+        from ..core import detectors
+        auth_h = runconfig.auth_headers(config)
+        confirmed = []
+        for h in recon.get("live_hosts", [])[:3]:
+            url = (h.get("url") or "").rstrip("/")
+            if url:
+                confirmed.extend(detectors.run_detectors(url, log, auth=auth_h))
+        if config.get("headless_dast"):
+            try:
+                from . import dast as dast_mod
+                dast_findings = dast_mod.run_dast(recon, config, log)
+                if dast_findings:
+                    confirmed.extend(dast_findings)
+                    log(f"headless DAST added {len(dast_findings)} confirmed client-side issue(s)", "ok", "detect")
+            except Exception as e:
+                log(f"headless DAST skipped: {type(e).__name__}: {e}", "warn", "detect")
+        try:
+            from ..core import injection
+            inj = injection.run_injection_tests(recon, config, log)
+            if inj:
+                confirmed.extend(inj)
+        except Exception as e:
+            log(f"injection testing skipped: {type(e).__name__}: {e}", "warn", "detect")
+
+        recon["confirmed"] = confirmed
+        log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
+    else:
+        log("Passive mode: skipping active enumeration.", "info", "mission")
+
+    log("── Test-Guidance engine ──", "hdr", "guidance")
+    pb = guidance_mod.build_guidance(recon)
+    if recon.get("confirmed"):
+        pb = guidance_mod.sort_guidance(recon["confirmed"] + pb)
+    if config.get("ai_redteam"):
+        from ..core import guidance_llm
+        llm_pb = guidance_llm.build_llm_guidance(recon, config)
+        log(f"AI RedTeam: {len(llm_pb)} LLM playbooks (OWASP LLM Top 10)", "ok", "guidance")
+        pb = guidance_mod.sort_guidance(pb + llm_pb)
+    from ..core import intuition
+    hunches = intuition.build_intuition(recon, config)
+    if hunches:
+        log(f"Intuition: {len(hunches)} hunch(es) from endpoints/JS/signals", "info", "guidance")
+        pb = guidance_mod.sort_guidance(pb + hunches)
+    recon["_intuition_count"] = len(hunches)
+    return recon, pb
+
+
 def execute(mission_id: str, hub) -> None:
     m = db.get_mission(mission_id)
     if not m:
@@ -90,145 +222,52 @@ def execute(mission_id: str, hub) -> None:
     hub.push(mission_id, {"type": "status", "status": "running"})
     log(f"Mission started · target={target} · mode={mode}", "ok", "mission")
 
-    recon: dict = {"target": target}
+    targets = _split_targets(target) or [target]
+    multi = len(targets) > 1
+    recon: dict = {"target": target, "targets": targets, "live_hosts": [],
+                   "all_subdomains": [], "nmap": {"open_ports": []}, "nuclei": [],
+                   "confirmed": [], "dir_bust": {}, "_intuition_count": 0}
+    all_pb: list = []
     try:
-        # ── passive (always) ────────────────────────────────────────────────
-        log("── Percival // passive recon ──", "hdr", "passive")
-        recon.update(passive_mod.run_passive(target, run_dir, log))
-        hub.push(mission_id, {"type": "phase_done", "phase": "passive"})
+        if multi:
+            log(f"Batch mission: scanning {len(targets)} targets into one report", "ok", "mission")
+        for i, t in enumerate(targets, 1):
+            if multi:
+                log(f"══════ Target {i}/{len(targets)} · {t} ══════", "hdr", "mission")
+            t_dir = (run_dir / _safe_name(t)) if multi else run_dir
+            t_dir.mkdir(parents=True, exist_ok=True)
+            recon_t, pb_t = _scan_target(t, mode, scope, config, t_dir, log, hub, mission_id)
+            all_pb.extend(pb_t)
+            recon["live_hosts"].extend(recon_t.get("live_hosts", []))
+            recon["all_subdomains"].extend(recon_t.get("all_subdomains") or recon_t.get("subdomains", []))
+            recon["nmap"]["open_ports"].extend((recon_t.get("nmap") or {}).get("open_ports", []))
+            recon["nuclei"].extend(recon_t.get("nuclei", []))
+            recon["confirmed"].extend(recon_t.get("confirmed", []))
+            recon["dir_bust"].update(recon_t.get("dir_bust", {}))
+            recon["_intuition_count"] += recon_t.get("_intuition_count", 0)
+            # carry first-seen per-domain passive data for reference
+            for k in ("http", "email", "caa_records", "domain", "sub_cats", "takeover_candidates", "js_endpoints"):
+                if k not in recon and recon_t.get(k) is not None:
+                    recon[k] = recon_t.get(k)
+        hub.push(mission_id, {"type": "phase_done", "phase": "active"})
 
-        # ── active (active/full only) ───────────────────────────────────────
-        if mode in ("active", "full") and _scope_allows_active(scope):
-            en = [t for t, on in config["tools"].items() if on]
-            log("── Galahad // active enumeration ──", "hdr", "active")
-            log(f"Active packets to in-scope hosts · speed={config['speed']} · tools: {', '.join(en) or 'none'}", "warn", "active")
-            if runconfig.is_authenticated(config):
-                names = ", ".join(h.split(":", 1)[0] for h in runconfig.auth_headers(config))
-                log(f"Authenticated scan: session passthrough active ({names}) on httpx/ffuf/nuclei + detectors", "ok", "active")
-            tee = _Tee(sys.stdout, lambda ln: hub.emit(mission_id, "trace", "active", ln))
-            old = sys.stdout
-            sys.stdout = tee
-            try:
-                active_mod.run_active(target, run_dir, recon, log, cfg_from_env(), config)
-                # ── 3-step iterative recon loop (opt-in) ──
-                if config.get("recon_loop"):
-                    from . import loop as loop_mod
-                    loop_mod.run_recon_loop(target, run_dir, recon, log, cfg_from_env(), config)
-            finally:
-                sys.stdout = old
-
-            # De-dupe live hosts by hostname (same app on :80/:443 → one entry,
-            # prefer https) so findings/topology aren't triplicated.
-            if recon.get("live_hosts"):
-                from urllib.parse import urlparse
-                best: dict = {}
-                for h in recon["live_hosts"]:
-                    u = h.get("url", "")
-                    host = urlparse(u).hostname or u
-                    cur = best.get(host)
-                    if cur is None or (u.startswith("https") and not (cur.get("url", "") or "").startswith("https")):
-                        best[host] = h
-                if len(best) < len(recon["live_hosts"]):
-                    log(f"deduped live hosts: {len(recon['live_hosts'])} → {len(best)} (same app on multiple schemes/ports)", "info", "active")
-                recon["live_hosts"] = list(best.values())
-                for h in recon["live_hosts"]:
-                    if h.get("url"):
-                        h["url"] = _norm_url(h["url"])
-
-            # Collapse directory-busting results by canonical URL (host vs
-            # host:443) and case-insensitive path, so paths aren't double-reported
-            # (fixes /admin + :443/admin, and /ADMIN vs /Admin vs /admin).
-            if recon.get("dir_bust"):
-                merged: dict = {}
-                for base_u, paths in recon["dir_bust"].items():
-                    bucket = merged.setdefault(_norm_url(base_u), {})
-                    for p in paths or []:
-                        u = p.get("url") if isinstance(p, dict) else str(p)
-                        if not u:
-                            continue
-                        nu = _norm_url(u)
-                        k = nu.lower()
-                        cand = {**p, "url": nu} if isinstance(p, dict) else nu
-                        prev = bucket.get(k)
-                        if prev is None:
-                            bucket[k] = cand
-                        elif nu == k and (prev.get("url") if isinstance(prev, dict) else prev) != k:
-                            bucket[k] = cand  # prefer the all-lowercase path variant for display
-                before = sum(len(v or []) for v in recon["dir_bust"].values())
-                recon["dir_bust"] = {b: list(v.values()) for b, v in merged.items()}
-                after = sum(len(v) for v in recon["dir_bust"].values())
-                if after < before:
-                    log(f"deduped discovered paths: {before} → {after} (port/case variants)", "info", "active")
-
-            # ── active detectors: CONFIRM real vulns on live hosts ──
-            log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
-            from ..core import detectors
-            auth_h = runconfig.auth_headers(config)
-            confirmed = []
-            for h in recon.get("live_hosts", [])[:3]:
-                url = (h.get("url") or "").rstrip("/")
-                if url:
-                    confirmed.extend(detectors.run_detectors(url, log, auth=auth_h))
-            # ── headless-browser DAST (opt-in): confirm client-side vulns ──
-            if config.get("headless_dast"):
-                try:
-                    from . import dast as dast_mod
-                    dast_findings = dast_mod.run_dast(recon, config, log)
-                    if dast_findings:
-                        confirmed.extend(dast_findings)
-                        log(f"headless DAST added {len(dast_findings)} confirmed client-side issue(s)", "ok", "detect")
-                except Exception as e:
-                    log(f"headless DAST skipped: {type(e).__name__}: {e}", "warn", "detect")
-
-            # ── confirmed injection testing on DISCOVERED params (SQLi/XSS/CRLF) ──
-            try:
-                from ..core import injection
-                inj = injection.run_injection_tests(recon, config, log)
-                if inj:
-                    confirmed.extend(inj)
-            except Exception as e:
-                log(f"injection testing skipped: {type(e).__name__}: {e}", "warn", "detect")
-
-            recon["confirmed"] = confirmed
-            log(f"detectors confirmed {len(confirmed)} issue(s)", "ok", "detect")
-            hub.push(mission_id, {"type": "phase_done", "phase": "active"})
-        else:
-            log("Passive mode: skipping active enumeration.", "info", "mission")
-
-        # ── guidance (the buff) ─────────────────────────────────────────────
-        log("── Test-Guidance engine ──", "hdr", "guidance")
-        playbook = guidance_mod.build_guidance(recon)
-        if recon.get("confirmed"):
-            playbook = guidance_mod.sort_guidance(recon["confirmed"] + playbook)
-        # ── AI RedTeam: OWASP-LLM-Top-10 advisory playbooks (opt-in) ──
-        if config.get("ai_redteam"):
-            from ..core import guidance_llm
-            llm_pb = guidance_llm.build_llm_guidance(recon, config)
-            log(f"AI RedTeam: {len(llm_pb)} LLM playbooks (OWASP LLM Top 10)", "ok", "guidance")
-            playbook = guidance_mod.sort_guidance(playbook + llm_pb)
-
-        # ── intuition: heuristic hunches + JS endpoint mining (INFO tier) ──
-        from ..core import intuition
-        hunches = intuition.build_intuition(recon, config)
-        if hunches:
-            log(f"Intuition: {len(hunches)} hunch(es) from endpoints/JS/signals", "info", "guidance")
-            playbook = guidance_mod.sort_guidance(playbook + hunches)
-        recon["_intuition_count"] = len(hunches)
-
+        # ── merge every target's playbook into ONE report ───────────────────
+        playbook = guidance_mod.sort_guidance(all_pb)
         gstats = guidance_mod.guidance_stats(playbook)
-        log(f"generated {gstats['total']} test playbooks: {gstats['by_severity']}", "ok", "guidance")
+        log(f"generated {gstats['total']} test playbooks across {len(targets)} target(s): {gstats['by_severity']}", "ok", "guidance")
 
         # ── topology ────────────────────────────────────────────────────────
         topology = build_topology(recon, playbook)
 
         # ── stats ───────────────────────────────────────────────────────────
         stats = {
-            "subdomains": len(recon.get("all_subdomains") or recon.get("subdomains", [])),
+            "subdomains": len(set(recon.get("all_subdomains", []))),
             "live_hosts": len(recon.get("live_hosts", [])),
             "open_ports": len(recon.get("nmap", {}).get("open_ports", [])),
             "nuclei": len(recon.get("nuclei", [])),
             "confirmed": len(recon.get("confirmed", [])),
             "hunches": recon.get("_intuition_count", 0),
+            "targets": len(targets),
             "guidance": gstats,
             "mode": mode,
             "speed": config["speed"],

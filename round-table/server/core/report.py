@@ -55,6 +55,7 @@ def _finding_card(g: dict) -> str:
     tint = {"CRITICAL": "#fef2f2", "HIGH": "#fff7ed", "MEDIUM": "#fffbeb",
             "LOW": "#eff6ff", "INFO": "#f8fafc"}.get(g.get("severity", "INFO"), "#f8fafc")
     payloads = "".join(f"<li><code>{_esc(p)}</code></li>" for p in g.get("payloads", []))
+    bypass = "".join(f"<li>{_esc(b)}</li>" for b in g.get("bypass", []))
     steps = "".join(f"<li>{_esc(s)}</li>" for s in g.get("how_to_test", []))
     curls = "".join(
         f'<div class="curl"><div class="curl-desc">{_esc(c.get("desc",""))}</div>'
@@ -88,7 +89,8 @@ def _finding_card(g: dict) -> str:
         <p><strong>What to test:</strong> {_esc(g.get('what_to_test',''))}</p>
         {f'<div class="block"><strong>How to test / exploit</strong><ol>{steps}</ol></div>' if steps else ''}
         {f'<div class="block"><strong>Recommended payloads / injections</strong><ul class="payloads">{payloads}</ul></div>' if payloads else ''}
-        {f'<div class="block"><strong>Step-by-step cURL</strong>{curls}</div>' if curls else ''}
+        {f'<div class="block"><strong>WAF / filter bypass techniques</strong><ul>{bypass}</ul></div>' if bypass else ''}
+        {f'<div class="block"><strong>Step-by-step cURL (advanced cURL does the whole job)</strong>{curls}</div>' if curls else ''}
         {f'<p class="rem"><strong>Remediation:</strong> {_esc(rem)}</p>' if rem else ''}
         <p class="meta"><strong>Tools:</strong> {tools}{f' &nbsp;·&nbsp; <strong>References:</strong> {refs}' if refs else ''}</p>
       </div>
@@ -220,6 +222,7 @@ footer{{margin-top:48px;padding-top:18px;border-top:2px solid #e2e8f0;text-align
 <h2>1. Executive Summary</h2>
 <div class="cards">
   <div class="mc"><b style="color:{score_color}">{score}</b><span>Risk / 100</span></div>
+  {f'<div class="mc"><b>{stats.get("targets",1)}</b><span>Targets</span></div>' if stats.get('targets', 1) > 1 else ''}
   <div class="mc"><b>{len(confirmed)}</b><span>Confirmed</span></div>
   <div class="mc"><b>{len(guidance)}</b><span>Total findings</span></div>
   <div class="mc"><b>{stats.get('live_hosts',0)}</b><span>Live hosts</span></div>
@@ -284,6 +287,9 @@ def generate_markdown(mission: dict) -> str:
         if g.get("payloads"):
             out.append("- **Payloads:**")
             out += [f"  - `{p}`" for p in g["payloads"]]
+        if g.get("bypass"):
+            out.append("- **WAF / filter bypass:**")
+            out += [f"  - {b}" for b in g["bypass"]]
         if g.get("curl_steps"):
             out.append("- **cURL:**")
             for c in g["curl_steps"]:

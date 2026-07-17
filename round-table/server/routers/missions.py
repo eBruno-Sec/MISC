@@ -22,28 +22,50 @@ class LaunchRequest(BaseModel):
     config: Optional[dict] = None
 
 
+_TARGET_RE = re.compile(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$")
+
+
 @router.post("")
 async def launch(req: LaunchRequest):
     mode = req.mode.lower().strip()
     if mode not in VALID_MODES:
         raise HTTPException(400, f"mode must be one of {sorted(VALID_MODES)}")
-    target = scope_mod.normalize_target(req.target)
-    # Accept a domain, a bare host / container name, or host:port
-    # (e.g. example.com, juice-shop:3000, host.docker.internal:42000).
-    if not target or not re.match(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?(:\d{1,5})?$", target):
-        raise HTTPException(400, "target must be a domain, host, or host:port (e.g. example.com or juice-shop:3000)")
 
-    host, _ = scope_mod.split_host_port(target)
-    scope = scope_mod.parse_scope_text(req.scope_text) if req.scope_text else scope_mod.default_scope(target)
+    # One mission can cover several targets (comma/space separated, e.g. an
+    # imported program scope) and produces ONE consolidated report.
+    targets, seen = [], set()
+    for part in re.split(r"[,\s]+", (req.target or "").strip()):
+        t = scope_mod.normalize_target(part)
+        if not t:
+            continue
+        if not _TARGET_RE.match(t):
+            raise HTTPException(400, f"invalid target '{part}' (want a domain, host, or host:port)")
+        if t not in seen:
+            seen.add(t)
+            targets.append(t)
+    if not targets:
+        raise HTTPException(400, "no valid target (want a domain, host, or host:port)")
+    target = ", ".join(targets)
+
+    if req.scope_text:
+        scope = scope_mod.parse_scope_text(req.scope_text)
+    else:
+        scope = {"in_scope": [], "out_of_scope": [], "allow_active": False}
     if not scope.get("in_scope"):
-        scope["in_scope"] = [host, f"*.{host}"]
+        in_rules = []
+        for t in targets:
+            host, _ = scope_mod.split_host_port(t)
+            in_rules += [host, f"*.{host}"]
+        scope["in_scope"] = in_rules
 
     run_config = runconfig.normalize(req.config)
     mid = db.create_mission(target, mode, scope, run_config)
-    db.add_event(mid, "info", "mission", f"Mission queued for {target} ({mode} mode)")
+    label = targets[0] + (f" +{len(targets) - 1} more" if len(targets) > 1 else "")
+    db.add_event(mid, "info", "mission", f"Mission queued for {label} ({mode} mode)")
     # Fire-and-forget; hub serializes execution behind a lock.
     asyncio.create_task(hub.run_mission(mid))
-    return {"id": mid, "target": target, "mode": mode, "status": "queued", "scope": scope, "config": run_config}
+    return {"id": mid, "target": target, "targets": targets, "mode": mode,
+            "status": "queued", "scope": scope, "config": run_config}
 
 
 @router.get("")

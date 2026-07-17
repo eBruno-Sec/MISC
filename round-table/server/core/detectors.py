@@ -88,8 +88,16 @@ def _gid(*p):
     return "det_" + hashlib.sha1("|".join(p).encode()).hexdigest()[:9]
 
 
+def _curl_first(tools):
+    t = list(tools or [])
+    if not any(str(x).lower().startswith("curl") for x in t):
+        t = ["curl"] + t
+    t.sort(key=lambda x: 0 if str(x).lower().startswith("curl") else 1)
+    return t
+
+
 def _finding(*, key, title, category, severity, surface, evidence, what, how,
-             challenges=None, payloads=None, tools=None, curl_steps=None,
+             challenges=None, payloads=None, bypass=None, tools=None, curl_steps=None,
              references=None, remediation=None, tags=None, confidence=90):
     return {
         "id": _gid(key, surface),
@@ -106,7 +114,8 @@ def _finding(*, key, title, category, severity, surface, evidence, what, how,
         "what_to_test": what,
         "how_to_test": how,
         "payloads": payloads or [],
-        "tools": tools or ["curl", "Burp Suite"],
+        "bypass": bypass or [],
+        "tools": _curl_first(tools),
         "curl_steps": curl_steps or [],
         "references": references or [],
         "challenges": challenges or [],
