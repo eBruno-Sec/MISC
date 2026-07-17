@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NestEggHero 2">
+  <rect width="64" height="64" rx="14" fill="#14181f"/>
+  <path d="M32 8c9.5 0 19 13.5 19 27a19 19 0 0 1-38 0C13 21.5 22.5 8 32 8z" fill="#e5aa4f"/>
+  <path d="M20 40l6.5-7 5 5 8-10 4.5 5" stroke="#14181f" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

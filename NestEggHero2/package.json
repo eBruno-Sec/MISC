@@ -1,0 +1,11 @@
+{
+  "name": "nestegghero2",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Financial learning studio: lessons, estimate calculators, and a source-labeled fact registry. Static, no dependencies.",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node tools/server.mjs 4180"
+  }
+}

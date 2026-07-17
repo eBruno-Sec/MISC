@@ -1,0 +1,212 @@
+{
+  "package": "nestegghero_docs_fact_checked_2026-07-16",
+  "generated_at": "2026-07-16",
+  "file_count": 41,
+  "files": [
+    {
+      "file": "00-ai-system-prompt.md",
+      "bytes": 2739,
+      "sha256": "b4164a4c406f478ee4d90da763c660379812d64613b51e00ceda5935da14da2e"
+    },
+    {
+      "file": "01-product-philosophy.md",
+      "bytes": 823,
+      "sha256": "639b928b5a58bbeefaaca6d30378a8e1c9c6fff672330c75ed806dcadcc95819"
+    },
+    {
+      "file": "02-ui-ux-principles.md",
+      "bytes": 656,
+      "sha256": "95e1c4a60a026739769c084db02580181b91f48eb238dd5f9c3bba06b3b73220"
+    },
+    {
+      "file": "03-design-system.md",
+      "bytes": 899,
+      "sha256": "cad0040a6e2f9a98be372485121c5915d243fe80b2077b74a1759d6007662fa4"
+    },
+    {
+      "file": "04-component-library.md",
+      "bytes": 702,
+      "sha256": "0f10d4a7161d1202a8a30bf590dac37a5bfdd024a40c6decf0794a90e259e22d"
+    },
+    {
+      "file": "05-state-management.md",
+      "bytes": 774,
+      "sha256": "732470e62889d15fa0d921d860b9d9dea0efe76574e86a0c732bfdc7866204aa"
+    },
+    {
+      "file": "06-json-backup-spec.md",
+      "bytes": 1111,
+      "sha256": "a6361735f1432eac0711e028000f4a6c3244ad35cdfbd2158e25af423d31eeac"
+    },
+    {
+      "file": "07-security.md",
+      "bytes": 961,
+      "sha256": "b27b369e13c2bcb7475e32c8a631aafb65899923f89114886f98a2184d004186"
+    },
+    {
+      "file": "08-accessibility.md",
+      "bytes": 919,
+      "sha256": "1fa002cb23864f8ef58631499e6b81bef61f2469c0a7673069f34ea6238aa089"
+    },
+    {
+      "file": "09-performance.md",
+      "bytes": 351,
+      "sha256": "4fbd55c7d35e334f3ed40b6a9379829459e8ca929576810783bb773c95348f08"
+    },
+    {
+      "file": "10-seo-blog-engine.md",
+      "bytes": 636,
+      "sha256": "67aa9624660f709b93a57dd55860baeb3ad2b3a96e4a49361c7d7259c567a5d6"
+    },
+    {
+      "file": "11-financial-facts.md",
+      "bytes": 1461,
+      "sha256": "31866751b467a91f249c2e24b3edb045c484c78f36dd8e7595bd45a86cfd61bf"
+    },
+    {
+      "file": "12-financial-calculators.md",
+      "bytes": 941,
+      "sha256": "0932cb389e290f82fe123577c88d6bb8a9225ae21a8ce7d87fb5d113d9f7b325"
+    },
+    {
+      "file": "13-retirement-account-rules.md",
+      "bytes": 1959,
+      "sha256": "9f91771d23fe7aa8e98e372ae36087272b5b20d4e83ae85c7cc6d389f5921cb1"
+    },
+    {
+      "file": "14-tax-rules.md",
+      "bytes": 1196,
+      "sha256": "35f68c939197385cc60a34ba4fa1635a19ee3d36b251176eda484c8cc4c6ef87"
+    },
+    {
+      "file": "15-copywriting-guidelines.md",
+      "bytes": 507,
+      "sha256": "ffae5fbf2bd97bfbafb2a4594d82939bf119fd479995405d7cf3b787f9b2b5ce"
+    },
+    {
+      "file": "16-user-personas.md",
+      "bytes": 852,
+      "sha256": "55cc5fada6277cb9ac7efbd34b64bfdcb127ac27e296acb768aec69e00eaf1fb"
+    },
+    {
+      "file": "17-gamification.md",
+      "bytes": 398,
+      "sha256": "f447f620552229b64443846e284287bfdc23a433abf1bfce5e6bfcdef9782b94"
+    },
+    {
+      "file": "18-content-style-guide.md",
+      "bytes": 524,
+      "sha256": "4a5267126da298fbbaeb10cc8f58669f550587ce9a21ad9642c5f599752b66d0"
+    },
+    {
+      "file": "19-testing-checklist.md",
+      "bytes": 602,
+      "sha256": "013fdbaba20eee5b2289440a6b35a97d06398eacd322fdd9e2a4e5e9a98b85da"
+    },
+    {
+      "file": "20-engineering-principles.md",
+      "bytes": 552,
+      "sha256": "af60458d35a91e585060b9a551773219a784a28c8992bec08ac8d79d8a609b4b"
+    },
+    {
+      "file": "21-api-contracts.md",
+      "bytes": 404,
+      "sha256": "130e9a2eea591d557c536bbaee29022589aa1a9ed4e3dd1872414f813b4d3493"
+    },
+    {
+      "file": "22-error-handling.md",
+      "bytes": 512,
+      "sha256": "0854eff32168bf15e4b201d4885136c589406200a52fbca826e1f5b4cd3f5431"
+    },
+    {
+      "file": "23-animation-guidelines.md",
+      "bytes": 412,
+      "sha256": "17485bd9b9db328633f64709534691b4eacdf6d873a3ed0796a1d98de230ab3a"
+    },
+    {
+      "file": "24-mobile-first.md",
+      "bytes": 451,
+      "sha256": "0b8b15d9136a709bc9f973909d16c0d0a427ebd4bf561be750f04d3a714c832e"
+    },
+    {
+      "file": "25-print-mode.md",
+      "bytes": 521,
+      "sha256": "58bba076bea2e1d5494a0a982f17a4de59b4fd6ce09be7b33e581635b5eeb933"
+    },
+    {
+      "file": "26-offline-mode.md",
+      "bytes": 510,
+      "sha256": "c4a7f8b3a415913fc33d81e78be770b130eb36be597491ce8c00d35cdee60eeb"
+    },
+    {
+      "file": "27-ai-review-checklist.md",
+      "bytes": 414,
+      "sha256": "2b4a76325911e50dac5bf9e4d918bfb08b96697eee00e31671ae4667e3d4d87d"
+    },
+    {
+      "file": "28-prompt-library.md",
+      "bytes": 818,
+      "sha256": "48c439fc087bc2a2d14860d9fa747879dccd601b05dc5fba1034c5c49ed83006"
+    },
+    {
+      "file": "29-analytics-and-experiments.md",
+      "bytes": 673,
+      "sha256": "ebcba2820111ffcc367d671fdbf327c078738e3de2488ead09621f36c5ae4a1c"
+    },
+    {
+      "file": "30-privacy-and-data-governance.md",
+      "bytes": 532,
+      "sha256": "018334bbd7c7169bdad917d920cf7c6bbb0b25eaeb161c5f4b9061c348f1a390"
+    },
+    {
+      "file": "31-content-fact-record-template.md",
+      "bytes": 302,
+      "sha256": "68c6b88faaa0c4a6e66dd050735ed6f8d28d8d1b5fb3e30073b19a3fe3b94aea"
+    },
+    {
+      "file": "32-architecture.md",
+      "bytes": 396,
+      "sha256": "251a7009677ae056e08288f03174c91e9abe01e79065b39a2c73cc7894bfb07a"
+    },
+    {
+      "file": "33-release-governance.md",
+      "bytes": 283,
+      "sha256": "ad0f40cf814ef4f8a9094154a722172c3400dda42ed62a4acbe205b5feceebab"
+    },
+    {
+      "file": "34-2026-retirement-facts.md",
+      "bytes": 1308,
+      "sha256": "84f0a3e66d26ed1e499c04b4fd1e084649e90e1211738be236e85a605bf81198"
+    },
+    {
+      "file": "35-trump-accounts-status.md",
+      "bytes": 850,
+      "sha256": "87f03de3d5171168522f599a2c573db9fc329b4354fa17f124002474e7fda18c"
+    },
+    {
+      "file": "36-social-security-2026.md",
+      "bytes": 516,
+      "sha256": "ec8cfb0945b2e442baa220f1c35c5ca8b550de87850675acc544911e91bac009"
+    },
+    {
+      "file": "FACT_CHECK_REPORT.md",
+      "bytes": 1184,
+      "sha256": "39eea7bfd4bab11349fc351b01b018e06c97e42038082156a9bbd7e29c43264d"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1023,
+      "sha256": "6f8604864bdc1bcf3a731fa9a16d744ab96114c4686ae05203151ca3ce9a727d"
+    },
+    {
+      "file": "SOURCES.md",
+      "bytes": 1018,
+      "sha256": "5b90719d218461560cd491d31fefa4f90aa6a3b2ba3ec4dd43d465310be4c4cd"
+    },
+    {
+      "file": "glossary.md",
+      "bytes": 602,
+      "sha256": "55d34b0488afa1c797b6e8e48ba742286509cd571f543ebc25dfe1f26e802c91"
+    }
+  ]
+}

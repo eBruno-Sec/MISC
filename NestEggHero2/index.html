@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-textsize="normal">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+    <title>NestEggHero 2 | Financial learning studio</title>
+    <meta name="description" content="A financial learning studio: eight short lessons, seven estimate calculators, and a fact registry where every 2026 figure carries its effective year and official source.">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#14181f">
+    <link rel="canonical" href="https://ebruno-sec.github.io/MISC/NestEggHero2/">
+    <link rel="icon" href="images/egg.svg" type="image/svg+xml">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="stylesheet" href="styles/main.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <a class="brand" href="#/" aria-label="NestEggHero 2 home">
+        <img class="brand-egg" src="images/egg.svg" alt="" width="36" height="36">
+        <span>
+          <strong>NestEggHero&nbsp;2</strong>
+          <small>Financial learning studio</small>
+        </span>
+      </a>
+      <button class="icon-btn" id="menuToggle" type="button" aria-expanded="false" aria-controls="primaryNav">Menu</button>
+      <nav class="primary-nav" id="primaryNav" aria-label="Primary">
+        <a href="#/">Home</a>
+        <a href="#/library">Library</a>
+        <a href="#/tools">Calculators</a>
+        <a href="#/facts">Fact registry</a>
+        <a href="#/progress">My progress</a>
+      </nav>
+      <div class="header-tools">
+        <button class="icon-btn" id="kidSpeakToggle" type="button" data-kid-toggle aria-pressed="false">Kid Speak</button>
+        <button class="icon-btn" id="textSizeToggle" type="button" aria-label="Toggle larger text">A+</button>
+        <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch to dark theme"></button>
+      </div>
+    </header>
+
+    <div class="error-banner" id="banner" role="alert" hidden></div>
+
+    <main id="main">
+      <noscript>
+        <div class="empty-state">
+          <h1>NestEggHero 2 needs JavaScript</h1>
+          <p>The lessons, calculators, and fact registry are interactive and run entirely in your browser. Nothing is sent anywhere.</p>
+          <p>The official sources behind the 2026 figures are available directly:</p>
+          <p>
+            <a href="https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500">IRS 2026 retirement limits</a> ·
+            <a href="https://www.ssa.gov/cola/factsheets/2026.html">SSA 2026 fact sheet</a>
+          </p>
+        </div>
+      </noscript>
+    </main>
+
+    <footer class="site-footer">
+      <span id="offlineNote" hidden>Offline: cached lessons and calculators still work. Figures show their effective year.</span>
+      <p>General education only, never individualized tax, legal, fiduciary, or investment advice. Facts reviewed 2026-07-16.</p>
+      <nav aria-label="Official sources">
+        <a href="https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500" rel="noopener">IRS 2026 limits</a>
+        <a href="https://www.irs.gov/publications/p590a" rel="noopener">IRS Publication 590-A</a>
+        <a href="https://www.ssa.gov/cola/factsheets/2026.html" rel="noopener">SSA 2026 figures</a>
+        <a href="https://www.w3.org/TR/WCAG22/" rel="noopener">WCAG 2.2</a>
+      </nav>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="scripts/main.js"></script>
+  </body>
+</html>
