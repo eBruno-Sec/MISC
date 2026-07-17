@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Emberkin — Design Bible</title>
-<meta name="description" content="Phase-0 production design bible for Emberkin: GDD, TDD, world/narrative/character bibles, Mimic Orb state machine, multiplayer, child-safety, architecture, and roadmap." />
+<title>Emberkin — Design Codex</title>
+<meta name="description" content="Phase-0 production design codex for Emberkin: GDD, TDD, world, narrative, and character guides, Mimic Orb state machine, multiplayer, child-safety, architecture, and roadmap." />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -90,7 +90,7 @@
 <div class="layout">
 <aside>
   <div class="brand"><span class="mk">✦</span> EMBERKIN</div>
-  <div class="brand-sub">Design Bible · Phase 0</div>
+  <div class="brand-sub">Design Codex · Phase 0</div>
   <div class="backlinks">
     <a href="../index.html">← Project hub</a>
     <a href="../play/index.html">▶ Play slice</a>
@@ -103,9 +103,9 @@
     <a href="#scope">What's built vs designed</a>
     <a class="grp">Game design</a>
     <a href="#gdd">Core loop &amp; GDD</a>
-    <a href="#world">World bible</a>
-    <a href="#narrative">Narrative bible</a>
-    <a href="#characters">Character bible</a>
+    <a href="#world">World guide</a>
+    <a href="#narrative">Narrative guide</a>
+    <a href="#characters">Character guide</a>
     <a href="#villain">Villain — Mourne</a>
     <a href="#combat">Combat</a>
     <a href="#classes">Classes &amp; weapons</a>
@@ -137,7 +137,7 @@
 </aside>
 
 <main>
-  <h1>Emberkin — Production Design Bible</h1>
+  <h1>Emberkin — Production Design Codex</h1>
   <p class="lede">A family-friendly, fully-3D third-person fantasy adventure and, long-term, a safe game-creation platform. This document is the Phase-0 output: the design canon, technical plan, safety model, and roadmap behind the playable vertical slice.</p>
 
   <div class="hero">
@@ -210,7 +210,7 @@
   <h3>Controls (slice)</h3>
   <p>WASD move · Shift sprint · Space jump / glide · Left-click or J attack · E interact · Q or 1–5 element · F Mirrorstep / eject · mouse look · Esc pause. Arrow keys also orbit the camera (no-mouse fallback). Full parity across keyboard/mouse, gamepad, and touch is specified in the <a href="#a11y">accessibility</a> and input sections.</p>
 
-  <h2 id="world"><span class="num">06</span>World bible</h2>
+  <h2 id="world"><span class="num">06</span>World guide</h2>
   <p><strong>The Reach of Aldermere</strong> is a bright, broken land held together by the <strong>Wellspring</strong> — a buried source from which the five elements flow. Long ago the Wellspring cracked; its light scattered into <strong>Wardstones</strong> across the regions, and stray sparks (Glimmers, like Tainer) drifted loose. The slice takes place in <strong>Willowmere Vale</strong>: a lake-and-forest valley with a fishing shore, a Stonekin camp in the northern crags, and a windswept ridge where Skywright Pell teaches gliding.</p>
   <h3>Planned regions (each with original culture, architecture, wildlife, arc)</h3>
   <div class="cards">
@@ -222,12 +222,12 @@
     <div class="card"><h4>The Stillfields</h4><p>Where Mourne's silence spreads. Endgame.</p></div>
   </div>
 
-  <h2 id="narrative"><span class="num">07</span>Narrative bible</h2>
+  <h2 id="narrative"><span class="num">07</span>Narrative guide</h2>
   <p><strong>Theme:</strong> change is not the enemy of peace — it is the price of being alive. Loss hurts; stillness that prevents loss also prevents growth, joy, and reunion.</p>
   <p><strong>Arc:</strong> Two siblings set out from Willowmere. Mourne appears and, believing he is being <em>merciful</em>, separates them to "spare" them the pain of the coming stillness. The player wakes seasons later, fishes Tainer from the lake, and follows the Wardstones outward — each restoring a piece of the Wellspring's light and a piece of what happened. The search for the sibling and the fight to keep Aldermere <em>changing</em> are the same journey.</p>
   <p>Critical story content is authored and testable. Optional/ambient NPC dialogue may be schedule- and reputation-driven, but never generative without the guardrails in the <a href="#safety">safety</a> section.</p>
 
-  <h2 id="characters"><span class="num">08</span>Character bible</h2>
+  <h2 id="characters"><span class="num">08</span>Character guide</h2>
   <div class="cards">
     <div class="card"><h4>Wren</h4><p>The sister. Warm, quick, stubbornly loyal. Teal palette. Fully voiced/animated; equal to Cael in every way.</p></div>
     <div class="card"><h4>Cael</h4><p>The brother. Steady, curious, dry humour. Amber palette. Equal to Wren; no gameplay advantage either way.</p></div>
@@ -361,13 +361,13 @@ Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ─�
   <p>Built in from the start and present in the slice: reduced motion (less shake/flashing), high-contrast theme, larger UI scale, camera-speed and invert-Y, aim assist, and non-colour-only status (every element and alert carries a name/sigil/shape). Targets WCAG 2.2 AA for web interfaces. Planned additions: subtitles with speaker labels, full remapping, hold/toggle alternatives, screen-reader support for menus, and difficulty options. Interactive targets are ≥44px; focus states are visible.</p>
 
   <h2 id="art"><span class="num">29</span>Art, animation, VFX &amp; audio</h2>
-  <p><strong>Art direction:</strong> bright, stylized, readable fantasy with strong silhouettes and expressive faces — clearly 3D, never stick figures. The slice uses a cohesive low-poly, flat-shaded look with PBR-lite materials, soft shadows, and fog. <strong>VFX:</strong> restrained, readable, non-graphic (dissolve = motes of light). <strong>Audio (planned):</strong> original adaptive score per region, diegetic ambience, accessible audio cues, and no copyrighted material. An art bible governs proportions, palettes, materials, enemy silhouettes, UI, and asset budgets.</p>
+  <p><strong>Art direction:</strong> bright, stylized, readable fantasy with strong silhouettes and expressive faces — clearly 3D, never stick figures. The slice uses a cohesive low-poly, flat-shaded look with PBR-lite materials, soft shadows, and fog. <strong>VFX:</strong> restrained, readable, non-graphic (dissolve = motes of light). <strong>Audio (planned):</strong> original adaptive score per region, diegetic ambience, accessible audio cues, and no copyrighted material. An art guide governs proportions, palettes, materials, enemy silhouettes, UI, and asset budgets.</p>
 
   <h2 id="roadmap"><span class="num">30</span>Milestone roadmap</h2>
   <table>
     <thead><tr><th>Phase</th><th>Focus</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td>0 — Discovery</td><td>This bible, IP canon, technical plan, safety plan</td><td><span class="pill impl">✓</span></td></tr>
+      <tr><td>0 — Discovery</td><td>This codex, IP canon, technical plan, safety plan</td><td><span class="pill impl">✓</span></td></tr>
       <tr><td>1 — Vertical slice</td><td>Core 3D loop, Mimic Orb, elements, gliding, save</td><td><span class="pill impl">✓ (this build)</span></td></tr>
       <tr><td>2 — Core systems</td><td>Weapon tiers/inventory, elemental variants &amp; mechanisms, boss encounter <em>(✓ this build)</em>; parties &amp; matchmaking <em>(◇ needs servers)</em></td><td><span class="pill impl">✓</span> / <span class="pill design">◇</span></td></tr>
       <tr><td>3 — Platform</td><td>Accounts, family accounts, parental controls, safe comms, moderation, internal creator</td><td><span class="pill design">◇</span></td></tr>
@@ -393,7 +393,7 @@ Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ─�
   <p>Gated, promotable releases (dev → test → staging → prod) with signed artifacts, smoke tests, and rollback. Incident response covers safety escalations (trust &amp; safety on-call), security incidents (containment, disclosure, key rotation), and live-ops outages (runbooks, status, postmortems). Feature flags allow safe, reversible rollout of new regions, creator features, and communication modes.</p>
 
   <footer>
-    <p><strong>Emberkin</strong> — Phase-0 design bible. Original IP; family-friendly; safe by design. This document describes both what is built (the playable slice) and what is designed for the full platform, with the boundary between them made explicit throughout.</p>
+    <p><strong>Emberkin</strong> — Phase-0 design codex. Original IP; family-friendly; safe by design. This document describes both what is built (the playable slice) and what is designed for the full platform, with the boundary between them made explicit throughout.</p>
     <p style="margin-top:.4rem"><a href="../index.html">Project hub</a> · <a href="../play/index.html">Play the slice</a> · <a href="../README.md">README</a></p>
   </footer>
 </main>

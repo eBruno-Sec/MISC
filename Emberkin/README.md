@@ -4,7 +4,7 @@ An original, family-friendly, **fully-3D third-person** fantasy adventure — pl
 This is a **vertical slice** built from a complete production brief: it demonstrates the core game
 loop (sibling & class selection, a floating companion, elemental powers, non-graphic combat, the
 signature *Mimic Orb* transformation, and gliding) inside a small hand-built 3D world, plus a full
-Phase-0 design bible.
+Phase-0 design codex.
 
 > Built with [Three.js](https://threejs.org) (loaded via CDN import map). No build step, no backend —
 > a self-contained static site that runs on GitHub Pages.
@@ -126,7 +126,7 @@ Emberkin/
     studio.js         Creator sandbox: grid placement, erase/undo, limits,
                       validated save/load, instant playtest
   docs/
-    index.html        Phase-0 design bible (GDD, TDD, systems, safety, architecture, roadmap)
+    index.html        Phase-0 design codex (GDD, TDD, systems, safety, architecture, roadmap)
   README.md           This file
   CONTINUE_HERE.md     Build-status / handoff notes
 ```
