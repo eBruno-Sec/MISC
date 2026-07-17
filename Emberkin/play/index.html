@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Emberkin — A Light Between Two</title>
+<meta name="description" content="Emberkin: an original fully-3D fantasy adventure vertical slice. Choose a sibling and class, meet Tainer, unlock elements, and master the Mimic Orb transformation." />
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body data-theme="night" data-contrast="normal" data-motion="full" data-ui="normal">
+
+<!-- ================= 3D VIEWPORT ================= -->
+<canvas id="scene"></canvas>
+
+<!-- ================= LOADING ================= -->
+<div id="loading" class="overlay center">
+  <div class="logo-mark" aria-hidden="true">✦</div>
+  <h1 class="logo">EMBERKIN</h1>
+  <p class="tagline">A Light Between Two</p>
+  <p id="load-status" class="load-status">Kindling the world…</p>
+  <div class="load-bar"><div id="load-fill"></div></div>
+  <p id="load-fallback" class="load-fallback"></p>
+</div>
+
+<!-- ================= SCREEN-SPACE HUD ================= -->
+<div id="hud" class="hud hidden" aria-hidden="true">
+  <!-- top-left: vitals -->
+  <div class="hud-vitals">
+    <div class="vital-row">
+      <span class="vital-label">Wren&nbsp;/&nbsp;Cael</span>
+      <span id="hero-name" class="vital-name">—</span>
+    </div>
+    <div class="bar hp"><div id="hp-fill" class="bar-fill"></div><span id="hp-text" class="bar-text">100</span></div>
+    <div id="mimic-bar-wrap" class="bar mimic hidden">
+      <div id="mimic-fill" class="bar-fill"></div><span id="mimic-text" class="bar-text">Mimic</span>
+    </div>
+    <div class="bar stamina"><div id="stam-fill" class="bar-fill"></div></div>
+  </div>
+
+  <!-- top-right: tokens + connection -->
+  <div class="hud-corner-right">
+    <div class="token"><span class="token-icon" aria-hidden="true">✦</span><span id="token-count">0</span> <span class="token-label">Emberlight</span></div>
+    <div id="net-state" class="net-state" title="Local session — single player">
+      <span class="net-dot" aria-hidden="true"></span><span class="net-label">Local</span>
+    </div>
+  </div>
+
+  <!-- bottom-left: element wheel -->
+  <div id="element-wheel" class="element-wheel" role="group" aria-label="Element selection">
+    <button class="elem" data-elem="none" title="No element (unarmed)"><span class="elem-sigil">○</span><span class="elem-name">None</span></button>
+    <button class="elem locked" data-elem="loam" title="Loam — earth"><span class="elem-sigil">⬡</span><span class="elem-name">Loam</span></button>
+    <button class="elem locked" data-elem="tide" title="Tide — water"><span class="elem-sigil">≈</span><span class="elem-name">Tide</span></button>
+    <button class="elem locked" data-elem="cinder" title="Cinder — fire"><span class="elem-sigil">✷</span><span class="elem-name">Cinder</span></button>
+    <button class="elem locked" data-elem="arc" title="Arc — storm"><span class="elem-sigil">ϟ</span><span class="elem-name">Arc</span></button>
+    <button class="elem locked" data-elem="rime" title="Rime — ice"><span class="elem-sigil">❈</span><span class="elem-name">Rime</span></button>
+  </div>
+
+  <!-- bottom-center: contextual prompt -->
+  <div id="prompt" class="prompt hidden"><kbd id="prompt-key">E</kbd> <span id="prompt-text">Interact</span></div>
+
+  <!-- bottom-right: mimic orb + weapon -->
+  <div class="hud-corner-br">
+    <div id="orb-status" class="orb-status hidden">
+      <span class="orb-glow" aria-hidden="true">◈</span>
+      <div class="orb-lines"><span class="orb-title">Mimic Orb held</span><span class="orb-sub"><kbd>F</kbd> Mirrorstep</span></div>
+    </div>
+    <div id="weapon-chip" class="weapon-chip"><span id="weapon-name">—</span><span id="weapon-lvl" class="weapon-lvl">Lv 1</span></div>
+  </div>
+
+  <!-- top-center: objective + alert -->
+  <div class="hud-top-center">
+    <div id="objective" class="objective"><span class="obj-dot" aria-hidden="true">◇</span><span id="objective-text">—</span></div>
+    <div id="alert-state" class="alert-state hidden"><span class="alert-icon" aria-hidden="true">◔</span><span id="alert-text">Observed</span></div>
+  </div>
+
+  <!-- Tainer companion dialogue -->
+  <div id="tainer" class="tainer hidden">
+    <div class="tainer-orb" aria-hidden="true"><span>✦</span></div>
+    <div class="tainer-bubble"><span class="tainer-name">Tainer</span><p id="tainer-text"></p></div>
+  </div>
+
+  <!-- toast (rejections / info) -->
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<!-- ================= MENUS ================= -->
+
+<!-- Title -->
+<div id="menu-title" class="overlay center menu hidden">
+  <div class="logo-mark" aria-hidden="true">✦</div>
+  <h1 class="logo">EMBERKIN</h1>
+  <p class="tagline">A Light Between Two</p>
+  <div class="menu-btns">
+    <button class="btn primary" id="btn-new">New Journey</button>
+    <button class="btn" id="btn-continue" disabled>Continue</button>
+    <button class="btn" id="btn-load">Load Progress (.json)</button>
+    <button class="btn ghost" id="btn-docs" onclick="window.open('../docs/index.html','_blank')">Design Bible</button>
+    <button class="btn ghost" id="btn-settings-title">Accessibility &amp; Settings</button>
+  </div>
+  <p class="fineprint">An original family-friendly adventure. Local save only — never authoritative.</p>
+</div>
+
+<!-- Sibling select -->
+<div id="menu-sibling" class="overlay center menu hidden">
+  <h2 class="menu-h">Two travelled together. You are one of them.</h2>
+  <p class="menu-p">Choose who you play. The other becomes the <strong>Lost Sibling</strong> you set out to find.</p>
+  <div class="pick-row" id="sibling-row">
+    <button class="pick-card" data-sib="wren">
+      <div class="pick-portrait" data-sib="wren" aria-hidden="true"></div>
+      <span class="pick-name">Wren</span>
+      <span class="pick-tag">the sister</span>
+    </button>
+    <button class="pick-card" data-sib="cael">
+      <div class="pick-portrait" data-sib="cael" aria-hidden="true"></div>
+      <span class="pick-name">Cael</span>
+      <span class="pick-tag">the brother</span>
+    </button>
+  </div>
+  <p class="menu-note">Both are equally capable, support every class, and give no gameplay advantage.</p>
+</div>
+
+<!-- Class select -->
+<div id="menu-class" class="overlay center menu hidden">
+  <h2 class="menu-h">Choose your path. <span class="warn">This choice is permanent.</span></h2>
+  <div class="class-layout">
+    <div class="class-list" id="class-list" role="listbox" aria-label="Class">
+      <button class="class-item" data-class="sword">Sword</button>
+      <button class="class-item" data-class="bow">Bow</button>
+      <button class="class-item" data-class="greatsword">Greatsword</button>
+      <button class="class-item" data-class="dual">Dual Swords</button>
+      <button class="class-item" data-class="focus">Psychic Focus</button>
+    </div>
+    <div class="class-detail" id="class-detail">
+      <div class="class-preview" id="class-preview" aria-hidden="true"></div>
+      <h3 id="class-title">Sword</h3>
+      <p id="class-weapon" class="class-weapon">Vale Blade</p>
+      <p id="class-desc" class="class-desc">Select a class to preview it.</p>
+      <ul class="class-stats" id="class-stats"></ul>
+      <div class="complexity" id="class-complexity"></div>
+    </div>
+  </div>
+  <button class="btn primary" id="btn-confirm-class" disabled>Confirm class</button>
+</div>
+
+<!-- Cinematic / story beats -->
+<div id="cinematic" class="overlay center cinematic hidden">
+  <div class="cine-art" id="cine-art" aria-hidden="true"></div>
+  <p id="cine-text" class="cine-text"></p>
+  <button class="btn ghost cine-next" id="cine-next">Continue ▸</button>
+  <button class="btn ghost cine-skip" id="cine-skip">Skip</button>
+</div>
+
+<!-- Pause -->
+<div id="menu-pause" class="overlay center menu hidden">
+  <h2 class="menu-h">Paused</h2>
+  <div class="menu-btns">
+    <button class="btn primary" id="btn-resume">Resume</button>
+    <button class="btn" id="btn-settings-pause">Accessibility &amp; Settings</button>
+    <button class="btn" id="btn-save">Save Progress (.json)</button>
+    <button class="btn" id="btn-load-pause">Load Progress (.json)</button>
+    <button class="btn ghost" id="btn-quit">Return to Title</button>
+  </div>
+  <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
+</div>
+
+<!-- Settings / accessibility -->
+<div id="menu-settings" class="overlay center menu hidden">
+  <h2 class="menu-h">Accessibility &amp; Settings</h2>
+  <div class="settings-grid">
+    <label class="set-row"><span>Theme</span>
+      <select id="set-theme"><option value="night">Night</option><option value="day">Day</option><option value="high-contrast">High contrast</option></select>
+    </label>
+    <label class="set-row"><span>Colourblind-safe cues</span>
+      <input type="checkbox" id="set-contrast" /> <em class="set-hint">adds shapes + labels, never colour alone</em>
+    </label>
+    <label class="set-row"><span>Reduced motion</span>
+      <input type="checkbox" id="set-motion" /> <em class="set-hint">less camera shake &amp; flashing</em>
+    </label>
+    <label class="set-row"><span>Larger UI</span>
+      <input type="checkbox" id="set-ui" />
+    </label>
+    <label class="set-row"><span>Camera speed</span>
+      <input type="range" id="set-cam" min="0.2" max="2" step="0.1" value="1" />
+    </label>
+    <label class="set-row"><span>Invert camera Y</span>
+      <input type="checkbox" id="set-invert" />
+    </label>
+    <label class="set-row"><span>Aim assist (Bow)</span>
+      <input type="checkbox" id="set-aim" checked />
+    </label>
+    <label class="set-row"><span>Master volume</span>
+      <input type="range" id="set-vol" min="0" max="1" step="0.05" value="0.6" />
+    </label>
+  </div>
+  <button class="btn primary" id="btn-settings-back">Back</button>
+</div>
+
+<input type="file" id="file-input" accept="application/json,.json" hidden />
+
+<script type="module" src="game.js"></script>
+<noscript><div class="overlay center"><p>Emberkin needs JavaScript and WebGL to run.</p></div></noscript>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Emberkin — A Light Between Two</title>
+<meta name="description" content="An original, family-friendly, fully-3D third-person fantasy adventure vertical slice built with Three.js — plus its full Phase-0 design bible." />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d1017; --surface:#161b26; --surface2:#1c2331; --border:#28303f; --accent:#7bd3c6; --accent2:#f5c168;
+    --text:#9aa4bc; --bright:#eef3ff; --muted:#5c667e;
+    --loam:#d9a24a; --tide:#41b6c4; --cinder:#f0713b; --arc:#b48bf0; --rime:#8fd7f0;
+    --display:'Space Grotesk',sans-serif; --body:'Nunito',sans-serif;
+  }
+  html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  body{display:flex;flex-direction:column;align-items:center;padding:3rem 1.5rem 4rem}
+  .wrap{width:100%;max-width:900px}
+  a{color:var(--accent)}
+
+  /* hero */
+  .hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:22px;
+    background:
+      radial-gradient(120% 140% at 80% -10%, rgba(123,211,198,.16), transparent 55%),
+      radial-gradient(120% 140% at 0% 110%, rgba(245,193,104,.14), transparent 55%),
+      linear-gradient(160deg,var(--surface),#10151f);
+    padding:2.6rem 2.2rem 2.2rem}
+  .mk{font-size:2rem;color:var(--accent);filter:drop-shadow(0 0 14px var(--accent));display:block;margin-bottom:.4rem}
+  h1{font-family:var(--display);font-weight:800;letter-spacing:.1em;font-size:clamp(2.1rem,7vw,3.2rem);color:var(--bright);line-height:1}
+  .tag{font-family:var(--display);color:var(--accent2);font-weight:700;letter-spacing:.03em;font-size:1rem;margin:.3rem 0 1rem}
+  .intro{max-width:60ch;color:var(--text)}
+  .intro strong{color:var(--bright)}
+  .badges{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.2rem}
+  .badge{font-size:.72rem;font-weight:700;color:var(--text);background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:20px;padding:.28rem .7rem}
+
+  /* actions */
+  .actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin-top:1.4rem}
+  a.action{display:flex;align-items:center;gap:.9rem;padding:1rem 1.2rem;border-radius:14px;text-decoration:none;border:1.5px solid var(--border);background:var(--surface);transition:transform .15s,border-color .15s,box-shadow .15s}
+  a.action:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 8px 26px rgba(123,211,198,.12)}
+  a.action.primary{background:linear-gradient(135deg,rgba(123,211,198,.18),rgba(245,193,104,.12));border-color:var(--accent)}
+  .action .ico{font-size:1.4rem;width:2.4rem;height:2.4rem;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:10px;flex-shrink:0}
+  .action .t{font-family:var(--display);font-weight:700;color:var(--bright);font-size:1rem}
+  .action .d{font-size:.8rem;color:var(--muted);margin-top:.1rem}
+
+  .label{font-family:var(--display);font-size:.74rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:2.4rem 0 .8rem;display:flex;align-items:center;gap:.8rem}
+  .label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:12px}
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1rem 1.1rem}
+  .tile h3{font-family:var(--display);color:var(--bright);font-size:.98rem;margin-bottom:.25rem;display:flex;align-items:center;gap:.5rem}
+  .tile p{font-size:.85rem;color:var(--muted)}
+  .sig{font-size:1.1rem}
+  .el-loam{color:var(--loam)} .el-tide{color:var(--tide)} .el-cinder{color:var(--cinder)} .el-arc{color:var(--arc)} .el-rime{color:var(--rime)}
+
+  ol.check{list-style:none;counter-reset:c;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:.4rem .9rem}
+  ol.check li{counter-increment:c;position:relative;padding-left:1.9rem;font-size:.87rem;color:var(--text)}
+  ol.check li::before{content:'✓';position:absolute;left:0;top:0;width:1.4rem;height:1.4rem;background:rgba(123,211,198,.14);color:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800}
+
+  .note{background:var(--surface);border-left:3px solid var(--accent2);border-radius:0 12px 12px 0;padding:.9rem 1.1rem;margin-top:1rem;font-size:.86rem;max-width:70ch}
+  .note strong{color:var(--bright)}
+
+  footer{margin-top:2.6rem;color:var(--muted);font-size:.8rem;text-align:center;width:100%}
+  footer a{color:var(--muted)}
+
+  @media (prefers-reduced-motion:no-preference){.wrap{animation:pop .4s cubic-bezier(.22,1,.36,1) both}@keyframes pop{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <span class="mk">✦</span>
+    <h1>EMBERKIN</h1>
+    <p class="tag">A Light Between Two</p>
+    <p class="intro">An original, family-friendly, <strong>fully-3D third-person</strong> fantasy adventure — playable right in your browser. Choose a sibling and a permanent class, fish <strong>Tainer</strong> from the lake, attune elemental <strong>Wardstones</strong>, and <strong>Mirrorstep</strong> into defeated creatures with the signature <strong>Mimic Orb</strong>. Built with Three.js from a full production brief.</p>
+    <div class="badges">
+      <span class="badge">Three.js · WebGL</span>
+      <span class="badge">No install</span>
+      <span class="badge">Keyboard / mouse</span>
+      <span class="badge">Accessible</span>
+      <span class="badge">Local save only</span>
+      <span class="badge">Original IP</span>
+    </div>
+
+    <div class="actions">
+      <a class="action primary" href="play/index.html">
+        <span class="ico">▶</span>
+        <span><span class="t">Play the slice</span><span class="d">The full 3D vertical slice</span></span>
+      </a>
+      <a class="action" href="docs/index.html">
+        <span class="ico">✦</span>
+        <span><span class="t">Design Bible</span><span class="d">Phase-0 GDD, TDD &amp; safety plan</span></span>
+      </a>
+      <a class="action" href="README.md">
+        <span class="ico">📖</span>
+        <span><span class="t">README</span><span class="d">IP canon, controls, scope notes</span></span>
+      </a>
+    </div>
+  </div>
+
+  <p class="label">The world</p>
+  <p style="max-width:70ch">In the <strong style="color:var(--bright)">Reach of Aldermere</strong>, the buried Wellspring that feeds the five elements has cracked. <strong style="color:var(--bright)">Mourne, the Stillard</strong> — an ancient being who believes a changeless world can never suffer — separates two siblings and sets out to freeze the land into silence. You play one sibling searching for the other, guided by a small floating light called Tainer.</p>
+
+  <p class="label">Five elements, attuned at Wardstones</p>
+  <div class="grid">
+    <div class="tile"><h3><span class="sig el-loam">⬡</span> Loam</h3><p>Earth — raise cover, break weak stone, open buried paths.</p></div>
+    <div class="tile"><h3><span class="sig el-tide">≈</span> Tide</h3><p>Water — fill mechanisms, extinguish, float objects.</p></div>
+    <div class="tile"><h3><span class="sig el-cinder">✷</span> Cinder</h3><p>Fire — ignite, melt Rime walls, controlled updrafts.</p></div>
+    <div class="tile"><h3><span class="sig el-arc">ϟ</span> Arc</h3><p>Storm — power devices, conductive chains, stun.</p></div>
+    <div class="tile"><h3><span class="sig el-rime">❈</span> Rime</h3><p>Ice — freeze water into platforms, barriers, slow.</p></div>
+  </div>
+
+  <p class="label">What you can do in the slice</p>
+  <ol class="check">
+    <li>Select the brother or sister</li>
+    <li>Choose a permanent class (5 to preview)</li>
+    <li>Watch the separation &amp; fish out Tainer</li>
+    <li>Explore a 3D world in third person</li>
+    <li>Fight Stonekin — non-graphic dissolve</li>
+    <li>Earn a Mimic Orb &amp; transform</li>
+    <li>Use monster abilities with separate health</li>
+    <li>Eject manually and automatically</li>
+    <li>Keep your exact health on return</li>
+    <li>Infiltrate a camp in disguise</li>
+    <li>Attune an element &amp; solve a puzzle</li>
+    <li>Earn Emberlight &amp; upgrade a weapon</li>
+    <li>Pass the Windrider's Trial to glide</li>
+    <li>Save &amp; reload progress (.json)</li>
+    <li>Tune accessibility &amp; themes</li>
+  </ol>
+
+  <div class="note">
+    <strong>Honest scope.</strong> This is a front-end vertical slice plus a full design package — not the shipped platform. The brief's multiplayer, containerized, moderated live-service with user-generated content is <em>fully designed</em> in the <a href="docs/index.html">Design Bible</a> and clearly marked as not-yet-built. Local saves here are a convenience backup only and are never authoritative — matching the brief's rule that client state never governs real progression, currency, or child data.
+  </div>
+
+  <footer>
+    <p>Part of <a href="../index.html">Built on Request</a> · Original IP, family-friendly, safe by design.</p>
+  </footer>
+</div>
+</body>
+</html>

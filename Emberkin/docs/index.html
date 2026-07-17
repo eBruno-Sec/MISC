@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Emberkin — Design Bible</title>
+<meta name="description" content="Phase-0 production design bible for Emberkin: GDD, TDD, world/narrative/character bibles, Mimic Orb state machine, multiplayer, child-safety, architecture, and roadmap." />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0e1118; --surface:#161b26; --surface2:#1c2331; --border:#28303f;
+    --text:#aeb8cc; --bright:#eef3ff; --muted:#6b7590; --accent:#7bd3c6; --accent2:#f5c168;
+    --loam:#d9a24a; --tide:#41b6c4; --cinder:#f0713b; --arc:#b48bf0; --rime:#8fd7f0;
+    --ok:#5fd08a; --warn:#f2c14e; --danger:#ef5f6b;
+    --display:'Space Grotesk',sans-serif; --body:'Nunito',sans-serif;
+  }
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+  .layout{display:grid;grid-template-columns:260px 1fr;max-width:1200px;margin:0 auto;gap:0}
+
+  /* sidebar */
+  aside{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:1.6rem 1rem 3rem;border-right:1px solid var(--border);background:var(--surface)}
+  .brand{font-family:var(--display);font-weight:800;font-size:1.35rem;color:var(--bright);letter-spacing:.12em;display:flex;align-items:center;gap:.5rem}
+  .brand .mk{color:var(--accent);filter:drop-shadow(0 0 8px var(--accent))}
+  .brand-sub{color:var(--accent2);font-size:.72rem;font-weight:700;letter-spacing:.04em;margin:.1rem 0 1.2rem .1rem}
+  .backlinks{display:flex;gap:.4rem;margin-bottom:1.2rem;flex-wrap:wrap}
+  .backlinks a{font-size:.72rem;font-weight:700;text-decoration:none;color:var(--bright);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.35rem .6rem}
+  .backlinks a:hover{border-color:var(--accent);color:var(--accent)}
+  nav.toc a{display:block;color:var(--muted);text-decoration:none;font-size:.82rem;padding:.22rem .5rem;border-radius:7px;border-left:2px solid transparent}
+  nav.toc a:hover{color:var(--bright);background:var(--surface2)}
+  nav.toc a.grp{color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.1em;font-size:.66rem;margin-top:1rem;padding-left:.5rem}
+  nav.toc a.grp:hover{background:none;color:var(--muted)}
+
+  /* content */
+  main{padding:2.4rem 2.6rem 6rem;min-width:0}
+  h1{font-family:var(--display);font-weight:800;font-size:2.2rem;color:var(--bright);letter-spacing:-.01em;line-height:1.1}
+  .lede{font-size:1.02rem;color:var(--text);max-width:70ch;margin-top:.8rem}
+  h2{font-family:var(--display);font-weight:700;font-size:1.35rem;color:var(--bright);margin:2.6rem 0 .5rem;padding-top:.6rem;scroll-margin-top:1rem}
+  h2 .num{color:var(--accent);font-size:.9rem;font-weight:800;margin-right:.5rem;vertical-align:middle}
+  h3{font-family:var(--display);font-weight:700;font-size:1.02rem;color:var(--bright);margin:1.4rem 0 .4rem}
+  p{max-width:74ch;margin:.5rem 0}
+  a{color:var(--accent)}
+  strong{color:var(--bright)}
+  em{color:var(--accent2);font-style:normal;font-weight:700}
+  ul,ol{margin:.5rem 0 .5rem 1.3rem;max-width:74ch}
+  li{margin:.25rem 0}
+  code{font-family:ui-monospace,'SFMono-Regular',Menlo,monospace;font-size:.85em;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:.05em .4em;color:#cfe6df}
+  hr{border:none;border-top:1px solid var(--border);margin:2.4rem 0}
+
+  .hero{background:linear-gradient(135deg,var(--surface),var(--surface2));border:1px solid var(--border);border-radius:16px;padding:1.6rem 1.8rem;margin-top:1.4rem}
+  .pill{display:inline-block;font-size:.7rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:.2rem .55rem;border-radius:20px;border:1px solid var(--border);color:var(--muted);margin:.15rem .2rem 0 0}
+  .pill.impl{color:var(--ok);border-color:var(--ok)}
+  .pill.design{color:var(--accent2);border-color:var(--accent2)}
+
+  .callout{border-left:3px solid var(--accent);background:var(--surface);border-radius:0 10px 10px 0;padding:.8rem 1.1rem;margin:1rem 0;max-width:74ch}
+  .callout.warn{border-color:var(--warn)}
+  .callout.honesty{border-color:var(--accent2)}
+  .callout .k{font-weight:800;color:var(--bright);display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.2rem}
+
+  table{border-collapse:collapse;width:100%;max-width:100%;margin:1rem 0;font-size:.86rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--surface2);color:var(--bright);font-family:var(--display);font-weight:700;font-size:.8rem;white-space:nowrap}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.7rem;margin:1rem 0}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.9rem 1rem}
+  .card h4{font-family:var(--display);color:var(--bright);font-size:.95rem;margin-bottom:.2rem}
+  .card .sig{font-size:1.3rem}
+  .el-loam{color:var(--loam)} .el-tide{color:var(--tide)} .el-cinder{color:var(--cinder)} .el-arc{color:var(--arc)} .el-rime{color:var(--rime)}
+
+  .fsm{font-family:ui-monospace,monospace;font-size:.8rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;overflow-x:auto;color:#bfe0d8;line-height:1.5;white-space:pre}
+
+  footer{border-top:1px solid var(--border);margin-top:3rem;padding-top:1.2rem;color:var(--muted);font-size:.8rem}
+
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr}
+    aside{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+    nav.toc{display:grid;grid-template-columns:repeat(2,1fr);gap:.1rem}
+    main{padding:1.6rem 1.2rem 4rem}
+  }
+  @media print{
+    aside{display:none} .layout{grid-template-columns:1fr}
+    body{background:#fff;color:#111} main{padding:0}
+    h1,h2,h3,strong{color:#000} a{color:#111;text-decoration:none}
+    .hero,.callout,.card,table,.fsm{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside>
+  <div class="brand"><span class="mk">✦</span> EMBERKIN</div>
+  <div class="brand-sub">Design Bible · Phase 0</div>
+  <div class="backlinks">
+    <a href="../index.html">← Project hub</a>
+    <a href="../play/index.html">▶ Play slice</a>
+  </div>
+  <nav class="toc">
+    <a class="grp">Overview</a>
+    <a href="#summary">Executive summary</a>
+    <a href="#originality">Originality</a>
+    <a href="#vision">Vision &amp; pillars</a>
+    <a href="#scope">What's built vs designed</a>
+    <a class="grp">Game design</a>
+    <a href="#gdd">Core loop &amp; GDD</a>
+    <a href="#world">World bible</a>
+    <a href="#narrative">Narrative bible</a>
+    <a href="#characters">Character bible</a>
+    <a href="#villain">Villain — Mourne</a>
+    <a href="#combat">Combat</a>
+    <a href="#classes">Classes &amp; weapons</a>
+    <a href="#progression">Progression &amp; economy</a>
+    <a href="#elements">Elements &amp; Wardstones</a>
+    <a href="#mimic">Mimic Orb + state machine</a>
+    <a href="#ai">Enemy &amp; NPC AI</a>
+    <a href="#gliding">Gliding</a>
+    <a href="#quests">Quest framework</a>
+    <a class="grp">Platform (designed)</a>
+    <a href="#multiplayer">Multiplayer &amp; networking</a>
+    <a href="#ugc">Creator / UGC</a>
+    <a href="#safety">Child safety</a>
+    <a href="#security">Security threat model</a>
+    <a href="#privacy">Privacy &amp; data</a>
+    <a class="grp">Technical</a>
+    <a href="#tdd">Engine &amp; architecture</a>
+    <a href="#data">Data &amp; schema</a>
+    <a href="#containers">Containers &amp; K8s</a>
+    <a href="#cicd">CI/CD &amp; observability</a>
+    <a href="#testing">Testing</a>
+    <a href="#a11y">Accessibility</a>
+    <a href="#art">Art &amp; audio</a>
+    <a class="grp">Production</a>
+    <a href="#roadmap">Roadmap</a>
+    <a href="#risks">Risk register</a>
+    <a href="#release">Release &amp; incident</a>
+  </nav>
+</aside>
+
+<main>
+  <h1>Emberkin — Production Design Bible</h1>
+  <p class="lede">A family-friendly, fully-3D third-person fantasy adventure and, long-term, a safe game-creation platform. This document is the Phase-0 output: the design canon, technical plan, safety model, and roadmap behind the playable vertical slice.</p>
+
+  <div class="hero">
+    <span class="pill impl">✓ Implemented in the slice</span>
+    <span class="pill design">◇ Designed, not yet built</span>
+    <p style="margin-top:.7rem">The <a href="../play/index.html">browser slice</a> implements the core single-player loop end to end. Everything a browser page cannot honestly be — a server-authoritative, moderated, multiplayer live-service with user-generated content — is <em>fully designed here</em> and clearly marked as not-yet-built. Nothing on this page is presented as shipped that isn't.</p>
+  </div>
+
+  <h2 id="summary"><span class="num">01</span>Executive summary</h2>
+  <p><strong>Emberkin</strong> is an original third-person action-adventure for children, families, and anyone who likes exploration, puzzles, and cooperative play. A player chooses one of two siblings — <strong>Wren</strong> or <strong>Cael</strong> — and a single <em>permanent</em> combat class. An ancient being, <strong>Mourne the Stillard</strong>, separates the siblings and sets out to freeze the world into changeless "peace." The player searches for the lost sibling, aided by <strong>Tainer</strong>, a small floating light-being pulled from a lake.</p>
+  <p>The flagship adventure is designed to double as a showcase for a later <em>safe creation platform</em>, where children can build and publish their own experiences inside strong guardrails. The pillars: <strong>approachable for an eight-year-old, meaningful for older players, original, accessible, and safe by design.</strong></p>
+
+  <h2 id="originality"><span class="num">02</span>Originality</h2>
+  <p>Emberkin uses broad genre conventions (open exploration, elemental powers, a companion, gliding traversal) but <strong>every</strong> name, character, creature, region, symbol, and system is original to this project. It does not copy characters, companion designs, dialogue, story, map, creatures, UI, music, or code from any existing product. An originality review runs throughout production: any new proper noun is checked against known franchises before it enters canon.</p>
+  <table>
+    <thead><tr><th>Element</th><th>Original to Emberkin</th></tr></thead>
+    <tbody>
+      <tr><td>World / start region</td><td>The Reach of Aldermere / Willowmere Vale</td></tr>
+      <tr><td>Siblings</td><td>Wren (sister), Cael (brother)</td></tr>
+      <tr><td>Companion</td><td>Tainer, a "Glimmer" (spark of first light)</td></tr>
+      <tr><td>Villain</td><td>Mourne, the Stillard; servants the Hollow Wardens</td></tr>
+      <tr><td>Elements</td><td>Loam, Tide, Cinder, Arc, Rime</td></tr>
+      <tr><td>Statues</td><td>Wardstones</td></tr>
+      <tr><td>Enemy family</td><td>The Stonekin (Grumble, Boulderback)</td></tr>
+      <tr><td>Glide mentor / licence</td><td>Skywright Pell / the Windrider's Mark</td></tr>
+      <tr><td>Currency</td><td>Emberlight</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="vision"><span class="num">03</span>Vision &amp; design pillars</h2>
+  <ul>
+    <li><strong>Easy to understand, hard to master.</strong> Clear objectives, friendly onboarding, gradual complexity, optional depth.</li>
+    <li><strong>Wonder over threat.</strong> Stakes are emotional (a lost sibling), never graphic. Defeated creatures dissolve into light; nothing bleeds or dies on screen.</li>
+    <li><strong>Curiosity is rewarded.</strong> Hidden paths, environmental storytelling, transformation-only routes, vertical traversal.</li>
+    <li><strong>Safe by design.</strong> Child safety, privacy, and moderation are foundational systems, not add-ons.</li>
+    <li><strong>Accessible from day one.</strong> Reduced motion, high contrast, non-colour-only cues, remap, aim assist, scalable UI — all present in the slice.</li>
+    <li><strong>No predatory monetisation.</strong> Cosmetics only; no loot boxes, gambling, pay-to-win, or manipulative urgency.</li>
+  </ul>
+
+  <h2 id="scope"><span class="num">04</span>What's built vs. designed</h2>
+  <table>
+    <thead><tr><th>System</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Sibling &amp; permanent-class selection</td><td><span class="pill impl">✓</span></td><td>Preview, stats, permanence enforced per save</td></tr>
+      <tr><td>Fully-3D world, third-person camera, movement</td><td><span class="pill impl">✓</span></td><td>Follow + collision camera, sprint/stamina, jump</td></tr>
+      <tr><td>Fishing → Tainer → tutorial</td><td><span class="pill impl">✓</span></td><td>Opening beats + companion hints</td></tr>
+      <tr><td>Combat, non-graphic dissolve</td><td><span class="pill impl">✓</span></td><td>Class-specific melee/ranged; motes-of-light defeat</td></tr>
+      <tr><td>Mimic Orb: transform, separate health, auto+manual eject</td><td><span class="pill impl">✓</span></td><td>Health preservation verified by test</td></tr>
+      <tr><td>Elements + Wardstones + a puzzle</td><td><span class="pill impl">✓</span></td><td>Cinder melts a Rime wall to open the path</td></tr>
+      <tr><td>Stealth infiltration (disguised)</td><td><span class="pill impl">✓</span></td><td>Guards ignore the Mimic form; alert states</td></tr>
+      <tr><td>Gliding trial &amp; licence</td><td><span class="pill impl">✓</span></td><td>Windrider's Trial (hoops + updraft)</td></tr>
+      <tr><td>Emberlight tokens + weapon upgrade</td><td><span class="pill impl">✓</span></td><td>Spend to raise weapon level</td></tr>
+      <tr><td>Local JSON save/load + validation</td><td><span class="pill impl">✓</span></td><td>Schema, migration hooks, pollution guard, transactional hydrate</td></tr>
+      <tr><td>Accessibility &amp; themes</td><td><span class="pill impl">✓</span></td><td>Reduced motion, high contrast, larger UI, camera speed, aim assist</td></tr>
+      <tr><td>Server-authoritative multiplayer &amp; co-op</td><td><span class="pill design">◇</span></td><td>Designed below; a browser can't be authoritative against itself</td></tr>
+      <tr><td>Accounts, family accounts, parental dashboard</td><td><span class="pill design">◇</span></td><td>Designed below</td></tr>
+      <tr><td>Creator tools / UGC / moderation</td><td><span class="pill design">◇</span></td><td>Designed below (sandboxed visual scripting)</td></tr>
+      <tr><td>Containers, Kubernetes, CI/CD, live-ops</td><td><span class="pill design">◇</span></td><td>Designed below</td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+
+  <h2 id="gdd"><span class="num">05</span>Core loop &amp; Game Design Document</h2>
+  <p><strong>Moment-to-moment:</strong> explore → discover a landmark or Wardstone → solve an elemental or transformation puzzle → fight or sneak past Stonekin → earn Emberlight → upgrade → unlock new traversal (elements, gliding, Mimic forms) → reach the next story beat.</p>
+  <p><strong>Session loop:</strong> pick up the thread of the search for the lost sibling, attune a new element or master a new Mimic form, clear a region's story arc, and bank progress. <strong>Meta loop:</strong> the widening map, growing element/transform toolkit, and the mystery of Mourne and the Wellspring.</p>
+  <h3>Controls (slice)</h3>
+  <p>WASD move · Shift sprint · Space jump / glide · Left-click or J attack · E interact · Q or 1–5 element · F Mirrorstep / eject · mouse look · Esc pause. Arrow keys also orbit the camera (no-mouse fallback). Full parity across keyboard/mouse, gamepad, and touch is specified in the <a href="#a11y">accessibility</a> and input sections.</p>
+
+  <h2 id="world"><span class="num">06</span>World bible</h2>
+  <p><strong>The Reach of Aldermere</strong> is a bright, broken land held together by the <strong>Wellspring</strong> — a buried source from which the five elements flow. Long ago the Wellspring cracked; its light scattered into <strong>Wardstones</strong> across the regions, and stray sparks (Glimmers, like Tainer) drifted loose. The slice takes place in <strong>Willowmere Vale</strong>: a lake-and-forest valley with a fishing shore, a Stonekin camp in the northern crags, and a windswept ridge where Skywright Pell teaches gliding.</p>
+  <h3>Planned regions (each with original culture, architecture, wildlife, arc)</h3>
+  <div class="cards">
+    <div class="card"><h4>Willowmere Vale</h4><p>Starting forest &amp; lake. Home. Cinder Wardstone.</p></div>
+    <div class="card"><h4>The Crags</h4><p>Stone highlands, Stonekin camps, Rime Wardstone.</p></div>
+    <div class="card"><h4>Sunkedge Coast</h4><p>Tidal ruins &amp; sea-caves. Tide Wardstone.</p></div>
+    <div class="card"><h4>Loamhold</h4><p>Underground terraces &amp; root-cities. Loam Wardstone.</p></div>
+    <div class="card"><h4>Skarn Heights</h4><p>Floating storm-isles. Arc Wardstone, glide routes.</p></div>
+    <div class="card"><h4>The Stillfields</h4><p>Where Mourne's silence spreads. Endgame.</p></div>
+  </div>
+
+  <h2 id="narrative"><span class="num">07</span>Narrative bible</h2>
+  <p><strong>Theme:</strong> change is not the enemy of peace — it is the price of being alive. Loss hurts; stillness that prevents loss also prevents growth, joy, and reunion.</p>
+  <p><strong>Arc:</strong> Two siblings set out from Willowmere. Mourne appears and, believing he is being <em>merciful</em>, separates them to "spare" them the pain of the coming stillness. The player wakes seasons later, fishes Tainer from the lake, and follows the Wardstones outward — each restoring a piece of the Wellspring's light and a piece of what happened. The search for the sibling and the fight to keep Aldermere <em>changing</em> are the same journey.</p>
+  <p>Critical story content is authored and testable. Optional/ambient NPC dialogue may be schedule- and reputation-driven, but never generative without the guardrails in the <a href="#safety">safety</a> section.</p>
+
+  <h2 id="characters"><span class="num">08</span>Character bible</h2>
+  <div class="cards">
+    <div class="card"><h4>Wren</h4><p>The sister. Warm, quick, stubbornly loyal. Teal palette. Fully voiced/animated; equal to Cael in every way.</p></div>
+    <div class="card"><h4>Cael</h4><p>The brother. Steady, curious, dry humour. Amber palette. Equal to Wren; no gameplay advantage either way.</p></div>
+    <div class="card"><h4>Tainer</h4><p>A Glimmer — a small floating spark of the world's first light. Energetic, helpful, brave, funny. Helps without constantly interrupting. Her origin ties to the cracked Wellspring.</p></div>
+    <div class="card"><h4>Skywright Pell</h4><p>Old windrider and glide mentor. Runs the Windrider's Trial. Gruff, kind, endless wind metaphors.</p></div>
+  </div>
+  <p><strong>Both siblings</strong> are equally capable, support every class, have complete animation sets, adapt cinematics/dialogue, and store the choice permanently. Optional renaming can be supported later if voice systems stay natural.</p>
+
+  <h2 id="villain"><span class="num">09</span>Villain — Mourne, the Stillard</h2>
+  <p><strong>Motive:</strong> Mourne once lost everything to change and grief. He concluded that a world which never changes can never suffer — so he seeks to <em>still</em> Aldermere into a perfect, silent, unchanging calm. He believes this is <strong>mercy</strong>, which makes him tragic rather than evil.</p>
+  <p><strong>Method:</strong> he cracked the Wellspring to drain the world's "restlessness," scattering the elements. His lieutenants, the <strong>Hollow Wardens</strong>, spread quiet zones (the Stillfields) where nothing grows or moves. <strong>Connection to the siblings:</strong> he separated them not out of cruelty but to "spare" them the pain of the stillness to come. The final confrontation is about proving that change — and the grief that comes with it — is worth keeping.</p>
+
+  <h2 id="combat"><span class="num">10</span>Combat</h2>
+  <p>Full-3D, readable, non-graphic. Light/heavy/charged attacks, dodging, telegraphs, stagger, knockback, weak points, and bosses. Elemental attacks change interactions (e.g., Cinder ignites, Rime freezes, Arc powers mechanisms). Feedback uses animation, sound, restrained VFX, impact response, and readable UI — never blood or gore. On defeat, enemies dissolve into ash, mist, or drifting motes of light.</p>
+
+  <h2 id="classes"><span class="num">11</span>Classes &amp; weapons</h2>
+  <p>One class is chosen once and is <strong>permanent</strong> for the save. Players only find weapons of their class; weapons can be equipped, compared, upgraded, fused, or dismantled for materials, with destruction protection and confirmations.</p>
+  <table>
+    <thead><tr><th>Class</th><th>Weapon</th><th>Identity</th><th>Complexity</th></tr></thead>
+    <tbody>
+      <tr><td>Sword</td><td>Vale Blade</td><td>Balanced, reliable, parry potential</td><td>Low</td></tr>
+      <tr><td>Bow</td><td>Reed Bow</td><td>Ranged precision, weak-points, aim assist</td><td>Medium</td></tr>
+      <tr><td>Greatsword</td><td>Cragcleaver</td><td>Slow, heavy, high stagger, breaks weak stone</td><td>Medium</td></tr>
+      <tr><td>Dual Swords</td><td>Twin Fangs</td><td>Fast combos, mobility, quick elemental build-up</td><td>Medium</td></tr>
+      <tr><td>Psychic Focus</td><td>Wander Rune</td><td>Floating rune; push/pull, shields, moving platforms</td><td>High</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="progression"><span class="num">12</span>Progression &amp; token economy</h2>
+  <p>Players earn <strong>Emberlight</strong> from combat, exploration, and challenges, and spend it to raise weapon level (and, in the full game, character skills, elemental abilities, utility, and cosmetics). The design uses the <em>fewest practical currencies</em>, is data-driven for easy rebalancing, age-appropriate, exploit-resistant, and explicitly non-predatory. In the slice, one currency (Emberlight) upgrades the class weapon.</p>
+
+  <h2 id="elements"><span class="num">13</span>Elements &amp; Wardstones</h2>
+  <p>Touching a <strong>Wardstone</strong> attunes an element permanently; the player switches freely among attuned elements. Each element carries an original name, sigil, and colour — and is <strong>never signalled by colour alone</strong> (name + sigil always accompany it, for colourblind players).</p>
+  <div class="cards">
+    <div class="card"><span class="sig el-loam">⬡</span><h4 class="el-loam">Loam</h4><p>Earth. Raise cover &amp; steps, break weak stone, open buried paths.</p></div>
+    <div class="card"><span class="sig el-tide">≈</span><h4 class="el-tide">Tide</h4><p>Water. Fill mechanisms, extinguish, float objects, grow plants.</p></div>
+    <div class="card"><span class="sig el-cinder">✷</span><h4 class="el-cinder">Cinder</h4><p>Fire. Ignite, melt Rime, heat mechanisms, controlled updrafts.</p></div>
+    <div class="card"><span class="sig el-arc">ϟ</span><h4 class="el-arc">Arc</h4><p>Storm. Power devices, conductive chains, stun, powered locks.</p></div>
+    <div class="card"><span class="sig el-rime">❈</span><h4 class="el-rime">Rime</h4><p>Ice. Freeze water into platforms, slow mechanisms, barriers.</p></div>
+  </div>
+  <p><strong>Implemented puzzle:</strong> a Rime ice-wall blocks the path north; equipping <span class="el-cinder">Cinder</span> and striking it melts it, opening the route to the Stonekin camp — combining combat, elements, and traversal in one gate.</p>
+
+  <h2 id="mimic"><span class="num">14</span>Mimic Orb — signature transformation</h2>
+  <p>Certain defeated Stonekin leave a single-use <strong>Mimic Orb</strong>. Absorbing it performs a <strong>Mirrorstep</strong>: the player becomes that creature. The player's normal abilities are hidden; only the monster's abilities are shown; the monster form has <strong>its own separate health</strong>, while the player's real health is <strong>preserved exactly</strong>. The form ends on manual eject (F) or automatically when monster health reaches zero — and in both cases the player returns with the <em>exact</em> health they held before transforming.</p>
+  <div class="callout"><span class="k">Verified invariant</span>Automated in-game tests confirm: transforming preserves player HP; manual eject restores it exactly; reaching 0 monster-HP triggers automatic eject and restores the exact pre-transform value. (Tested with HP 63 and 47 — both restored precisely.)</div>
+  <h3>Uses</h3>
+  <p>Infiltration and disguise (guards ignore the Mimic form), reaching creature-only routes, creature-specific abilities, breaking obstacles, and alternate quest paths. In the slice, the player Mirrorsteps into a Grumble to slip through the guarded camp.</p>
+  <h3>State machine</h3>
+  <div class="fsm">
+Normal ──(pick up orb)──▶ OrbAvailable ──(press F)──▶ TransformationPending
+   ▲                                                        │ (server/authority confirm)
+   │                                                        ▼
+Cooldown ◀──(eject complete)── Ejecting ◀── EjectionPending ◀── Transformed ◀── Transforming
+   │                                   ▲                          │
+   └──(cooldown elapsed)──▶ Normal     └────(F, or monster HP=0)──┘
+
+Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ──▶ Normal (safe reset)
+  </div>
+  <table>
+    <thead><tr><th>State</th><th>Meaning</th><th>Authority (full game)</th></tr></thead>
+    <tbody>
+      <tr><td>Normal</td><td>Player in their own body</td><td>—</td></tr>
+      <tr><td>OrbAvailable</td><td>Orb held, not yet used</td><td>Server validates orb ownership</td></tr>
+      <tr><td>TransformationPending</td><td>Request sent, awaiting confirm</td><td>Client shows local anticipation only</td></tr>
+      <tr><td>Transforming</td><td>Confirmed; swapping model/abilities</td><td>Server authoritative</td></tr>
+      <tr><td>Transformed</td><td>Monster form active, separate HP</td><td>Server owns both HP pools</td></tr>
+      <tr><td>EjectionPending → Ejecting</td><td>Ending the form</td><td>Server restores exact player HP</td></tr>
+      <tr><td>Cooldown</td><td>Brief lockout before re-use</td><td>Server-timed</td></tr>
+      <tr><td>InvalidOrRecovery</td><td>Desync/reconnect safe reset</td><td>Server reconciles to last valid state</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><span class="k">Exploit prevention (full game)</span>The server is authoritative: it prevents infinite transformations, orb duplication, healing exploits, ability spoofing, unauthorized restricted-area access via disguise, and duration manipulation. In the single-player slice, the same state machine runs locally with the same guarantees.</div>
+
+  <h2 id="ai"><span class="num">15</span>Enemy &amp; NPC AI</h2>
+  <p><strong>Stonekin</strong> (Grumble, Boulderback) idle, patrol, notice, chase, and attack, then drift home when they lose the player. Guards use vision/proximity and are fooled by a valid Mimic disguise. <strong>Stealth states</strong>: Safe → Observed → Suspicious → Detected, surfaced with text + shape, never colour alone, and only shown near a guarded zone. NPCs (e.g., Pell) use fixed roles and authored dialogue. Enemy AI is designed to be <em>fair and learnable</em>.</p>
+
+  <h2 id="gliding"><span class="num">16</span>Gliding — the Windrider's Trial</h2>
+  <p>The player does not start with a glider. <strong>Skywright Pell</strong> administers the <strong>Windrider's Trial</strong>: ride an updraft, then glide through a line of rings before touching down. Passing grants the <strong>Windrider's Mark</strong> (licence) and a <em>windwing</em>. Gliding is learned traversal, not an element. Upgrades (planned): stamina, air control, turn rate, updraft efficiency, cosmetics.</p>
+
+  <h2 id="quests"><span class="num">17</span>Quest framework</h2>
+  <p>Quest types: main, regional, character, exploration, puzzle, hidden, cooperative, boss, transformation, gliding, and challenge. The design avoids repetitive fetch quests, emphasising exploration, mystery, environment, character, elements, transformation, and meaningful choices. The slice threads one continuous questline (fish → attune → melt the gate → earn an orb → infiltrate → learn to glide → free roam).</p>
+
+  <hr>
+  <div class="callout honesty"><span class="k">The following systems are designed, not built</span>They belong to the full live-service platform and cannot be honestly implemented inside a single static browser page. They are specified here so the architecture is real and the boundaries are explicit.</div>
+
+  <h2 id="multiplayer"><span class="num">18</span>Multiplayer &amp; networking <span class="pill design">◇ designed</span></h2>
+  <p>Solo players can complete the whole story; co-op is additive. The model is <strong>server-authoritative</strong>: dedicated session servers own movement, combat, damage, enemies, elements, transformations, Mimic Orbs, quests, loot, world state, and gliding. Clients predict and reconcile. A network-facing UI state model (Idle → LocallyPending → ServerConfirmed / ServerRejected → Reconciling → DegradedConnection → Reconnecting → Recovered / Failed) keeps latency legible without blaming the player. Session management, matchmaking, parties, interest management, anti-cheat, reconnection, and version compatibility are all part of the design.</p>
+
+  <h2 id="ugc"><span class="num">19</span>Creator tools / UGC <span class="pill design">◇ designed</span></h2>
+  <p>Two toolsets: a professional internal editor and a simplified, child-friendly creator. Creation uses <strong>sandboxed, capability-limited visual scripting</strong> — never unrestricted code execution. Connector ports carry a semantic colour token <em>plus</em> a distinct icon/shape and label (never colour alone). An "Instant Playtest" checkpoints the draft, launches an isolated sandbox with execution/memory/network/time limits, and returns the author to their exact editor context. Publishing requires moderation, scanning, review, versioning, rollback, audit logs, and parental permission.</p>
+
+  <h2 id="safety"><span class="num">20</span>Child safety, moderation &amp; parental controls <span class="pill design">◇ designed</span></h2>
+  <ul>
+    <li><strong>Safe defaults.</strong> Child accounts default to non-text communication: symbol/phrase wheels, contextual pings, emotes, cooperative signals. Free-form chat requires eligibility, parental authorization, and server-side filtering (profanity + PII + abuse), with reporting, muting, blocking, and rate limits.</li>
+    <li><strong>Parental dashboard gate.</strong> Elevated actions (expanded chat, discoverable profiles, publishing, friend requests, purchases, external links, voice) route through a secure parental-verification flow. A child-solvable arithmetic question is explicitly <em>not</em> an acceptable gate; a PIN alone is not legal consent.</li>
+    <li><strong>Server-side validation.</strong> All text, chat, profile, publishing, and creator input is validated on the server; client filters are supplemental only.</li>
+    <li><strong>Data minimisation &amp; limited discoverability</strong>, audit logs, escalation, and qualified legal review. The product does not claim any control is impenetrable, and does not claim regulatory compliance without qualified review.</li>
+  </ul>
+
+  <h2 id="security"><span class="num">21</span>Security threat model <span class="pill design">◇ designed</span></h2>
+  <p>Threats modelled: account takeover, credential stuffing, session hijacking, injection/XSS/CSRF/SSRF, broken access control &amp; IDOR, replay, item/currency duplication, client-authoritative cheating (movement/damage spoofing), Mimic Orb exploits, malicious uploads, chat abuse, secret exposure, supply-chain compromise, container escape, DoS, and matchmaking abuse. Controls: server authority, short-lived tokens with secure refresh, RBAC, input validation &amp; output encoding, least privilege, secrets management, dependency/container scanning, static/dynamic analysis, CSP for web, and signed builds/assets where justified. Even in the slice, local saves are validated defensively (size limit, safe parse, structural + semantic checks, schema-version rejection, prototype-pollution guard, transactional hydration, no code evaluation).</p>
+
+  <h2 id="privacy"><span class="num">22</span>Privacy &amp; data <span class="pill design">◇ designed</span></h2>
+  <p>Data minimisation by default; PII protection; parent-owned child data with access, export, and deletion paths; retention limits; regional policy via configuration. <strong>Local JSON saves are explicitly non-authoritative</strong> — the brief forbids client state governing progression, currency, entitlements, competitive results, moderation, or protected child data, and the slice honours that: its saves are a convenience backup only.</p>
+
+  <hr>
+
+  <h2 id="tdd"><span class="num">23</span>Engine &amp; architecture (TDD) <span class="pill design">◇ full game</span></h2>
+  <p><strong>Slice engine:</strong> the browser vertical slice is built on <strong>Three.js</strong> (WebGL) with no build step — appropriate for a shareable web demonstration. <strong>Full game:</strong> a native engine is recommended (Unreal or Unity for 3D quality, animation, and dedicated-server tooling; Godot as an open alternative). The recommendation weighs 3D quality, multiplayer, animation, UGC, licensing, dedicated servers, and containerized server integration. Architecture favours a <strong>modular monolith</strong> for backend services early, with separately scalable dedicated session servers, and event-driven integration where justified — avoiding premature microservices. Domains: identity, accounts, families, profiles, characters, inventory, progression, quests, world state, sessions, matchmaking, parties, friends, communication, moderation, reports, creator, publishing, assets, economy, entitlements, analytics, notifications, admin, and audit.</p>
+
+  <h2 id="data"><span class="num">24</span>Data &amp; schema <span class="pill design">◇ full game</span></h2>
+  <p>Right store per need: relational DB for authoritative accounts/progression; cache for sessions; object storage for assets; search for published content; event streams for analytics; time-series for metrics. Never make client state authoritative for currency, entitlements, competitive results, protected progression, moderation, or permissions. The slice's save schema (versioned, migratable) is the local-only analogue:</p>
+  <div class="fsm">save = {
+  schemaVersion: 1, product: "0.1.0-slice", savedAt: ISODate, id: string,
+  payload: { sibling, klass, hp, maxHp, tokens, weaponLevel,
+             elements{loam,tide,cinder,arc,rime}, activeElement,
+             glideUnlocked, stage, flags{...}, pos{x,z} }
+}   // rejected if schemaVersion &gt; supported, or on structural/semantic failure</div>
+
+  <h2 id="containers"><span class="num">25</span>Containers &amp; Kubernetes <span class="pill design">◇ full game</span></h2>
+  <p>Runtime services and dedicated game servers are containerized with multi-stage Dockerfiles, non-root users, health checks, pinned dependencies, scanning, and a one-command Docker Compose local stack (API, auth, game server, DB, cache, broker, object-storage emulator, moderation, analytics, admin, web, reverse proxy, observability). Production targets Kubernetes with deployments/StatefulSets, autoscaling, probes, network policies, rolling updates/rollback, and a game-server orchestrator (e.g., Agones) for session-aware routing. Native engine editors are <em>not</em> forced into containers where that harms workflow.</p>
+
+  <h2 id="cicd"><span class="num">26</span>CI/CD &amp; observability <span class="pill design">◇ full game</span></h2>
+  <p>CI automates formatting, linting, static analysis, tests, security/dependency scanning, container builds/scans, asset validation, server/client builds, deploy, smoke tests, rollback, and release notes across dev/test/staging/prod with gated releases and branch protection. Observability: structured logs, metrics, tracing, crash reporting, plus game-specific signals (session diagnostics, matchmaking, latency, server tick, moderation turnaround) — never logging secrets, tokens, payment data, or sensitive child data.</p>
+
+  <h2 id="testing"><span class="num">27</span>Testing strategy</h2>
+  <p>Full plan spans unit, integration, API, multiplayer, load, security, end-to-end, gameplay automation, save/load, migration, container, deployment, accessibility, moderation, parental-control, exploit, reconnect, and network-degradation tests. <strong>In the slice</strong>, the acceptance-critical invariants are exercised via an in-game QA harness (enable with <code>?dev=1</code>): combat → dissolve → orb drop, transform with separate health, manual and automatic eject preserving exact health, element unlock/switch, and save serialize/validate/round-trip including malicious-input rejection.</p>
+
+  <h2 id="a11y"><span class="num">28</span>Accessibility</h2>
+  <p>Built in from the start and present in the slice: reduced motion (less shake/flashing), high-contrast theme, larger UI scale, camera-speed and invert-Y, aim assist, and non-colour-only status (every element and alert carries a name/sigil/shape). Targets WCAG 2.2 AA for web interfaces. Planned additions: subtitles with speaker labels, full remapping, hold/toggle alternatives, screen-reader support for menus, and difficulty options. Interactive targets are ≥44px; focus states are visible.</p>
+
+  <h2 id="art"><span class="num">29</span>Art, animation, VFX &amp; audio</h2>
+  <p><strong>Art direction:</strong> bright, stylized, readable fantasy with strong silhouettes and expressive faces — clearly 3D, never stick figures. The slice uses a cohesive low-poly, flat-shaded look with PBR-lite materials, soft shadows, and fog. <strong>VFX:</strong> restrained, readable, non-graphic (dissolve = motes of light). <strong>Audio (planned):</strong> original adaptive score per region, diegetic ambience, accessible audio cues, and no copyrighted material. An art bible governs proportions, palettes, materials, enemy silhouettes, UI, and asset budgets.</p>
+
+  <h2 id="roadmap"><span class="num">30</span>Milestone roadmap</h2>
+  <table>
+    <thead><tr><th>Phase</th><th>Focus</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>0 — Discovery</td><td>This bible, IP canon, technical plan, safety plan</td><td><span class="pill impl">✓</span></td></tr>
+      <tr><td>1 — Vertical slice</td><td>Core 3D loop, Mimic Orb, elements, gliding, save</td><td><span class="pill impl">✓ (this build)</span></td></tr>
+      <tr><td>2 — Core systems</td><td>Class depth, more weapons/elements/enemies, boss, parties, matchmaking, persistent progression</td><td><span class="pill design">◇</span></td></tr>
+      <tr><td>3 — Platform</td><td>Accounts, family accounts, parental controls, safe comms, moderation, internal creator</td><td><span class="pill design">◇</span></td></tr>
+      <tr><td>4 — User creation</td><td>Simplified creator, visual scripting, publishing, ratings, sandboxing</td><td><span class="pill design">◇</span></td></tr>
+      <tr><td>5 — Scale &amp; release</td><td>K8s, regional scaling, load/security/accessibility/safety review, store prep, live-ops</td><td><span class="pill design">◇</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="risks"><span class="num">31</span>Risk register (top items)</h2>
+  <table>
+    <thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Child-safety / compliance gaps</td><td>Severe</td><td>Safe defaults, server-side validation, parental gates, qualified legal review before launch</td></tr>
+      <tr><td>Scope (AAA breadth vs. team)</td><td>High</td><td>Phased delivery; vertical slice first; modular monolith; cut cosmetics before systems</td></tr>
+      <tr><td>Cheating in authoritative multiplayer</td><td>High</td><td>Server authority, validation, anti-cheat, Mimic Orb server ownership</td></tr>
+      <tr><td>Moderation load for UGC</td><td>High</td><td>Sandboxed scripting, scanning, review workflows, rollback, audit logs</td></tr>
+      <tr><td>Accessibility debt</td><td>Medium</td><td>Built from the start; tested before any compliance claim</td></tr>
+      <tr><td>Originality drift</td><td>Medium</td><td>Ongoing originality review of every new proper noun and design</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="release"><span class="num">32</span>Release &amp; incident response <span class="pill design">◇ full game</span></h2>
+  <p>Gated, promotable releases (dev → test → staging → prod) with signed artifacts, smoke tests, and rollback. Incident response covers safety escalations (trust &amp; safety on-call), security incidents (containment, disclosure, key rotation), and live-ops outages (runbooks, status, postmortems). Feature flags allow safe, reversible rollout of new regions, creator features, and communication modes.</p>
+
+  <footer>
+    <p><strong>Emberkin</strong> — Phase-0 design bible. Original IP; family-friendly; safe by design. This document describes both what is built (the playable slice) and what is designed for the full platform, with the boundary between them made explicit throughout.</p>
+    <p style="margin-top:.4rem"><a href="../index.html">Project hub</a> · <a href="../play/index.html">Play the slice</a> · <a href="../README.md">README</a></p>
+  </footer>
+</main>
+</div>
+</body>
+</html>
