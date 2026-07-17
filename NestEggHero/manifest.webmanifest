@@ -4,7 +4,7 @@
   "description": "Source-labeled financial education and calculators.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#f7f4ed",
-  "theme_color": "#17201d",
+  "background_color": "#f5f7fa",
+  "theme_color": "#101619",
   "icons": [{ "src": "images/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

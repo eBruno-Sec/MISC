@@ -7,7 +7,11 @@
     <title>NestEggHero | Financial Learning Studio</title>
     <meta name="description" content="Learn retirement account rules, compare educational estimates, and keep source-labeled learning progress on your own device.">
     <meta name="robots" content="index, follow">
-    <meta name="theme-color" content="#17201d">
+    <meta property="og:title" content="NestEggHero | Financial Learning Studio">
+    <meta property="og:description" content="Source-labeled retirement lessons, deterministic calculators, and local-only learning progress.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://ebruno-sec.github.io/MISC/NestEggHero/">
+    <meta name="theme-color" content="#101619">
     <link rel="canonical" href="https://ebruno-sec.github.io/MISC/NestEggHero/">
     <link rel="icon" href="images/mark.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.webmanifest">
@@ -25,6 +29,7 @@
         <a href="#/">Home</a>
         <a href="#/learn">Lessons</a>
         <a href="#/tools">Calculators</a>
+        <a href="#/tools/roth-traditional-lab">Roth Lab</a>
         <a href="#/facts">Fact registry</a>
         <a href="#/progress">Progress</a>
       </nav>
@@ -35,6 +40,12 @@
       </div>
     </header>
     <div class="notice" id="notice" role="alert" hidden></div>
+    <aside class="fact-drawer" id="factDrawer" aria-hidden="true" aria-label="Source detail">
+      <div class="fact-drawer-panel">
+        <button class="drawer-close" id="factDrawerClose" type="button" aria-label="Close source detail">Close</button>
+        <div id="factDrawerBody"></div>
+      </div>
+    </aside>
     <main id="app" tabindex="-1">
       <noscript>
         <section class="empty-state">

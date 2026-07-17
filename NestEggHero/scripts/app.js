@@ -13,6 +13,9 @@ const themeToggle = document.querySelector("#themeToggle");
 const kidToggle = document.querySelector("#kidSpeakToggle");
 const textSizeToggle = document.querySelector("#textSizeToggle");
 const offlineNote = document.querySelector("#offlineNote");
+const factDrawer = document.querySelector("#factDrawer");
+const factDrawerBody = document.querySelector("#factDrawerBody");
+const factDrawerClose = document.querySelector("#factDrawerClose");
 
 const BADGES = [
   { id: "first-lesson", name: "First lesson finished" },
@@ -55,7 +58,7 @@ function textWithTokens(text) {
     if (match.index > index) output.push(document.createTextNode(text.slice(index, match.index)));
     if (match[1] === "fact") {
       const fact = getFact(match[2]);
-      output.push(el("button", { class: "fact-token", type: "button", "aria-label": `${fact.display}. ${fact.claim}. Source ${fact.sourceTitle}.`, onclick: () => showNotice(`${fact.claim}: ${fact.display}. Effective ${fact.effectiveYear}. Source: ${fact.sourceTitle}. Reviewed ${fact.reviewedAt}.`) }, fact.display, el("sup", { text: String(fact.effectiveYear || "src") })));
+      output.push(el("button", { class: "fact-token", type: "button", "aria-label": `${fact.display}. ${fact.claim}. Source ${fact.sourceTitle}.`, onclick: () => openFactDrawer(fact) }, fact.display, el("sup", { text: String(fact.effectiveYear || "src") })));
     } else {
       const term = GLOSSARY[match[2]];
       output.push(el("button", { class: "term-token", type: "button", onclick: () => showNotice(`${term.word}: ${state.preferences.kidSpeak ? term.kid : term.plain}`) }, term.word));
@@ -64,6 +67,30 @@ function textWithTokens(text) {
   }
   if (index < text.length) output.push(document.createTextNode(text.slice(index)));
   return output;
+}
+
+function openFactDrawer(fact) {
+  factDrawerBody.replaceChildren(
+    el("p", { class: "eyebrow", text: "Source-labeled fact" }),
+    el("h2", { text: fact.display }),
+    el("p", { class: "lead", text: fact.claim }),
+    el("dl", { class: "fact-detail-grid" },
+      metric("Effective year", String(fact.effectiveYear || "Concept")),
+      metric("Authority", fact.authorityStatus),
+      metric("Jurisdiction", fact.jurisdiction),
+      metric("Reviewed", fact.reviewedAt),
+      metric("Next review", fact.nextReviewAt),
+      metric("Reviewer", fact.reviewedBy || "NestEggHero")
+    ),
+    el("p", {}, el("a", { class: "btn primary", href: fact.sourceUrl, rel: "noopener", text: fact.sourceTitle })),
+    el("p", { class: "muted", text: "This drawer is for source inspection only. NestEggHero still does not provide individualized tax, legal, fiduciary, or investment advice." })
+  );
+  factDrawer.setAttribute("aria-hidden", "false");
+  factDrawerClose.focus({ preventScroll: true });
+}
+
+function closeFactDrawer() {
+  factDrawer.setAttribute("aria-hidden", "true");
 }
 
 function showToast(message) {
@@ -127,34 +154,63 @@ function breadcrumbs(items) {
 
 function viewHome() {
   const readCount = Object.keys(state.learning.readLessons).length;
-  return el("div", { class: "view" },
+  const progress = Math.round(readCount / ARTICLES.length * 100);
+  const rothLab = getCalculator("roth-traditional-lab");
+  return el("div", { class: "view home-view" },
     el("section", { class: "hero" },
       el("div", { class: "hero-copy" },
         el("p", { class: "eyebrow", text: "Source-labeled financial learning" }),
-        el("h1", { text: "Understand retirement numbers before they become decisions." }),
-        el("p", { class: "lead", text: state.preferences.kidSpeak ? "Short lessons, honest examples, and calculators you can try without entering private account details." : `Eight guided lessons, ${CALCULATORS.length} deterministic calculators, and a fact registry where changing 2026 figures carry an effective year and official source.` }),
-        el("div", { class: "actions" }, el("a", { class: "btn primary", href: "#/learn", text: "Start learning" }), el("a", { class: "btn ghost", href: "#/tools", text: "Open calculators" }))
+        el("h1", { text: "Make retirement choices feel legible." }),
+        el("p", { class: "lead", text: state.preferences.kidSpeak ? "Short lessons, honest examples, and calculators you can try without entering private account details." : `Eight guided lessons, ${CALCULATORS.length} deterministic calculators, and a source drawer for every changing 2026 figure.` }),
+        el("div", { class: "actions hero-actions" },
+          el("a", { class: "btn primary", href: "#/tools/roth-traditional-lab", text: "Open Roth Lab" }),
+          el("a", { class: "btn ghost", href: "#/learn", text: "Start lessons" }),
+          el("a", { class: "btn quiet", href: "#/facts", text: "Inspect sources" })
+        ),
+        el("div", { class: "signal-strip", "aria-label": "Product signals" },
+          signal("Local-only", "IndexedDB progress"),
+          signal("2026 facts", `${allFacts().length} source records`),
+          signal("No accounts", "No credentials asked")
+        )
       ),
-      el("div", { class: "hero-panel" },
-        el("h2", { text: "Learning state" }),
-        el("dl", { class: "metric-grid" },
-          metric("Lessons read", `${readCount}/${ARTICLES.length}`),
+      el("div", { class: "hero-panel insight-panel" },
+        el("div", { class: "snapshot-header" },
+          el("div", {}, el("p", { class: "eyebrow", text: "Today" }), el("h2", { text: "Decision snapshot" })),
+          el("span", { class: "status-pill", text: "Private by default" })
+        ),
+        el("dl", { class: "metric-grid hero-metrics" },
+          metric("Lessons", `${readCount}/${ARTICLES.length}`),
           metric("Calculators", String(CALCULATORS.length)),
           metric("Fact records", String(allFacts().length))
         ),
-        el("p", { class: "muted", text: "Everything runs in your browser. No bank credentials, tax IDs, account numbers, or sensitive financial records are requested." })
+        el("div", { class: "progress-rail" },
+          el("div", { class: "progress-copy" }, el("span", { text: "Learning path" }), el("strong", { text: `${progress}%` })),
+          el("progress", { max: 100, value: progress, "aria-label": `Learning path ${progress}% complete` })
+        ),
+        el("a", { class: "spotlight-link", href: "#/tools/roth-traditional-lab" },
+          el("span", { class: "spotlight-kicker", text: "Featured lab" }),
+          el("strong", { text: rothLab.name }),
+          el("span", { text: rothLab.blurb })
+        )
       )
     ),
-    el("section", { class: "band" },
-      el("h2", { text: "What makes this careful" }),
+    el("section", { class: "band command-band" },
+      el("div", { class: "section-heading" },
+        el("p", { class: "eyebrow", text: "Next useful move" }),
+        el("h2", { text: "A calmer way to compare the rules." })
+      ),
       el("div", { class: "card-grid" },
-        card("Facts cannot float free", "Every changing number resolves through the registry with source, effective year, authority status, reviewer, and next-review date.", "#/facts"),
-        card("Calculators show assumptions", "Results are estimates, not promises. Assumptions and tables sit beside the headline result.", "#/tools"),
-        card("Progress stays local", "Learning state uses IndexedDB; only low-risk preferences use localStorage. Backups are validated before import.", "#/progress")
+        card("Roth vs Traditional", "Compare tax-now and tax-later assumptions with phaseout notes and equal-budget math.", "#/tools/roth-traditional-lab"),
+        card("2026 contribution limits", "Check IRA, workplace, and SIMPLE limits by age without mixing separate rules.", "#/tools/limit-helper"),
+        card("Source registry", "Open the official source record behind every changing number.", "#/facts")
       )
     ),
     disclosure()
   );
+}
+
+function signal(label, value) {
+  return el("div", { class: "signal" }, el("span", { text: label }), el("strong", { text: value }));
 }
 
 function metric(label, value) {
@@ -268,17 +324,58 @@ function sourcesBlock(sources) {
 }
 
 function viewTools() {
-  return el("div", { class: "view" }, breadcrumbs([["Home", "#/"], ["Calculators", "#/tools"]]), el("header", { class: "view-header" }, el("p", { class: "eyebrow", text: "Estimate lab" }), el("h1", { text: "Calculators that say what they assume." }), el("p", { class: "lead", text: "Each tool is deterministic, labels results as estimates, and uses display rounding only after calculation." })), el("div", { class: "card-grid" }, CALCULATORS.map((calc) => card(calc.name, calc.blurb, `#/tools/${calc.slug}`))), disclosure());
+  const featured = getCalculator("roth-traditional-lab");
+  return el("div", { class: "view tools-view" },
+    breadcrumbs([["Home", "#/"], ["Calculators", "#/tools"]]),
+    el("header", { class: "view-header" },
+      el("p", { class: "eyebrow", text: "Estimate lab" }),
+      el("h1", { text: "Calculators that say what they assume." }),
+      el("p", { class: "lead", text: "Each tool is deterministic, labels results as estimates, and uses display rounding only after calculation." })
+    ),
+    el("section", { class: "tool-spotlight" },
+      el("div", {},
+        el("p", { class: "eyebrow", text: "Featured" }),
+        el("h2", { text: featured.name }),
+        el("p", { text: featured.blurb }),
+        el("a", { class: "btn primary", href: `#/tools/${featured.slug}`, text: "Compare scenarios" })
+      ),
+      el("dl", { class: "metric-grid" },
+        metric("Modes", "2"),
+        metric("Phaseout checks", "3"),
+        metric("Saved data", "0")
+      )
+    ),
+    el("div", { class: "card-grid tool-grid" }, CALCULATORS.map((calc) => el("article", { class: calc.slug === featured.slug ? "card tool-card featured-tool" : "card tool-card" },
+      el("p", { class: "eyebrow", text: calc.slug === featured.slug ? "Decision lab" : "Calculator" }),
+      el("h2", {}, el("a", { href: `#/tools/${calc.slug}`, text: calc.name })),
+      el("p", { text: calc.blurb })
+    ))),
+    disclosure()
+  );
 }
 
 function viewCalculator(slug) {
   const calc = getCalculator(slug);
   const results = el("div", { class: "results", "aria-live": "polite" });
   const form = el("form", { class: "tool-form" });
+  if (calc.presets?.length) {
+    form.append(el("div", { class: "preset-panel" },
+      el("span", { class: "eyebrow", text: "Scenarios" }),
+      el("div", { class: "preset-row" }, calc.presets.map((preset) => el("button", { class: "chip", type: "button", onclick: () => {
+        for (const [key, value] of Object.entries(preset.values)) {
+          const input = form.elements.namedItem(key);
+          if (input) input.value = value;
+        }
+        form.requestSubmit();
+      } }, preset.label)))
+    ));
+  }
+  const fields = el("div", { class: "field-grid" });
   calc.fields.forEach((field) => {
     const input = field.kind === "choice" ? el("select", { name: field.id }, field.options.map((option) => el("option", { value: option.value, selected: option.value === field.defaultValue, text: option.label }))) : el("input", { name: field.id, type: "number", inputmode: "decimal", value: field.defaultValue, step: field.step || "1" });
-    form.append(el("label", {}, el("span", { text: field.label }), field.suffix ? el("span", { class: "input-wrap" }, input, el("span", { text: field.suffix })) : input));
+    fields.append(el("label", {}, el("span", { text: field.label }), field.suffix ? el("span", { class: "input-wrap" }, input, el("span", { text: field.suffix })) : input));
   });
+  form.append(fields);
   form.append(el("button", { class: "btn primary", type: "submit" }, "Run estimate"));
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -294,13 +391,23 @@ function viewCalculator(slug) {
     }
   });
   setTimeout(() => form.requestSubmit(), 0);
-  return el("div", { class: "view" }, breadcrumbs([["Home", "#/"], ["Calculators", "#/tools"], [calc.name, `#/tools/${slug}`]]), el("header", { class: "view-header" }, el("p", { class: "eyebrow", text: "Estimate, not promise" }), el("h1", { text: calc.name }), el("p", { class: "lead", text: calc.blurb })), el("div", { class: "tool-layout" }, form, results), disclosure());
+  return el("div", { class: "view calculator-view" },
+    breadcrumbs([["Home", "#/"], ["Calculators", "#/tools"], [calc.name, `#/tools/${slug}`]]),
+    el("header", { class: "view-header" },
+      el("p", { class: "eyebrow", text: "Estimate, not promise" }),
+      el("h1", { text: calc.name }),
+      el("p", { class: "lead", text: calc.blurb })
+    ),
+    el("div", { class: "tool-layout" }, form, results),
+    disclosure()
+  );
 }
 
 function renderOutcome(host, outcome) {
   host.replaceChildren(el("section", { class: "result-card" },
     el("p", { class: "eyebrow", text: outcome.headline.label }),
     el("h2", { text: outcome.headline.value }),
+    outcome.comparison ? comparisonBars(outcome.comparison) : null,
     el("div", { class: "metric-grid" }, (outcome.stats || []).map((item) => metric(item.label, item.value))),
     outcome.warnings?.length ? el("div", { class: "warning-list", role: "note" }, el("h3", { text: "Eligibility notes" }), el("ul", {}, outcome.warnings.map((item) => el("li", { text: item })))) : null,
     el("h3", { text: "Assumptions" }),
@@ -308,6 +415,14 @@ function renderOutcome(host, outcome) {
     outcome.chart ? chart(outcome.chart) : null,
     outcome.table ? dataTable(outcome.table) : null
   ));
+}
+
+function comparisonBars(items) {
+  const max = Math.max(...items.map((item) => item.value), 1);
+  return el("div", { class: "comparison-bars" }, items.map((item) => el("div", { class: `comparison-row ${item.accent || ""}` },
+    el("div", {}, el("strong", { text: item.label }), el("span", { text: item.display })),
+    el("progress", { max, value: Math.max(0, item.value), "aria-label": `${item.label}: ${item.display}` })
+  )));
 }
 
 function chart(data) {
@@ -440,10 +555,19 @@ function renderRoute() {
 
 function updateNav() {
   const current = path();
-  for (const link of nav.querySelectorAll("a")) {
+  const links = Array.from(nav.querySelectorAll("a"));
+  let best = null;
+  let bestLength = -1;
+  for (const link of links) {
     const target = link.getAttribute("href").replace(/^#\/?/, "").replace(/\/+$/, "") || "";
     const active = target === current || (target && current.startsWith(target + "/"));
-    if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+    if (active && target.length > bestLength) {
+      best = link;
+      bestLength = target.length;
+    }
+  }
+  for (const link of links) {
+    if (link === best) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
   }
 }
 
@@ -459,10 +583,16 @@ function bindShell() {
   window.addEventListener("hashchange", renderRoute);
   window.addEventListener("online", () => { offlineNote.hidden = true; });
   window.addEventListener("offline", () => { offlineNote.hidden = false; });
+  factDrawerClose.addEventListener("click", closeFactDrawer);
+  factDrawer.addEventListener("click", (event) => { if (event.target === factDrawer) closeFactDrawer(); });
+  window.addEventListener("keydown", (event) => { if (event.key === "Escape") closeFactDrawer(); });
 }
 
 async function init() {
-  const loaded = await loadLearning();
+  const loaded = await Promise.race([
+    loadLearning(),
+    new Promise((resolve) => setTimeout(() => resolve({ learning: defaultLearning(), persisted: false }), 900))
+  ]);
   state.learning = loaded.learning;
   state.persisted = loaded.persisted;
   applyPreferences();

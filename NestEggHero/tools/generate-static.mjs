@@ -36,6 +36,11 @@ function shell({ title, description, path, body, jsonLd = null }) {
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}">
     <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#101619">
+    <meta property="og:title" content="${esc(title)}">
+    <meta property="og:description" content="${esc(description)}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="${canonical}">
     <link rel="canonical" href="${canonical}">
     <link rel="stylesheet" href="../styles/main.css">
     <link rel="icon" href="../images/mark.svg" type="image/svg+xml">
@@ -49,6 +54,7 @@ function shell({ title, description, path, body, jsonLd = null }) {
         <a href="../index.html">Interactive app</a>
         <a href="index.html">Lessons</a>
         <a href="../tools/index.html">Calculators</a>
+        <a href="../index.html#/tools/roth-traditional-lab">Roth Lab</a>
         <a href="../facts/index.html">Fact registry</a>
       </nav>
     </header>
@@ -106,7 +112,8 @@ function factsIndex() {
 }
 
 function toolsIndex() {
-  const body = `<header class="view-header"><p class="eyebrow">Estimate calculators</p><h1>Tools that show assumptions</h1><p class="lead">The interactive app runs these deterministic calculators locally in the browser.</p></header><div class="card-grid">${CALCULATORS.map((calc) => `<article class="card"><h2><a href="../index.html#/tools/${calc.slug}">${esc(calc.name)}</a></h2><p>${esc(calc.blurb)}</p></article>`).join("")}</div>`;
+  const featured = CALCULATORS.find((calc) => calc.slug === "roth-traditional-lab");
+  const body = `<header class="view-header"><p class="eyebrow">Estimate calculators</p><h1>Tools that show assumptions</h1><p class="lead">The interactive app runs these deterministic calculators locally in the browser.</p></header><section class="tool-spotlight"><div><p class="eyebrow">Featured</p><h2>${esc(featured.name)}</h2><p>${esc(featured.blurb)}</p><a class="btn primary" href="../index.html#/tools/${featured.slug}">Compare scenarios</a></div><dl class="metric-grid"><div><dt>Modes</dt><dd>2</dd></div><div><dt>Phaseout checks</dt><dd>3</dd></div><div><dt>Saved data</dt><dd>0</dd></div></dl></section><div class="card-grid tool-grid">${CALCULATORS.map((calc) => `<article class="${calc.slug === featured.slug ? "card tool-card featured-tool" : "card tool-card"}"><p class="eyebrow">${calc.slug === featured.slug ? "Decision lab" : "Calculator"}</p><h2><a href="../index.html#/tools/${calc.slug}">${esc(calc.name)}</a></h2><p>${esc(calc.blurb)}</p></article>`).join("")}</div>`;
   return shell({ title: "Calculators | NestEggHero", description: "NestEggHero deterministic educational calculators.", path: "/tools/", body });
 }
 

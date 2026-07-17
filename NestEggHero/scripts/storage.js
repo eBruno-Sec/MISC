@@ -6,8 +6,7 @@ const LEARNING_KEY = "learning";
 const PREFS_KEY = "nestegghero.preferences";
 
 export function defaultPreferences() {
-  const prefersDark = typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
-  return { theme: prefersDark ? "dark" : "light", kidSpeak: false, textSize: "normal" };
+  return { theme: "light", kidSpeak: false, textSize: "normal" };
 }
 
 export function defaultLearning() {

@@ -271,6 +271,10 @@ export function rothTraditionalDecision({ annualAmount, age, years, annualRate, 
       { label: "Roth annual deposit", value: formatUSD(rothContribution) },
       { label: "Traditional annual deposit", value: formatUSD(traditionalContribution) }
     ],
+    comparison: [
+      { label: "Roth", value: rothAfterTax, display: formatUSD(rothAfterTax), accent: "roth" },
+      { label: "Traditional", value: traditionalAfterTax, display: formatUSD(traditionalAfterTax), accent: "traditional" }
+    ],
     warnings,
     assumptions: [
       `2026 IRA limit used: ${formatUSD(limit)} for age ${wholeAge}.`,
@@ -334,7 +338,11 @@ export const CALCULATORS = [
     { id: "apr", label: "APR", kind: "percent", min: 0, max: 100, defaultValue: "21", step: "0.1", suffix: "%" },
     { id: "monthlyPayment", label: "Monthly payment", kind: "dollars", defaultValue: "250", step: "10" }
   ], compute: debtPayoff },
-  { slug: "roth-traditional-lab", name: "Roth vs Traditional Decision Lab", blurb: "Compare tax-now and tax-later IRA assumptions with phaseout warnings.", fields: [
+  { slug: "roth-traditional-lab", name: "Roth vs Traditional Decision Lab", blurb: "Compare tax-now and tax-later IRA assumptions with phaseout warnings.", presets: [
+    { label: "Early career", values: { annualAmount: "5000", age: "27", years: "35", annualRate: "6", currentTaxRate: "12", retirementTaxRate: "22", comparisonMode: "same-budget", filingStatus: "single", workplaceCoverage: "self", modifiedAgi: "65000" } },
+    { label: "High earner", values: { annualAmount: "7500", age: "42", years: "23", annualRate: "5", currentTaxRate: "32", retirementTaxRate: "24", comparisonMode: "same-budget", filingStatus: "mfj", workplaceCoverage: "self", modifiedAgi: "260000" } },
+    { label: "Near retirement", values: { annualAmount: "8600", age: "56", years: "9", annualRate: "4", currentTaxRate: "24", retirementTaxRate: "18", comparisonMode: "same-contribution", filingStatus: "mfj", workplaceCoverage: "none", modifiedAgi: "150000" } }
+  ], fields: [
     { id: "annualAmount", label: "Annual comparison amount", kind: "dollars", defaultValue: "7500", step: "100" },
     { id: "age", label: "Age at year end", kind: "whole", min: 0, max: 120, defaultValue: "35" },
     { id: "years", label: "Years invested", kind: "whole", min: 1, max: 60, defaultValue: "25" },

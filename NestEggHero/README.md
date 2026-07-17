@@ -7,6 +7,7 @@ NestEggHero is a static, dependency-free financial learning studio for GitHub Pa
 - Fact registry with effective year, jurisdiction, authority status, source URL, retrieval date, reviewer, and next-review date.
 - Eight structured lessons with Kid Speak variants, quizzes, sources, risks, takeaways, and next steps.
 - Nine calculators using pure functions: steady saving, compound growth, debt payoff, Roth vs Traditional Decision Lab, today's dollars, real return, present value, effective annual rate, and 2026 contribution limit helper.
+- Premium responsive interface with a modern decision dashboard, source drawer, scenario presets, and richer calculator result panels.
 - IndexedDB learning progress with localStorage only for low-risk preferences.
 - JSON backup envelope with schema versioning, sha256-base64 checksum, size/depth/node/string guards, prototype-pollution rejection, preview, merge, and replace.
 - Crawlable generated lesson, fact, and calculator index pages for GitHub Pages SEO.
