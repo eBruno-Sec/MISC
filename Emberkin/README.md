@@ -103,8 +103,9 @@ Playable, end to end:
 | Cycle element | **Q** / **1–5** |
 | Activate Mimic Orb | **F** (when an orb is held) |
 | Eject from Mimic form | **F** |
-| Camera | **Mouse** (click the canvas to look) |
-| Pause / menu | **Esc** |
+| Camera | **Mouse** (click the canvas to capture it and look) |
+| Zoom camera | **Scroll wheel** |
+| Free the cursor / pause | **Esc** (one press does both; Resume re-captures the mouse) |
 
 A full control list and accessibility options are available from the in-game pause menu. Every
 control is also shown on the HUD, and prompts adapt to what you can currently do.

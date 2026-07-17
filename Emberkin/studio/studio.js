@@ -320,7 +320,7 @@ addEventListener('mouseup', e=>{
   const gp = groundPoint(e);
   if (gp) addObject(S.placeType, gp.x, gp.z, S.rot);
 });
-addEventListener('wheel', e=>{ if(!P.active){ dist=Math.max(14,Math.min(80,dist+Math.sign(e.deltaY)*3)); } }, {passive:true});
+addEventListener('wheel', e=>{ if(!P.active){ dist=Math.max(14,Math.min(80,dist-Math.sign(e.deltaY)*3)); } }, {passive:true});
 
 /* -------------------------------------------------------------- loop */
 function tick(){

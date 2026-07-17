@@ -792,7 +792,14 @@ function bindInput(){
     if (e.button===0){ doAttack(); attackHeld=true; if(!pointerLocked) canvas.requestPointerLock?.(); }
   });
   addEventListener('mouseup', ()=>{ attackHeld=false; });
-  document.addEventListener('pointerlockchange', ()=>{ pointerLocked = document.pointerLockElement===canvas; });
+  document.addEventListener('pointerlockchange', ()=>{
+    const was = pointerLocked;
+    pointerLocked = document.pointerLockElement===canvas;
+    // Esc releases the browser's pointer lock WITHOUT delivering a keydown to the
+    // page — treat that release as the pause gesture so the cursor and the menu
+    // arrive together instead of leaving the game running with a free mouse.
+    if (was && !pointerLocked && G.phase==='playing'){ pause(); lockOnResume = true; }
+  });
   addEventListener('mousemove', (e)=>{
     if (G.phase!=='playing') return;
     if (pointerLocked){
@@ -804,7 +811,7 @@ function bindInput(){
     }
     pitch = Math.max(-0.2, Math.min(1.1, pitch));
   });
-  addEventListener('wheel', (e)=>{ if(G.phase==='playing'){ camDist = Math.max(4, Math.min(14, camDist + Math.sign(e.deltaY))); }},{passive:true});
+  addEventListener('wheel', (e)=>{ if(G.phase==='playing'){ camDist = Math.max(4, Math.min(14, camDist - Math.sign(e.deltaY))); }},{passive:true});
 }
 
 /* ============================================================ GAME FLOW / UI */
@@ -954,7 +961,7 @@ function enterWorld(){
   player.position.set(lakePos.x + 12, 0, lakePos.z + 2);
   yaw = Math.PI*0.5;
   tainerSay(`Psst — down here! ...okay you can’t hear me yet. Go on, ${sibName()}. Cast your line at the lake.`, 5200);
-  toast('Click the game to look around with the mouse. Esc to pause.', 'info', 4200);
+  toast('Click the game to capture the mouse and look around. Esc frees the cursor (and pauses). Scroll to zoom.', 'info', 5200);
 }
 
 /* ------------------------------------------------------------- interaction */
@@ -1634,8 +1641,13 @@ function updateHUD(){
 }
 
 /* ================================================================= PAUSE/SET */
-function pause(){ if(G.phase!=='playing') return; G.phase='paused'; show(dom['menu-pause']); document.exitPointerLock?.(); }
-function resume(){ if(G.phase!=='paused') return; hide(dom['menu-pause']); G.phase='playing'; }
+let lockOnResume = false;
+function pause(){ if(G.phase!=='playing') return; lockOnResume = pointerLocked; G.phase='paused'; show(dom['menu-pause']); document.exitPointerLock?.(); }
+function resume(){
+  if(G.phase!=='paused') return;
+  hide(dom['menu-pause']); G.phase='playing';
+  if (lockOnResume) dom_scene().requestPointerLock?.();   // give the mouse back to the camera
+}
 
 /* ------------------------------------------------------ inventory (gear) */
 function openInventory(){
@@ -2002,6 +2014,7 @@ function installDevHooks(){
     warp: (x,z)=>{ player.position.set(x,0,z); },
     chestsState: ()=> ({...G.chests}),
     viewYaw: ()=> yaw,
+    view: ()=> ({ yaw:+yaw.toFixed(3), pitch:+pitch.toFixed(3), camDist }),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
