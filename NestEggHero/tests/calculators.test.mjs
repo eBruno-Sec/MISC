@@ -1,9 +1,9 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { CALCULATORS, runCalculator, contributionGrowth, debtPayoff, effectiveAnnualRate, realReturn } from "../scripts/calculators.js";
+import { CALCULATORS, runCalculator, contributionGrowth, debtPayoff, effectiveAnnualRate, realReturn, rothTraditionalDecision } from "../scripts/calculators.js";
 
 test("all calculators are registered with defaults", () => {
-  assert.equal(CALCULATORS.length, 8);
+  assert.equal(CALCULATORS.length, 9);
   for (const calc of CALCULATORS) {
     assert.ok(calc.slug);
     assert.ok(calc.name);
@@ -30,6 +30,40 @@ test("effective annual rate exceeds stated APR when compounding", () => {
 test("real return uses exact division formula", () => {
   const result = realReturn({ nominalRate: 0.06, inflation: 0.03 });
   assert.match(result.headline.value, /2\.91%/);
+});
+
+test("Roth vs Traditional ties in same-budget mode when tax rates match", () => {
+  const result = rothTraditionalDecision({
+    annualAmount: 7500,
+    age: 35,
+    years: 25,
+    annualRate: 0.05,
+    currentTaxRate: 0.22,
+    retirementTaxRate: 0.22,
+    comparisonMode: "same-budget",
+    filingStatus: "single",
+    workplaceCoverage: "self",
+    modifiedAgi: 100000
+  });
+  assert.equal(result.headline.value, "Tie");
+  assert.equal(result.stats[2].value, "$5,850");
+});
+
+test("Roth vs Traditional surfaces phaseout warnings", () => {
+  const result = rothTraditionalDecision({
+    annualAmount: 7500,
+    age: 35,
+    years: 10,
+    annualRate: 0.04,
+    currentTaxRate: 0.24,
+    retirementTaxRate: 0.22,
+    comparisonMode: "same-contribution",
+    filingStatus: "mfj",
+    workplaceCoverage: "self",
+    modifiedAgi: 260000
+  });
+  assert.ok(result.warnings.some((item) => item.includes("Direct Roth IRA contribution") && item.includes("at or above")));
+  assert.ok(result.warnings.some((item) => item.includes("Traditional IRA deduction") && item.includes("at or above")));
 });
 
 test("registered calculators run with defaults", () => {

@@ -201,6 +201,88 @@ export function debtPayoff({ balance, apr, monthlyPayment }) {
   };
 }
 
+function futureValueAnnualSeries(annualAmount, annualRate, years) {
+  if (annualAmount === 0) return 0;
+  return annualRate === 0 ? annualAmount * years : annualAmount * ((Math.pow(1 + annualRate, years) - 1) / annualRate);
+}
+
+function phaseoutMessage(label, magi, start, end) {
+  if (magi <= start) return `${label}: the entered MAGI is below the 2026 phaseout start.`;
+  if (magi >= end) return `${label}: the entered MAGI is at or above the 2026 phaseout end.`;
+  return `${label}: the entered MAGI is inside the 2026 phaseout range.`;
+}
+
+function rothPhaseoutMessage(filingStatus, magi) {
+  if (filingStatus === "mfj") return phaseoutMessage("Direct Roth IRA contribution", magi, 242000, 252000);
+  if (filingStatus === "mfs") return phaseoutMessage("Direct Roth IRA contribution for married filing separately if spouses lived together", magi, 0, 10000);
+  return phaseoutMessage("Direct Roth IRA contribution", magi, 153000, 168000);
+}
+
+function traditionalDeductionMessage(filingStatus, coverage, magi) {
+  if (coverage === "none") return "Traditional IRA deduction: the federal phaseout generally does not apply when neither spouse is covered by a workplace retirement plan.";
+  if (coverage === "spouse") {
+    if (filingStatus === "mfj") return phaseoutMessage("Traditional IRA deduction when only the spouse is covered at work", magi, 242000, 252000);
+    if (filingStatus === "mfs") return phaseoutMessage("Traditional IRA deduction for married filing separately when a spouse is covered", magi, 0, 10000);
+    return "Traditional IRA deduction: spouse-covered phaseouts mainly apply to married filers; verify the actual filing facts.";
+  }
+  if (filingStatus === "mfj") return phaseoutMessage("Traditional IRA deduction when the contributor is covered at work", magi, 129000, 149000);
+  if (filingStatus === "mfs") return phaseoutMessage("Traditional IRA deduction for married filing separately when covered at work", magi, 0, 10000);
+  return phaseoutMessage("Traditional IRA deduction when covered at work", magi, 81000, 91000);
+}
+
+export function rothTraditionalDecision({ annualAmount, age, years, annualRate, currentTaxRate, retirementTaxRate, comparisonMode, filingStatus, workplaceCoverage, modifiedAgi }) {
+  const wholeAge = Math.floor(age);
+  const limit = 7500 + (wholeAge >= 50 ? 1100 : 0);
+  if (annualAmount === 0) fail("Add an annual comparison amount.");
+  if (annualAmount > limit) fail(`The annual comparison amount exceeds the 2026 IRA contribution limit for age ${wholeAge}: ${formatUSD(limit)}.`);
+
+  const traditionalContribution = annualAmount;
+  const rothContribution = comparisonMode === "same-budget" ? annualAmount * (1 - currentTaxRate) : annualAmount;
+  const rothFuture = futureValueAnnualSeries(rothContribution, annualRate, years);
+  const traditionalFuture = futureValueAnnualSeries(traditionalContribution, annualRate, years);
+  const rothAfterTax = rothFuture;
+  const traditionalAfterTax = traditionalFuture * (1 - retirementTaxRate);
+  const difference = rothAfterTax - traditionalAfterTax;
+  const tie = Math.abs(difference) < 0.5;
+  const leader = tie ? "Tie" : difference > 0 ? `Roth +${formatUSD(Math.abs(difference))}` : `Traditional +${formatUSD(Math.abs(difference))}`;
+
+  const rows = [];
+  for (let year = 1; year <= years; year += 1) {
+    rows.push([
+      String(year),
+      formatUSD(futureValueAnnualSeries(rothContribution, annualRate, year)),
+      formatUSD(futureValueAnnualSeries(traditionalContribution, annualRate, year) * (1 - retirementTaxRate))
+    ]);
+  }
+
+  const warnings = [
+    rothPhaseoutMessage(filingStatus, modifiedAgi),
+    traditionalDeductionMessage(filingStatus, workplaceCoverage, modifiedAgi),
+    comparisonMode === "same-contribution"
+      ? "Same IRA deposit mode does not invest the traditional current-year tax savings."
+      : "Same pre-tax budget mode reduces the Roth deposit by the entered current tax rate."
+  ];
+
+  return {
+    headline: { label: tie ? "Estimated after-tax comparison" : "Estimated after-tax advantage", value: leader },
+    stats: [
+      { label: "Roth after-tax estimate", value: formatUSD(rothAfterTax) },
+      { label: "Traditional after-tax estimate", value: formatUSD(traditionalAfterTax) },
+      { label: "Roth annual deposit", value: formatUSD(rothContribution) },
+      { label: "Traditional annual deposit", value: formatUSD(traditionalContribution) }
+    ],
+    warnings,
+    assumptions: [
+      `2026 IRA limit used: ${formatUSD(limit)} for age ${wholeAge}.`,
+      `Annual return of ${formatRate(annualRate)} for ${years} year${years === 1 ? "" : "s"}, with end-of-year deposits.`,
+      `Current federal tax rate entered: ${formatRate(currentTaxRate)}. Retirement federal tax rate entered: ${formatRate(retirementTaxRate)}.`,
+      "Roth withdrawals are treated as qualified and tax-free; traditional withdrawals are reduced by the entered retirement tax rate.",
+      "Federal-only educational model. It excludes state tax, penalties, RMD strategy, backdoor Roth rules, taxable side accounts, investment fees, and volatility."
+    ],
+    table: { caption: "Estimated after-tax value by year", columns: ["Year", "Roth", "Traditional"], rows }
+  };
+}
+
 export function contributionLimit({ accountType, age }) {
   const wholeAge = Math.floor(age);
   let label = "";
@@ -252,6 +334,18 @@ export const CALCULATORS = [
     { id: "apr", label: "APR", kind: "percent", min: 0, max: 100, defaultValue: "21", step: "0.1", suffix: "%" },
     { id: "monthlyPayment", label: "Monthly payment", kind: "dollars", defaultValue: "250", step: "10" }
   ], compute: debtPayoff },
+  { slug: "roth-traditional-lab", name: "Roth vs Traditional Decision Lab", blurb: "Compare tax-now and tax-later IRA assumptions with phaseout warnings.", fields: [
+    { id: "annualAmount", label: "Annual comparison amount", kind: "dollars", defaultValue: "7500", step: "100" },
+    { id: "age", label: "Age at year end", kind: "whole", min: 0, max: 120, defaultValue: "35" },
+    { id: "years", label: "Years invested", kind: "whole", min: 1, max: 60, defaultValue: "25" },
+    { id: "annualRate", label: "Nominal annual return", kind: "percent", min: -25, max: 25, defaultValue: "5", step: "0.1", suffix: "%" },
+    { id: "currentTaxRate", label: "Current federal tax rate", kind: "percent", min: 0, max: 60, defaultValue: "22", step: "0.1", suffix: "%" },
+    { id: "retirementTaxRate", label: "Retirement federal tax rate", kind: "percent", min: 0, max: 60, defaultValue: "22", step: "0.1", suffix: "%" },
+    { id: "comparisonMode", label: "Comparison mode", kind: "choice", defaultValue: "same-budget", options: [{ value: "same-budget", label: "Same pre-tax savings budget" }, { value: "same-contribution", label: "Same IRA deposit" }] },
+    { id: "filingStatus", label: "Filing status", kind: "choice", defaultValue: "single", options: [{ value: "single", label: "Single" }, { value: "head", label: "Head of household" }, { value: "mfj", label: "Married filing jointly" }, { value: "mfs", label: "Married filing separately" }] },
+    { id: "workplaceCoverage", label: "Workplace plan coverage", kind: "choice", defaultValue: "self", options: [{ value: "self", label: "Contributor covered at work" }, { value: "spouse", label: "Only spouse covered at work" }, { value: "none", label: "Neither spouse covered at work" }] },
+    { id: "modifiedAgi", label: "Modified AGI", kind: "dollars", defaultValue: "140000", step: "1000" }
+  ], compute: rothTraditionalDecision },
   { slug: "todays-dollars", name: "Today's dollars", blurb: "Restate a future amount in current purchasing power.", fields: [
     { id: "futureAmount", label: "Future amount", kind: "dollars", defaultValue: "500000", step: "1000" },
     { id: "inflation", label: "Inflation assumption", kind: "percent", min: 0, max: 25, defaultValue: "2.5", step: "0.1", suffix: "%" },

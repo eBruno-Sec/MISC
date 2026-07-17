@@ -216,6 +216,8 @@ input, select {
 .input-wrap { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center; }
 .results { min-height: 220px; }
 .result-card h2 { margin-top: 0; font-size: clamp(2rem, 4vw, 3.25rem); }
+.warning-list { margin: 1rem 0; padding: 0.9rem 1rem; border: 1px solid #d69d2f; border-radius: 8px; background: rgba(214, 157, 47, 0.13); }
+.warning-list h3 { margin-top: 0; }
 .chart { display: grid; gap: 0.4rem; margin-top: 1rem; }
 .chart-row { display: grid; grid-template-columns: 44px minmax(120px, 1fr) 80px; gap: 0.5rem; align-items: center; font-size: 0.9rem; }
 .chart-progress { width: 100%; height: 16px; border: 0; border-radius: 999px; overflow: hidden; background: var(--chart-track); appearance: none; }

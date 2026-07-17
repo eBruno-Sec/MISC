@@ -6,6 +6,6 @@ import { allFacts } from "../scripts/facts.js";
 
 test("NestEggHero product spine is present", () => {
   assert.equal(ARTICLES.length, 8);
-  assert.equal(CALCULATORS.length, 8);
+  assert.equal(CALCULATORS.length, 9);
   assert.ok(allFacts().length >= 30);
 });

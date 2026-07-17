@@ -63,7 +63,7 @@ export const ARTICLES = [
       { id: "future", heading: "Unknown future rates", paragraphs: [{ plain: "The comparison often turns on whether today's tax rate or the withdrawal-year tax rate is higher. Future rates, future law, and personal income are uncertain, so this page teaches tradeoffs rather than choosing for the reader.", kid: "The question is whether tax is bigger now or later. Nobody knows that perfectly." }]}
     ],
     example: { plain: "If tax rates are identical now and later, Roth and traditional math can tie before other rules. Differences appear when tax rates, RMDs, phaseouts, and eligibility differ.", kid: "If the tax slice is the same now and later, the two choices can end up the same." },
-    activity: { kind: "calculator", slug: "present-value", label: "Compare future dollars with today's dollars" },
+    activity: { kind: "calculator", slug: "roth-traditional-lab", label: "Compare Roth and Traditional assumptions" },
     risks: ["This is not a recommendation.", "Roth qualified-withdrawal rules have conditions.", "State taxes are not covered here."],
     takeaways: ["The core distinction is tax timing.", "IRA contribution limits are shared across traditional and Roth IRAs.", "Future tax rates are uncertain."],
     quiz: [{ question: "Which statement is safest?", options: ["Roth is always best", "Traditional is always best", "The comparison depends on facts and assumptions"], answer: 2, explain: "Universal claims are not appropriate." }],

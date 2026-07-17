@@ -132,7 +132,7 @@ function viewHome() {
       el("div", { class: "hero-copy" },
         el("p", { class: "eyebrow", text: "Source-labeled financial learning" }),
         el("h1", { text: "Understand retirement numbers before they become decisions." }),
-        el("p", { class: "lead", text: state.preferences.kidSpeak ? "Short lessons, honest examples, and calculators you can try without entering private account details." : "Eight guided lessons, eight deterministic calculators, and a fact registry where changing 2026 figures carry an effective year and official source." }),
+        el("p", { class: "lead", text: state.preferences.kidSpeak ? "Short lessons, honest examples, and calculators you can try without entering private account details." : `Eight guided lessons, ${CALCULATORS.length} deterministic calculators, and a fact registry where changing 2026 figures carry an effective year and official source.` }),
         el("div", { class: "actions" }, el("a", { class: "btn primary", href: "#/learn", text: "Start learning" }), el("a", { class: "btn ghost", href: "#/tools", text: "Open calculators" }))
       ),
       el("div", { class: "hero-panel" },
@@ -298,7 +298,16 @@ function viewCalculator(slug) {
 }
 
 function renderOutcome(host, outcome) {
-  host.replaceChildren(el("section", { class: "result-card" }, el("p", { class: "eyebrow", text: outcome.headline.label }), el("h2", { text: outcome.headline.value }), el("div", { class: "metric-grid" }, (outcome.stats || []).map((item) => metric(item.label, item.value))), el("h3", { text: "Assumptions" }), el("ul", {}, outcome.assumptions.map((item) => el("li", { text: item }))), outcome.chart ? chart(outcome.chart) : null, outcome.table ? dataTable(outcome.table) : null));
+  host.replaceChildren(el("section", { class: "result-card" },
+    el("p", { class: "eyebrow", text: outcome.headline.label }),
+    el("h2", { text: outcome.headline.value }),
+    el("div", { class: "metric-grid" }, (outcome.stats || []).map((item) => metric(item.label, item.value))),
+    outcome.warnings?.length ? el("div", { class: "warning-list", role: "note" }, el("h3", { text: "Eligibility notes" }), el("ul", {}, outcome.warnings.map((item) => el("li", { text: item })))) : null,
+    el("h3", { text: "Assumptions" }),
+    el("ul", {}, outcome.assumptions.map((item) => el("li", { text: item }))),
+    outcome.chart ? chart(outcome.chart) : null,
+    outcome.table ? dataTable(outcome.table) : null
+  ));
 }
 
 function chart(data) {
