@@ -1,12 +1,12 @@
-{
-  "name": "nestegghero",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "description": "A GitHub-hostable financial education app for learning retirement basics safely.",
-  "scripts": {
-    "build": "node tests/domain.test.mjs",
-    "serve": "node tools/serve.mjs 4173",
-    "test": "node tests/domain.test.mjs"
-  }
+﻿{
+    "name":  "nestegghero",
+    "version":  "1.0.0",
+    "private":  true,
+    "type":  "module",
+    "description":  "Source-labeled financial education, deterministic calculators, and local-only learning progress.",
+    "scripts":  {
+                    "test":  "node --test",
+                    "build":  "node tools/generate-static.mjs \u0026\u0026 node --test",
+                    "serve":  "node tools/serve.mjs 4173"
+                }
 }

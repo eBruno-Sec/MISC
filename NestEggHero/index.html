@@ -1,263 +1,59 @@
-<!doctype html>
-<html lang="en" data-theme="system">
+﻿<!doctype html>
+<html lang="en" data-theme="light" data-text-size="normal">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
-    <title>NestEggHero | Retirement Learning Lab</title>
-    <meta name="description" content="Learn retirement account basics, compare educational projections, and export learning progress without storing sensitive financial details.">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+    <title>NestEggHero | Financial Learning Studio</title>
+    <meta name="description" content="Learn retirement account rules, compare educational estimates, and keep source-labeled learning progress on your own device.">
     <meta name="robots" content="index, follow">
-    <meta name="theme-color" content="#1f6f5b">
+    <meta name="theme-color" content="#17201d">
     <link rel="canonical" href="https://ebruno-sec.github.io/MISC/NestEggHero/">
+    <link rel="icon" href="images/mark.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="styles/main.css">
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to main content</a>
+    <a class="skip-link" href="#app">Skip to main content</a>
     <header class="site-header">
-      <div class="brand" aria-label="NestEggHero home">
-        <span class="brand-mark" aria-hidden="true">N</span>
-        <span>
-          <strong>NestEggHero</strong>
-          <small>Retirement learning lab</small>
-        </span>
-      </div>
-      <nav class="primary-nav" aria-label="Primary navigation">
-        <a href="#learn">Learn</a>
-        <a href="#calculator">Calculator</a>
-        <a href="#facts">2026 facts</a>
-        <a href="#progress">Progress</a>
+      <a class="brand" href="#/" aria-label="NestEggHero home">
+        <img src="images/mark.svg" alt="" width="42" height="42">
+        <span><strong>NestEggHero</strong><small>Financial learning studio</small></span>
+      </a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="primaryNav">Menu</button>
+      <nav class="primary-nav" id="primaryNav" aria-label="Primary navigation">
+        <a href="#/">Home</a>
+        <a href="#/learn">Lessons</a>
+        <a href="#/tools">Calculators</a>
+        <a href="#/facts">Fact registry</a>
+        <a href="#/progress">Progress</a>
       </nav>
-      <div class="header-actions">
-        <button class="icon-button" id="kidSpeakToggle" type="button" aria-pressed="false" aria-label="Toggle Kid Speak explanations">Kid</button>
-        <button class="icon-button" id="themeToggle" type="button" aria-label="Toggle color theme">Theme</button>
+      <div class="header-tools" aria-label="Display tools">
+        <button class="tool-btn" id="kidSpeakToggle" type="button" aria-pressed="false">Kid Speak</button>
+        <button class="tool-btn" id="textSizeToggle" type="button" aria-label="Toggle larger text">A+</button>
+        <button class="tool-btn" id="themeToggle" type="button" aria-label="Switch theme">Theme</button>
       </div>
     </header>
-
-    <main id="main">
-      <section class="hero-band" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <p class="eyebrow">General education. Source-labeled. No pressure.</p>
-          <h1 id="hero-title">Learn what retirement account numbers mean before you act.</h1>
-          <p class="hero-text">NestEggHero explains retirement limits, tradeoffs, and projections in plain language. Results are estimates based on the values entered, not promises or personalized advice.</p>
-          <div class="hero-actions">
-            <a class="button primary" href="#learn">Start a lesson</a>
-            <a class="button secondary" href="#calculator">Compare an estimate</a>
-          </div>
-        </div>
-        <aside class="hero-panel" aria-labelledby="today-title">
-          <h2 id="today-title">Today in the lab</h2>
-          <dl class="stat-grid">
-            <div>
-              <dt>2026 IRA limit</dt>
-              <dd>$7,500</dd>
-            </div>
-            <div>
-              <dt>2026 401(k) elective deferral</dt>
-              <dd>$24,500</dd>
-            </div>
-            <div>
-              <dt>Fact review</dt>
-              <dd>2026-07-16</dd>
-            </div>
-          </dl>
-          <p class="fine-print">United States federal figures. Plan documents and individual facts can change outcomes.</p>
-        </aside>
-      </section>
-
-      <section class="status-strip" aria-label="Product safeguards">
-        <div>
-          <strong>Privacy first</strong>
-          <span>No bank credentials, tax IDs, or account numbers are collected.</span>
-        </div>
-        <div>
-          <strong>Accessibility target</strong>
-          <span>WCAG 2.2 AA with larger 44px product controls.</span>
-        </div>
-        <div>
-          <strong>Offline aware</strong>
-          <span id="offlineStatus" aria-live="polite">Checking offline readiness.</span>
-        </div>
-      </section>
-
-      <section id="learn" class="content-band" aria-labelledby="learn-title">
-        <div class="section-heading">
-          <p class="eyebrow">Guided lessons</p>
-          <h2 id="learn-title">Pick one thing to understand clearly.</h2>
-          <p>Each lesson keeps sources and assumptions close to the explanation, with a Kid Speak mode for simpler wording.</p>
-        </div>
-
-        <div class="learning-layout">
-          <div class="lesson-list" id="lessonList" aria-label="Lessons"></div>
-          <article class="lesson-reader" id="lessonReader" aria-live="polite" itemscope itemtype="https://schema.org/Article"></article>
-        </div>
-      </section>
-
-      <section id="calculator" class="content-band alt" aria-labelledby="calculator-title">
-        <div class="section-heading">
-          <p class="eyebrow">Estimate lab</p>
-          <h2 id="calculator-title">Compare a simple savings projection.</h2>
-          <p>This calculator uses educational assumptions only. It does not know your tax situation, fees, plan rules, or risk tolerance.</p>
-        </div>
-
-        <div class="tool-layout">
-          <form class="calculator-form" id="projectionForm">
-            <fieldset>
-              <legend>Savings projection inputs</legend>
-              <label>
-                Starting amount
-                <input id="initialAmount" name="initialAmount" inputmode="decimal" type="number" min="0" step="100" value="2500">
-              </label>
-              <label>
-                Monthly contribution
-                <input id="monthlyContribution" name="monthlyContribution" inputmode="decimal" type="number" min="0" step="25" value="250">
-              </label>
-              <label>
-                Years
-                <input id="years" name="years" inputmode="numeric" type="number" min="1" max="60" step="1" value="20">
-              </label>
-              <label>
-                Nominal annual return
-                <span class="input-suffix">
-                  <input id="nominalReturn" name="nominalReturn" inputmode="decimal" type="number" min="-25" max="25" step="0.1" value="5">
-                  <span aria-hidden="true">%</span>
-                </span>
-              </label>
-              <label>
-                Inflation assumption
-                <span class="input-suffix">
-                  <input id="inflation" name="inflation" inputmode="decimal" type="number" min="0" max="15" step="0.1" value="2.5">
-                  <span aria-hidden="true">%</span>
-                </span>
-              </label>
-              <label>
-                Contribution timing
-                <select id="timing" name="timing">
-                  <option value="end">End of each month</option>
-                  <option value="beginning">Beginning of each month</option>
-                </select>
-              </label>
-            </fieldset>
-            <div class="form-actions">
-              <button class="button primary" type="submit">Update estimate</button>
-              <button class="button secondary" type="reset">Reset inputs</button>
-            </div>
-          </form>
-
-          <div class="results-panel" aria-live="polite">
-            <div id="projectionError" class="error-banner" hidden></div>
-            <div id="projectionResults"></div>
-            <div id="projectionChart" class="projection-chart" role="img" aria-label="Projection chart"></div>
-            <div class="table-wrap">
-              <table id="projectionTable">
-                <caption>Year-by-year projection table</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Year</th>
-                    <th scope="col">Contributions</th>
-                    <th scope="col">Nominal estimate</th>
-                    <th scope="col">Today's dollars</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="facts" class="content-band" aria-labelledby="facts-title">
-        <div class="section-heading">
-          <p class="eyebrow">Effective year: 2026</p>
-          <h2 id="facts-title">Source-labeled retirement limits.</h2>
-          <p>These figures are United States federal educational summaries, reviewed on 2026-07-16 against official sources.</p>
-        </div>
-
-        <div class="facts-layout">
-          <form class="limit-helper" id="limitForm">
-            <fieldset>
-              <legend>Contribution limit helper</legend>
-              <label>
-                Account type
-                <select id="accountType" name="accountType">
-                  <option value="ira">IRA</option>
-                  <option value="workplace">401(k), 403(b), governmental 457, or TSP</option>
-                  <option value="simple">SIMPLE IRA</option>
-                </select>
-              </label>
-              <label>
-                Age at year end
-                <input id="age" name="age" inputmode="numeric" type="number" min="0" max="120" value="35">
-              </label>
-            </fieldset>
-            <button class="button primary" type="submit">Show educational limit</button>
-          </form>
-          <div class="limit-result" id="limitResult" aria-live="polite"></div>
-          <div class="facts-table-wrap">
-            <table>
-              <caption>Verified 2026 headline limits</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Item</th>
-                  <th scope="col">2026 value</th>
-                </tr>
-              </thead>
-              <tbody id="factsTable"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section id="progress" class="content-band alt" aria-labelledby="progress-title">
-        <div class="section-heading">
-          <p class="eyebrow">Learning continuity</p>
-          <h2 id="progress-title">Keep only what helps you resume learning.</h2>
-          <p>Progress, bookmarks, quiz scores, badges, and preferences can be exported. Sensitive financial inputs are not included.</p>
-        </div>
-
-        <div class="progress-layout">
-          <section class="progress-panel" aria-labelledby="progress-summary-title">
-            <h3 id="progress-summary-title">Your progress</h3>
-            <div id="progressSummary"></div>
-            <div class="badge-row" id="badgeRow" aria-label="Earned badges"></div>
-          </section>
-
-          <section class="backup-panel" aria-labelledby="backup-title">
-            <h3 id="backup-title">Backup and restore</h3>
-            <p class="fine-print">Imports are validated before anything changes. Unsupported future major versions are rejected.</p>
-            <div class="backup-actions">
-              <button class="button primary" id="exportButton" type="button">Export progress</button>
-              <label class="file-drop">
-                <span>Import progress JSON</span>
-                <input id="importInput" type="file" accept="application/json,.json">
-              </label>
-            </div>
-            <div id="importPreview" class="import-preview" aria-live="polite"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="disclosure-band" aria-labelledby="disclosure-title">
-        <h2 id="disclosure-title">Educational disclosure</h2>
-        <p>NestEggHero provides general education only. It does not provide individualized tax, legal, fiduciary, or investment advice. Review official sources, plan documents, and qualified professionals before making decisions.</p>
-        <ul>
-          <li>Calculator results are estimates based on visible assumptions.</li>
-          <li>Changing financial facts must show an effective year and source.</li>
-          <li>Proposed rules are labeled separately from final authority.</li>
-        </ul>
-      </section>
+    <div class="notice" id="notice" role="alert" hidden></div>
+    <main id="app" tabindex="-1">
+      <noscript>
+        <section class="empty-state">
+          <h1>NestEggHero needs JavaScript</h1>
+          <p>The lessons, calculators, and backup tools run locally in your browser. Nothing is sent to a server.</p>
+          <p><a href="https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500">IRS 2026 retirement limits</a></p>
+        </section>
+      </noscript>
     </main>
-
     <footer class="site-footer">
-      <p>Built for careful financial education. Last content review: 2026-07-16.</p>
-      <nav aria-label="Source links">
-        <a href="https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500">IRS 2026 retirement limits</a>
-        <a href="https://www.ssa.gov/cola/factsheets/2026.html">SSA 2026 figures</a>
-        <a href="https://www.w3.org/TR/WCAG22/">WCAG 2.2</a>
+      <p><strong>General education only.</strong> Not tax, legal, fiduciary, or investment advice. Facts reviewed 2026-07-16.</p>
+      <p id="offlineNote" hidden>Offline: cached lessons and calculators remain available. Dynamic facts show their effective year.</p>
+      <nav aria-label="Official source links">
+        <a href="https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500" rel="noopener">IRS 2026 limits</a>
+        <a href="https://www.ssa.gov/cola/factsheets/2026.html" rel="noopener">SSA 2026 figures</a>
+        <a href="https://www.w3.org/TR/WCAG22/" rel="noopener">WCAG 2.2</a>
       </nav>
     </footer>
-
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="assets/app.js"></script>
+    <script type="module" src="scripts/app.js"></script>
   </body>
 </html>

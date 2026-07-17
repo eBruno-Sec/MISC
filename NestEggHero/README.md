@@ -1,43 +1,37 @@
-# NestEggHero
+﻿# NestEggHero
 
-NestEggHero is a static, GitHub-hostable financial education app for learning retirement basics, comparing simple projections, and exporting low-risk learning progress.
+NestEggHero is a static, dependency-free financial learning studio for GitHub Pages. It teaches source-labeled 2026 retirement facts, runs deterministic educational calculators, and keeps learning continuity on the user's device.
 
-This first version was built from the fact-checked NestEggHero documentation package reviewed on 2026-07-16. It is educational only and does not provide individualized tax, legal, fiduciary, or investment advice.
+## Highlights
 
-## What is included
+- Fact registry with effective year, jurisdiction, authority status, source URL, retrieval date, reviewer, and next-review date.
+- Eight structured lessons with Kid Speak variants, quizzes, sources, risks, takeaways, and next steps.
+- Eight calculators using pure functions: steady saving, compound growth, debt payoff, today's dollars, real return, present value, effective annual rate, and 2026 contribution limit helper.
+- IndexedDB learning progress with localStorage only for low-risk preferences.
+- JSON backup envelope with schema versioning, sha256-base64 checksum, size/depth/node/string guards, prototype-pollution rejection, preview, merge, and replace.
+- Crawlable generated lesson, fact, and calculator index pages for GitHub Pages SEO.
+- Print mode, reduced motion support, dark theme, larger text mode, service worker cache, sitemap, robots file, and tests.
 
-- Crawlable educational content with reviewed dates and official sources.
-- A deterministic savings projection calculator with assumptions shown next to results.
-- A 2026 retirement contribution limit helper using source-labeled federal figures.
-- Kid Speak explanations that preserve the underlying financial meaning.
-- IndexedDB learning progress, bookmarks, badges, and preferences.
-- Schema-versioned JSON export/import with checksum validation.
-- Print, reduced-motion, dark theme, and offline-support scaffolding.
-
-## Local preview
-
-Open `index.html` directly for the core app, or run a local static server to test offline behavior:
+## Run locally
 
 ```bash
-python -m http.server 4173
+npm run serve
 ```
 
-Then visit `http://localhost:4173`.
+Open http://127.0.0.1:4173/.
 
-## GitHub Pages URL
+## Validate and generate static pages
 
-Expected project URL after the MISC repo publishes from the branch root:
+```bash
+npm run build
+```
+
+`build` generates static pages under `learn/`, `facts/`, and `tools/`, then runs the test suite.
+
+## Hosted URL
 
 https://ebruno-sec.github.io/MISC/NestEggHero/
 
-## Validation
+## Content governance
 
-```bash
-npm test
-```
-
-The test suite covers the formula and contribution-limit domain module used by the app.
-
-## Source authority
-
-Changing financial facts must include an effective year, jurisdiction, authority status, source URL, retrieval date, reviewer, and next-review date before publication.
+Changing financial facts must be updated in `scripts/facts.js` and must include an effective year, jurisdiction, authority status, source URL, retrieval date, reviewer, and next-review date. This app is general education only and does not provide individualized tax, legal, fiduciary, or investment advice.

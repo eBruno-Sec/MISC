@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
-  <title id="title">NestEggHero mark</title>
-  <rect width="128" height="128" rx="18" fill="#1f6f5b"/>
-  <path d="M28 72c0-22 16-39 36-39s36 17 36 39c0 8-3 15-7 21H35c-4-6-7-13-7-21Z" fill="#f7f4ed"/>
-  <path d="M43 72c0-13 9-23 21-23s21 10 21 23c0 4-1 8-3 12H46c-2-4-3-8-3-12Z" fill="#f5b642"/>
-  <path d="M43 98h42" stroke="#17201d" stroke-width="8" stroke-linecap="round"/>
-</svg>
