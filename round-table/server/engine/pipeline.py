@@ -158,11 +158,25 @@ def _scan_target(target, mode, scope, config, run_dir, log, hub, mission_id):
         log("── Active detectors (confirm real vulns) ──", "hdr", "detect")
         from ..core import detectors
         auth_h = runconfig.auth_headers(config)
+        auth_hd = {k.split(":", 1)[0].strip(): k.split(":", 1)[1].strip() for k in auth_h if ":" in k}
         confirmed = []
         for h in recon.get("live_hosts", [])[:3]:
             url = (h.get("url") or "").rstrip("/")
             if url:
                 confirmed.extend(detectors.run_detectors(url, log, auth=auth_h))
+        # ── JS bundle recon: mine hidden API endpoints + leaked secrets ──
+        try:
+            from ..core import jsrecon
+            for h in recon.get("live_hosts", [])[:2]:
+                url = (h.get("url") or "").rstrip("/")
+                if not url:
+                    continue
+                jr = jsrecon.mine_js(url, log, auth=auth_hd)
+                confirmed.extend(jr.get("findings", []))
+                if jr.get("endpoints"):
+                    recon.setdefault("js_endpoints", []).extend(jr["endpoints"])
+        except Exception as e:
+            log(f"jsrecon skipped: {type(e).__name__}: {e}", "warn", "detect")
         if config.get("headless_dast"):
             try:
                 from . import dast as dast_mod
