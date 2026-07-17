@@ -106,7 +106,7 @@ def _scan_target(target, mode, scope, config, run_dir, log, hub, mission_id):
         old = sys.stdout
         sys.stdout = tee
         try:
-            active_mod.run_active(target, run_dir, recon, log, cfg_from_env(), config)
+            active_mod.run_active(target, run_dir, recon, log, cfg_from_env(), config, scope=scope)
             if config.get("recon_loop"):
                 from . import loop as loop_mod
                 loop_mod.run_recon_loop(target, run_dir, recon, log, cfg_from_env(), config)

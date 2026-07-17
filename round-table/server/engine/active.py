@@ -48,7 +48,7 @@ def _ensure_target_live(target: str, recon: dict, log) -> None:
         log(f"target registered as live host from passive HTTP probe: {url}", "ok", "active")
 
 
-def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict, run_config: dict = None) -> dict:
+def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict, run_config: dict = None, scope: dict = None) -> dict:
     from ..core import runconfig
 
     rc = runconfig.normalize(run_config)
@@ -79,7 +79,20 @@ def run_active(target: str, run_dir: Path, recon: dict, log, cfg: dict, run_conf
     # Always probe the exact target (incl. host:port) so a single app is detected
     # even when it has no subdomains (e.g. juice-shop:3000).
     probe = sorted(set(all_subs + [target]))
-    log(f"{len(all_subs)} subdomains (+ target) → probing {len(probe)}", "ok", "active")
+
+    # Respect out-of-scope: never send active traffic to a discovered host that
+    # matches a program's out-of-scope rule (e.g. an imported HackerOne scope).
+    if scope and (scope.get("out_of_scope") or scope.get("in_scope")):
+        from ..core import scope as scope_mod
+        kept, dropped = [], []
+        for h in probe:
+            ok, _ = scope_mod.in_scope(h, scope)
+            (kept if ok else dropped).append(h)
+        if dropped:
+            log(f"scope filter: skipping {len(dropped)} out-of-scope host(s) (e.g. {', '.join(dropped[:3])})", "warn", "active")
+        probe = kept or [target]
+        recon["all_subdomains"] = [s for s in all_subs if s in set(kept)]
+    log(f"{len(recon['all_subdomains'])} subdomains (+ target) → probing {len(probe)}", "ok", "active")
 
     log("Live host detection (httpx)", phase="active")
     if en("httpx"):
