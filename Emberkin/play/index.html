@@ -78,6 +78,10 @@
   <div class="hud-top-center">
     <div id="objective" class="objective"><span class="obj-dot" aria-hidden="true">◇</span><span id="objective-text">—</span></div>
     <div id="alert-state" class="alert-state hidden"><span class="alert-icon" aria-hidden="true">◔</span><span id="alert-text">Observed</span></div>
+    <div id="boss-bar" class="boss-bar hidden">
+      <span class="boss-name">Hush, the Hollow Warden</span>
+      <div class="bar boss"><div id="boss-fill" class="bar-fill"></div></div>
+    </div>
   </div>
 
   <!-- Tainer companion dialogue -->
@@ -162,12 +166,22 @@
   <h2 class="menu-h">Paused</h2>
   <div class="menu-btns">
     <button class="btn primary" id="btn-resume">Resume</button>
+    <button class="btn" id="btn-inv">Weapons &amp; Gear</button>
     <button class="btn" id="btn-settings-pause">Accessibility &amp; Settings</button>
     <button class="btn" id="btn-save">Save Progress (.json)</button>
     <button class="btn" id="btn-load-pause">Load Progress (.json)</button>
     <button class="btn ghost" id="btn-quit">Return to Title</button>
   </div>
   <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
+</div>
+
+<!-- Weapons & Gear (inventory) -->
+<div id="menu-inv" class="overlay center menu hidden">
+  <h2 class="menu-h">Weapons &amp; Gear</h2>
+  <p class="menu-p">Weapons of your class. Equip one, upgrade it, or dismantle spares into Emberlight.</p>
+  <div id="inv-list" class="inv-list" role="list"></div>
+  <p class="menu-note" id="inv-tokens"></p>
+  <button class="btn primary" id="btn-inv-back">Back</button>
 </div>
 
 <!-- Settings / accessibility -->

@@ -6,8 +6,8 @@
 import * as THREE from 'three';
 
 /* ------------------------------------------------------------------ consts */
-const SCHEMA_VERSION = 1;
-const PRODUCT_VERSION = '0.1.0-slice';
+const SCHEMA_VERSION = 2;          // v2 adds weapons/chests/mechanisms/boss; v1 saves migrate
+const PRODUCT_VERSION = '0.2.0-slice';
 const SAVE_KEY = 'emberkin.save.v1';
 const SETTINGS_KEY = 'emberkin.settings.v1';
 
@@ -29,6 +29,19 @@ const CLASSES = {
     stats:{Power:3,Speed:2,Range:4,Defense:3}, complexity:'Complexity: High — a thinker’s path.' },
 };
 
+/* Weapon tiers per class. Players only ever find weapons of their own class. */
+const WEAPONS = {
+  sword:      [ {id:'sw1',name:'Vale Blade',tier:1},  {id:'sw2',name:'Bramblefang',tier:2}, {id:'sw3',name:'Dawnedge',tier:3} ],
+  bow:        [ {id:'bw1',name:'Reed Bow',tier:1},    {id:'bw2',name:'Galewhisper',tier:2}, {id:'bw3',name:'Sunstring',tier:3} ],
+  greatsword: [ {id:'gs1',name:'Cragcleaver',tier:1}, {id:'gs2',name:'Bouldersong',tier:2}, {id:'gs3',name:'Titanroot',tier:3} ],
+  dual:       [ {id:'du1',name:'Twin Fangs',tier:1},  {id:'du2',name:'Skydancers',tier:2},  {id:'du3',name:'Emberfangs',tier:3} ],
+  focus:      [ {id:'fo1',name:'Wander Rune',tier:1}, {id:'fo2',name:'Lumen Coil',tier:2},  {id:'fo3',name:'Starheart',tier:3} ],
+};
+const TIER_MULT = { 1:1, 2:1.4, 3:1.85 };
+/* Elemental variant counters: attack with the counter element for bonus damage.
+   A variant resists its own element. Loam variants only resist Loam. */
+const COUNTER = { cinder:'rime', rime:'cinder', arc:'tide', tide:'arc' };
+
 const ELEMENTS = {
   loam:  { name:'Loam',  color:0xd9a24a, sigil:'⬡' },
   tide:  { name:'Tide',  color:0x41b6c4, sigil:'≈' },
@@ -46,6 +59,10 @@ const G = {
   stamina: 100, maxStam: 100,
   tokens: 0,
   weaponLevel: 1,
+  owned: [], equipped: null,
+  chests: {},
+  mechs: { loam:false, tide:false, arc:false, rime:false },
+  bossDefeated: false,
   elements: { loam:false, tide:false, cinder:false, arc:false, rime:false },
   activeElement: 'none',
   glideUnlocked: false,
@@ -72,7 +89,8 @@ const dom = {};
  'class-complexity','btn-confirm-class','file-input',
  'btn-new','btn-continue','btn-load','btn-settings-title','btn-resume','btn-settings-pause','btn-save',
  'btn-load-pause','btn-quit','btn-settings-back',
- 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol'
+ 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol',
+ 'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back'
 ].forEach(id => dom[id] = $(id));
 
 /* ============================================================ THREE.JS CORE */
@@ -87,6 +105,11 @@ const hoops = [];
 const projectiles = [];
 const particles = [];       // dissolve/vfx groups {mesh, life, max, vel[]}
 let iceWall = null, campGoal = null, pellPos = null, lakePos = null;
+const mechanisms = [];      // {id, elem, pos, r, done, apply(withVfx)}
+const platforms = [];       // walkable tops: {x, z, hw, hd, topY}
+let bossRef = null, bossChestSpawned = false;
+let lakeFrozen = false;
+const DEEP_WATER_R = 8.4;   // unswimmable centre of the lake until frozen
 const world = new THREE.Group();
 
 let ok3d = true;
@@ -207,6 +230,11 @@ function buildWorld() {
   world.add(makeNPC(pellPos, 0xdcc36a));
   buildTrial();
 
+  // Phase-2 content: elemental mechanisms, treasure, variants, and the boss arena
+  buildMechanisms();
+  buildBossArena();
+  spawnVariantEnemies();
+
   // wandering Stonekin near start (first combat)
   spawnEnemy(new THREE.Vector3(9, 0, 2), 'grumble');
   spawnEnemy(new THREE.Vector3(13, 0, 5), 'grumble', true); // drops orb
@@ -309,8 +337,287 @@ function buildTrial(){
   wind.position.set(-4,10,44); world.add(wind);
 }
 
-const colliders = []; // {x,z,r,tag}
+const colliders = []; // {x,z,r,tag,maxY?}  maxY: collider only applies below this height
 const spinners = [];
+
+/* ---------------------------------------------- Phase-2: chests & treasure */
+function makeChest(id, pos, contents, radius=3.2, extraCond=null){
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.6,0.8),
+    new THREE.MeshStandardMaterial({ color:0x7a5230, roughness:0.9 }));
+  base.position.y=0.3; base.castShadow=true; g.add(base);
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(1.14,0.34,0.84),
+    new THREE.MeshStandardMaterial({ color:0x8a6238, roughness:0.85 }));
+  lid.position.set(0,0.72,-0.02); g.add(lid);
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(1.18,0.1,0.88),
+    new THREE.MeshStandardMaterial({ color:0xe6c15a, metalness:0.5, roughness:0.4 }));
+  trim.position.y=0.58; g.add(trim);
+  g.position.copy(pos);
+  if (G.chests[id]) lid.rotation.x = -1.1;   // already opened in this save
+  world.add(g);
+  interactables.push({
+    pos: pos.clone(), radius, key:'E',
+    label: () => 'Open chest',
+    cond: () => !G.chests[id] && (!extraCond || extraCond()),
+    onUse: () => {
+      G.chests[id] = true;
+      lid.rotation.x = -1.1;
+      spawnBurst(pos.clone().add(new THREE.Vector3(0,1,0)), 0xf5c168, 22, 0.9, true);
+      if (contents.type==='weapon') grantWeapon(contents.tier);
+      else { addTokens(contents.n); toast(`+${contents.n} Emberlight!`, 'good', 2400); }
+    },
+  });
+  return g;
+}
+function grantWeapon(tier){
+  const w = WEAPONS[G.klass][tier-1];
+  if (G.owned.includes(w.id)){ addTokens(15); toast(`A duplicate ${w.name} shimmers into 15 Emberlight.`, 'good', 3000); return; }
+  G.owned.push(w.id);
+  toast(`New weapon: ${w.name} (Tier ${tier})! Equip it from the pause menu.`, 'good', 4200);
+  tainerSay(`Oooh, ${w.name}! That one sings. Check Weapons & Gear when you get a breath.`, 4800);
+}
+function findWeapon(id){ return (WEAPONS[G.klass]||[]).find(w=>w.id===id) || null; }
+function equippedWeapon(){ return findWeapon(G.equipped) || WEAPONS[G.klass]?.[0] || {id:'?',name:'—',tier:1}; }
+
+/* ------------------------------------------- Phase-2: elemental mechanisms */
+function mechMarkerMesh(elem){
+  // a carved trigger stone with the element's sigil colour crystal — plus shape, never colour alone
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9,1.1,1.2,6), MAT.stoneDark);
+  base.position.y=0.6; base.castShadow=true; g.add(base);
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.45,0),
+    new THREE.MeshStandardMaterial({ color:ELEMENTS[elem].color, emissive:ELEMENTS[elem].color, emissiveIntensity:0.35, flatShading:true }));
+  crystal.position.y=1.6; g.add(crystal);
+  g.userData.crystal = crystal;
+  return g;
+}
+function addMechanism(id, elem, pos, marker, apply){
+  world.add(marker); marker.position.copy(pos);
+  const m = { id, elem, pos:pos.clone(), r:4.5, done:false, marker, apply };
+  mechanisms.push(m);
+  return m;
+}
+function activateMechanism(m, withVfx=true){
+  if (m.done) return;
+  m.done = true; G.mechs[m.id] = true;
+  if (m.marker?.userData?.crystal) m.marker.userData.crystal.material.emissiveIntensity = 1.2;
+  if (withVfx) spawnBurst(m.pos.clone().setY(1.6), ELEMENTS[m.elem].color, 30, 1.2);
+  m.apply(withVfx);
+}
+
+function buildMechanisms(){
+  /* RIME — freeze the deep lake to walk to the island hoard */
+  const islePos = new THREE.Vector3(lakePos.x, 0, lakePos.z);
+  const isle = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.8,0.5,10), MAT.dirt);
+  isle.position.set(islePos.x, 0.1, islePos.z); world.add(isle);
+  makeChest('chest-isle', new THREE.Vector3(islePos.x, 0.3, islePos.z), {type:'weapon', tier:2});
+  const iceMat = new THREE.MeshStandardMaterial({ color:0xcdeef8, roughness:0.15, transparent:true, opacity:0.9, flatShading:true });
+  const discs = new THREE.Group(); discs.visible = false;
+  for (let i=1;i<=3;i++){
+    const d = new THREE.Mesh(new THREE.CylinderGeometry(1.7,1.9,0.24,10), iceMat);
+    d.position.set(lakePos.x + 10 - i*2.6, 0.12, lakePos.z + 1.5 - i*0.5);
+    discs.add(d);
+  }
+  world.add(discs);
+  addMechanism('rime', 'rime',
+    new THREE.Vector3(lakePos.x + 12.5, 0, lakePos.z + 3),
+    mechMarkerMesh('rime'),
+    (vfx)=>{ lakeFrozen = true; discs.visible = true;
+      if (vfx){ toast('The deep water stills into ice — a path to the island!', 'good', 3200);
+        tainerSay('Rime on open water! Now we can walk right out to that little island. I KNEW it was hiding something.', 5200); } });
+
+  /* LOAM — raise stone steps to a high hoard near the Loam Wardstone */
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(7,5,7), MAT.rock);
+  plat.position.set(-48, 2.5, -42); plat.castShadow=true; world.add(plat);
+  colliders.push({ x:-48, z:-42, r:4.4, maxY:4.4 });
+  platforms.push({ x:-48, z:-42, hw:3.5, hd:3.5, topY:5 });
+  makeChest('chest-loam', new THREE.Vector3(-48, 5.3, -42), {type:'tokens', n:25});
+  const steps = [];
+  const stepDefs = [ {x:-42.6,z:-38.6,topY:1.7}, {x:-44.6,z:-40,topY:3.4}, {x:-46.4,z:-41.2,topY:5} ];
+  for (const s of stepDefs){
+    const st = new THREE.Mesh(new THREE.BoxGeometry(2.4, s.topY, 2.4), MAT.stone);
+    st.position.set(s.x, s.topY/2 - 6, s.z);   // start sunken
+    st.castShadow=true; world.add(st); steps.push({mesh:st, def:s});
+  }
+  addMechanism('loam', 'loam',
+    new THREE.Vector3(-41.5, 0, -37),
+    mechMarkerMesh('loam'),
+    (vfx)=>{ for (const s of steps){ s.mesh.position.y = s.def.topY/2; platforms.push({ x:s.def.x, z:s.def.z, hw:1.2, hd:1.2, topY:s.def.topY }); }
+      if (vfx){ toast('Stone steps rumble up from the earth!', 'good', 2800);
+        tainerSay('Loam listens to you now. Up the steps — treasure never buries itself THAT well.', 4600); } });
+
+  /* TIDE — flood the sealed basin so its hoard floats up to the rim */
+  const bPos = new THREE.Vector3(58, 0, 44);
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(3.4,3.7,3.4,10,1,true),
+    new THREE.MeshStandardMaterial({ color:0x8f96a3, roughness:0.9, flatShading:true, side:THREE.DoubleSide }));
+  ring.position.set(bPos.x,1.7,bPos.z); world.add(ring);
+  for (let a=0;a<8;a++){ const ang=a/8*Math.PI*2; colliders.push({ x:bPos.x+Math.cos(ang)*3.4, z:bPos.z+Math.sin(ang)*3.4, r:0.9, maxY:3.2 }); }
+  platforms.push({ x:bPos.x, z:bPos.z, hw:4.4, hd:4.4, topY:3.4 });          // rim walkway
+  platforms.push({ x:bPos.x+5.4, z:bPos.z, hw:1.3, hd:1.3, topY:1.7 });      // outer step 1
+  const stepA = new THREE.Mesh(new THREE.BoxGeometry(2.6,1.7,2.6), MAT.stone);
+  stepA.position.set(bPos.x+5.4,0.85,bPos.z); world.add(stepA);
+  const waterFill = new THREE.Mesh(new THREE.CylinderGeometry(3.2,3.2,0.2,16),
+    new THREE.MeshStandardMaterial({ color:0x3aa7c4, roughness:0.2, transparent:true, opacity:0.85 }));
+  waterFill.position.set(bPos.x,0.4,bPos.z); waterFill.visible=false; world.add(waterFill);
+  const tideChest = makeChest('chest-tide', new THREE.Vector3(bPos.x, 0.4, bPos.z), {type:'tokens', n:30}, 5.2, ()=>G.mechs.tide);
+  // chest starts at the bottom of the basin, unreachable until it floats up
+  addMechanism('tide', 'tide',
+    new THREE.Vector3(bPos.x - 5.2, 0, bPos.z + 1),
+    mechMarkerMesh('tide'),
+    (vfx)=>{ waterFill.visible = true; waterFill.position.y = 3.1; tideChest.position.y = 3.2;
+      if (vfx){ toast('Water surges up the basin — the hoard floats to the rim!', 'good', 3200);
+        tainerSay('Tide fills what stone seals. Climb the outer step and walk the rim!', 4800); } });
+
+  /* ARC — power the sealed gate to the Hollow Warden's hollow (built in buildBossArena) */
+}
+
+/* -------------------------------------------------- Phase-2: boss — Hush */
+const BOSS_POS = new THREE.Vector3(26, 0, -96);
+let bossGateParts = null;
+function buildBossArena(){
+  // ring of crag walls with a gap facing the camp
+  for (let i=0;i<10;i++){
+    const ang = (i/10)*Math.PI*2;
+    if (ang > Math.PI*0.35 && ang < Math.PI*0.65) continue;   // gap toward +z (the camp side)
+    const rock = new THREE.Mesh(new THREE.ConeGeometry(2.6, 7+((i*37)%3)*1.5, 5), i%2?MAT.rock:MAT.stoneDark);
+    const x = BOSS_POS.x + Math.cos(ang)*14, z = BOSS_POS.z + Math.sin(ang)*14;
+    rock.position.set(x, 3, z); rock.castShadow=true; world.add(rock);
+    colliders.push({ x, z, r:2.2 });
+  }
+  // gate: two sliding slabs in the gap
+  const slabMat = new THREE.MeshStandardMaterial({ color:0x4a5162, roughness:0.85, flatShading:true });
+  const gz = BOSS_POS.z + 14;
+  const L = new THREE.Mesh(new THREE.BoxGeometry(3.4,6,1.2), slabMat); L.position.set(BOSS_POS.x-1.8,3,gz); world.add(L);
+  const R = new THREE.Mesh(new THREE.BoxGeometry(3.4,6,1.2), slabMat); R.position.set(BOSS_POS.x+1.8,3,gz); world.add(R);
+  colliders.push({ x:BOSS_POS.x-1.8, z:gz, r:1.8, tag:'bossgate' });
+  colliders.push({ x:BOSS_POS.x+1.8, z:gz, r:1.8, tag:'bossgate' });
+  bossGateParts = { L, R, gz };
+  addMechanism('arc', 'arc',
+    new THREE.Vector3(BOSS_POS.x + 5.5, 0, gz + 2.5),
+    mechMarkerMesh('arc'),
+    (vfx)=>{
+      L.position.x = BOSS_POS.x - 5.4; R.position.x = BOSS_POS.x + 5.4;
+      for (let i=colliders.length-1;i>=0;i--) if (colliders[i].tag==='bossgate') colliders.splice(i,1);
+      if (!G.bossDefeated) spawnBoss();
+      if (vfx){ toast('The conduit crackles — the gate grinds open!', 'good', 3000);
+        tainerSay('Something in that hollow has been very, very quiet. That’s Hush — one of Mourne’s Hollow Wardens. We can do this. Watch for the slam, then strike the crystal on its back!', 7200); } });
+  // if this save already defeated Hush, its reward chest must still exist
+  if (G.bossDefeated && !bossChestSpawned){
+    bossChestSpawned = true;
+    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'weapon', tier:3});
+  }
+}
+
+function makeWarden(){
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color:0x3a3f52, roughness:0.85, flatShading:true });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1,3.1,1.5), bodyMat);
+  body.position.y=2.2; body.castShadow=true; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.9,1.0), bodyMat);
+  head.position.y=4.2; g.add(head);
+  const eyeMat = new THREE.MeshStandardMaterial({ color:0xd9c8f5, emissive:0xb9a0e8, emissiveIntensity:0.9 });
+  const eL=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.12,0.06),eyeMat); eL.position.set(-0.25,4.25,0.53); g.add(eL);
+  const eR=eL.clone(); eR.position.x=0.25; g.add(eR);
+  const armGeo = new THREE.BoxGeometry(0.7,2.6,0.7);
+  const aL=new THREE.Mesh(armGeo,bodyMat); aL.position.set(-1.6,2.4,0); aL.castShadow=true; g.add(aL);
+  const aR=new THREE.Mesh(armGeo,bodyMat); aR.position.set(1.6,2.4,0); aR.castShadow=true; g.add(aR);
+  const legGeo = new THREE.BoxGeometry(0.8,1.4,0.8);
+  const lL=new THREE.Mesh(legGeo,MAT.stoneDark); lL.position.set(-0.6,0.7,0); g.add(lL);
+  const lR=new THREE.Mesh(legGeo,MAT.stoneDark); lR.position.set(0.6,0.7,0); g.add(lR);
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.6,0),
+    new THREE.MeshStandardMaterial({ color:0x7bd3c6, emissive:0x2a6b60, emissiveIntensity:0.4, flatShading:true }));
+  crystal.position.set(0,3.1,-1.0); g.add(crystal);
+  g.userData.arms = {aL,aR}; g.userData.crystal = crystal;
+  return g;
+}
+function spawnBoss(){
+  const mesh = makeWarden();
+  mesh.position.copy(BOSS_POS);
+  scene.add(mesh);
+  bossRef = {
+    mesh, kind:'warden', boss:true, guard:false, dropsOrb:false, elem:null,
+    hp:320, maxHp:320, dmg:24, speed:3.0, r:1.9,
+    home:BOSS_POS.clone(), state:'idle', target:null,
+    telegraph:0, slamCd:2, weak:0, phase:1,
+    atkCd:0, hitCd:0, alive:true, wobble:0,
+  };
+  enemies.push(bossRef);
+}
+function updateBoss(e, dt, pPos, transformed){
+  e.weak = Math.max(0, e.weak - dt);
+  e.slamCd = Math.max(0, e.slamCd - dt);
+  if (e.hitCd>0) e.hitCd-=dt;
+  const cr = e.mesh.userData.crystal;
+  cr.material.emissiveIntensity = e.weak>0 ? 1.6 : 0.4;
+  const d = Math.hypot(pPos.x-e.mesh.position.x, pPos.z-e.mesh.position.z);
+
+  // phase 2 at half health
+  if (e.phase===1 && e.hp < e.maxHp/2){
+    e.phase=2; e.speed=3.9;
+    spawnEnemy(e.mesh.position.clone().add(new THREE.Vector3(3,0,2)), 'grumble');
+    spawnEnemy(e.mesh.position.clone().add(new THREE.Vector3(-3,0,2)), 'grumble');
+    tainerSay('It’s calling Stonekin to it — keep moving! After the slam, the crystal! The CRYSTAL!', 4600);
+  }
+
+  const arms = e.mesh.userData.arms;
+  if (e.telegraph > 0){
+    // wind-up: arms rise, body pulses — the readable warning before the slam
+    e.telegraph -= dt;
+    arms.aL.rotation.x = arms.aR.rotation.x = -2.2 * (1 - e.telegraph);
+    if (e.telegraph <= 0){
+      arms.aL.rotation.x = arms.aR.rotation.x = 0.6;
+      spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,0.4,0)), 0xb9a0e8, 26, 1.6);
+      if (!settings.motion) shake(0.35);
+      if (d < 5.4){ if (transformed) damageMimic(e.dmg); else damagePlayer(e.dmg); }
+      e.weak = 2.6;                 // crystal exposed — bonus-damage window
+      e.slamCd = e.phase===2 ? 2.2 : 3.2;
+    }
+  } else {
+    arms.aL.rotation.x = arms.aR.rotation.x = 0;
+    if (d < 40){
+      const to = new THREE.Vector3(pPos.x-e.mesh.position.x,0,pPos.z-e.mesh.position.z);
+      const dist = to.length();
+      e.mesh.rotation.y = Math.atan2(to.x, to.z);
+      if (dist > 4.0){
+        to.normalize();
+        e.mesh.position.x += to.x*e.speed*dt;
+        e.mesh.position.z += to.z*e.speed*dt;
+      } else if (e.slamCd<=0){
+        e.telegraph = e.phase===2 ? 0.65 : 0.95;
+      }
+    }
+  }
+
+  // boss bar
+  if (d < 45 && e.alive){
+    show(dom['boss-bar']);
+    dom['boss-fill'].style.width = (e.hp/e.maxHp*100)+'%';
+  } else hide(dom['boss-bar']);
+}
+function bossDefeatedFlow(e){
+  G.bossDefeated = true;
+  hide(dom['boss-bar']);
+  addTokens(40);
+  dissolve(e.mesh); dissolve(e.mesh);   // extra-big send-off, still just light
+  if (!bossChestSpawned){ bossChestSpawned = true;
+    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'weapon', tier:3}); }
+  G.stage = 6;
+  setObjective('The vale is safe. The trail of the Lost Sibling leads beyond Willowmere… To be continued.');
+  toast('Hush, the Hollow Warden, dissolves into light. +40 Emberlight', 'good', 4600);
+  tainerSay('You did it… the stillness is lifting! Look — the light it was holding is drifting off the way your sibling went. The search goes on, and now nothing in this vale can stop us.', 8000);
+}
+
+/* --------------------------------------- Phase-2: elemental Stonekin packs */
+function spawnVariantEnemies(){
+  spawnEnemy(new THREE.Vector3(30,0,-26), 'grumble', false, false, 'rime');
+  spawnEnemy(new THREE.Vector3(37,0,-33), 'grumble', true,  false, 'rime');
+  spawnEnemy(new THREE.Vector3(16,0,-22), 'grumble', false, false, 'cinder');
+  spawnEnemy(new THREE.Vector3(-14,0,56), 'grumble', false, false, 'arc');
+  spawnEnemy(new THREE.Vector3(-7,0,64),  'grumble', true,  false, 'arc');
+  spawnEnemy(new THREE.Vector3(44,0,30),  'grumble', false, false, 'tide');
+  spawnEnemy(new THREE.Vector3(-36,0,-28),'grumble', false, false, 'loam');
+  spawnEnemy(new THREE.Vector3(-44,0,-30),'boulder', false, false, 'loam');
+}
 
 /* -------------------------------------------------------------- characters */
 function humanoid(tunic, skin=0xf0c9a0){
@@ -407,7 +714,7 @@ function buildTainer(){
 }
 
 /* ------------------------------------------------------------------ enemies */
-function makeStonekin(kind){
+function makeStonekin(kind, elem=null){
   const g = new THREE.Group();
   const big = kind==='boulder';
   const s = big ? 1.7 : 1.0;
@@ -426,18 +733,27 @@ function makeStonekin(kind){
   const legMat = MAT.stoneDark;
   for (const sx of [-0.32,0.32]){ const l=new THREE.Mesh(new THREE.BoxGeometry(0.2*s,0.4*s,0.2*s),legMat);
     l.position.set(sx*s,0.2*s,0); g.add(l); }
+  // elemental variant: glowing crystal shards in the variant's colour (plus resist behaviour)
+  if (elem){
+    const cMat = new THREE.MeshStandardMaterial({ color:ELEMENTS[elem].color, emissive:ELEMENTS[elem].color, emissiveIntensity:0.6, flatShading:true });
+    for (const [cx,cy,cz,cs] of [[-0.35,1.4,0,0.22],[0.3,1.5,-0.2,0.18],[0,1.6,0.25,0.16]]){
+      const shard = new THREE.Mesh(new THREE.OctahedronGeometry(cs*s,0), cMat);
+      shard.position.set(cx*s, cy*s, cz*s); g.add(shard);
+    }
+  }
   g.userData.eyes=[eL,eR];
   return g;
 }
 
-function spawnEnemy(pos, kind, dropsOrb=false, guard=false){
-  const mesh = makeStonekin(kind);
+function spawnEnemy(pos, kind, dropsOrb=false, guard=false, elem=null){
+  const mesh = makeStonekin(kind, elem);
   mesh.position.copy(pos);
   scene.add(mesh);
   const big = kind==='boulder';
+  const baseHp = (big?120:48) + (elem?14:0);   // variants are a little tougher
   const e = {
-    mesh, kind, guard, dropsOrb,
-    hp: big?120:48, maxHp: big?120:48,
+    mesh, kind, guard, dropsOrb, elem,
+    hp: baseHp, maxHp: baseHp,
     dmg: big?18:10, speed: big?2.0:2.6,
     home: pos.clone(), state:'idle', target:null,
     atkCd:0, hitCd:0, alive:true, wobble:Math.random()*10,
@@ -466,6 +782,7 @@ function bindInput(){
       if (k==='j') doAttack();
       if (k==='escape') pause();
     } else if (k==='escape' && G.phase==='paused') resume();
+    else if (k==='escape' && G.phase==='inventory') closeInventory();
   });
   addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
 
@@ -528,7 +845,17 @@ function goTitle(){
 
 function newGame(){
   hide(dom['menu-title']);
-  G.sibling=null; G.klass=null;
+  // full reset — G is a module singleton, so a second New Journey must not inherit old state
+  Object.assign(G, {
+    sibling:null, klass:null, hp:100, maxHp:100, stamina:100, tokens:0, weaponLevel:1,
+    owned:[], equipped:null, chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
+    bossDefeated:false,
+    elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
+    glideUnlocked:false, stage:0,
+    flags:{fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false},
+    mimic:{state:'Normal',hp:0,maxHp:0,orbHeld:false,cooldown:0,savedHp:100},
+  });
+  worldBuilt = false;
   G.phase='sibling'; show(dom['menu-sibling']);
 }
 
@@ -538,7 +865,11 @@ dom['menu-sibling'].addEventListener('click', (e)=>{
   document.querySelectorAll('.pick-card').forEach(c=>c.classList.remove('sel'));
   card.classList.add('sel');
   G.sibling = card.dataset.sib;
-  setTimeout(()=>{ hide(dom['menu-sibling']); openClassSelect(); }, 260);
+  G.phase = 'sibling-picked';
+  setTimeout(()=>{
+    if (G.phase !== 'sibling-picked') return;   // flow already moved on
+    hide(dom['menu-sibling']); openClassSelect();
+  }, 260);
 });
 
 /* class */
@@ -564,6 +895,8 @@ function classGlyph(k){ return {sword:'⚔️',bow:'\u{1f3f9}',greatsword:'\u{1f
 dom['menu-class'].addEventListener('click',(e)=>{ const it=e.target.closest('.class-item'); if(it) selectClass(it.dataset.class); });
 dom['btn-confirm-class'].addEventListener('click', ()=>{
   G.klass = previewClass;
+  G.owned = [WEAPONS[G.klass][0].id];
+  G.equipped = G.owned[0];
   hide(dom['menu-class']);
   startOpening();
 });
@@ -729,7 +1062,7 @@ function doAttack(){
   if (G.phase!=='playing') return;
   const inMimic = G.mimic.state==='Transformed';
   const c = CLASSES[G.klass];
-  const dmgBase = inMimic ? 22 : (c.dmg + (G.weaponLevel-1)*8);
+  const dmgBase = inMimic ? 22 : Math.round(c.dmg * TIER_MULT[equippedWeapon().tier]) + (G.weaponLevel-1)*8;
   atkAnim = 1;
   if (!inMimic && c.ranged){
     fireProjectile(dmgBase);
@@ -744,6 +1077,16 @@ function meleeHit(range, arc, dmg){
     const d = Math.hypot(player.position.x-iceWall.position.x, player.position.z-iceWall.position.z);
     const to = new THREE.Vector3().subVectors(iceWall.position, player.position).setY(0).normalize();
     if (d<4.5 && fwd.dot(to)>0.3){ meltIce(); }
+  }
+  // elemental mechanisms: strike with the matching element
+  for (const m of mechanisms){
+    if (m.done) continue;
+    const d = Math.hypot(player.position.x-m.pos.x, player.position.z-m.pos.z);
+    if (d > m.r) continue;
+    const to = new THREE.Vector3().subVectors(m.pos, player.position).setY(0).normalize();
+    if (d>2 && fwd.dot(to)<0.2) continue;
+    if (G.activeElement === m.elem) activateMechanism(m);
+    else toast(`This mechanism answers only to ${ELEMENTS[m.elem].name} (${ELEMENTS[m.elem].sigil}).`, 'info', 2400);
   }
   for (const e of enemies){
     if (!e.alive) continue;
@@ -770,7 +1113,7 @@ function fireProjectile(dmg){
     new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1}));
   m.position.copy(player.position).add(new THREE.Vector3(0,1.3,0)).add(fwd.clone().multiplyScalar(0.8));
   scene.add(m);
-  projectiles.push({ mesh:m, vel:fwd.multiplyScalar(38), life:1.6, dmg });
+  projectiles.push({ mesh:m, vel:fwd.multiplyScalar(38), life:1.6, dmg, elem:G.activeElement });
 }
 function swingVfx(fwd){
   const col = G.activeElement==='none'?0xffffff:ELEMENTS[G.activeElement].color;
@@ -778,17 +1121,29 @@ function swingVfx(fwd){
 }
 function damageEnemy(e, dmg){
   if (!e.alive) return;
-  e.hp -= dmg;
+  let mult = 1;
+  if (e.elem){
+    if (G.activeElement === e.elem) mult = 0.25;                       // resists its own element
+    else if (COUNTER[e.elem] && G.activeElement === COUNTER[e.elem]) mult = 1.75;   // weak to its counter
+    if (mult < 1 && !G.flags.resistHinted){
+      G.flags.resistHinted = true;
+      tainerSay('Its crystals drink that element! Try the opposite one — Cinder against Rime, Tide against Arc.', 5200);
+    }
+  }
+  if (e.boss && e.weak > 0) mult *= 2;                                 // crystal exposed after the slam
+  e.hp -= dmg * mult;
   e.hitCd = 0.12;
   e.state='chase'; e.target=player;
-  spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,1,0)), 0xffffff, 6, 0.5);
+  const fxCol = mult>1 ? 0xfff0a0 : (mult<1 ? 0x8a90a0 : 0xffffff);
+  spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,1,0)), fxCol, mult>1?12:6, 0.5);
   if (e.hp<=0) defeatEnemy(e);
 }
 function defeatEnemy(e){
   e.alive=false;
   dissolve(e.mesh);                      // non-graphic: dissolve into motes of light
   scene.remove(e.mesh);
-  const reward = e.kind==='boulder'?12:5;
+  if (e.boss){ bossDefeatedFlow(e); return; }
+  const reward = (e.kind==='boulder'?12:5) + (e.elem?4:0);
   addTokens(reward);
   if (e.dropsOrb){ dropOrb(e.mesh.position.clone()); }
   if (!G.flags.firstKill){
@@ -976,7 +1331,7 @@ function trialPass(){
   toast('You earned the Windrider’s Mark! Gliding unlocked. +20 Emberlight', 'good', 4200);
   tainerSay('That was BEAUTIFUL! The Windrider’s Mark is yours — hold Space whenever you’re falling. The whole vale is open now. Let’s go find them.', 6500);
   G.stage=5;
-  setObjective('Free roam: attune the other Wardstones, upgrade your weapon (pause menu), and explore. The search continues.');
+  setObjective('Attune the remaining Wardstones, strike the four elemental mechanisms, and open the Arc-sealed gate beyond the camp — something waits in the hollow.');
 }
 
 /* ------------------------------------------------------------- progression */
@@ -1090,11 +1445,17 @@ function updatePlayer(dt){
   // integrate with collision (XZ)
   const nextX = body.position.x + pv.x*dt;
   const nextZ = body.position.z + pv.z*dt;
-  const res = resolveCollision(body.position.x, body.position.z, nextX, nextZ, transformed?1.0:0.6);
+  const res = resolveCollision(body.position.x, body.position.z, nextX, nextZ, transformed?1.0:0.6, body.position.y);
   body.position.x = res.x; body.position.z = res.z;
   body.position.y += pv.y*dt;
 
-  if (body.position.y <= 0){ body.position.y=0; if(pv.y<0){ pv.y=0; grounded=true; glideActive=false; } }
+  // ground = 0, or the top of any platform we're above and falling onto
+  let groundY = 0;
+  for (const pf of platforms){
+    if (Math.abs(body.position.x-pf.x)<=pf.hw && Math.abs(body.position.z-pf.z)<=pf.hd &&
+        body.position.y >= pf.topY-0.45 && pv.y<=0) groundY = Math.max(groundY, pf.topY);
+  }
+  if (body.position.y <= groundY){ body.position.y=groundY; if(pv.y<0){ pv.y=0; grounded=true; glideActive=false; } }
   else grounded=false;
 
   // keep within world
@@ -1121,10 +1482,16 @@ function windLift(pos){
   return up;
 }
 
-function resolveCollision(x,z,nx,nz,pr){
+function resolveCollision(x,z,nx,nz,pr,y=0){
   for (const c of colliders){
+    if (c.maxY!=null && y > c.maxY) continue;   // standing above this obstacle
     const dx=nx-c.x, dz=nz-c.z; const d=Math.hypot(dx,dz); const min=c.r+pr;
     if (d<min && d>0.0001){ const push=(min-d); nx += dx/d*push; nz += dz/d*push; }
+  }
+  // the lake's deep centre is unswimmable until frozen (gliding over it is allowed)
+  if (!lakeFrozen && lakePos && y < 2.5){
+    const dx=nx-lakePos.x, dz=nz-lakePos.z; const d=Math.hypot(dx,dz);
+    if (d < DEEP_WATER_R && d > 0.001){ const push=DEEP_WATER_R-d; nx += dx/d*push; nz += dz/d*push; }
   }
   return { x:nx, z:nz };
 }
@@ -1150,6 +1517,7 @@ function updateEnemies(dt){
   const pPos = transformed && mimicMesh ? mimicMesh.position : player.position;
   for (const e of enemies){
     if (!e.alive) continue;
+    if (e.boss){ updateBoss(e, dt, pPos, transformed); continue; }
     e.wobble += dt;
     e.atkCd = Math.max(0, e.atkCd-dt);
     if (e.hitCd>0) e.hitCd-=dt;
@@ -1189,6 +1557,7 @@ function updateEnemies(dt){
 }
 function damagePlayer(dmg){
   if (G.mimic.state==='Transformed') return;
+  if (window.__dmgLog) window.__dmgLog.push(['player', dmg, new Error().stack.split('\n')[2]?.trim()]);
   G.hp = Math.max(0, G.hp - dmg);
   updateHUD();
   if (!settings.motion) shake(0.25);
@@ -1252,7 +1621,7 @@ function updateHUD(){
   dom['hp-text'].textContent = Math.ceil(G.hp);
   dom['stam-fill'].style.width = (G.stamina/G.maxStam*100)+'%';
   dom['token-count'].textContent = G.tokens;
-  dom['weapon-name'].textContent = G.klass?CLASSES[G.klass].weapon:'—';
+  dom['weapon-name'].textContent = G.klass ? equippedWeapon().name : '—';
   dom['weapon-lvl'].textContent = 'Lv '+G.weaponLevel;
   // mimic bar
   if (G.mimic.state==='Transformed'){
@@ -1266,6 +1635,60 @@ function updateHUD(){
 /* ================================================================= PAUSE/SET */
 function pause(){ if(G.phase!=='playing') return; G.phase='paused'; show(dom['menu-pause']); document.exitPointerLock?.(); }
 function resume(){ if(G.phase!=='paused') return; hide(dom['menu-pause']); G.phase='playing'; }
+
+/* ------------------------------------------------------ inventory (gear) */
+function openInventory(){
+  if (G.phase!=='paused') return;
+  G.phase='inventory'; hide(dom['menu-pause']); show(dom['menu-inv']); renderInv();
+}
+function closeInventory(){
+  if (G.phase!=='inventory') return;
+  hide(dom['menu-inv']); G.phase='paused'; show(dom['menu-pause']);
+}
+function weaponPower(w){ return Math.round(CLASSES[G.klass].dmg * TIER_MULT[w.tier]) + (G.weaponLevel-1)*8; }
+function renderInv(){
+  const list = dom['inv-list'];
+  list.innerHTML = '';
+  const eq = equippedWeapon();
+  const upCost = 10 + (G.weaponLevel-1)*8;
+  for (const id of G.owned){
+    const w = findWeapon(id); if (!w) continue;
+    const isEq = id === G.equipped;
+    const pw = weaponPower(w);
+    const delta = pw - weaponPower(eq);
+    const row = document.createElement('div');
+    row.className = 'inv-row'+(isEq?' equipped':'');
+    row.setAttribute('role','listitem');
+    row.innerHTML = `
+      <div class="inv-info">
+        <div class="inv-name">${w.name} <span class="inv-tier">Tier ${w.tier}</span>${isEq?' <span class="inv-badge">Equipped</span>':''}</div>
+        <div class="inv-stats">Power ${pw}${isEq?'':` <span class="${delta>=0?'up':'down'}">(${delta>=0?'+':''}${delta} vs equipped)</span>`}</div>
+      </div>
+      <div class="inv-actions"></div>`;
+    const actions = row.querySelector('.inv-actions');
+    if (isEq){
+      const up = document.createElement('button');
+      up.className='btn small'; up.textContent=`Upgrade (✦${upCost})`;
+      up.disabled = G.tokens < upCost;
+      up.onclick = ()=>{ upgradeWeapon(); renderInv(); };
+      actions.appendChild(up);
+    } else {
+      const eqBtn = document.createElement('button');
+      eqBtn.className='btn small'; eqBtn.textContent='Equip';
+      eqBtn.onclick = ()=>{ G.equipped=id; tintWeapon(G.activeElement); updateHUD(); renderInv(); toast(`${w.name} equipped.`, 'good', 1800); };
+      actions.appendChild(eqBtn);
+      const dis = document.createElement('button');
+      dis.className='btn small danger'; dis.textContent=`Dismantle (+✦${6*w.tier})`;
+      dis.onclick = ()=>{
+        if (dis.dataset.confirm){ G.owned = G.owned.filter(x=>x!==id); addTokens(6*w.tier); renderInv(); toast(`${w.name} dismantled into ${6*w.tier} Emberlight.`, 'info', 2600); }
+        else { dis.dataset.confirm='1'; dis.textContent='Really dismantle?'; setTimeout(()=>{ delete dis.dataset.confirm; if(dis.isConnected) dis.textContent=`Dismantle (+✦${6*w.tier})`; }, 2600); }
+      };
+      actions.appendChild(dis);
+    }
+    list.appendChild(row);
+  }
+  dom['inv-tokens'].textContent = `✦ ${G.tokens} Emberlight held. Dismantling a spare grants 6 × its tier. Your class finds stronger weapons in chests.`;
+}
 
 function openSettings(from){ settingsReturn=from; hide(dom['menu-title']); hide(dom['menu-pause']); G.phase='settings'; show(dom['menu-settings']); syncSettingsUI(); }
 let settingsReturn='title';
@@ -1298,6 +1721,8 @@ function serialize(){
       sibling:G.sibling, klass:G.klass, hp:G.hp, maxHp:G.maxHp, tokens:G.tokens,
       weaponLevel:G.weaponLevel, elements:G.elements, activeElement:G.activeElement,
       glideUnlocked:G.glideUnlocked, stage:G.stage, flags:G.flags,
+      owned:G.owned, equipped:G.equipped, chests:G.chests, mechs:G.mechs,
+      bossDefeated:G.bossDefeated,
       pos:{x:player?.position.x||0, z:player?.position.z||0},
     }
   };
@@ -1342,13 +1767,26 @@ function hydrate(p){
     elements: {loam:!!p.elements?.loam,tide:!!p.elements?.tide,cinder:!!p.elements?.cinder,arc:!!p.elements?.arc,rime:!!p.elements?.rime},
     activeElement: ELEMENTS[p.activeElement]?p.activeElement:'none',
     glideUnlocked: !!p.glideUnlocked, stage: clamp(p.stage??0,0,9)|0,
-    flags: Object.assign({fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false}, (p.flags&&typeof p.flags==='object')?p.flags:{}),
+    flags: Object.assign({fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false}, (p.flags&&typeof p.flags==='object')?p.flags:{}),
     pos: p.pos && typeof p.pos.x==='number' ? p.pos : null,
   };
+  // v2 fields — v1 saves migrate to sensible defaults for their class
+  const roster = WEAPONS[next.klass] || WEAPONS.sword;
+  const starter = roster[0].id;
+  let owned = Array.isArray(p.owned) ? p.owned.filter(id=>roster.some(w=>w.id===id)) : [];
+  if (!owned.length) owned = [starter];
+  let equipped = (typeof p.equipped==='string' && owned.includes(p.equipped)) ? p.equipped : owned[0];
+  const boolMap = (src, keys) => { const o={}; for (const k of keys) o[k] = !!(src && src[k]); return o; };
+  next.owned = owned; next.equipped = equipped;
+  next.chests = {}; if (p.chests && typeof p.chests==='object'){ for (const k of Object.keys(p.chests)){ if (/^chest-[a-z-]{1,24}$/.test(k)) next.chests[k]=!!p.chests[k]; } }
+  next.mechs = boolMap(p.mechs, ['loam','tide','arc','rime']);
+  next.bossDefeated = !!p.bossDefeated;
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
     activeElement:next.activeElement, glideUnlocked:next.glideUnlocked, stage:next.stage, flags:next.flags,
+    owned:next.owned, equipped:next.equipped, chests:next.chests, mechs:next.mechs,
+    bossDefeated:next.bossDefeated,
   });
   return next;
 }
@@ -1384,6 +1822,8 @@ function startLoadedGame(next){
   // reflect unlocked wardstones visually
   for (const ws of wardstones){ if (G.elements[ws.elem]){ ws.unlocked=true; ws.sig.material.color.set(ELEMENTS[ws.elem].color); ws.sig.material.emissive.set(ELEMENTS[ws.elem].color); ws.sig.material.emissiveIntensity=1; ws.glow.intensity=1.6; } }
   if (G.flags.iceMelted && iceWall){ for(let i=colliders.length-1;i>=0;i--) if(colliders[i].tag==='ice') colliders.splice(i,1); world.remove(iceWall); }
+  // re-apply completed mechanisms (opens gate / freezes lake / raises steps; respawns boss if undefeated)
+  for (const m of mechanisms){ if (G.mechs[m.id]) activateMechanism(m, false); }
   setActiveElement(G.activeElement);
   if (next.pos){ player.position.set(next.pos.x, 0, next.pos.z); }
   setObjective(G.stage>=5?'Free roam: explore, attune Wardstones, and continue the search.':'Continue your journey.');
@@ -1398,6 +1838,7 @@ function clearWorld(){
   for (const p of projectiles){ scene.remove(p.mesh); } projectiles.length=0;
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
+  mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; hide(dom['boss-bar']);
   if (player){ scene.remove(player); player=null; }
   if (tainerMesh){ scene.remove(tainerMesh); tainerMesh=null; }
   if (mimicMesh){ scene.remove(mimicMesh); mimicMesh=null; }
@@ -1433,6 +1874,8 @@ function bindButtons(){
   dom['btn-settings-pause'].onclick = ()=> openSettings('pause');
   dom['btn-settings-back'].onclick = ()=> closeSettings();
   dom['btn-resume'].onclick = ()=> resume();
+  dom['btn-inv'].onclick = ()=> openInventory();
+  dom['btn-inv-back'].onclick = ()=> closeInventory();
   dom['btn-save'].onclick = ()=> downloadSave();
   dom['btn-quit'].onclick = ()=> { hide(dom['menu-pause']); goTitle(); };
   dom['file-input'].onchange = (e)=> { loadFromFile(e.target.files[0]); e.target.value=''; };
@@ -1479,6 +1922,16 @@ function updateProjectiles(dt){
     const p=projectiles[i]; p.life-=dt; p.mesh.position.addScaledVector(p.vel,dt);
     let hit=false;
     for (const e of enemies){ if(!e.alive)continue; if(p.mesh.position.distanceTo(e.mesh.position)<e.r+0.4){ damageEnemy(e,p.dmg); hit=true; break; } }
+    if (!hit) for (const m of mechanisms){
+      if (m.done) continue;
+      if (Math.hypot(p.mesh.position.x-m.pos.x, p.mesh.position.z-m.pos.z) < 1.6){
+        if (p.elem === m.elem) activateMechanism(m);
+        else toast(`This mechanism answers only to ${ELEMENTS[m.elem].name} (${ELEMENTS[m.elem].sigil}).`, 'info', 2400);
+        hit=true; break;
+      }
+    }
+    if (!hit && iceWall && !G.flags.iceMelted && p.elem==='cinder' &&
+        Math.hypot(p.mesh.position.x-iceWall.position.x, p.mesh.position.z-iceWall.position.z) < 3.2){ meltIce(); hit=true; }
     if (hit||p.life<=0){ scene.remove(p.mesh); projectiles.splice(i,1); }
   }
 }
@@ -1537,6 +1990,29 @@ function installDevHooks(){
     save: ()=> serialize(),
     loadObj: (o)=> loadFromObject(o),
     validate: (o)=>{ try { validateSave(o); return 'valid'; } catch(e){ return GENERIC_INVALID; } },
+    // Phase-2 hooks
+    mech: (id)=>{ const m=mechanisms.find(x=>x.id===id); if(m) activateMechanism(m); return !!m; },
+    mechs: ()=> ({...G.mechs}),
+    boss: ()=> bossRef ? { alive:bossRef.alive, hp:Math.round(bossRef.hp), maxHp:bossRef.maxHp, phase:bossRef.phase, weak:+bossRef.weak.toFixed(2) } : null,
+    hurtBoss: (n)=>{ if(bossRef&&bossRef.alive) damageEnemy(bossRef,n); },
+    giveWeapon: (tier)=> grantWeapon(tier),
+    equip: (id)=>{ if(G.owned.includes(id)){ G.equipped=id; updateHUD(); return true; } return false; },
+    gear: ()=> ({ owned:[...G.owned], equipped:G.equipped, power:weaponPower(equippedWeapon()) }),
+    warp: (x,z)=>{ player.position.set(x,0,z); },
+    chestsState: ()=> ({...G.chests}),
+    // deterministic simulation stepping — RAF is throttled in background tabs,
+    // so QA drives the same per-frame updates the real loop uses
+    step: (sec=1)=>{
+      const dt = 1/60, n = Math.round(sec/dt);
+      for (let i=0;i<n;i++){
+        if (G.phase==='playing'){
+          updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
+          updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
+        }
+        updateParticles(dt);
+      }
+      return `stepped ${sec}s (${n} frames)`;
+    },
   };
   console.log('[Emberkin] dev hooks installed: window.__EMBER');
 }

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Emberkin Studio — build your own glade</title>
+<meta name="description" content="Emberkin Studio: a kid-friendly creator sandbox. Place trees, rocks, creatures and treasure on a grid, then instantly playtest your glade. Local only — nothing is published." />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0e1420; --panel:#161d2c; --panel2:#1e2740; --line:#2b3550;
+    --text:#c9d4ea; --bright:#eef3ff; --muted:#7f8db0; --accent:#7bd3c6; --accent2:#f5c168;
+    --ok:#5fd08a; --danger:#ef5f6b;
+    --display:'Baloo 2',sans-serif; --body:'Nunito',sans-serif;
+  }
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--body)}
+  canvas#scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+  .bar{position:fixed;left:0;right:0;z-index:10;display:flex;align-items:center;gap:.5rem;padding:.55rem .8rem;flex-wrap:wrap}
+  .bar.top{top:0;background:linear-gradient(180deg,rgba(10,14,22,.92),rgba(10,14,22,.55) 80%,transparent)}
+  .bar.bottom{bottom:0;justify-content:center;background:linear-gradient(0deg,rgba(10,14,22,.92),rgba(10,14,22,.55) 80%,transparent)}
+  .brand{font-family:var(--display);font-weight:800;color:var(--bright);letter-spacing:.06em;display:flex;align-items:center;gap:.4rem;margin-right:.6rem}
+  .brand .mk{color:var(--accent)}
+  .brand small{color:var(--accent2);font-weight:700;font-size:.68rem;letter-spacing:.02em}
+
+  button{
+    font-family:var(--display);font-weight:700;font-size:.85rem;color:var(--bright);
+    background:var(--panel);border:1.5px solid var(--line);border-radius:11px;
+    padding:.5rem .8rem;min-height:44px;cursor:pointer;display:flex;align-items:center;gap:.4rem;
+    transition:border-color .12s, transform .12s;
+  }
+  button:hover{border-color:var(--accent)}
+  button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  button.sel{border-color:var(--accent);background:var(--panel2);color:var(--accent)}
+  button.warn{border-color:var(--danger);color:var(--danger)}
+  button.go{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b1018;border-color:transparent}
+  .count{font-size:.78rem;color:var(--muted);font-weight:700;margin-left:auto;padding:.3rem .6rem;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .hint{position:fixed;left:50%;transform:translateX(-50%);bottom:64px;z-index:9;color:var(--muted);font-size:.78rem;background:rgba(10,14,22,.7);border:1px solid var(--line);border-radius:16px;padding:.3rem .9rem;pointer-events:none}
+  .toast{position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:20;background:rgba(14,20,32,.95);border:1.5px solid var(--line);border-radius:12px;padding:.55rem 1rem;color:var(--bright);font-weight:700;font-size:.85rem;transition:opacity .3s}
+  .toast.ok{border-color:var(--ok)} .toast.bad{border-color:var(--danger)}
+  .hidden{display:none !important}
+
+  #btn-return{position:fixed;top:12px;right:12px;z-index:30}
+  body.playtest .bar{display:none}
+  body.playtest .hint{display:none}
+
+  .fine{position:fixed;right:10px;bottom:8px;z-index:8;color:var(--muted);font-size:.66rem;pointer-events:none}
+  @media (max-width:700px){ .brand small{display:none} button{font-size:.78rem;padding:.45rem .6rem} }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div class="bar top" id="bar-top">
+  <span class="brand"><span class="mk">✦</span> EMBERKIN STUDIO <small>· local sandbox — nothing is published</small></span>
+  <button data-place="tree">🌳 Tree</button>
+  <button data-place="rock">🪨 Rock</button>
+  <button data-place="bloom">🌼 Bloom</button>
+  <button data-place="grumble">👀 Grumble</button>
+  <button data-place="chest">🧰 Chest</button>
+  <button data-place="hoop">⭕ Hoop</button>
+  <button data-place="flag">🚩 Start</button>
+  <span class="count" id="count">0 / 200</span>
+</div>
+
+<div class="bar bottom" id="bar-bottom">
+  <button id="btn-rotate" title="Rotate the piece you are placing (R)">↻ Rotate</button>
+  <button id="btn-erase" title="Click things to remove them">🧽 Erase</button>
+  <button id="btn-undo" title="Undo (Ctrl+Z)">↩ Undo</button>
+  <button id="btn-clear" class="warn" title="Clear the whole glade">🗑 Clear</button>
+  <button id="btn-save" title="Download your glade as a .json file">💾 Save</button>
+  <button id="btn-load" title="Load a glade .json file">📂 Load</button>
+  <button id="btn-play" class="go" title="Walk around your glade!">▶ Playtest</button>
+</div>
+
+<p class="hint" id="hint">Pick a piece, then click the ground to place it. Drag to look around, scroll to zoom.</p>
+<button id="btn-return" class="go hidden">◀ Back to editing</button>
+<p class="fine">Emberkin Studio saves only to your device. Autosaves to this browser.</p>
+
+<div class="toast hidden" id="toast"></div>
+<input type="file" id="file-input" accept="application/json,.json" hidden />
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js" } }
+</script>
+<script type="module" src="studio.js"></script>
+<noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Emberkin Studio needs JavaScript and WebGL.</p></noscript>
+</body>
+</html>

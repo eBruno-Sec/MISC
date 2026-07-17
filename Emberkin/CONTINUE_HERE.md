@@ -1,73 +1,54 @@
 # Emberkin — build status / handoff
 
-**Last updated:** 2026-07-17 ~03:30 PDT
-**Status:** ✅ COMPLETE and verified in-browser. Committed & pushed to `eBruno-Sec/MISC`.
+**Last updated:** 2026-07-17 ~05:10 PDT
+**Status:** ✅ COMPLETE (Phase 1 slice + Phase 2 expansion + Phase 4 studio), verified in-browser,
+committed & pushed to `eBruno-Sec/MISC`.
 
-If you are the scheduled 04:41 continuation: **the project is finished.** Do NOT rebuild it.
-Your job is only a light verification/polish pass. See the checklist at the bottom.
+If you are a scheduled continuation: **the project is finished. Do NOT rebuild it.**
+Only run the light verification checklist at the bottom.
 
-Read `README.md` for the full original IP canon (names, elements, villain, regions, classes).
+`README.md` holds the full original IP canon (names, elements, villain, regions, classes, tiers).
 
 ---
 
-## What exists (all done)
+## What exists (all done, all verified)
 
-| File | State |
+| Piece | Contents |
 | --- | --- |
-| `README.md` | Original IP bible, controls, layout, honest scope notes. |
-| `index.html` | Project hub / landing page (matches MISC gallery style). Links Play + Design Bible + README. |
-| `play/index.html` | Game shell: importmap for three@0.161.0 (jsdelivr CDN), canvas, HUD, all menus. |
-| `play/style.css` | HUD, menus, 3 themes, accessibility, CSS portraits, print. |
-| `play/game.js` | The full game (~950 lines, core three.js only). All systems below. |
-| `docs/index.html` | Phase-0 design bible (GDD, TDD, Mimic Orb state machine, multiplayer, child-safety, architecture, roadmap, risks). |
-| `../index.html` | MISC gallery — Emberkin card added first under "Games & Interactive". |
-| `../.claude/launch.json` | `misc-static` python http.server on port 8123 (for local preview). |
+| `play/` | The full 3D game (~2,050-line game.js). Core loop **plus Phase-2**: 3 weapon tiers per class with Weapons & Gear panel (equip / compare / upgrade / dismantle w/ 2-step confirm), 4 elemental mechanisms (Rime freezes the lake deep-water zone, Loam raises steps+platforms, Tide floods the basin, Arc opens the boss gate), elemental Stonekin variants (resist own element ×0.25, counter ×1.75; Cinder↔Rime, Tide↔Arc), and the boss **Hush, the Hollow Warden** (320 HP, telegraphed slam, 2.6s weak window ×2 dmg, phase 2 at half HP spawns adds, defeat = +40 Emberlight + Tier-3 chest + "to be continued"). Save schema **v2** with v1→v2 migration. |
+| `studio/` | **Emberkin Studio** (Phase-4 demonstrator): grid-snapped placement of 7 piece types, single-flag rule, occupied-square rejection, erase/undo(60)/clear, 200-piece limit, localStorage autosave, validated JSON save/load (type whitelist, bounds, pollution guard, limit check — generic error "Invalid or corrupted progress file"), instant playtest (kid spawns at flag, walks/jumps, Grumbles wander, chests pop, hoops spin) that restores exact editor context on exit. Local-only; no publishing. |
+| `docs/` | Design bible updated: scope table rows for the new systems, UGC section links the Studio, roadmap marks Phase 2 (single-player parts) and Phase 4 (local sandbox) as shipped, villain section names Hush. |
+| `index.html` | Hub: Studio action card + expanded checklist. |
+| `../index.html` | Gallery card description covers boss + studio. |
 
-## Systems implemented & VERIFIED (via ?dev=1 QA harness + manual play)
+## Verification evidence (dev harness, `?dev=1`)
 
-- Title → sibling select (Wren/Cael) → permanent class select (5, with preview/stats) → opening
-  cinematic → world. ✓
-- Fully-3D world (lake, trees, mountains, Wardstones, camp, trial hoops), blocky humanoid
-  characters (not stick figures), third-person follow camera with collision + drag/mouse look +
-  arrow-key fallback. ✓
-- Movement: WASD, sprint+stamina, jump. ✓
-- Fishing at the lake → Tainer emerges → companion dialogue + objective progression. ✓
-- Combat (class-specific melee/ranged) → non-graphic dissolve into motes of light → Emberlight
-  tokens → Mimic Orb drop. ✓
-- **Mimic Orb** full state machine, separate monster health, player health preserved exactly,
-  manual eject (F) AND automatic eject at 0 monster-HP — both restore exact pre-transform health.
-  **Verified precisely with HP 63 and 47.** ✓
-- Stealth: guards ignore the disguised Mimic form; alert states shown only near the camp. ✓
-- Elements: unlock at Wardstones, switch (Q / 1–5), Cinder melts the Rime wall puzzle. ✓
-- Gliding: Windrider's Trial (updraft + hoops) grants the Windrider's Mark. ✓
-- Progression: Emberlight + weapon upgrade. ✓
-- Save/Load: JSON download + upload + localStorage autosave; validation rejects prototype
-  pollution, future schema versions, non-objects, bad enums (exact message
-  "Invalid or corrupted progress file"); round-trip restore verified. ✓
-- Accessibility & themes: reduced motion, high-contrast, larger UI, camera speed, invert-Y,
-  aim assist, volume — all wired and persisted. ✓
-- No console errors across the whole flow. ✓
-
-## Notes
-
-- `?dev=1` on the play URL installs `window.__EMBER` QA hooks (spawnNear, killNearest, transform,
-  eject, hurtMimic, setHp, save, loadObj, validate, unlockAll, state). Gated — absent in normal
-  play. Keep it; it's how this build was verified and how you can re-verify.
-- three.js loads from `https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js` via
-  importmap. Confirmed loading in-browser. GitHub Pages serves ES modules fine.
+Game (`window.__EMBER`, includes deterministic `step(seconds)` because background tabs throttle RAF):
+- Weapons: grant/equip/dismantle; tier power math exact (sword 26/36; bow 30/39 at Lv2). UI flow
+  clicked through: rows, +10 comparison, "Really dismantle?" confirm, +6 Emberlight, resume.
+- Mechanisms: all four activate via hook AND via real melee strike; wrong element refused with
+  sigil-labeled toast; projectiles carry element (Bow/Focus can trigger mechs and melt the ice wall).
+- Deep water: unfrozen lake ejects walkers to the 8.4-radius ring (glide-over allowed above y2.5);
+  frozen lake is walkable to the island chest.
+- Boss: exactly one 24-dmg slam per cycle (damage log instrumented), weak window ×2 verified
+  (10→20), phase 2 at <160 HP spawns exactly 2 adds, defeat flow grants +40/stage 6/Tier-3 chest.
+- Saves: v2 round-trips all new fields; **v1 save migrates** (starter weapon granted, mechs/chests/
+  boss defaulted); defeated-save rebuild spawns no boss but re-creates the reward chest ("Open
+  chest" prompt → grants Tier-3).
+- Fixed during this pass: sibling-select 260ms timer could stamp phase='class' over a running game
+  (now guarded); ranged classes couldn't melt the ice wall (now can); new-game now fully resets the
+  module-singleton G.
+Studio (`window.__STUDIO`): all editor invariants + save validation + round-trip + autosave-across-
+reload + click-to-place (switched to mouse events — same input path as the game) + visual playtest
+walk (kid moved (6,6)→(9.2,9.1)) + context restore.
+Zero console errors across all flows, local and live.
 
 ---
 
-## Verification-only checklist for the scheduled run
+## Verification-only checklist for any scheduled run
 
-1. `git -C "C:\Users\Zabre\Desktop\2. ClaudeAI\Apps\MISC" log --oneline -3` — confirm the Emberkin
-   commit is present and pushed (`git status` clean, `git log origin/main` includes it).
-2. Optionally open the LIVE site once GitHub Pages has rebuilt:
-   `https://ebruno-sec.github.io/MISC/Emberkin/` and `.../Emberkin/play/?dev=1`. Check the loading
-   screen clears and the title screen appears (confirms the CDN importmap works on Pages).
-3. If (and only if) something is actually broken, fix it, then commit & push. Otherwise do nothing —
-   the project is complete. Do not rebuild or re-scope.
-
-## Source brief (reference)
-`C:\Users\Zabre\AppData\Local\Temp\claude\C--Users-Zabre-Desktop-2--ClaudeAI-Apps-MISC\6682e31d-3ff9-4d3c-bb18-a554514d1e15\scratchpad\zip_extract\Claude_Fable_Prompt_Package\MASTER_PROMPT.md`
-(scratchpad — may be cleaned up; original zip in Downloads). `README.md` + this file are sufficient.
+1. `git -C "C:\Users\Zabre\Desktop\2. ClaudeAI\Apps\MISC" status` clean; latest Emberkin commit on
+   origin/main.
+2. Optionally: open `https://ebruno-sec.github.io/MISC/Emberkin/play/?dev=1` — loading clears to
+   title, console clean. Same for `.../Emberkin/studio/`.
+3. Fix only if actually broken; otherwise stop. Do not rebuild or re-scope.

@@ -40,15 +40,27 @@ proper nouns below are original to this project.
 
 ### The five permanent classes
 
-| Class | Starting weapon | Playstyle |
-| --- | --- | --- |
-| **Sword** | Vale Blade | Balanced close range, reliable, parry potential |
-| **Bow** | Reed Bow | Ranged precision, charged shots, weak points |
-| **Greatsword** | Cragcleaver | Slow, heavy, high stagger, breaks weak stone |
-| **Dual Swords** | Twin Fangs | Fast combos, high mobility, quick elemental build-up |
-| **Psychic Focus** | Wander Rune | A floating rune; telekinetic push/pull, shields, moving platforms |
+| Class | Tier 1 (start) | Tier 2 (lake hoard) | Tier 3 (boss reward) | Playstyle |
+| --- | --- | --- | --- | --- |
+| **Sword** | Vale Blade | Bramblefang | Dawnedge | Balanced close range, reliable, parry potential |
+| **Bow** | Reed Bow | Galewhisper | Sunstring | Ranged precision, charged shots, weak points |
+| **Greatsword** | Cragcleaver | Bouldersong | Titanroot | Slow, heavy, high stagger, breaks weak stone |
+| **Dual Swords** | Twin Fangs | Skydancers | Emberfangs | Fast combos, high mobility, quick elemental build-up |
+| **Psychic Focus** | Wander Rune | Lumen Coil | Starheart | A floating rune; telekinetic push/pull, shields, moving platforms |
 
-The class is chosen once and is permanent for the save. All classes complete the slice.
+The class is chosen once and is permanent for the save. All classes complete the slice. Weapons
+are managed from the pause menu's **Weapons & Gear** panel: equip, compare power, upgrade with
+Emberlight, or dismantle spares (two-step confirm; the equipped weapon is protected).
+
+### The four elemental mechanisms & the boss
+
+Carved trigger stones around the vale answer only to their own element (sigil + name shown, never
+colour alone): **Rime** freezes the lake's deep water into a path to an island hoard, **Loam**
+raises stone steps to a cliff-top chest, **Tide** floods a sealed basin so its hoard floats to the
+rim, and **Arc** powers open the gate to a hollow where **Hush, the Hollow Warden** — Mourne's
+first lieutenant — waits. Hush telegraphs a slam, exposes its back-crystal for bonus damage
+afterward, and calls Stonekin at half health. Elemental Stonekin variants resist their own element
+and take extra damage from its counter (Cinder ↔ Rime, Tide ↔ Arc).
 
 ---
 
@@ -70,8 +82,11 @@ Playable, end to end:
 12. Unlock an **element** at a Wardstone and use it in an **environmental puzzle**
 13. Earn **Emberlight** and **upgrade** your weapon
 14. Pass the **Windrider's Trial** and unlock **gliding**
-15. **Save** progress to JSON and **reload** it (with autosave to local storage)
+15. **Save** progress to JSON and **reload** it (with autosave to local storage; v1 saves migrate to v2)
 16. Adjust **accessibility** settings (reduced motion, high-contrast, camera speed, larger UI, aim assist)
+17. Strike all **four elemental mechanisms** and open their hoards
+18. Defeat **Hush, the Hollow Warden** and claim the Tier-3 weapon
+19. Build and **instantly playtest** your own glade in **Emberkin Studio**
 
 ---
 
@@ -102,14 +117,29 @@ control is also shown on the HUD, and prompts adapt to what you can currently do
 Emberkin/
   index.html          Project hub / landing page (matches the MISC gallery style)
   play/
-    index.html        Game shell — canvas, HUD, menus
+    index.html        Game shell — canvas, HUD, menus, inventory, boss bar
     style.css         Game + HUD styling, themes, accessibility, print
-    game.js           The game (Three.js): world, camera, combat, mimic, elements, gliding, save
+    game.js           The game (Three.js): world, camera, combat, mimic, elements,
+                      mechanisms, weapons, boss, gliding, save (v2 + migration)
+  studio/
+    index.html        Emberkin Studio shell — toolbar, palette, playtest UI
+    studio.js         Creator sandbox: grid placement, erase/undo, limits,
+                      validated save/load, instant playtest
   docs/
     index.html        Phase-0 design bible (GDD, TDD, systems, safety, architecture, roadmap)
   README.md           This file
   CONTINUE_HERE.md     Build-status / handoff notes
 ```
+
+## Emberkin Studio (creator sandbox)
+
+A kid-friendly, **local-only** creator: place trees, rocks, blooms, Grumbles, chests, hoops, and a
+start flag on a snapped grid (max 200 pieces), erase and undo freely, then hit **Playtest** to walk
+your own glade instantly — chests pop open, Grumbles wander, hoops spin. **Back to editing**
+returns you to the exact camera, mode, and selection you left. Glades autosave to the browser and
+export/import as validated `.json` (same defensive rules as game saves). Nothing can be published
+or shared — which is exactly why it ships without the moderation pipeline the full platform
+design requires.
 
 ## Running locally
 

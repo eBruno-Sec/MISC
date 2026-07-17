@@ -224,6 +224,27 @@ body[data-theme="day"] .tainer-bubble{background:rgba(255,255,255,.95)}
 /* toast fade */
 .toast{transition:opacity .3s} .toast.out{opacity:0}
 
+/* ============================================================ boss bar */
+.boss-bar{display:flex;flex-direction:column;gap:.25rem;width:min(440px,64vw);align-items:center}
+.boss-name{font-family:var(--display);font-weight:800;font-size:.85rem;color:#d9c8f5;text-shadow:0 1px 4px rgba(0,0,0,.6);letter-spacing:.04em}
+.bar.boss{width:100%;height:14px;border-color:#6b4fa0}
+.bar.boss .bar-fill{background:linear-gradient(90deg,#7a5ac0,#b9a0e8)}
+
+/* ============================================================ inventory */
+.inv-list{display:flex;flex-direction:column;gap:.5rem;width:min(560px,92vw);max-height:46vh;overflow-y:auto;padding:.2rem}
+.inv-row{display:flex;align-items:center;gap:.8rem;background:var(--panel);border:1.5px solid var(--border);border-radius:12px;padding:.7rem .9rem;text-align:left}
+.inv-row.equipped{border-color:var(--accent)}
+.inv-info{flex:1;min-width:0}
+.inv-name{font-family:var(--display);font-weight:700;color:var(--bright);font-size:.95rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.inv-tier{font-size:.66rem;font-weight:800;color:var(--accent-2);border:1px solid var(--accent-2);border-radius:10px;padding:.05rem .45rem}
+.inv-badge{font-size:.66rem;font-weight:800;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:.05rem .45rem}
+.inv-stats{font-size:.76rem;color:var(--muted);margin-top:.15rem}
+.inv-stats .up{color:var(--ok)} .inv-stats .down{color:var(--danger)}
+.inv-actions{display:flex;gap:.4rem;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.btn.small{font-size:.78rem;padding:.45rem .7rem;min-height:40px;border-radius:9px}
+.btn.small.danger{border-color:var(--danger);color:var(--danger);background:transparent}
+.btn.small.danger:hover:not(:disabled){background:rgba(239,95,107,.12);border-color:var(--danger)}
+
 /* ============================================================ responsive */
 @media (max-width:640px){
   .class-layout{flex-direction:column}

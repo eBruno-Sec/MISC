@@ -186,7 +186,10 @@
       <tr><td>Fishing → Tainer → tutorial</td><td><span class="pill impl">✓</span></td><td>Opening beats + companion hints</td></tr>
       <tr><td>Combat, non-graphic dissolve</td><td><span class="pill impl">✓</span></td><td>Class-specific melee/ranged; motes-of-light defeat</td></tr>
       <tr><td>Mimic Orb: transform, separate health, auto+manual eject</td><td><span class="pill impl">✓</span></td><td>Health preservation verified by test</td></tr>
-      <tr><td>Elements + Wardstones + a puzzle</td><td><span class="pill impl">✓</span></td><td>Cinder melts a Rime wall to open the path</td></tr>
+      <tr><td>Elements + Wardstones + puzzles</td><td><span class="pill impl">✓</span></td><td>Cinder melts a Rime wall; four elemental mechanisms (freeze the lake, raise steps, flood the basin, power the gate)</td></tr>
+      <tr><td>Weapon inventory: find, equip, compare, dismantle, upgrade</td><td><span class="pill impl">✓</span></td><td>Three tiers per class, chest drops, Weapons &amp; Gear panel</td></tr>
+      <tr><td>Elemental Stonekin variants (resist / counter)</td><td><span class="pill impl">✓</span></td><td>Variants resist their own element, weak to its counter</td></tr>
+      <tr><td>Boss encounter — Hush, the Hollow Warden</td><td><span class="pill impl">✓</span></td><td>Telegraphed slam, weak-point window, phase 2, arena gate</td></tr>
       <tr><td>Stealth infiltration (disguised)</td><td><span class="pill impl">✓</span></td><td>Guards ignore the Mimic form; alert states</td></tr>
       <tr><td>Gliding trial &amp; licence</td><td><span class="pill impl">✓</span></td><td>Windrider's Trial (hoops + updraft)</td></tr>
       <tr><td>Emberlight tokens + weapon upgrade</td><td><span class="pill impl">✓</span></td><td>Spend to raise weapon level</td></tr>
@@ -194,7 +197,7 @@
       <tr><td>Accessibility &amp; themes</td><td><span class="pill impl">✓</span></td><td>Reduced motion, high contrast, larger UI, camera speed, aim assist</td></tr>
       <tr><td>Server-authoritative multiplayer &amp; co-op</td><td><span class="pill design">◇</span></td><td>Designed below; a browser can't be authoritative against itself</td></tr>
       <tr><td>Accounts, family accounts, parental dashboard</td><td><span class="pill design">◇</span></td><td>Designed below</td></tr>
-      <tr><td>Creator tools / UGC / moderation</td><td><span class="pill design">◇</span></td><td>Designed below (sandboxed visual scripting)</td></tr>
+      <tr><td>Creator sandbox — Emberkin Studio (local)</td><td><span class="pill impl">✓</span></td><td>Grid placement, limits, undo, validated save/load, instant playtest. Publishing/moderation remain designed-only</td></tr>
       <tr><td>Containers, Kubernetes, CI/CD, live-ops</td><td><span class="pill design">◇</span></td><td>Designed below</td></tr>
     </tbody>
   </table>
@@ -235,13 +238,13 @@
 
   <h2 id="villain"><span class="num">09</span>Villain — Mourne, the Stillard</h2>
   <p><strong>Motive:</strong> Mourne once lost everything to change and grief. He concluded that a world which never changes can never suffer — so he seeks to <em>still</em> Aldermere into a perfect, silent, unchanging calm. He believes this is <strong>mercy</strong>, which makes him tragic rather than evil.</p>
-  <p><strong>Method:</strong> he cracked the Wellspring to drain the world's "restlessness," scattering the elements. His lieutenants, the <strong>Hollow Wardens</strong>, spread quiet zones (the Stillfields) where nothing grows or moves. <strong>Connection to the siblings:</strong> he separated them not out of cruelty but to "spare" them the pain of the stillness to come. The final confrontation is about proving that change — and the grief that comes with it — is worth keeping.</p>
+  <p><strong>Method:</strong> he cracked the Wellspring to drain the world's "restlessness," scattering the elements. His lieutenants, the <strong>Hollow Wardens</strong>, spread quiet zones (the Stillfields) where nothing grows or moves. The first Warden the player faces is <strong>Hush</strong>, a towering construct sealed in a hollow beyond the Stonekin camp — its telegraphed slam and exposed back-crystal teach the boss grammar the later Wardens build on. <strong>Connection to the siblings:</strong> Mourne separated them not out of cruelty but to "spare" them the pain of the stillness to come. The final confrontation is about proving that change — and the grief that comes with it — is worth keeping.</p>
 
   <h2 id="combat"><span class="num">10</span>Combat</h2>
   <p>Full-3D, readable, non-graphic. Light/heavy/charged attacks, dodging, telegraphs, stagger, knockback, weak points, and bosses. Elemental attacks change interactions (e.g., Cinder ignites, Rime freezes, Arc powers mechanisms). Feedback uses animation, sound, restrained VFX, impact response, and readable UI — never blood or gore. On defeat, enemies dissolve into ash, mist, or drifting motes of light.</p>
 
   <h2 id="classes"><span class="num">11</span>Classes &amp; weapons</h2>
-  <p>One class is chosen once and is <strong>permanent</strong> for the save. Players only find weapons of their class; weapons can be equipped, compared, upgraded, fused, or dismantled for materials, with destruction protection and confirmations.</p>
+  <p>One class is chosen once and is <strong>permanent</strong> for the save. Players only find weapons of their class; weapons can be equipped, compared, upgraded, or dismantled for Emberlight, with destruction protection (the equipped weapon can't be dismantled; dismantling asks twice). Each class has three tiers in the slice — the starter, a Tier-2 find in the frozen-lake hoard, and a Tier-3 reward from the boss — with power scaling ×1 / ×1.4 / ×1.85 before upgrade levels.</p>
   <table>
     <thead><tr><th>Class</th><th>Weapon</th><th>Identity</th><th>Complexity</th></tr></thead>
     <tbody>
@@ -313,8 +316,9 @@ Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ─�
   <h2 id="multiplayer"><span class="num">18</span>Multiplayer &amp; networking <span class="pill design">◇ designed</span></h2>
   <p>Solo players can complete the whole story; co-op is additive. The model is <strong>server-authoritative</strong>: dedicated session servers own movement, combat, damage, enemies, elements, transformations, Mimic Orbs, quests, loot, world state, and gliding. Clients predict and reconcile. A network-facing UI state model (Idle → LocallyPending → ServerConfirmed / ServerRejected → Reconciling → DegradedConnection → Reconnecting → Recovered / Failed) keeps latency legible without blaming the player. Session management, matchmaking, parties, interest management, anti-cheat, reconnection, and version compatibility are all part of the design.</p>
 
-  <h2 id="ugc"><span class="num">19</span>Creator tools / UGC <span class="pill design">◇ designed</span></h2>
-  <p>Two toolsets: a professional internal editor and a simplified, child-friendly creator. Creation uses <strong>sandboxed, capability-limited visual scripting</strong> — never unrestricted code execution. Connector ports carry a semantic colour token <em>plus</em> a distinct icon/shape and label (never colour alone). An "Instant Playtest" checkpoints the draft, launches an isolated sandbox with execution/memory/network/time limits, and returns the author to their exact editor context. Publishing requires moderation, scanning, review, versioning, rollback, audit logs, and parental permission.</p>
+  <h2 id="ugc"><span class="num">19</span>Creator tools / UGC <span class="pill impl">✓ local sandbox</span> <span class="pill design">◇ publishing</span></h2>
+  <p>Two toolsets: a professional internal editor and a simplified, child-friendly creator. Creation uses <strong>sandboxed, capability-limited tools</strong> — never unrestricted code execution. An "Instant Playtest" checkpoints the draft, launches an isolated session with execution/asset limits, and returns the author to their exact editor context. Publishing requires moderation, scanning, review, versioning, rollback, audit logs, and parental permission.</p>
+  <p><strong>Shipped demonstrator:</strong> <a href="../studio/index.html">Emberkin Studio</a> implements the child-friendly creator's core loop locally: grid-snapped placement of seven piece types, erase/undo, a 200-piece asset limit, validated JSON save/load (same defensive rules as game saves), and an instant playtest that spawns you at your start flag and returns you to the exact editor camera, mode, and selection. It is <em>local-only by design</em> — nothing can be published or shared, which is why it needs no moderation pipeline yet.</p>
 
   <h2 id="safety"><span class="num">20</span>Child safety, moderation &amp; parental controls <span class="pill design">◇ designed</span></h2>
   <ul>
@@ -351,7 +355,7 @@ Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ─�
   <p>CI automates formatting, linting, static analysis, tests, security/dependency scanning, container builds/scans, asset validation, server/client builds, deploy, smoke tests, rollback, and release notes across dev/test/staging/prod with gated releases and branch protection. Observability: structured logs, metrics, tracing, crash reporting, plus game-specific signals (session diagnostics, matchmaking, latency, server tick, moderation turnaround) — never logging secrets, tokens, payment data, or sensitive child data.</p>
 
   <h2 id="testing"><span class="num">27</span>Testing strategy</h2>
-  <p>Full plan spans unit, integration, API, multiplayer, load, security, end-to-end, gameplay automation, save/load, migration, container, deployment, accessibility, moderation, parental-control, exploit, reconnect, and network-degradation tests. <strong>In the slice</strong>, the acceptance-critical invariants are exercised via an in-game QA harness (enable with <code>?dev=1</code>): combat → dissolve → orb drop, transform with separate health, manual and automatic eject preserving exact health, element unlock/switch, and save serialize/validate/round-trip including malicious-input rejection.</p>
+  <p>Full plan spans unit, integration, API, multiplayer, load, security, end-to-end, gameplay automation, save/load, migration, container, deployment, accessibility, moderation, parental-control, exploit, reconnect, and network-degradation tests. <strong>In the slice</strong>, the acceptance-critical invariants are exercised via an in-game QA harness (enable with <code>?dev=1</code>): combat → dissolve → orb drop, transform with separate health, manual and automatic eject preserving exact health, element unlock/switch, elemental mechanisms, weapon grant/equip/tier scaling, boss slam cadence and weak-window multiplier, and save serialize/validate/round-trip — including malicious-input rejection and <strong>v1 → v2 schema migration</strong>. The harness includes a deterministic <code>step(seconds)</code> simulator so time-dependent logic is testable even when the browser throttles animation frames.</p>
 
   <h2 id="a11y"><span class="num">28</span>Accessibility</h2>
   <p>Built in from the start and present in the slice: reduced motion (less shake/flashing), high-contrast theme, larger UI scale, camera-speed and invert-Y, aim assist, and non-colour-only status (every element and alert carries a name/sigil/shape). Targets WCAG 2.2 AA for web interfaces. Planned additions: subtitles with speaker labels, full remapping, hold/toggle alternatives, screen-reader support for menus, and difficulty options. Interactive targets are ≥44px; focus states are visible.</p>
@@ -365,9 +369,9 @@ Any state ──(desync / bad input / reconnect)──▶ InvalidOrRecovery ─�
     <tbody>
       <tr><td>0 — Discovery</td><td>This bible, IP canon, technical plan, safety plan</td><td><span class="pill impl">✓</span></td></tr>
       <tr><td>1 — Vertical slice</td><td>Core 3D loop, Mimic Orb, elements, gliding, save</td><td><span class="pill impl">✓ (this build)</span></td></tr>
-      <tr><td>2 — Core systems</td><td>Class depth, more weapons/elements/enemies, boss, parties, matchmaking, persistent progression</td><td><span class="pill design">◇</span></td></tr>
+      <tr><td>2 — Core systems</td><td>Weapon tiers/inventory, elemental variants &amp; mechanisms, boss encounter <em>(✓ this build)</em>; parties &amp; matchmaking <em>(◇ needs servers)</em></td><td><span class="pill impl">✓</span> / <span class="pill design">◇</span></td></tr>
       <tr><td>3 — Platform</td><td>Accounts, family accounts, parental controls, safe comms, moderation, internal creator</td><td><span class="pill design">◇</span></td></tr>
-      <tr><td>4 — User creation</td><td>Simplified creator, visual scripting, publishing, ratings, sandboxing</td><td><span class="pill design">◇</span></td></tr>
+      <tr><td>4 — User creation</td><td>Simplified creator with instant playtest <em>(✓ Emberkin Studio, local)</em>; visual scripting, publishing, ratings <em>(◇)</em></td><td><span class="pill impl">✓</span> / <span class="pill design">◇</span></td></tr>
       <tr><td>5 — Scale &amp; release</td><td>K8s, regional scaling, load/security/accessibility/safety review, store prep, live-ops</td><td><span class="pill design">◇</span></td></tr>
     </tbody>
   </table>
