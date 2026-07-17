@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://ebruno-sec.github.io/MISC/FinFam/sitemap.xml

@@ -28,7 +28,7 @@ Then visit `http://localhost:4173`.
 
 Expected project URL after the MISC repo publishes from the branch root:
 
-https://ebruno-sec.github.io/MISC/FinFam/
+https://ebruno-sec.github.io/MISC/NestEggHero/
 
 ## Validation
 
