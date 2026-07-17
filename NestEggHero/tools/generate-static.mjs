@@ -41,6 +41,9 @@ function shell({ title, description, path, body, jsonLd = null }) {
     <meta property="og:description" content="${esc(description)}">
     <meta property="og:type" content="website">
     <meta property="og:url" content="${canonical}">
+    <meta property="og:image" content="${site}/images/hero-dashboard.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="${site}/images/hero-dashboard.png">
     <link rel="canonical" href="${canonical}">
     <link rel="stylesheet" href="../styles/main.css">
     <link rel="icon" href="../images/mark.svg" type="image/svg+xml">

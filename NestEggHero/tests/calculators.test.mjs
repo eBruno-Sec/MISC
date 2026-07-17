@@ -47,6 +47,9 @@ test("Roth vs Traditional ties in same-budget mode when tax rates match", () => 
   });
   assert.equal(result.headline.value, "Tie");
   assert.equal(result.stats[2].value, "$5,850");
+  assert.equal(result.decision.sensitivity.breakEvenLabel, "22.00%");
+  assert.equal(result.decision.sensitivity.interpretation, "Very sensitive: a small tax-rate change can flip the modeled result.");
+  assert.ok(result.decision.factors.some((item) => item.includes("break-even line")));
 });
 
 test("Roth vs Traditional surfaces phaseout warnings", () => {

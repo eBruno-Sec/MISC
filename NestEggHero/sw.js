@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = "nestegghero-v1.0.0";
+const CACHE_NAME = "nestegghero-v1.0.1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const ASSETS = [
   "./scripts/storage.js",
   "./scripts/backup.js",
   "./images/mark.svg",
+  "./images/hero-dashboard.png",
   "./manifest.webmanifest",
   "./robots.txt",
   "./sitemap.xml"

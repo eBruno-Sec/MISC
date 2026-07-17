@@ -245,6 +245,30 @@ export function rothTraditionalDecision({ annualAmount, age, years, annualRate, 
   const difference = rothAfterTax - traditionalAfterTax;
   const tie = Math.abs(difference) < 0.5;
   const leader = tie ? "Tie" : difference > 0 ? `Roth +${formatUSD(Math.abs(difference))}` : `Traditional +${formatUSD(Math.abs(difference))}`;
+  const breakEvenTaxRate = traditionalFuture === 0 ? 0 : 1 - rothFuture / traditionalFuture;
+  const clampedBreakEven = Math.min(0.6, Math.max(0, breakEvenTaxRate));
+  const breakEvenDistance = retirementTaxRate - clampedBreakEven;
+  const taxGap = retirementTaxRate - currentTaxRate;
+  const modeLabel = comparisonMode === "same-budget" ? "Same pre-tax budget" : "Same IRA deposit";
+  const decisionTitle = tie ? "The modeled result is essentially even" : difference > 0 ? "Roth leads in this scenario" : "Traditional leads in this scenario";
+  const decisionSummary = tie
+    ? "The entered tax rates and growth assumptions leave the modeled after-tax results within rounding distance."
+    : difference > 0
+      ? "Under these inputs, paying the modeled tax cost now leaves the Roth path ahead after the withdrawal-tax assumption is applied."
+      : "Under these inputs, deferring the modeled tax cost leaves the traditional path ahead after the withdrawal-tax assumption is applied.";
+  const rateSignal = taxGap > 0.0001
+    ? "Retirement tax rate is higher than today's rate, which usually helps the Roth side in this model."
+    : taxGap < -0.0001
+      ? "Retirement tax rate is lower than today's rate, which usually helps the traditional side in this model."
+      : "Current and retirement tax rates match, so the comparison mode and deposit framing drive most of the result.";
+  const budgetSignal = comparisonMode === "same-budget"
+    ? "Same-budget mode reduces the Roth deposit by the current tax cost, creating a cleaner tax-timing comparison."
+    : "Same-deposit mode compares equal IRA deposits and intentionally leaves current-year traditional tax savings outside the model.";
+  const breakEvenSignal = Math.abs(breakEvenDistance) < 0.005
+    ? "Your entered retirement tax rate is sitting almost exactly on the modeled break-even line."
+    : breakEvenDistance > 0
+      ? `Your entered retirement tax rate is ${formatRate(Math.abs(breakEvenDistance))} above the modeled break-even line.`
+      : `Your entered retirement tax rate is ${formatRate(Math.abs(breakEvenDistance))} below the modeled break-even line.`;
 
   const rows = [];
   for (let year = 1; year <= years; year += 1) {
@@ -265,6 +289,36 @@ export function rothTraditionalDecision({ annualAmount, age, years, annualRate, 
 
   return {
     headline: { label: tie ? "Estimated after-tax comparison" : "Estimated after-tax advantage", value: leader },
+    decision: {
+      title: decisionTitle,
+      summary: decisionSummary,
+      winner: tie ? "Tie" : difference > 0 ? "Roth" : "Traditional",
+      gap: tie ? "Within $1" : formatUSD(Math.abs(difference)),
+      primary: [
+        { label: "Comparison frame", value: modeLabel, note: comparisonMode === "same-budget" ? "Tax-now vs tax-later on one savings budget" : "Equal IRA deposits, tax savings excluded" },
+        { label: "Tax-rate gap", value: `${taxGap >= 0 ? "+" : ""}${formatRate(taxGap)}`, note: `Retirement ${formatRate(retirementTaxRate)} vs current ${formatRate(currentTaxRate)}` },
+        { label: "Limit used", value: `${Math.round((annualAmount / limit) * 100)}%`, note: `${formatUSD(annualAmount)} of the ${formatUSD(limit)} 2026 IRA limit` }
+      ],
+      factors: [
+        rateSignal,
+        budgetSignal,
+        breakEvenSignal,
+        `${years} year${years === 1 ? "" : "s"} of growth are modeled before the withdrawal-tax assumption is applied.`
+      ],
+      sensitivity: {
+        enteredRate: retirementTaxRate,
+        breakEvenRate: clampedBreakEven,
+        maxRate: 0.6,
+        enteredLabel: formatRate(retirementTaxRate),
+        breakEvenLabel: formatRate(clampedBreakEven),
+        distanceLabel: formatRate(Math.abs(breakEvenDistance)),
+        interpretation: Math.abs(breakEvenDistance) < 0.005
+          ? "Very sensitive: a small tax-rate change can flip the modeled result."
+          : breakEvenDistance > 0
+            ? "Above break-even: this tax-rate input leans Roth in the model."
+            : "Below break-even: this tax-rate input leans Traditional in the model."
+      }
+    },
     stats: [
       { label: "Roth after-tax estimate", value: formatUSD(rothAfterTax) },
       { label: "Traditional after-tax estimate", value: formatUSD(traditionalAfterTax) },

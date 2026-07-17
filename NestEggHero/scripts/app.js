@@ -173,24 +173,33 @@ function viewHome() {
           signal("No accounts", "No credentials asked")
         )
       ),
-      el("div", { class: "hero-panel insight-panel" },
-        el("div", { class: "snapshot-header" },
-          el("div", {}, el("p", { class: "eyebrow", text: "Today" }), el("h2", { text: "Decision snapshot" })),
-          el("span", { class: state.persisted ? "status-pill" : "status-pill warning", text: state.persisted ? "Private by default" : "Session only" })
+      el("figure", { class: "hero-visual", "aria-label": "NestEggHero retirement decision workspace preview" },
+        el("img", { class: "hero-art", src: "images/hero-dashboard.png", alt: "Layered financial learning cards and a retirement dashboard around a nest egg.", width: "1693", height: "929", loading: "eager" }),
+        el("figcaption", { class: "visually-hidden", text: "A visual preview of NestEggHero's source-labeled lessons, calculators, and retirement decision lab." }),
+        el("div", { class: "hero-proof-row", "aria-label": "Trust signals" },
+          el("span", { text: "Source drawer" }),
+          el("span", { text: "Local progress" }),
+          el("span", { text: "No account" })
         ),
-        el("dl", { class: "metric-grid hero-metrics" },
-          metric("Lessons", `${readCount}/${ARTICLES.length}`),
-          metric("Calculators", String(CALCULATORS.length)),
-          metric("Fact records", String(allFacts().length))
-        ),
-        el("div", { class: "progress-rail" },
-          el("div", { class: "progress-copy" }, el("span", { text: "Learning path" }), el("strong", { text: `${progress}%` })),
-          el("progress", { max: 100, value: progress, "aria-label": `Learning path ${progress}% complete` })
-        ),
-        el("a", { class: "spotlight-link", href: "#/tools/roth-traditional-lab" },
-          el("span", { class: "spotlight-kicker", text: "Featured lab" }),
-          el("strong", { text: rothLab.name }),
-          el("span", { text: rothLab.blurb })
+        el("div", { class: "hero-panel insight-panel hero-floating-panel" },
+          el("div", { class: "snapshot-header" },
+            el("div", {}, el("p", { class: "eyebrow", text: "Today" }), el("h2", { text: "Decision snapshot" })),
+            el("span", { class: state.persisted ? "status-pill" : "status-pill warning", text: state.persisted ? "Private by default" : "Session only" })
+          ),
+          el("dl", { class: "metric-grid hero-metrics" },
+            metric("Lessons", `${readCount}/${ARTICLES.length}`),
+            metric("Calculators", String(CALCULATORS.length)),
+            metric("Fact records", String(allFacts().length))
+          ),
+          el("div", { class: "progress-rail" },
+            el("div", { class: "progress-copy" }, el("span", { text: "Learning path" }), el("strong", { text: `${progress}%` })),
+            el("progress", { max: 100, value: progress, "aria-label": `Learning path ${progress}% complete` })
+          ),
+          el("a", { class: "spotlight-link", href: "#/tools/roth-traditional-lab" },
+            el("span", { class: "spotlight-kicker", text: "Featured lab" }),
+            el("strong", { text: rothLab.name }),
+            el("span", { text: rothLab.blurb })
+          )
         )
       )
     ),
@@ -370,12 +379,14 @@ function viewCalculator(slug) {
       } }, preset.label)))
     ));
   }
-  const fields = el("div", { class: "field-grid" });
-  calc.fields.forEach((field) => {
-    const input = field.kind === "choice" ? el("select", { name: field.id }, field.options.map((option) => el("option", { value: option.value, selected: option.value === field.defaultValue, text: option.label }))) : el("input", { name: field.id, type: "number", inputmode: "decimal", value: field.defaultValue, step: field.step || "1" });
-    fields.append(el("label", {}, el("span", { text: field.label }), field.suffix ? el("span", { class: "input-wrap" }, input, el("span", { text: field.suffix })) : input));
-  });
-  form.append(fields);
+  const controls = new Map(calc.fields.map((field) => [field.id, fieldControl(field)]));
+  if (slug === "roth-traditional-lab") {
+    form.append(rothFieldGroups(controls));
+  } else {
+    const fields = el("div", { class: "field-grid" });
+    for (const control of controls.values()) fields.append(control);
+    form.append(fields);
+  }
   form.append(el("button", { class: "btn primary", type: "submit" }, "Run estimate"));
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -404,6 +415,28 @@ function viewCalculator(slug) {
   );
 }
 
+function fieldControl(field) {
+  const input = field.kind === "choice" ? el("select", { name: field.id }, field.options.map((option) => el("option", { value: option.value, selected: option.value === field.defaultValue, text: option.label }))) : el("input", { name: field.id, type: "number", inputmode: "decimal", value: field.defaultValue, step: field.step || "1" });
+  return el("label", {}, el("span", { text: field.label }), field.suffix ? el("span", { class: "input-wrap" }, input, el("span", { text: field.suffix })) : input);
+}
+
+function rothFieldGroups(controls) {
+  const take = (...ids) => ids.map((id) => controls.get(id)).filter(Boolean);
+  return el("div", { class: "field-grid grouped-fields" },
+    fieldGroup("Scenario", "How much, how long, and which comparison frame.", take("annualAmount", "age", "years", "annualRate", "comparisonMode")),
+    fieldGroup("Tax rates", "The model only uses the rates you enter here.", take("currentTaxRate", "retirementTaxRate")),
+    fieldGroup("Eligibility screen", "Phaseout notes are warnings, not eligibility decisions.", take("filingStatus", "workplaceCoverage", "modifiedAgi"))
+  );
+}
+
+function fieldGroup(title, note, controls) {
+  return el("fieldset", { class: "field-group" },
+    el("legend", { text: title }),
+    el("p", { text: note }),
+    ...controls
+  );
+}
+
 function rothLabPrimer() {
   return el("section", { class: "lab-primer", "aria-label": "Roth vs Traditional comparison framing" },
     el("div", { class: "lab-step" }, el("span", { text: "01" }), el("strong", { text: "Choose a comparison frame" }), el("p", { text: "Same pre-tax budget is the cleanest tax-timing comparison; same IRA deposit answers a different question." })),
@@ -416,6 +449,7 @@ function renderOutcome(host, outcome) {
   host.replaceChildren(el("section", { class: outcome.comparison ? "result-card decision-result" : "result-card" },
     el("p", { class: "eyebrow", text: outcome.headline.label }),
     el("h2", { text: outcome.headline.value }),
+    outcome.decision ? decisionBrief(outcome.decision) : null,
     outcome.comparison ? comparisonBars(outcome.comparison) : null,
     el("div", { class: "metric-grid" }, (outcome.stats || []).map((item) => metric(item.label, item.value))),
     outcome.warnings?.length ? el("div", { class: "warning-list", role: "note" }, el("h3", { text: "Eligibility notes" }), el("ul", {}, outcome.warnings.map((item) => el("li", { text: item })))) : null,
@@ -424,6 +458,55 @@ function renderOutcome(host, outcome) {
     outcome.chart ? chart(outcome.chart) : null,
     outcome.table ? dataTable(outcome.table) : null
   ));
+}
+
+function decisionBrief(decision) {
+  const tone = decision.winner === "Roth" ? "roth" : decision.winner === "Traditional" ? "traditional" : "tie";
+  return el("section", { class: `decision-brief ${tone}`, "aria-label": "Decision brief" },
+    el("div", { class: "decision-brief-header" },
+      el("div", {},
+        el("p", { class: "eyebrow", text: "Decision brief" }),
+        el("h3", { text: decision.title }),
+        el("p", { text: decision.summary })
+      ),
+      el("div", { class: "decision-gap" },
+        el("span", { text: "Modeled gap" }),
+        el("strong", { text: decision.gap }),
+        el("small", { text: decision.winner === "Tie" ? "No clear modeled lead" : `${decision.winner} lead` })
+      )
+    ),
+    el("div", { class: "decision-grid" }, decision.primary.map((item) => el("div", { class: "decision-tile" },
+      el("span", { text: item.label }),
+      el("strong", { text: item.value }),
+      el("p", { text: item.note })
+    ))),
+    decision.sensitivity ? sensitivityMap(decision.sensitivity) : null,
+    el("ul", { class: "decision-factors" }, decision.factors.map((item) => el("li", { text: item })))
+  );
+}
+
+function sensitivityMap(sensitivity) {
+  return el("section", { class: "sensitivity-map", "aria-label": "Break-even tax rate sensitivity" },
+    el("div", { class: "sensitivity-copy" },
+      el("span", { text: "Break-even line" }),
+      el("strong", { text: sensitivity.interpretation }),
+      el("p", { text: `Entered retirement rate ${sensitivity.enteredLabel}; modeled break-even ${sensitivity.breakEvenLabel}. Distance ${sensitivity.distanceLabel}.` })
+    ),
+    el("div", { class: "sensitivity-bars" },
+      sensitivityBar("Entered retirement rate", sensitivity.enteredLabel, sensitivity.enteredRate, sensitivity.maxRate, "entered"),
+      sensitivityBar("Modeled break-even rate", sensitivity.breakEvenLabel, sensitivity.breakEvenRate, sensitivity.maxRate, "breakeven")
+    )
+  );
+}
+
+function sensitivityBar(label, display, value, max, tone) {
+  return el("div", { class: `sensitivity-bar ${tone}` },
+    el("div", { class: "sensitivity-bar-copy" },
+      el("span", { text: label }),
+      el("strong", { text: display })
+    ),
+    el("progress", { max, value, "aria-label": `${label}: ${display}` })
+  );
 }
 
 function comparisonBars(items) {
