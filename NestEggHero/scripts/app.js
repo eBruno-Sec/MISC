@@ -168,7 +168,7 @@ function viewHome() {
           el("a", { class: "btn quiet", href: "#/facts", text: "Inspect sources" })
         ),
         el("div", { class: "signal-strip", "aria-label": "Product signals" },
-          signal("Local-only", "IndexedDB progress"),
+          signal("Local-only", state.persisted ? "IndexedDB progress" : "Session fallback"),
           signal("2026 facts", `${allFacts().length} source records`),
           signal("No accounts", "No credentials asked")
         )
@@ -176,7 +176,7 @@ function viewHome() {
       el("div", { class: "hero-panel insight-panel" },
         el("div", { class: "snapshot-header" },
           el("div", {}, el("p", { class: "eyebrow", text: "Today" }), el("h2", { text: "Decision snapshot" })),
-          el("span", { class: "status-pill", text: "Private by default" })
+          el("span", { class: state.persisted ? "status-pill" : "status-pill warning", text: state.persisted ? "Private by default" : "Session only" })
         ),
         el("dl", { class: "metric-grid hero-metrics" },
           metric("Lessons", `${readCount}/${ARTICLES.length}`),
@@ -398,13 +398,22 @@ function viewCalculator(slug) {
       el("h1", { text: calc.name }),
       el("p", { class: "lead", text: calc.blurb })
     ),
+    slug === "roth-traditional-lab" ? rothLabPrimer() : null,
     el("div", { class: "tool-layout" }, form, results),
     disclosure()
   );
 }
 
+function rothLabPrimer() {
+  return el("section", { class: "lab-primer", "aria-label": "Roth vs Traditional comparison framing" },
+    el("div", { class: "lab-step" }, el("span", { text: "01" }), el("strong", { text: "Choose a comparison frame" }), el("p", { text: "Same pre-tax budget is the cleanest tax-timing comparison; same IRA deposit answers a different question." })),
+    el("div", { class: "lab-step" }, el("span", { text: "02" }), el("strong", { text: "Check eligibility notes" }), el("p", { text: "Phaseout warnings explain when Roth contribution or traditional deduction limits may matter." })),
+    el("div", { class: "lab-step" }, el("span", { text: "03" }), el("strong", { text: "Read the assumption trail" }), el("p", { text: "Every result states tax rates, time horizon, limit guard, and what the model excludes." }))
+  );
+}
+
 function renderOutcome(host, outcome) {
-  host.replaceChildren(el("section", { class: "result-card" },
+  host.replaceChildren(el("section", { class: outcome.comparison ? "result-card decision-result" : "result-card" },
     el("p", { class: "eyebrow", text: outcome.headline.label }),
     el("h2", { text: outcome.headline.value }),
     outcome.comparison ? comparisonBars(outcome.comparison) : null,
@@ -597,7 +606,6 @@ async function init() {
   state.persisted = loaded.persisted;
   applyPreferences();
   bindShell();
-  if (!state.persisted) showNotice("This browser is not allowing local saves. Export a backup from Progress to keep work beyond this session.");
   renderRoute();
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
