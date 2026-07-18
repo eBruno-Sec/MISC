@@ -105,7 +105,8 @@ const dom = {};
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
- 'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n'
+ 'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
+ 'minimap','menu-map','worldmap','map-title','btn-map-close'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -995,12 +996,14 @@ function bindInput(){
         else lastTap[act] = now;
       }
       else if (act==='pause') pause();
+      else if (act==='map') openMap();
       else if (act==='inventory') { pause(); openInventory(); }
       else {
         const slot = INPUT.slotIndex(act);
         if (slot >= 0) selectHotbar(slot);
       }
     } else if (act==='pause' && G.phase==='paused') resume();
+    else if ((act==='map'||act==='pause') && G.phase==='map') closeMap();
     else if (G.phase==='inventory'){
       const slot = INPUT.slotIndex(act);
       if (slot >= 0 && assignPick) assignToSlot(slot);
@@ -1617,6 +1620,93 @@ function triggerReaction(e, rx){
 }
 /* tryReaction: called from damageEnemy after the base hit lands. */
 function tryReaction(e){ reactionCore(e); }
+/* ------------------------------------------------- exploration (Phase H) */
+const FOG_CELL = 14;
+const explored = new Set();
+const POI_STYLE = {
+  lake:['#41b6c4','~'], camp:['#ef5f6b','▲'], boss:['#b48bf0','☠'], npc:['#f5c168','✦'],
+  ward:['#7bd3c6','◆'], barrow:['#8a6a45','▼'], cavern:['#8fe0e6','◈'],
+};
+function markExplored(){
+  if (!player) return;
+  const cx = Math.round(player.position.x/FOG_CELL), cz = Math.round(player.position.z/FOG_CELL);
+  for (let dx=-1;dx<=1;dx++) for (let dz=-1;dz<=1;dz++) explored.add((cx+dx)+','+(cz+dz));
+}
+function isExplored(x,z){ return explored.has(Math.round(x/FOG_CELL)+','+Math.round(z/FOG_CELL)); }
+function drawMinimap(){
+  const cv = dom.minimap; if (!cv || G.phase!=='playing') return;
+  const ctx = cv.getContext('2d'), W=cv.width, H=cv.height, cxp=W/2, cyp=H/2;
+  const RANGE = 62, scale = (W/2)/RANGE;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = G.underground ? '#0c0a10' : '#12331f'; ctx.fillRect(0,0,W,H);
+  const px = player.position.x, pz = player.position.z;
+  // POIs
+  for (const p of POIS){
+    const dx=(p.x-px)*scale, dz=(p.z-pz)*scale;
+    if (Math.hypot(dx,dz) > W/2-4) continue;
+    if (!isExplored(p.x,p.z)) continue;
+    const st = POI_STYLE[p.kind]||['#cccccc','•'];
+    ctx.fillStyle = st[0]; ctx.font='9px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(st[1], cxp+dx, cyp+dz);
+  }
+  // enemies
+  ctx.fillStyle = '#ef5f6b';
+  for (const e of enemies){ if(!e.alive)continue;
+    const dx=(e.mesh.position.x-px)*scale, dz=(e.mesh.position.z-pz)*scale;
+    if (Math.hypot(dx,dz) > W/2-3) continue;
+    ctx.beginPath(); ctx.arc(cxp+dx, cyp+dz, e.boss?3:1.8, 0, 7); ctx.fill();
+  }
+  // forges
+  ctx.fillStyle = '#f0713b';
+  for (const f of forges){ const dx=(f.x-px)*scale, dz=(f.z-pz)*scale; if(Math.hypot(dx,dz)<W/2-3){ ctx.fillRect(cxp+dx-1.5,cyp+dz-1.5,3,3); } }
+  // player arrow
+  ctx.save(); ctx.translate(cxp,cyp); ctx.rotate(-player.rotation.y);
+  ctx.fillStyle = '#eef3ff'; ctx.beginPath(); ctx.moveTo(0,-5); ctx.lineTo(3.5,4); ctx.lineTo(-3.5,4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.strokeRect(0.5,0.5,W-1,H-1);
+}
+function drawWorldMap(){
+  const cv = dom.worldmap; if (!cv) return;
+  const ctx = cv.getContext('2d'), W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0f18'; ctx.fillRect(0,0,W,H);
+  // map covers the current region
+  const under = G.underground;
+  const cxw = under?CAVERN.x:0, czw = under?CAVERN.z:0, span = under?130:200;
+  const toX = (x)=> (x-cxw)/span*0.5*W + W/2;
+  const toY = (z)=> (z-czw)/span*0.5*H + H/2;
+  // explored fog: draw revealed cells
+  ctx.fillStyle = under ? '#1a1622' : '#1f4a2c';
+  for (const key of explored){
+    const [gx,gz] = key.split(',').map(Number);
+    const wx = gx*FOG_CELL, wz = gz*FOG_CELL;
+    if (Math.abs(wx-cxw)>span || Math.abs(wz-czw)>span) continue;
+    const s = FOG_CELL/span*0.5*W;
+    ctx.fillRect(toX(wx)-s/2, toY(wz)-s/2, s+1, s+1);
+  }
+  // POIs (only explored)
+  for (const p of POIS){
+    if (!isExplored(p.x,p.z)) continue;
+    if (Math.abs(p.x-cxw)>span || Math.abs(p.z-czw)>span) continue;
+    const st = POI_STYLE[p.kind]||['#ccc','•'];
+    ctx.fillStyle=st[0]; ctx.font='16px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(st[1], toX(p.x), toY(p.z));
+    ctx.fillStyle='rgba(238,243,255,.7)'; ctx.font='9px sans-serif';
+    ctx.fillText(p.name, toX(p.x), toY(p.z)+12);
+  }
+  // player
+  ctx.save(); ctx.translate(toX(player.position.x), toY(player.position.z)); ctx.rotate(-player.rotation.y);
+  ctx.fillStyle='#f5c168'; ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(5,7); ctx.lineTo(-5,7); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.strokeRect(0.5,0.5,W-1,H-1);
+}
+function openMap(){
+  if (G.phase!=='playing') return;
+  G.phase='map'; document.exitPointerLock?.();
+  dom['map-title'].textContent = G.underground ? 'The Deep' : 'Willowmere Vale';
+  show(dom['menu-map']); drawWorldMap();
+}
+function closeMap(){ if (G.phase!=='map') return; hide(dom['menu-map']); G.phase='playing'; }
+
 function updateCombo(){
   if (!dom.combo) return;
   if (G.combo>=2){ dom['combo-n'].textContent = G.combo+'×'; show(dom.combo);
@@ -3024,7 +3114,7 @@ function clearWorld(){
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
   mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
   harvestables.length=0; placed.length=0; placedMap.clear(); POIS.length=0; forges.length=0;
-  cavernBuilt=false; pitCount=0; dragonRef=null; dragonHome=null; G.underground=false;
+  cavernBuilt=false; pitCount=0; dragonRef=null; dragonHome=null; G.underground=false; explored.clear();
   for (const d of drops) scene?.remove(d.mesh); drops.length=0;
   for (const f of floaters) f.el.remove(); floaters.length=0;
   setAmbiance(false);
@@ -3045,7 +3135,7 @@ function buildFreshWorldFor(next){
 }
 
 function hideAllMenus(){
-  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom.loading].forEach(hide);
+  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom['menu-map'],dom['menu-inv'],dom.loading].forEach(hide);
 }
 
 /* first-time (new game) world build after class confirm */
@@ -3074,6 +3164,7 @@ function bindButtons(){
     renderInv();
   };
   if (dom['craft-search']) dom['craft-search'].oninput = ()=> renderCrafting();
+  if (dom['btn-map-close']) dom['btn-map-close'].onclick = ()=> closeMap();
   buildHotbarUI();
   dom['btn-save'].onclick = ()=> downloadSave();
   dom['btn-quit'].onclick = ()=> { hide(dom['menu-pause']); goTitle(); };
@@ -3098,6 +3189,7 @@ function ensureWorld(){ if(!worldBuilt){ startFreshWorld(); worldBuilt=true; } }
 
 /* ================================================================= MAIN LOOP */
 let autosaveT = 0;
+let mmT = 0;        // minimap redraw throttle
 let hitstop = 0;    // brief freeze-frame on landed hits (impact feel)
 function loop(){
   requestAnimationFrame(loop);
@@ -3115,6 +3207,8 @@ function loop(){
     updateHarvest(dt);
     updateTraps(dt);
     tickCombo(dt);
+    markExplored();
+    mmT += dt; if (mmT>0.12){ mmT=0; drawMinimap(); }
     updateCamera(dt);
     // autosave every 12s
     autosaveT += dt; if (autosaveT>12){ autosaveT=0; if(G.klass) autosave(); }
@@ -3279,6 +3373,10 @@ function installDevHooks(){
     jumpsUsed: ()=> jumpsUsed, queueJump: ()=> queueJump(),
     dash: (dx,dz)=> tryDash(new THREE.Vector3(dx,0,dz)),
     playerY2: ()=> +player.position.y.toFixed(2),
+    // Phase H
+    openMap: ()=> openMap(), closeMap: ()=> closeMap(),
+    exploredCount: ()=> explored.size,
+    poiCount: ()=> POIS.length,
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -3287,7 +3385,7 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
-          updateDrops(dt); updateHarvest(dt); updateTraps(dt); tickCombo(dt); updateCamera(dt);
+          updateDrops(dt); updateHarvest(dt); updateTraps(dt); tickCombo(dt); markExplored(); updateCamera(dt);
         }
         updateParticles(dt); updateFloaters(dt);
       }

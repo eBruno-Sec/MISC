@@ -50,6 +50,7 @@
     <div id="net-state" class="net-state" title="Local session — single player">
       <span class="net-dot" aria-hidden="true"></span><span class="net-label">Local</span>
     </div>
+    <canvas id="minimap" class="minimap" width="150" height="150" title="Minimap — press M for the world map"></canvas>
   </div>
 
   <!-- bottom-center: unified hotbar (weapons / elements / consumables, keys 1–0) -->
@@ -180,6 +181,14 @@
     <button class="btn ghost" id="btn-quit">Return to Title</button>
   </div>
   <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
+</div>
+
+<!-- World map -->
+<div id="menu-map" class="overlay center menu hidden">
+  <h2 class="menu-h" id="map-title">Willowmere Vale</h2>
+  <canvas id="worldmap" width="520" height="520" class="worldmap"></canvas>
+  <p class="menu-note">Fog lifts as you explore. Press <kbd>M</kbd> or Esc to close.</p>
+  <button class="btn primary" id="btn-map-close">Close</button>
 </div>
 
 <!-- Inventory & Gear -->
