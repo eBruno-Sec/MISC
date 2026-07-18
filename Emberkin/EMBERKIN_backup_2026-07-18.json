@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 3,
+  "product": "0.3.0-slice",
+  "savedAt": "2026-07-18T04:07:31.458Z",
+  "id": "local-cael",
+  "payload": {
+    "sibling": "cael",
+    "klass": "bow",
+    "hp": 100,
+    "maxHp": 100,
+    "tokens": 39,
+    "weaponLevel": 6,
+    "elements": {
+      "loam": true,
+      "tide": true,
+      "cinder": true,
+      "arc": true,
+      "rime": true
+    },
+    "activeElement": "loam",
+    "glideUnlocked": true,
+    "stage": 5,
+    "flags": {
+      "fished": true,
+      "firstKill": true,
+      "transformedOnce": true,
+      "campPassed": false,
+      "trialPassed": true,
+      "iceMelted": false,
+      "resistHinted": false
+    },
+    "owned": [
+      "bw2"
+    ],
+    "equipped": "bw2",
+    "chests": {
+      "chest-isle": true,
+      "chest-loam": true
+    },
+    "mechs": {
+      "loam": false,
+      "tide": false,
+      "arc": false,
+      "rime": false
+    },
+    "bossDefeated": false,
+    "bag": [
+      {
+        "id": "emberjam",
+        "n": 2
+      }
+    ],
+    "hotbar": [
+      {
+        "kind": "element",
+        "id": "elem_loam"
+      },
+      {
+        "kind": "element",
+        "id": "elem_tide"
+      },
+      {
+        "kind": "element",
+        "id": "elem_cinder"
+      },
+      {
+        "kind": "element",
+        "id": "elem_arc"
+      },
+      {
+        "kind": "element",
+        "id": "elem_rime"
+      },
+      null,
+      null,
+      null,
+      null,
+      {
+        "kind": "item",
+        "id": "emberjam"
+      }
+    ],
+    "pos": {
+      "x": -63.64658504896392,
+      "z": -72.1268821120274
+    }
+  }
+}

@@ -97,7 +97,8 @@ const dom = {};
  'btn-load-pause','btn-quit','btn-settings-back',
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
- 'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort'
+ 'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
+ 'elem-hud','elem-hud-sig','elem-hud-name'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -949,7 +950,12 @@ function bindInput(){
     if (k===' ' || k==='tab') e.preventDefault();
     const act = INPUT.actionFor(k);
     if (G.phase==='playing'){
-      if (act==='interact') tryInteract();
+      if (act==='interact'){
+        // E is context-sensitive: interact when a prompt is showing,
+        // otherwise cycle elements leftward (Q cycles rightward)
+        if (!dom.prompt.classList.contains('hidden')) tryInteract();
+        else cycleElement(-1);
+      }
       else if (act==='mimic') tryMimic();
       else if (act==='cycle_element') cycleElement(1);
       else if (act==='attack') doAttack();
@@ -1210,7 +1216,6 @@ function unlockElement(elem, ws){
   ws.sig.material.emissiveIntensity = 1;
   ws.glow.intensity = 1.6;
   sfx.attune();
-  hotbarAutoAdd({ kind:'element', id:'elem_'+elem });
   spawnBurst(ws.pos.clone().setY(3), ELEMENTS[elem].color, 34);
   setActiveElement(elem);
   refreshElementWheel();
@@ -1224,8 +1229,8 @@ function unlockElement(elem, ws){
 }
 function setActiveElement(elem){
   G.activeElement = elem;
-  refreshElementWheel();
   tintWeapon(elem);
+  updateHUD();          // syncs the element indicator, hotbar highlights, and weapon chip
 }
 function tintWeapon(elem){
   const wp = player?.userData?.weapon; if(!wp) return;
@@ -1237,13 +1242,6 @@ function cycleElement(dir){
   if (avail.length<=1){ toast('No elements attuned yet.', 'info', 1600); return; }
   let i = avail.indexOf(G.activeElement); i = (i+dir+avail.length)%avail.length;
   setActiveElement(avail[i]);
-}
-function pickElementByIndex(n){
-  const order = ['loam','tide','cinder','arc','rime'];
-  const elem = order[n-1];
-  if (!elem) return;
-  if (!G.elements[elem]){ toast(`${ELEMENTS[elem].name} not attuned yet.`, 'info', 1600); return; }
-  setActiveElement(elem);
 }
 /* ---------------------------------------------- bag (stackable inventory) */
 function addItem(id, n=1){
@@ -1284,11 +1282,11 @@ function useItem(id){
   } else toast(`${d.name} can't be used yet.`, 'info', 1600);
 }
 
-/* hotbar: filled slots act (weapon/element/consumable); empty slots 1–5 keep
-   the legacy element binding as a fallback */
+/* hotbar: filled slots act (weapon/element/consumable). Elements are normally
+   cycled with Q/E, but saved element entries remain usable. */
 function selectHotbar(i){
   const entry = G.hotbar[i];
-  if (!entry){ if (i < 5) pickElementByIndex(i+1); return; }
+  if (!entry) return;
   if (entry.kind==='element'){
     const d = itemDef(entry.id);
     if (d && G.elements[d.elem]) setActiveElement(d.elem);
@@ -1334,9 +1332,12 @@ function refreshHotbarUI(){
   if (dom['inv-hotbar'] && G.phase==='inventory')
     [...dom['inv-hotbar'].children].forEach((b,i)=> slotVisual(b, G.hotbar[i], i));
 }
+let dragFromSlot = null;      // set while dragging an entry from one slot to another
 function assignToSlot(i){
   if (!assignPick) return false;
   G.hotbar[i] = assignPick; assignPick = null;
+  if (dragFromSlot!=null && dragFromSlot!==i) G.hotbar[dragFromSlot] = null;   // moved, not copied
+  dragFromSlot = null;
   sfx.ui(); renderInv(); refreshHotbarUI();
   toast('Assigned.', 'good', 1200);
   return true;
@@ -1355,6 +1356,14 @@ function buildHotbarUI(){
           G.hotbar[i]=null; renderInv(); refreshHotbarUI();   // click a filled slot to clear it
         }
       };
+      b.draggable = true;
+      b.addEventListener('dragstart', ()=>{
+        if (G.hotbar[i]){ assignPick = G.hotbar[i]; dragFromSlot = i; refreshHotbarUI(); }
+      });
+      b.addEventListener('dragend', ()=>{
+        // drop already handled placement; this only clears an abandoned drag
+        if (dragFromSlot!=null){ dragFromSlot = null; assignPick = null; refreshHotbarUI(); }
+      });
       b.addEventListener('dragover', e=>{ if (assignPick) e.preventDefault(); });
       b.addEventListener('drop', e=>{ e.preventDefault(); assignToSlot(i); });
       holder.appendChild(b);
@@ -1994,6 +2003,10 @@ function updateHUD(){
   dom['token-count'].textContent = G.tokens;
   dom['weapon-name'].textContent = G.klass ? equippedWeapon().name : '—';
   dom['weapon-lvl'].textContent = 'Lv '+G.weaponLevel;
+  const ed = ELEMENTS[G.activeElement];
+  dom['elem-hud-sig'].textContent = ed ? ed.sigil : '○';
+  dom['elem-hud-name'].textContent = ed ? ed.name : 'None';
+  dom['elem-hud-sig'].style.color = ed ? elemColorCss(G.activeElement) : '';
   refreshHotbarUI();
   // mimic bar
   if (G.mimic.state==='Transformed'){
@@ -2025,7 +2038,7 @@ function closeInventory(){
 }
 function weaponPower(w){ return Math.round(CLASSES[G.klass].dmg * TIER_MULT[w.tier]) + (G.weaponLevel-1)*8; }
 function markPicked(el){
-  document.querySelectorAll('.bag-item.picked,.elem-chip.picked').forEach(x=>x.classList.remove('picked'));
+  document.querySelectorAll('.bag-item.picked,.elem-chip.picked,.inv-row.picked').forEach(x=>x.classList.remove('picked'));
   if (el) el.classList.add('picked');
   refreshHotbarUI();
 }
@@ -2053,14 +2066,12 @@ function renderInv(){
   const er = dom['elem-row'];
   er.innerHTML = '';
   for (const [elem, def] of Object.entries(ELEMENTS)){
-    if (elem==='none' || !G.elements[elem]) continue;
+    if (!G.elements[elem]) continue;
     const c = document.createElement('button');
-    c.type='button'; c.className='elem-chip';
+    c.type='button'; c.className='elem-chip'+(G.activeElement===elem?' on':'');
     c.innerHTML = `<span style="color:${elemColorCss(elem)}">${def.sigil}</span> ${def.name}`;
-    c.onclick = ()=>{
-      assignPick = { kind:'element', id:'elem_'+elem }; markPicked(c);
-      toast(`Assign ${def.name}: click a hotbar slot (or press 1–0).`, 'info', 2600);
-    };
+    c.title = `Switch to ${def.name} (or cycle with Q / E in play)`;
+    c.onclick = ()=>{ setActiveElement(elem); renderInv(); };
     er.appendChild(c);
   }
   if (!er.children.length) er.innerHTML = '<span class="bag-empty">Touch a Wardstone to attune an element.</span>';
@@ -2077,6 +2088,13 @@ function renderInv(){
     const row = document.createElement('div');
     row.className = 'inv-row'+(isEq?' equipped':'');
     row.setAttribute('role','listitem');
+    row.draggable = true;
+    const pickW = ()=>{
+      assignPick = { kind:'weapon', id }; markPicked(row);
+      toast(`Assign ${w.name}: drop it on a slot (or press 1–0).`, 'info', 2600);
+    };
+    row.addEventListener('dragstart', pickW);
+    row.addEventListener('click', ev=>{ if (ev.target.tagName!=='BUTTON') pickW(); });
     row.innerHTML = `
       <div class="inv-info">
         <div class="inv-name">${w.name} <span class="inv-tier">Tier ${w.tier}</span>${isEq?' <span class="inv-badge">Equipped</span>':''}</div>
@@ -2220,13 +2238,9 @@ function hydrate(p){
       if ((h.kind==='element') === (t==='element')) next.hotbar[i] = {kind:h.kind, id:h.id};
     }
   });
-  // pre-hotbar saves (v1/v2): seed the bar from what the save already earned
-  if (next.hotbar.every(s=>!s)){
-    next.hotbar[0] = { kind:'weapon', id:equipped };
-    let hi = 1;
-    for (const el of ['loam','tide','cinder','arc','rime'])
-      if (next.elements[el] && hi < 10) next.hotbar[hi++] = { kind:'element', id:'elem_'+el };
-  }
+  // pre-hotbar saves (v1/v2): seed the bar with the equipped weapon
+  // (elements are cycled with Q/E, not slotted)
+  if (next.hotbar.every(s=>!s)) next.hotbar[0] = { kind:'weapon', id:equipped };
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,

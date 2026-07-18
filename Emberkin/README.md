@@ -100,7 +100,8 @@ Playable, end to end:
 | Glide | **Space** in the air (after the Windrider's Mark) |
 | Attack | **Left click** or **J** |
 | Interact / fish / touch Wardstone | **E** |
-| Cycle element | **Q** / **1–5** |
+| Cycle element | **Q** (next) / **E** (previous — when no interaction prompt is showing) |
+| Hotbar (weapons, tools, consumables) | **1–0**, assignable by drag &amp; drop in the inventory |
 | Activate Mimic Orb | **F** (when an orb is held) |
 | Eject from Mimic form | **F** |
 | Camera | **Mouse** (click the canvas to capture it and look) |

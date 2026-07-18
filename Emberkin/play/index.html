@@ -58,8 +58,12 @@
   <!-- bottom-center: contextual prompt -->
   <div id="prompt" class="prompt hidden"><kbd id="prompt-key">E</kbd> <span id="prompt-text">Interact</span></div>
 
-  <!-- bottom-right: mimic orb + weapon -->
+  <!-- bottom-right: mimic orb + element + weapon -->
   <div class="hud-corner-br">
+    <div id="elem-hud" class="elem-hud" title="Active element — cycle with Q / E">
+      <span id="elem-hud-sig">○</span><span id="elem-hud-name">None</span>
+      <span class="elem-hud-keys"><kbd>Q</kbd><kbd>E</kbd></span>
+    </div>
     <div id="orb-status" class="orb-status hidden">
       <span class="orb-glow" aria-hidden="true">◈</span>
       <div class="orb-lines"><span class="orb-title">Mimic Orb held</span><span class="orb-sub"><kbd>F</kbd> Mirrorstep</span></div>
@@ -175,7 +179,7 @@
 <!-- Inventory & Gear -->
 <div id="menu-inv" class="overlay center menu hidden">
   <h2 class="menu-h">Inventory &amp; Gear</h2>
-  <p class="menu-p" id="inv-hint">Click a bag item (or drag it onto a slot below) to put it on your hotbar. Number keys 1–0 use the slots in play.</p>
+  <p class="menu-p" id="inv-hint">Drag a weapon or bag item onto a hotbar slot (click works too, then click a slot or press 1–0). Drag between slots to rearrange. Elements aren't slotted — cycle them with <kbd>Q</kbd> and <kbd>E</kbd>.</p>
   <div id="inv-hotbar" class="inv-hotbar" role="toolbar" aria-label="Hotbar slots"></div>
   <div class="inv-section-h">Bag <button class="btn small" id="btn-sort">Sort</button></div>
   <div id="bag-grid" class="bag-grid"></div>
