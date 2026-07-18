@@ -105,7 +105,7 @@ const dom = {};
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
- 'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search'
+ 'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -986,7 +986,14 @@ function bindInput(){
       }
       else if (act==='mimic') tryMimic();
       else if (act==='cycle_element') cycleElement(1);
-      else if (act==='attack') doAttack();
+      else if (act==='attack'){ chargeT=0; charged=false; doAttack(); }
+      else if (act==='jump'){ if (!e.repeat) queueJump(); }
+      else if (act && act.startsWith('move_') && !e.repeat){
+        // double-tap a direction to dash
+        const now = performance.now();
+        if (lastTap[act] && now-lastTap[act] < 280){ tryDash(dirForAction(act)); lastTap[act]=0; }
+        else lastTap[act] = now;
+      }
       else if (act==='pause') pause();
       else if (act==='inventory') { pause(); openInventory(); }
       else {
@@ -1533,7 +1540,10 @@ function damageEnemy(e, dmg){
     }
   }
   if (e.boss && e.weak > 0) mult *= 2;                                 // crystal exposed after the slam
-  // crit (Phase G): a chance for bonus damage
+  // combo: consecutive player hits add a small ramping bonus
+  G.combo++; G.comboT = 2; mult *= 1 + Math.min(G.combo,12)*0.03;
+  updateCombo();
+  // crit: a chance for bonus damage (scales with weapon level)
   let crit = false;
   if (Math.random() < critChance()){ mult *= 1.8; crit = true; }
   e.hitCd = 0.12;
@@ -1555,14 +1565,119 @@ function applyEnemyDamage(e, dmg, col=0xffffff, crit=false){
   if (e.hp<=0) defeatEnemy(e);
 }
 function colCss(c){ return '#'+c.toString(16).padStart(6,'0'); }
-function critChance(){ return 0.10 + G.critBonus; }   // Phase G tunes G.critBonus
-/* tryReaction: filled in Phase G — stamps the active element and triggers a
-   two-element reaction when a different element lands. */
-function tryReaction(e){ if (typeof reactionCore==='function') reactionCore(e); }
+function critChance(){ return 0.10 + (G.weaponLevel-1)*0.02 + (G.critBonus||0); }
+
+/* ------------------------------------------------ elemental reactions (orig.)
+   Hitting a creature stamps your element on it briefly; landing a *different*
+   element triggers a named reaction. Original to Emberkin — not copied. */
+const REACTIONS = {
+  'cinder+tide':  { name:'Steambloom',      col:0xd8f0f5, kind:'aoe',   dmg:26 },
+  'cinder+rime':  { name:'Thermal Shatter', col:0xfff0a0, kind:'heavy', dmg:50 },
+  'arc+tide':     { name:'Galvanize',       col:0xcdb4ff, kind:'chain', dmg:22, status:'shock' },
+  'cinder+loam':  { name:'Emberforge',      col:0xf0a24a, kind:'heavy', dmg:34 },
+  'loam+rime':    { name:'Frostcrack',      col:0x9fe6f5, kind:'aoe',   dmg:24, status:'chill' },
+  'arc+rime':     { name:'Static Frost',    col:0xbfe6ff, kind:'chain', dmg:26, status:'shock' },
+  'loam+tide':    { name:'Bloomsurge',      col:0x9fe0a0, kind:'aoe',   dmg:20 },
+  'arc+loam':     { name:'Groundfault',     col:0xd0c060, kind:'heavy', dmg:30, status:'shock' },
+  'arc+cinder':   { name:'Firestorm',       col:0xff9a5a, kind:'aoe',   dmg:28, status:'burn' },
+  'rime+tide':    { name:'Deepfreeze',      col:0x8fd7f0, kind:'heavy', dmg:28, status:'chill' },
+};
+function pairKey(a,b){ return [a,b].sort().join('+'); }
+function reactionCore(e){
+  const el = G.activeElement;
+  if (el==='none') return;
+  const prev = (e.aura && e.aura.t>0) ? e.aura.elem : null;
+  if (prev && prev!==el){
+    const rx = REACTIONS[pairKey(prev, el)];
+    e.aura = null;
+    if (rx) triggerReaction(e, rx);
+  } else {
+    e.aura = { elem:el, t:4 };
+  }
+}
+function triggerReaction(e, rx){
+  spawnFloater(rx.name, e.mesh.position.clone().add(new THREE.Vector3(0,2.2,0)), colCss(rx.col));
+  spawnBurst(e.mesh.position.clone().setY(1), rx.col, 22, 1.3, true);
+  if (!settings.motion) shake(0.22);
+  sfx.attune();
+  applyEnemyDamage(e, rx.dmg, rx.col);
+  if (rx.status) applyStatus(e, rx.status, 3);
+  if (rx.kind==='aoe' || rx.kind==='chain'){
+    const rad = rx.kind==='chain' ? 7 : 5;
+    for (const o of enemies){
+      if (o===e || !o.alive) continue;
+      if (o.mesh.position.distanceTo(e.mesh.position) < rad){
+        applyEnemyDamage(o, rx.dmg*0.6, rx.col);
+        if (rx.status) applyStatus(o, rx.status, 2.4);
+      }
+    }
+  }
+  if (!G.flags.firstReaction){ G.flags.firstReaction=true;
+    tainerSay(`A reaction! Hit with one element, then a different one — ${rx.name}! Mix elements for big bonus damage.`, 5600); }
+}
+/* tryReaction: called from damageEnemy after the base hit lands. */
+function tryReaction(e){ reactionCore(e); }
+function updateCombo(){
+  if (!dom.combo) return;
+  if (G.combo>=2){ dom['combo-n'].textContent = G.combo+'×'; show(dom.combo);
+    if (!settings.motion){ dom.combo.classList.remove('bump'); void dom.combo.offsetWidth; dom.combo.classList.add('bump'); } }
+  else hide(dom.combo);
+}
+function tickCombo(dt){
+  if (G.comboT>0){ G.comboT-=dt; if (G.comboT<=0 && G.combo>0){ G.combo=0; updateCombo(); } }
+}
+
+/* ---------------------------------------------------- combat moves (Phase G) */
+let jumpsUsed=0, jumpQueued=false, dashCd=0, dashT=0, dashDir=new THREE.Vector3(), chargeT=0, charged=false;
+const lastTap = {};
+function dirForAction(act){
+  const f = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const rt = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  if (act==='move_fwd') return f;
+  if (act==='move_back') return f.clone().negate();
+  if (act==='move_left') return rt.clone().negate();
+  return rt;   // move_right
+}
+function queueJump(){
+  if (G.phase!=='playing' || G.mimic.state==='Transformed') return;
+  if (grounded){ pv.y=9.2; grounded=false; jumpsUsed=1; }
+  else if (jumpsUsed<2 && !glideActive){ pv.y=8.6; jumpsUsed=2;
+    spawnBurst(player.position.clone().setY(player.position.y+0.2), 0xcfe6ff, 12, 0.8); sfx.swing(); }
+}
+function tryDash(dir){
+  if (dashCd>0 || G.phase!=='playing') return;
+  dashCd = 0.9; dashT = 0.18; dashDir.copy(dir).normalize();
+  spawnBurst(player.position.clone().setY(player.position.y+0.6), 0xffffff, 10, 0.7);
+  sfx.swing();
+}
+function doChargedAttack(){
+  const c = CLASSES[G.klass];
+  const inMimic = G.mimic.state==='Transformed';
+  const dmg = (inMimic?22:Math.round(c.dmg*TIER_MULT[equippedWeapon().tier])+(G.weaponLevel-1)*8) * 2.3;
+  atkAnim = 1; sfx.hit(); if(!settings.motion) shake(0.28);
+  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)).add(fwd.clone().multiplyScalar(1.5)),
+    G.activeElement==='none'?0xffe6a0:ELEMENTS[G.activeElement].color, 26, 1.4, true);
+  if (!inMimic && c.ranged){ fireProjectile(dmg); }
+  else {
+    let struck=false;
+    for (const e of enemies){ if(!e.alive)continue;
+      const to=new THREE.Vector3().subVectors(e.mesh.position,player.position).setY(0); const d=to.length();
+      if (d>c.range+1.4+e.r) continue; to.normalize();
+      if (fwd.dot(to) < Math.cos((c.arc||1)*1.5)) continue;
+      damageEnemy(e, dmg);
+      // knockback
+      e.mesh.position.x += to.x*1.4; e.mesh.position.z += to.z*1.4; struck=true;
+    }
+    if (!struck && !harvestHit(player.position, fwd, G.activeElement)) tryBreakOrDig(fwd);
+  }
+  toast('Charged strike!', 'good', 900);
+}
 
 /* ---------------------------------------- status effects (traps + reactions) */
 function applyStatus(e, type, dur){ e.status = e.status || {}; e.status[type] = Math.max(e.status[type]||0, dur); }
 function updateStatus(e, dt){
+  if (e.aura){ e.aura.t -= dt; if (e.aura.t<=0) e.aura=null; }
   if (!e.status) return 1;
   let slow = 1;
   if (e.status.chill>0){ e.status.chill-=dt; slow = 0.42; }
@@ -1580,6 +1695,9 @@ function defeatEnemy(e){
   if (e.boss){ bossDefeatedFlow(e); return; }
   const reward = (e.kind==='boulder'?12:5) + (e.elem?4:0);
   addTokens(reward);
+  // heal on kill — a small reward that keeps aggressive play alive
+  if (G.hp < G.maxHp){ G.hp = Math.min(G.maxHp, G.hp + 5);
+    spawnFloater('+5', player.position.clone().add(new THREE.Vector3(0,2,0)), '#8fe6a0'); updateHUD(); }
   if (e.dropsOrb){ dropOrb(e.mesh.position.clone()); }
   if (!G.flags.firstKill){
     G.flags.firstKill=true;
@@ -2288,12 +2406,21 @@ function updatePlayer(dt){
   if (sprint && moving) G.stamina = Math.max(0, G.stamina - 26*dt);
   else G.stamina = Math.min(G.maxStam, G.stamina + 16*dt);
 
-  // jump / glide
+  // dash: a short burst of speed
+  dashCd = Math.max(0, dashCd-dt);
+  if (dashT>0){ dashT-=dt; pv.x = dashDir.x*22; pv.z = dashDir.z*22; }
+
+  // jump / glide (double-jump handled via queueJump on keydown)
   const windUp = windLift(body.position);
-  if (keys[' ']){
-    if (grounded){ pv.y = 9.2; grounded=false; }
-    else if (G.glideUnlocked && pv.y < 1.5){ glideActive=true; }
-  } else glideActive=false;
+  if (grounded) jumpsUsed = 0;
+  if (keys[' '] && !grounded && G.glideUnlocked && pv.y < 1.5){ glideActive=true; }
+  else if (!keys[' ']) glideActive=false;
+
+  // charged attack: hold the attack button to unleash a heavy strike
+  if ((attackHeld || keys['j']) && dashT<=0){
+    chargeT += dt;
+    if (chargeT>0.6 && !charged){ charged=true; doChargedAttack(); }
+  } else { chargeT=0; charged=false; }
 
   // gravity
   if (glideActive && !grounded){
@@ -2987,6 +3114,7 @@ function loop(){
     updateDrops(dt);
     updateHarvest(dt);
     updateTraps(dt);
+    tickCombo(dt);
     updateCamera(dt);
     // autosave every 12s
     autosaveT += dt; if (autosaveT>12){ autosaveT=0; if(G.klass) autosave(); }
@@ -3142,6 +3270,15 @@ function installDevHooks(){
     blockHp: (gx,gz)=>{ const e=placed.find(p=>p.gx===gx&&p.gz===gz); return e?Math.round(e.hp):null; },
     hurtNearest: (n)=>{ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive)continue; const d=player.position.distanceTo(e.mesh.position); if(d<bd){bd=d;best=e;} } if(best){ damageEnemy(best,n); return true;} return false; },
     enemyStatusFor: (x,z)=>{ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive)continue; const d=Math.hypot(e.mesh.position.x-x,e.mesh.position.z-z); if(d<bd){bd=d;best=e;} } return best?{...(best.status||{}),hp:Math.round(best.hp),d:+bd.toFixed(1)}:null; },
+    // Phase G
+    setElement: (el)=> setActiveElement(el),
+    reactOn: (x,z)=>{ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive)continue; const d=Math.hypot(e.mesh.position.x-x,e.mesh.position.z-z); if(d<bd){bd=d;best=e;} }
+      if(!best) return null; const before=Math.round(best.hp); damageEnemy(best, 1); return { hpBefore:before, hpAfter:Math.round(best.hp), aura:best.aura?best.aura.elem:null }; },
+    combo: ()=> G.combo,
+    charged: ()=> doChargedAttack(),
+    jumpsUsed: ()=> jumpsUsed, queueJump: ()=> queueJump(),
+    dash: (dx,dz)=> tryDash(new THREE.Vector3(dx,0,dz)),
+    playerY2: ()=> +player.position.y.toFixed(2),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -3150,7 +3287,7 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
-          updateDrops(dt); updateHarvest(dt); updateTraps(dt); updateCamera(dt);
+          updateDrops(dt); updateHarvest(dt); updateTraps(dt); tickCombo(dt); updateCamera(dt);
         }
         updateParticles(dt); updateFloaters(dt);
       }
