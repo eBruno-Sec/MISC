@@ -1,11 +1,34 @@
 # Emberkin — build status / handoff
 
-**Last updated:** 2026-07-17 ~05:10 PDT
-**Status:** ✅ COMPLETE (Phase 1 slice + Phase 2 expansion + Phase 4 studio), verified in-browser,
-committed & pushed to `eBruno-Sec/MISC`.
+**Last updated:** 2026-07-17 (survival-sandbox expansion underway)
+**Status:** Adventure slice ✅ shipped & verified. Now expanding into a survival sandbox per an
+audited, phased roadmap (below). If you are a scheduled continuation: verify the latest commit
+pushed; only continue the CURRENT in-progress sandbox phase, never rebuild shipped systems.
 
-If you are a scheduled continuation: **the project is finished. Do NOT rebuild it.**
-Only run the light verification checklist at the bottom.
+## Survival-sandbox expansion (approved 2026-07-17)
+
+Approved architecture decisions:
+- **Hybrid terrain overlay** — heightfield stays authoritative; ground tiles voxelize on first
+  dig (1 m³ cells, ~24 m depth cap). Full-voxel rewrite explicitly rejected.
+- **Elements live in the hotbar** — unified 1–0 hotbar (weapons/tools/consumables/elements);
+  Q still cycles elements.
+
+Roadmap: A core framework → B inventory/hotbar UI → C gathering (trees/ores/plants, damage
+numbers) → D dig & place (voxel overlay) → E crafting/forge/smelting → F building + elemental
+traps → G combat depth + original elemental reactions → H exploration (minimap/fog/caves) →
+I dragon endgame at depth → J polish/QoL.
+
+**Phase A (core framework) — code complete, final regression pending:**
+- `play/items.js` — pure item registry (materials/consumables/tools/blocks/element entries),
+  hasOwnProperty-guarded lookups (rejects `__proto__`/`constructor` ids).
+- `play/input.js` — action map; all keys route through it (1–0 are slot1..slot10).
+- game.js: bag API (addItem/countItem/removeItem/useItem w/ stack limits), selectHotbar
+  (weapon/element/consumable entries; empty slots 1–5 fall back to legacy element pick),
+  save SCHEMA_VERSION=3 (bag+hotbar, sanitized; v1/v2 migrate), serialize deep-copies (fixed
+  live-reference aliasing), reticle + ranged aim-dot (`#reticle`, `#aim-dot`).
+- Verified so far: input routing, legacy fallback, stack split at limits, hotbar
+  weapon/element/consumable actions, v3 round-trip, v2+v1 migration. Pending when tooling
+  allows: aliasing + proto-id regression rerun, reticle screenshot, full old-suite regression.
 
 `README.md` holds the full original IP canon (names, elements, villain, regions, classes, tiers).
 

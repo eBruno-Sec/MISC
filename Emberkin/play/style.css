@@ -224,6 +224,14 @@ body[data-theme="day"] .tainer-bubble{background:rgba(255,255,255,.95)}
 /* toast fade */
 .toast{transition:opacity .3s} .toast.out{opacity:0}
 
+/* ============================================================ reticle */
+.reticle{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;pointer-events:none;z-index:11;opacity:.85}
+.reticle span{position:absolute;background:var(--bright);border-radius:2px;box-shadow:0 0 4px rgba(0,0,0,.7)}
+.reticle span:first-child{left:0;right:0;top:50%;height:2px;margin-top:-1px}
+.reticle span:last-child{top:0;bottom:0;left:50%;width:2px;margin-left:-1px}
+body[data-theme="high-contrast"] .reticle span{background:var(--accent)}
+.aim-dot{position:fixed;width:11px;height:11px;border-radius:50%;border:2px solid var(--accent-2);background:rgba(245,193,104,.35);pointer-events:none;z-index:11;transform:translate(-50%,-50%);box-shadow:0 0 6px rgba(0,0,0,.55)}
+
 /* ============================================================ boss bar */
 .boss-bar{display:flex;flex-direction:column;gap:.25rem;width:min(440px,64vw);align-items:center}
 .boss-name{font-family:var(--display);font-weight:800;font-size:.85rem;color:#d9c8f5;text-shadow:0 1px 4px rgba(0,0,0,.6);letter-spacing:.04em}

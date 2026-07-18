@@ -4,10 +4,13 @@
    All proper nouns are original to this project. Family-friendly, accessible.
    ========================================================================== */
 import * as THREE from 'three';
+import { ITEMS, itemDef, isValidItemId, stackLimit } from './items.js';
+import { makeInput } from './input.js';
 
 /* ------------------------------------------------------------------ consts */
-const SCHEMA_VERSION = 2;          // v2 adds weapons/chests/mechanisms/boss; v1 saves migrate
-const PRODUCT_VERSION = '0.2.0-slice';
+const SCHEMA_VERSION = 3;          // v3 adds bag/hotbar; v1/v2 saves migrate forward
+const PRODUCT_VERSION = '0.3.0-slice';
+const INPUT = makeInput();
 const SAVE_KEY = 'emberkin.save.v1';
 const SETTINGS_KEY = 'emberkin.settings.v1';
 
@@ -60,6 +63,8 @@ const G = {
   tokens: 0,
   weaponLevel: 1,
   owned: [], equipped: null,
+  bag: [],                       // stackable items: [{id, n}]
+  hotbar: new Array(10).fill(null),   // slots: null | {kind:'item'|'weapon'|'element', id}
   chests: {},
   mechs: { loam:false, tide:false, arc:false, rime:false },
   bossDefeated: false,
@@ -90,7 +95,8 @@ const dom = {};
  'btn-new','btn-continue','btn-load','btn-settings-title','btn-resume','btn-settings-pause','btn-save',
  'btn-load-pause','btn-quit','btn-settings-back',
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol',
- 'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back'
+ 'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
+ 'reticle','aim-dot'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -938,16 +944,21 @@ function bindInput(){
   addEventListener('keydown', (e)=>{
     const k = e.key.toLowerCase();
     keys[k] = true;
-    if (k===' ') e.preventDefault();
+    if (k===' ' || k==='tab') e.preventDefault();
+    const act = INPUT.actionFor(k);
     if (G.phase==='playing'){
-      if (k==='e') tryInteract();
-      if (k==='f') tryMimic();
-      if (k==='q') cycleElement(1);
-      if (k>='1'&&k<='5') pickElementByIndex(parseInt(k));
-      if (k==='j') doAttack();
-      if (k==='escape') pause();
-    } else if (k==='escape' && G.phase==='paused') resume();
-    else if (k==='escape' && G.phase==='inventory') closeInventory();
+      if (act==='interact') tryInteract();
+      else if (act==='mimic') tryMimic();
+      else if (act==='cycle_element') cycleElement(1);
+      else if (act==='attack') doAttack();
+      else if (act==='pause') pause();
+      else if (act==='inventory') { pause(); openInventory(); }
+      else {
+        const slot = INPUT.slotIndex(act);
+        if (slot >= 0) selectHotbar(slot);
+      }
+    } else if (act==='pause' && G.phase==='paused') resume();
+    else if ((act==='pause' || act==='inventory') && G.phase==='inventory') closeInventory();
   });
   addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
 
@@ -1020,7 +1031,8 @@ function newGame(){
   // full reset — G is a module singleton, so a second New Journey must not inherit old state
   Object.assign(G, {
     sibling:null, klass:null, hp:100, maxHp:100, stamina:100, tokens:0, weaponLevel:1,
-    owned:[], equipped:null, chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
+    owned:[], equipped:null, bag:[], hotbar:new Array(10).fill(null),
+    chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
     bossDefeated:false,
     elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
     glideUnlocked:false, stage:0,
@@ -1220,6 +1232,61 @@ function pickElementByIndex(n){
   if (!G.elements[elem]){ toast(`${ELEMENTS[elem].name} not attuned yet.`, 'info', 1600); return; }
   setActiveElement(elem);
 }
+/* ---------------------------------------------- bag (stackable inventory) */
+function addItem(id, n=1){
+  if (!isValidItemId(id) || n<=0) return 0;
+  const lim = stackLimit(id);
+  let left = n;
+  for (const s of G.bag){
+    if (s.id===id && s.n<lim){ const take=Math.min(left, lim-s.n); s.n+=take; left-=take; if(!left) break; }
+  }
+  while (left>0){
+    if (G.bag.length>=60){ toast('Your bag is full!','bad',2200); break; }
+    const take=Math.min(left,lim); G.bag.push({id, n:take}); left-=take;
+  }
+  const added = n-left;
+  if (added>0) toast(`+${added} ${itemDef(id).name}`, 'good', 1500);
+  return added;
+}
+function countItem(id){ return G.bag.reduce((a,s)=>a+(s.id===id?s.n:0),0); }
+function removeItem(id, n=1){
+  let need=n;
+  for (let i=G.bag.length-1; i>=0 && need>0; i--){
+    const s=G.bag[i]; if (s.id!==id) continue;
+    const take=Math.min(need,s.n); s.n-=take; need-=take; if(!s.n) G.bag.splice(i,1);
+  }
+  return n-need;
+}
+function useItem(id){
+  const d=itemDef(id); if(!d) return;
+  if (d.type==='consumable' && d.heal){
+    if (countItem(id)<1){ toast(`No ${d.name} left.`,'info',1500); return; }
+    if (G.hp>=G.maxHp){ toast('Already at full health.','info',1500); return; }
+    removeItem(id,1);
+    G.hp=Math.min(G.maxHp, G.hp+d.heal);
+    sfx.token();
+    spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)), 0x8fe6a0, 14, 0.8, true);
+    updateHUD();
+    toast(`${d.name}: +${d.heal} health.`, 'good', 1800);
+  } else toast(`${d.name} can't be used yet.`, 'info', 1600);
+}
+
+/* hotbar: filled slots act (weapon/element/consumable); empty slots 1–5 keep
+   the legacy element binding until Phase B populates the bar */
+function selectHotbar(i){
+  const entry = G.hotbar[i];
+  if (!entry){ if (i < 5) pickElementByIndex(i+1); return; }
+  if (entry.kind==='element'){
+    const d = itemDef(entry.id);
+    if (d && G.elements[d.elem]) setActiveElement(d.elem);
+    else toast('Not attuned yet.', 'info', 1400);
+  } else if (entry.kind==='weapon'){
+    if (G.owned.includes(entry.id)){ G.equipped=entry.id; tintWeapon(G.activeElement); updateHUD(); toast(`${findWeapon(entry.id).name} equipped.`,'good',1200); }
+  } else if (entry.kind==='item'){
+    useItem(entry.id);
+  }
+}
+
 function refreshElementWheel(){
   dom['element-wheel'].querySelectorAll('.elem').forEach(btn=>{
     const el = btn.dataset.elem;
@@ -1804,6 +1871,36 @@ function updateCamera(dt){
   camera.lookAt(focus);
 }
 
+/* ------------------------------------------------------------ aim reticle */
+const _aimEnd = new THREE.Vector3();
+function updateAim(){
+  if (G.phase!=='playing'){ hide(dom.reticle); hide(dom['aim-dot']); return; }
+  show(dom.reticle);
+  const c = CLASSES[G.klass];
+  if (!c || !c.ranged || G.mimic.state==='Transformed'){ hide(dom['aim-dot']); return; }
+  // march along the facing line to the first enemy, hillside, or max range —
+  // this is where an arrow or rune bolt will actually land
+  const oy = player.position.y + 1.3;
+  const dx = Math.sin(player.rotation.y), dz = Math.cos(player.rotation.y);
+  let found = false;
+  for (let d=2; d<=40 && !found; d+=0.5){
+    const px = player.position.x + dx*d, pz = player.position.z + dz*d;
+    for (const e of enemies){
+      if (e.alive && Math.hypot(px-e.mesh.position.x, pz-e.mesh.position.z) < e.r+0.4){
+        _aimEnd.set(px, e.mesh.position.y+1, pz); found = true; break;
+      }
+    }
+    if (!found && terrainH(px,pz) > oy){ _aimEnd.set(px, terrainH(px,pz), pz); found = true; }
+    if (!found && d>=40) _aimEnd.set(px, oy, pz);
+  }
+  if (!found) _aimEnd.set(player.position.x+dx*40, oy, player.position.z+dz*40);
+  const v = _aimEnd.project(camera);
+  if (v.z > 1){ hide(dom['aim-dot']); return; }
+  dom['aim-dot'].style.left = ((v.x*0.5+0.5)*innerWidth)+'px';
+  dom['aim-dot'].style.top  = ((-v.y*0.5+0.5)*innerHeight)+'px';
+  show(dom['aim-dot']);
+}
+
 /* ================================================================= HUD SYNC */
 function setObjective(t){ dom['objective-text'].textContent = t; }
 function updateHUD(){
@@ -1911,7 +2008,8 @@ function loadSettings(){
 
 /* ================================================================= SAVE/LOAD */
 function serialize(){
-  return {
+  // deep-copied at the end so the snapshot can never alias live state
+  const raw = {
     schemaVersion: SCHEMA_VERSION, product: PRODUCT_VERSION, savedAt: new Date().toISOString(),
     id: 'local-'+(G.sibling||'x'),
     payload: {
@@ -1920,9 +2018,11 @@ function serialize(){
       glideUnlocked:G.glideUnlocked, stage:G.stage, flags:G.flags,
       owned:G.owned, equipped:G.equipped, chests:G.chests, mechs:G.mechs,
       bossDefeated:G.bossDefeated,
+      bag:G.bag, hotbar:G.hotbar,
       pos:{x:player?.position.x||0, z:player?.position.z||0},
     }
   };
+  return JSON.parse(JSON.stringify(raw));
 }
 function autosave(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(serialize())); }catch(e){} dom['btn-continue'].disabled=false; }
 
@@ -1978,12 +2078,30 @@ function hydrate(p){
   next.chests = {}; if (p.chests && typeof p.chests==='object'){ for (const k of Object.keys(p.chests)){ if (/^chest-[a-z-]{1,24}$/.test(k)) next.chests[k]=!!p.chests[k]; } }
   next.mechs = boolMap(p.mechs, ['loam','tide','arc','rime']);
   next.bossDefeated = !!p.bossDefeated;
+  // v3 fields — older saves get empty defaults
+  next.bag = [];
+  if (Array.isArray(p.bag)) for (const s of p.bag){
+    if (s && isValidItemId(s.id) && next.bag.length < 60){
+      const n = clamp(s.n, 1, 999)|0;
+      if (n > 0) next.bag.push({ id:s.id, n:Math.min(n, stackLimit(s.id)) });
+    }
+  }
+  next.hotbar = new Array(10).fill(null);
+  if (Array.isArray(p.hotbar)) p.hotbar.slice(0,10).forEach((h,i)=>{
+    if (!h || typeof h !== 'object') return;
+    if (h.kind==='weapon' && roster.some(w=>w.id===h.id)) next.hotbar[i] = {kind:'weapon', id:h.id};
+    else if ((h.kind==='item' || h.kind==='element') && isValidItemId(h.id)){
+      const t = itemDef(h.id).type;
+      if ((h.kind==='element') === (t==='element')) next.hotbar[i] = {kind:h.kind, id:h.id};
+    }
+  });
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
     activeElement:next.activeElement, glideUnlocked:next.glideUnlocked, stage:next.stage, flags:next.flags,
     owned:next.owned, equipped:next.equipped, chests:next.chests, mechs:next.mechs,
     bossDefeated:next.bossDefeated,
+    bag:next.bag, hotbar:next.hotbar,
   });
   return next;
 }
@@ -2118,6 +2236,7 @@ function loop(){
     motes.rotation.y += dt*0.008;
     motes.position.y = Math.sin(performance.now()*0.0004)*0.35;
   }
+  updateAim();
   if (renderer) renderer.render(scene, camera);
 }
 function updateProjectiles(dt){
@@ -2211,6 +2330,15 @@ function installDevHooks(){
     facing: ()=> player ? +player.rotation.y.toFixed(3) : null,
     height: (x,z)=> +terrainH(x,z).toFixed(2),
     playerY: ()=> player ? +player.position.y.toFixed(2) : null,
+    // Phase A framework hooks
+    bag: ()=> JSON.parse(JSON.stringify(G.bag)),
+    hotbarState: ()=> JSON.parse(JSON.stringify(G.hotbar)),
+    give: (id,n)=> addItem(id,n),
+    use: (id)=> useItem(id),
+    count: (id)=> countItem(id),
+    setSlot: (i,entry)=>{ G.hotbar[i]=entry; return true; },
+    pressSlot: (i)=> selectHotbar(i),
+    action: (k)=> INPUT.actionFor(k),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -2219,9 +2347,11 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
+          updateCamera(dt);
         }
         updateParticles(dt);
       }
+      updateAim();
       return `stepped ${sec}s (${n} frames)`;
     },
   };
