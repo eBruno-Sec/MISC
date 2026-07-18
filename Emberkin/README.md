@@ -101,7 +101,12 @@ Playable, end to end:
 | Attack | **Left click** or **J** |
 | Interact / fish / touch Wardstone | **E** |
 | Cycle element | **Q** (next) / **E** (previous — when no interaction prompt is showing) |
-| Hotbar (weapons, tools, consumables) | **1–0**, assignable by drag &amp; drop in the inventory |
+| Hotbar (weapons, tools, consumables, blocks) | **1–0**, assignable by drag &amp; drop in the inventory |
+| Gather / build / break / dig | **Attack** at a tree, rock, ore, placed block, or ground (a block on the hotbar places instead) |
+| Dash | double-tap a movement key |
+| Double jump | **Space** again in the air |
+| Charged attack | hold **Attack** ~0.6s |
+| World map | **M** · Inventory & crafting | **I** or the pause menu |
 | Activate Mimic Orb | **F** (when an orb is held) |
 | Eject from Mimic form | **F** |
 | Camera | **Mouse** (click the canvas to capture it and look) |
@@ -132,6 +137,28 @@ Emberkin/
   README.md           This file
   CONTINUE_HERE.md     Build-status / handoff notes
 ```
+
+## Survival sandbox
+
+Past the story slice, Emberkin is a full survival loop:
+
+- **Gather** — chop trees for Timber, mine rock for Stone, and work ore veins for Iron, Gold, and
+  Crystal. Ore needs a pick of the right tier; nodes regrow over time. Drops magnet to you.
+- **Craft & forge** — an in-inventory recipe panel (with search) turns materials into tools,
+  building blocks, elemental traps, and consumables. Place a **Forge** to smelt ore into ingots and
+  craft iron gear; brew a **Wardcharm** to permanently raise max health.
+- **Build & dig** — place blocks on a grid to raise walls and platforms (enemies will attack your
+  structures); lay **Spike / Frost / Ember** traps; dig the ground for dirt and stone.
+- **Delve** — with an Iron Pick, descend the **Sunken Barrow** into a dark crystal cavern with ore,
+  an underground lake, ruins, and a hidden hoard.
+- **Fight deeper** — dash, double-jump, and charged strikes; a **combo** meter; crits and
+  heal-on-kill; and **ten original elemental reactions** (hit with one element, then another) that
+  splash bonus damage and status effects.
+- **Explore** — a rotating **minimap** and a full **world map** with fog of war.
+- **Endgame** — wake **Vornrath, the Deepwyrm** at the bottom of the Delve. Beating it unlocks the
+  **Wellspring Transmute**, legendary loot, and an optional **Deepened** (harder) mode.
+
+Everything is local and single-player; the survival systems all persist in the same versioned save.
 
 ## Emberkin Studio (creator sandbox)
 

@@ -106,7 +106,7 @@ const dom = {};
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
- 'minimap','menu-map','worldmap','map-title','btn-map-close'
+ 'minimap','menu-map','worldmap','map-title','btn-map-close','tracker'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -199,6 +199,7 @@ const sfx = {
   eject:    ()=>{ noiseBurst(0.3, {freq:1400, vol:0.15}); tone(740, 0.25, {vol:0.08, slide:370}); },
   attune:   ()=> [330,415,494,659].forEach((f,i)=> tone(f, 0.6, {vol:0.07, delay:i*0.05})),
   hurt:     ()=> tone(220, 0.15, {type:'sawtooth', vol:0.1, slide:110}),
+  step:     ()=> noiseBurst(0.06, {freq:340, vol:0.04}),
 };
 
 /* ============================================================ THREE.JS CORE */
@@ -1295,7 +1296,7 @@ function addItem(id, n=1){
     const take=Math.min(left,lim); G.bag.push({id, n:take}); left-=take;
   }
   const added = n-left;
-  if (added>0) toast(`+${added} ${itemDef(id).name}`, 'good', 1500);
+  if (added>0){ toast(`+${added} ${itemDef(id).name}`, 'good', 1500); if (dom.tracker) updateHUD(); }
   return added;
 }
 function countItem(id){ return G.bag.reduce((a,s)=>a+(s.id===id?s.n:0),0); }
@@ -2668,6 +2669,11 @@ function updatePlayer(dt){
 
   animateLimbs(body, moving, dt);
 
+  // footsteps
+  if (moving && grounded){ stepT += dt * (sprint?1.5:1);
+    if (stepT > 0.34){ stepT = 0; sfx.step(); } }
+  else stepT = 0.3;
+
   // orb pickups
   for (let i=orbs.length-1;i>=0;i--){
     const o=orbs[i]; if (body.position.distanceTo(o.mesh.position)<1.6) collectOrb(o);
@@ -2883,6 +2889,12 @@ function updateHUD(){
   dom['elem-hud-sig'].textContent = ed ? ed.sigil : '○';
   dom['elem-hud-name'].textContent = ed ? ed.name : 'None';
   dom['elem-hud-sig'].style.color = ed ? elemColorCss(G.activeElement) : '';
+  // resource tracker: key materials the player has gathered
+  if (dom.tracker){
+    const track = ['timber','stone_chunk','iron_ingot','crystal_ore'];
+    dom.tracker.innerHTML = track.filter(id=>countItem(id)>0)
+      .map(id=>`<span class="trk">${itemDef(id).icon} ${countItem(id)}</span>`).join('');
+  }
   refreshHotbarUI();
   // mimic bar
   if (G.mimic.state==='Transformed'){
@@ -3309,6 +3321,7 @@ function ensureWorld(){ if(!worldBuilt){ startFreshWorld(); worldBuilt=true; } }
 /* ================================================================= MAIN LOOP */
 let autosaveT = 0;
 let mmT = 0;        // minimap redraw throttle
+let stepT = 0;      // footstep cadence
 let hitstop = 0;    // brief freeze-frame on landed hits (impact feel)
 function loop(){
   requestAnimationFrame(loop);

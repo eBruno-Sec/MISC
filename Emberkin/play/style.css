@@ -51,6 +51,7 @@ kbd{
   backdrop-filter:blur(3px)}
 body[data-theme="day"] .overlay{background:radial-gradient(120% 120% at 50% 0%, rgba(255,255,255,.5), rgba(210,224,240,.92))}
 .overlay.center{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6vh 5vw;gap:.4rem}
+@media (prefers-reduced-motion:no-preference){ .overlay:not(.hidden){animation:ovfade .22s ease both} @keyframes ovfade{from{opacity:0}to{opacity:1}} }
 .hidden{display:none !important}
 
 /* ---- brand ---- */
@@ -58,6 +59,8 @@ body[data-theme="day"] .overlay{background:radial-gradient(120% 120% at 50% 0%, 
 .logo{font-family:var(--display);font-weight:800;letter-spacing:.14em;font-size:calc(3rem*var(--ui-scale));color:var(--bright);line-height:1}
 .tagline{font-family:var(--display);color:var(--accent-2);font-weight:600;letter-spacing:.05em;font-size:calc(1.05rem*var(--ui-scale));margin-bottom:1.4rem}
 .fineprint{color:var(--muted);font-size:calc(.76rem*var(--ui-scale));margin-top:1.4rem;max-width:44ch}
+.controls-hint{color:var(--text);font-size:calc(.74rem*var(--ui-scale));margin-top:1.1rem;max-width:52ch;line-height:1.9}
+.controls-hint kbd{margin:0 .1em}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 body[data-motion="reduced"] .logo-mark{animation:none}
 
@@ -262,6 +265,11 @@ body[data-theme="day"] .tainer-bubble{background:rgba(255,255,255,.95)}
 
 /* toast fade */
 .toast{transition:opacity .3s} .toast.out{opacity:0}
+
+/* ============================================================ resource tracker */
+.tracker{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.3rem}
+.tracker .trk{display:flex;align-items:center;gap:.2rem;font-size:.72rem;font-weight:800;color:var(--bright);background:rgba(10,15,25,.5);border:1px solid var(--line);border-radius:8px;padding:.12rem .4rem}
+body[data-theme="day"] .tracker .trk{background:rgba(255,255,255,.55)}
 
 /* ============================================================ minimap / map */
 .minimap{width:130px;height:130px;border-radius:12px;border:1.5px solid var(--line);background:rgba(8,12,20,.6);margin-top:.2rem}
