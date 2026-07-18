@@ -18,17 +18,24 @@ numbers) → D dig & place (voxel overlay) → E crafting/forge/smelting → F b
 traps → G combat depth + original elemental reactions → H exploration (minimap/fog/caves) →
 I dragon endgame at depth → J polish/QoL.
 
-**Phase A (core framework) — code complete, final regression pending:**
-- `play/items.js` — pure item registry (materials/consumables/tools/blocks/element entries),
-  hasOwnProperty-guarded lookups (rejects `__proto__`/`constructor` ids).
-- `play/input.js` — action map; all keys route through it (1–0 are slot1..slot10).
-- game.js: bag API (addItem/countItem/removeItem/useItem w/ stack limits), selectHotbar
-  (weapon/element/consumable entries; empty slots 1–5 fall back to legacy element pick),
-  save SCHEMA_VERSION=3 (bag+hotbar, sanitized; v1/v2 migrate), serialize deep-copies (fixed
-  live-reference aliasing), reticle + ranged aim-dot (`#reticle`, `#aim-dot`).
-- Verified so far: input routing, legacy fallback, stack split at limits, hotbar
-  weapon/element/consumable actions, v3 round-trip, v2+v1 migration. Pending when tooling
-  allows: aliasing + proto-id regression rerun, reticle screenshot, full old-suite regression.
+**Phase A (core framework) — ✅ SHIPPED & verified** (commit ba13b45):
+items.js registry (proto-guarded lookups), input.js action map, bag API, save v3 with
+v1/v2 migration, deep-copied snapshots, reticle + ranged aim-dot, step() harness now runs
+updateCamera/updateAim. Full old-suite regression passed.
+
+**Phase B (inventory + hotbar) — ✅ SHIPPED & verified** (26c9aa9 + refinements 597562f):
+unified 10-slot hotbar (keys 1–0; weapons show tier + equipped highlight, consumables show
+counts), bag grid with tooltips + sort, full drag & drop (weapons, items, slot-to-slot moves),
+auto-population (starter weapon + 2 Emberjam; found weapons auto-slot). Per user feedback,
+ELEMENTS ARE NOT SLOTTED: Q cycles right, E cycles left (E is context-sensitive — interacts
+when a prompt is showing), HUD element chip bottom-right live-syncs. Old element wheel removed.
+Also: over-the-shoulder camera setting (right/left/center, default right).
+
+**Next up: Phase C — gathering** (harvestable trees → Timber, surface ore nodes with hardness
++ tool tiers, plants, magnet pickups, floating damage/loot numbers). Then D (voxel dig/place
+overlay per approved hybrid design), E crafting, F building+traps, G combat/reactions,
+H minimap/caves, I dragon endgame, J polish. One phase at a time, verify before shipping.
+User's save backups are gitignored (EMBERKIN_backup_*.json).
 
 `README.md` holds the full original IP canon (names, elements, villain, regions, classes, tiers).
 
