@@ -73,6 +73,8 @@ const G = {
   underground: false,
   dragonDefeated: false,
   hardMode: false,
+  critBonus: 0,               // Phase G upgrades
+  combo: 0, comboT: 0,
   elements: { loam:false, tide:false, cinder:false, arc:false, rime:false },
   activeElement: 'none',
   glideUnlocked: false,
@@ -1072,6 +1074,7 @@ function newGame(){
     owned:[], equipped:null, bag:[], hotbar:new Array(10).fill(null),
     chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
     bossDefeated:false, build:[], underground:false, dragonDefeated:false, hardMode:false,
+    critBonus:0, combo:0, comboT:0,
     elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
     glideUnlocked:false, stage:0,
     flags:{fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false},
@@ -1530,14 +1533,45 @@ function damageEnemy(e, dmg){
     }
   }
   if (e.boss && e.weak > 0) mult *= 2;                                 // crystal exposed after the slam
-  e.hp -= dmg * mult;
+  // crit (Phase G): a chance for bonus damage
+  let crit = false;
+  if (Math.random() < critChance()){ mult *= 1.8; crit = true; }
   e.hitCd = 0.12;
   e.state='chase'; e.target=player;
-  sfx.hit();
   hitstop = Math.max(hitstop, e.boss ? 0.06 : 0.04);   // impact freeze-frame
-  const fxCol = mult>1 ? 0xfff0a0 : (mult<1 ? 0x8a90a0 : 0xffffff);
-  spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,1,0)), fxCol, mult>1?12:6, 0.5);
+  const fxCol = crit ? 0xffd24a : (mult>1 ? 0xfff0a0 : (mult<1 ? 0x8a90a0 : 0xffffff));
+  applyEnemyDamage(e, dmg*mult, fxCol, crit);
+  // reactions (Phase G): a different element than the one already on the target
+  tryReaction(e);
+}
+/* core damage: floating number, particles, defeat. Shared by swings, projectiles,
+   traps, statuses, and reactions so damage numbers appear everywhere. */
+function applyEnemyDamage(e, dmg, col=0xffffff, crit=false){
+  if (!e.alive) return;
+  e.hp -= dmg;
+  sfx.hit();
+  spawnFloater((crit?'✦':'')+Math.round(dmg), e.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), colCss(col));
+  spawnBurst(e.mesh.position.clone().add(new THREE.Vector3(0,1,0)), col, crit?12:6, 0.5);
   if (e.hp<=0) defeatEnemy(e);
+}
+function colCss(c){ return '#'+c.toString(16).padStart(6,'0'); }
+function critChance(){ return 0.10 + G.critBonus; }   // Phase G tunes G.critBonus
+/* tryReaction: filled in Phase G — stamps the active element and triggers a
+   two-element reaction when a different element lands. */
+function tryReaction(e){ if (typeof reactionCore==='function') reactionCore(e); }
+
+/* ---------------------------------------- status effects (traps + reactions) */
+function applyStatus(e, type, dur){ e.status = e.status || {}; e.status[type] = Math.max(e.status[type]||0, dur); }
+function updateStatus(e, dt){
+  if (!e.status) return 1;
+  let slow = 1;
+  if (e.status.chill>0){ e.status.chill-=dt; slow = 0.42; }
+  if (e.status.shock>0){ e.status.shock-=dt; slow = 0; }              // stunned
+  if (e.status.burn>0){
+    e.status.burn-=dt; e._burnT=(e._burnT||0)+dt;
+    if (e._burnT>0.5){ e._burnT=0; applyEnemyDamage(e, 7, 0xf0713b); }
+  }
+  return slow;
 }
 function defeatEnemy(e){
   e.alive=false;
@@ -1838,6 +1872,42 @@ function digGround(){
 }
 
 /* -------------------------------------------------- the Sunken Barrow / delve */
+/* a solid placed block directly in an enemy's path (so it attacks structures) */
+function blockAhead(pos, dir){
+  const ax = pos.x + dir.x*0.9, az = pos.z + dir.z*0.9;
+  let best=null, bd=1e9;
+  for (const e of placed){
+    if (e.trap) continue;
+    const d = Math.hypot(e.gx-ax, e.gz-az);
+    if (d<0.8 && d<bd){ bd=d; best=e; }
+  }
+  return best;
+}
+function damageBlock(entry, dmg){
+  entry.hp -= dmg;
+  spawnBurst(entry.mesh.position.clone(), 0xcdb89a, 4, 0.4);
+  entry.mesh.position.x += (Math.random()-0.5)*0.05;   // shudder
+  if (entry.hp<=0) removeBlock(entry, false);
+}
+function updateTraps(dt){
+  for (const t of placed){
+    if (!t.trap) continue;
+    if (t.cooldown>0){ t.cooldown-=dt; continue; }
+    for (const e of enemies){
+      if (!e.alive) continue;
+      if (Math.abs(e.mesh.position.x-t.gx)<0.75 && Math.abs(e.mesh.position.z-t.gz)<0.75){
+        t.cooldown = t.trap==='spike'?0.7:1.5;
+        if (t.trap==='spike'){ applyEnemyDamage(e, 34, 0xd6dae0); }
+        else if (t.trap==='frost'){ applyEnemyDamage(e, 8, 0x8fd7f0); applyStatus(e,'chill',3.2);
+          spawnBurst(t.mesh.position.clone().setY(0.6), 0x8fd7f0, 8, 0.6); }
+        else if (t.trap==='ember'){ applyEnemyDamage(e, 8, 0xf0713b); applyStatus(e,'burn',3.2);
+          spawnBurst(t.mesh.position.clone().setY(0.6), 0xf0713b, 8, 0.6); }
+        break;                                    // one enemy per pulse
+      }
+    }
+  }
+}
+
 let cavernBuilt = false, delveReturn = null;
 function buildDelve(){
   // surface: a dark cracked mound with a descent prompt (needs an Iron Pick)
@@ -2326,6 +2396,10 @@ function updateEnemies(dt){
     e.wobble += dt;
     e.atkCd = Math.max(0, e.atkCd-dt);
     if (e.hitCd>0) e.hitCd-=dt;
+    if (e.blockCd>0) e.blockCd-=dt;
+    const slow = updateStatus(e, dt);
+    if (!e.alive) continue;                       // burn may have finished it
+    const spd = e.speed * slow;
     const d = Math.hypot(pPos.x-e.mesh.position.x, pPos.z-e.mesh.position.z);
 
     // guards ignore disguised player
@@ -2341,8 +2415,13 @@ function updateEnemies(dt){
       const dist=to.length();
       if (dist>e.r+1.1){
         to.normalize();
-        const nx=e.mesh.position.x+to.x*e.speed*dt, nz=e.mesh.position.z+to.z*e.speed*dt;
-        e.mesh.position.x=nx; e.mesh.position.z=nz;
+        // a placed block in the way gets attacked instead of walked through
+        const block = blockAhead(e.mesh.position, to);
+        if (block){ if (!(e.blockCd>0)){ e.blockCd=0.9; damageBlock(block, 12); } }
+        else {
+          const nx=e.mesh.position.x+to.x*spd*dt, nz=e.mesh.position.z+to.z*spd*dt;
+          e.mesh.position.x=nx; e.mesh.position.z=nz;
+        }
         e.mesh.rotation.y=Math.atan2(to.x,to.z);
       } else if (e.atkCd<=0){
         e.atkCd = 1.4;
@@ -2353,7 +2432,12 @@ function updateEnemies(dt){
     } else {
       // drift home
       const to=new THREE.Vector3(e.home.x-e.mesh.position.x,0,e.home.z-e.mesh.position.z);
-      if (to.length()>1){ to.normalize(); e.mesh.position.x+=to.x*e.speed*0.4*dt; e.mesh.position.z+=to.z*e.speed*0.4*dt; }
+      if (to.length()>1){ to.normalize(); e.mesh.position.x+=to.x*spd*0.4*dt; e.mesh.position.z+=to.z*spd*0.4*dt; }
+    }
+    // chill/burn visual tint on the eyes
+    if (e.status && (e.status.chill>0||e.status.burn>0) && e.mesh.userData.eyes){
+      const c = e.status.chill>0 ? 0x8fd7f0 : 0xf0713b;
+      for (const ey of e.mesh.userData.eyes) ey.material.emissive?.setHex?.(c);
     }
     // ground-follow + idle bob
     e.mesh.position.y = terrainH(e.mesh.position.x, e.mesh.position.z) + Math.abs(Math.sin(e.wobble*3))*0.08;
@@ -2902,6 +2986,7 @@ function loop(){
     updateTainerFollow(dt);
     updateDrops(dt);
     updateHarvest(dt);
+    updateTraps(dt);
     updateCamera(dt);
     // autosave every 12s
     autosaveT += dt; if (autosaveT>12){ autosaveT=0; if(G.klass) autosave(); }
@@ -3048,6 +3133,15 @@ function installDevHooks(){
     canCraft: (rid)=>{ const r=RECIPES.find(x=>x.id===rid); return r?recipeAvailable(r):null; },
     nearForge: ()=> nearForge(),
     recipes: ()=> RECIPES.map(r=>r.id),
+    // Phase F
+    spawnEnemyAt: (x,z,kind)=> spawnEnemy(new THREE.Vector3(x,0,z), kind||'grumble'),
+    enemyStatus: (i)=>{ const e=enemies.filter(x=>x.alive)[i]; return e?{...(e.status||{}),hp:Math.round(e.hp)}:null; },
+    aliveEnemyList: ()=> enemies.filter(e=>e.alive).map(e=>({kind:e.kind,hp:Math.round(e.hp),x:+e.mesh.position.x.toFixed(1),z:+e.mesh.position.z.toFixed(1)})),
+    placedList: ()=> placed.map(e=>({type:e.type,trap:e.trap||null,x:e.gx,y:e.gy,z:e.gz,hp:Math.round(e.hp)})),
+    placeAt: (type,gx,gy,gz)=> placeBlock(type,gx,gy,gz,itemDef(type)?.trap||null),
+    blockHp: (gx,gz)=>{ const e=placed.find(p=>p.gx===gx&&p.gz===gz); return e?Math.round(e.hp):null; },
+    hurtNearest: (n)=>{ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive)continue; const d=player.position.distanceTo(e.mesh.position); if(d<bd){bd=d;best=e;} } if(best){ damageEnemy(best,n); return true;} return false; },
+    enemyStatusFor: (x,z)=>{ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive)continue; const d=Math.hypot(e.mesh.position.x-x,e.mesh.position.z-z); if(d<bd){bd=d;best=e;} } return best?{...(best.status||{}),hp:Math.round(best.hp),d:+bd.toFixed(1)}:null; },
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -3056,7 +3150,7 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
-          updateDrops(dt); updateHarvest(dt); updateCamera(dt);
+          updateDrops(dt); updateHarvest(dt); updateTraps(dt); updateCamera(dt);
         }
         updateParticles(dt); updateFloaters(dt);
       }
