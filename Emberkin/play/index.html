@@ -52,15 +52,8 @@
     </div>
   </div>
 
-  <!-- bottom-left: element wheel -->
-  <div id="element-wheel" class="element-wheel" role="group" aria-label="Element selection">
-    <button class="elem" data-elem="none" title="No element (unarmed)"><span class="elem-sigil">○</span><span class="elem-name">None</span></button>
-    <button class="elem locked" data-elem="loam" title="Loam — earth"><span class="elem-sigil">⬡</span><span class="elem-name">Loam</span></button>
-    <button class="elem locked" data-elem="tide" title="Tide — water"><span class="elem-sigil">≈</span><span class="elem-name">Tide</span></button>
-    <button class="elem locked" data-elem="cinder" title="Cinder — fire"><span class="elem-sigil">✷</span><span class="elem-name">Cinder</span></button>
-    <button class="elem locked" data-elem="arc" title="Arc — storm"><span class="elem-sigil">ϟ</span><span class="elem-name">Arc</span></button>
-    <button class="elem locked" data-elem="rime" title="Rime — ice"><span class="elem-sigil">❈</span><span class="elem-name">Rime</span></button>
-  </div>
+  <!-- bottom-center: unified hotbar (weapons / elements / consumables, keys 1–0) -->
+  <div id="hotbar" class="hotbar" role="toolbar" aria-label="Hotbar — keys 1 to 0"></div>
 
   <!-- bottom-center: contextual prompt -->
   <div id="prompt" class="prompt hidden"><kbd id="prompt-key">E</kbd> <span id="prompt-text">Interact</span></div>
@@ -179,10 +172,16 @@
   <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
 </div>
 
-<!-- Weapons & Gear (inventory) -->
+<!-- Inventory & Gear -->
 <div id="menu-inv" class="overlay center menu hidden">
-  <h2 class="menu-h">Weapons &amp; Gear</h2>
-  <p class="menu-p">Weapons of your class. Equip one, upgrade it, or dismantle spares into Emberlight.</p>
+  <h2 class="menu-h">Inventory &amp; Gear</h2>
+  <p class="menu-p" id="inv-hint">Click a bag item (or drag it onto a slot below) to put it on your hotbar. Number keys 1–0 use the slots in play.</p>
+  <div id="inv-hotbar" class="inv-hotbar" role="toolbar" aria-label="Hotbar slots"></div>
+  <div class="inv-section-h">Bag <button class="btn small" id="btn-sort">Sort</button></div>
+  <div id="bag-grid" class="bag-grid"></div>
+  <div class="inv-section-h">Attuned elements</div>
+  <div id="elem-row" class="elem-row"></div>
+  <div class="inv-section-h">Weapons</div>
   <div id="inv-list" class="inv-list" role="list"></div>
   <p class="menu-note" id="inv-tokens"></p>
   <button class="btn primary" id="btn-inv-back">Back</button>

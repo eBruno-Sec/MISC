@@ -86,7 +86,7 @@ const settings = {
 const $ = (id) => document.getElementById(id);
 const dom = {};
 ['loading','load-status','load-fill','load-fallback','hud','hero-name','hp-fill','hp-text',
- 'mimic-bar-wrap','mimic-fill','mimic-text','stam-fill','token-count','net-state','element-wheel',
+ 'mimic-bar-wrap','mimic-fill','mimic-text','stam-fill','token-count','net-state',
  'prompt','prompt-key','prompt-text','orb-status','weapon-chip','weapon-name','weapon-lvl',
  'objective-text','alert-state','alert-text','tainer','tainer-text','toast',
  'menu-title','menu-sibling','menu-class','cinematic','cine-art','cine-text','cine-next','cine-skip',
@@ -96,7 +96,7 @@ const dom = {};
  'btn-load-pause','btn-quit','btn-settings-back',
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
- 'reticle','aim-dot'
+ 'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -538,6 +538,7 @@ function grantWeapon(tier){
   const w = WEAPONS[G.klass][tier-1];
   if (G.owned.includes(w.id)){ addTokens(15); toast(`A duplicate ${w.name} shimmers into 15 Emberlight.`, 'good', 3000); return; }
   G.owned.push(w.id);
+  hotbarAutoAdd({ kind:'weapon', id:w.id });
   toast(`New weapon: ${w.name} (Tier ${tier})! Equip it from the pause menu.`, 'good', 4200);
   tainerSay(`Oooh, ${w.name}! That one sings. Check Weapons & Gear when you get a breath.`, 4800);
 }
@@ -958,7 +959,11 @@ function bindInput(){
         if (slot >= 0) selectHotbar(slot);
       }
     } else if (act==='pause' && G.phase==='paused') resume();
-    else if ((act==='pause' || act==='inventory') && G.phase==='inventory') closeInventory();
+    else if (G.phase==='inventory'){
+      const slot = INPUT.slotIndex(act);
+      if (slot >= 0 && assignPick) assignToSlot(slot);
+      else if (act==='pause' || act==='inventory') closeInventory();
+    }
   });
   addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
 
@@ -1040,6 +1045,8 @@ function newGame(){
     mimic:{state:'Normal',hp:0,maxHp:0,orbHeld:false,cooldown:0,savedHp:100},
   });
   worldBuilt = false;
+  assignPick = null;
+  refreshHotbarUI();
   G.phase='sibling'; show(dom['menu-sibling']);
 }
 
@@ -1081,6 +1088,10 @@ dom['btn-confirm-class'].addEventListener('click', ()=>{
   G.klass = previewClass;
   G.owned = [WEAPONS[G.klass][0].id];
   G.equipped = G.owned[0];
+  G.hotbar[0] = { kind:'weapon', id:G.equipped };
+  addItem('emberjam', 2);                              // starter snack — shows the consumable loop
+  hotbarAutoAdd({ kind:'item', id:'emberjam' });
+  refreshHotbarUI();
   hide(dom['menu-class']);
   startOpening();
 });
@@ -1198,6 +1209,7 @@ function unlockElement(elem, ws){
   ws.sig.material.emissiveIntensity = 1;
   ws.glow.intensity = 1.6;
   sfx.attune();
+  hotbarAutoAdd({ kind:'element', id:'elem_'+elem });
   spawnBurst(ws.pos.clone().setY(3), ELEMENTS[elem].color, 34);
   setActiveElement(elem);
   refreshElementWheel();
@@ -1272,7 +1284,7 @@ function useItem(id){
 }
 
 /* hotbar: filled slots act (weapon/element/consumable); empty slots 1–5 keep
-   the legacy element binding until Phase B populates the bar */
+   the legacy element binding as a fallback */
 function selectHotbar(i){
   const entry = G.hotbar[i];
   if (!entry){ if (i < 5) pickElementByIndex(i+1); return; }
@@ -1285,16 +1297,80 @@ function selectHotbar(i){
   } else if (entry.kind==='item'){
     useItem(entry.id);
   }
+  refreshHotbarUI();
+}
+
+/* ------------------------------------------------------- hotbar UI (HUD) */
+const CLASS_GLYPH = { sword:'🗡️', bow:'🏹', greatsword:'⚔️', dual:'🗡️', focus:'🔮' };
+let assignPick = null;      // {kind,id} chosen in the inventory, awaiting a slot
+function elemColorCss(elem){ return '#'+ELEMENTS[elem].color.toString(16).padStart(6,'0'); }
+function slotVisual(btn, entry, idx){
+  btn.className = 'hslot';
+  btn.innerHTML = `<span class="hkey">${(idx+1)%10}</span>`;
+  if (assignPick && G.phase==='inventory') btn.classList.add('assignable');
+  if (!entry){ btn.classList.add('empty'); btn.title = 'Empty slot'; return; }
+  if (entry.kind==='weapon'){
+    const w = findWeapon(entry.id);
+    if (!w){ btn.classList.add('empty'); return; }
+    btn.innerHTML += (CLASS_GLYPH[G.klass]||'🗡️') + `<span class="htier">T${w.tier}</span>`;
+    btn.title = `${w.name} — equip`;
+    if (G.equipped===entry.id) btn.classList.add('active');
+  } else if (entry.kind==='element'){
+    const d = itemDef(entry.id);
+    btn.innerHTML += `<span style="color:${elemColorCss(d.elem)}">${d.icon}</span>`;
+    btn.title = `${d.name} — element`;
+    if (G.activeElement===d.elem) btn.classList.add('active');
+    if (!G.elements[d.elem]) btn.classList.add('dim');
+  } else {
+    const d = itemDef(entry.id), n = countItem(entry.id);
+    btn.innerHTML += d.icon + `<span class="hcount">${n}</span>`;
+    btn.title = `${d.name}${d.desc ? ' — '+d.desc : ''}`;
+    if (!n) btn.classList.add('dim');
+  }
+}
+function refreshHotbarUI(){
+  if (dom.hotbar) [...dom.hotbar.children].forEach((b,i)=> slotVisual(b, G.hotbar[i], i));
+  if (dom['inv-hotbar'] && G.phase==='inventory')
+    [...dom['inv-hotbar'].children].forEach((b,i)=> slotVisual(b, G.hotbar[i], i));
+}
+function assignToSlot(i){
+  if (!assignPick) return false;
+  G.hotbar[i] = assignPick; assignPick = null;
+  sfx.ui(); renderInv(); refreshHotbarUI();
+  toast('Assigned.', 'good', 1200);
+  return true;
+}
+function buildHotbarUI(){
+  for (const holder of [dom.hotbar, dom['inv-hotbar']]){
+    if (!holder) continue;
+    holder.innerHTML = '';
+    for (let i=0;i<10;i++){
+      const b = document.createElement('button');
+      b.type='button'; b.dataset.slot = i;
+      b.onclick = ()=>{
+        if (assignPick){ assignToSlot(i); return; }
+        if (G.phase==='playing') selectHotbar(i);
+        else if (G.phase==='inventory' && G.hotbar[i]){
+          G.hotbar[i]=null; renderInv(); refreshHotbarUI();   // click a filled slot to clear it
+        }
+      };
+      b.addEventListener('dragover', e=>{ if (assignPick) e.preventDefault(); });
+      b.addEventListener('drop', e=>{ e.preventDefault(); assignToSlot(i); });
+      holder.appendChild(b);
+    }
+  }
+  refreshHotbarUI();
+}
+function hotbarAutoAdd(entry){
+  if (G.hotbar.some(s=>s && s.kind===entry.kind && s.id===entry.id)) return;
+  const i = G.hotbar.findIndex(s=>!s);
+  if (i>=0){ G.hotbar[i]=entry; refreshHotbarUI(); }
 }
 
 function refreshElementWheel(){
-  dom['element-wheel'].querySelectorAll('.elem').forEach(btn=>{
-    const el = btn.dataset.elem;
-    const locked = el!=='none' && !G.elements[el];
-    btn.classList.toggle('locked', locked);
-    btn.classList.toggle('active', G.activeElement===el);
-    btn.onclick = ()=>{ if(el==='none') setActiveElement('none'); else if(!locked) setActiveElement(el); };
-  });
+  // the standalone element wheel was replaced by the unified hotbar (Phase B);
+  // element state now renders through refreshHotbarUI
+  refreshHotbarUI();
 }
 
 /* ------------------------------------------------------------- combat */
@@ -1912,6 +1988,7 @@ function updateHUD(){
   dom['token-count'].textContent = G.tokens;
   dom['weapon-name'].textContent = G.klass ? equippedWeapon().name : '—';
   dom['weapon-lvl'].textContent = 'Lv '+G.weaponLevel;
+  refreshHotbarUI();
   // mimic bar
   if (G.mimic.state==='Transformed'){
     show(dom['mimic-bar-wrap']);
@@ -1937,10 +2014,51 @@ function openInventory(){
 }
 function closeInventory(){
   if (G.phase!=='inventory') return;
+  assignPick = null; markPicked(null);
   hide(dom['menu-inv']); G.phase='paused'; show(dom['menu-pause']);
 }
 function weaponPower(w){ return Math.round(CLASSES[G.klass].dmg * TIER_MULT[w.tier]) + (G.weaponLevel-1)*8; }
+function markPicked(el){
+  document.querySelectorAll('.bag-item.picked,.elem-chip.picked').forEach(x=>x.classList.remove('picked'));
+  if (el) el.classList.add('picked');
+  refreshHotbarUI();
+}
 function renderInv(){
+  refreshHotbarUI();
+  // bag grid
+  const bg = dom['bag-grid'];
+  bg.innerHTML = '';
+  if (!G.bag.length) bg.innerHTML = '<span class="bag-empty">Nothing gathered yet — the vale provides to those who wander.</span>';
+  for (const s of G.bag){
+    const d = itemDef(s.id); if (!d) continue;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'bag-item'; b.draggable = true;
+    b.innerHTML = `${d.icon}<span class="hcount">${s.n}</span>`;
+    b.title = `${d.name} ×${s.n}${d.desc ? ' — '+d.desc : ''}`;
+    const pick = ()=>{
+      assignPick = { kind:'item', id:s.id }; markPicked(b);
+      toast(`Assign ${d.name}: click a hotbar slot (or press 1–0).`, 'info', 2600);
+    };
+    b.onclick = pick;
+    b.addEventListener('dragstart', pick);
+    bg.appendChild(b);
+  }
+  // attuned element chips
+  const er = dom['elem-row'];
+  er.innerHTML = '';
+  for (const [elem, def] of Object.entries(ELEMENTS)){
+    if (elem==='none' || !G.elements[elem]) continue;
+    const c = document.createElement('button');
+    c.type='button'; c.className='elem-chip';
+    c.innerHTML = `<span style="color:${elemColorCss(elem)}">${def.sigil}</span> ${def.name}`;
+    c.onclick = ()=>{
+      assignPick = { kind:'element', id:'elem_'+elem }; markPicked(c);
+      toast(`Assign ${def.name}: click a hotbar slot (or press 1–0).`, 'info', 2600);
+    };
+    er.appendChild(c);
+  }
+  if (!er.children.length) er.innerHTML = '<span class="bag-empty">Touch a Wardstone to attune an element.</span>';
+  // weapons
   const list = dom['inv-list'];
   list.innerHTML = '';
   const eq = equippedWeapon();
@@ -2095,6 +2213,13 @@ function hydrate(p){
       if ((h.kind==='element') === (t==='element')) next.hotbar[i] = {kind:h.kind, id:h.id};
     }
   });
+  // pre-hotbar saves (v1/v2): seed the bar from what the save already earned
+  if (next.hotbar.every(s=>!s)){
+    next.hotbar[0] = { kind:'weapon', id:equipped };
+    let hi = 1;
+    for (const el of ['loam','tide','cinder','arc','rime'])
+      if (next.elements[el] && hi < 10) next.hotbar[hi++] = { kind:'element', id:'elem_'+el };
+  }
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
@@ -2191,6 +2316,15 @@ function bindButtons(){
   dom['btn-resume'].onclick = ()=> resume();
   dom['btn-inv'].onclick = ()=> openInventory();
   dom['btn-inv-back'].onclick = ()=> closeInventory();
+  const TYPE_ORDER = { consumable:0, tool:1, block:2, element:3, material:4 };
+  dom['btn-sort'].onclick = ()=>{
+    G.bag.sort((a,b)=>{
+      const da=itemDef(a.id), db=itemDef(b.id);
+      return (TYPE_ORDER[da.type]-TYPE_ORDER[db.type]) || da.name.localeCompare(db.name) || b.n-a.n;
+    });
+    renderInv();
+  };
+  buildHotbarUI();
   dom['btn-save'].onclick = ()=> downloadSave();
   dom['btn-quit'].onclick = ()=> { hide(dom['menu-pause']); goTitle(); };
   dom['file-input'].onchange = (e)=> { loadFromFile(e.target.files[0]); e.target.value=''; };
