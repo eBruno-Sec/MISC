@@ -266,6 +266,34 @@ body[data-theme="day"] .tainer-bubble{background:rgba(255,255,255,.95)}
 /* toast fade */
 .toast{transition:opacity .3s} .toast.out{opacity:0}
 
+/* ============================================================ journal / quests */
+.journal-rank{font-family:var(--display);font-weight:700;color:var(--accent-2);font-size:calc(.86rem*var(--ui-scale));margin:-.4rem 0 .6rem}
+.jtabs{display:flex;gap:.3rem;flex-wrap:wrap;justify-content:center;margin-bottom:.6rem}
+.jtab{font-family:var(--display);font-weight:700;font-size:.82rem;padding:.4rem .8rem;border-radius:10px;border:1.5px solid var(--line);background:var(--panel);color:var(--text);cursor:pointer;min-height:40px}
+.jtab:hover{border-color:var(--accent);color:var(--bright)}
+.jtab.sel{background:var(--panel-2);border-color:var(--accent);color:var(--bright)}
+.jbody{width:min(600px,94vw);max-height:52vh;overflow-y:auto;text-align:left;display:flex;flex-direction:column;gap:.5rem;padding:.2rem}
+.qcard{background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:.7rem .9rem}
+.qcard.active{border-color:var(--accent-2)}
+.qcard.done{opacity:.7}
+.qcard .qh{font-family:var(--display);font-weight:700;color:var(--bright);font-size:.95rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.qcard .qh .tag{font-size:.62rem;font-weight:800;border-radius:8px;padding:.05rem .4rem;border:1px solid}
+.qcard .qh .tag.now{color:var(--accent-2);border-color:var(--accent-2)}
+.qcard .qh .tag.ok{color:var(--ok);border-color:var(--ok)}
+.qcard .qd{font-size:.84rem;color:var(--text);margin-top:.25rem}
+.qcard .qlesson{font-size:.82rem;color:var(--muted);margin-top:.35rem;font-style:italic;border-left:2px solid var(--accent);padding-left:.6rem}
+.qbar{height:7px;border-radius:6px;background:var(--panel-2);overflow:hidden;margin-top:.4rem}
+.qbar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+.qpractice{font-size:.8rem;color:var(--accent-2);margin-top:.35rem}
+.insight .ith{font-family:var(--display);font-weight:800;color:var(--accent);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase}
+.insight .itt{color:var(--bright);font-size:.92rem;margin-top:.15rem}
+.insight .itp{color:var(--accent-2);font-size:.8rem;margin-top:.25rem}
+.guide-row{font-size:.86rem;color:var(--text);line-height:1.6}
+.guide-row b{color:var(--bright)}
+.guide-h{font-family:var(--display);font-weight:800;color:var(--accent);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;margin-top:.5rem}
+.journal-note{color:var(--muted);font-size:calc(.7rem*var(--ui-scale));max-width:56ch;margin:.8rem 0 .2rem;line-height:1.5}
+#tc-journal{color:var(--accent-2)}
+
 /* ============================================================ resource tracker */
 .tracker{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.3rem}
 .tracker .trk{display:flex;align-items:center;gap:.2rem;font-size:.72rem;font-weight:800;color:var(--bright);background:rgba(10,15,25,.5);border:1px solid var(--line);border-radius:8px;padding:.12rem .4rem}

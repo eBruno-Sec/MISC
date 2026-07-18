@@ -147,6 +147,37 @@ Emberkin/
   CONTINUE_HERE.md     Build-status / handoff notes
 ```
 
+## Story, quests & the Wayfarer's Journal
+
+Emberkin has a **guided main story** you can follow beat by beat — and each beat teaches a real,
+gentle life skill, so the hero grows in wisdom, not just in loot. The villain **Mourne** wants to
+*freeze the world so nothing can ever be lost*; that's emotional avoidance dressed as mercy, and the
+final boss **Vornrath** is buried grief grown huge in the dark. So the lessons aren't bolted on —
+they're the story the game is already telling:
+
+| Beat | Skill it teaches |
+| --- | --- |
+| The first cast · meeting Tainer | Beginning — the next small step |
+| Attuning your first element | Emotional intelligence — naming feelings |
+| Melting the ice wall | Problem-solving — patience over force |
+| Slipping through the camp | Situational awareness — watch first |
+| Besting Hush | Stoicism — the space between what happens and what you do |
+| Sparking a reaction | Stoicism — the dichotomy of control |
+| The Windrider's Trial | Courage — leaning into the wind |
+| Descending the Delve | Growth — the precious things grow in the dark |
+| Facing the Deepwyrm | Integration — meeting the pain turns it back to light |
+| Understanding Mourne | Meaning — a life you can lose is worth living fully |
+
+Each completed beat files an **Insight** in the **Wayfarer's Journal** (open with **L**), which tracks
+a **Wayfarer rank** from *Lost Traveller* to *Lightbearer* — the cry-baby-to-wise meter. **Daily** and
+**weekly quests** pair a game task with a small real-world **practice** ("name one thing you can't
+control, and loosen your grip on it"). The Journal also holds a **How to Play** guide covering every
+mechanic — movement, combat, elements, gather, craft, build, dig, and the Delve.
+
+> **A note on the reflections:** they're gentle life-skills practice inspired by stoicism and
+> emotional intelligence — *not* medical or mental-health advice. This is surfaced in the Journal
+> itself. If something ever feels too heavy, the game says plainly: talk with someone you trust.
+
 ## Survival sandbox
 
 Past the story slice, Emberkin is a full survival loop:

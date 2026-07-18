@@ -119,6 +119,7 @@
     <button id="tc-elemL" class="tc-btn tc-sm" aria-label="Previous element">◀</button>
     <button id="tc-elemR" class="tc-btn tc-sm" aria-label="Next element">▶</button>
     <button id="tc-map" class="tc-btn tc-sm" aria-label="Map">▦</button>
+    <button id="tc-journal" class="tc-btn tc-sm" aria-label="Journal">✦</button>
     <button id="tc-menu" class="tc-btn tc-sm" aria-label="Menu">☰</button>
   </div>
 </div>
@@ -196,6 +197,7 @@
   <div class="menu-btns">
     <button class="btn primary" id="btn-resume">Resume</button>
     <button class="btn" id="btn-inv">Inventory, Gear &amp; Crafting</button>
+    <button class="btn" id="btn-journal">Journal &amp; Quests</button>
     <button class="btn" id="btn-settings-pause">Accessibility &amp; Settings</button>
     <button class="btn" id="btn-save">Save Progress (.json)</button>
     <button class="btn" id="btn-load-pause">Load Progress (.json)</button>
@@ -203,6 +205,22 @@
   </div>
   <p class="controls-hint">Move <kbd>WASD</kbd> · Sprint <kbd>Shift</kbd> · Dash <kbd>double-tap</kbd> · Jump/Double-jump <kbd>Space</kbd> · Attack <kbd>click</kbd>/<kbd>J</kbd> (hold to charge) · Gather/Build/Dig with attack · Elements <kbd>Q</kbd>/<kbd>E</kbd> · Hotbar <kbd>1</kbd>–<kbd>0</kbd> · Map <kbd>M</kbd> · Bag <kbd>I</kbd> · Interact <kbd>E</kbd> · Mimic <kbd>F</kbd></p>
   <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
+</div>
+
+<!-- Journal / Quests -->
+<div id="menu-journal" class="overlay center menu hidden">
+  <h2 class="menu-h">Wayfarer’s Journal</h2>
+  <p class="journal-rank" id="journal-rank">Rank: Lost Traveller · 0 / 10 insights</p>
+  <div class="jtabs" id="jtabs">
+    <button class="jtab sel" data-tab="story">Story</button>
+    <button class="jtab" data-tab="daily">Daily</button>
+    <button class="jtab" data-tab="weekly">Weekly</button>
+    <button class="jtab" data-tab="journal">Insights</button>
+    <button class="jtab" data-tab="guide">How to Play</button>
+  </div>
+  <div id="jbody" class="jbody"></div>
+  <p class="journal-note">Emberkin’s reflections are gentle life-skills practice inspired by stoicism and emotional intelligence — not medical or mental-health advice. If something feels too heavy, talk with someone you trust.</p>
+  <button class="btn primary" id="btn-journal-close">Close</button>
 </div>
 
 <!-- World map -->

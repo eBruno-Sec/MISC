@@ -7,10 +7,11 @@ import * as THREE from 'three';
 import { ITEMS, itemDef, isValidItemId, stackLimit } from './items.js';
 import { makeInput } from './input.js';
 import { RECIPES } from './recipes.js';
+import { MAIN_QUESTS, DAILY_POOL, WEEKLY_POOL, wayfarerRank } from './quests.js';
 
 /* ------------------------------------------------------------------ consts */
-const SCHEMA_VERSION = 3;          // v3 adds bag/hotbar; v1/v2 saves migrate forward
-const PRODUCT_VERSION = '0.3.0-slice';
+const SCHEMA_VERSION = 4;          // v4 adds quest/journal state; v1–v3 saves migrate forward
+const PRODUCT_VERSION = '0.4.0-slice';
 const INPUT = makeInput();
 const SAVE_KEY = 'emberkin.save.v1';
 const SETTINGS_KEY = 'emberkin.settings.v1';
@@ -75,6 +76,8 @@ const G = {
   hardMode: false,
   critBonus: 0,               // Phase G upgrades
   combo: 0, comboT: 0,
+  // quests & journal
+  quest: { main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
   elements: { loam:false, tide:false, cinder:false, arc:false, rime:false },
   activeElement: 'none',
   glideUnlocked: false,
@@ -107,7 +110,8 @@ const dom = {};
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
  'minimap','menu-map','worldmap','map-title','btn-map-close','tracker',
- 'touch-ui','tc-stick','tc-knob','tc-attack','tc-jump','tc-dash','tc-interact','tc-mimic','tc-elemL','tc-elemR','tc-map','tc-menu'
+ 'touch-ui','tc-stick','tc-knob','tc-attack','tc-jump','tc-dash','tc-interact','tc-mimic','tc-elemL','tc-elemR','tc-map','tc-journal','tc-menu',
+ 'menu-journal','journal-rank','jtabs','jbody','btn-journal','btn-journal-close'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -795,6 +799,8 @@ function updateBoss(e, dt, pPos, transformed){
 function bossDefeatedFlow(e){
   G.bossDefeated = true;
   hide(dom['boss-bar']);
+  advanceMain('bossDefeated');
+  noteEvent('defeatBoss', 1);
   addTokens(40);
   dissolve(e.mesh); dissolve(e.mesh);   // extra-big send-off, still just light
   if (!bossChestSpawned){ bossChestSpawned = true;
@@ -1001,6 +1007,7 @@ function bindInput(){
       }
       else if (act==='pause') pause();
       else if (act==='map') openMap();
+      else if (act==='log') openJournal();
       else if (act==='inventory') { pause(); openInventory(); }
       else {
         const slot = INPUT.slotIndex(act);
@@ -1008,6 +1015,7 @@ function bindInput(){
       }
     } else if (act==='pause' && G.phase==='paused') resume();
     else if ((act==='map'||act==='pause') && G.phase==='map') closeMap();
+    else if ((act==='log'||act==='pause') && G.phase==='journal') closeJournal();
     else if (G.phase==='inventory'){
       const slot = INPUT.slotIndex(act);
       if (slot >= 0 && assignPick) assignToSlot(slot);
@@ -1109,6 +1117,7 @@ function bindTouch(canvas){
   hold('tc-elemL',  ()=>{ if(G.phase==='playing') cycleElement(-1); });
   hold('tc-elemR',  ()=>{ if(G.phase==='playing') cycleElement(1); });
   hold('tc-map',    ()=>{ if(G.phase==='playing') openMap(); else if(G.phase==='map') closeMap(); });
+  hold('tc-journal',()=>{ if(G.phase==='playing') openJournal(); else if(G.phase==='journal') closeJournal(); });
   hold('tc-menu',   ()=>{ if(G.phase==='playing') pause(); else if(G.phase==='paused') resume(); });
 }
 
@@ -1157,6 +1166,7 @@ function newGame(){
     chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
     bossDefeated:false, build:[], underground:false, dragonDefeated:false, hardMode:false,
     critBonus:0, combo:0, comboT:0,
+    quest:{ main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
     elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
     glideUnlocked:false, stage:0,
     flags:{fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false},
@@ -1263,7 +1273,8 @@ function enterWorld(){
   applySettings();
   updateHUD();
   refreshElementWheel();
-  setObjective('Reach the lake and cast a line.  (Walk with W A S D, hold to swim close, press E at the water.)');
+  ensureQuests();
+  refreshObjective();
   // position player at lakeside
   player.position.set(lakePos.x + 12, 0, lakePos.z + 2);
   yaw = Math.PI*0.5;
@@ -1312,7 +1323,7 @@ function doFishing(){
     tainerSay('Whoa — hi! You pulled me right out of the reeds! I’m Tainer. A Glimmer. A... a spark of the first light, if you want the long version.', 6000);
     setTimeout(()=>tainerSay('You’re looking for someone. I can feel it. I’ll help — that’s kind of what I’m for. First, that carved stone up the hill? Touch it. Trust me.', 6500), 6200);
     G.stage = 1;
-    setObjective('Touch the glowing Wardstone up the hill to attune your first element. (Press E near it)');
+    advanceMain('fished');
     // point player toward first wardstone
   }, 1400);
 }
@@ -1330,18 +1341,20 @@ function unlockElement(elem, ws){
   spawnBurst(ws.pos.clone().setY(3), ELEMENTS[elem].color, 34);
   setActiveElement(elem);
   refreshElementWheel();
-  toast(`${ELEMENTS[elem].name} attuned!  Switch elements with Q or 1–5.`, 'good', 3200);
-  tainerSay(`${ELEMENTS[elem].name}! Feel that? Now your strikes carry it. Some things in this world only answer to the right element.`, 5000);
+  toast(`${ELEMENTS[elem].name} attuned!  Switch elements with Q (next) and E (previous).`, 'good', 3200);
+  tainerSay(`${ELEMENTS[elem].name}! Feel that? Now your strikes carry it. Switch elements with Q and E. Some things only answer to the right one.`, 5600);
+  advanceMain('firstElement');
   if (elem==='cinder' && G.stage===1){
     G.stage = 2;
-    setObjective('A wall of Rime ice blocks the path north. Equip Cinder and strike it to melt through. Clear the Stonekin if they trouble you.');
-    tainerSay('See that ice wall? Cinder melts Rime. Give it a few good hits!', 4600);
+    tainerSay('See that ice wall? Cinder melts Rime. Equip Cinder (Q/E) and give it a few good hits!', 4600);
   }
 }
 function setActiveElement(elem){
+  const changed = G.activeElement !== elem;
   G.activeElement = elem;
   tintWeapon(elem);
   updateHUD();          // syncs the element indicator, hotbar highlights, and weapon chip
+  if (changed && elem !== 'none') noteEvent('element', 1);
 }
 function tintWeapon(elem){
   const wp = player?.userData?.weapon; if(!wp) return;
@@ -1367,7 +1380,8 @@ function addItem(id, n=1){
     const take=Math.min(left,lim); G.bag.push({id, n:take}); left-=take;
   }
   const added = n-left;
-  if (added>0){ toast(`+${added} ${itemDef(id).name}`, 'good', 1500); if (dom.tracker) updateHUD(); }
+  if (added>0){ toast(`+${added} ${itemDef(id).name}`, 'good', 1500); if (dom.tracker) updateHUD();
+    if (itemDef(id).type==='material') noteEvent('gather', added, id); }   // material guard prevents reward recursion
   return added;
 }
 function countItem(id){ return G.bag.reduce((a,s)=>a+(s.id===id?s.n:0),0); }
@@ -1421,6 +1435,7 @@ function craft(r){
   const added = addItem(r.out.id, r.out.n);
   sfx.attune();
   spawnFloater('+'+r.out.n+' '+itemDef(r.out.id).name, player.position.clone().add(new THREE.Vector3(0,2,0)), '#8fe6a0');
+  noteEvent('craft', 1);
   if (!G.flags.firstCraft){ G.flags.firstCraft=true;
     tainerSay('You made something! Tools speed up gathering, blocks let you build, and a Forge unlocks iron. Keep at it.', 5200); }
   return added>0 || r.out.id.startsWith('block_');
@@ -1687,7 +1702,9 @@ function triggerReaction(e, rx){
       }
     }
   }
+  noteEvent('react', 1);
   if (!G.flags.firstReaction){ G.flags.firstReaction=true;
+    advanceMain('firstReaction');
     tainerSay(`A reaction! Hit with one element, then a different one — ${rx.name}! Mix elements for big bonus damage.`, 5600); }
 }
 /* tryReaction: called from damageEnemy after the base hit lands. */
@@ -1702,7 +1719,10 @@ const POI_STYLE = {
 function markExplored(){
   if (!player) return;
   const cx = Math.round(player.position.x/FOG_CELL), cz = Math.round(player.position.z/FOG_CELL);
+  const before = explored.size;
   for (let dx=-1;dx<=1;dx++) for (let dz=-1;dz<=1;dz++) explored.add((cx+dx)+','+(cz+dz));
+  const gained = explored.size - before;
+  if (gained > 0) noteEvent('explore', gained);
 }
 function isExplored(x,z){ return explored.has(Math.round(x/FOG_CELL)+','+Math.round(z/FOG_CELL)); }
 function drawMinimap(){
@@ -1779,6 +1799,84 @@ function drawWorldMap(){
   drawHeadingArrow(ctx, toX(player.position.x), toY(player.position.z), player.rotation.y, 11, '#f5c168');
   ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.strokeRect(0.5,0.5,W-1,H-1);
 }
+/* ------------------------------------------------------- journal / quest UI */
+let journalTab = 'story';
+const GUIDE = [
+  ['Move &amp; look', 'Walk with <b>W A S D</b>. Sprint <b>Shift</b>. Look with the <b>mouse</b> (or drag on touch). Jump <b>Space</b> — again in the air to <b>double-jump</b>. <b>Double-tap</b> a move key to <b>dash</b>.'],
+  ['Fight', 'Attack with <b>left-click</b> or <b>J</b>. <b>Hold</b> attack to unleash a <b>charged strike</b>. Land hits in a row to build a <b>combo</b>.'],
+  ['Elements &amp; reactions', 'Attune elements at Wardstones, then switch with <b>Q</b> (next) and <b>E</b> (previous). Hit a foe with one element, then a <b>different</b> one, to trigger a <b>reaction</b> for bonus damage.'],
+  ['Gather', 'Swing at <b>trees</b> for Timber and <b>rock</b> for Stone. <b>Ore</b> needs a <b>pick</b> of the right tier. Drops fly to you on their own.'],
+  ['Craft &amp; forge', 'Open <b>Inventory</b> (<b>I</b> or pause menu) and use the <b>Crafting</b> list to make tools, blocks, and traps. Place a <b>Forge</b> and stand near it to <b>smelt</b> ore into iron.'],
+  ['Build &amp; dig', 'Put a <b>block on your hotbar</b> (<b>1–0</b>) and press attack to <b>place</b> it. Attack a placed block to <b>break</b> it. With a <b>pick</b>, attack the bare ground to <b>dig</b>.'],
+  ['Traps', 'Craft and place <b>Spike / Frost / Ember</b> traps to defend a base — enemies that step on them take damage or a status.'],
+  ['The Delve', 'Forge an <b>Iron Pick</b>, then use it at the <b>Sunken Barrow</b> to descend into the crystal cavern — and whatever waits at the bottom.'],
+  ['Get around', 'Open the <b>Map</b> with <b>M</b>, this <b>Journal</b> with <b>L</b>, and pause with <b>Esc</b>. Progress autosaves; download a <b>.json</b> from the pause menu for a real backup.'],
+];
+function renderJournal(){
+  const rankEl = dom['journal-rank'];
+  const nIns = G.quest.insights.length;
+  if (rankEl) rankEl.textContent = `Rank: ${wisdomTitle()} · ${nIns} / ${MAIN_QUESTS.length} insights`;
+  [...dom.jtabs.children].forEach(b=> b.classList.toggle('sel', b.dataset.tab===journalTab));
+  const body = dom.jbody; body.innerHTML = '';
+  const esc = (s)=> s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  if (journalTab==='story'){
+    MAIN_QUESTS.forEach((q,i)=>{
+      const done = G.quest.mainDone.includes(q.id);
+      const active = i===G.quest.main && !done;
+      if (i > G.quest.main) return;                         // don't spoil unreached beats
+      const c = document.createElement('div');
+      c.className = 'qcard'+(active?' active':'')+(done?' done':'');
+      c.innerHTML = `<div class="qh">${esc(q.title)} ${active?'<span class="tag now">Current</span>':(done?'<span class="tag ok">✓</span>':'')}</div>
+        <div class="qd">${q.objective}</div>${done?`<div class="qlesson">“${esc(q.lesson)}”</div>`:''}`;
+      body.appendChild(c);
+    });
+  } else if (journalTab==='daily' || journalTab==='weekly'){
+    const arr = journalTab==='daily'?G.quest.daily:G.quest.weekly;
+    const pool = journalTab==='daily'?DAILY_POOL:WEEKLY_POOL;
+    const when = journalTab==='daily'?'Refreshes each day.':'Refreshes each week.';
+    body.insertAdjacentHTML('beforeend', `<p class="guide-row" style="color:var(--muted)">${when}</p>`);
+    if (!arr.length) body.insertAdjacentHTML('beforeend','<p class="guide-row">None right now — come back later.</p>');
+    for (const e of arr){
+      const def = pool.find(p=>p.id===e.id); if (!def) continue;
+      const c = document.createElement('div'); c.className='qcard'+(e.done?' done':'');
+      const frac = Math.min(1, e.prog/def.goal.n);
+      c.innerHTML = `<div class="qh">${esc(def.title)} ${e.done?'<span class="tag ok">✓</span>':`<span class="tag now">+${def.reward}✦</span>`}</div>
+        <div class="qbar"><i style="width:${frac*100}%"></i></div>
+        <div class="qd">${e.prog} / ${def.goal.n}</div>
+        <div class="qpractice">Practice — ${esc(def.practice)}</div>`;
+      body.appendChild(c);
+    }
+  } else if (journalTab==='journal'){
+    if (!G.quest.insights.length) body.insertAdjacentHTML('beforeend','<p class="guide-row">Your insights will gather here as your story unfolds.</p>');
+    for (const id of G.quest.insights){
+      const q = MAIN_QUESTS.find(x=>x.id===id); if (!q||!q.insight) continue;
+      const c = document.createElement('div'); c.className='qcard insight';
+      c.innerHTML = `<div class="ith">${esc(q.insight.theme)}</div>
+        <div class="itt">“${esc(q.insight.teaching)}”</div>
+        <div class="itp">Try this — ${esc(q.insight.practice)}</div>`;
+      body.appendChild(c);
+    }
+  } else {
+    for (const [h, t] of GUIDE){
+      body.insertAdjacentHTML('beforeend', `<div class="guide-h">${h}</div><div class="guide-row">${t}</div>`);
+    }
+  }
+}
+function openJournal(){
+  if (G.phase!=='playing' && G.phase!=='paused') return;
+  cameFromPause = (G.phase==='paused');
+  hide(dom['menu-pause']);
+  G.phase='journal'; document.exitPointerLock?.();
+  show(dom['menu-journal']); renderJournal();
+}
+function closeJournal(){
+  if (G.phase!=='journal') return;
+  hide(dom['menu-journal']);
+  if (cameFromPause){ G.phase='paused'; show(dom['menu-pause']); }
+  else G.phase='playing';
+}
+let cameFromPause = false;
+
 function openMap(){
   if (G.phase!=='playing') return;
   G.phase='map'; document.exitPointerLock?.();
@@ -1864,6 +1962,7 @@ function defeatEnemy(e){
   scene.remove(e.mesh);
   if (e.dragon){ dragonDefeatedFlow(e); return; }
   if (e.boss){ bossDefeatedFlow(e); return; }
+  noteEvent('defeat', 1);
   const reward = (e.kind==='boulder'?12:5) + (e.elem?4:0);
   addTokens(reward);
   // heal on kill — a small reward that keeps aggressive play alive
@@ -2104,7 +2203,7 @@ function placeBlock(type, gx, gy, gz, trap=null, fromLoad=false){
     gx, gy, gz, collider: trap?null:collider, platform: trap?null:platform, cooldown:0 };
   placed.push(entry); placedMap.set(key, entry);
   if (type==='block_forge') forges.push({ x:gx, z:gz });
-  if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4); }
+  if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4); noteEvent('build', 1); }
   return true;
 }
 function removeBlock(entry, drop=true){
@@ -2286,6 +2385,8 @@ function setAmbiance(under){
 function descend(){
   buildCavern();
   G.underground = true;
+  advanceMain('descended');
+  noteEvent('descend', 1);
   const barrow = interactables.find(x=>x.label&&/Barrow/.test(x.label()));
   delveReturn = { x:-96, z:-92 };
   player.position.set(CAVERN.x+50, 0, CAVERN.z);
@@ -2401,6 +2502,8 @@ function updateEnemyShots(dt){
 }
 function dragonDefeatedFlow(e){
   G.dragonDefeated = true; dragonRef = null; hide(dom['boss-bar']);
+  advanceMain('dragonDefeated');
+  noteEvent('defeatBoss', 1);
   dissolve(e.mesh); dissolve(e.mesh);
   scene.remove(e.mesh);
   spawnDrop('crystal_ore', 12, e.mesh.position.clone().setY(1));
@@ -2550,6 +2653,7 @@ function setAlert(lv){
 function campPassed(){
   G.flags.campPassed = true;
   hide(dom['alert-state']);
+  advanceMain('campPassed');
   addTokens(15);
   toast('You slipped through the camp! +15 Emberlight', 'good', 3200);
   tainerSay('You walked right through them! Okay okay — next: Skywright Pell, past the meadow. He teaches gliding, and honestly we are going to need it.', 6000);
@@ -2589,6 +2693,7 @@ function updateTrial(){
 }
 function trialPass(){
   G.flags.trialPassed=true; G.glideUnlocked=true;
+  advanceMain('trialPassed');
   addTokens(20);
   spawnBurst(player.position.clone(),0x7bd3c6,40,1.4);
   toast('You earned the Windrider’s Mark! Gliding unlocked. +20 Emberlight', 'good', 4200);
@@ -2596,6 +2701,104 @@ function trialPass(){
   G.stage=5;
   setObjective('Attune the remaining Wardstones, strike the four elemental mechanisms, and open the Arc-sealed gate beyond the camp — something waits in the hollow.');
 }
+
+/* ============================================================ QUESTS & JOURNAL
+   Main chain teaches a reflective skill at each existing story beat; daily/weekly
+   pair a game task with a small real-world practice; the Journal collects Insights
+   into a Wayfarer rank. See quests.js for content + the "not therapy" framing. */
+function todayKey(){ return new Date().toISOString().slice(0,10); }
+function weekKey(){
+  const d = new Date(); const day = (d.getDay()+6)%7;           // Mon=0
+  const monday = new Date(d); monday.setDate(d.getDate()-day);
+  return monday.toISOString().slice(0,10);
+}
+function rollPool(pool, n){
+  const ids = pool.map(p=>p.id); const out=[];
+  while (out.length<n && ids.length){ out.push(ids.splice(Math.floor(Math.random()*ids.length),1)[0]); }
+  return out.map(id=>({ id, prog:0, done:false }));
+}
+function ensureQuests(){
+  const q = G.quest;
+  if (q.dailyDate !== todayKey()){ q.dailyDate = todayKey(); q.daily = rollPool(DAILY_POOL, 3); }
+  if (q.weeklyKey !== weekKey()){ q.weeklyKey = weekKey(); q.weekly = rollPool(WEEKLY_POOL, 2); }
+}
+function activeMainQuest(){ return MAIN_QUESTS[G.quest.main] || null; }
+function refreshObjective(){
+  const q = activeMainQuest();
+  if (q) setObjective(q.objective);
+  else if (G.quest.mainDone.length >= MAIN_QUESTS.length) setObjective('Your legend is written — roam free, help the vale, and carry what you’ve learned.');
+}
+const firedTriggers = new Set();
+function advanceMain(trigger){
+  firedTriggers.add(trigger);
+  const q = activeMainQuest();
+  if (q && q.trigger === trigger) completeMain(q);
+}
+function completeMain(q){
+  if (G.quest.mainDone.includes(q.id)) return;
+  G.quest.mainDone.push(q.id);
+  G.quest.main = Math.min(G.quest.main+1, MAIN_QUESTS.length);
+  grantInsight(q);
+  if (q.reward) addTokens(q.reward);
+  sfx.attune();
+  toast(`Story: “${q.title}” — insight earned. +${q.reward} Emberlight`, 'good', 4200);
+  tainerSay(q.lesson, 8000);
+  refreshObjective(); updateHUD();
+  // chain forward: the capstone auto-completes, and any beat whose trigger
+  // already fired this session (out-of-order play) completes too
+  const next = activeMainQuest();
+  if (next){
+    if (next.trigger === 'auto') setTimeout(()=>{ if (activeMainQuest()===next) completeMain(next); }, 9000);
+    else if (firedTriggers.has(next.trigger)) setTimeout(()=>{ if (activeMainQuest()===next) completeMain(next); }, 400);
+  }
+}
+function grantInsight(q){
+  if (!q.insight || G.quest.insights.includes(q.id)) return;
+  G.quest.insights.push(q.id);
+}
+function reconstructMainFromFlags(){
+  // resume the story at the right beat for a save made before quests existed
+  const f = G.flags||{};
+  const done = [];
+  const mark = (id,cond)=>{ if(cond) done.push(id); };
+  mark('m_cast', f.fished);
+  mark('m_name', Object.values(G.elements||{}).some(Boolean));
+  mark('m_wall', f.iceMelted);
+  mark('m_watch', f.campPassed);
+  mark('m_space', G.bossDefeated);
+  mark('m_control', f.firstReaction);
+  mark('m_wind', f.trialPassed || G.glideUnlocked);
+  mark('m_dark', G.dragonDefeated);   // if the dragon's dead they surely descended
+  mark('m_wyrm', G.dragonDefeated);
+  mark('m_light', G.dragonDefeated);
+  G.quest.mainDone = MAIN_QUESTS.filter(q=>done.includes(q.id)).map(q=>q.id);
+  G.quest.insights = [...G.quest.mainDone];
+  // active = first not-done
+  let idx = MAIN_QUESTS.findIndex(q=>!G.quest.mainDone.includes(q.id));
+  G.quest.main = idx<0 ? MAIN_QUESTS.length : idx;
+}
+function noteEvent(type, n=1, item=null){
+  const bump = (arr, pool)=>{
+    for (const e of arr){
+      if (e.done) continue;
+      const def = pool.find(p=>p.id===e.id); if (!def) continue;
+      const g = def.goal;
+      if (g.type !== type) continue;
+      if (g.item){ const ok = Array.isArray(g.item) ? g.item.includes(item) : g.item===item; if (!ok) continue; }
+      e.prog += n;
+      if (e.prog >= g.n){ e.done=true; e.prog=g.n;
+        if (def.reward) addTokens(def.reward);
+        if (def.item) addItem(def.item, 1);
+        sfx.token();
+        toast(`Quest done: ${def.title}  ·  +${def.reward} Emberlight`, 'good', 3600);
+        if (def.practice) tainerSay(`A small practice for the world beyond the vale — ${def.practice}`, 6000);
+      }
+    }
+  };
+  bump(G.quest.daily, DAILY_POOL);
+  bump(G.quest.weekly, WEEKLY_POOL);
+}
+function wisdomTitle(){ return wayfarerRank(G.quest.insights.length); }
 
 /* ------------------------------------------------------------- progression */
 function addTokens(n){ G.tokens += n; sfx.token(); updateHUD(); }
@@ -2638,6 +2841,7 @@ function updateParticles(dt){
 function meltIce(){
   if (G.flags.iceMelted) return;
   G.flags.iceMelted = true;
+  advanceMain('iceMelted');
   spawnBurst(iceWall.position.clone().setY(2), 0x8fd7f0, 40, 1.4, true);
   spawnBurst(iceWall.position.clone().setY(2), 0xf0713b, 20, 1.2);
   // remove ice colliders
@@ -3167,6 +3371,7 @@ function serialize(){
       bag:G.bag, hotbar:G.hotbar,
       build:placed.map(e=>({t:e.type, gx:e.gx, gy:e.gy, gz:e.gz, trap:e.trap||null})),
       dragonDefeated:G.dragonDefeated, hardMode:G.hardMode,
+      quest:G.quest,
       pos:{x:player?.position.x||0, z:player?.position.z||0},
     }
   };
@@ -3258,6 +3463,25 @@ function hydrate(p){
   next.dragonDefeated = !!p.dragonDefeated;
   next.hardMode = !!p.hardMode;
   next.underground = false;
+  // quests (v4). Sanitize against the known quest/pool ids; older saves reconstruct below.
+  const mainIds = MAIN_QUESTS.map(q=>q.id);
+  const dailyIds = DAILY_POOL.map(d=>d.id), weeklyIds = WEEKLY_POOL.map(w=>w.id);
+  const sanEntries = (arr, ids)=> Array.isArray(arr) ? arr.filter(e=>e&&ids.includes(e.id))
+    .map(e=>({ id:e.id, prog:Math.max(0,Math.min(9999, e.prog|0)), done:!!e.done })) : [];
+  const qp = (p.quest && typeof p.quest==='object') ? p.quest : null;
+  if (qp){
+    next.quest = {
+      main: Math.max(0, Math.min(MAIN_QUESTS.length, qp.main|0)),
+      mainDone: Array.isArray(qp.mainDone) ? qp.mainDone.filter(id=>mainIds.includes(id)) : [],
+      insights: Array.isArray(qp.insights) ? qp.insights.filter(id=>mainIds.includes(id)) : [],
+      daily: sanEntries(qp.daily, dailyIds), weekly: sanEntries(qp.weekly, weeklyIds),
+      dailyDate: typeof qp.dailyDate==='string' ? qp.dailyDate.slice(0,10) : '',
+      weeklyKey: typeof qp.weeklyKey==='string' ? qp.weeklyKey.slice(0,10) : '',
+    };
+  } else {
+    next.quest = { main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' };
+    next._reconstructQuest = true;   // pre-v4 save: rebuild story progress from flags after assign
+  }
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
@@ -3266,7 +3490,10 @@ function hydrate(p){
     bossDefeated:next.bossDefeated,
     bag:next.bag, hotbar:next.hotbar,
     build:next.build, dragonDefeated:next.dragonDefeated, hardMode:next.hardMode, underground:false,
+    quest:next.quest,
   });
+  if (next._reconstructQuest) reconstructMainFromFlags();
+  ensureQuests();                 // roll today's daily/weekly if missing or stale
   return next;
 }
 function clamp(v,a,b){ v=Number(v); if(!isFinite(v))v=a; return Math.max(a,Math.min(b,v)); }
@@ -3311,7 +3538,7 @@ function startLoadedGame(next){
     if (next.pos.z < -200){ player.position.set(-96, terrainH(-96,-92), -92); }
     else player.position.set(next.pos.x, terrainH(next.pos.x, next.pos.z), next.pos.z);
   }
-  setObjective(G.stage>=5?'Free roam: explore, attune Wardstones, and continue the search.':'Continue your journey.');
+  refreshObjective();
   tainerSay('Back on the road! I kept your place. Let’s keep looking.', 4200);
 }
 
@@ -3347,7 +3574,7 @@ function buildFreshWorldFor(next){
 }
 
 function hideAllMenus(){
-  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom['menu-map'],dom['menu-inv'],dom.loading].forEach(hide);
+  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom['menu-map'],dom['menu-inv'],dom['menu-journal'],dom.loading].forEach(hide);
 }
 
 /* first-time (new game) world build after class confirm */
@@ -3377,6 +3604,9 @@ function bindButtons(){
   };
   if (dom['craft-search']) dom['craft-search'].oninput = ()=> renderCrafting();
   if (dom['btn-map-close']) dom['btn-map-close'].onclick = ()=> closeMap();
+  if (dom['btn-journal']) dom['btn-journal'].onclick = ()=> openJournal();
+  if (dom['btn-journal-close']) dom['btn-journal-close'].onclick = ()=> closeJournal();
+  if (dom.jtabs) [...dom.jtabs.children].forEach(b=> b.onclick = ()=>{ journalTab=b.dataset.tab; renderJournal(); });
   buildHotbarUI();
   dom['btn-save'].onclick = ()=> downloadSave();
   dom['btn-quit'].onclick = ()=> { hide(dom['menu-pause']); goTitle(); };
@@ -3610,6 +3840,15 @@ function installDevHooks(){
     usingTouch: ()=> usingTouch,
     setStick: (x,y,sprint)=>{ touch.mx=x; touch.my=y; touch.sprint=!!sprint; },
     touchState: ()=> ({ usingTouch, mx:touch.mx, my:touch.my, sprint:touch.sprint }),
+    // quests & journal
+    questState: ()=> ({ main:G.quest.main, active:activeMainQuest()?.id||null,
+      done:[...G.quest.mainDone], insights:G.quest.insights.length, rank:wisdomTitle(),
+      daily:G.quest.daily.map(d=>({id:d.id,prog:d.prog,done:d.done})),
+      weekly:G.quest.weekly.map(w=>({id:w.id,prog:w.prog,done:w.done})) }),
+    fireTrigger: (t)=> advanceMain(t),
+    noteEvent: (type,n,item)=> noteEvent(type,n,item),
+    openJournal: ()=> openJournal(), closeJournal: ()=> closeJournal(),
+    setTab: (t)=>{ journalTab=t; if(G.phase==='journal') renderJournal(); },
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{

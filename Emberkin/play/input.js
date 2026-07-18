@@ -9,7 +9,7 @@ export const DEFAULT_BINDS = {
   ' ':'jump',      'shift':'sprint',
   'e':'interact',  'f':'mimic',      'j':'attack',
   'q':'cycle_element',
-  'i':'inventory', 'tab':'inventory','m':'map',
+  'i':'inventory', 'tab':'inventory','m':'map','l':'log',
   'escape':'pause',
   '1':'slot1','2':'slot2','3':'slot3','4':'slot4','5':'slot5',
   '6':'slot6','7':'slot7','8':'slot8','9':'slot9','0':'slot10',
