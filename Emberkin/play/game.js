@@ -1731,11 +1731,21 @@ function drawMinimap(){
   // forges
   ctx.fillStyle = '#f0713b';
   for (const f of forges){ const dx=(f.x-px)*scale, dz=(f.z-pz)*scale; if(Math.hypot(dx,dz)<W/2-3){ ctx.fillRect(cxp+dx-1.5,cyp+dz-1.5,3,3); } }
-  // player arrow
-  ctx.save(); ctx.translate(cxp,cyp); ctx.rotate(-player.rotation.y);
-  ctx.fillStyle = '#eef3ff'; ctx.beginPath(); ctx.moveTo(0,-5); ctx.lineTo(3.5,4); ctx.lineTo(-3.5,4); ctx.closePath(); ctx.fill();
-  ctx.restore();
+  // player arrow — points along the true heading. The map is world-locked
+  // (world +x → screen right, world +z → screen down), and the player faces
+  // world dir (sin θ, cos θ), so the arrow tip goes exactly there.
+  drawHeadingArrow(ctx, cxp, cyp, player.rotation.y, 6, '#eef3ff');
   ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.strokeRect(0.5,0.5,W-1,H-1);
+}
+function drawHeadingArrow(ctx, cx, cy, rotY, len, color){
+  const fx = Math.sin(rotY), fy = Math.cos(rotY);   // screen-space facing (unit)
+  const pxp = -fy, pyp = fx;                          // perpendicular
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx + fx*len, cy + fy*len);                        // tip = heading
+  ctx.lineTo(cx - fx*len*0.7 + pxp*len*0.6, cy - fy*len*0.7 + pyp*len*0.6);
+  ctx.lineTo(cx - fx*len*0.7 - pxp*len*0.6, cy - fy*len*0.7 - pyp*len*0.6);
+  ctx.closePath(); ctx.fill();
 }
 function drawWorldMap(){
   const cv = dom.worldmap; if (!cv) return;
@@ -1765,10 +1775,8 @@ function drawWorldMap(){
     ctx.fillStyle='rgba(238,243,255,.7)'; ctx.font='9px sans-serif';
     ctx.fillText(p.name, toX(p.x), toY(p.z)+12);
   }
-  // player
-  ctx.save(); ctx.translate(toX(player.position.x), toY(player.position.z)); ctx.rotate(-player.rotation.y);
-  ctx.fillStyle='#f5c168'; ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(5,7); ctx.lineTo(-5,7); ctx.closePath(); ctx.fill();
-  ctx.restore();
+  // player — same world-locked heading arrow as the minimap
+  drawHeadingArrow(ctx, toX(player.position.x), toY(player.position.z), player.rotation.y, 11, '#f5c168');
   ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.strokeRect(0.5,0.5,W-1,H-1);
 }
 function openMap(){
@@ -3586,6 +3594,10 @@ function installDevHooks(){
     openMap: ()=> openMap(), closeMap: ()=> closeMap(),
     exploredCount: ()=> explored.size,
     poiCount: ()=> POIS.length,
+    faceToward: (x,z)=>{ const dx=x-player.position.x, dz=z-player.position.z; yaw=Math.atan2(-dx,-dz); },
+    // the on-screen heading-arrow direction (unit, screen space: +x right, +y down)
+    arrowDir: ()=> ({ x:+Math.sin(player.rotation.y).toFixed(3), z:+Math.cos(player.rotation.y).toFixed(3) }),
+    lakePos: ()=> lakePos ? { x:lakePos.x, z:lakePos.z } : null,
     // Phase I
     dragon: ()=> dragonRef ? { alive:dragonRef.alive, hp:Math.round(dragonRef.hp), maxHp:dragonRef.maxHp, phase:dragonRef.phase } : null,
     awakenDragon: ()=>{ if(!dragonRef && dragonHome && !G.dragonDefeated){ spawnDragon(); return true; } return false; },
