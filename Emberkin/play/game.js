@@ -102,7 +102,7 @@ const dom = {};
  'class-complexity','btn-confirm-class','file-input',
  'btn-new','btn-continue','btn-load','btn-settings-title','btn-resume','btn-settings-pause','btn-save',
  'btn-load-pause','btn-quit','btn-settings-back',
- 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
+ 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder','set-hard','set-hard-row',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
@@ -211,6 +211,7 @@ const interactables = [];   // {pos, radius, label, key, onUse, cond}
 const windZones = [];
 const hoops = [];
 const projectiles = [];
+const enemyShots = [];      // boss/dragon projectiles aimed at the player
 const particles = [];       // dissolve/vfx groups {mesh, life, max, vel[]}
 let iceWall = null, campGoal = null, pellPos = null, lakePos = null;
 const mechanisms = [];      // {id, elem, pos, r, done, apply(withVfx)}
@@ -786,10 +787,8 @@ function updateBoss(e, dt, pPos, transformed){
   }
 
   // boss bar
-  if (d < 45 && e.alive){
-    show(dom['boss-bar']);
-    dom['boss-fill'].style.width = (e.hp/e.maxHp*100)+'%';
-  } else hide(dom['boss-bar']);
+  if (d < 45 && e.alive) showBossBar('Hush, the Hollow Warden', e.hp/e.maxHp);
+  else hide(dom['boss-bar']);
 }
 function bossDefeatedFlow(e){
   G.bossDefeated = true;
@@ -947,11 +946,12 @@ function spawnEnemy(pos, kind, dropsOrb=false, guard=false, elem=null){
   mesh.position.copy(pos);
   scene.add(mesh);
   const big = kind==='boulder';
-  const baseHp = (big?120:48) + (elem?14:0);   // variants are a little tougher
+  const hm = G.hardMode ? 1.5 : 1;             // Deepened mode: tougher foes
+  const baseHp = ((big?120:48) + (elem?14:0)) * hm;
   const e = {
     mesh, kind, guard, dropsOrb, elem,
     hp: baseHp, maxHp: baseHp,
-    dmg: big?18:10, speed: big?2.0:2.6,
+    dmg: (big?18:10)*hm, speed: big?2.0:2.6,
     home: pos.clone(), state:'idle', target:null,
     atkCd:0, hitCd:0, alive:true, wobble:Math.random()*10,
     r: big?1.3:0.9,
@@ -1782,6 +1782,7 @@ function defeatEnemy(e){
   e.alive=false;
   dissolve(e.mesh);                      // non-graphic: dissolve into motes of light
   scene.remove(e.mesh);
+  if (e.dragon){ dragonDefeatedFlow(e); return; }
   if (e.boss){ bossDefeatedFlow(e); return; }
   const reward = (e.kind==='boulder'?12:5) + (e.elem?4:0);
   addTokens(reward);
@@ -2222,8 +2223,120 @@ function ascend(){
   toast('You climb back into daylight.', 'good', 2600);
 }
 
+/* ============================================================ PHASE I: DRAGON
+   Vornrath, the Deepwyrm — the endgame boss asleep at the bottom of the Delve.
+   Multi-phase, reaction-driven; defeating it unlocks the Wellspring Transmute,
+   legendary loot, and the Deepened (harder) mode. Original design. ===========*/
 let dragonHome = null, dragonRef = null;
-function buildDragon(pos){ dragonHome = pos.clone(); }   // Phase I fills in the fight
+function buildDragon(pos){ dragonHome = pos.clone(); }
+function makeDragonMesh(){
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color:0x2a2230, roughness:0.7, flatShading:true });
+  const bellyMat = new THREE.MeshStandardMaterial({ color:0x5a2a2a, roughness:0.8, flatShading:true });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(2.0, 5, 4, 8), bodyMat);
+  body.rotation.z = Math.PI/2; body.position.y=3; body.castShadow=true; g.add(body);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.8,1.3,3.4,6), bodyMat);
+  neck.position.set(3.4,4.4,0); neck.rotation.z=-0.7; g.add(neck);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(2.3,1.5,1.5), bodyMat); head.position.set(5.2,5.5,0); g.add(head);
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(1.9,0.5,1.3), bellyMat); jaw.position.set(5.4,4.85,0); g.add(jaw);
+  const eyeMat = new THREE.MeshStandardMaterial({ color:0xff7a3a, emissive:0xff5a1a, emissiveIntensity:1.3 });
+  for (const s of [-0.5,0.5]){ const e=new THREE.Mesh(new THREE.SphereGeometry(0.22,8,8),eyeMat); e.position.set(5.9,5.8,s); g.add(e); }
+  const wingMat = new THREE.MeshStandardMaterial({ color:0x3a2a3a, roughness:0.9, flatShading:true, transparent:true, opacity:0.92, side:THREE.DoubleSide });
+  const wingGeo = new THREE.ConeGeometry(4,0.35,3);
+  const wL = new THREE.Mesh(wingGeo, wingMat); wL.position.set(0,5,-3.2); wL.rotation.z=Math.PI/2; wL.scale.set(1,3,1); g.add(wL);
+  const wR = wL.clone(); wR.position.z=3.2; g.add(wR);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(1.5, 6, 6), bodyMat); tail.position.set(-5,3,0); tail.rotation.z=-Math.PI/2; g.add(tail);
+  const cMat = new THREE.MeshStandardMaterial({ color:0x8fe0e6, emissive:0x2a6b60, emissiveIntensity:0.7, flatShading:true });
+  for (const x of [-1.2,0.8,2.6]){ const c=new THREE.Mesh(new THREE.OctahedronGeometry(0.7,0),cMat); c.position.set(x,5.3,0); g.add(c); }
+  g.userData.wings={wL,wR};
+  return g;
+}
+function spawnDragon(){
+  const mesh = makeDragonMesh();
+  mesh.position.copy(dragonHome);
+  scene.add(mesh);
+  const hp = G.hardMode?1500:950;
+  dragonRef = { mesh, dragon:true, boss:true, guard:false, dropsOrb:false, elem:null,
+    hp, maxHp:hp, dmg: G.hardMode?34:26, speed:5.4, r:3.4, home:dragonHome.clone(),
+    telegraph:0, atkCd:2.2, breatheCd:3, phase:1, alive:true, wobble:0 };
+  enemies.push(dragonRef);
+  toast('The Deepwyrm stirs — Vornrath wakes!', 'bad', 3800);
+  tainerSay('THAT’S what was breathing! Vornrath, the Deepwyrm. Reactions hurt it most — stack two elements! And watch its fire breath.', 6800);
+}
+function maybeAwakenDragon(){
+  if (!G.underground || !dragonHome || dragonRef || G.dragonDefeated) return;
+  if (player.position.distanceTo(dragonHome) < 30) spawnDragon();
+}
+function updateDragon(e, dt, pPos, transformed){
+  e.wobble += dt; e.atkCd -= dt; e.breatheCd -= dt;
+  if (e.phase===1 && e.hp < e.maxHp/2){ e.phase=2; e.speed=7.2; e.dmg*=1.15;
+    spawnBurst(e.mesh.position.clone().setY(5), 0xff7a3a, 30, 2, true);
+    tainerSay('It’s enraged — faster and fiercer! Keep stacking reactions and don’t stop moving!', 4600); }
+  const d = Math.hypot(pPos.x-e.mesh.position.x, pPos.z-e.mesh.position.z);
+  const to = new THREE.Vector3(pPos.x-e.mesh.position.x,0,pPos.z-e.mesh.position.z);
+  if (to.lengthSq()>0.01) e.mesh.rotation.y = Math.atan2(to.x,to.z) - Math.PI/2;   // head is +x local
+  if (e.telegraph>0){
+    e.telegraph -= dt;
+    e.mesh.position.y = terrainH(e.mesh.position.x,e.mesh.position.z) + Math.sin((0.8-e.telegraph)*4)*0.6;
+    if (e.telegraph<=0){
+      spawnBurst(e.mesh.position.clone().setY(0.5), 0xf0713b, 34, 2); if(!settings.motion) shake(0.4);
+      if (d<8){ if(transformed) damageMimic(e.dmg); else damagePlayer(e.dmg); }
+      e.atkCd = e.phase===2?1.6:2.6;
+    }
+  } else {
+    if (d>8){ to.normalize(); e.mesh.position.x+=to.x*e.speed*dt; e.mesh.position.z+=to.z*e.speed*dt; }
+    else if (e.atkCd<=0){ e.telegraph=0.8; }
+    if (e.breatheCd<=0 && d>6 && d<44){ e.breatheCd = e.phase===2?2.2:3.6; dragonBreath(e, pPos); }
+    e.mesh.position.y = terrainH(e.mesh.position.x,e.mesh.position.z);
+  }
+  const fl = Math.sin(e.wobble*4)*0.35;
+  if (e.mesh.userData.wings){ e.mesh.userData.wings.wL.rotation.x=fl; e.mesh.userData.wings.wR.rotation.x=-fl; }
+  if (d<55 && e.alive) showBossBar('Vornrath, the Deepwyrm', e.hp/e.maxHp); else hide(dom['boss-bar']);
+}
+function dragonBreath(e, pPos){
+  const dir = new THREE.Vector3(pPos.x-e.mesh.position.x,0,pPos.z-e.mesh.position.z).normalize();
+  const col=0xf0713b;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.55,8,8),
+    new THREE.MeshStandardMaterial({ color:col, emissive:col, emissiveIntensity:1 }));
+  m.position.copy(e.mesh.position).add(new THREE.Vector3(0,4,0)).add(dir.clone().multiplyScalar(4));
+  scene.add(m);
+  enemyShots.push({ mesh:m, vel:dir.multiplyScalar(22), life:2.6, dmg:Math.round(e.dmg*0.7) });
+  sfx.transform();
+}
+function updateEnemyShots(dt){
+  const pp = (G.mimic.state==='Transformed'&&mimicMesh?mimicMesh:player).position;
+  for (let i=enemyShots.length-1;i>=0;i--){
+    const s=enemyShots[i]; s.life-=dt; s.mesh.position.addScaledVector(s.vel,dt);
+    s.mesh.rotation.y+=dt*4;
+    if (s.mesh.position.distanceTo(pp)<1.4){
+      if (G.mimic.state==='Transformed') damageMimic(s.dmg); else damagePlayer(s.dmg);
+      spawnBurst(s.mesh.position.clone(), 0xf0713b, 10, 1);
+      scene.remove(s.mesh); enemyShots.splice(i,1); continue;
+    }
+    if (s.life<=0 || s.mesh.position.y < terrainH(s.mesh.position.x,s.mesh.position.z)){
+      spawnBurst(s.mesh.position.clone(), 0xf0713b, 6, 0.8);
+      scene.remove(s.mesh); enemyShots.splice(i,1);
+    }
+  }
+}
+function dragonDefeatedFlow(e){
+  G.dragonDefeated = true; dragonRef = null; hide(dom['boss-bar']);
+  dissolve(e.mesh); dissolve(e.mesh);
+  scene.remove(e.mesh);
+  spawnDrop('crystal_ore', 12, e.mesh.position.clone().setY(1));
+  spawnDrop('gold_ore', 8, e.mesh.position.clone().setY(1));
+  addItem('wardcharm', 2);
+  addTokens(120);
+  toast('Vornrath dissolves into a river of light! The Wellspring Transmute is unlocked.', 'good', 6000);
+  tainerSay('You DID it! The Deepwyrm is light again. The Wellspring’s waking — endless crystal if you Transmute at a Forge, and a Deepened mode if you ever want a real challenge. Turn it on in Settings.', 9000);
+  setObjective('The Deepwyrm is undone. Transmute crystal at a Forge, or brave Deepened mode. Your search for the Lost Sibling continues beyond the vale…');
+}
+function showBossBar(name, frac){
+  const bn = dom['boss-bar'].querySelector('.boss-name');
+  if (bn) bn.textContent = name;
+  dom['boss-fill'].style.width = Math.max(0,frac*100)+'%';
+  show(dom['boss-bar']);
+}
 
 /* ------------------------------------------------------------- mimic orb */
 function dropOrb(pos){
@@ -2609,6 +2722,7 @@ function updateEnemies(dt){
   const pPos = transformed && mimicMesh ? mimicMesh.position : player.position;
   for (const e of enemies){
     if (!e.alive) continue;
+    if (e.dragon){ updateDragon(e, dt, pPos, transformed); continue; }
     if (e.boss){ updateBoss(e, dt, pPos, transformed); continue; }
     e.wobble += dt;
     e.atkCd = Math.max(0, e.atkCd-dt);
@@ -2927,6 +3041,8 @@ function syncSettingsUI(){
   dom['set-motion'].checked=settings.motion; dom['set-ui'].checked=settings.ui;
   dom['set-cam'].value=settings.cam; dom['set-invert'].checked=settings.invert;
   dom['set-shoulder'].value=settings.shoulder;
+  if (dom['set-hard-row']){ dom['set-hard-row'].style.display = G.dragonDefeated ? 'flex' : 'none';
+    dom['set-hard'].checked = !!G.hardMode; }
   dom['set-aim'].checked=settings.aim; dom['set-vol'].value=settings.vol;
 }
 function applySettings(){
@@ -3110,6 +3226,7 @@ function clearWorld(){
   for (const e of enemies){ scene.remove(e.mesh); } enemies.length=0;
   for (const o of orbs){ scene.remove(o.mesh); } orbs.length=0;
   for (const p of projectiles){ scene.remove(p.mesh); } projectiles.length=0;
+  for (const s of enemyShots){ scene.remove(s.mesh); } enemyShots.length=0;
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
   mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
@@ -3178,6 +3295,8 @@ function bindButtons(){
   dom['set-cam'].oninput = e=>{ settings.cam=parseFloat(e.target.value); saveSettings(); };
   dom['set-invert'].onchange = e=>{ settings.invert=e.target.checked; saveSettings(); };
   dom['set-shoulder'].onchange = e=>{ settings.shoulder=e.target.value; saveSettings(); };
+  dom['set-hard'].onchange = e=>{ G.hardMode = e.target.checked && G.dragonDefeated;
+    if (e.target.checked && !G.dragonDefeated){ e.target.checked=false; toast('Defeat the Deepwyrm to unlock Deepened mode.', 'info', 2600); } };
   dom['set-aim'].onchange = e=>{ settings.aim=e.target.checked; saveSettings(); };
   dom['set-vol'].oninput = e=>{ settings.vol=parseFloat(e.target.value); setMasterVol(); saveSettings(); };
 }
@@ -3206,6 +3325,8 @@ function loop(){
     updateDrops(dt);
     updateHarvest(dt);
     updateTraps(dt);
+    updateEnemyShots(dt);
+    maybeAwakenDragon();
     tickCombo(dt);
     markExplored();
     mmT += dt; if (mmT>0.12){ mmT=0; drawMinimap(); }
@@ -3377,6 +3498,13 @@ function installDevHooks(){
     openMap: ()=> openMap(), closeMap: ()=> closeMap(),
     exploredCount: ()=> explored.size,
     poiCount: ()=> POIS.length,
+    // Phase I
+    dragon: ()=> dragonRef ? { alive:dragonRef.alive, hp:Math.round(dragonRef.hp), maxHp:dragonRef.maxHp, phase:dragonRef.phase } : null,
+    awakenDragon: ()=>{ if(!dragonRef && dragonHome && !G.dragonDefeated){ spawnDragon(); return true; } return false; },
+    hurtDragon: (n)=>{ if(dragonRef&&dragonRef.alive){ const d=dragonRef; damageEnemy(d,n); return d.alive?Math.round(d.hp):'defeated';} return null; },
+    dragonDefeated: ()=> G.dragonDefeated,
+    hardMode: ()=> G.hardMode,
+    enemyShotCount: ()=> enemyShots.length,
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -3385,7 +3513,8 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
-          updateDrops(dt); updateHarvest(dt); updateTraps(dt); tickCombo(dt); markExplored(); updateCamera(dt);
+          updateDrops(dt); updateHarvest(dt); updateTraps(dt); updateEnemyShots(dt);
+          maybeAwakenDragon(); tickCombo(dt); markExplored(); updateCamera(dt);
         }
         updateParticles(dt); updateFloaters(dt);
       }
