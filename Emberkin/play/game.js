@@ -68,6 +68,10 @@ const G = {
   chests: {},
   mechs: { loam:false, tide:false, arc:false, rime:false },
   bossDefeated: false,
+  build: [],                  // placed blocks: [{t, gx, gy, gz, trap}]
+  underground: false,
+  dragonDefeated: false,
+  hardMode: false,
   elements: { loam:false, tide:false, cinder:false, arc:false, rime:false },
   activeElement: 'none',
   glideUnlocked: false,
@@ -216,6 +220,8 @@ const drops = [];           // {mesh, id, n, life, vy}  dropped items that magne
 const placed = [];          // {key, type, mesh, hp, gx,gy,gz, trap}  player-placed blocks
 const placedMap = new Map();// "gx,gy,gz" -> placed entry
 const floaters = [];        // {el, pos, vy, life, max}  world-anchored damage/loot text
+const POIS = [];            // {x,z,kind,name}  points of interest for the minimap (Phase H)
+let activeSlot = 0;         // currently highlighted hotbar slot
 const world = new THREE.Group();
 
 let ok3d = true;
@@ -310,6 +316,7 @@ function mkMat(){
 function buildWorld() {
   mkMat();
   initFlatZones();
+  initBlockMats();
   scene.add(world);
 
   // rolling-hill ground: a displaced plane; terrainH is the same function
@@ -377,6 +384,13 @@ function buildWorld() {
 
   // Phase-C content: rock/ore veins and lakeside plants
   scatterResources();
+  // Phase-D content: the Sunken Barrow dig-down (cavern builds on first descent)
+  buildDelve();
+  // POIs for the map
+  POIS.push({x:lakePos.x,z:lakePos.z,kind:'lake',name:'Willowmere'},
+    {x:26,z:-46,kind:'camp',name:'Stonekin Camp'}, {x:26,z:-92,kind:'boss',name:'Hush'},
+    {x:-4,z:40,kind:'npc',name:'Skywright Pell'});
+  for (const ws of wardstones) POIS.push({x:ws.pos.x,z:ws.pos.z,kind:'ward',name:ELEMENTS[ws.elem].name});
 
   // ambient life: grass tufts (instanced, cheap) and drifting light motes
   const gGeo = new THREE.ConeGeometry(0.07, 0.4, 4);
@@ -1056,7 +1070,7 @@ function newGame(){
     sibling:null, klass:null, hp:100, maxHp:100, stamina:100, tokens:0, weaponLevel:1,
     owned:[], equipped:null, bag:[], hotbar:new Array(10).fill(null),
     chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
-    bossDefeated:false,
+    bossDefeated:false, build:[], underground:false, dragonDefeated:false, hardMode:false,
     elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
     glideUnlocked:false, stage:0,
     flags:{fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false},
@@ -1296,8 +1310,9 @@ function useItem(id){
 /* hotbar: filled slots act (weapon/element/consumable). Elements are normally
    cycled with Q/E, but saved element entries remain usable. */
 function selectHotbar(i){
+  activeSlot = i;
   const entry = G.hotbar[i];
-  if (!entry) return;
+  if (!entry){ refreshHotbarUI(); return; }
   if (entry.kind==='element'){
     const d = itemDef(entry.id);
     if (d && G.elements[d.elem]) setActiveElement(d.elem);
@@ -1317,6 +1332,7 @@ function elemColorCss(elem){ return '#'+ELEMENTS[elem].color.toString(16).padSta
 function slotVisual(btn, entry, idx){
   btn.className = 'hslot';
   btn.innerHTML = `<span class="hkey">${(idx+1)%10}</span>`;
+  if (idx===activeSlot && G.phase==='playing') btn.classList.add('sel');
   if (assignPick && G.phase==='inventory') btn.classList.add('assignable');
   if (!entry){ btn.classList.add('empty'); btn.title = 'Empty slot'; return; }
   if (entry.kind==='weapon'){
@@ -1398,6 +1414,8 @@ function refreshElementWheel(){
 let atkAnim = 0;
 function doAttack(){
   if (G.phase!=='playing') return;
+  // placing a block from the active hotbar slot takes priority over swinging
+  if (G.mimic.state!=='Transformed' && tryPlaceFromHotbar()) return;
   const inMimic = G.mimic.state==='Transformed';
   const c = CLASSES[G.klass];
   const dmgBase = inMimic ? 22 : Math.round(c.dmg * TIER_MULT[equippedWeapon().tier]) + (G.weaponLevel-1)*8;
@@ -1439,8 +1457,10 @@ function meleeHit(range, arc, dmg){
     if (fwd.dot(to) < Math.cos(arc)) continue;
     damageEnemy(e, dmg); struck = true;
   }
-  // no enemy hit? the same swing gathers a resource node in front
-  if (!struck) harvestHit(player.position, fwd, G.activeElement);
+  // no enemy hit? the same swing gathers a node, else breaks a block / digs
+  if (!struck){
+    if (!harvestHit(player.position, fwd, G.activeElement)) tryBreakOrDig(fwd);
+  }
   swingVfx(fwd);
 }
 function fireProjectile(dmg){
@@ -1676,6 +1696,218 @@ function scatterResources(){
       { drop:'riverbud', hp:1, dropN:[1,2], scale:1 });
   }
 }
+
+/* ============================================================ PHASE D: BUILD
+   Grid-snapped block placement/breaking and ground digging, plus the Sunken
+   Barrow that descends into an underground cavern. Blocks are 1m cubes on an
+   integer grid; each carries its own collider + platform so you can build and
+   stand on structures. The heightfield stays authoritative for the open world
+   (approved hybrid overlay) — voxels exist only where the player builds/digs. */
+const BLOCK_MAT = {};
+const MAX_PLACED = 320;
+let pitCount = 0;
+const CAVERN = new THREE.Vector3(0, 0, -360);   // flat, enclosed, dark region
+function blockKey(gx,gy,gz){ return gx+','+gy+','+gz; }
+function initBlockMats(){
+  BLOCK_MAT.block_dirt  = new THREE.MeshStandardMaterial({ color:0x8a6a45, roughness:1, flatShading:true });
+  BLOCK_MAT.block_stone = new THREE.MeshStandardMaterial({ color:0x8f96a3, roughness:0.95, flatShading:true });
+  BLOCK_MAT.block_plank = new THREE.MeshStandardMaterial({ color:0xb07d45, roughness:0.9, flatShading:true });
+  BLOCK_MAT.spike       = new THREE.MeshStandardMaterial({ color:0x9aa2ad, roughness:0.6, metalness:0.3, flatShading:true });
+  BLOCK_MAT.barricade   = new THREE.MeshStandardMaterial({ color:0x6a4a2c, roughness:1, flatShading:true });
+}
+function aimCell(){
+  // the grid cell just in front of the player, at the top of any stack there
+  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  const p = player.position.clone().add(fwd.multiplyScalar(2.0));
+  const gx = Math.round(p.x), gz = Math.round(p.z);
+  let gy = Math.round(terrainH(gx,gz));           // integer ground level
+  while (placedMap.has(blockKey(gx,gy,gz))) gy++;  // stack on top of existing blocks
+  return { gx, gy, gz };
+}
+function placeBlock(type, gx, gy, gz, trap=null, fromLoad=false){
+  const key = blockKey(gx,gy,gz);
+  if (placedMap.has(key)) return false;
+  if (placed.length >= MAX_PLACED){ if(!fromLoad) toast('Build limit reached here.', 'info', 2000); return false; }
+  const geo = trap==='spike'
+    ? new THREE.ConeGeometry(0.42, 0.9, 4)
+    : new THREE.BoxGeometry(0.98, 0.98, 0.98);
+  const mesh = new THREE.Mesh(geo, BLOCK_MAT[trap||type] || BLOCK_MAT.block_stone);
+  mesh.position.set(gx, gy + (trap==='spike'?0.45:0.5), gz);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  world.add(mesh);
+  const collider = { x:gx, z:gz, r:0.62, maxY: gy+0.9 };
+  const platform = { x:gx, z:gz, hw:0.5, hd:0.5, topY: gy+1 };
+  if (!trap){ colliders.push(collider); platforms.push(platform); }
+  const entry = { key, type, trap, mesh, hp: itemDef(type)?.hardness ? itemDef(type).hardness*30 : 40,
+    gx, gy, gz, collider: trap?null:collider, platform: trap?null:platform };
+  placed.push(entry); placedMap.set(key, entry);
+  if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4); }
+  return true;
+}
+function removeBlock(entry, drop=true){
+  world.remove(entry.mesh);
+  placed.splice(placed.indexOf(entry),1); placedMap.delete(entry.key);
+  if (entry.collider){ const i=colliders.indexOf(entry.collider); if(i>=0) colliders.splice(i,1); }
+  if (entry.platform){ const i=platforms.indexOf(entry.platform); if(i>=0) platforms.splice(i,1); }
+  if (drop){ const id = entry.trap ? (entry.trap==='spike'?'iron_ingot':'timber') : entry.type;
+    spawnDrop(id, 1, entry.mesh.position.clone()); }
+  spawnBurst(entry.mesh.position.clone(), 0xcdb89a, 8, 0.6); sfx.hit();
+}
+/* place from the active hotbar block; returns true if it consumed the attack */
+function tryPlaceFromHotbar(){
+  const entry = G.hotbar[activeSlot];
+  if (!entry || entry.kind!=='item') return false;
+  const d = itemDef(entry.id);
+  if (!d || (d.type!=='block')) return false;
+  if (countItem(entry.id) < 1){ toast(`No ${d.name} left.`, 'info', 1400); return true; }
+  const c = aimCell();
+  const trap = TRAP_BLOCKS[entry.id] || null;
+  if (placeBlock(entry.id, c.gx, c.gy, c.gz, trap)){ removeItem(entry.id, 1); refreshHotbarUI(); }
+  return true;
+}
+/* break a placed block in front, or dig the ground with a pick */
+function tryBreakOrDig(fwd){
+  const p = player.position.clone().add(fwd.clone().multiplyScalar(1.6));
+  // nearest placed block within reach
+  let best=null, bd=1e9;
+  for (const e of placed){
+    const d = Math.hypot(e.gx-p.x, e.gz-p.z) + Math.abs(e.gy - player.position.y)*0.3;
+    if (d<bd && d<1.6){ bd=d; best=e; }
+  }
+  if (best){ removeBlock(best, true); return true; }
+  // else dig the ground (needs a pick)
+  return digGround();
+}
+function digGround(){
+  if (bestToolTier('pick') < 1){ toast('You need a pick to dig here.', 'info', 1800); return false; }
+  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  const p = player.position.clone().add(fwd.multiplyScalar(1.4));
+  const rocky = terrainH(p.x,p.z) > 1.2;
+  const id = rocky ? 'stone_chunk' : 'dirt_clod';
+  spawnDrop(id, 1 + (Math.random()<0.4?1:0), p.clone().setY(terrainH(p.x,p.z)+0.3));
+  if (Math.random()<0.12) spawnDrop('clay_lump', 1, p.clone().setY(terrainH(p.x,p.z)+0.3));
+  spawnBurst(p.clone().setY(terrainH(p.x,p.z)+0.2), 0x8a6a45, 8, 0.6);
+  sfx.hit();
+  // cosmetic divot (bounded pool)
+  if (pitCount < 40){
+    pitCount++;
+    const pit = new THREE.Mesh(new THREE.CircleGeometry(0.6, 8),
+      new THREE.MeshStandardMaterial({ color:0x3a2c1c, roughness:1 }));
+    pit.rotation.x = -Math.PI/2; pit.position.set(p.x, terrainH(p.x,p.z)+0.03, p.z); world.add(pit);
+  }
+  return true;
+}
+
+/* -------------------------------------------------- the Sunken Barrow / delve */
+const TRAP_BLOCKS = { }; // filled in Phase F
+let cavernBuilt = false, delveReturn = null;
+function buildDelve(){
+  // surface: a dark cracked mound with a descent prompt (needs an Iron Pick)
+  const barrow = new THREE.Vector3(-96, 0, -96);
+  const mound = new THREE.Group();
+  for (let i=0;i<7;i++){
+    const rk = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4+Math.random(),0), MAT.stoneDark);
+    const a=i/7*Math.PI*2; rk.position.set(Math.cos(a)*2.2, 0.6+Math.random()*0.6, Math.sin(a)*2.2);
+    rk.castShadow=true; mound.add(rk);
+  }
+  const maw = new THREE.Mesh(new THREE.CircleGeometry(1.6, 16),
+    new THREE.MeshStandardMaterial({ color:0x05070c }));
+  maw.rotation.x=-Math.PI/2; maw.position.y=0.05; mound.add(maw);
+  mound.position.set(barrow.x, terrainH(barrow.x,barrow.z), barrow.z); world.add(mound);
+  colliders.push({ x:barrow.x, z:barrow.z, r:2.2 });
+  interactables.push({
+    pos: barrow.clone(), radius: 4.2, key:'E',
+    label: () => bestToolTier('pick')>=2 ? 'Descend into the Sunken Barrow' : 'Sunken Barrow — need an Iron Pick',
+    cond: () => true,
+    onUse: () => {
+      if (bestToolTier('pick') < 2){ toast('The stone is too hard — forge an Iron Pick first.', 'info', 2600); return; }
+      descend();
+    },
+  });
+  // POI for the minimap (Phase H)
+  POIS.push({ x:barrow.x, z:barrow.z, kind:'barrow', name:'Sunken Barrow' });
+}
+function buildCavern(){
+  if (cavernBuilt) return; cavernBuilt = true;
+  const cx=CAVERN.x, cz=CAVERN.z;
+  // dark floor
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(60, 40),
+    new THREE.MeshStandardMaterial({ color:0x2a2622, roughness:1 }));
+  floor.rotation.x=-Math.PI/2; floor.position.set(cx,0.02,cz); floor.receiveShadow=true; world.add(floor);
+  // ceiling
+  const ceil = new THREE.Mesh(new THREE.CircleGeometry(62, 40),
+    new THREE.MeshStandardMaterial({ color:0x14100e, roughness:1, side:THREE.DoubleSide }));
+  ceil.rotation.x=Math.PI/2; ceil.position.set(cx,20,cz); world.add(ceil);
+  // wall ring
+  for (let i=0;i<28;i++){
+    const a=i/28*Math.PI*2;
+    const col = new THREE.Mesh(new THREE.ConeGeometry(5, 22, 5), i%2?MAT.stoneDark:MAT.rock);
+    col.position.set(cx+Math.cos(a)*58, 9, cz+Math.sin(a)*58); world.add(col);
+    colliders.push({ x:cx+Math.cos(a)*58, z:cz+Math.sin(a)*58, r:4 });
+  }
+  // ambient glow crystals + a light
+  const cl = new THREE.PointLight(0x8fe0e6, 0.8, 90); cl.position.set(cx,12,cz); world.add(cl);
+  // crystal-rich ore veins (the reward for digging deep)
+  for (let i=0;i<10;i++){
+    const a=Math.random()*Math.PI*2, r=8+Math.random()*44;
+    makeHarvestNode('rock', cx+Math.cos(a)*r, cz+Math.sin(a)*r,
+      { ore:true, drop:'crystal_ore', hp:110, minTier:2, dropN:[2,3], scale:0.9 });
+  }
+  for (let i=0;i<6;i++){
+    const a=Math.random()*Math.PI*2, r=8+Math.random()*44;
+    makeHarvestNode('rock', cx+Math.cos(a)*r, cz+Math.sin(a)*r, { drop:'iron_ore', hp:90, minTier:1, dropN:[2,3], scale:0.85 });
+  }
+  // underground lake
+  const ul = new THREE.Mesh(new THREE.CircleGeometry(9, 30),
+    new THREE.MeshStandardMaterial({ color:0x1c4a63, roughness:0.15, metalness:0.2, transparent:true, opacity:0.9 }));
+  ul.rotation.x=-Math.PI/2; ul.position.set(cx-30,0.06,cz+22); world.add(ul);
+  // ruined pillars (environmental storytelling)
+  for (const [px,pz,ph] of [[cx+26,cz-18,6],[cx+30,cz-14,3.5],[cx+22,cz-22,5]]){
+    const pil = new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.3,ph,8), MAT.stone);
+    pil.position.set(px, ph/2, pz); pil.castShadow=true; world.add(pil);
+    colliders.push({ x:px, z:pz, r:1.2 });
+  }
+  // secret room: a hidden alcove chest behind the pillars
+  makeChest('chest-delve', new THREE.Vector3(cx+30, 0, cz-24), {type:'tokens', n:60});
+  FLAT_ZONES.push({ x:cx, z:cz, r:60 });   // keep the cavern floor flat
+  // ascend shaft (a lit pillar of light back to the surface)
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,20,12,1,true),
+    new THREE.MeshStandardMaterial({ color:0xfff2c0, emissive:0xf5c168, emissiveIntensity:0.5, transparent:true, opacity:0.3, side:THREE.DoubleSide }));
+  shaft.position.set(cx+50, 10, cz); world.add(shaft);
+  interactables.push({
+    pos: new THREE.Vector3(cx+50,0,cz), radius: 3.5, key:'E',
+    label: ()=> 'Rise to the surface', cond: ()=> G.underground,
+    onUse: ()=> ascend(),
+  });
+  buildDragon(new THREE.Vector3(cx, 0, cz-30));   // Phase I boss, dormant
+}
+function setAmbiance(under){
+  if (!scene) return;
+  if (under){ scene.background = new THREE.Color(0x07060a); if(scene.fog){ scene.fog.color.set(0x07060a); scene.fog.near=8; scene.fog.far=70; } }
+  else { scene.background = new THREE.Color(0x9fd0e8); if(scene.fog){ scene.fog.color.set(0x9fd0e8); scene.fog.near=40; scene.fog.far=260; } }
+}
+function descend(){
+  buildCavern();
+  G.underground = true;
+  const barrow = interactables.find(x=>x.label&&/Barrow/.test(x.label()));
+  delveReturn = { x:-96, z:-92 };
+  player.position.set(CAVERN.x+50, 0, CAVERN.z);
+  setAmbiance(true);
+  sfx.transform();
+  toast('You squeeze down into a vast, glimmering dark…', 'info', 3600);
+  tainerSay('Whoa. This goes DEEP. Crystal everywhere — and… something breathing down here. Stay sharp.', 5200);
+  if (POIS.every(p=>p.kind!=='cavern')) POIS.push({ x:CAVERN.x, z:CAVERN.z, kind:'cavern', name:'The Deep' });
+}
+function ascend(){
+  G.underground = false;
+  player.position.set(delveReturn?.x ?? -96, 0, delveReturn?.z ?? -92);
+  setAmbiance(false);
+  sfx.eject();
+  toast('You climb back into daylight.', 'good', 2600);
+}
+
+let dragonHome = null, dragonRef = null;
+function buildDragon(pos){ dragonHome = pos.clone(); }   // Phase I fills in the fight
 
 /* ------------------------------------------------------------- mimic orb */
 function dropOrb(pos){
@@ -1983,9 +2215,15 @@ function updatePlayer(dt){
   if (body.position.y <= groundY){ body.position.y=groundY; if(pv.y<0){ pv.y=0; grounded=true; glideActive=false; } }
   else grounded=false;
 
-  // keep within world
-  const R = Math.hypot(body.position.x, body.position.z);
-  if (R>195){ body.position.x*=195/R; body.position.z*=195/R; }
+  // keep within bounds — the open world (radius 195 from origin) or, underground,
+  // inside the cavern (radius 55 from its centre, which sits far off at CAVERN)
+  if (G.underground){
+    const dx=body.position.x-CAVERN.x, dz=body.position.z-CAVERN.z, R=Math.hypot(dx,dz);
+    if (R>55){ body.position.x=CAVERN.x+dx/R*55; body.position.z=CAVERN.z+dz/R*55; }
+  } else {
+    const R = Math.hypot(body.position.x, body.position.z);
+    if (R>195){ body.position.x*=195/R; body.position.z*=195/R; }
+  }
 
   // if transformed, keep player group synced (for eject position + attack facing)
   if (transformed && mimicMesh){ player.position.copy(mimicMesh.position); player.rotation.y = mimicMesh.rotation.y; }
@@ -2347,6 +2585,8 @@ function serialize(){
       owned:G.owned, equipped:G.equipped, chests:G.chests, mechs:G.mechs,
       bossDefeated:G.bossDefeated,
       bag:G.bag, hotbar:G.hotbar,
+      build:placed.map(e=>({t:e.type, gx:e.gx, gy:e.gy, gz:e.gz, trap:e.trap||null})),
+      dragonDefeated:G.dragonDefeated, hardMode:G.hardMode,
       pos:{x:player?.position.x||0, z:player?.position.z||0},
     }
   };
@@ -2426,6 +2666,18 @@ function hydrate(p){
   // pre-hotbar saves (v1/v2): seed the bar with the equipped weapon
   // (elements are cycled with Q/E, not slotted)
   if (next.hotbar.every(s=>!s)) next.hotbar[0] = { kind:'weapon', id:equipped };
+  // placed structures (validated: known block types + integer coords)
+  next.build = [];
+  if (Array.isArray(p.build)) for (const b of p.build){
+    if (b && isValidItemId(b.t) && itemDef(b.t).type==='block'
+        && Number.isFinite(b.gx) && Number.isFinite(b.gy) && Number.isFinite(b.gz)
+        && Math.abs(b.gx)<300 && Math.abs(b.gz)<500 && next.build.length<MAX_PLACED){
+      next.build.push({ t:b.t, gx:b.gx|0, gy:b.gy|0, gz:b.gz|0, trap:(typeof b.trap==='string'?b.trap:null) });
+    }
+  }
+  next.dragonDefeated = !!p.dragonDefeated;
+  next.hardMode = !!p.hardMode;
+  next.underground = false;
   Object.assign(G, {
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
@@ -2433,6 +2685,7 @@ function hydrate(p){
     owned:next.owned, equipped:next.equipped, chests:next.chests, mechs:next.mechs,
     bossDefeated:next.bossDefeated,
     bag:next.bag, hotbar:next.hotbar,
+    build:next.build, dragonDefeated:next.dragonDefeated, hardMode:next.hardMode, underground:false,
   });
   return next;
 }
@@ -2470,8 +2723,14 @@ function startLoadedGame(next){
   if (G.flags.iceMelted && iceWall){ for(let i=colliders.length-1;i>=0;i--) if(colliders[i].tag==='ice') colliders.splice(i,1); world.remove(iceWall); }
   // re-apply completed mechanisms (opens gate / freezes lake / raises steps; respawns boss if undefeated)
   for (const m of mechanisms){ if (G.mechs[m.id]) activateMechanism(m, false); }
+  // rebuild placed structures
+  for (const b of (G.build||[])) placeBlock(b.t, b.gx, b.gy, b.gz, b.trap||null, true);
   setActiveElement(G.activeElement);
-  if (next.pos){ player.position.set(next.pos.x, 0, next.pos.z); }
+  if (next.pos){
+    // saved underground? surface safely at the barrow (avoids loading into an unbuilt cavern)
+    if (next.pos.z < -200){ player.position.set(-96, terrainH(-96,-92), -92); }
+    else player.position.set(next.pos.x, terrainH(next.pos.x, next.pos.z), next.pos.z);
+  }
   setObjective(G.stage>=5?'Free roam: explore, attune Wardstones, and continue the search.':'Continue your journey.');
   tainerSay('Back on the road! I kept your place. Let’s keep looking.', 4200);
 }
@@ -2485,9 +2744,11 @@ function clearWorld(){
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
   mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
-  harvestables.length=0; placed.length=0; placedMap.clear();
+  harvestables.length=0; placed.length=0; placedMap.clear(); POIS.length=0;
+  cavernBuilt=false; pitCount=0; dragonRef=null; dragonHome=null; G.underground=false;
   for (const d of drops) scene?.remove(d.mesh); drops.length=0;
   for (const f of floaters) f.el.remove(); floaters.length=0;
+  setAmbiance(false);
   if (player){ scene.remove(player); player=null; }
   if (tainerMesh){ scene.remove(tainerMesh); tainerMesh=null; }
   if (mimicMesh){ scene.remove(mimicMesh); mimicMesh=null; }
@@ -2704,6 +2965,15 @@ function installDevHooks(){
         const dx=best.mesh.position.x-player.position.x, dz=best.mesh.position.z-player.position.z, L=Math.hypot(dx,dz)||1;
         yaw = Math.atan2(-dx/L, -dz/L); return true; } return false; },
     swing: ()=> doAttack(),
+    // Phase D
+    placedCount: ()=> placed.length,
+    placeAhead: (type)=>{ const c=aimCell(); return placeBlock(type, c.gx, c.gy, c.gz, TRAP_BLOCKS[type]||null); },
+    dig: ()=> digGround(),
+    descend: ()=> descend(),
+    ascend: ()=> ascend(),
+    underground: ()=> G.underground,
+    cavernBuilt: ()=> cavernBuilt,
+    setActiveSlot: (i)=>{ activeSlot=i; refreshHotbarUI(); },
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
