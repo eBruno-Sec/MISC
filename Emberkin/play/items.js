@@ -33,10 +33,20 @@ export const ITEMS = {
   axe_stone:    { name:'Stone Axe',     icon:'🪓', stack:1, type:'tool', tool:'axe',  tier:1, desc:'Fells vale trees.' },
   axe_iron:     { name:'Iron Axe',      icon:'🪓', stack:1, type:'tool', tool:'axe',  tier:2, desc:'Fells anything with bark.' },
 
+  /* -------- consumables (Phase E) -------- */
+  wardcharm:    { name:'Wardcharm',     icon:'🔆', stack:5, type:'consumable', maxhp:20,
+                  desc:'Crystal-bound charm. Permanently raises max health by 20.' },
+
   /* -------- placeable blocks (Phase D/F) -------- */
   block_dirt:   { name:'Dirt Block',    icon:'🟫', stack:99, type:'block', hardness:1, desc:'Placeable earth.' },
   block_stone:  { name:'Stone Block',   icon:'⬜', stack:99, type:'block', hardness:3, desc:'Placeable stone.' },
   block_plank:  { name:'Plank Block',   icon:'🟧', stack:99, type:'block', hardness:2, desc:'Worked timber.' },
+  block_forge:  { name:'Forge',         icon:'🔥', stack:9, type:'block', hardness:3, station:'forge',
+                  desc:'Placeable forge. Stand near it to smelt ore and craft iron gear.' },
+  block_wall:   { name:'Stone Wall',    icon:'🧱', stack:99, type:'block', hardness:4, desc:'Sturdy defensive wall.' },
+  trap_spike:   { name:'Spike Trap',    icon:'🔺', stack:99, type:'block', hardness:2, trap:'spike', desc:'Harms enemies that step on it.' },
+  trap_frost:   { name:'Frost Trap',    icon:'❄️', stack:99, type:'block', hardness:2, trap:'frost', desc:'Chills and slows enemies.' },
+  trap_ember:   { name:'Ember Trap',    icon:'🔥', stack:99, type:'block', hardness:2, trap:'ember', desc:'Scorches enemies that step on it.' },
 
   /* -------- elements as hotbar entries (attunement checked by the game) -------- */
   elem_loam:    { name:'Loam',   icon:'⬡', stack:1, type:'element', elem:'loam' },

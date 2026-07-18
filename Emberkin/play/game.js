@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { ITEMS, itemDef, isValidItemId, stackLimit } from './items.js';
 import { makeInput } from './input.js';
+import { RECIPES } from './recipes.js';
 
 /* ------------------------------------------------------------------ consts */
 const SCHEMA_VERSION = 3;          // v3 adds bag/hotbar; v1/v2 saves migrate forward
@@ -102,7 +103,7 @@ const dom = {};
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
- 'elem-hud','elem-hud-sig','elem-hud-name','floaters'
+ 'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -1304,7 +1305,40 @@ function useItem(id){
     spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)), 0x8fe6a0, 14, 0.8, true);
     updateHUD();
     toast(`${d.name}: +${d.heal} health.`, 'good', 1800);
+  } else if (d.type==='consumable' && d.maxhp){
+    if (countItem(id)<1){ toast(`No ${d.name} left.`,'info',1500); return; }
+    removeItem(id,1);
+    G.maxHp += d.maxhp; G.hp = Math.min(G.maxHp, G.hp + d.maxhp);
+    sfx.attune();
+    spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)), 0xfff2c0, 20, 1, true);
+    updateHUD();
+    toast(`${d.name}: max health now ${G.maxHp}!`, 'good', 2400);
   } else toast(`${d.name} can't be used yet.`, 'info', 1600);
+}
+
+/* -------------------------------------------------------- crafting (Phase E) */
+function nearForge(){
+  if (!player) return false;
+  for (const f of forges) if (Math.hypot(player.position.x-f.x, player.position.z-f.z) < 4.5) return true;
+  return false;
+}
+function recipeAvailable(r){
+  if (r.station==='forge' && !nearForge()) return { ok:false, why:'Stand near a Forge' };
+  if (r.unlock && !G[r.unlock]) return { ok:false, why:'Locked' };
+  if (r.element && G.activeElement!==r.element) return { ok:false, why:`Equip ${ELEMENTS[r.element].name}` };
+  for (const ing of r.in) if (countItem(ing.id) < ing.n) return { ok:false, why:'Need materials' };
+  return { ok:true };
+}
+function craft(r){
+  const a = recipeAvailable(r);
+  if (!a.ok){ toast(a.why, 'info', 1800); return false; }
+  for (const ing of r.in) removeItem(ing.id, ing.n);
+  const added = addItem(r.out.id, r.out.n);
+  sfx.attune();
+  spawnFloater('+'+r.out.n+' '+itemDef(r.out.id).name, player.position.clone().add(new THREE.Vector3(0,2,0)), '#8fe6a0');
+  if (!G.flags.firstCraft){ G.flags.firstCraft=true;
+    tainerSay('You made something! Tools speed up gathering, blocks let you build, and a Forge unlocks iron. Keep at it.', 5200); }
+  return added>0 || r.out.id.startsWith('block_');
 }
 
 /* hotbar: filled slots act (weapon/element/consumable). Elements are normally
@@ -1712,9 +1746,13 @@ function initBlockMats(){
   BLOCK_MAT.block_dirt  = new THREE.MeshStandardMaterial({ color:0x8a6a45, roughness:1, flatShading:true });
   BLOCK_MAT.block_stone = new THREE.MeshStandardMaterial({ color:0x8f96a3, roughness:0.95, flatShading:true });
   BLOCK_MAT.block_plank = new THREE.MeshStandardMaterial({ color:0xb07d45, roughness:0.9, flatShading:true });
+  BLOCK_MAT.block_wall  = new THREE.MeshStandardMaterial({ color:0x767d88, roughness:0.95, flatShading:true });
+  BLOCK_MAT.block_forge = new THREE.MeshStandardMaterial({ color:0x3a2f2a, roughness:0.8, emissive:0xf0713b, emissiveIntensity:0.5, flatShading:true });
   BLOCK_MAT.spike       = new THREE.MeshStandardMaterial({ color:0x9aa2ad, roughness:0.6, metalness:0.3, flatShading:true });
-  BLOCK_MAT.barricade   = new THREE.MeshStandardMaterial({ color:0x6a4a2c, roughness:1, flatShading:true });
+  BLOCK_MAT.frost       = new THREE.MeshStandardMaterial({ color:0x8fd7f0, roughness:0.3, emissive:0x41b6c4, emissiveIntensity:0.4, flatShading:true });
+  BLOCK_MAT.ember       = new THREE.MeshStandardMaterial({ color:0xf0713b, roughness:0.6, emissive:0xf0713b, emissiveIntensity:0.6, flatShading:true });
 }
+const forges = [];   // {x,z} positions of placed forges
 function aimCell(){
   // the grid cell just in front of the player, at the top of any stack there
   const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
@@ -1728,19 +1766,21 @@ function placeBlock(type, gx, gy, gz, trap=null, fromLoad=false){
   const key = blockKey(gx,gy,gz);
   if (placedMap.has(key)) return false;
   if (placed.length >= MAX_PLACED){ if(!fromLoad) toast('Build limit reached here.', 'info', 2000); return false; }
-  const geo = trap==='spike'
-    ? new THREE.ConeGeometry(0.42, 0.9, 4)
-    : new THREE.BoxGeometry(0.98, 0.98, 0.98);
+  let geo, yoff = 0.5;
+  if (trap==='spike'){ geo = new THREE.ConeGeometry(0.42, 0.9, 4); yoff = 0.45; }
+  else if (trap){ geo = new THREE.BoxGeometry(0.96, 0.18, 0.96); yoff = 0.09; }  // flat trap plate
+  else geo = new THREE.BoxGeometry(0.98, 0.98, 0.98);
   const mesh = new THREE.Mesh(geo, BLOCK_MAT[trap||type] || BLOCK_MAT.block_stone);
-  mesh.position.set(gx, gy + (trap==='spike'?0.45:0.5), gz);
+  mesh.position.set(gx, gy + yoff, gz);
   mesh.castShadow = true; mesh.receiveShadow = true;
   world.add(mesh);
   const collider = { x:gx, z:gz, r:0.62, maxY: gy+0.9 };
   const platform = { x:gx, z:gz, hw:0.5, hd:0.5, topY: gy+1 };
   if (!trap){ colliders.push(collider); platforms.push(platform); }
   const entry = { key, type, trap, mesh, hp: itemDef(type)?.hardness ? itemDef(type).hardness*30 : 40,
-    gx, gy, gz, collider: trap?null:collider, platform: trap?null:platform };
+    gx, gy, gz, collider: trap?null:collider, platform: trap?null:platform, cooldown:0 };
   placed.push(entry); placedMap.set(key, entry);
+  if (type==='block_forge') forges.push({ x:gx, z:gz });
   if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4); }
   return true;
 }
@@ -1749,8 +1789,8 @@ function removeBlock(entry, drop=true){
   placed.splice(placed.indexOf(entry),1); placedMap.delete(entry.key);
   if (entry.collider){ const i=colliders.indexOf(entry.collider); if(i>=0) colliders.splice(i,1); }
   if (entry.platform){ const i=platforms.indexOf(entry.platform); if(i>=0) platforms.splice(i,1); }
-  if (drop){ const id = entry.trap ? (entry.trap==='spike'?'iron_ingot':'timber') : entry.type;
-    spawnDrop(id, 1, entry.mesh.position.clone()); }
+  if (entry.type==='block_forge'){ const i=forges.findIndex(f=>f.x===entry.gx&&f.z===entry.gz); if(i>=0) forges.splice(i,1); }
+  if (drop){ spawnDrop(entry.type, 1, entry.mesh.position.clone()); }
   spawnBurst(entry.mesh.position.clone(), 0xcdb89a, 8, 0.6); sfx.hit();
 }
 /* place from the active hotbar block; returns true if it consumed the attack */
@@ -1761,8 +1801,7 @@ function tryPlaceFromHotbar(){
   if (!d || (d.type!=='block')) return false;
   if (countItem(entry.id) < 1){ toast(`No ${d.name} left.`, 'info', 1400); return true; }
   const c = aimCell();
-  const trap = TRAP_BLOCKS[entry.id] || null;
-  if (placeBlock(entry.id, c.gx, c.gy, c.gz, trap)){ removeItem(entry.id, 1); refreshHotbarUI(); }
+  if (placeBlock(entry.id, c.gx, c.gy, c.gz, d.trap || null)){ removeItem(entry.id, 1); refreshHotbarUI(); }
   return true;
 }
 /* break a placed block in front, or dig the ground with a pick */
@@ -1799,7 +1838,6 @@ function digGround(){
 }
 
 /* -------------------------------------------------- the Sunken Barrow / delve */
-const TRAP_BLOCKS = { }; // filled in Phase F
 let cavernBuilt = false, delveReturn = null;
 function buildDelve(){
   // surface: a dark cracked mound with a descent prompt (needs an Iron Pick)
@@ -2546,7 +2584,37 @@ function renderInv(){
     }
     list.appendChild(row);
   }
+  renderCrafting();
   dom['inv-tokens'].textContent = `✦ ${G.tokens} Emberlight held. Dismantling a spare grants 6 × its tier. Your class finds stronger weapons in chests.`;
+}
+function renderCrafting(){
+  const list = dom['craft-list']; if (!list) return;
+  const q = (dom['craft-search']?.value || '').toLowerCase();
+  list.innerHTML = '';
+  const forge = nearForge();
+  for (const r of RECIPES){
+    if (r.unlock && !G[r.unlock]) continue;                 // hidden until unlocked
+    const outDef = itemDef(r.out.id);
+    const label = r.label || `${outDef.name}${r.out.n>1?' ×'+r.out.n:''}`;
+    if (q && !label.toLowerCase().includes(q) && !outDef.name.toLowerCase().includes(q)) continue;
+    const avail = recipeAvailable(r);
+    const row = document.createElement('div');
+    row.className = 'craft-row'+(avail.ok?'':' locked');
+    const cost = r.in.map(ing=>{
+      const have = countItem(ing.id), ok = have>=ing.n;
+      return `<span class="${ok?'have':'short'}">${itemDef(ing.id).name} ${have}/${ing.n}</span>`;
+    }).join(', ');
+    const stationNote = r.station==='forge' ? (forge?'':' · <em>needs Forge</em>') : '';
+    const elemNote = r.element ? ` · <em>${ELEMENTS[r.element].name}</em>` : '';
+    row.innerHTML = `<span class="craft-out">${outDef.icon} ${label}</span>
+      <span class="craft-cost">${cost}${stationNote}${elemNote}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn small'; btn.textContent = 'Craft'; btn.disabled = !avail.ok;
+    btn.title = avail.ok ? '' : avail.why;
+    btn.onclick = ()=>{ if (craft(r)){ renderInv(); } };
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
 }
 
 function openSettings(from){ settingsReturn=from; hide(dom['menu-title']); hide(dom['menu-pause']); G.phase='settings'; show(dom['menu-settings']); syncSettingsUI(); }
@@ -2744,7 +2812,7 @@ function clearWorld(){
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
   mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
-  harvestables.length=0; placed.length=0; placedMap.clear(); POIS.length=0;
+  harvestables.length=0; placed.length=0; placedMap.clear(); POIS.length=0; forges.length=0;
   cavernBuilt=false; pitCount=0; dragonRef=null; dragonHome=null; G.underground=false;
   for (const d of drops) scene?.remove(d.mesh); drops.length=0;
   for (const f of floaters) f.el.remove(); floaters.length=0;
@@ -2794,6 +2862,7 @@ function bindButtons(){
     });
     renderInv();
   };
+  if (dom['craft-search']) dom['craft-search'].oninput = ()=> renderCrafting();
   buildHotbarUI();
   dom['btn-save'].onclick = ()=> downloadSave();
   dom['btn-quit'].onclick = ()=> { hide(dom['menu-pause']); goTitle(); };
@@ -2967,13 +3036,18 @@ function installDevHooks(){
     swing: ()=> doAttack(),
     // Phase D
     placedCount: ()=> placed.length,
-    placeAhead: (type)=>{ const c=aimCell(); return placeBlock(type, c.gx, c.gy, c.gz, TRAP_BLOCKS[type]||null); },
+    placeAhead: (type)=>{ const c=aimCell(); return placeBlock(type, c.gx, c.gy, c.gz, itemDef(type)?.trap||null); },
     dig: ()=> digGround(),
     descend: ()=> descend(),
     ascend: ()=> ascend(),
     underground: ()=> G.underground,
     cavernBuilt: ()=> cavernBuilt,
     setActiveSlot: (i)=>{ activeSlot=i; refreshHotbarUI(); },
+    // Phase E
+    craft: (rid)=>{ const r=RECIPES.find(x=>x.id===rid); return r?craft(r):false; },
+    canCraft: (rid)=>{ const r=RECIPES.find(x=>x.id===rid); return r?recipeAvailable(r):null; },
+    nearForge: ()=> nearForge(),
+    recipes: ()=> RECIPES.map(r=>r.id),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
