@@ -253,6 +253,10 @@ body[data-theme="day"] .tainer-bubble{background:rgba(255,255,255,.95)}
 /* toast fade */
 .toast{transition:opacity .3s} .toast.out{opacity:0}
 
+/* ============================================================ floaters */
+.floaters{position:fixed;inset:0;pointer-events:none;z-index:11;overflow:hidden}
+.floater{position:absolute;transform:translate(-50%,-50%);font-family:var(--display);font-weight:800;font-size:calc(.95rem*var(--ui-scale));text-shadow:0 1px 3px rgba(0,0,0,.8);white-space:nowrap}
+
 /* ============================================================ reticle */
 .reticle{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;pointer-events:none;z-index:11;opacity:.85}
 .reticle span{position:absolute;background:var(--bright);border-radius:2px;box-shadow:0 0 4px rgba(0,0,0,.7)}

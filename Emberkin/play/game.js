@@ -98,7 +98,7 @@ const dom = {};
  'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
- 'elem-hud','elem-hud-sig','elem-hud-name'
+ 'elem-hud','elem-hud-sig','elem-hud-name','floaters'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -211,6 +211,11 @@ let bossRef = null, bossChestSpawned = false;
 let lakeFrozen = false;
 let motes = null;           // drifting ambient light specks
 const DEEP_WATER_R = 8.4;   // unswimmable centre of the lake until frozen
+const harvestables = [];    // {mesh, kind, ore, hp, maxHp, drop, respawnAt, base}
+const drops = [];           // {mesh, id, n, life, vy}  dropped items that magnet to the player
+const placed = [];          // {key, type, mesh, hp, gx,gy,gz, trap}  player-placed blocks
+const placedMap = new Map();// "gx,gy,gz" -> placed entry
+const floaters = [];        // {el, pos, vy, life, max}  world-anchored damage/loot text
 const world = new THREE.Group();
 
 let ok3d = true;
@@ -370,6 +375,9 @@ function buildWorld() {
   buildBossArena();
   spawnVariantEnemies();
 
+  // Phase-C content: rock/ore veins and lakeside plants
+  scatterResources();
+
   // ambient life: grass tufts (instanced, cheap) and drifting light motes
   const gGeo = new THREE.ConeGeometry(0.07, 0.4, 4);
   const gMat = new THREE.MeshStandardMaterial({ color:0x5f9c46, roughness:1, flatShading:true });
@@ -422,7 +430,10 @@ function makeTree(x,z,s){
   }
   g.position.set(x, terrainH(x,z), z);
   g.userData.collide = { r: 0.7*s }; // trunk collision
-  colliders.push({ x, z, r:0.7*s });
+  const h = { mesh:g, kind:'tree', ore:false, hp:50, maxHp:50, drop:'timber',
+    dropN:[2,4], minTier:0, respawnAt:0, base:g.position.clone() };
+  harvestables.push(h);
+  colliders.push({ x, z, r:0.7*s, harvest:h });
   return g;
 }
 
@@ -1419,14 +1430,17 @@ function meleeHit(range, arc, dmg){
     if (G.activeElement === m.elem) activateMechanism(m);
     else toast(`This mechanism answers only to ${ELEMENTS[m.elem].name} (${ELEMENTS[m.elem].sigil}).`, 'info', 2400);
   }
+  let struck = false;
   for (const e of enemies){
     if (!e.alive) continue;
     const to = new THREE.Vector3().subVectors(e.mesh.position, player.position).setY(0);
     const d = to.length(); if (d>range+e.r) continue;
     to.normalize();
     if (fwd.dot(to) < Math.cos(arc)) continue;
-    damageEnemy(e, dmg);
+    damageEnemy(e, dmg); struck = true;
   }
+  // no enemy hit? the same swing gathers a resource node in front
+  if (!struck) harvestHit(player.position, fwd, G.activeElement);
   swingVfx(fwd);
 }
 function fireProjectile(dmg){
@@ -1490,6 +1504,177 @@ function dissolve(mesh){
   spawnBurst(p, 0xfff0c0, 30, 1.2, true);
   spawnBurst(p, 0xffd98a, 18, 1.6, true);
   sfx.dissolve();
+}
+
+/* ============================================================ PHASE C: GATHER
+   Harvestable nodes (trees/rock/ore/plants), dropped items that magnet to the
+   player, and world-anchored floating damage/loot text. Gathering reuses the
+   attack input: swinging (or a projectile) at a node damages it; the right tool
+   tier speeds it up, and ore requires at least a stone pick. ==================*/
+const DROP_COLORS = { timber:0x8a5a2b, stone_chunk:0x9098a4, dirt_clod:0x8a6a45, sand_pile:0xd8c78a,
+  clay_lump:0xb07050, iron_ore:0xb9c2cc, gold_ore:0xe6c15a, crystal_ore:0x8fe0e6, riverbud:0xf5c168 };
+
+function bestToolTier(kind){
+  let tier = 0;
+  const scan = (id)=>{ const d=itemDef(id); if (d && d.type==='tool' && d.tool===kind) tier=Math.max(tier,d.tier); };
+  for (const s of G.bag) scan(s.id);
+  for (const h of G.hotbar) if (h && h.kind==='item') scan(h.id);
+  return tier;
+}
+function spawnFloater(text, pos, color='#eef3ff'){
+  if (!dom.floaters) return;
+  const el = document.createElement('div');
+  el.className = 'floater'; el.textContent = text; el.style.color = color;
+  dom.floaters.appendChild(el);
+  floaters.push({ el, pos: pos.clone(), vy: 1.4, life: 1.1, max: 1.1 });
+  if (floaters.length > 40){ const old = floaters.shift(); old.el.remove(); }
+}
+function updateFloaters(dt){
+  for (let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i]; f.life -= dt; f.pos.y += f.vy*dt;
+    if (f.life<=0){ f.el.remove(); floaters.splice(i,1); continue; }
+    const v = f.pos.clone().project(camera);
+    if (v.z>1){ f.el.style.display='none'; continue; }
+    f.el.style.display='block';
+    f.el.style.left = ((v.x*0.5+0.5)*innerWidth)+'px';
+    f.el.style.top  = ((-v.y*0.5+0.5)*innerHeight)+'px';
+    f.el.style.opacity = Math.min(1, f.life/0.4);
+  }
+}
+function spawnDrop(id, n, pos){
+  if (!isValidItemId(id) || n<=0) return;
+  const col = DROP_COLORS[id] || 0xffe6a0;
+  const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.22,0),
+    new THREE.MeshStandardMaterial({ color:col, emissive:col, emissiveIntensity:0.25, flatShading:true }));
+  m.position.copy(pos).add(new THREE.Vector3((Math.random()-0.5)*0.8, 0.6, (Math.random()-0.5)*0.8));
+  scene.add(m);
+  drops.push({ mesh:m, id, n, life:60, vy:2.5 });
+}
+function updateDrops(dt){
+  const pp = (G.mimic.state==='Transformed'&&mimicMesh?mimicMesh:player).position;
+  for (let i=drops.length-1;i>=0;i--){
+    const d = drops[i]; d.life -= dt;
+    d.vy -= 9*dt; d.mesh.position.y += d.vy*dt;
+    const gy = terrainH(d.mesh.position.x, d.mesh.position.z) + 0.2;
+    if (d.mesh.position.y < gy){ d.mesh.position.y = gy; d.vy = 0; }
+    d.mesh.rotation.y += dt*2;
+    const dist = d.mesh.position.distanceTo(pp);
+    if (dist < 4.5){                                   // magnet
+      d.mesh.position.lerp(pp.clone().setY(pp.y+1), 1-Math.pow(0.001,dt));
+      if (dist < 1.3){
+        const got = addItem(d.id, d.n);
+        if (got>0){ spawnFloater('+'+got+' '+itemDef(d.id).name, d.mesh.position, '#f5c168'); sfx.token(); }
+        scene.remove(d.mesh); drops.splice(i,1); continue;
+      }
+    }
+    if (d.life<=0){ scene.remove(d.mesh); drops.splice(i,1); }
+  }
+}
+function makeHarvestNode(kind, x, z, opts){
+  // rock/ore/plant nodes (trees are converted in makeTree). opts: {ore,drop,hp,minTier,scale}
+  const g = new THREE.Group();
+  const s = opts.scale || 1;
+  if (kind==='plant'){
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,0.7*s,5), MAT.leaf);
+    stem.position.y=0.35*s; g.add(stem);
+    const flower = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26*s,0),
+      new THREE.MeshStandardMaterial({ color:0xf5c168, emissive:0x7a5a10, emissiveIntensity:0.4, flatShading:true }));
+    flower.position.y=0.8*s; g.add(flower);
+  } else {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.9*s,0), MAT.rock);
+    rock.position.y=0.6*s; rock.castShadow=true; g.add(rock);
+    if (opts.ore){
+      const col = DROP_COLORS[opts.drop] || 0xffffff;
+      for (const [ox,oy,oz] of [[-0.4,0.7,0.3],[0.35,0.9,-0.2],[0.1,1.05,0.35]]){
+        const v = new THREE.Mesh(new THREE.OctahedronGeometry(0.2*s,0),
+          new THREE.MeshStandardMaterial({ color:col, emissive:col, emissiveIntensity:0.5, flatShading:true }));
+        v.position.set(ox*s,oy*s,oz*s); g.add(v);
+      }
+    }
+  }
+  g.position.set(x, terrainH(x,z), z);
+  world.add(g);
+  const h = { mesh:g, kind, ore:!!opts.ore, hp:opts.hp, maxHp:opts.hp,
+    drop:opts.drop, dropN:opts.dropN||[1,3], minTier:opts.minTier||0, respawnAt:0,
+    base:g.position.clone() };
+  harvestables.push(h);
+  if (kind!=='plant') colliders.push({ x, z, r:0.75*s, harvest:h });
+  return h;
+}
+/* returns true if the swing/projectile was consumed by a harvest node */
+function harvestHit(pos, fwd, elem){
+  let best=null, bd=1e9;
+  for (const h of harvestables){
+    if (h.respawnAt>0) continue;
+    const to = new THREE.Vector3().subVectors(h.mesh.position, pos).setY(0);
+    const d = to.length(); if (d>3.4) continue;
+    if (fwd){ to.normalize(); if (fwd.dot(to) < 0.35 && d>1.6) continue; }
+    if (d<bd){ bd=d; best=h; }
+  }
+  if (!best) return false;
+  damageHarvest(best);
+  return true;
+}
+function damageHarvest(h){
+  const toolKind = (h.kind==='tree') ? 'axe' : 'pick';
+  const tier = bestToolTier(toolKind);
+  if (h.minTier>0 && tier < h.minTier){
+    const need = h.minTier>=2 ? 'an Iron Pick' : 'a Stone Pick';
+    toast(`You need ${need} to break this.`, 'info', 2200);
+    return;
+  }
+  const dmg = h.kind==='plant' ? h.maxHp : (10 + tier*22 + (toolKind==='axe'&&tier===0?0:0));
+  h.hp -= Math.max(dmg, tier>0?dmg:8);
+  sfx.hit();
+  spawnBurst(h.mesh.position.clone().add(new THREE.Vector3(0,0.9,0)),
+    h.ore?(DROP_COLORS[h.drop]||0xffffff):0xcdb89a, 6, 0.5);
+  h.mesh.scale.setScalar(0.92 + 0.08*Math.max(0,h.hp/h.maxHp));
+  if (h.hp<=0) breakHarvest(h);
+}
+function breakHarvest(h){
+  const n = h.dropN[0] + Math.floor(Math.random()*(h.dropN[1]-h.dropN[0]+1));
+  spawnDrop(h.drop, n, h.mesh.position.clone().setY(h.mesh.position.y+0.6));
+  spawnBurst(h.mesh.position.clone().add(new THREE.Vector3(0,0.8,0)), 0xd9d0b8, 14, 1);
+  sfx.dissolve();
+  h.mesh.visible = false; h.respawnAt = 45;            // regrows later (regen-ready per brief)
+  if (!G.flags.firstGather){ G.flags.firstGather=true;
+    tainerSay('Nice haul! The vale gives back — nodes regrow in time. Gather Timber and Stone; you’ll want to craft soon.', 5200); }
+}
+function updateHarvest(dt){
+  for (const h of harvestables){
+    if (h.respawnAt>0){
+      h.respawnAt -= dt;
+      if (h.respawnAt<=0){ h.hp=h.maxHp; h.mesh.visible=true; h.mesh.scale.setScalar(1);
+        spawnBurst(h.mesh.position.clone().add(new THREE.Vector3(0,0.6,0)), 0x8ec06a, 8, 0.6); }
+    } else if (h.kind==='plant'){
+      h.mesh.rotation.y += dt*0.4;
+    }
+  }
+}
+function scatterResources(){
+  // rock + ore veins across the wilds, plants near water
+  for (let i=0;i<26;i++){
+    const a=Math.random()*Math.PI*2, r=30+Math.random()*140;
+    const x=Math.cos(a)*r, z=Math.sin(a)*r;
+    if (Math.hypot(x-lakePos.x,z-lakePos.z)<15) continue;
+    if (terrainH(x,z) < 0.05 && Math.random()<0.5) continue;   // prefer hilly/rocky ground
+    makeHarvestNode('rock', x, z, { drop:'stone_chunk', hp:60, dropN:[2,4], scale:0.9+Math.random()*0.5 });
+  }
+  const oreDefs = [
+    { drop:'iron_ore', hp:80, minTier:1, dropN:[1,3], n:9 },
+    { drop:'gold_ore', hp:100, minTier:1, dropN:[1,2], n:5 },
+    { drop:'crystal_ore', hp:130, minTier:2, dropN:[1,2], n:4 },
+  ];
+  for (const od of oreDefs) for (let i=0;i<od.n;i++){
+    const a=Math.random()*Math.PI*2, r=45+Math.random()*130;
+    makeHarvestNode('rock', Math.cos(a)*r, Math.sin(a)*r,
+      { ore:true, drop:od.drop, hp:od.hp, minTier:od.minTier, dropN:od.dropN, scale:0.85 });
+  }
+  for (let i=0;i<10;i++){
+    const a=Math.random()*Math.PI*2, r=13+Math.random()*8;
+    makeHarvestNode('plant', lakePos.x+Math.cos(a)*r, lakePos.z+Math.sin(a)*r,
+      { drop:'riverbud', hp:1, dropN:[1,2], scale:1 });
+  }
 }
 
 /* ------------------------------------------------------------- mimic orb */
@@ -2300,6 +2485,9 @@ function clearWorld(){
   for (const p of particles){ scene.remove(p.grp); } particles.length=0;
   wardstones.length=0; interactables.length=0; windZones.length=0; hoops.length=0; spinners.length=0; colliders.length=0;
   mechanisms.length=0; platforms.length=0; bossRef=null; bossChestSpawned=false; lakeFrozen=false; motes=null; hide(dom['boss-bar']);
+  harvestables.length=0; placed.length=0; placedMap.clear();
+  for (const d of drops) scene?.remove(d.mesh); drops.length=0;
+  for (const f of floaters) f.el.remove(); floaters.length=0;
   if (player){ scene.remove(player); player=null; }
   if (tainerMesh){ scene.remove(tainerMesh); tainerMesh=null; }
   if (mimicMesh){ scene.remove(mimicMesh); mimicMesh=null; }
@@ -2382,11 +2570,14 @@ function loop(){
     updateTrial();
     tickMimicCooldown(dt);
     updateTainerFollow(dt);
+    updateDrops(dt);
+    updateHarvest(dt);
     updateCamera(dt);
     // autosave every 12s
     autosaveT += dt; if (autosaveT>12){ autosaveT=0; if(G.klass) autosave(); }
   }
   updateParticles(dt);
+  updateFloaters(dt);
   for (const s of spinners) s.rotation.z += dt*1.2;
   if (motes && !settings.motion){
     motes.rotation.y += dt*0.008;
@@ -2410,6 +2601,11 @@ function updateProjectiles(dt){
     }
     if (!hit && iceWall && !G.flags.iceMelted && p.elem==='cinder' &&
         Math.hypot(p.mesh.position.x-iceWall.position.x, p.mesh.position.z-iceWall.position.z) < 3.2){ meltIce(); hit=true; }
+    if (!hit) for (const h of harvestables){
+      if (h.respawnAt>0) continue;
+      if (Math.hypot(p.mesh.position.x-h.mesh.position.x, p.mesh.position.z-h.mesh.position.z) < 1.0
+          && Math.abs(p.mesh.position.y - (h.mesh.position.y+0.8)) < 1.4){ damageHarvest(h); hit=true; break; }
+    }
     if (!hit && p.mesh.position.y < terrainH(p.mesh.position.x, p.mesh.position.z) + 0.1){
       spawnBurst(p.mesh.position.clone(), 0xd9d0b8, 5, 0.4); hit=true;   // arrows bury into hillsides
     }
@@ -2495,6 +2691,19 @@ function installDevHooks(){
     setSlot: (i,entry)=>{ G.hotbar[i]=entry; return true; },
     pressSlot: (i)=> selectHotbar(i),
     action: (k)=> INPUT.actionFor(k),
+    // Phase C
+    harvestCount: ()=> harvestables.filter(h=>h.respawnAt<=0).length,
+    dropCount: ()=> drops.length,
+    nearestHarvest: (kind)=>{ const p=player.position;
+      let best=null,bd=1e9; for(const h of harvestables){ if(h.respawnAt>0)continue; if(kind&&h.kind!==kind&&!(kind==='ore'&&h.ore))continue;
+        const d=p.distanceTo(h.mesh.position); if(d<bd){bd=d;best=h;} } return best?{kind:best.kind,ore:best.ore,drop:best.drop,x:+best.mesh.position.x.toFixed(1),z:+best.mesh.position.z.toFixed(1),d:+bd.toFixed(1)}:null; },
+    warpToHarvest: (kind)=>{ const p=player.position; let best=null,bd=1e9;
+      for(const h of harvestables){ if(h.respawnAt>0)continue; if(kind==='ore'&&!h.ore)continue; if(kind&&kind!=='ore'&&h.kind!==kind)continue;
+        const d=p.distanceTo(h.mesh.position); if(d<bd){bd=d;best=h;} }
+      if(best){ player.position.set(best.mesh.position.x, terrainH(best.mesh.position.x,best.mesh.position.z), best.mesh.position.z-2.4);
+        const dx=best.mesh.position.x-player.position.x, dz=best.mesh.position.z-player.position.z, L=Math.hypot(dx,dz)||1;
+        yaw = Math.atan2(-dx/L, -dz/L); return true; } return false; },
+    swing: ()=> doAttack(),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{
@@ -2503,9 +2712,9 @@ function installDevHooks(){
         if (G.phase==='playing'){
           updatePlayer(dt); updateEnemies(dt); updateProjectiles(dt);
           updateStealth(dt); updateTrial(); tickMimicCooldown(dt); updateTainerFollow(dt);
-          updateCamera(dt);
+          updateDrops(dt); updateHarvest(dt); updateCamera(dt);
         }
-        updateParticles(dt);
+        updateParticles(dt); updateFloaters(dt);
       }
       updateAim();
       return `stepped ${sec}s (${n} frames)`;
