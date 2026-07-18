@@ -31,11 +31,23 @@ ELEMENTS ARE NOT SLOTTED: Q cycles right, E cycles left (E is context-sensitive 
 when a prompt is showing), HUD element chip bottom-right live-syncs. Old element wheel removed.
 Also: over-the-shoulder camera setting (right/left/center, default right).
 
-**Next up: Phase C — gathering** (harvestable trees → Timber, surface ore nodes with hardness
-+ tool tiers, plants, magnet pickups, floating damage/loot numbers). Then D (voxel dig/place
-overlay per approved hybrid design), E crafting, F building+traps, G combat/reactions,
-H minimap/caves, I dragon endgame, J polish. One phase at a time, verify before shipping.
-User's save backups are gitignored (EMBERKIN_backup_*.json).
+**Survival-sandbox expansion COMPLETE — all phases C–J shipped & verified:**
+- C gathering (trees/rock/ore/plants, magnet pickups, floating loot/damage text)
+- D dig & place blocks + the underground Delve (Sunken Barrow → crystal cavern)
+- E crafting/forge/smelting (recipes.js, in-inventory panel, Wardcharm +maxHP)
+- F building + elemental traps (spike/frost/ember) + structure combat + damage numbers
+- G combat depth: dash, double-jump, charged attack, crits, combo, heal-on-kill + 10 original
+  elemental reactions (Steambloom, Thermal Shatter, Galvanize, …)
+- H minimap + world map + fog of war
+- I Vornrath the Deepwyrm endgame → unlocks Wellspring Transmute, legendary loot, Deepened mode
+- J footsteps, menu fades, resource tracker, controls cheat-sheet, docs/README/hub/card updates
+
+Modules: play/items.js, play/input.js, play/recipes.js + play/game.js (~3,500 lines). Save
+schema v3 (bag/hotbar/build/underground/dragon/hardMode) with v1/v2/v3 migration. Dev harness
+(?dev=1) exposes hooks + a deterministic step(sec) simulator; full regression passes with zero
+console errors. User's save backups are gitignored (EMBERKIN_backup_*.json).
+
+If resuming: the game is feature-complete against the survival brief. Verify only; don't rebuild.
 
 `README.md` holds the full original IP canon (names, elements, villain, regions, classes, tiers).
 
