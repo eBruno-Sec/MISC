@@ -80,6 +80,7 @@ const G = {
 const settings = {
   theme:'night', contrast:false, motion:false, ui:false,
   cam:1, invert:false, aim:true, vol:0.6,
+  shoulder:'right',   // over-the-shoulder camera bias: right | left | center
 };
 
 /* --------------------------------------------------------------------- DOM */
@@ -94,7 +95,7 @@ const dom = {};
  'class-complexity','btn-confirm-class','file-input',
  'btn-new','btn-continue','btn-load','btn-settings-title','btn-resume','btn-settings-pause','btn-save',
  'btn-load-pause','btn-quit','btn-settings-back',
- 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol',
+ 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort'
 ].forEach(id => dom[id] = $(id));
@@ -1918,6 +1919,11 @@ function shake(a){ shakeAmt = Math.min(0.6, shakeAmt + a); }
 function updateCamera(dt){
   const target = (G.mimic.state==='Transformed' && mimicMesh) ? mimicMesh : player;
   const focus = target.position.clone().add(new THREE.Vector3(0,1.5,0));
+  // over-the-shoulder bias: slide the whole camera track sideways so the
+  // character stands off-centre and the crosshair has a clear line of sight
+  const sh = settings.shoulder==='center' ? 0 : (settings.shoulder==='left' ? -0.85 : 0.85);
+  focus.x += Math.cos(yaw)*sh;
+  focus.z += -Math.sin(yaw)*sh;
   const off = new THREE.Vector3(
     Math.sin(yaw)*Math.cos(pitch),
     Math.sin(pitch)+0.2,
@@ -2110,6 +2116,7 @@ function syncSettingsUI(){
   dom['set-theme'].value=settings.theme; dom['set-contrast'].checked=settings.contrast;
   dom['set-motion'].checked=settings.motion; dom['set-ui'].checked=settings.ui;
   dom['set-cam'].value=settings.cam; dom['set-invert'].checked=settings.invert;
+  dom['set-shoulder'].value=settings.shoulder;
   dom['set-aim'].checked=settings.aim; dom['set-vol'].value=settings.vol;
 }
 function applySettings(){
@@ -2336,6 +2343,7 @@ function bindButtons(){
   dom['set-ui'].onchange = e=>{ settings.ui=e.target.checked; applySettings(); };
   dom['set-cam'].oninput = e=>{ settings.cam=parseFloat(e.target.value); saveSettings(); };
   dom['set-invert'].onchange = e=>{ settings.invert=e.target.checked; saveSettings(); };
+  dom['set-shoulder'].onchange = e=>{ settings.shoulder=e.target.value; saveSettings(); };
   dom['set-aim'].onchange = e=>{ settings.aim=e.target.checked; saveSettings(); };
   dom['set-vol'].oninput = e=>{ settings.vol=parseFloat(e.target.value); setMasterVol(); saveSettings(); };
 }
