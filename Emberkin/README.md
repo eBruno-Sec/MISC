@@ -116,6 +116,15 @@ Playable, end to end:
 A full control list and accessibility options are available from the in-game pause menu. Every
 control is also shown on the HUD, and prompts adapt to what you can currently do.
 
+### Touch / mobile
+
+On a phone or tablet the game shows an **on-screen control layer** the moment you first touch the
+screen: a dynamic **movement joystick** (left thumb; push to the edge to sprint), a **drag-to-look**
+camera (right thumb), and thumb-reach buttons for **Attack** (hold to charge), **Jump**, **Dash**,
+**Interact**, **Mimic Orb**, **element ◀ / ▶**, **Map**, and **Menu**. The hotbar taps directly. The
+controls appear only on touch input, so desktop play is completely unchanged. *(The separate
+Emberkin Studio creator is still desktop-only.)*
+
 ---
 
 ## Project layout

@@ -106,7 +106,8 @@ const dom = {};
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
- 'minimap','menu-map','worldmap','map-title','btn-map-close','tracker'
+ 'minimap','menu-map','worldmap','map-title','btn-map-close','tracker',
+ 'touch-ui','tc-stick','tc-knob','tc-attack','tc-jump','tc-dash','tc-interact','tc-mimic','tc-elemL','tc-elemR','tc-map','tc-menu'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -966,6 +967,8 @@ const keys = {};
 let yaw = Math.PI, pitch = 0.35, camDist = 8;
 let pointerLocked = false;
 let attackHeld = false;
+let usingTouch = false;
+const touch = { moveId:null, ox:0, oy:0, mx:0, my:0, sprint:false, lookId:null, lx:0, ly:0 };
 
 function bindInput(){
   // browsers only allow audio after a user gesture — start it on the first one
@@ -1016,6 +1019,7 @@ function bindInput(){
   const canvas = dom_scene();
   canvas.addEventListener('mousedown', (e)=>{
     if (G.phase!=='playing') return;
+    if (usingTouch) return;   // touch devices use the on-screen controls, not pointer lock
     if (e.button===0){ doAttack(); attackHeld=true; if(!pointerLocked) canvas.requestPointerLock?.(); }
   });
   addEventListener('mouseup', ()=>{ attackHeld=false; });
@@ -1039,6 +1043,73 @@ function bindInput(){
     pitch = Math.max(-0.2, Math.min(1.1, pitch));
   });
   addEventListener('wheel', (e)=>{ if(G.phase==='playing'){ camDist = Math.max(4, Math.min(14, camDist - Math.sign(e.deltaY))); }},{passive:true});
+  bindTouch(canvas);
+}
+
+/* ------------------------------------------------- touch controls (mobile) */
+function enableTouch(){
+  if (usingTouch) return;
+  usingTouch = true;
+  document.body.setAttribute('data-touch','on');
+  // the centre crosshair stays — it's the aim reference for the drag-camera
+}
+function bindTouch(canvas){
+  const STICK_R = 52;
+  const stick = dom['tc-stick'], knob = dom['tc-knob'];
+  // canvas touches: left half = move joystick, right half = camera look
+  canvas.addEventListener('touchstart', (e)=>{
+    enableTouch();
+    for (const t of e.changedTouches){
+      if (t.clientX < innerWidth*0.5 && touch.moveId===null){
+        touch.moveId = t.identifier; touch.ox = t.clientX; touch.oy = t.clientY; touch.mx=0; touch.my=0;
+        if (stick){ stick.style.left=t.clientX+'px'; stick.style.top=t.clientY+'px'; show(stick); if(knob) knob.style.transform='translate(0,0)'; }
+      } else if (touch.lookId===null){
+        touch.lookId = t.identifier; touch.lx = t.clientX; touch.ly = t.clientY;
+      }
+    }
+    e.preventDefault();
+  }, {passive:false});
+  canvas.addEventListener('touchmove', (e)=>{
+    for (const t of e.changedTouches){
+      if (t.identifier===touch.moveId){
+        let dx=t.clientX-touch.ox, dy=t.clientY-touch.oy;
+        const len=Math.hypot(dx,dy)||1; const cl=Math.min(len,STICK_R);
+        dx=dx/len*cl; dy=dy/len*cl;
+        touch.mx = dx/STICK_R; touch.my = dy/STICK_R;
+        touch.sprint = (cl/STICK_R) > 0.92;
+        if (knob) knob.style.transform=`translate(${dx}px,${dy}px)`;
+      } else if (t.identifier===touch.lookId && G.phase==='playing'){
+        yaw   -= (t.clientX-touch.lx) * 0.006 * settings.cam;
+        pitch -= (t.clientY-touch.ly) * 0.006 * settings.cam * (settings.invert?-1:1);
+        pitch = Math.max(-0.2, Math.min(1.1, pitch));
+        touch.lx=t.clientX; touch.ly=t.clientY;
+      }
+    }
+    e.preventDefault();
+  }, {passive:false});
+  const endTouch = (e)=>{
+    for (const t of e.changedTouches){
+      if (t.identifier===touch.moveId){ touch.moveId=null; touch.mx=0; touch.my=0; touch.sprint=false; if(stick) hide(stick); }
+      if (t.identifier===touch.lookId){ touch.lookId=null; }
+    }
+  };
+  canvas.addEventListener('touchend', endTouch);
+  canvas.addEventListener('touchcancel', endTouch);
+  // action buttons — a press-and-hold helper so Attack can charge
+  const hold = (id, onDown, onUp)=>{
+    const el = dom[id]; if (!el) return;
+    el.addEventListener('touchstart', (e)=>{ enableTouch(); e.preventDefault(); e.stopPropagation(); onDown&&onDown(); }, {passive:false});
+    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); e.stopPropagation(); onUp&&onUp(); });
+  };
+  hold('tc-attack', ()=>{ if(G.phase==='playing'){ chargeT=0; charged=false; doAttack(); attackHeld=true; } }, ()=>{ attackHeld=false; });
+  hold('tc-jump',   ()=>{ queueJump(); });
+  hold('tc-dash',   ()=>{ if(G.phase==='playing') tryDash(new THREE.Vector3(-Math.sin(player.rotation.y),0,-Math.cos(player.rotation.y))); });
+  hold('tc-interact',()=>{ if(G.phase==='playing'){ if(!dom.prompt.classList.contains('hidden')) tryInteract(); else cycleElement(-1); } });
+  hold('tc-mimic',  ()=>{ if(G.phase==='playing') tryMimic(); });
+  hold('tc-elemL',  ()=>{ if(G.phase==='playing') cycleElement(-1); });
+  hold('tc-elemR',  ()=>{ if(G.phase==='playing') cycleElement(1); });
+  hold('tc-map',    ()=>{ if(G.phase==='playing') openMap(); else if(G.phase==='map') closeMap(); });
+  hold('tc-menu',   ()=>{ if(G.phase==='playing') pause(); else if(G.phase==='paused') resume(); });
 }
 
 /* ============================================================ GAME FLOW / UI */
@@ -2579,7 +2650,7 @@ function updatePlayer(dt){
   const transformed = G.mimic.state==='Transformed';
   const body = transformed && mimicMesh ? mimicMesh : player;
   const baseSpeed = transformed ? 5.5 : 6.5;
-  const sprint = keys['shift'] && G.stamina>0 && !transformed;
+  const sprint = (keys['shift'] || touch.sprint) && G.stamina>0 && !transformed;
   const speed = baseSpeed * (sprint?1.7:1);
 
   // camera-relative input — the camera sits at +[sin(yaw),cos(yaw)] from the
@@ -2591,6 +2662,10 @@ function updatePlayer(dt){
   if (keys['s']) move.sub(f);
   if (keys['a']) move.sub(r);
   if (keys['d']) move.add(r);
+  // analog touch joystick (up on the stick = forward)
+  if (usingTouch && (touch.mx || touch.my)){
+    move.copy(f).multiplyScalar(-touch.my).addScaledVector(r, touch.mx);
+  }
   // arrow keys rotate camera (accessibility/no-mouse fallback)
   if (keys['arrowleft']) yaw += 1.6*dt*settings.cam;
   if (keys['arrowright']) yaw -= 1.6*dt*settings.cam;
@@ -3518,6 +3593,11 @@ function installDevHooks(){
     dragonDefeated: ()=> G.dragonDefeated,
     hardMode: ()=> G.hardMode,
     enemyShotCount: ()=> enemyShots.length,
+    // touch controls
+    enableTouch: ()=> enableTouch(),
+    usingTouch: ()=> usingTouch,
+    setStick: (x,y,sprint)=>{ touch.mx=x; touch.my=y; touch.sprint=!!sprint; },
+    touchState: ()=> ({ usingTouch, mx:touch.mx, my:touch.my, sprint:touch.sprint }),
     // deterministic simulation stepping — RAF is throttled in background tabs,
     // so QA drives the same per-frame updates the real loop uses
     step: (sec=1)=>{

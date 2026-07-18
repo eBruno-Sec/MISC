@@ -315,6 +315,37 @@ body[data-theme="high-contrast"] .reticle span{background:var(--accent)}
 .btn.small.danger{border-color:var(--danger);color:var(--danger);background:transparent}
 .btn.small.danger:hover:not(:disabled){background:rgba(239,95,107,.12);border-color:var(--danger)}
 
+/* ============================================================ touch controls */
+.touch-ui{position:fixed;inset:0;z-index:14;pointer-events:none;display:none;touch-action:none}
+body[data-touch] .touch-ui{display:block}
+.touch-ui button{pointer-events:auto}
+.tc-btn{
+  position:absolute;width:60px;height:60px;border-radius:50%;
+  background:rgba(14,20,32,.5);border:1.5px solid var(--line);color:var(--bright);
+  font-size:1.5rem;font-weight:800;display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(2px);user-select:none;-webkit-user-select:none;touch-action:none;
+}
+.tc-btn:active{background:rgba(123,211,198,.35);border-color:var(--accent);transform:scale(.94)}
+.tc-btn.tc-big{width:82px;height:82px;font-size:2rem;background:rgba(245,193,104,.22);border-color:var(--accent-2)}
+.tc-btn.tc-sm{width:46px;height:46px;font-size:1.1rem}
+/* right-hand action cluster (thumb reach) */
+.tc-actions{position:absolute;right:calc(3% + env(safe-area-inset-right));bottom:calc(6% + env(safe-area-inset-bottom));width:210px;height:200px}
+#tc-attack{right:6px;bottom:6px}
+#tc-dash{right:96px;bottom:20px}
+#tc-jump{right:20px;bottom:110px}
+#tc-interact{right:100px;bottom:104px}
+#tc-mimic{right:150px;bottom:34px}
+/* top-row utility buttons */
+.tc-top{position:absolute;top:calc(9% + env(safe-area-inset-top));right:calc(3% + env(safe-area-inset-right));display:flex;gap:8px}
+.tc-top .tc-btn{position:static}
+/* dynamic movement joystick (bottom-left) */
+.tc-stick{position:absolute;width:120px;height:120px;border-radius:50%;background:rgba(14,20,32,.35);border:1.5px solid var(--line);margin-left:-60px;margin-top:-60px;pointer-events:none}
+.tc-knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(123,211,198,.5);border:1.5px solid var(--accent)}
+.tc-hint{position:absolute;left:calc(9% + env(safe-area-inset-left));bottom:calc(13% + env(safe-area-inset-bottom));color:var(--muted);font-size:.7rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;opacity:.5}
+.tc-look-hint{position:absolute;right:38%;top:44%;color:var(--muted);font-size:.66rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.28}
+/* on touch, the mouse-capture toast/hint is irrelevant */
+body[data-touch] .tc-look-hint{opacity:.22}
+
 /* ============================================================ responsive */
 @media (max-width:640px){
   .class-layout{flex-direction:column}
