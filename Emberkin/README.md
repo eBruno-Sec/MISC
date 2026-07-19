@@ -187,8 +187,12 @@ Past the story slice, Emberkin is a full survival loop:
 - **Craft & forge** — an in-inventory recipe panel (with search) turns materials into tools,
   building blocks, elemental traps, and consumables. Place a **Forge** to smelt ore into ingots and
   craft iron gear; brew a **Wardcharm** to permanently raise max health.
-- **Build & dig** — place blocks on a grid to raise walls and platforms (enemies will attack your
-  structures); lay **Spike / Frost / Ember** traps; dig the ground for dirt and stone.
+- **Dig** — craft a **Stone Pick** (3 Stone + 2 Timber), press its **hotbar number** to hold it, then
+  **attack open ground** to dig up Dirt, Stone and Clay. Holding a pick also mines rock and ore.
+  Works for every class.
+- **Build** — put a block on your hotbar and attack to **place** it (walls, platforms — enemies will
+  attack your structures); attack a placed block while *not* holding a block to **break** it back
+  into your bag. Lay **Spike / Frost / Ember** traps to defend a base.
 - **Delve** — with an Iron Pick, descend the **Sunken Barrow** into a dark crystal cavern with ore,
   an underground lake, ruins, and a hidden hoard.
 - **Fight deeper** — dash, double-jump, and charged strikes; a **combo** meter; crits and

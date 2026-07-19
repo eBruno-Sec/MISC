@@ -1412,6 +1412,8 @@ function useItem(id){
     spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)), 0xfff2c0, 20, 1, true);
     updateHUD();
     toast(`${d.name}: max health now ${G.maxHp}!`, 'good', 2400);
+  } else if (d.type==='tool'){
+    toast(`${d.name} — put it on your hotbar (1–0) and swing to dig or gather.`, 'info', 3000);
   } else toast(`${d.name} can't be used yet.`, 'info', 1600);
 }
 
@@ -1436,6 +1438,11 @@ function craft(r){
   sfx.attune();
   spawnFloater('+'+r.out.n+' '+itemDef(r.out.id).name, player.position.clone().add(new THREE.Vector3(0,2,0)), '#8fe6a0');
   noteEvent('craft', 1);
+  // tools and blocks go straight to the hotbar so they're findable
+  const outDef = itemDef(r.out.id);
+  if (outDef && (outDef.type==='tool' || outDef.type==='block')) hotbarAutoAdd({ kind:'item', id:r.out.id });
+  if (outDef && outDef.type==='tool')
+    tainerSay(`${outDef.name} made! It's on your hotbar — press its number, then swing at the ground to dig or at nodes to gather.`, 6000);
   if (!G.flags.firstCraft){ G.flags.firstCraft=true;
     tainerSay('You made something! Tools speed up gathering, blocks let you build, and a Forge unlocks iron. Keep at it.', 5200); }
   return added>0 || r.out.id.startsWith('block_');
@@ -1454,7 +1461,14 @@ function selectHotbar(i){
   } else if (entry.kind==='weapon'){
     if (G.owned.includes(entry.id)){ G.equipped=entry.id; tintWeapon(G.activeElement); updateHUD(); toast(`${findWeapon(entry.id).name} equipped.`,'good',1200); }
   } else if (entry.kind==='item'){
-    useItem(entry.id);
+    const d = itemDef(entry.id);
+    if (d && d.type==='tool'){
+      toast(`${d.name} ready — swing at bare ground to dig, or at trees / rock / ore to gather.`, 'info', 3000);
+      if (!G.flags.toolHint){ G.flags.toolHint = true;
+        tainerSay(`Pick in hand! Face open ground and swing to dig. Swing at trees for Timber, rock and ore for Stone and metal.`, 5600); }
+    }
+    else if (d && d.type==='block') toast(`${d.name} ready — attack to place it in front of you.`, 'info', 2600);
+    else useItem(entry.id);
   }
   refreshHotbarUI();
 }
@@ -1550,6 +1564,9 @@ function doAttack(){
   if (G.phase!=='playing') return;
   // placing a block from the active hotbar slot takes priority over swinging
   if (G.mimic.state!=='Transformed' && tryPlaceFromHotbar()) return;
+  // a TOOL on the active hotbar slot turns the swing into gather / dig / break,
+  // so every class (including ranged ones) can work the world
+  if (G.mimic.state!=='Transformed' && tryToolSwing()) return;
   const inMimic = G.mimic.state==='Transformed';
   const c = CLASSES[G.klass];
   const dmgBase = inMimic ? 22 : Math.round(c.dmg * TIER_MULT[equippedWeapon().tier]) + (G.weaponLevel-1)*8;
@@ -1563,6 +1580,24 @@ function doAttack(){
     pv.x += lf.x*2.4; pv.z += lf.z*2.4;
     meleeHit(inMimic ? 3.0 : c.range, inMimic ? 1.6 : c.arc, dmgBase);
   }
+}
+/* the tool currently selected on the hotbar, if any (pick / axe) */
+function activeToolDef(){
+  const e = G.hotbar[activeSlot];
+  if (!e || e.kind!=='item') return null;
+  const d = itemDef(e.id);
+  return (d && d.type==='tool') ? d : null;
+}
+/* tool swing: gather a node in front, else break a placed block, else dig ground */
+function tryToolSwing(){
+  const tool = activeToolDef();
+  if (!tool) return false;
+  atkAnim = 1; sfx.swing();
+  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  swingVfx(fwd);
+  if (harvestHit(player.position, fwd, G.activeElement)) return true;
+  tryBreakOrDig(fwd);
+  return true;
 }
 function meleeHit(range, arc, dmg){
   const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
@@ -1807,7 +1842,8 @@ const GUIDE = [
   ['Elements &amp; reactions', 'Attune elements at Wardstones, then switch with <b>Q</b> (next) and <b>E</b> (previous). Hit a foe with one element, then a <b>different</b> one, to trigger a <b>reaction</b> for bonus damage.'],
   ['Gather', 'Swing at <b>trees</b> for Timber and <b>rock</b> for Stone. <b>Ore</b> needs a <b>pick</b> of the right tier. Drops fly to you on their own.'],
   ['Craft &amp; forge', 'Open <b>Inventory</b> (<b>I</b> or pause menu) and use the <b>Crafting</b> list to make tools, blocks, and traps. Place a <b>Forge</b> and stand near it to <b>smelt</b> ore into iron.'],
-  ['Build &amp; dig', 'Put a <b>block on your hotbar</b> (<b>1–0</b>) and press attack to <b>place</b> it. Attack a placed block to <b>break</b> it. With a <b>pick</b>, attack the bare ground to <b>dig</b>.'],
+  ['Dig', '<b>1.</b> Craft a <b>Stone Pick</b> (3 Stone + 2 Timber) in the Inventory’s Crafting list. <b>2.</b> It lands on your <b>hotbar</b> — press its number (<b>1–0</b>) to hold it. <b>3.</b> Face <b>open ground</b> and <b>attack</b> to dig up Dirt, Stone and Clay. Holding the pick also mines rock and ore. Works for every class.'],
+  ['Build', 'Put a <b>block on your hotbar</b> and press attack to <b>place</b> it in front of you. Attack a placed block (while <em>not</em> holding a block) to <b>break</b> it and get it back.'],
   ['Traps', 'Craft and place <b>Spike / Frost / Ember</b> traps to defend a base — enemies that step on them take damage or a status.'],
   ['The Delve', 'Forge an <b>Iron Pick</b>, then use it at the <b>Sunken Barrow</b> to descend into the crystal cavern — and whatever waits at the bottom.'],
   ['Get around', 'Open the <b>Map</b> with <b>M</b>, this <b>Journal</b> with <b>L</b>, and pause with <b>Esc</b>. Progress autosaves; download a <b>.json</b> from the pause menu for a real backup.'],
