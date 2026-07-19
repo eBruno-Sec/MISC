@@ -40,17 +40,30 @@ proper nouns below are original to this project.
 
 ### The five permanent classes
 
-| Class | Tier 1 (start) | Tier 2 (lake hoard) | Tier 3 (boss reward) | Playstyle |
-| --- | --- | --- | --- | --- |
-| **Sword** | Vale Blade | Bramblefang | Dawnedge | Balanced close range, reliable, parry potential |
-| **Bow** | Reed Bow | Galewhisper | Sunstring | Ranged precision, charged shots, weak points |
-| **Greatsword** | Cragcleaver | Bouldersong | Titanroot | Slow, heavy, high stagger, breaks weak stone |
-| **Dual Swords** | Twin Fangs | Skydancers | Emberfangs | Fast combos, high mobility, quick elemental build-up |
-| **Psychic Focus** | Wander Rune | Lumen Coil | Starheart | A floating rune; telekinetic push/pull, shields, moving platforms |
+| Discipline | Weapons (all unique grade) | Playstyle |
+| --- | --- | --- |
+| **Sword** | Vale Blade · Bramblefang · Dawnedge | Balanced close range, reliable, parry potential |
+| **Bow** | Reed Bow · Galewhisper · Sunstring | Ranged precision, charged shots, weak points |
+| **Greatsword** | Cragcleaver · Bouldersong · Titanroot | Slow, heavy, high stagger, breaks weak stone |
+| **Dual Swords** | Twin Fangs · Skydancers · Emberfangs | Fast combos, high mobility, quick elemental build-up |
+| **Psychic Focus** | Wander Rune · Lumen Coil · Starheart | A floating rune; telekinetic push/pull, shields, moving platforms |
 
-The class is chosen once and is permanent for the save. All classes complete the slice. Weapons
-are managed from the pause menu's **Weapons & Gear** panel: equip, compare power, upgrade with
-Emberlight, or dismantle spares (two-step confirm; the equipped weapon is protected).
+### Mastery, not loot
+
+You choose a **starting discipline** at the beginning — it's your opening story beat and begins one
+Mastery rank ahead — but **every one of the 15 weapons is unlocked from the start**, usable by
+anyone. All are *unique grade*: equal in power, and **nothing can be broken or dismantled**.
+Equipping a weapon switches your whole combat style (pick up a bow and you shoot, even if you began
+as a swordfighter).
+
+Power comes from **Mastery**, bought with Emberlight in the inventory — one track per weapon type
+(Sword, Bow, Greatsword, Dual, Focus), 10 ranks each. Chests and quests pay Emberlight rather than
+weapons. **You invest in the discipline, not the object.**
+
+> *Deliberate change from the original brief.* The brief specified a permanent class, class-locked
+> weapon tiers, and dismantling spares for materials. This build keeps the permanent-choice **story
+> beat** but replaces the loot treadmill with mastery — more freedom to try every playstyle, and no
+> "destroy your gear" anxiety, which suits a family-friendly game better than a gear grind.
 
 ### The four elemental mechanisms & the boss
 

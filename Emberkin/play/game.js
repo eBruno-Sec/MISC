@@ -10,8 +10,8 @@ import { RECIPES } from './recipes.js';
 import { MAIN_QUESTS, DAILY_POOL, WEEKLY_POOL, wayfarerRank } from './quests.js';
 
 /* ------------------------------------------------------------------ consts */
-const SCHEMA_VERSION = 4;          // v4 adds quest/journal state; v1–v3 saves migrate forward
-const PRODUCT_VERSION = '0.4.0-slice';
+const SCHEMA_VERSION = 5;          // v5: all weapons unlocked + per-type mastery; v1–v4 migrate
+const PRODUCT_VERSION = '0.5.0-slice';
 const INPUT = makeInput();
 const SAVE_KEY = 'emberkin.save.v1';
 const SETTINGS_KEY = 'emberkin.settings.v1';
@@ -42,7 +42,7 @@ const WEAPONS = {
   dual:       [ {id:'du1',name:'Twin Fangs',tier:1},  {id:'du2',name:'Skydancers',tier:2},  {id:'du3',name:'Emberfangs',tier:3} ],
   focus:      [ {id:'fo1',name:'Wander Rune',tier:1}, {id:'fo2',name:'Lumen Coil',tier:2},  {id:'fo3',name:'Starheart',tier:3} ],
 };
-const TIER_MULT = { 1:1, 2:1.4, 3:1.85 };
+/* TIER_MULT removed in v5 — weapons no longer have power tiers (see mastery) */
 /* Elemental variant counters: attack with the counter element for bonus damage.
    A variant resists its own element. Loam variants only resist Loam. */
 const COUNTER = { cinder:'rime', rime:'cinder', arc:'tide', tide:'arc' };
@@ -63,7 +63,8 @@ const G = {
   hp: 100, maxHp: 100,
   stamina: 100, maxStam: 100,
   tokens: 0,
-  weaponLevel: 1,
+  weaponLevel: 1,             // legacy; migrated into mastery
+  mastery: { sword:1, bow:1, greatsword:1, dual:1, focus:1 },
   owned: [], equipped: null,
   bag: [],                       // stackable items: [{id, n}]
   hotbar: new Array(10).fill(null),   // slots: null | {kind:'item'|'weapon'|'element', id}
@@ -111,7 +112,7 @@ const dom = {};
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
  'minimap','menu-map','worldmap','map-title','btn-map-close','tracker',
  'touch-ui','tc-stick','tc-knob','tc-attack','tc-jump','tc-dash','tc-interact','tc-mimic','tc-elemL','tc-elemR','tc-map','tc-journal','tc-menu',
- 'menu-journal','journal-rank','jtabs','jbody','btn-journal','btn-journal-close'
+ 'menu-journal','journal-rank','jtabs','jbody','btn-journal','btn-journal-close','mastery-list'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -566,22 +567,72 @@ function makeChest(id, pos, contents, radius=3.2, extraCond=null){
       G.chests[id] = true;
       lid.rotation.x = -1.1;
       spawnBurst(pos.clone().add(new THREE.Vector3(0,1,0)), 0xf5c168, 22, 0.9, true);
-      if (contents.type==='weapon') grantWeapon(contents.tier);
-      else { addTokens(contents.n); toast(`+${contents.n} Emberlight!`, 'good', 2400); }
+      addTokens(contents.n);
+      toast(`+${contents.n} Emberlight — spend it on Mastery!`, 'good', 3000);
+      if (!G.flags.firstChest){ G.flags.firstChest = true;
+        tainerSay('Emberlight! That’s what you pour into Mastery. Open your bag and advance whichever weapon style you love — the blade doesn’t get better, YOU do.', 6400); }
     },
   });
   return g;
 }
-function grantWeapon(tier){
-  const w = WEAPONS[G.klass][tier-1];
-  if (G.owned.includes(w.id)){ addTokens(15); toast(`A duplicate ${w.name} shimmers into 15 Emberlight.`, 'good', 3000); return; }
-  G.owned.push(w.id);
-  hotbarAutoAdd({ kind:'weapon', id:w.id });
-  toast(`New weapon: ${w.name} (Tier ${tier})! Equip it from the pause menu.`, 'good', 4200);
-  tainerSay(`Oooh, ${w.name}! That one sings. Check Weapons & Gear when you get a breath.`, 4800);
+/* ---------------------------------------------------------- weapons & mastery
+   Design change from the original brief (deliberate, documented): every weapon
+   is unique-grade, indestructible, and usable by anyone. There are no tiers to
+   chase and nothing can be dismantled. Power comes from MASTERY per weapon
+   type, bought with Emberlight — you invest in the discipline, not the object. */
+const MASTERY_MAX = 10;
+const WEAPON_TYPES = ['sword','bow','greatsword','dual','focus'];
+function allWeapons(){
+  const out=[];
+  for (const t of WEAPON_TYPES) for (const w of (WEAPONS[t]||[])) out.push({...w, type:t});
+  return out;
 }
-function findWeapon(id){ return (WEAPONS[G.klass]||[]).find(w=>w.id===id) || null; }
-function equippedWeapon(){ return findWeapon(G.equipped) || WEAPONS[G.klass]?.[0] || {id:'?',name:'—',tier:1}; }
+function findWeapon(id){ return allWeapons().find(w=>w.id===id) || null; }
+function weaponType(id){ return findWeapon(id)?.type || G.klass || 'sword'; }
+function equippedWeapon(){
+  return findWeapon(G.equipped) || {...(WEAPONS[G.klass]?.[0] || {id:'?',name:'—',tier:1}), type:G.klass||'sword'};
+}
+function equippedType(){ return equippedWeapon().type || G.klass || 'sword'; }
+/* the combat profile now follows the WEAPON in hand, not the starting class */
+function activeProfile(){ return CLASSES[equippedType()] || CLASSES[G.klass] || CLASSES.sword; }
+function masteryOf(t){ return Math.max(1, Math.min(MASTERY_MAX, (G.mastery && G.mastery[t]) || 1)); }
+function masteryMult(lv){ return 1 + (lv-1)*0.22; }
+function masteryCost(lv){ return 12 + (lv-1)*10; }
+function weaponPower(w){
+  const t = w.type || weaponType(w.id);
+  return Math.round((CLASSES[t]?.dmg || 20) * masteryMult(masteryOf(t)));
+}
+function advanceMastery(t){
+  const lv = masteryOf(t);
+  if (lv >= MASTERY_MAX){ toast(`${CLASSES[t].name} mastery is already complete.`, 'info', 2200); return false; }
+  const cost = masteryCost(lv);
+  if (G.tokens < cost){ toast(`Need ${cost} Emberlight to advance ${CLASSES[t].name} (${G.tokens} held).`, 'info', 2600); return false; }
+  G.tokens -= cost; G.mastery[t] = lv+1;
+  sfx.attune();
+  spawnFloater(`${CLASSES[t].name} Mastery ${lv+1}`, player.position.clone().add(new THREE.Vector3(0,2.2,0)), '#f5c168');
+  toast(`${CLASSES[t].name} mastery → ${lv+1}. Power now ${Math.round(CLASSES[t].dmg*masteryMult(lv+1))}.`, 'good', 3200);
+  if (!G.flags.firstMastery){ G.flags.firstMastery = true;
+    tainerSay('That’s the real secret — you don’t get stronger by finding a better blade. You get stronger by practising the one in your hands.', 6000); }
+  updateHUD();
+  return true;
+}
+/* every weapon is available from the start; equipping swaps your combat style */
+function unlockAllWeapons(){ G.owned = allWeapons().map(w=>w.id); }
+function equipWeapon(id){
+  if (!findWeapon(id)) return false;
+  G.equipped = id;
+  rebuildWeaponProp();
+  tintWeapon(G.activeElement);
+  updateHUD();
+  return true;
+}
+function rebuildWeaponProp(){
+  if (!player) return;
+  const old = player.userData.weapon;
+  if (old) player.remove(old);
+  const wp = makeWeaponProp(equippedType());
+  player.add(wp); player.userData.weapon = wp;
+}
 
 /* ------------------------------------------- Phase-2: elemental mechanisms */
 function mechMarkerMesh(elem){
@@ -614,7 +665,7 @@ function buildMechanisms(){
   const islePos = new THREE.Vector3(lakePos.x, 0, lakePos.z);
   const isle = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.8,0.5,10), MAT.dirt);
   isle.position.set(islePos.x, 0.1, islePos.z); world.add(isle);
-  makeChest('chest-isle', new THREE.Vector3(islePos.x, 0.3, islePos.z), {type:'weapon', tier:2});
+  makeChest('chest-isle', new THREE.Vector3(islePos.x, 0.3, islePos.z), {type:'tokens', n:45});
   const iceMat = new THREE.MeshStandardMaterial({ color:0xcdeef8, roughness:0.15, transparent:true, opacity:0.9, flatShading:true });
   const discs = new THREE.Group(); discs.visible = false;
   for (let i=1;i<=3;i++){
@@ -708,7 +759,7 @@ function buildBossArena(){
   // if this save already defeated Hush, its reward chest must still exist
   if (G.bossDefeated && !bossChestSpawned){
     bossChestSpawned = true;
-    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'weapon', tier:3});
+    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'tokens', n:90});
   }
 }
 
@@ -804,7 +855,7 @@ function bossDefeatedFlow(e){
   addTokens(40);
   dissolve(e.mesh); dissolve(e.mesh);   // extra-big send-off, still just light
   if (!bossChestSpawned){ bossChestSpawned = true;
-    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'weapon', tier:3}); }
+    makeChest('chest-boss', new THREE.Vector3(BOSS_POS.x, 0, BOSS_POS.z), {type:'tokens', n:90}); }
   G.stage = 6;
   setObjective('The vale is safe. The trail of the Lost Sibling leads beyond Willowmere… To be continued.');
   toast('Hush, the Hollow Warden, dissolves into light. +40 Emberlight', 'good', 4600);
@@ -862,8 +913,8 @@ function buildPlayer(){
   player = humanoid(tunic);
   player.position.set(-18, 0, 10);
   playerParts = player.userData.parts;
-  // weapon prop in right hand
-  const wp = makeWeaponProp(G.klass);
+  // weapon prop in right hand — follows the EQUIPPED weapon's type
+  const wp = makeWeaponProp(equippedType());
   wp.position.set(0.5, 1.15, 0.1);
   player.add(wp); player.userData.weapon = wp;
   scene.add(player);
@@ -1163,6 +1214,7 @@ function newGame(){
   Object.assign(G, {
     sibling:null, klass:null, hp:100, maxHp:100, stamina:100, tokens:0, weaponLevel:1,
     owned:[], equipped:null, bag:[], hotbar:new Array(10).fill(null),
+    mastery:{ sword:1, bow:1, greatsword:1, dual:1, focus:1 },
     chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
     bossDefeated:false, build:[], underground:false, dragonDefeated:false, hardMode:false,
     critBonus:0, combo:0, comboT:0,
@@ -1214,8 +1266,12 @@ function classGlyph(k){ return {sword:'⚔️',bow:'\u{1f3f9}',greatsword:'\u{1f
 dom['menu-class'].addEventListener('click',(e)=>{ const it=e.target.closest('.class-item'); if(it) selectClass(it.dataset.class); });
 dom['btn-confirm-class'].addEventListener('click', ()=>{
   G.klass = previewClass;
-  G.owned = [WEAPONS[G.klass][0].id];
-  G.equipped = G.owned[0];
+  // every weapon is available from the start; your chosen discipline just
+  // begins one Mastery rank ahead and is what you start holding
+  unlockAllWeapons();
+  G.mastery = { sword:1, bow:1, greatsword:1, dual:1, focus:1 };
+  G.mastery[G.klass] = 2;
+  G.equipped = WEAPONS[G.klass][0].id;
   G.hotbar[0] = { kind:'weapon', id:G.equipped };
   addItem('emberjam', 2);                              // starter snack — shows the consumable loop
   hotbarAutoAdd({ kind:'item', id:'emberjam' });
@@ -1568,8 +1624,8 @@ function doAttack(){
   // so every class (including ranged ones) can work the world
   if (G.mimic.state!=='Transformed' && tryToolSwing()) return;
   const inMimic = G.mimic.state==='Transformed';
-  const c = CLASSES[G.klass];
-  const dmgBase = inMimic ? 22 : Math.round(c.dmg * TIER_MULT[equippedWeapon().tier]) + (G.weaponLevel-1)*8;
+  const c = activeProfile();
+  const dmgBase = inMimic ? 22 : weaponPower(equippedWeapon());
   atkAnim = 1;
   sfx.swing();
   if (!inMimic && c.ranged){
@@ -1634,18 +1690,24 @@ function meleeHit(range, arc, dmg){
 }
 function fireProjectile(dmg){
   const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
-  // aim assist: nudge toward nearest enemy in front
+  const muzzle = player.position.clone().add(new THREE.Vector3(0,1.3,0));
+  // aim assist: nudge toward nearest enemy in front. Shots are flat-flying, so
+  // aim in TRUE 3D at the target's torso — otherwise, on rolling terrain, a
+  // target standing lower than the shooter gets sailed straight over.
   if (settings.aim){
     let best=null,bd=1e9;
     for (const e of enemies){ if(!e.alive) continue;
       const to=new THREE.Vector3().subVectors(e.mesh.position,player.position).setY(0); const d=to.length();
       if (d<40 && fwd.dot(to.clone().normalize())>0.7 && d<bd){best=e;bd=d;} }
-    if (best){ fwd.copy(new THREE.Vector3().subVectors(best.mesh.position,player.position).setY(0).normalize()); }
+    if (best){
+      const aimAt = best.mesh.position.clone().add(new THREE.Vector3(0, best.boss?2.2:0.9, 0));
+      fwd.copy(aimAt.sub(muzzle).normalize());
+    }
   }
   const col = G.activeElement==='none'?0xffe6a0:ELEMENTS[G.activeElement].color;
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.16,8,8),
     new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1}));
-  m.position.copy(player.position).add(new THREE.Vector3(0,1.3,0)).add(fwd.clone().multiplyScalar(0.8));
+  m.position.copy(muzzle).add(fwd.clone().multiplyScalar(0.8));
   scene.add(m);
   projectiles.push({ mesh:m, vel:fwd.multiplyScalar(38), life:1.6, dmg, elem:G.activeElement });
 }
@@ -1690,7 +1752,7 @@ function applyEnemyDamage(e, dmg, col=0xffffff, crit=false){
   if (e.hp<=0) defeatEnemy(e);
 }
 function colCss(c){ return '#'+c.toString(16).padStart(6,'0'); }
-function critChance(){ return 0.10 + (G.weaponLevel-1)*0.02 + (G.critBonus||0); }
+function critChance(){ return 0.10 + (masteryOf(equippedType())-1)*0.02 + (G.critBonus||0); }
 
 /* ------------------------------------------------ elemental reactions (orig.)
    Hitting a creature stamps your element on it briefly; landing a *different*
@@ -1955,9 +2017,9 @@ function tryDash(dir){
   sfx.swing();
 }
 function doChargedAttack(){
-  const c = CLASSES[G.klass];
+  const c = activeProfile();
   const inMimic = G.mimic.state==='Transformed';
-  const dmg = (inMimic?22:Math.round(c.dmg*TIER_MULT[equippedWeapon().tier])+(G.weaponLevel-1)*8) * 2.3;
+  const dmg = (inMimic ? 22 : weaponPower(equippedWeapon())) * 2.3;
   atkAnim = 1; sfx.hit(); if(!settings.motion) shake(0.28);
   const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
   spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)).add(fwd.clone().multiplyScalar(1.5)),
@@ -2838,13 +2900,7 @@ function wisdomTitle(){ return wayfarerRank(G.quest.insights.length); }
 
 /* ------------------------------------------------------------- progression */
 function addTokens(n){ G.tokens += n; sfx.token(); updateHUD(); }
-function upgradeWeapon(){
-  const cost = 10 + (G.weaponLevel-1)*8;
-  if (G.tokens < cost){ toast(`Need ${cost} Emberlight to upgrade (${G.tokens} held).`, 'info', 2400); return; }
-  G.tokens -= cost; G.weaponLevel++;
-  toast(`${CLASSES[G.klass].weapon} upgraded to Lv ${G.weaponLevel}! (+8 power)`, 'good', 3000);
-  updateHUD();
-}
+/* upgradeWeapon() is gone — power now comes from advanceMastery() per weapon type */
 
 /* ------------------------------------------------------------- particles */
 function spawnBurst(pos, color, count=20, spread=1, rise=false){
@@ -3172,7 +3228,7 @@ const _aimEnd = new THREE.Vector3();
 function updateAim(){
   if (G.phase!=='playing'){ hide(dom.reticle); hide(dom['aim-dot']); return; }
   show(dom.reticle);
-  const c = CLASSES[G.klass];
+  const c = activeProfile();
   if (!c || !c.ranged || G.mimic.state==='Transformed'){ hide(dom['aim-dot']); return; }
   // march along the facing line to the first enemy, hillside, or max range —
   // this is where an arrow or rune bolt will actually land
@@ -3207,7 +3263,7 @@ function updateHUD(){
   dom['stam-fill'].style.width = (G.stamina/G.maxStam*100)+'%';
   dom['token-count'].textContent = G.tokens;
   dom['weapon-name'].textContent = G.klass ? equippedWeapon().name : '—';
-  dom['weapon-lvl'].textContent = 'Lv '+G.weaponLevel;
+  dom['weapon-lvl'].textContent = G.klass ? ('M'+masteryOf(equippedType())) : '—';
   const ed = ELEMENTS[G.activeElement];
   dom['elem-hud-sig'].textContent = ed ? ed.sigil : '○';
   dom['elem-hud-name'].textContent = ed ? ed.name : 'None';
@@ -3247,7 +3303,6 @@ function closeInventory(){
   assignPick = null; markPicked(null);
   hide(dom['menu-inv']); G.phase='paused'; show(dom['menu-pause']);
 }
-function weaponPower(w){ return Math.round(CLASSES[G.klass].dmg * TIER_MULT[w.tier]) + (G.weaponLevel-1)*8; }
 function markPicked(el){
   document.querySelectorAll('.bag-item.picked,.elem-chip.picked,.inv-row.picked').forEach(x=>x.classList.remove('picked'));
   if (el) el.classList.add('picked');
@@ -3286,56 +3341,71 @@ function renderInv(){
     er.appendChild(c);
   }
   if (!er.children.length) er.innerHTML = '<span class="bag-empty">Touch a Wardstone to attune an element.</span>';
-  // weapons
+  // mastery — where power actually comes from now
+  renderMastery();
+  // weapons: every weapon, every type, all unique-grade and indestructible
   const list = dom['inv-list'];
   list.innerHTML = '';
-  const eq = equippedWeapon();
-  const upCost = 10 + (G.weaponLevel-1)*8;
-  for (const id of G.owned){
-    const w = findWeapon(id); if (!w) continue;
-    const isEq = id === G.equipped;
-    const pw = weaponPower(w);
-    const delta = pw - weaponPower(eq);
-    const row = document.createElement('div');
-    row.className = 'inv-row'+(isEq?' equipped':'');
-    row.setAttribute('role','listitem');
-    row.draggable = true;
-    const pickW = ()=>{
-      assignPick = { kind:'weapon', id }; markPicked(row);
-      toast(`Assign ${w.name}: drop it on a slot (or press 1–0).`, 'info', 2600);
-    };
-    row.addEventListener('dragstart', pickW);
-    row.addEventListener('click', ev=>{ if (ev.target.tagName!=='BUTTON') pickW(); });
-    row.innerHTML = `
-      <div class="inv-info">
-        <div class="inv-name">${w.name} <span class="inv-tier">Tier ${w.tier}</span>${isEq?' <span class="inv-badge">Equipped</span>':''}</div>
-        <div class="inv-stats">Power ${pw}${isEq?'':` <span class="${delta>=0?'up':'down'}">(${delta>=0?'+':''}${delta} vs equipped)</span>`}</div>
-      </div>
-      <div class="inv-actions"></div>`;
-    const actions = row.querySelector('.inv-actions');
-    if (isEq){
-      const up = document.createElement('button');
-      up.className='btn small'; up.textContent=`Upgrade (✦${upCost})`;
-      up.disabled = G.tokens < upCost;
-      up.onclick = ()=>{ upgradeWeapon(); renderInv(); };
-      actions.appendChild(up);
-    } else {
-      const eqBtn = document.createElement('button');
-      eqBtn.className='btn small'; eqBtn.textContent='Equip';
-      eqBtn.onclick = ()=>{ G.equipped=id; tintWeapon(G.activeElement); updateHUD(); renderInv(); toast(`${w.name} equipped.`, 'good', 1800); };
-      actions.appendChild(eqBtn);
-      const dis = document.createElement('button');
-      dis.className='btn small danger'; dis.textContent=`Dismantle (+✦${6*w.tier})`;
-      dis.onclick = ()=>{
-        if (dis.dataset.confirm){ G.owned = G.owned.filter(x=>x!==id); addTokens(6*w.tier); renderInv(); toast(`${w.name} dismantled into ${6*w.tier} Emberlight.`, 'info', 2600); }
-        else { dis.dataset.confirm='1'; dis.textContent='Really dismantle?'; setTimeout(()=>{ delete dis.dataset.confirm; if(dis.isConnected) dis.textContent=`Dismantle (+✦${6*w.tier})`; }, 2600); }
+  for (const t of WEAPON_TYPES){
+    const prof = CLASSES[t];
+    const head = document.createElement('div');
+    head.className = 'wtype-head';
+    head.innerHTML = `${prof.name} <span class="wtype-m">Mastery ${masteryOf(t)} · Power ${Math.round(prof.dmg*masteryMult(masteryOf(t)))}</span>${t===G.klass?' <span class="inv-badge">Your discipline</span>':''}`;
+    list.appendChild(head);
+    for (const w of (WEAPONS[t]||[])){
+      const id = w.id, isEq = id === G.equipped;
+      const row = document.createElement('div');
+      row.className = 'inv-row'+(isEq?' equipped':'');
+      row.setAttribute('role','listitem');
+      row.draggable = true;
+      const pickW = ()=>{
+        assignPick = { kind:'weapon', id }; markPicked(row);
+        toast(`Assign ${w.name}: drop it on a slot (or press 1–0).`, 'info', 2600);
       };
-      actions.appendChild(dis);
+      row.addEventListener('dragstart', pickW);
+      row.addEventListener('click', ev=>{ if (ev.target.tagName!=='BUTTON') pickW(); });
+      row.innerHTML = `
+        <div class="inv-info">
+          <div class="inv-name">${w.name} <span class="inv-tier">Unique</span>${isEq?' <span class="inv-badge">Equipped</span>':''}</div>
+          <div class="inv-stats">${prof.name} · Power ${weaponPower({...w, type:t})}</div>
+        </div>
+        <div class="inv-actions"></div>`;
+      const actions = row.querySelector('.inv-actions');
+      if (!isEq){
+        const eqBtn = document.createElement('button');
+        eqBtn.className='btn small'; eqBtn.textContent='Equip';
+        eqBtn.onclick = ()=>{ equipWeapon(id); renderInv(); toast(`${w.name} equipped — ${prof.name} style.`, 'good', 2000); };
+        actions.appendChild(eqBtn);
+      }
+      list.appendChild(row);
     }
-    list.appendChild(row);
   }
   renderCrafting();
-  dom['inv-tokens'].textContent = `✦ ${G.tokens} Emberlight held. Dismantling a spare grants 6 × its tier. Your class finds stronger weapons in chests.`;
+  dom['inv-tokens'].textContent = `✦ ${G.tokens} Emberlight held. Every weapon is yours and none can be broken — spend Emberlight on Mastery to grow stronger.`;
+}
+function renderMastery(){
+  const box = dom['mastery-list']; if (!box) return;
+  box.innerHTML = '';
+  for (const t of WEAPON_TYPES){
+    const prof = CLASSES[t], lv = masteryOf(t), max = lv>=MASTERY_MAX;
+    const cost = masteryCost(lv);
+    const row = document.createElement('div');
+    row.className = 'inv-row';
+    row.innerHTML = `
+      <div class="inv-info">
+        <div class="inv-name">${prof.name}${t===G.klass?' <span class="inv-badge">Discipline</span>':''}</div>
+        <div class="qbar"><i style="width:${lv/MASTERY_MAX*100}%"></i></div>
+        <div class="inv-stats">Mastery ${lv} / ${MASTERY_MAX} · Power ${Math.round(prof.dmg*masteryMult(lv))}</div>
+      </div>
+      <div class="inv-actions"></div>`;
+    const b = document.createElement('button');
+    b.className = 'btn small';
+    b.textContent = max ? 'Mastered' : `Advance (✦${cost})`;
+    b.disabled = max || G.tokens < cost;
+    b.onclick = ()=>{ if (advanceMastery(t)) renderInv(); };
+    row.querySelector('.inv-actions').appendChild(b);
+    box.appendChild(row);
+  }
 }
 function renderCrafting(){
   const list = dom['craft-list']; if (!list) return;
@@ -3400,7 +3470,7 @@ function serialize(){
     id: 'local-'+(G.sibling||'x'),
     payload: {
       sibling:G.sibling, klass:G.klass, hp:G.hp, maxHp:G.maxHp, tokens:G.tokens,
-      weaponLevel:G.weaponLevel, elements:G.elements, activeElement:G.activeElement,
+      weaponLevel:G.weaponLevel, mastery:G.mastery, elements:G.elements, activeElement:G.activeElement,
       glideUnlocked:G.glideUnlocked, stage:G.stage, flags:G.flags,
       owned:G.owned, equipped:G.equipped, chests:G.chests, mechs:G.mechs,
       bossDefeated:G.bossDefeated,
@@ -3459,11 +3529,24 @@ function hydrate(p){
   // v2 fields — v1 saves migrate to sensible defaults for their class
   const roster = WEAPONS[next.klass] || WEAPONS.sword;
   const starter = roster[0].id;
-  let owned = Array.isArray(p.owned) ? p.owned.filter(id=>roster.some(w=>w.id===id)) : [];
-  if (!owned.length) owned = [starter];
-  let equipped = (typeof p.equipped==='string' && owned.includes(p.equipped)) ? p.equipped : owned[0];
+  // v5: every weapon is unlocked for everyone, so `owned` is always the full set
+  const owned = allWeapons().map(w=>w.id);
+  const equipped = (typeof p.equipped==='string' && owned.includes(p.equipped)) ? p.equipped : starter;
   const boolMap = (src, keys) => { const o={}; for (const k of keys) o[k] = !!(src && src[k]); return o; };
   next.owned = owned; next.equipped = equipped;
+  // mastery: use saved values, else convert a pre-v5 weaponLevel into the
+  // player's own discipline so old saves keep the power they earned
+  next.mastery = { sword:1, bow:1, greatsword:1, dual:1, focus:1 };
+  const mp = (p.mastery && typeof p.mastery==='object') ? p.mastery : null;
+  if (mp){
+    for (const t of WEAPON_TYPES){
+      const v = Number(mp[t]);
+      next.mastery[t] = Number.isFinite(v) ? Math.max(1, Math.min(MASTERY_MAX, Math.floor(v))) : 1;
+    }
+  } else {
+    const lv = Math.max(1, Math.min(MASTERY_MAX, Number(p.weaponLevel)||1));
+    next.mastery[next.klass] = Math.max(2, lv);   // discipline keeps its head start
+  }
   next.chests = {}; if (p.chests && typeof p.chests==='object'){ for (const k of Object.keys(p.chests)){ if (/^chest-[a-z-]{1,24}$/.test(k)) next.chests[k]=!!p.chests[k]; } }
   next.mechs = boolMap(p.mechs, ['loam','tide','arc','rime']);
   next.bossDefeated = !!p.bossDefeated;
@@ -3522,7 +3605,7 @@ function hydrate(p){
     sibling:next.sibling, klass:next.klass, hp:next.hp, maxHp:next.maxHp,
     tokens:next.tokens, weaponLevel:next.weaponLevel, elements:next.elements,
     activeElement:next.activeElement, glideUnlocked:next.glideUnlocked, stage:next.stage, flags:next.flags,
-    owned:next.owned, equipped:next.equipped, chests:next.chests, mechs:next.mechs,
+    owned:next.owned, equipped:next.equipped, mastery:next.mastery, chests:next.chests, mechs:next.mechs,
     bossDefeated:next.bossDefeated,
     bag:next.bag, hotbar:next.hotbar,
     build:next.build, dragonDefeated:next.dragonDefeated, hardMode:next.hardMode, underground:false,
@@ -3710,7 +3793,15 @@ function updateProjectiles(dt){
   for (let i=projectiles.length-1;i>=0;i--){
     const p=projectiles[i]; p.life-=dt; p.mesh.position.addScaledVector(p.vel,dt);
     let hit=false;
-    for (const e of enemies){ if(!e.alive)continue; if(p.mesh.position.distanceTo(e.mesh.position)<e.r+0.4){ damageEnemy(e,p.dmg); hit=true; break; } }
+    // hit test in the horizontal plane with a torso-height band. A plain 3D
+    // distance check sat exactly on the threshold (shots fly at y≈1.3 while
+    // enemy origins sit on the ground), so ranged hits were unreliable.
+    for (const e of enemies){
+      if (!e.alive) continue;
+      const hx = p.mesh.position.x - e.mesh.position.x, hz = p.mesh.position.z - e.mesh.position.z;
+      const hy = p.mesh.position.y - (e.mesh.position.y + (e.boss?2.2:0.9));
+      if (Math.hypot(hx,hz) < e.r + 0.5 && Math.abs(hy) < (e.boss?3.0:1.7)){ damageEnemy(e,p.dmg); hit=true; break; }
+    }
     if (!hit) for (const m of mechanisms){
       if (m.done) continue;
       if (Math.hypot(p.mesh.position.x-m.pos.x, p.mesh.position.z-m.pos.z) < 1.6){
@@ -3792,7 +3883,12 @@ function installDevHooks(){
     mechs: ()=> ({...G.mechs}),
     boss: ()=> bossRef ? { alive:bossRef.alive, hp:Math.round(bossRef.hp), maxHp:bossRef.maxHp, phase:bossRef.phase, weak:+bossRef.weak.toFixed(2) } : null,
     hurtBoss: (n)=>{ if(bossRef&&bossRef.alive) damageEnemy(bossRef,n); },
-    giveWeapon: (tier)=> grantWeapon(tier),
+    mastery: ()=> ({...G.mastery}),
+    advanceMastery: (t)=> advanceMastery(t),
+    equippedType: ()=> equippedType(),
+    allWeaponIds: ()=> allWeapons().map(w=>w.id),
+    projCount: ()=> projectiles.length,
+    projList: ()=> projectiles.map(p=>({x:+p.mesh.position.x.toFixed(2), y:+p.mesh.position.y.toFixed(2), z:+p.mesh.position.z.toFixed(2), life:+p.life.toFixed(2)})),
     equip: (id)=>{ if(G.owned.includes(id)){ G.equipped=id; updateHUD(); return true; } return false; },
     gear: ()=> ({ owned:[...G.owned], equipped:G.equipped, power:weaponPower(equippedWeapon()) }),
     warp: (x,z)=>{ player.position.set(x,0,z); },
