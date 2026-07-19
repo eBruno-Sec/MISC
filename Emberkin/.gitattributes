@@ -1,0 +1,2 @@
+# keep the vendored library byte-identical to the upstream release
+vendor/** -text

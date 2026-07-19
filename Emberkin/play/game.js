@@ -1078,6 +1078,10 @@ function spawnEnemy(pos, kind, dropsOrb=false, guard=false, elem=null){
 /* ================================================================= CONTROLS */
 const keys = {};
 let yaw = Math.PI, pitch = 0.35, camDist = 8;
+/* Pitch used to clamp to [-0.2, 1.1]. Because the camera rig is level at -0.2,
+   that meant the player could look DOWN but never UP — so anything overhead
+   (a ledge, the Deepwyrm in flight) was literally unaimable. Opened upward. */
+const PITCH_MIN = -0.85, PITCH_MAX = 1.1;
 let pointerLocked = false;
 let attackHeld = false;
 let usingTouch = false;
@@ -1156,7 +1160,7 @@ function bindInput(){
       yaw   -= e.movementX * 0.004 * settings.cam;
       pitch -= e.movementY * 0.004 * settings.cam * (settings.invert?-1:1);
     }
-    pitch = Math.max(-0.2, Math.min(1.1, pitch));
+    pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, pitch));
   });
   addEventListener('wheel', (e)=>{ if(G.phase==='playing'){ camDist = Math.max(4, Math.min(14, camDist - Math.sign(e.deltaY))); }},{passive:true});
   bindTouch(canvas);
@@ -1197,7 +1201,7 @@ function bindTouch(canvas){
       } else if (t.identifier===touch.lookId && G.phase==='playing'){
         yaw   -= (t.clientX-touch.lx) * 0.006 * settings.cam;
         pitch -= (t.clientY-touch.ly) * 0.006 * settings.cam * (settings.invert?-1:1);
-        pitch = Math.max(-0.2, Math.min(1.1, pitch));
+        pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, pitch));
         touch.lx=t.clientX; touch.ly=t.clientY;
       }
     }
@@ -1212,10 +1216,23 @@ function bindTouch(canvas){
   canvas.addEventListener('touchend', endTouch);
   canvas.addEventListener('touchcancel', endTouch);
   // action buttons — a press-and-hold helper so Attack can charge
+  // Any focus loss releases every held input. Alt-tabbing while holding Space, or
+  // a phone call arriving mid-glide, otherwise left the key latched down.
+  const releaseAllHeld = ()=>{
+    for (const k of Object.keys(keys)) keys[k] = false;
+    attackHeld = false; touch.mx = 0; touch.my = 0;
+  };
+  addEventListener('blur', releaseAllHeld);
+  document.addEventListener('visibilitychange', ()=>{ if (document.hidden) releaseAllHeld(); });
+
   const hold = (id, onDown, onUp)=>{
     const el = dom[id]; if (!el) return;
     el.addEventListener('touchstart', (e)=>{ enableTouch(); e.preventDefault(); e.stopPropagation(); onDown&&onDown(); }, {passive:false});
     el.addEventListener('touchend',   (e)=>{ e.preventDefault(); e.stopPropagation(); onUp&&onUp(); });
+    // touchcancel fires when the OS steals the gesture (notification, system swipe,
+    // finger sliding off). Without this the "up" half never ran, so a held button
+    // — jump above all — latched ON and left you stuck gliding forever.
+    el.addEventListener('touchcancel', (e)=>{ e.stopPropagation(); onUp&&onUp(); });
   };
   hold('tc-attack', ()=>{ if(G.phase==='playing'){ chargeT=0; charged=false; doAttack(); attackHeld=true; } }, ()=>{ attackHeld=false; });
   // hold the jump button to GLIDE — gliding needs a held input, and a one-shot
@@ -1733,6 +1750,21 @@ function tryToolSwing(){
   tryBreakOrDig(fwd);
   return true;
 }
+/* Neutral resting pitch. Looking further down than this aims down, further up
+   aims up, and sitting here shoots flat — so the default feel is unchanged. */
+const AIM_NEUTRAL_PITCH = 0.35;
+/* Full 3D aim direction from the camera: horizontal term is exactly the old
+   yaw-based forward (so nothing about existing aiming changes), plus a vertical
+   term derived from how far the camera is tilted off neutral. */
+function aimVector(){
+  const ap = pitch - AIM_NEUTRAL_PITCH;
+  const cp = Math.cos(ap);
+  return new THREE.Vector3(
+    Math.sin(player.rotation.y)*cp,
+    -Math.sin(ap),
+    Math.cos(player.rotation.y)*cp
+  ).normalize();
+}
 function meleeHit(range, arc, dmg){
   const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
   // ice wall melt
@@ -1751,11 +1783,20 @@ function meleeHit(range, arc, dmg){
     if (G.activeElement === m.elem) activateMechanism(m);
     else toast(`This mechanism answers only to ${ELEMENTS[m.elem].name} (${ELEMENTS[m.elem].sigil}).`, 'info', 2400);
   }
+  // Horizontal arc + a vertical band. This used to discard Y entirely
+  // (.setY(0)), so a swing could kill something six metres overhead. The band is
+  // deliberately generous and does NOT tilt with the camera: you can still reach
+  // a low ledge or a shallow pit, but tying it to aim would make you whiff an
+  // enemy at your feet whenever the camera drifted up. Ranged attacks are where
+  // true vertical aiming lives.
+  const vBand = 1.6 + range*0.5;
   let struck = false;
   for (const e of enemies){
     if (!e.alive) continue;
-    const to = new THREE.Vector3().subVectors(e.mesh.position, player.position).setY(0);
+    const full = new THREE.Vector3().subVectors(e.mesh.position, player.position);
+    const to = full.clone().setY(0);
     const d = to.length(); if (d>range+e.r) continue;
+    if (Math.abs(full.y) > vBand + e.r) continue;      // no hitting through ceilings
     to.normalize();
     if (fwd.dot(to) < Math.cos(arc)) continue;
     damageEnemy(e, dmg); struck = true;
@@ -1767,7 +1808,10 @@ function meleeHit(range, arc, dmg){
   swingVfx(fwd);
 }
 function fireProjectile(dmg){
-  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  // Aim follows the CAMERA, pitch included — shots used to be built from yaw
+  // alone with y forced to 0, so they always flew dead flat and you could never
+  // deliberately shoot at something above or below you.
+  const fwd = aimVector();
   const muzzle = player.position.clone().add(new THREE.Vector3(0,1.3,0));
   // aim assist: nudge toward nearest enemy in front. Shots are flat-flying, so
   // aim in TRUE 3D at the target's torso — otherwise, on rolling terrain, a
@@ -2894,7 +2938,9 @@ function campPassed(){
 let trialActive=false, trialRelaunch=0.5, trialTimer=0;
 function startTrial(){
   if (G.flags.trialPassed){ tainerSay('Pell says the winds are yours now. Hold Space in the air to glide anywhere!', 4200); return; }
-  trialActive = true; trialTimer = 40; trialRelaunch = 0.5;
+  // generous: the timer is a stuck-state safety net, NOT a difficulty clock, and
+  // it resets every time a ring is cleared so steady progress never runs it out
+  trialActive = true; trialTimer = 240; trialRelaunch = 0.5;
   hoops.forEach(h=>h.userData.hoop.passed=false);
   G.glideUnlocked = true; // trial glide granted
   // launch: place player on updraft and give upward pop
@@ -2904,14 +2950,37 @@ function startTrial(){
   tainerSay('Ride the updraft! You’ll glide on your own — just steer with the stick or W A S D. If you land, the wind lifts you again. Take your time.', 6200);
   setObjective('Windrider’s Trial: steer through all 4 rings. Landing is fine — the wind relaunches you.');
 }
+/* End the trial for any reason other than passing it. Without this, trialActive
+   stayed true forever if you wandered off mid-trial — and because the auto-glide
+   condition reads `(keys[' '] || trialActive)`, that left you permanently stuck
+   in a glide with nothing held. */
+function endTrial(reason){
+  if (!trialActive) return;
+  trialActive = false;
+  if (!keys[' ']) glideActive = false;      // don't strand the player mid-glide
+  if (reason === 'left'){
+    toast('Trial paused — come back to the updraft at the cliffs to try again.', 'info', 3200);
+    setObjective('Return to Pell at the windy cliffs to retry the Windrider’s Trial.');
+  } else if (reason === 'timeout'){
+    toast('Trial reset — take a breather and start it again whenever you like.', 'info', 3200);
+  }
+  refreshObjective();
+}
 function updateTrial(){
   if (!trialActive) return;
+  // bail out if the player wandered away from the trial grounds or ran the clock
+  // out; the trial is optional and must never latch on permanently
+  trialTimer -= 1/60;
+  const dFromTrial = Math.hypot(player.position.x - (-4), player.position.z - 43);
+  if (dFromTrial > 70) return endTrial('left');
+  if (trialTimer <= 0)  return endTrial('timeout');
   let passed=0;
   for (const h of hoops){
     const d = player.position.distanceTo(h.position);
     // generous ring radius — this is a joyful first flight, not a precision test
     if (!h.userData.hoop.passed && d<6.5){ h.userData.hoop.passed=true; spawnBurst(h.position.clone(),0xf5c168,20,0.9);
-      h.material.color.set(0x7bd3c6); h.material.emissive.set(0x2a6b60); toast('Ring!','good',900); }
+      h.material.color.set(0x7bd3c6); h.material.emissive.set(0x2a6b60); toast('Ring!','good',900);
+      trialTimer = 240; }                      // progress refreshes the safety net
     if (h.userData.hoop.passed) passed++;
   }
   if (passed>=hoops.length){ trialActive=false; trialPass(); return; }
@@ -3269,8 +3338,8 @@ function updatePlayer(dt){
   // arrow keys rotate camera (accessibility/no-mouse fallback)
   if (keys['arrowleft']) yaw += 1.6*dt*settings.cam;
   if (keys['arrowright']) yaw -= 1.6*dt*settings.cam;
-  if (keys['arrowup']) pitch = Math.min(1.1, pitch+1.2*dt);
-  if (keys['arrowdown']) pitch = Math.max(-0.2, pitch-1.2*dt);
+  if (keys["arrowup"]) pitch = Math.max(PITCH_MIN, pitch-1.2*dt);
+  if (keys["arrowdown"]) pitch = Math.min(PITCH_MAX, pitch+1.2*dt);
 
   const moving = move.lengthSq()>0.01;
   if (moving){
@@ -4330,6 +4399,18 @@ function installDevHooks(){
     recipes: ()=> RECIPES.map(r=>r.id),
     // Phase F
     spawnEnemyAt: (x,z,kind)=> spawnEnemy(new THREE.Vector3(x,0,z), kind||'grumble'),
+    // place an enemy at an exact 3D point (elevation testing)
+    placeEnemyAt: (x,y,z,kind)=>{ const e = spawnEnemy(new THREE.Vector3(x,0,z), kind||'grumble');
+      const t = e || enemies[enemies.length-1]; if(!t) return null;
+      t.mesh.position.set(x,y,z); t.frozenY = true; return {x,y,z,hp:t.hp}; },
+    // hold every living enemy at a fixed height (gravity otherwise drops them
+    // before an elevation hit-test can run)
+    pinEnemyY: (y)=>{ for(const e of enemies){ if(e.alive) e.mesh.position.y = y; } },
+    enemy3D: ()=> enemies.filter(e=>e.alive).map(e=>({kind:e.kind, hp:e.hp,
+      x:+e.mesh.position.x.toFixed(2), y:+e.mesh.position.y.toFixed(2), z:+e.mesh.position.z.toFixed(2)})),
+    setPitch: (p)=>{ pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, p)); return pitch; },
+    aimVec: ()=>{ const a=aimVector(); return { x:+a.x.toFixed(3), y:+a.y.toFixed(3), z:+a.z.toFixed(3) }; },
+    pitchRange: ()=> ({ min:PITCH_MIN, max:PITCH_MAX, neutral:AIM_NEUTRAL_PITCH, current:+pitch.toFixed(3) }),
     enemyStatus: (i)=>{ const e=enemies.filter(x=>x.alive)[i]; return e?{...(e.status||{}),hp:Math.round(e.hp)}:null; },
     aliveEnemyList: ()=> enemies.filter(e=>e.alive).map(e=>({kind:e.kind,hp:Math.round(e.hp),x:+e.mesh.position.x.toFixed(1),z:+e.mesh.position.z.toFixed(1)})),
     placedList: ()=> placed.map(e=>({type:e.type,trap:e.trap||null,x:e.gx,y:e.gy,z:e.gz,hp:Math.round(e.hp)})),

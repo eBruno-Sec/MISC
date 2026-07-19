@@ -53,11 +53,23 @@ If resuming: the game is feature-complete against the survival brief. Verify onl
 
 ---
 
+## Current state (read this first)
+
+**Shipped and playable** at `https://ebruno-sec.github.io/MISC/Emberkin/play/`.
+Save schema is **v6**. `game.js` is ~4,400 lines. Three.js is **vendored** in `vendor/`.
+All 15 weapons unlock at the start; progression is per-type **mastery**, not weapon tiers.
+Sections further down were written earlier in the build and describe older phases —
+trust the code over any specific number below.
+
+**Known open items:** the Studio is mouse-only (no touch); Google Fonts is still an
+external request (cosmetic only — falls back to `system-ui`).
+
 ## What exists (all done, all verified)
 
 | Piece | Contents |
 | --- | --- |
-| `play/` | The full 3D game (~2,050-line game.js). Core loop **plus Phase-2**: 3 weapon tiers per class with Weapons & Gear panel (equip / compare / upgrade / dismantle w/ 2-step confirm), 4 elemental mechanisms (Rime freezes the lake deep-water zone, Loam raises steps+platforms, Tide floods the basin, Arc opens the boss gate), elemental Stonekin variants (resist own element ×0.25, counter ×1.75; Cinder↔Rime, Tide↔Arc), and the boss **Hush, the Hollow Warden** (320 HP, telegraphed slam, 2.6s weak window ×2 dmg, phase 2 at half HP spawns adds, defeat = +40 Emberlight + Tier-3 chest + "to be continued"). Save schema **v2** with v1→v2 migration. |
+| `play/` | The full 3D game (~4,400-line game.js). Core loop, the survival sandbox (gather / craft / forge / build / dig / traps), 4 elemental mechanisms (Rime freezes the lake deep-water zone, Loam raises steps+platforms, Tide floods the basin, Arc opens the boss gate), elemental Stonekin variants (resist own element ×0.25, counter ×1.75; Cinder↔Rime, Tide↔Arc), the boss **Hush, the Hollow Warden**, the Delve, and the endgame dragon **Vornrath the Deepwyrm**. **All 15 weapons unlocked from the start** — progression is per-type *mastery* bought with Emberlight, not weapon tiers. Story quest chain + daily/weekly + 12 milestone "Lessons", with insights **sealed by answering a quiz**. Touch controls for phones. Save schema **v6**, migrating v1→v6. |
+| `vendor/` | Three.js r161, vendored. The game has **no external runtime dependency** — do not repoint the import maps at a CDN. |
 | `studio/` | **Emberkin Studio** (Phase-4 demonstrator): grid-snapped placement of 7 piece types, single-flag rule, occupied-square rejection, erase/undo(60)/clear, 200-piece limit, localStorage autosave, validated JSON save/load (type whitelist, bounds, pollution guard, limit check — generic error "Invalid or corrupted progress file"), instant playtest (kid spawns at flag, walks/jumps, Grumbles wander, chests pop, hoops spin) that restores exact editor context on exit. Local-only; no publishing. |
 | `docs/` | Design codex updated: scope table rows for the new systems, UGC section links the Studio, roadmap marks Phase 2 (single-player parts) and Phase 4 (local sandbox) as shipped, villain section names Hush. |
 | `index.html` | Hub: Studio action card + expanded checklist. |
@@ -73,10 +85,10 @@ Game (`window.__EMBER`, includes deterministic `step(seconds)` because backgroun
 - Deep water: unfrozen lake ejects walkers to the 8.4-radius ring (glide-over allowed above y2.5);
   frozen lake is walkable to the island chest.
 - Boss: exactly one 24-dmg slam per cycle (damage log instrumented), weak window ×2 verified
-  (10→20), phase 2 at <160 HP spawns exactly 2 adds, defeat flow grants +40/stage 6/Tier-3 chest.
+  (10→20), phase 2 at <160 HP spawns exactly 2 adds, defeat flow grants +40 Emberlight / stage 6 / reward chest.
 - Saves: v2 round-trips all new fields; **v1 save migrates** (starter weapon granted, mechs/chests/
   boss defaulted); defeated-save rebuild spawns no boss but re-creates the reward chest ("Open
-  chest" prompt → grants Tier-3).
+  chest" prompt → grants Emberlight).
 - Fixed during this pass: sibling-select 260ms timer could stamp phase='class' over a running game
   (now guarded); ranged classes couldn't melt the ice wall (now can); new-game now fully resets the
   module-singleton G.
