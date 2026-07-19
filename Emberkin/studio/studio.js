@@ -534,6 +534,11 @@ if (location.search.includes('dev')){
     play: ()=> startPlaytest(),
     stop: ()=> endPlaytest(),
     mode: ()=> ({ mode:S.mode, type:S.placeType, playtest:P.active }),
+    // isolate the two raycasts so a failing tap can be traced to the pick
+    // itself rather than the event plumbing that called it
+    pickAt: (x,y)=>{ const o=pickObject({clientX:x, clientY:y}); return o ? {type:o.type, x:o.x, z:o.z} : null; },
+    groundAt: (x,y)=> groundPoint({clientX:x, clientY:y}),
+    objects: ()=> S.objects.map(o=>({type:o.type, x:o.x, z:o.z})),
     kidPos: ()=> P.kid ? {x:+P.kid.position.x.toFixed(2), z:+P.kid.position.z.toFixed(2)} : null,
   };
   console.log('[Emberkin Studio] dev hooks: window.__STUDIO');
