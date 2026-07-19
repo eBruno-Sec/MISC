@@ -4267,6 +4267,11 @@ function installDevHooks(){
     warp: (x,z)=>{ player.position.set(x,0,z); },
     chestsState: ()=> ({...G.chests}),
     interact: ()=> tryInteract(),
+    pos: ()=> player ? { x:+player.position.x.toFixed(3), y:+player.position.y.toFixed(3), z:+player.position.z.toFixed(3) } : null,
+    setYaw: (y)=>{ yaw = y; return yaw; },
+    // glide is driven by a HELD input; expose it so touch-vs-key parity is testable
+    glideState: ()=> ({ spaceHeld: !!keys[' '], gliding: glideActive, unlocked: G.glideUnlocked,
+      grounded, vy:+pv.y.toFixed(3), y:+(player?player.position.y:0).toFixed(3) }),
     chestList: ()=> interactables.filter(i=>/chest/.test(i.id||'')).map(i=>({id:i.id, x:i.pos.x, z:i.pos.z, open:!!G.chests[i.id]})),
     // wisdom / reflection harness
     reflect: ()=> ({ open:G.phase==='reflect', cur:reflectCur?.id||null, attempts:reflectAttempts,
