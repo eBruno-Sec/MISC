@@ -198,11 +198,41 @@ they're the story the game is already telling:
 | Facing the Deepwyrm | Integration — meeting the pain turns it back to light |
 | Understanding Mourne | Meaning — a life you can lose is worth living fully |
 
-Each completed beat files an **Insight** in the **Wayfarer's Journal** (open with **L**), which tracks
-a **Wayfarer rank** from *Lost Traveller* to *Lightbearer* — the cry-baby-to-wise meter. **Daily** and
-**weekly quests** pair a game task with a small real-world **practice** ("name one thing you can't
-control, and loosen your grip on it"). The Journal also holds a **How to Play** guide covering every
-mechanic — movement, combat, elements, gather, craft, build, dig, and the Delve.
+Alongside the story there are **12 Lessons** — wisdom the vale teaches by *doing* rather than by
+telling. They complete on gameplay milestones and never expire:
+
+| Lesson | Earned by | Skill it teaches |
+| --- | --- | --- |
+| Made, Not Found | craft anything | Creation — good things are built |
+| Small Deposits | gather 50 | Compounding — small efforts add up |
+| You Are Always Building | place 20 blocks | Habits — choose what you build |
+| Steady Hands | 25 encounters | Composure — useful while rattled |
+| Go and See | explore 60 tiles | Curiosity — look instead of guessing |
+| Combinations | 8 reactions | Collaboration — two beats one |
+| Turn the Soil | dig 15 | Persistence — the boring stretch pays |
+| Depth Over Width | 5 mastery ranks | Deliberate practice over dabbling |
+| Heat and Time | smelt 5 | Transformation needs discomfort *and* patience |
+| Tend Yourself | 5 restoratives | Self-care isn't quitting |
+| Before the Storm | 5 traps | Foresight — prepare in the calm |
+| Curiosity Rewarded | 4 chests | Wonder is worth protecting |
+
+### Insights are earned by play, but *sealed* by reading
+
+That's the part that makes the wisdom stick. When a beat or lesson completes, the game pauses and
+shows a **Reflection**: the story line, then the teaching and a practice to try. Tap **I've read it —
+ask me** and it asks **one question** about what you just read. Answer correctly and the insight is
+**sealed**. Answer wrong and it simply returns you to the teaching to read again — no penalty, no
+lost progress, just another pass. Your **Wayfarer rank** (*Lost Traveller → Seeker → Wanderer →
+Steady → Kindled → Sage → Lightbearer → Keeper of the Ember*, across all **22** insights) counts
+**sealed** insights only, so reading *is* the progression.
+
+Nothing traps you: every Reflection has a **Not now** button (in both the reading and the quiz view,
+since phones have no Esc). Anything left unsealed waits in the **Insights** tab with a **Read & seal
+this insight** button, and the Journal header tells you how many are still awaiting you.
+
+**Daily** and **weekly quests** pair a game task with a small real-world **practice** ("name one
+thing you can't control, and loosen your grip on it"). The Journal also holds a **How to Play** guide
+covering every mechanic — movement, combat, elements, gather, craft, build, dig, and the Delve.
 
 > **A note on the reflections:** they're gentle life-skills practice inspired by stoicism and
 > emotional intelligence — *not* medical or mental-health advice. This is surfaced in the Journal

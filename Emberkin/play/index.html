@@ -207,6 +207,29 @@
   <p class="fineprint" id="pause-fine">Progress autosaves to this browser. Download a .json for a real backup.</p>
 </div>
 
+<!-- Reflection: read the lesson, then seal it by answering -->
+<div id="menu-reflect" class="overlay center menu hidden">
+  <p class="reflect-kicker" id="reflect-kicker">A Reflection</p>
+  <h2 class="menu-h" id="reflect-title">—</h2>
+  <p class="reflect-lesson" id="reflect-lesson"></p>
+  <div class="reflect-card">
+    <span class="ith" id="reflect-theme">—</span>
+    <p class="itt" id="reflect-teaching"></p>
+    <p class="itp" id="reflect-practice"></p>
+  </div>
+  <div id="reflect-readbox">
+    <button class="btn primary" id="btn-reflect-read">I've read it — ask me</button>
+    <button class="btn" id="btn-reflect-later">Not now</button>
+  </div>
+  <div id="reflect-quizbox" class="hidden">
+    <p class="reflect-q" id="reflect-q"></p>
+    <div class="reflect-opts" id="reflect-opts"></div>
+    <p class="reflect-feedback hidden" id="reflect-feedback"></p>
+    <!-- touch has no Esc: the quiz must always show its own way out -->
+    <button class="btn" id="btn-reflect-later2">Not now</button>
+  </div>
+</div>
+
 <!-- Journal / Quests -->
 <div id="menu-journal" class="overlay center menu hidden">
   <h2 class="menu-h">Wayfarer’s Journal</h2>
@@ -215,6 +238,7 @@
     <button class="jtab sel" data-tab="story">Story</button>
     <button class="jtab" data-tab="daily">Daily</button>
     <button class="jtab" data-tab="weekly">Weekly</button>
+    <button class="jtab" data-tab="side">Lessons</button>
     <button class="jtab" data-tab="journal">Insights</button>
     <button class="jtab" data-tab="guide">How to Play</button>
   </div>

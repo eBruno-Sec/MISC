@@ -1,2 +1,4 @@
 EMBERKIN_backup_*.json
 EMBERKIN_STUDIO_backup_*.json
+# local dev-server config, not part of the game
+.claude/

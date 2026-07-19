@@ -7,10 +7,10 @@ import * as THREE from 'three';
 import { ITEMS, itemDef, isValidItemId, stackLimit } from './items.js';
 import { makeInput } from './input.js';
 import { RECIPES } from './recipes.js';
-import { MAIN_QUESTS, DAILY_POOL, WEEKLY_POOL, wayfarerRank } from './quests.js';
+import { MAIN_QUESTS, SIDE_QUESTS, DAILY_POOL, WEEKLY_POOL, wayfarerRank } from './quests.js';
 
 /* ------------------------------------------------------------------ consts */
-const SCHEMA_VERSION = 5;          // v5: all weapons unlocked + per-type mastery; v1–v4 migrate
+const SCHEMA_VERSION = 6;          // v6: sealed insights + side quests; v1–v5 migrate
 const PRODUCT_VERSION = '0.5.0-slice';
 const INPUT = makeInput();
 const SAVE_KEY = 'emberkin.save.v1';
@@ -107,7 +107,7 @@ const G = {
   critBonus: 0,               // Phase G upgrades
   combo: 0, comboT: 0,
   // quests & journal
-  quest: { main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
+  quest: { main:0, mainDone:[], insights:[], sealed:[], side:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
   elements: { loam:false, tide:false, cinder:false, arc:false, rime:false },
   activeElement: 'none',
   glideUnlocked: false,
@@ -141,7 +141,9 @@ const dom = {};
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
  'minimap','menu-map','worldmap','map-title','btn-map-close','tracker',
  'touch-ui','tc-stick','tc-knob','tc-attack','tc-jump','tc-dash','tc-interact','tc-mimic','tc-elemL','tc-elemR','tc-map','tc-journal','tc-menu',
- 'menu-journal','journal-rank','jtabs','jbody','btn-journal','btn-journal-close','mastery-list'
+ 'menu-journal','journal-rank','jtabs','jbody','btn-journal','btn-journal-close','mastery-list',
+ 'menu-reflect','reflect-kicker','reflect-title','reflect-lesson','reflect-theme','reflect-teaching','reflect-practice',
+ 'reflect-readbox','btn-reflect-read','btn-reflect-later','btn-reflect-later2','reflect-quizbox','reflect-q','reflect-opts','reflect-feedback'
 ].forEach(id => dom[id] = $(id));
 
 /* ================================================================== AUDIO
@@ -563,7 +565,7 @@ function buildTrial(){
     world.add(hoop); hoops.push(hoop); spinners.push(hoop);
   }
   // wind updraft column near the launch
-  windZones.push({ pos:new THREE.Vector3(-4,0,44), r:6, up:14 });
+  windZones.push({ pos:new THREE.Vector3(-4,0,44), r:11, up:17 });
   // visual for wind
   const wind = new THREE.Mesh(new THREE.CylinderGeometry(6,6,20,16,1,true),
     new THREE.MeshBasicMaterial({ color:0xaee6ff, transparent:true, opacity:0.10, side:THREE.DoubleSide }));
@@ -589,7 +591,7 @@ function makeChest(id, pos, contents, radius=3.2, extraCond=null){
   if (G.chests[id]) lid.rotation.x = -1.1;   // already opened in this save
   world.add(g);
   interactables.push({
-    pos: pos.clone(), radius, key:'E',
+    id, pos: pos.clone(), radius, key:'E',
     label: () => 'Open chest',
     cond: () => !G.chests[id] && (!extraCond || extraCond()),
     onUse: () => {
@@ -597,6 +599,7 @@ function makeChest(id, pos, contents, radius=3.2, extraCond=null){
       lid.rotation.x = -1.1;
       spawnBurst(pos.clone().add(new THREE.Vector3(0,1,0)), 0xf5c168, 22, 0.9, true);
       addTokens(contents.n);
+      noteEvent('chest', 1);
       toast(`+${contents.n} Emberlight — spend it on Mastery!`, 'good', 3000);
       if (!G.flags.firstChest){ G.flags.firstChest = true;
         tainerSay('Emberlight! That’s what you pour into Mastery. Open your bag and advance whichever weapon style you love — the blade doesn’t get better, YOU do.', 6400); }
@@ -638,6 +641,7 @@ function advanceMastery(t){
   const cost = masteryCost(lv);
   if (G.tokens < cost){ toast(`Need ${cost} Emberlight to advance ${CLASSES[t].name} (${G.tokens} held).`, 'info', 2600); return false; }
   G.tokens -= cost; G.mastery[t] = lv+1;
+  noteEvent('mastery', 1);
   sfx.attune();
   spawnFloater(`${CLASSES[t].name} Mastery ${lv+1}`, player.position.clone().add(new THREE.Vector3(0,2.2,0)), '#f5c168');
   toast(`${CLASSES[t].name} mastery → ${lv+1}. Power now ${Math.round(CLASSES[t].dmg*masteryMult(lv+1))}.`, 'good', 3200);
@@ -1119,6 +1123,7 @@ function bindInput(){
     } else if (act==='pause' && G.phase==='paused') resume();
     else if ((act==='map'||act==='pause') && G.phase==='map') closeMap();
     else if ((act==='log'||act==='pause') && G.phase==='journal') closeJournal();
+    else if (act==='pause' && G.phase==='reflect') closeReflection();
     else if (G.phase==='inventory'){
       const slot = INPUT.slotIndex(act);
       if (slot >= 0 && assignPick) assignToSlot(slot);
@@ -1213,7 +1218,11 @@ function bindTouch(canvas){
     el.addEventListener('touchend',   (e)=>{ e.preventDefault(); e.stopPropagation(); onUp&&onUp(); });
   };
   hold('tc-attack', ()=>{ if(G.phase==='playing'){ chargeT=0; charged=false; doAttack(); attackHeld=true; } }, ()=>{ attackHeld=false; });
-  hold('tc-jump',   ()=>{ queueJump(); });
+  // hold the jump button to GLIDE — gliding needs a held input, and a one-shot
+  // tap made the Windrider's Trial impossible to finish on a phone
+  hold('tc-jump',
+    ()=>{ keys[' '] = true; queueJump(); },
+    ()=>{ keys[' '] = false; });
   hold('tc-dash',   ()=>{ if(G.phase==='playing') tryDash(new THREE.Vector3(-Math.sin(player.rotation.y),0,-Math.cos(player.rotation.y))); });
   hold('tc-interact',()=>{ if(G.phase==='playing'){ if(!dom.prompt.classList.contains('hidden')) tryInteract(); else cycleElement(-1); } });
   hold('tc-mimic',  ()=>{ if(G.phase==='playing') tryMimic(); });
@@ -1221,7 +1230,8 @@ function bindTouch(canvas){
   hold('tc-elemR',  ()=>{ if(G.phase==='playing') cycleElement(1); });
   hold('tc-map',    ()=>{ if(G.phase==='playing') openMap(); else if(G.phase==='map') closeMap(); });
   hold('tc-journal',()=>{ if(G.phase==='playing') openJournal(); else if(G.phase==='journal') closeJournal(); });
-  hold('tc-menu',   ()=>{ if(G.phase==='playing') pause(); else if(G.phase==='paused') resume(); });
+  hold('tc-menu',   ()=>{ if(G.phase==='playing') pause(); else if(G.phase==='paused') resume();
+                          else if(G.phase==='reflect') closeReflection(); });
 }
 
 /* ============================================================ GAME FLOW / UI */
@@ -1270,7 +1280,7 @@ function newGame(){
     chests:{}, mechs:{loam:false,tide:false,arc:false,rime:false},
     bossDefeated:false, build:[], underground:false, dragonDefeated:false, hardMode:false,
     critBonus:0, combo:0, comboT:0,
-    quest:{ main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
+    quest:{ main:0, mainDone:[], insights:[], sealed:[], side:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' },
     elements:{loam:false,tide:false,cinder:false,arc:false,rime:false}, activeElement:'none',
     glideUnlocked:false, stage:0,
     flags:{fished:false,firstKill:false,transformedOnce:false,campPassed:false,trialPassed:false,iceMelted:false,resistHinted:false},
@@ -1516,6 +1526,7 @@ function useItem(id){
     sfx.token();
     spawnBurst(player.position.clone().add(new THREE.Vector3(0,1.2,0)), 0x8fe6a0, 14, 0.8, true);
     updateHUD();
+    noteEvent('consume', 1);
     toast(`${d.name}: +${d.heal} health.`, 'good', 1800);
   } else if (d.type==='consumable' && d.maxhp){
     if (countItem(id)<1){ toast(`No ${d.name} left.`,'info',1500); return; }
@@ -1551,6 +1562,7 @@ function craft(r){
   sfx.attune();
   spawnFloater('+'+r.out.n+' '+itemDef(r.out.id).name, player.position.clone().add(new THREE.Vector3(0,2,0)), '#8fe6a0');
   noteEvent('craft', 1);
+  if (r.station==='forge') noteEvent('smelt', 1);
   // tools and blocks go straight to the hotbar so they're findable
   const outDef = itemDef(r.out.id);
   if (outDef && (outDef.type==='tool' || outDef.type==='block')) hotbarAutoAdd({ kind:'item', id:r.out.id });
@@ -1996,11 +2008,14 @@ const GUIDE = [
   ['Traps', 'Craft and place <b>Spike / Frost / Ember</b> traps to defend a base — enemies that step on them take damage or a status.'],
   ['The Delve', 'Forge an <b>Iron Pick</b>, then use it at the <b>Sunken Barrow</b> to descend into the crystal cavern — and whatever waits at the bottom.'],
   ['Get around', 'Open the <b>Map</b> with <b>M</b>, this <b>Journal</b> with <b>L</b>, and pause with <b>Esc</b>. Progress autosaves; download a <b>.json</b> from the pause menu for a real backup.'],
+  ['Insights &amp; your rank', 'Story beats and <b>Lessons</b> (things you learn by doing — crafting, digging, building, fighting) each hand you an <b>Insight</b>: a real-world idea worth keeping. Read it, then answer one question to <b>seal</b> it. Get it wrong and you simply read it again — nothing is lost. Your <b>Wayfarer rank</b> counts sealed insights only, so the reading is the progression. Left one unsealed? It waits in <b>Insights</b> with a <b>Read &amp; seal</b> button.'],
 ];
 function renderJournal(){
   const rankEl = dom['journal-rank'];
-  const nIns = G.quest.insights.length;
-  if (rankEl) rankEl.textContent = `Rank: ${wisdomTitle()} · ${nIns} / ${MAIN_QUESTS.length} insights`;
+  const nSeal = sealedCount(), nIns = G.quest.insights.length;
+  if (rankEl) rankEl.textContent =
+    `Rank: ${wisdomTitle()} · ${nSeal} / ${ALL_LESSONS.length} insights sealed`
+    + (nIns > nSeal ? ` · ${nIns-nSeal} awaiting you` : '');
   [...dom.jtabs.children].forEach(b=> b.classList.toggle('sel', b.dataset.tab===journalTab));
   const body = dom.jbody; body.innerHTML = '';
   const esc = (s)=> s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -2031,14 +2046,38 @@ function renderJournal(){
         <div class="qpractice">Practice — ${esc(def.practice)}</div>`;
       body.appendChild(c);
     }
+  } else if (journalTab==='side'){
+    ensureSideQuests();
+    body.insertAdjacentHTML('beforeend','<p class="guide-row" style="color:var(--muted)">Lessons the vale teaches by doing. These never expire.</p>');
+    for (const e of G.quest.side){
+      const def = SIDE_QUESTS.find(s=>s.id===e.id); if (!def) continue;
+      const c = document.createElement('div'); c.className='qcard'+(e.done?' done':'');
+      const frac = Math.min(1, e.prog/def.goal.n);
+      c.innerHTML = `<div class="qh">${esc(def.title)} ${e.done
+          ? (isSealed(def.id)?'<span class="tag ok">✓ sealed</span>':'<span class="seal-tag no">unsealed</span>')
+          : `<span class="tag now">+${def.reward}✦</span>`}</div>
+        <div class="qbar"><i style="width:${frac*100}%"></i></div>
+        <div class="qd">${Math.min(e.prog, def.goal.n)} / ${def.goal.n}</div>
+        ${e.done?`<div class="qlesson">“${esc(def.lesson)}”</div>`:''}`;
+      body.appendChild(c);
+    }
   } else if (journalTab==='journal'){
     if (!G.quest.insights.length) body.insertAdjacentHTML('beforeend','<p class="guide-row">Your insights will gather here as your story unfolds.</p>');
     for (const id of G.quest.insights){
-      const q = MAIN_QUESTS.find(x=>x.id===id); if (!q||!q.insight) continue;
-      const c = document.createElement('div'); c.className='qcard insight';
-      c.innerHTML = `<div class="ith">${esc(q.insight.theme)}</div>
+      const q = lessonById(id); if (!q||!q.insight) continue;
+      const sealed = isSealed(id);
+      const c = document.createElement('div'); c.className='qcard insight'+(sealed?'':' unsealed');
+      c.innerHTML = `<div class="ith">${esc(q.insight.theme)}
+          <span class="seal-tag ${sealed?'ok':'no'}">${sealed?'sealed':'unsealed'}</span></div>
         <div class="itt">“${esc(q.insight.teaching)}”</div>
         <div class="itp">Try this — ${esc(q.insight.practice)}</div>`;
+      if (!sealed && q.quiz){
+        const b = document.createElement('button');
+        b.className='btn primary'; b.type='button'; b.style.marginTop='.6rem';
+        b.textContent='Read & seal this insight';
+        b.addEventListener('click', ()=> openReflection(q));
+        c.appendChild(b);
+      }
       body.appendChild(c);
     }
   } else {
@@ -2389,7 +2428,8 @@ function placeBlock(type, gx, gy, gz, trap=null, fromLoad=false){
     gx, gy, gz, collider: trap?null:collider, platform: trap?null:platform, cooldown:0 };
   placed.push(entry); placedMap.set(key, entry);
   if (type==='block_forge') forges.push({ x:gx, z:gz });
-  if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4); noteEvent('build', 1); }
+  if (!fromLoad){ sfx.hit(); spawnBurst(mesh.position.clone(), 0xd9d0b8, 5, 0.4);
+    noteEvent('build', 1); if (trap) noteEvent('trap', 1); }
   return true;
 }
 function removeBlock(entry, drop=true){
@@ -2435,6 +2475,7 @@ function digGround(){
   if (Math.random()<0.12) spawnDrop('clay_lump', 1, p.clone().setY(terrainH(p.x,p.z)+0.3));
   spawnBurst(p.clone().setY(terrainH(p.x,p.z)+0.2), 0x8a6a45, 8, 0.6);
   sfx.hit();
+  noteEvent('dig', 1);
   // cosmetic divot (bounded pool)
   if (pitCount < 40){
     pitCount++;
@@ -2850,34 +2891,41 @@ function campPassed(){
 }
 
 /* ------------------------------------------------------------- gliding */
-let trialActive=false, trialTimer=0;
+let trialActive=false, trialRelaunch=0.5, trialTimer=0;
 function startTrial(){
   if (G.flags.trialPassed){ tainerSay('Pell says the winds are yours now. Hold Space in the air to glide anywhere!', 4200); return; }
-  trialActive = true; trialTimer = 40;
+  trialActive = true; trialTimer = 40; trialRelaunch = 0.5;
   hoops.forEach(h=>h.userData.hoop.passed=false);
   G.glideUnlocked = true; // trial glide granted
   // launch: place player on updraft and give upward pop
   player.position.set(-4, 0.2, 43);
-  pv.set(0, 10, 4);
-  toast('Windrider’s Trial: fly through all 4 rings! Hold Space to glide.', 'info', 4200);
-  tainerSay('Ride the updraft, then hold Space and steer with W A S D. Thread every ring!', 5000);
-  setObjective('Windrider’s Trial: glide through all 4 rings before you land.');
+  pv.set(0, 12, 4);
+  toast('Windrider’s Trial: fly through all 4 rings. You glide automatically — just steer!', 'info', 5000);
+  tainerSay('Ride the updraft! You’ll glide on your own — just steer with the stick or W A S D. If you land, the wind lifts you again. Take your time.', 6200);
+  setObjective('Windrider’s Trial: steer through all 4 rings. Landing is fine — the wind relaunches you.');
 }
 function updateTrial(){
   if (!trialActive) return;
   let passed=0;
   for (const h of hoops){
     const d = player.position.distanceTo(h.position);
-    if (!h.userData.hoop.passed && d<2.6){ h.userData.hoop.passed=true; spawnBurst(h.position.clone(),0xf5c168,20,0.9);
+    // generous ring radius — this is a joyful first flight, not a precision test
+    if (!h.userData.hoop.passed && d<6.5){ h.userData.hoop.passed=true; spawnBurst(h.position.clone(),0xf5c168,20,0.9);
       h.material.color.set(0x7bd3c6); h.material.emissive.set(0x2a6b60); toast('Ring!','good',900); }
     if (h.userData.hoop.passed) passed++;
   }
-  if (passed>=hoops.length){ trialActive=false; trialPass(); }
-  // fail if landed before finishing
-  if (grounded && player.position.y<0.3 && passed<hoops.length){
-    trialActive=false;
-    if (!G.flags.trialPassed){ G.glideUnlocked=false; toast('Touched down early — talk to Pell to try again.', 'bad', 3200); }
-  }
+  if (passed>=hoops.length){ trialActive=false; trialPass(); return; }
+  // Landing no longer fails and never revokes the glider. Touch down and you
+  // simply get launched back up to try the remaining rings.
+  if (grounded && player.position.y < 0.4){
+    trialRelaunch -= 1/60;
+    if (trialRelaunch <= 0){
+      trialRelaunch = 1.2;
+      player.position.set(-4, 0.3, 43);
+      pv.set(0, 11, 4);
+      toast(`Up you go again — ${hoops.length-passed} ring${hoops.length-passed===1?'':'s'} to go.`, 'info', 2200);
+    }
+  } else trialRelaunch = 0.5;
 }
 function trialPass(){
   G.flags.trialPassed=true; G.glideUnlocked=true;
@@ -2909,6 +2957,9 @@ function ensureQuests(){
   const q = G.quest;
   if (q.dailyDate !== todayKey()){ q.dailyDate = todayKey(); q.daily = rollPool(DAILY_POOL, 3); }
   if (q.weeklyKey !== weekKey()){ q.weeklyKey = weekKey(); q.weekly = rollPool(WEEKLY_POOL, 2); }
+  if (!Array.isArray(q.sealed)) q.sealed = [];
+  if (!Array.isArray(q.side)) q.side = [];
+  ensureSideQuests();
 }
 /* Derived from what's actually completed, never a separate index — beats can
    complete out of order (catch-up), which desynced a standalone pointer. */
@@ -2938,6 +2989,7 @@ function completeMain(q, quiet){
     sfx.attune();
     toast(`Story: “${q.title}” — insight earned. +${q.reward} Emberlight`, 'good', 4200);
     tainerSay(q.lesson, 8000);
+    queueReflection(q);              // read it, then answer for it — that's the seal
   }
   refreshObjective(); updateHUD();
   // chain forward: the capstone auto-completes, and any beat whose trigger
@@ -2993,8 +3045,128 @@ function noteEvent(type, n=1, item=null){
   };
   bump(G.quest.daily, DAILY_POOL);
   bump(G.quest.weekly, WEEKLY_POOL);
+
+  // side quests are permanent milestone lessons, not rotating goals
+  ensureSideQuests();
+  for (const e of G.quest.side){
+    if (e.done) continue;
+    const def = SIDE_QUESTS.find(s=>s.id===e.id); if (!def) continue;
+    const g = def.goal;
+    if (g.type !== type) continue;
+    if (g.item){ const ok = Array.isArray(g.item) ? g.item.includes(item) : g.item===item; if (!ok) continue; }
+    e.prog += n;
+    if (e.prog >= g.n) completeSide(def, e);
+  }
 }
-function wisdomTitle(){ return wayfarerRank(G.quest.insights.length); }
+/* ------------------------------------------------------ reflections & seals
+   An insight is *earned* by playing, but only SEALED by proving you read it.
+   Rank counts sealed insights only — that's what makes the reading matter.
+   The modal is escapable on purpose: being trapped mid-fight would be worse
+   than an unsealed insight, and the Journal lets you seal it any time. */
+const ALL_LESSONS = [...MAIN_QUESTS, ...SIDE_QUESTS];
+function lessonById(id){ return ALL_LESSONS.find(q=>q.id===id) || null; }
+function isSealed(id){ return G.quest.sealed.includes(id); }
+function sealedCount(){ return G.quest.sealed.length; }
+
+let reflectQueue = [], reflectCur = null, reflectAttempts = 0, reflectReturn = 'playing';
+function queueReflection(q){
+  if (!q || !q.insight || !q.quiz || isSealed(q.id)) return;
+  if (reflectCur === q || reflectQueue.includes(q)) return;
+  reflectQueue.push(q);
+  if (!reflectCur) setTimeout(nextReflection, 900);   // let the completion toast land first
+}
+function nextReflection(){
+  if (reflectCur) return;
+  if (G.phase!=='playing' && G.phase!=='journal' && G.phase!=='paused') return;
+  const q = reflectQueue.shift();
+  if (!q) return;
+  if (isSealed(q.id)) return nextReflection();
+  openReflection(q);
+}
+function openReflection(q){
+  reflectCur = q; reflectAttempts = 0;
+  reflectReturn = (G.phase==='journal') ? 'journal' : 'playing';
+  if (G.phase==='journal') hide(dom['menu-journal']);
+  G.phase = 'reflect';
+  document.exitPointerLock?.();
+  dom['reflect-kicker'].textContent = SIDE_QUESTS.includes(q) ? 'A Lesson From The Doing' : 'A Reflection';
+  dom['reflect-title'].textContent    = q.title;
+  dom['reflect-lesson'].textContent   = '“'+q.lesson+'”';
+  dom['reflect-theme'].textContent    = q.insight.theme;
+  dom['reflect-teaching'].textContent = q.insight.teaching;
+  dom['reflect-practice'].textContent = 'Try this — ' + q.insight.practice;
+  show(dom['reflect-readbox']); hide(dom['reflect-quizbox']);
+  dom['btn-reflect-read'].textContent = "I've read it — ask me";
+  hide(dom['reflect-feedback']);
+  show(dom['menu-reflect']);
+  sfx.attune?.();
+}
+function showReflectQuiz(){
+  const q = reflectCur; if (!q) return;
+  hide(dom['reflect-readbox']); show(dom['reflect-quizbox']);
+  dom['reflect-q'].textContent = q.quiz.q;
+  const box = dom['reflect-opts']; box.innerHTML = '';
+  q.quiz.options.forEach((opt, i)=>{
+    const b = document.createElement('button');
+    b.className = 'btn'; b.type = 'button'; b.textContent = opt;
+    b.addEventListener('click', ()=> answerReflection(i));
+    box.appendChild(b);
+  });
+}
+function answerReflection(i){
+  const q = reflectCur; if (!q) return;
+  const fb = dom['reflect-feedback'];
+  if (i === q.quiz.answer){
+    if (!G.quest.sealed.includes(q.id)) G.quest.sealed.push(q.id);
+    fb.className = 'reflect-feedback good';
+    fb.textContent = 'Sealed. That one is yours now.';
+    show(fb);
+    sfx.token?.();
+    setTimeout(()=>{ closeReflection(); toast(`Insight sealed — ${q.insight.theme}. Rank: ${wisdomTitle()}`, 'good', 3600); }, 1100);
+  } else {
+    reflectAttempts++;
+    fb.className = 'reflect-feedback bad';
+    fb.textContent = 'Not quite — read it once more, then try again.';
+    show(fb);
+    sfx.hit?.();
+    // send them back to the teaching; that re-read IS the point
+    setTimeout(()=>{
+      if (reflectCur !== q) return;
+      hide(dom['reflect-quizbox']); show(dom['reflect-readbox']);
+      dom['btn-reflect-read'].textContent = reflectAttempts>=2 ? 'Alright — ask me again' : 'Read again — ask me';
+      hide(fb);
+    }, 1500);
+  }
+}
+function closeReflection(){
+  if (G.phase!=='reflect') return;
+  const q = reflectCur;
+  hide(dom['menu-reflect']);
+  reflectCur = null;
+  if (q && !isSealed(q.id)) toast('Insight unsealed — open the Journal (L) to seal it.', 'warn', 3400);
+  if (reflectReturn==='journal'){ G.phase='journal'; show(dom['menu-journal']); renderJournal(); }
+  else { G.phase='playing'; updateHUD(); }
+  if (reflectQueue.length) setTimeout(nextReflection, 600);
+}
+
+/* --------------------------------------------------------------- side quests */
+function ensureSideQuests(){
+  const have = new Set(G.quest.side.map(e=>e.id));
+  for (const s of SIDE_QUESTS) if (!have.has(s.id)) G.quest.side.push({ id:s.id, prog:0, done:false });
+  // drop entries for quests that no longer exist
+  const ids = new Set(SIDE_QUESTS.map(s=>s.id));
+  G.quest.side = G.quest.side.filter(e=>ids.has(e.id));
+}
+function completeSide(def, entry){
+  entry.done = true; entry.prog = def.goal.n;
+  if (!G.quest.insights.includes(def.id)) G.quest.insights.push(def.id);
+  if (def.reward) addTokens(def.reward);
+  sfx.token?.();
+  toast(`Insight earned: “${def.title}”  ·  +${def.reward}✦`, 'good', 3800);
+  queueReflection(def);
+}
+
+function wisdomTitle(){ return wayfarerRank(sealedCount()); }
 
 /* Self-healing chain. The story is linear, but the world isn't — a player can
    descend or slay the Deepwyrm before beating Hush, and those are one-shot
@@ -3121,8 +3293,10 @@ function updatePlayer(dt){
   // jump / glide (double-jump handled via queueJump on keydown)
   const windUp = windLift(body.position);
   if (grounded) jumpsUsed = 0;
-  if (keys[' '] && !grounded && G.glideUnlocked && pv.y < 1.5){ glideActive=true; }
-  else if (!keys[' ']) glideActive=false;
+  // During the Trial you glide automatically while falling — no held input
+  // needed, which is what made it unplayable on a phone.
+  if (!grounded && G.glideUnlocked && pv.y < 1.5 && (keys[' '] || trialActive)) glideActive=true;
+  else if (!keys[' '] && !trialActive) glideActive=false;
 
   // charged attack: hold the attack button to unleash a heavy strike
   if ((attackHeld || keys['j']) && dashT<=0){
@@ -3189,7 +3363,7 @@ function updatePlayer(dt){
 
 function windLift(pos){
   let up=0;
-  for (const w of windZones){ if (Math.hypot(pos.x-w.pos.x,pos.z-w.pos.z)<w.r && pos.y<22) up=Math.max(up,w.up); }
+  for (const w of windZones){ if (Math.hypot(pos.x-w.pos.x,pos.z-w.pos.z)<w.r && pos.y<26) up=Math.max(up,w.up); }
   return up;
 }
 
@@ -3738,6 +3912,8 @@ function hydrate(p){
   next.underground = false;
   // quests (v4). Sanitize against the known quest/pool ids; older saves reconstruct below.
   const mainIds = MAIN_QUESTS.map(q=>q.id);
+  const sideIds = SIDE_QUESTS.map(s=>s.id);
+  const lessonIds = [...mainIds, ...sideIds];       // v6: insights come from both
   const dailyIds = DAILY_POOL.map(d=>d.id), weeklyIds = WEEKLY_POOL.map(w=>w.id);
   const sanEntries = (arr, ids)=> Array.isArray(arr) ? arr.filter(e=>e&&ids.includes(e.id))
     .map(e=>({ id:e.id, prog:Math.max(0,Math.min(9999, e.prog|0)), done:!!e.done })) : [];
@@ -3746,13 +3922,17 @@ function hydrate(p){
     next.quest = {
       main: Math.max(0, Math.min(MAIN_QUESTS.length, qp.main|0)),
       mainDone: Array.isArray(qp.mainDone) ? qp.mainDone.filter(id=>mainIds.includes(id)) : [],
-      insights: Array.isArray(qp.insights) ? qp.insights.filter(id=>mainIds.includes(id)) : [],
+      insights: Array.isArray(qp.insights) ? qp.insights.filter(id=>lessonIds.includes(id)) : [],
+      // v5-and-older saves never took a quiz; their earned insights start unsealed
+      // and the Journal invites them to seal each one.
+      sealed: Array.isArray(qp.sealed) ? qp.sealed.filter(id=>lessonIds.includes(id)) : [],
+      side: sanEntries(qp.side, sideIds),
       daily: sanEntries(qp.daily, dailyIds), weekly: sanEntries(qp.weekly, weeklyIds),
       dailyDate: typeof qp.dailyDate==='string' ? qp.dailyDate.slice(0,10) : '',
       weeklyKey: typeof qp.weeklyKey==='string' ? qp.weeklyKey.slice(0,10) : '',
     };
   } else {
-    next.quest = { main:0, mainDone:[], insights:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' };
+    next.quest = { main:0, mainDone:[], insights:[], sealed:[], side:[], daily:[], weekly:[], dailyDate:'', weeklyKey:'' };
     next._reconstructQuest = true;   // pre-v4 save: rebuild story progress from flags after assign
   }
   Object.assign(G, {
@@ -3814,6 +3994,12 @@ function startLoadedGame(next){
   }
   refreshObjective();
   tainerSay('Back on the road! I kept your place. Let’s keep looking.', 4200);
+  // pre-v6 saves carry earned-but-unsealed insights; say so rather than letting
+  // the rank quietly look like it went backwards
+  const pending = G.quest.insights.filter(id=>!isSealed(id)).length;
+  if (pending) setTimeout(()=>{
+    toast(`${pending} insight${pending>1?'s':''} awaiting you — open the Journal (L) to read and seal ${pending>1?'them':'it'}.`, 'info', 6000);
+  }, 5000);
 }
 
 /* ============================================================ WORLD REBUILD */
@@ -3848,7 +4034,8 @@ function buildFreshWorldFor(next){
 }
 
 function hideAllMenus(){
-  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom['menu-map'],dom['menu-inv'],dom['menu-journal'],dom.loading].forEach(hide);
+  [dom['menu-title'],dom['menu-sibling'],dom['menu-class'],dom.cinematic,dom['menu-pause'],dom['menu-settings'],dom['menu-map'],dom['menu-inv'],dom['menu-journal'],dom['menu-reflect'],dom.loading].forEach(hide);
+  reflectQueue = []; reflectCur = null;
 }
 
 /* first-time (new game) world build after class confirm */
@@ -3880,6 +4067,9 @@ function bindButtons(){
   if (dom['btn-map-close']) dom['btn-map-close'].onclick = ()=> closeMap();
   if (dom['btn-journal']) dom['btn-journal'].onclick = ()=> openJournal();
   if (dom['btn-journal-close']) dom['btn-journal-close'].onclick = ()=> closeJournal();
+  if (dom['btn-reflect-read']) dom['btn-reflect-read'].onclick = ()=> showReflectQuiz();
+  for (const id of ['btn-reflect-later','btn-reflect-later2'])
+    if (dom[id]) dom[id].onclick = ()=> closeReflection();
   if (dom.jtabs) [...dom.jtabs.children].forEach(b=> b.onclick = ()=>{ journalTab=b.dataset.tab; renderJournal(); });
   buildHotbarUI();
   dom['btn-save'].onclick = ()=> downloadSave();
@@ -4067,12 +4257,29 @@ function installDevHooks(){
       };
     },
     mods: ()=> equippedMods(),
+    hoopList: ()=> hoops.map(h=>({x:+h.position.x.toFixed(1), y:+h.position.y.toFixed(1), z:+h.position.z.toFixed(1), passed:!!h.userData.hoop.passed})),
+    trialActive: ()=> trialActive,
+    startTrial: ()=> startTrial(),
     projCount: ()=> projectiles.length,
     projList: ()=> projectiles.map(p=>({x:+p.mesh.position.x.toFixed(2), y:+p.mesh.position.y.toFixed(2), z:+p.mesh.position.z.toFixed(2), life:+p.life.toFixed(2)})),
     equip: (id)=>{ if(G.owned.includes(id)){ G.equipped=id; updateHUD(); return true; } return false; },
     gear: ()=> ({ owned:[...G.owned], equipped:G.equipped, power:weaponPower(equippedWeapon()) }),
     warp: (x,z)=>{ player.position.set(x,0,z); },
     chestsState: ()=> ({...G.chests}),
+    interact: ()=> tryInteract(),
+    chestList: ()=> interactables.filter(i=>/chest/.test(i.id||'')).map(i=>({id:i.id, x:i.pos.x, z:i.pos.z, open:!!G.chests[i.id]})),
+    // wisdom / reflection harness
+    reflect: ()=> ({ open:G.phase==='reflect', cur:reflectCur?.id||null, attempts:reflectAttempts,
+      queued:reflectQueue.map(q=>q.id), quizShown:!dom['reflect-quizbox'].classList.contains('hidden'),
+      lesson:dom['reflect-teaching'].textContent, question:dom['reflect-q'].textContent,
+      options:[...dom['reflect-opts'].children].map(b=>b.textContent) }),
+    reflectRead: ()=> showReflectQuiz(),
+    reflectAnswer: (i)=> answerReflection(i),
+    reflectClose: ()=> closeReflection(),
+    wisdom: ()=> ({ rank:wisdomTitle(), sealed:[...G.quest.sealed], earned:[...G.quest.insights],
+      total:ALL_LESSONS.length,
+      side:G.quest.side.map(e=>({id:e.id, prog:e.prog, done:e.done})) }),
+    noteEvent: (t,n)=> noteEvent(t, n||1),
     viewYaw: ()=> yaw,
     view: ()=> ({ yaw:+yaw.toFixed(3), pitch:+pitch.toFixed(3), camDist }),
     facing: ()=> player ? +player.rotation.y.toFixed(3) : null,
