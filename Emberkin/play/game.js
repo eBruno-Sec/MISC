@@ -1398,8 +1398,10 @@ function updateInteract(){
   let best=null, bestD=1e9;
   // lake fishing (stage 0)
   if (!G.flags.fished){
+    // any shoreline spot works. (The old 10.5–13.5 ring silently vanished the
+    // moment you stepped toward the water — deep water already stops you at ~9.)
     const d = Math.hypot(player.position.x-lakePos.x, player.position.z-lakePos.z);
-    if (d < 13.5 && d > 10.5){ best = { kind:'fish' }; bestD=0; }
+    if (d < 15){ best = { kind:'fish' }; bestD=0; }
   }
   for (const it of interactables){
     if (it.cond && !it.cond()) continue;
@@ -2569,6 +2571,7 @@ function setAmbiance(under){
 function descend(){
   buildCavern();
   G.underground = true;
+  G.flags.descendedEver = true;
   advanceMain('descended');
   noteEvent('descend', 1);
   const barrow = interactables.find(x=>x.label&&/Barrow/.test(x.label()));
@@ -2726,7 +2729,7 @@ function collectOrb(o){
   toast('Mimic Orb held. Press F to Mirrorstep.', 'good', 2600);
   if (G.stage===2 || G.stage===3){
     G.stage=3;
-    setObjective('Press F to Mirrorstep into a Grumble, then slip past the camp guards to the far marker.');
+    toast('Press F to Mirrorstep into a Grumble, then slip past the camp guards.', 'info', 4200);
   }
 }
 
@@ -2794,6 +2797,12 @@ let alertLevel = 0; // 0 safe .. 3 detected
 function updateStealth(dt){
   const transformed = G.mimic.state==='Transformed';
   const pos = transformed && mimicMesh ? mimicMesh.position : player.position;
+  // Reaching the goal must be checked FIRST. It used to sit below the early
+  // returns, so a *successful* infiltration — outrunning the guards or killing
+  // them — never registered, permanently blocking the story.
+  if (campGoal && !G.flags.campPassed){
+    if (Math.hypot(pos.x-campGoal.x, pos.z-campGoal.z) < 3.5){ campPassed(); }
+  }
   const guards = enemies.filter(e=>e.alive && e.guard);
   if (!guards.length){ hide(dom['alert-state']); return; }
   // only surface the stealth indicator when actually near the camp
@@ -2819,11 +2828,6 @@ function updateStealth(dt){
     // spotted: guards give chase; nudge player back a bit
     for (const g of guards){ g.state='chase'; g.target=player; }
   }
-  // reach goal
-  if (campGoal && !G.flags.campPassed){
-    const d = Math.hypot(pos.x-campGoal.x, pos.z-campGoal.z);
-    if (d<3){ campPassed(); }
-  }
 }
 function setAlert(lv){
   const el = dom['alert-state'];
@@ -2842,7 +2846,7 @@ function campPassed(){
   toast('You slipped through the camp! +15 Emberlight', 'good', 3200);
   tainerSay('You walked right through them! Okay okay — next: Skywright Pell, past the meadow. He teaches gliding, and honestly we are going to need it.', 6000);
   G.stage=4;
-  setObjective('Find Skywright Pell (south meadow) and pass the Windrider’s Trial.');
+  refreshObjective();
 }
 
 /* ------------------------------------------------------------- gliding */
@@ -2883,7 +2887,7 @@ function trialPass(){
   toast('You earned the Windrider’s Mark! Gliding unlocked. +20 Emberlight', 'good', 4200);
   tainerSay('That was BEAUTIFUL! The Windrider’s Mark is yours — hold Space whenever you’re falling. The whole vale is open now. Let’s go find them.', 6500);
   G.stage=5;
-  setObjective('Attune the remaining Wardstones, strike the four elemental mechanisms, and open the Arc-sealed gate beyond the camp — something waits in the hollow.');
+  refreshObjective();
 }
 
 /* ============================================================ QUESTS & JOURNAL
@@ -2906,7 +2910,13 @@ function ensureQuests(){
   if (q.dailyDate !== todayKey()){ q.dailyDate = todayKey(); q.daily = rollPool(DAILY_POOL, 3); }
   if (q.weeklyKey !== weekKey()){ q.weeklyKey = weekKey(); q.weekly = rollPool(WEEKLY_POOL, 2); }
 }
-function activeMainQuest(){ return MAIN_QUESTS[G.quest.main] || null; }
+/* Derived from what's actually completed, never a separate index — beats can
+   complete out of order (catch-up), which desynced a standalone pointer. */
+function activeMainQuest(){
+  const q = MAIN_QUESTS.find(x => !G.quest.mainDone.includes(x.id)) || null;
+  G.quest.main = q ? MAIN_QUESTS.indexOf(q) : MAIN_QUESTS.length;   // keep the saved index honest
+  return q;
+}
 function refreshObjective(){
   const q = activeMainQuest();
   if (q) setObjective(q.objective);
@@ -2917,16 +2927,18 @@ function advanceMain(trigger){
   firedTriggers.add(trigger);
   const q = activeMainQuest();
   if (q && q.trigger === trigger) completeMain(q);
+  else setTimeout(reconcileQuests, 250);   // out-of-order milestone: catch up
 }
-function completeMain(q){
+function completeMain(q, quiet){
   if (G.quest.mainDone.includes(q.id)) return;
   G.quest.mainDone.push(q.id);
-  G.quest.main = Math.min(G.quest.main+1, MAIN_QUESTS.length);
   grantInsight(q);
   if (q.reward) addTokens(q.reward);
-  sfx.attune();
-  toast(`Story: “${q.title}” — insight earned. +${q.reward} Emberlight`, 'good', 4200);
-  tainerSay(q.lesson, 8000);
+  if (!quiet){
+    sfx.attune();
+    toast(`Story: “${q.title}” — insight earned. +${q.reward} Emberlight`, 'good', 4200);
+    tainerSay(q.lesson, 8000);
+  }
   refreshObjective(); updateHUD();
   // chain forward: the capstone auto-completes, and any beat whose trigger
   // already fired this session (out-of-order play) completes too
@@ -2984,6 +2996,32 @@ function noteEvent(type, n=1, item=null){
 }
 function wisdomTitle(){ return wayfarerRank(G.quest.insights.length); }
 
+/* Self-healing chain. The story is linear, but the world isn't — a player can
+   descend or slay the Deepwyrm before beating Hush, and those are one-shot
+   events. Without this, finishing content out of order permanently orphaned the
+   remaining beats. Any active quest whose milestone has ALREADY happened
+   completes itself, cascading forward. */
+const TRIGGER_SATISFIED = {
+  fished:        ()=> !!G.flags.fished,
+  firstElement:  ()=> Object.values(G.elements||{}).some(Boolean),
+  iceMelted:     ()=> !!G.flags.iceMelted,
+  campPassed:    ()=> !!G.flags.campPassed,
+  trialPassed:   ()=> !!(G.flags.trialPassed || G.glideUnlocked),
+  bossDefeated:  ()=> !!G.bossDefeated,
+  firstReaction: ()=> !!G.flags.firstReaction,
+  descended:     ()=> !!(G.flags.descendedEver || G.dragonDefeated),
+  dragonDefeated:()=> !!G.dragonDefeated,
+};
+function reconcileQuests(){
+  for (let guard=0; guard<MAIN_QUESTS.length+2; guard++){
+    const q = activeMainQuest();
+    if (!q) return;
+    const sat = TRIGGER_SATISFIED[q.trigger];
+    if (sat && sat()) completeMain(q, true);      // silent catch-up
+    else return;
+  }
+}
+
 /* ------------------------------------------------------------- progression */
 function addTokens(n){ G.tokens += n; sfx.token(); updateHUD(); }
 /* upgradeWeapon() is gone — power now comes from advanceMastery() per weapon type */
@@ -3027,7 +3065,7 @@ function meltIce(){
   world.remove(iceWall);
   toast('The Rime wall melts away!', 'good', 2600);
   tainerSay('Ha! Told you. The path north is open — that’s the Stonekin camp. We’ll want a disguise for that...', 5200);
-  if (G.stage<3){ setObjective('Defeat a Stonekin to earn a Mimic Orb, then use it to sneak through the camp.'); }
+  if (G.stage<3){ toast('Defeat a Stonekin to earn a Mimic Orb, then sneak through the camp.', 'info', 4200); }
 }
 
 /* ================================================================= PHYSICS */
@@ -3729,6 +3767,7 @@ function hydrate(p){
   });
   if (next._reconstructQuest) reconstructMainFromFlags();
   ensureQuests();                 // roll today's daily/weekly if missing or stale
+  reconcileQuests();              // catch the chain up to whatever already happened
   return next;
 }
 function clamp(v,a,b){ v=Number(v); if(!isFinite(v))v=a; return Math.max(a,Math.min(b,v)); }
@@ -4052,7 +4091,9 @@ function installDevHooks(){
     harvestCount: ()=> harvestables.filter(h=>h.respawnAt<=0).length,
     dropCount: ()=> drops.length,
     nearestHarvest: (kind)=>{ const p=player.position;
-      let best=null,bd=1e9; for(const h of harvestables){ if(h.respawnAt>0)continue; if(kind&&h.kind!==kind&&!(kind==='ore'&&h.ore))continue;
+      let best=null,bd=1e9; for(const h of harvestables){ if(h.respawnAt>0)continue;
+        if(kind==='stone'){ if(h.kind!=='rock'||h.ore) continue; }
+        else if(kind&&h.kind!==kind&&!(kind==='ore'&&h.ore))continue;
         const d=p.distanceTo(h.mesh.position); if(d<bd){bd=d;best=h;} } return best?{kind:best.kind,ore:best.ore,drop:best.drop,x:+best.mesh.position.x.toFixed(1),z:+best.mesh.position.z.toFixed(1),d:+bd.toFixed(1)}:null; },
     warpToHarvest: (kind)=>{ const p=player.position; let best=null,bd=1e9;
       for(const h of harvestables){ if(h.respawnAt>0)continue; if(kind==='ore'&&!h.ore)continue; if(kind&&kind!=='ore'&&h.kind!==kind)continue;
@@ -4102,7 +4143,8 @@ function installDevHooks(){
     arrowDir: ()=> ({ x:+Math.sin(player.rotation.y).toFixed(3), z:+Math.cos(player.rotation.y).toFixed(3) }),
     lakePos: ()=> lakePos ? { x:lakePos.x, z:lakePos.z } : null,
     // Phase I
-    dragon: ()=> dragonRef ? { alive:dragonRef.alive, hp:Math.round(dragonRef.hp), maxHp:dragonRef.maxHp, phase:dragonRef.phase } : null,
+    dragon: ()=> dragonRef ? { alive:dragonRef.alive, hp:Math.round(dragonRef.hp), maxHp:dragonRef.maxHp, phase:dragonRef.phase,
+      x:+dragonRef.mesh.position.x.toFixed(1), z:+dragonRef.mesh.position.z.toFixed(1), r:dragonRef.r } : null,
     awakenDragon: ()=>{ if(!dragonRef && dragonHome && !G.dragonDefeated){ spawnDragon(); return true; } return false; },
     hurtDragon: (n)=>{ if(dragonRef&&dragonRef.alive){ const d=dragonRef; damageEnemy(d,n); return d.alive?Math.round(d.hp):'defeated';} return null; },
     dragonDefeated: ()=> G.dragonDefeated,

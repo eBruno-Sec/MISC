@@ -44,6 +44,14 @@ export const MAIN_QUESTS = [
       practice:'Before reacting today, take one breath and notice what’s really happening.' },
     reward:16 },
 
+  { id:'m_wind', trigger:'trialPassed',
+    title:'Lean Into the Wind',
+    objective:'Find Skywright Pell in the south meadow and pass the Windrider’s Trial.',
+    lesson:"You were scared to fall. Then you leaned INTO the wind instead of fighting it — and you flew. Courage was never the absence of fear. It’s moving with it.",
+    insight:{ theme:'Courage', teaching:'Courage isn’t the absence of fear — it’s leaning into the wind you were given.',
+      practice:'Do one small brave thing you’ve been putting off.' },
+    reward:18 },
+
   { id:'m_space', trigger:'bossDefeated',
     title:'The Space Before the Strike',
     objective:'Face Hush, the Hollow Warden, in the sealed hollow.',
@@ -59,14 +67,6 @@ export const MAIN_QUESTS = [
     insight:{ theme:'Stoicism · Control', teaching:'Some things answer to you; most don’t. Spend your strength on the first, and let the rest be.',
       practice:'Name one thing you can’t control today — and loosen your grip on it.' },
     reward:16 },
-
-  { id:'m_wind', trigger:'trialPassed',
-    title:'Lean Into the Wind',
-    objective:'Earn the Windrider’s Mark from Skywright Pell.',
-    lesson:"You were scared to fall. Then you leaned INTO the wind instead of fighting it — and you flew. Courage was never the absence of fear. It’s moving with it.",
-    insight:{ theme:'Courage', teaching:'Courage isn’t the absence of fear — it’s leaning into the wind you were given.',
-      practice:'Do one small brave thing you’ve been putting off.' },
-    reward:18 },
 
   { id:'m_dark', trigger:'descended',
     title:'Into the Dark',
