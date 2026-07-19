@@ -186,8 +186,7 @@ function setMode(mode, type){
   if (type) S.placeType = type;
   document.querySelectorAll('[data-place]').forEach(b=>b.classList.toggle('sel', mode==='place' && b.dataset.place===S.placeType));
   $('btn-erase').classList.toggle('sel', mode==='erase');
-  $('hint').textContent = mode==='erase' ? 'Erase mode: click a piece to remove it.'
-    : 'Pick a piece, then click the ground to place it. Drag to look around, scroll to zoom.';
+  $('hint').textContent = hintText();
   refreshGhost();
 }
 document.querySelectorAll('[data-place]').forEach(b=> b.onclick = ()=> setMode('place', b.dataset.place));
@@ -277,6 +276,7 @@ function startPlaytest(){
 function endPlaytest(){
   if (!P.active) return;
   P.active = false;
+  PT.moveId=null; PT.lookId=null; PT.mvx=0; PT.mvy=0; hideStick();
   scene.remove(P.kid); P.kid = null;
   document.body.classList.remove('playtest');
   $('btn-return').classList.add('hidden');
@@ -290,6 +290,25 @@ $('btn-return').onclick = ()=> endPlaytest();
 
 /* -------------------------------------------------------------- input */
 const keys = {};
+
+/* Touch is detected lazily. Until then the mouse/keyboard path below runs
+   verbatim; once a touch is seen we drive from the on-screen controls and
+   ignore the synthetic mouse events the browser fires after a tap. */
+let touchOn = false;
+function enableTouch(){
+  if (touchOn) return;
+  touchOn = true;
+  document.body.setAttribute('data-touch','on');
+  $('hint').textContent = hintText();
+}
+function hintText(){
+  if (S.mode==='erase')
+    return touchOn ? 'Erase mode: tap a piece to remove it.' : 'Erase mode: click a piece to remove it.';
+  return touchOn
+    ? 'Pick a piece, then tap the ground to place it. Drag to look, pinch to zoom, two fingers to pan.'
+    : 'Pick a piece, then click the ground to place it. Drag to look around, scroll to zoom.';
+}
+
 addEventListener('keydown', e=>{
   keys[e.key.toLowerCase()]=true;
   if (e.key===' ') e.preventDefault();
@@ -300,8 +319,9 @@ addEventListener('keydown', e=>{
 addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
 
 let dragging=false, dragMoved=false;
-canvas.addEventListener('mousedown', e=>{ dragging=true; dragMoved=false; });
+canvas.addEventListener('mousedown', e=>{ if (touchOn) return; dragging=true; dragMoved=false; });
 addEventListener('mousemove', e=>{
+  if (touchOn) return;
   if (dragging && (e.buttons&1)){
     if (Math.abs(e.movementX)+Math.abs(e.movementY) > 1) dragMoved=true;
     yaw -= e.movementX*0.005; pitch = Math.max(0.15, Math.min(1.35, pitch + e.movementY*0.005));
@@ -314,13 +334,127 @@ addEventListener('mousemove', e=>{
   }
 });
 addEventListener('mouseup', e=>{
+  if (touchOn) return;
   if (!dragging) return; dragging=false;
   if (dragMoved || P.active) return;
-  if (S.mode==='erase'){ const o=pickObject(e); if(o){ removeObject(o); toast('Removed.', ''); } return; }
-  const gp = groundPoint(e);
-  if (gp) addObject(S.placeType, gp.x, gp.z, S.rot);
+  doPlaceEraseAt(e.clientX, e.clientY);
 });
-addEventListener('wheel', e=>{ if(!P.active){ dist=Math.max(14,Math.min(80,dist-Math.sign(e.deltaY)*3)); } }, {passive:true});
+addEventListener('wheel', e=>{ if(!P.active && !touchOn){ dist=Math.max(14,Math.min(80,dist-Math.sign(e.deltaY)*3)); } }, {passive:true});
+
+/* place (or erase) at a screen point, shared by the mouse and touch paths */
+function doPlaceEraseAt(cx, cy){
+  const ev = { clientX:cx, clientY:cy };
+  if (S.mode==='erase'){ const o=pickObject(ev); if(o){ removeObject(o); toast('Removed.', ''); } return; }
+  const gp = groundPoint(ev);
+  if (gp) addObject(S.placeType, gp.x, gp.z, S.rot);
+}
+
+/* --------------------------------------------------- touch controls (mobile) */
+const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+function screenToGround(cx, cy){
+  ndc.x=(cx/innerWidth)*2-1; ndc.y=-(cy/innerHeight)*2+1;
+  ray.setFromCamera(ndc, camera);
+  const p = new THREE.Vector3();
+  return ray.ray.intersectPlane(GROUND_PLANE, p) ? p : null;
+}
+
+const stickEl = $('tc-stick'), knobEl = $('tc-knob');
+function moveKnob(dx,dy){ knobEl.style.transform = `translate(${dx}px,${dy}px)`; }
+function showStick(x,y){ stickEl.style.left=x+'px'; stickEl.style.top=y+'px'; moveKnob(0,0); stickEl.style.display='block'; }
+function hideStick(){ stickEl.style.display='none'; moveKnob(0,0); }
+
+/* editor: one finger orbits + taps to place/erase, two fingers pinch-zoom & pan */
+let gest = null;
+function edStart(touches){
+  if (touches.length===1){
+    const t=touches[0];
+    gest = { mode:'orbit', x:t.clientX, y:t.clientY, sx:t.clientX, sy:t.clientY, moved:false };
+  } else {
+    const a=touches[0], b=touches[1];
+    gest = { mode:'pinch', d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),
+             mx:(a.clientX+b.clientX)/2, my:(a.clientY+b.clientY)/2 };
+  }
+}
+function edMove(touches){
+  if (!gest) return;
+  if (gest.mode==='orbit' && touches.length===1){
+    const t=touches[0], dx=t.clientX-gest.x, dy=t.clientY-gest.y;
+    if (Math.hypot(t.clientX-gest.sx, t.clientY-gest.sy) > 8) gest.moved=true;
+    yaw -= dx*0.006; pitch = Math.max(0.15, Math.min(1.35, pitch + dy*0.006));
+    gest.x=t.clientX; gest.y=t.clientY;
+  } else if (gest.mode==='pinch' && touches.length>=2){
+    const a=touches[0], b=touches[1];
+    const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    const mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2;
+    // pan so the world point under the fingers' midpoint stays put
+    const g0=screenToGround(gest.mx,gest.my), g1=screenToGround(mx,my);
+    if (g0 && g1){ target.add(g0.sub(g1)); target.x=clamp(target.x,-64,64); target.z=clamp(target.z,-64,64); }
+    dist = clamp(dist*(gest.d/Math.max(1,d)), 14, 80);
+    gest.d=d; gest.mx=mx; gest.my=my;
+  }
+}
+function edEnd(e){
+  if (gest && gest.mode==='orbit' && !gest.moved && e.touches.length===0){
+    const t=e.changedTouches[0];
+    doPlaceEraseAt(t.clientX, t.clientY);
+  }
+  if (e.touches.length===0){ gest=null; }
+  else { edStart(e.touches); if (gest) gest.moved=true; }   // lifting one finger of a pinch never places
+}
+
+/* playtest: left half = move stick, right half = look; on-screen Jump button */
+const PT = { moveId:null, m0x:0, m0y:0, mvx:0, mvy:0, lookId:null, lx:0, ly:0 };
+function ptStart(changed){
+  for (const t of changed){
+    if (t.clientX < innerWidth*0.5 && PT.moveId===null){
+      PT.moveId=t.identifier; PT.m0x=t.clientX; PT.m0y=t.clientY; PT.mvx=0; PT.mvy=0;
+      showStick(t.clientX, t.clientY);
+    } else if (PT.lookId===null){
+      PT.lookId=t.identifier; PT.lx=t.clientX; PT.ly=t.clientY;
+    }
+  }
+}
+function ptMove(changed){
+  for (const t of changed){
+    if (t.identifier===PT.moveId){
+      let dx=t.clientX-PT.m0x, dy=t.clientY-PT.m0y;
+      const len=Math.hypot(dx,dy), R=60;
+      if (len>R){ dx*=R/len; dy*=R/len; }
+      PT.mvx=dx/R; PT.mvy=dy/R; moveKnob(dx,dy);
+    } else if (t.identifier===PT.lookId){
+      yaw -= (t.clientX-PT.lx)*0.006; pitch=Math.max(0.15,Math.min(1.35,pitch+(t.clientY-PT.ly)*0.006));
+      PT.lx=t.clientX; PT.ly=t.clientY;
+    }
+  }
+}
+function ptEnd(changed){
+  for (const t of changed){
+    if (t.identifier===PT.moveId){ PT.moveId=null; PT.mvx=0; PT.mvy=0; hideStick(); }
+    else if (t.identifier===PT.lookId){ PT.lookId=null; }
+  }
+}
+
+canvas.addEventListener('touchstart', e=>{
+  enableTouch();
+  if (P.active) ptStart(e.changedTouches); else edStart(e.touches);
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchmove', e=>{
+  if (P.active) ptMove(e.changedTouches); else edMove(e.touches);
+  e.preventDefault();
+}, {passive:false});
+const onTouchEnd = e=>{
+  if (P.active) ptEnd(e.changedTouches); else edEnd(e);
+  if (e.cancelable) e.preventDefault();
+};
+canvas.addEventListener('touchend', onTouchEnd, {passive:false});
+canvas.addEventListener('touchcancel', onTouchEnd, {passive:false});
+
+$('btn-jump').addEventListener('touchstart', e=>{
+  e.preventDefault();
+  if (P.active && P.grounded){ P.vel.y=8.5; P.grounded=false; }
+}, {passive:false});
 
 /* -------------------------------------------------------------- loop */
 function tick(){
@@ -334,6 +468,7 @@ function tick(){
     const mv = new THREE.Vector3();
     if (keys['w']) mv.add(f); if (keys['s']) mv.sub(f);
     if (keys['a']) mv.sub(r); if (keys['d']) mv.add(r);
+    if (PT.mvx || PT.mvy){ mv.addScaledVector(f, -PT.mvy).addScaledVector(r, PT.mvx); }
     if (mv.lengthSq()>0.01){ mv.normalize(); P.kid.position.addScaledVector(mv, 6*dt); P.kid.rotation.y=Math.atan2(mv.x,mv.z); }
     if (keys[' '] && P.grounded){ P.vel.y=8.5; P.grounded=false; }
     P.vel.y -= 22*dt; P.kid.position.y += P.vel.y*dt;
