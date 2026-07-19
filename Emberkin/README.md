@@ -115,7 +115,7 @@ Playable, end to end:
 15. **Save** progress to JSON and **reload** it (with autosave to local storage; v1 saves migrate to v2)
 16. Adjust **accessibility** settings (reduced motion, high-contrast, camera speed, larger UI, aim assist)
 17. Strike all **four elemental mechanisms** and open their hoards
-18. Defeat **Hush, the Hollow Warden** and claim the Tier-3 weapon
+18. Defeat **Hush, the Hollow Warden** and claim a hoard of Emberlight for Mastery
 19. Build and **instantly playtest** your own glade in **Emberkin Studio**
 
 ---
