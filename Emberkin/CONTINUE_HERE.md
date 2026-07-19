@@ -61,8 +61,19 @@ All 15 weapons unlock at the start; progression is per-type **mastery**, not wea
 Sections further down were written earlier in the build and describe older phases —
 trust the code over any specific number below.
 
-**Known open items:** the Studio is mouse-only (no touch); Google Fonts is still an
-external request (cosmetic only — falls back to `system-ui`).
+**Rendering:** ACES filmic tone mapping + sRGB output, a gradient sky dome
+(back-faced sphere, `toneMapped:false`, hidden underground via `setAmbiance`),
+a warm key sun plus a shadowless cool fill light, and fog matched to the
+horizon. All of that is free-tier (no post-processing passes). A **Graphics
+quality** setting (High/Medium/Low) in Accessibility & Settings controls the
+only costly knobs: pixel ratio and shadow map size/softness (Low turns shadows
+off). Defaults to Medium on touch devices, High on desktop; persists in
+settings. Bloom/AO are intentionally NOT added yet (they need the three.js
+post-processing addons vendored) and would be a Medium/High-only follow-up.
+
+**Known open items:** none outstanding. (Both former items are now closed: the
+Studio has full touch controls, and all webfonts are vendored so there are zero
+external runtime requests.)
 
 ## What exists (all done, all verified)
 
@@ -70,7 +81,7 @@ external request (cosmetic only — falls back to `system-ui`).
 | --- | --- |
 | `play/` | The full 3D game (~4,400-line game.js). Core loop, the survival sandbox (gather / craft / forge / build / dig / traps), 4 elemental mechanisms (Rime freezes the lake deep-water zone, Loam raises steps+platforms, Tide floods the basin, Arc opens the boss gate), elemental Stonekin variants (resist own element ×0.25, counter ×1.75; Cinder↔Rime, Tide↔Arc), the boss **Hush, the Hollow Warden**, the Delve, and the endgame dragon **Vornrath the Deepwyrm**. **All 15 weapons unlocked from the start** — progression is per-type *mastery* bought with Emberlight, not weapon tiers. Story quest chain + daily/weekly + 12 milestone "Lessons", with insights **sealed by answering a quiz**. Touch controls for phones. Save schema **v6**, migrating v1→v6. |
 | `vendor/` | Three.js r161, vendored. The game has **no external runtime dependency** — do not repoint the import maps at a CDN. |
-| `studio/` | **Emberkin Studio** (Phase-4 demonstrator): grid-snapped placement of 7 piece types, single-flag rule, occupied-square rejection, erase/undo(60)/clear, 200-piece limit, localStorage autosave, validated JSON save/load (type whitelist, bounds, pollution guard, limit check — generic error "Invalid or corrupted progress file"), instant playtest (kid spawns at flag, walks/jumps, Grumbles wander, chests pop, hoops spin) that restores exact editor context on exit. Local-only; no publishing. |
+| `studio/` | **Emberkin Studio** (Phase-4 demonstrator): grid-snapped placement of 7 piece types, single-flag rule, occupied-square rejection, erase/undo(60)/clear, 200-piece limit, localStorage autosave, validated JSON save/load (type whitelist, bounds, pollution guard, limit check — generic error "Invalid or corrupted progress file"), instant playtest (kid spawns at flag, walks/jumps, Grumbles wander, chests pop, hoops spin) that restores exact editor context on exit. **Touch controls**: one-finger orbit + tap-to-place/erase, two-finger pinch-zoom & pan, and an on-screen joystick + Jump button in playtest (desktop mouse/keyboard path unchanged). Local-only; no publishing. |
 | `docs/` | Design codex updated: scope table rows for the new systems, UGC section links the Studio, roadmap marks Phase 2 (single-player parts) and Phase 4 (local sandbox) as shipped, villain section names Hush. |
 | `index.html` | Hub: Studio action card + expanded checklist. |
 | `../index.html` | Gallery card description covers boss + studio. |

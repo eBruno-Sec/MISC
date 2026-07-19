@@ -6,7 +6,15 @@
 <title>Emberkin Studio — build your own glade</title>
 <meta name="description" content="Emberkin Studio: a kid-friendly creator sandbox. Place trees, rocks, creatures and treasure on a grid, then instantly playtest your glade. Local only — nothing is published." />
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+  /* Fonts vendored locally (latin subset). No external request. See vendor/fonts/. */
+  @font-face{font-family:'Baloo 2';font-style:normal;font-weight:500;font-display:swap;src:url(../vendor/fonts/baloo2-500.woff2) format('woff2')}
+  @font-face{font-family:'Baloo 2';font-style:normal;font-weight:600;font-display:swap;src:url(../vendor/fonts/baloo2-600.woff2) format('woff2')}
+  @font-face{font-family:'Baloo 2';font-style:normal;font-weight:700;font-display:swap;src:url(../vendor/fonts/baloo2-700.woff2) format('woff2')}
+  @font-face{font-family:'Baloo 2';font-style:normal;font-weight:800;font-display:swap;src:url(../vendor/fonts/baloo2-800.woff2) format('woff2')}
+  @font-face{font-family:'Nunito';font-style:normal;font-weight:400;font-display:swap;src:url(../vendor/fonts/nunito-400.woff2) format('woff2')}
+  @font-face{font-family:'Nunito';font-style:normal;font-weight:600;font-display:swap;src:url(../vendor/fonts/nunito-600.woff2) format('woff2')}
+  @font-face{font-family:'Nunito';font-style:normal;font-weight:700;font-display:swap;src:url(../vendor/fonts/nunito-700.woff2) format('woff2')}
+  @font-face{font-family:'Nunito';font-style:normal;font-weight:800;font-display:swap;src:url(../vendor/fonts/nunito-800.woff2) format('woff2')}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
     --bg:#0e1420; --panel:#161d2c; --panel2:#1e2740; --line:#2b3550;
@@ -47,6 +55,15 @@
 
   .fine{position:fixed;right:10px;bottom:8px;z-index:8;color:var(--muted);font-size:.66rem;pointer-events:none}
   @media (max-width:700px){ .brand small{display:none} button{font-size:.78rem;padding:.45rem .6rem} }
+
+  /* touch controls: hidden until the first touch is seen (desktop never sees them) */
+  #tc-stick{position:fixed;z-index:24;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;
+    border:2px solid rgba(123,211,198,.45);background:rgba(14,20,32,.30);pointer-events:none;display:none}
+  #tc-knob{position:absolute;left:50%;top:50%;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;
+    background:rgba(123,211,198,.85);box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  #btn-jump{display:none;position:fixed;right:18px;bottom:90px;z-index:24;width:78px;height:78px;
+    border-radius:50%;justify-content:center;font-size:.95rem}
+  body[data-touch=on].playtest #btn-jump{display:flex}
 </style>
 </head>
 <body>
@@ -77,6 +94,9 @@
 <p class="hint" id="hint">Pick a piece, then click the ground to place it. Drag to look around, scroll to zoom.</p>
 <button id="btn-return" class="go hidden">◀ Back to editing</button>
 <p class="fine">Emberkin Studio saves only to your device. Autosaves to this browser.</p>
+
+<div id="tc-stick"><div id="tc-knob"></div></div>
+<button id="btn-jump" class="go" title="Jump">⤒ Jump</button>
 
 <div class="toast hidden" id="toast"></div>
 <input type="file" id="file-input" accept="application/json,.json" hidden />

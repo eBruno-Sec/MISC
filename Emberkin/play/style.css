@@ -1,7 +1,15 @@
 /* ============================================================
    EMBERKIN — UI / HUD / menus / themes / accessibility
    ============================================================ */
-@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+/* Fonts vendored locally (latin subset). No external request. See vendor/fonts/. */
+@font-face{font-family:'Baloo 2';font-style:normal;font-weight:500;font-display:swap;src:url(../vendor/fonts/baloo2-500.woff2) format('woff2')}
+@font-face{font-family:'Baloo 2';font-style:normal;font-weight:600;font-display:swap;src:url(../vendor/fonts/baloo2-600.woff2) format('woff2')}
+@font-face{font-family:'Baloo 2';font-style:normal;font-weight:700;font-display:swap;src:url(../vendor/fonts/baloo2-700.woff2) format('woff2')}
+@font-face{font-family:'Baloo 2';font-style:normal;font-weight:800;font-display:swap;src:url(../vendor/fonts/baloo2-800.woff2) format('woff2')}
+@font-face{font-family:'Nunito';font-style:normal;font-weight:400;font-display:swap;src:url(../vendor/fonts/nunito-400.woff2) format('woff2')}
+@font-face{font-family:'Nunito';font-style:normal;font-weight:600;font-display:swap;src:url(../vendor/fonts/nunito-600.woff2) format('woff2')}
+@font-face{font-family:'Nunito';font-style:normal;font-weight:700;font-display:swap;src:url(../vendor/fonts/nunito-700.woff2) format('woff2')}
+@font-face{font-family:'Nunito';font-style:normal;font-weight:800;font-display:swap;src:url(../vendor/fonts/nunito-800.woff2) format('woff2')}
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
