@@ -61,6 +61,16 @@ All 15 weapons unlock at the start; progression is per-type **mastery**, not wea
 Sections further down were written earlier in the build and describe older phases —
 trust the code over any specific number below.
 
+**Rendering:** ACES filmic tone mapping + sRGB output, a gradient sky dome
+(back-faced sphere, `toneMapped:false`, hidden underground via `setAmbiance`),
+a warm key sun plus a shadowless cool fill light, and fog matched to the
+horizon. All of that is free-tier (no post-processing passes). A **Graphics
+quality** setting (High/Medium/Low) in Accessibility & Settings controls the
+only costly knobs: pixel ratio and shadow map size/softness (Low turns shadows
+off). Defaults to Medium on touch devices, High on desktop; persists in
+settings. Bloom/AO are intentionally NOT added yet (they need the three.js
+post-processing addons vendored) and would be a Medium/High-only follow-up.
+
 **Known open items:** none outstanding. (Both former items are now closed: the
 Studio has full touch controls, and all webfonts are vendored so there are zero
 external runtime requests.)

@@ -121,6 +121,7 @@ const settings = {
   theme:'night', contrast:false, motion:false, ui:false,
   cam:1, invert:false, aim:true, vol:0.6,
   shoulder:'right',   // over-the-shoulder camera bias: right | left | center
+  quality:'high',     // graphics: high | medium | low (pixel ratio + shadows)
 };
 
 /* --------------------------------------------------------------------- DOM */
@@ -135,7 +136,7 @@ const dom = {};
  'class-complexity','btn-confirm-class','file-input',
  'btn-new','btn-continue','btn-load','btn-settings-title','btn-resume','btn-settings-pause','btn-save',
  'btn-load-pause','btn-quit','btn-settings-back',
- 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder','set-hard','set-hard-row',
+ 'set-theme','set-contrast','set-motion','set-ui','set-cam','set-invert','set-aim','set-vol','set-shoulder','set-hard','set-hard-row','set-quality',
  'boss-bar','boss-fill','menu-inv','inv-list','inv-tokens','btn-inv','btn-inv-back',
  'reticle','aim-dot','hotbar','inv-hotbar','bag-grid','elem-row','inv-hint','btn-sort',
  'elem-hud','elem-hud-sig','elem-hud-name','floaters','craft-list','craft-search','combo','combo-n',
@@ -241,6 +242,7 @@ const sfx = {
 
 /* ============================================================ THREE.JS CORE */
 let renderer, scene, camera, clock;
+let sunLight=null, fillLight=null, skyDome=null;
 let player, playerParts, tainerMesh, mimicMesh;
 const enemies = [];
 const orbs = [];
@@ -278,10 +280,15 @@ function initThree() {
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // filmic tone mapping + colour management: turns the flat, washed look into
+  // graded colour with rolled-off highlights. Free, no extra passes.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9fd0e8);
-  scene.fog = new THREE.Fog(0x9fd0e8, 60, 220);
+  scene.background = new THREE.Color(0xcfe4f5);
+  scene.fog = new THREE.Fog(0xcfe4f5, 70, 240);
 
   camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 600);
   camera.position.set(0, 6, 10);
@@ -295,16 +302,74 @@ function onResize(){ if(!renderer) return; camera.aspect = innerWidth/innerHeigh
 
 /* ------------------------------------------------------------------ lights */
 function buildLights() {
-  const hemi = new THREE.HemisphereLight(0xdfefff, 0x556b3f, 0.9);
+  // sky/ground bounce: warmer ground tone reads as sunlight bouncing off grass
+  const hemi = new THREE.HemisphereLight(0xdcefff, 0x6a7a48, 1.05);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d6, 1.15);
+  // warm key sun, brighter to sit right under ACES tone mapping
+  const sun = new THREE.DirectionalLight(0xfff1cf, 2.2);
   sun.position.set(40, 70, 20);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0004;               // trims shadow acne on the low-poly facets
   const s = 90; const c = sun.shadow.camera;
   c.left=-s;c.right=s;c.top=s;c.bottom=-s;c.near=1;c.far=250; c.updateProjectionMatrix();
-  scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+  scene.add(sun); sunLight = sun;
+  // cool fill from the opposite side (no shadow) gives shaded sides depth
+  // instead of near-black. One extra light, no shadow map: essentially free.
+  const fill = new THREE.DirectionalLight(0xaecbff, 0.55);
+  fill.position.set(-46, 34, -30);
+  scene.add(fill); fillLight = fill;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.10));
+  buildSky();
+  applyQuality();
+}
+
+/* Gradient sky dome. A back-faced sphere with a vertical-gradient canvas
+   texture, toneMapped:false so it stays a clean backdrop. One mesh, no passes. */
+function buildSky(){
+  const cvs = document.createElement('canvas'); cvs.width = 2; cvs.height = 256;
+  const cx = cvs.getContext('2d');
+  const grad = cx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.00, '#5aa6e6');   // zenith
+  grad.addColorStop(0.55, '#9fcdee');
+  grad.addColorStop(1.00, '#e7f2fb');   // horizon haze (matches fog)
+  cx.fillStyle = grad; cx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshBasicMaterial({ map:tex, side:THREE.BackSide, fog:false, depthWrite:false, toneMapped:false });
+  skyDome = new THREE.Mesh(new THREE.SphereGeometry(500, 24, 16), mat);
+  skyDome.renderOrder = -1;
+  scene.add(skyDome);
+}
+
+/* Graphics quality: the only knobs that actually cost frames live here, so a
+   phone can drop to Low while a desktop runs High. Free-tier polish (tone
+   mapping, sky, fill light) is always on. */
+function setShadowRes(n){
+  if (!sunLight) return;
+  if (sunLight.shadow.mapSize.width === n && sunLight.shadow.map) return;
+  sunLight.shadow.mapSize.set(n, n);
+  if (sunLight.shadow.map){ sunLight.shadow.map.dispose(); sunLight.shadow.map = null; }
+}
+function applyQuality(){
+  if (!renderer) return;
+  const q = settings.quality || 'high';
+  const dpr = window.devicePixelRatio || 1;
+  if (q === 'low'){
+    renderer.setPixelRatio(Math.min(dpr, 1));
+    renderer.shadowMap.enabled = false;
+  } else if (q === 'medium'){
+    renderer.setPixelRatio(Math.min(dpr, 1.5));
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+    setShadowRes(1024);
+  } else {
+    renderer.setPixelRatio(Math.min(dpr, 2));
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    setShadowRes(2048);
+  }
+  if (sunLight) sunLight.castShadow = renderer.shadowMap.enabled;
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.needsUpdate = true;
 }
 
 /* ------------------------------------------------------------------ terrain
@@ -2650,8 +2715,15 @@ function buildCavern(){
 }
 function setAmbiance(under){
   if (!scene) return;
-  if (under){ scene.background = new THREE.Color(0x07060a); if(scene.fog){ scene.fog.color.set(0x07060a); scene.fog.near=8; scene.fog.far=70; } }
-  else { scene.background = new THREE.Color(0x9fd0e8); if(scene.fog){ scene.fog.color.set(0x9fd0e8); scene.fog.near=40; scene.fog.far=260; } }
+  if (under){
+    scene.background = new THREE.Color(0x07060a);
+    if(scene.fog){ scene.fog.color.set(0x07060a); scene.fog.near=8; scene.fog.far=70; }
+    if(skyDome) skyDome.visible = false;
+  } else {
+    scene.background = new THREE.Color(0xcfe4f5);
+    if(scene.fog){ scene.fog.color.set(0xcfe4f5); scene.fog.near=45; scene.fog.far=270; }
+    if(skyDome) skyDome.visible = true;
+  }
 }
 function descend(){
   buildCavern();
@@ -3846,17 +3918,26 @@ function syncSettingsUI(){
   if (dom['set-hard-row']){ dom['set-hard-row'].style.display = G.dragonDefeated ? 'flex' : 'none';
     dom['set-hard'].checked = !!G.hardMode; }
   dom['set-aim'].checked=settings.aim; dom['set-vol'].value=settings.vol;
+  if (dom['set-quality']) dom['set-quality'].value=settings.quality;
 }
 function applySettings(){
   document.body.dataset.theme = settings.theme;
   document.body.dataset.motion = settings.motion?'reduced':'full';
   document.body.dataset.ui = settings.ui?'large':'normal';
   document.body.dataset.contrast = settings.contrast?'high':'normal';
+  applyQuality();
   saveSettings();
 }
 function saveSettings(){ try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }catch(e){} }
 function loadSettings(){
-  try{ const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null'); if(s&&typeof s==='object') Object.assign(settings,s); }catch(e){}
+  try{
+    const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null');
+    if(s&&typeof s==='object') Object.assign(settings,s);
+    // first run on a touch/phone: start at Medium so it's smooth out of the box
+    if(!s || !('quality' in s)){
+      settings.quality = matchMedia('(pointer:coarse)').matches ? 'medium' : 'high';
+    }
+  }catch(e){}
 }
 
 /* ================================================================= SAVE/LOAD */
@@ -4157,6 +4238,7 @@ function bindButtons(){
     if (e.target.checked && !G.dragonDefeated){ e.target.checked=false; toast('Defeat the Deepwyrm to unlock Deepened mode.', 'info', 2600); } };
   dom['set-aim'].onchange = e=>{ settings.aim=e.target.checked; saveSettings(); };
   dom['set-vol'].oninput = e=>{ settings.vol=parseFloat(e.target.value); setMasterVol(); saveSettings(); };
+  if (dom['set-quality']) dom['set-quality'].onchange = e=>{ settings.quality=e.target.value; applyQuality(); saveSettings(); };
 }
 
 /* hook class-confirm to build the world before opening cinematic already done;
@@ -4201,6 +4283,7 @@ function loop(){
     motes.position.y = Math.sin(performance.now()*0.0004)*0.35;
   }
   updateAim();
+  if (skyDome && camera) skyDome.position.copy(camera.position);   // keep the horizon centred on the view
   if (renderer) renderer.render(scene, camera);
 }
 function updateProjectiles(dt){
