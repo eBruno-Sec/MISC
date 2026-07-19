@@ -40,13 +40,30 @@ proper nouns below are original to this project.
 
 ### The five permanent classes
 
-| Discipline | Weapons (all unique grade) | Playstyle |
+Every weapon has its **own feel**. Faster weapons hit lighter and slower ones hit harder, so
+damage-per-second stays comparable — the choice is style, never strength.
+
+| Discipline | Weapon | Signature |
 | --- | --- | --- |
-| **Sword** | Vale Blade · Bramblefang · Dawnedge | Balanced close range, reliable, parry potential |
-| **Bow** | Reed Bow · Galewhisper · Sunstring | Ranged precision, charged shots, weak points |
-| **Greatsword** | Cragcleaver · Bouldersong · Titanroot | Slow, heavy, high stagger, breaks weak stone |
-| **Dual Swords** | Twin Fangs · Skydancers · Emberfangs | Fast combos, high mobility, quick elemental build-up |
-| **Psychic Focus** | Wander Rune · Lumen Coil · Starheart | A floating rune; telekinetic push/pull, shields, moving platforms |
+| **Sword** | Vale Blade | Forgiving — a wider, more generous swing arc |
+| | Bramblefang | Swift — quick strikes, shorter reach, combo builds **double** |
+| | Dawnedge | Keen — long reach, **+10% crit** |
+| **Bow** | Reed Bow | Quick draw — rapid, lighter shots |
+| | Galewhisper | **Piercing** — arrows carry on through a second foe |
+| | Sunstring | Heavy draw — slow, powerful shots |
+| **Greatsword** | Cragcleaver | **Crushing** — heavy knockback |
+| | Bouldersong | Sweeping — a far wider arc through crowds |
+| | Titanroot | **Stonebane** — ×1.4 against the heavy Stonekin |
+| **Dual Swords** | Twin Fangs | Relentless — fastest strikes, combo builds **double** |
+| | Skydancers | **Windborne** — longer, more frequent dash |
+| | Emberfangs | **Emberbound** — elemental reactions hit 35% harder |
+| **Psychic Focus** | Wander Rune | Swift bolts — light, rapid casts |
+| | Lumen Coil | **Chaining** — its light arcs on to a nearby foe |
+| | Starheart | Starfall — slow, heavy, brilliant impact |
+
+Weapons are held **in the hands** and swing with the arms, with a distinct animation per style —
+a sword arc, a two-handed greatsword chop, a bow draw-and-loose, a floating spinning rune, and
+**dual swords that alternate left and right** for a real combo rhythm.
 
 ### Mastery, not loot
 

@@ -217,6 +217,7 @@ body[data-motion="reduced"] .hslot.assignable{animation:none;box-shadow:0 0 10px
 .craft-cost .have{color:var(--ok)}
 .inv-row{cursor:grab}
 .sec-hint{font-family:var(--body);font-weight:600;font-size:.72rem;color:var(--muted)}
+.inv-blurb{font-size:.74rem;color:var(--accent-2);margin-top:.15rem;font-style:italic}
 .wtype-head{font-family:var(--display);font-weight:800;color:var(--accent);font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;margin:.5rem 0 .1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .wtype-head .wtype-m{font-family:var(--body);font-weight:700;font-size:.7rem;color:var(--muted);text-transform:none;letter-spacing:0}
 .inv-row.picked{border-color:var(--accent);box-shadow:0 0 10px var(--accent)}

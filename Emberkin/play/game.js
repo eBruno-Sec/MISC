@@ -35,13 +35,42 @@ const CLASSES = {
 };
 
 /* Weapon tiers per class. Players only ever find weapons of their own class. */
+/* Every weapon is unique grade — equal in worth, different in FEEL. Faster
+   weapons hit lighter and slower ones hit harder, so damage-per-second stays
+   comparable and the choice is about style, never strength.
+   mods: dmg (per-hit ×), cd (seconds between swings), arc/reach (×), crit (+),
+   perk (a signature trait). */
 const WEAPONS = {
-  sword:      [ {id:'sw1',name:'Vale Blade',tier:1},  {id:'sw2',name:'Bramblefang',tier:2}, {id:'sw3',name:'Dawnedge',tier:3} ],
-  bow:        [ {id:'bw1',name:'Reed Bow',tier:1},    {id:'bw2',name:'Galewhisper',tier:2}, {id:'bw3',name:'Sunstring',tier:3} ],
-  greatsword: [ {id:'gs1',name:'Cragcleaver',tier:1}, {id:'gs2',name:'Bouldersong',tier:2}, {id:'gs3',name:'Titanroot',tier:3} ],
-  dual:       [ {id:'du1',name:'Twin Fangs',tier:1},  {id:'du2',name:'Skydancers',tier:2},  {id:'du3',name:'Emberfangs',tier:3} ],
-  focus:      [ {id:'fo1',name:'Wander Rune',tier:1}, {id:'fo2',name:'Lumen Coil',tier:2},  {id:'fo3',name:'Starheart',tier:3} ],
+  sword: [
+    {id:'sw1',name:'Vale Blade',  dmg:1.00,cd:0.28,arc:1.15,reach:1.00,crit:0,    perk:null,       blurb:'Forgiving — a wider, more generous swing arc.'},
+    {id:'sw2',name:'Bramblefang', dmg:0.85,cd:0.20,arc:0.95,reach:0.85,crit:0,    perk:'comboUp',  blurb:'Swift — quick strikes, shorter reach, combo builds fast.'},
+    {id:'sw3',name:'Dawnedge',    dmg:1.10,cd:0.32,arc:1.00,reach:1.30,crit:0.10, perk:null,       blurb:'Keen — long reach and a far higher crit chance.'},
+  ],
+  bow: [
+    {id:'bw1',name:'Reed Bow',    dmg:0.85,cd:0.22,arc:1.00,reach:1.00,crit:0,    perk:null,       blurb:'Quick draw — rapid, lighter shots.'},
+    {id:'bw2',name:'Galewhisper', dmg:1.00,cd:0.30,arc:1.00,reach:1.00,crit:0,    perk:'pierce',   blurb:'Piercing — arrows carry on through a second foe.'},
+    {id:'bw3',name:'Sunstring',   dmg:1.35,cd:0.45,arc:1.00,reach:1.00,crit:0.05, perk:null,       blurb:'Heavy draw — slow, powerful shots.'},
+  ],
+  greatsword: [
+    {id:'gs1',name:'Cragcleaver', dmg:1.00,cd:0.42,arc:1.00,reach:1.00,crit:0,    perk:'stagger',  blurb:'Crushing — sends foes reeling backward.'},
+    {id:'gs2',name:'Bouldersong', dmg:0.90,cd:0.40,arc:1.55,reach:1.10,crit:0,    perk:null,       blurb:'Sweeping — carves a far wider arc through crowds.'},
+    {id:'gs3',name:'Titanroot',   dmg:1.10,cd:0.45,arc:1.00,reach:1.00,crit:0,    perk:'stonebane',blurb:'Stonebane — devastating against the heavy Stonekin.'},
+  ],
+  dual: [
+    {id:'du1',name:'Twin Fangs',  dmg:0.80,cd:0.18,arc:1.00,reach:0.95,crit:0,    perk:'comboUp',  blurb:'Relentless — the fastest strikes; combo builds double.'},
+    {id:'du2',name:'Skydancers',  dmg:0.90,cd:0.22,arc:1.05,reach:1.00,crit:0.05, perk:'dash',     blurb:'Windborne — longer dash, nimble footwork.'},
+    {id:'du3',name:'Emberfangs',  dmg:0.95,cd:0.24,arc:1.00,reach:1.00,crit:0,    perk:'elemental',blurb:'Emberbound — elemental reactions hit far harder.'},
+  ],
+  focus: [
+    {id:'fo1',name:'Wander Rune', dmg:0.85,cd:0.24,arc:1.00,reach:1.00,crit:0,    perk:null,       blurb:'Swift bolts — light, rapid casts.'},
+    {id:'fo2',name:'Lumen Coil',  dmg:0.95,cd:0.32,arc:1.00,reach:1.00,crit:0,    perk:'chain',    blurb:'Chaining — its light arcs on to a nearby foe.'},
+    {id:'fo3',name:'Starheart',   dmg:1.35,cd:0.48,arc:1.00,reach:1.00,crit:0.05, perk:null,       blurb:'Starfall — slow, heavy, brilliant impact.'},
+  ],
 };
+const WMOD_DEFAULT = { dmg:1, cd:0.28, arc:1, reach:1, crit:0, perk:null, blurb:'' };
+function weaponMods(id){ return { ...WMOD_DEFAULT, ...(findWeapon(id) || {}) }; }
+function equippedMods(){ return weaponMods(G.equipped); }
+function hasPerk(p){ return equippedMods().perk === p; }
 /* TIER_MULT removed in v5 — weapons no longer have power tiers (see mastery) */
 /* Elemental variant counters: attack with the counter element for bonus damage.
    A variant resists its own element. Loam variants only resist Loam. */
@@ -600,7 +629,8 @@ function masteryMult(lv){ return 1 + (lv-1)*0.22; }
 function masteryCost(lv){ return 12 + (lv-1)*10; }
 function weaponPower(w){
   const t = w.type || weaponType(w.id);
-  return Math.round((CLASSES[t]?.dmg || 20) * masteryMult(masteryOf(t)));
+  const m = weaponMods(w.id);
+  return Math.round((CLASSES[t]?.dmg || 20) * masteryMult(masteryOf(t)) * (m.dmg||1));
 }
 function advanceMastery(t){
   const lv = masteryOf(t);
@@ -626,12 +656,20 @@ function equipWeapon(id){
   updateHUD();
   return true;
 }
-function rebuildWeaponProp(){
-  if (!player) return;
-  const old = player.userData.weapon;
-  if (old) player.remove(old);
-  const wp = makeWeaponProp(equippedType());
-  player.add(wp); player.userData.weapon = wp;
+function rebuildWeaponProp(){ attachWeaponProps(); }
+/* parent the props to the arm meshes at hand height (arms are 0.72 tall with a
+   centred origin, so the hand sits at local y = -0.36) */
+function attachWeaponProps(){
+  if (!player || !playerParts) return;
+  const held = player.userData.weapons;
+  if (held){ if (held.right) playerParts.armR.remove(held.right); if (held.left) playerParts.armL.remove(held.left); }
+  const { right, left } = makeWeaponProp(equippedType(), G.equipped);
+  right.position.set(0, -0.36, 0.06);
+  playerParts.armR.add(right);
+  if (left){ left.position.set(0, -0.36, 0.06); playerParts.armL.add(left); }
+  player.userData.weapons = { right, left };
+  player.userData.weapon = right;          // back-compat for tinting/float
+  tintWeapon(G.activeElement);
 }
 
 /* ------------------------------------------- Phase-2: elemental mechanisms */
@@ -913,28 +951,42 @@ function buildPlayer(){
   player = humanoid(tunic);
   player.position.set(-18, 0, 10);
   playerParts = player.userData.parts;
-  // weapon prop in right hand — follows the EQUIPPED weapon's type
-  const wp = makeWeaponProp(equippedType());
-  wp.position.set(0.5, 1.15, 0.1);
-  player.add(wp); player.userData.weapon = wp;
+  // weapon props are parented to the HANDS so they swing with the arms
+  attachWeaponProps();
   scene.add(player);
 }
 
-function makeWeaponProp(klass){
-  const g = new THREE.Group();
+/* Returns {right, left} props to be parented to the HANDS (the arm meshes), so
+   a weapon actually travels with the swing. Dual wield returns two blades. */
+function makeWeaponProp(klass, wid){
   const steel = new THREE.MeshStandardMaterial({ color:0xcdd6e6, roughness:0.35, metalness:0.6, flatShading:true });
   const gold  = new THREE.MeshStandardMaterial({ color:0xe6c15a, roughness:0.4, metalness:0.5 });
-  if (klass==='sword'){ const b=new THREE.Mesh(new THREE.BoxGeometry(0.08,1.1,0.02),steel); b.position.y=0.55; g.add(b);
-    const h=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.08,0.08),gold); g.add(h); }
-  else if (klass==='greatsword'){ const b=new THREE.Mesh(new THREE.BoxGeometry(0.18,1.7,0.05),steel); b.position.y=0.85; g.add(b);
-    const h=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.1,0.1),gold); g.add(h); }
-  else if (klass==='dual'){ const b=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.8,0.02),steel); b.position.y=0.4; g.add(b); }
-  else if (klass==='bow'){ const b=new THREE.Mesh(new THREE.TorusGeometry(0.5,0.04,6,12,Math.PI*1.2),
-      new THREE.MeshStandardMaterial({color:0x8a5a2c,roughness:0.8})); b.rotation.z=Math.PI/2; g.add(b); }
-  else if (klass==='focus'){ const b=new THREE.Mesh(new THREE.OctahedronGeometry(0.28,0),
-      new THREE.MeshStandardMaterial({color:0xb48bf0,emissive:0x5a3a8a,emissiveIntensity:0.7,flatShading:true}));
-    b.position.set(0.2,0.2,0); g.add(b); g.userData.float=b; }
-  return g;
+  const wood  = new THREE.MeshStandardMaterial({ color:0x8a5a2c, roughness:0.8 });
+  // per-weapon flourish so the three of a type don't look identical
+  const idx = Math.max(0, (WEAPONS[klass]||[]).findIndex(w=>w.id===wid));
+  const accent = [0xe6c15a, 0x7bd3c6, 0xf0713b][idx] || 0xe6c15a;
+  const accentMat = new THREE.MeshStandardMaterial({ color:accent, emissive:accent, emissiveIntensity:0.35, roughness:0.4, metalness:0.5 });
+  const blade = (len, w=0.08, th=0.02)=>{
+    const g = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w,len,th), steel); b.position.y = len/2; g.add(b);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(w*3.4,0.08,0.08), accentMat); g.add(h);
+    const p = new THREE.Mesh(new THREE.BoxGeometry(w*0.9,0.1,0.09), gold); p.position.y=-0.1; g.add(p);
+    return g;
+  };
+  let right = new THREE.Group(), left = null;
+  if (klass==='sword'){ right = blade(1.1 + idx*0.12); }
+  else if (klass==='greatsword'){ right = blade(1.7 + idx*0.1, 0.18, 0.05); }
+  else if (klass==='dual'){ right = blade(0.8, 0.06); left = blade(0.8, 0.06); }   // TWO blades
+  else if (klass==='bow'){
+    const b = new THREE.Mesh(new THREE.TorusGeometry(0.5,0.04,6,12,Math.PI*1.2), wood);
+    b.rotation.z = Math.PI/2; right.add(b);
+    const str = new THREE.Mesh(new THREE.BoxGeometry(0.01,0.86,0.01), accentMat); str.position.z=0.02; right.add(str);
+  }
+  else if (klass==='focus'){
+    const b = new THREE.Mesh(new THREE.OctahedronGeometry(0.26 + idx*0.03,0), accentMat);
+    b.position.set(0,0.05,0.25); right.add(b); right.userData.float = b;
+  }
+  return { right, left };
 }
 
 function makeNPC(pos, color){
@@ -1413,9 +1465,12 @@ function setActiveElement(elem){
   if (changed && elem !== 'none') noteEvent('element', 1);
 }
 function tintWeapon(elem){
-  const wp = player?.userData?.weapon; if(!wp) return;
+  const held = player?.userData?.weapons; if(!held) return;
   const col = elem==='none' ? 0xcdd6e6 : ELEMENTS[elem].color;
-  wp.traverse(o=>{ if(o.isMesh && o.material && o.material.emissive){ o.material.emissive.setHex(elem==='none'?0x000000:col); o.material.emissiveIntensity = elem==='none'?0:0.5; }});
+  for (const wp of [held.right, held.left]){
+    if (!wp) continue;
+    wp.traverse(o=>{ if(o.isMesh && o.material && o.material.emissive){ o.material.emissive.setHex(elem==='none'?0x000000:col); o.material.emissiveIntensity = elem==='none'?0:0.5; }});
+  }
 }
 function cycleElement(dir){
   const avail = ['none', ...Object.keys(ELEMENTS).filter(e=>G.elements[e])];
@@ -1542,8 +1597,9 @@ function slotVisual(btn, entry, idx){
   if (entry.kind==='weapon'){
     const w = findWeapon(entry.id);
     if (!w){ btn.classList.add('empty'); return; }
-    btn.innerHTML += (CLASS_GLYPH[G.klass]||'🗡️') + `<span class="htier">T${w.tier}</span>`;
-    btn.title = `${w.name} — equip`;
+    const wt = weaponType(entry.id);
+    btn.innerHTML += (CLASS_GLYPH[wt]||'🗡️') + `<span class="htier">M${masteryOf(wt)}</span>`;
+    btn.title = `${w.name} — ${CLASSES[wt]?.name||''} · ${w.blurb||''}`;
     if (G.equipped===entry.id) btn.classList.add('active');
   } else if (entry.kind==='element'){
     const d = itemDef(entry.id);
@@ -1616,6 +1672,8 @@ function refreshElementWheel(){
 
 /* ------------------------------------------------------------- combat */
 let atkAnim = 0;
+let swingSide = 0;        // dual wield alternates hands for a combo feel
+let playerAtkCd = 0;      // per-weapon swing cooldown (weapon "speed")
 function doAttack(){
   if (G.phase!=='playing') return;
   // placing a block from the active hotbar slot takes priority over swinging
@@ -1625,8 +1683,14 @@ function doAttack(){
   if (G.mimic.state!=='Transformed' && tryToolSwing()) return;
   const inMimic = G.mimic.state==='Transformed';
   const c = activeProfile();
+  const mods = equippedMods();
+  if (!inMimic){
+    if (playerAtkCd > 0) return;            // weapon speed gates the swing
+    playerAtkCd = mods.cd;
+  }
   const dmgBase = inMimic ? 22 : weaponPower(equippedWeapon());
   atkAnim = 1;
+  if (!inMimic && equippedType()==='dual') swingSide ^= 1;   // alternate hands
   sfx.swing();
   if (!inMimic && c.ranged){
     fireProjectile(dmgBase);
@@ -1634,7 +1698,7 @@ function doAttack(){
     // small committed lunge toward the strike
     const lf = new THREE.Vector3(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y));
     pv.x += lf.x*2.4; pv.z += lf.z*2.4;
-    meleeHit(inMimic ? 3.0 : c.range, inMimic ? 1.6 : c.arc, dmgBase);
+    meleeHit(inMimic ? 3.0 : c.range*mods.reach, inMimic ? 1.6 : c.arc*mods.arc, dmgBase);
   }
 }
 /* the tool currently selected on the hotbar, if any (pick / axe) */
@@ -1709,7 +1773,8 @@ function fireProjectile(dmg){
     new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1}));
   m.position.copy(muzzle).add(fwd.clone().multiplyScalar(0.8));
   scene.add(m);
-  projectiles.push({ mesh:m, vel:fwd.multiplyScalar(38), life:1.6, dmg, elem:G.activeElement });
+  projectiles.push({ mesh:m, vel:fwd.multiplyScalar(38), life:1.6, dmg, elem:G.activeElement,
+    pierce: hasPerk('pierce') ? 1 : 0, hitList:null });
 }
 function swingVfx(fwd){
   const col = G.activeElement==='none'?0xffffff:ELEMENTS[G.activeElement].color;
@@ -1727,9 +1792,12 @@ function damageEnemy(e, dmg){
     }
   }
   if (e.boss && e.weak > 0) mult *= 2;                                 // crystal exposed after the slam
-  // combo: consecutive player hits add a small ramping bonus
-  G.combo++; G.comboT = 2; mult *= 1 + Math.min(G.combo,12)*0.03;
+  // combo: consecutive player hits add a small ramping bonus ('comboUp' doubles it)
+  G.combo += hasPerk('comboUp') ? 2 : 1;
+  G.comboT = 2; mult *= 1 + Math.min(G.combo,12)*0.03;
   updateCombo();
+  // 'stonebane' — brutal against the heavy Stonekin
+  if (hasPerk('stonebane') && (e.kind==='boulder' || e.elem==='loam')) mult *= 1.4;
   // crit: a chance for bonus damage (scales with weapon level)
   let crit = false;
   if (Math.random() < critChance()){ mult *= 1.8; crit = true; }
@@ -1738,9 +1806,26 @@ function damageEnemy(e, dmg){
   hitstop = Math.max(hitstop, e.boss ? 0.06 : 0.04);   // impact freeze-frame
   const fxCol = crit ? 0xffd24a : (mult>1 ? 0xfff0a0 : (mult<1 ? 0x8a90a0 : 0xffffff));
   applyEnemyDamage(e, dmg*mult, fxCol, crit);
+  // 'stagger' — heavy knockback
+  if (hasPerk('stagger') && e.alive && !e.boss){
+    const away = new THREE.Vector3().subVectors(e.mesh.position, player.position).setY(0).normalize();
+    e.mesh.position.x += away.x*1.6; e.mesh.position.z += away.z*1.6;
+    spawnBurst(e.mesh.position.clone().setY(1), 0xd6dae0, 8, 0.8);
+  }
+  // 'chain' — the strike arcs on to a nearby foe
+  if (hasPerk('chain') && !chaining){
+    chaining = true;
+    let best=null, bd=1e9;
+    for (const o of enemies){ if(o===e||!o.alive) continue;
+      const d=o.mesh.position.distanceTo(e.mesh.position); if(d<6 && d<bd){bd=d;best=o;} }
+    if (best){ spawnBurst(best.mesh.position.clone().setY(1), 0xb48bf0, 10, 0.8);
+      applyEnemyDamage(best, dmg*mult*0.5, 0xb48bf0); }
+    chaining = false;
+  }
   // reactions (Phase G): a different element than the one already on the target
   tryReaction(e);
 }
+let chaining = false;   // guards the chain perk against recursing
 /* core damage: floating number, particles, defeat. Shared by swings, projectiles,
    traps, statuses, and reactions so damage numbers appear everywhere. */
 function applyEnemyDamage(e, dmg, col=0xffffff, crit=false){
@@ -1752,7 +1837,7 @@ function applyEnemyDamage(e, dmg, col=0xffffff, crit=false){
   if (e.hp<=0) defeatEnemy(e);
 }
 function colCss(c){ return '#'+c.toString(16).padStart(6,'0'); }
-function critChance(){ return 0.10 + (masteryOf(equippedType())-1)*0.02 + (G.critBonus||0); }
+function critChance(){ return 0.10 + (masteryOf(equippedType())-1)*0.02 + (equippedMods().crit||0) + (G.critBonus||0); }
 
 /* ------------------------------------------------ elemental reactions (orig.)
    Hitting a creature stamps your element on it briefly; landing a *different*
@@ -1787,7 +1872,7 @@ function triggerReaction(e, rx){
   spawnBurst(e.mesh.position.clone().setY(1), rx.col, 22, 1.3, true);
   if (!settings.motion) shake(0.22);
   sfx.attune();
-  applyEnemyDamage(e, rx.dmg, rx.col);
+  applyEnemyDamage(e, rx.dmg * (hasPerk('elemental') ? 1.35 : 1), rx.col);   // 'elemental' perk
   if (rx.status) applyStatus(e, rx.status, 3);
   if (rx.kind==='aoe' || rx.kind==='chain'){
     const rad = rx.kind==='chain' ? 7 : 5;
@@ -2012,7 +2097,8 @@ function queueJump(){
 }
 function tryDash(dir){
   if (dashCd>0 || G.phase!=='playing') return;
-  dashCd = 0.9; dashT = 0.18; dashDir.copy(dir).normalize();
+  const nimble = hasPerk('dash');                 // 'dash' perk: longer, more frequent
+  dashCd = nimble ? 0.6 : 0.9; dashT = nimble ? 0.26 : 0.18; dashDir.copy(dir).normalize();
   spawnBurst(player.position.clone().setY(player.position.y+0.6), 0xffffff, 10, 0.7);
   sfx.swing();
 }
@@ -2989,6 +3075,7 @@ function updatePlayer(dt){
   if (sprint && moving) G.stamina = Math.max(0, G.stamina - 26*dt);
   else G.stamina = Math.min(G.maxStam, G.stamina + 16*dt);
 
+  playerAtkCd = Math.max(0, playerAtkCd - dt);
   // dash: a short burst of speed
   dashCd = Math.max(0, dashCd-dt);
   if (dashT>0){ dashT-=dt; pv.x = dashDir.x*22; pv.z = dashDir.z*22; }
@@ -3093,12 +3180,40 @@ function animateLimbs(body, moving, dt){
     parts.torso.position.y = 1.15 + (moving ? Math.abs(Math.sin(t))*0.05 : Math.sin(t*0.4)*0.015);
     parts.torso.rotation.x = moving ? 0.09 : 0;
     parts.head.position.y = 1.82 + (moving ? Math.abs(Math.sin(t))*0.04 : 0);
-    // attack swing
-    if (atkAnim>0){ atkAnim=Math.max(0,atkAnim-dt*4); parts.armR.rotation.x = -1.4*atkAnim; }
+    // ---- attack animation: the weapon travels with the arm it's held in ----
+    const style = equippedType();
+    if (atkAnim>0){
+      atkAnim = Math.max(0, atkAnim - dt*(3.2/Math.max(0.12, equippedMods().cd)) * 0.28);
+      const a = atkAnim;                    // 1 → 0 across the swing
+      const arc = -2.3*a + 0.55*(1-a);      // wind up behind, follow through forward
+      if (style==='greatsword'){            // two-handed overhead chop
+        parts.armR.rotation.x = arc*1.15; parts.armL.rotation.x = arc*1.05;
+        parts.armR.rotation.z = -0.25*a;    parts.armL.rotation.z = 0.25*a;
+        parts.torso.rotation.x = 0.22*(1-a);
+      } else if (style==='dual'){           // alternating left/right combo
+        if (swingSide===0){ parts.armR.rotation.x = arc;      parts.armL.rotation.x = 0.5*a; }
+        else              { parts.armL.rotation.x = arc;      parts.armR.rotation.x = 0.5*a; }
+        parts.torso.rotation.y = (swingSide===0? -0.3 : 0.3) * a;
+      } else if (style==='bow'){            // draw and loose
+        parts.armL.rotation.x = -1.45;      parts.armR.rotation.x = -0.9 - 0.5*a;
+        parts.armR.rotation.z = 0.35;
+      } else if (style==='focus'){          // thrust the rune forward
+        parts.armR.rotation.x = -1.5*a - 0.2; parts.armR.rotation.z = -0.2*a;
+      } else {                              // sword
+        parts.armR.rotation.x = arc; parts.armR.rotation.z = -0.3*a;
+        parts.torso.rotation.y = -0.22*a;
+      }
+    } else {
+      parts.torso.rotation.y = 0;
+      if (style==='bow'){ parts.armL.rotation.x = -1.2; parts.armL.rotation.z = 0; }  // bow held ready
+    }
     if (glideActive){ parts.armL.rotation.z=0.9; parts.armR.rotation.z=-0.9; parts.armL.rotation.x=0; parts.armR.rotation.x=0; }
-    else { parts.armL.rotation.z=0; parts.armR.rotation.z=0; }
+    else if (atkAnim<=0 && style!=='bow'){ parts.armL.rotation.z=0; parts.armR.rotation.z=0; }
   }
-  if (body.userData?.float){ body.userData.float.rotation.y += dt*2; body.userData.float.position.y=0.2+Math.sin(performance.now()*0.004)*0.06; }
+  // the Psychic Focus rune drifts and spins in hand
+  const rune = body.userData?.weapon?.userData?.float;
+  if (rune){ rune.rotation.y += dt*2.2; rune.rotation.x += dt*1.1;
+    rune.position.y = 0.05 + Math.sin(performance.now()*0.004)*0.07; }
 }
 
 /* ================================================================= ENEMIES AI */
@@ -3367,7 +3482,8 @@ function renderInv(){
       row.innerHTML = `
         <div class="inv-info">
           <div class="inv-name">${w.name} <span class="inv-tier">Unique</span>${isEq?' <span class="inv-badge">Equipped</span>':''}</div>
-          <div class="inv-stats">${prof.name} · Power ${weaponPower({...w, type:t})}</div>
+          <div class="inv-stats">Power ${weaponPower({...w, type:t})} · ${w.cd<=0.22?'Fast':(w.cd>=0.40?'Heavy':'Balanced')}${w.crit?` · +${Math.round(w.crit*100)}% crit`:''}${w.reach!==1?` · ${w.reach>1?'long':'short'} reach`:''}</div>
+          <div class="inv-blurb">${w.blurb}</div>
         </div>
         <div class="inv-actions"></div>`;
       const actions = row.querySelector('.inv-actions');
@@ -3800,7 +3916,13 @@ function updateProjectiles(dt){
       if (!e.alive) continue;
       const hx = p.mesh.position.x - e.mesh.position.x, hz = p.mesh.position.z - e.mesh.position.z;
       const hy = p.mesh.position.y - (e.mesh.position.y + (e.boss?2.2:0.9));
-      if (Math.hypot(hx,hz) < e.r + 0.5 && Math.abs(hy) < (e.boss?3.0:1.7)){ damageEnemy(e,p.dmg); hit=true; break; }
+      if (Math.hypot(hx,hz) < e.r + 0.5 && Math.abs(hy) < (e.boss?3.0:1.7)){
+        if (p.hitList && p.hitList.includes(e)) continue;      // already pierced this one
+        damageEnemy(e,p.dmg);
+        if (p.pierce > 0){ p.pierce--; (p.hitList = p.hitList||[]).push(e); }   // carry on through
+        else hit = true;
+        break;
+      }
     }
     if (!hit) for (const m of mechanisms){
       if (m.done) continue;
@@ -3887,6 +4009,25 @@ function installDevHooks(){
     advanceMastery: (t)=> advanceMastery(t),
     equippedType: ()=> equippedType(),
     allWeaponIds: ()=> allWeapons().map(w=>w.id),
+    rig: ()=>{
+      const held = player?.userData?.weapons || {};
+      const wp = new THREE.Vector3(), lp = new THREE.Vector3();
+      if (held.right) held.right.getWorldPosition(wp);
+      if (held.left) held.left.getWorldPosition(lp);
+      return {
+        type: equippedType(),
+        rightParentIsArm: held.right ? held.right.parent === playerParts.armR : false,
+        leftParentIsArm:  held.left  ? held.left.parent  === playerParts.armL : null,
+        hasLeftBlade: !!held.left,
+        weaponWorldY: held.right ? +wp.y.toFixed(3) : null,
+        weaponWorldZ: held.right ? +wp.z.toFixed(3) : null,
+        leftWorldY: held.left ? +lp.y.toFixed(3) : null,
+        armR: +playerParts.armR.rotation.x.toFixed(3),
+        armL: +playerParts.armL.rotation.x.toFixed(3),
+        atkAnim: +atkAnim.toFixed(2), swingSide, atkCd: +playerAtkCd.toFixed(2),
+      };
+    },
+    mods: ()=> equippedMods(),
     projCount: ()=> projectiles.length,
     projList: ()=> projectiles.map(p=>({x:+p.mesh.position.x.toFixed(2), y:+p.mesh.position.y.toFixed(2), z:+p.mesh.position.z.toFixed(2), life:+p.life.toFixed(2)})),
     equip: (id)=>{ if(G.owned.includes(id)){ G.equipped=id; updateHUD(); return true; } return false; },
