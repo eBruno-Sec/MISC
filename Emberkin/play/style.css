@@ -50,7 +50,13 @@ kbd{
   radial-gradient(120% 120% at 50% 0%, rgba(20,28,45,.55), rgba(6,10,18,.92));
   backdrop-filter:blur(3px)}
 body[data-theme="day"] .overlay{background:radial-gradient(120% 120% at 50% 0%, rgba(255,255,255,.5), rgba(210,224,240,.92))}
-.overlay.center{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6vh 5vw;gap:.4rem}
+/* Menus must ALWAYS be fully reachable. Tall panels (inventory/settings) used
+   to overflow a short or landscape screen with overflow:visible, pushing the
+   Back button off-screen — and with no Esc key on mobile, that trapped you. */
+.overlay.center{display:flex;flex-direction:column;align-items:center;justify-content:safe center;
+  text-align:center;padding:5vh 5vw calc(5vh + 1rem);gap:.4rem;
+  overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+.overlay.center > *{flex-shrink:0}
 @media (prefers-reduced-motion:no-preference){ .overlay:not(.hidden){animation:ovfade .22s ease both} @keyframes ovfade{from{opacity:0}to{opacity:1}} }
 .hidden{display:none !important}
 
@@ -208,7 +214,7 @@ body[data-motion="reduced"] .hslot.assignable{animation:none;box-shadow:0 0 10px
 .elem-chip.on{border-color:var(--accent-2);box-shadow:0 0 8px rgba(245,193,104,.4)}
 /* crafting */
 .craft-search{margin-left:auto;background:var(--bg);border:1.5px solid var(--line);border-radius:8px;padding:.25rem .5rem;color:var(--bright);font-family:var(--body);font-size:.78rem;width:120px}
-.craft-list{display:flex;flex-direction:column;gap:.35rem;width:min(560px,92vw);max-height:34vh;overflow-y:auto;padding:.1rem}
+.craft-list{display:flex;flex-direction:column;gap:.35rem;width:min(560px,92vw);padding:.1rem}
 .craft-row{display:flex;align-items:center;gap:.7rem;background:var(--panel);border:1.5px solid var(--line);border-radius:10px;padding:.5rem .7rem;text-align:left}
 .craft-row.locked{opacity:.5}
 .craft-out{font-family:var(--display);font-weight:700;color:var(--bright);font-size:.9rem;display:flex;align-items:center;gap:.4rem;min-width:150px}
@@ -333,7 +339,9 @@ body[data-theme="high-contrast"] .reticle span{background:var(--accent)}
 .bar.boss .bar-fill{background:linear-gradient(90deg,#7a5ac0,#b9a0e8)}
 
 /* ============================================================ inventory */
-.inv-list{display:flex;flex-direction:column;gap:.5rem;width:min(560px,92vw);max-height:46vh;overflow-y:auto;padding:.2rem}
+/* one scroll context: the overlay scrolls, inner lists flow. Nested scrollboxes
+   hid content inside small panes and produced double scrollbars. */
+.inv-list{display:flex;flex-direction:column;gap:.5rem;width:min(560px,92vw);padding:.2rem}
 .inv-row{display:flex;align-items:center;gap:.8rem;background:var(--panel);border:1.5px solid var(--border);border-radius:12px;padding:.7rem .9rem;text-align:left}
 .inv-row.equipped{border-color:var(--accent)}
 .inv-info{flex:1;min-width:0}
@@ -377,6 +385,16 @@ body[data-touch] .touch-ui{display:block}
 .tc-look-hint{position:absolute;right:38%;top:44%;color:var(--muted);font-size:.66rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.28}
 /* on touch, the mouse-capture toast/hint is irrelevant */
 body[data-touch] .tc-look-hint{opacity:.22}
+
+/* short / landscape screens: shrink the inner scroll areas so panels fit */
+@media (max-height:560px){
+  .overlay.center{padding:2.5vh 4vw 3.5vh}
+  .menu-h{font-size:calc(1.15rem*var(--ui-scale))}
+  .jbody{max-height:40vh}
+  .worldmap{width:min(300px,52vh);height:min(300px,52vh)}
+  .journal-note,.menu-note,.fineprint{display:none}
+  .controls-hint{font-size:.66rem;line-height:1.5}
+}
 
 /* ============================================================ responsive */
 @media (max-width:640px){
