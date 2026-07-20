@@ -20,6 +20,8 @@ import guidance
 import triage
 import report
 import db
+import dns_recon
+import auth
 
 
 # ── security: target validation ──────────────────────────────────
@@ -229,6 +231,86 @@ def test_db_roundtrip_and_redaction():
     assert db.get_profiles("m1")[0]["headers"]["Cookie"] == poc.REDACTED
     assert db.get_profiles_raw("m1")[0]["headers"]["Cookie"] == "s=1"
     assert db.list_missions()[0]["id"] == "m1"
+
+
+# ── dns_recon: SPF/DMARC/vendors + takeover fingerprints ─────────
+def test_dns_parsers():
+    assert dns_recon.parse_spf(['"v=spf1 include:_spf.google.com ~all"']).startswith("v=spf1")
+    assert not dns_recon.parse_spf(['"random"'])
+    assert "p=none" in dns_recon.parse_dmarc(['"v=DMARC1; p=none"']).lower()
+    vendors = dns_recon.vendors_from_txt(['"stripe-verification=abc"', '"google-site-verification=x"'])
+    assert "Stripe" in vendors and "Google Workspace" in vendors
+
+
+def test_takeover_matcher_requires_cname_and_signature():
+    # CNAME to GitHub Pages + unclaimed body -> critical candidate
+    hit = dns_recon.match_takeover("sub.example.com", "user.github.io", 404,
+                                   "There isn't a GitHub Pages site here.")
+    assert hit and hit["service"] == "GitHub Pages" and hit["severity"] == "CRITICAL"
+    # CNAME to a provider but a normal 200 body -> no takeover
+    assert dns_recon.match_takeover("sub.example.com", "user.github.io", 200, "<html>real site</html>") is None
+    # unrelated CNAME -> no match
+    assert dns_recon.match_takeover("sub.example.com", "cdn.cloudflare.net", 404, "nope") is None
+
+
+# ── injection-probe verdict helpers ──────────────────────────────
+def test_cors_verdict():
+    origin = "https://bbh-evil.example"
+    v = ws.analyze_cors(origin, {"Access-Control-Allow-Origin": origin,
+                                 "Access-Control-Allow-Credentials": "true"})
+    assert v and v["severity"] == "HIGH" and v["credentials"]
+    assert ws.analyze_cors(origin, {"Access-Control-Allow-Origin": "https://legit.com"}) is None
+
+
+def test_open_redirect_and_host_header_and_ssti():
+    assert ws.analyze_open_redirect(302, "https://bbh-evil.example/x", "")["severity"] == "MEDIUM"
+    assert ws.analyze_open_redirect(200, "", "https://legit.com") is None
+    assert ws.analyze_host_header("", "https://bbh-evil.example/reset")["severity"] == "MEDIUM"
+    assert ws.analyze_host_header("clean body", "") is None
+    assert ws.analyze_ssti("result is ", "result is 49")["severity"] == "HIGH"
+    assert ws.analyze_ssti("has 49 already", "has 49 already") is None   # not introduced by us
+
+
+def test_redirect_and_ssti_probe_builders():
+    rp = ws.build_redirect_probes("https://t/go?next=/home&id=1")
+    assert rp and all(p.parameter == "next" for p in rp)
+    sp = ws.build_ssti_probes("https://t/hello?name=bob")
+    assert sp and any("7*7" in p.payload for p in sp)
+
+
+def test_guidance_email_caa_takeover_now_fire():
+    # the new recon data lights up the email / caa / takeover guidance rules
+    recon = {
+        "target": "example.com", "domain": "example.com",
+        "email": {"spf": "", "dmarc": ""},          # both missing -> spoofing finding
+        "caa_records": [],                           # none -> caa finding
+        "takeover_candidates": [
+            {"subdomain": "old.example.com", "severity": "CRITICAL", "reason": "dangling CNAME"}],
+        "misc": [{"type": "CORS Misconfiguration", "url": "https://api.example.com/me",
+                  "severity": "HIGH", "detail": "reflected origin"}],
+    }
+    keys = {g["key"] for g in guidance.build_guidance(recon)}
+    assert "email-spoof" in keys and "caa-missing" in keys
+    assert "takeover" in keys and "cors" in keys
+
+
+# ── auth: heuristic login-form parsing ───────────────────────────
+def test_parse_login_form_finds_fields_and_csrf():
+    html = """
+    <form action="/session" method="post">
+      <input type="hidden" name="csrf_token" value="abc123">
+      <input type="email" name="email">
+      <input type="password" name="password">
+      <button type="submit">Log in</button>
+    </form>"""
+    form = auth.parse_login_form(html, "https://app.example.com/login")
+    assert form["action"] == "https://app.example.com/session"
+    assert form["user_field"] == "email" and form["pass_field"] == "password"
+    assert form["hidden"]["csrf_token"] == "abc123"
+
+
+def test_parse_login_form_none_without_password():
+    assert auth.parse_login_form("<form><input name='q'></form>", "https://x") is None
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────

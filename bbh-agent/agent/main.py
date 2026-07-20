@@ -35,6 +35,9 @@ class EngageRequest(BaseModel):
     objective: Optional[str] = None
     mode: str = "active"           # passive | active | full
     auto_approve: bool = False
+    # authenticated scanning: raw session headers and/or an auto-login
+    auth_headers: dict = {}        # e.g. {"Cookie": "session=..."} or {"Authorization": "Bearer ..."}
+    login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
 
 
 class ReplayRequest(BaseModel):
@@ -129,7 +132,21 @@ async def engage(req: EngageRequest):
     scope = ScopeEngine()
     scope.load_manual(req.in_scope, req.out_of_scope, req.program_name)
 
-    tools = ToolRegistry(scope, mission_id=session_id, lab_mode=(req.mode == "full"))
+    # authenticated scanning: raw headers first, then optional auto-login (scoped)
+    session_headers = dict(req.auth_headers or {})
+    auth_note = ""
+    if req.login and req.login.get("url"):
+        import auth as auth_mod
+        if not scope.validate(req.login["url"])[0]:
+            auth_note = "login URL is out of scope — skipped"
+        else:
+            res = await auth_mod.login(req.login["url"], req.login.get("username", ""),
+                                       req.login.get("password", ""))
+            session_headers.update(res.get("headers", {}))
+            auth_note = res.get("note", "")
+
+    tools = ToolRegistry(scope, mission_id=session_id, lab_mode=(req.mode == "full"),
+                         session_headers=session_headers)
     stop_event = asyncio.Event()
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
                      auto_approve=req.auto_approve, mission_id=session_id)
@@ -139,11 +156,13 @@ async def engage(req: EngageRequest):
         f"In-scope targets: {', '.join(req.in_scope)}")
 
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(),
-                      {"auto_approve": req.auto_approve})
+                      {"auto_approve": req.auto_approve,
+                       "authenticated": bool(session_headers), "auth_note": auth_note})
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
                             "status": "created", "streaming": False}
-    return {"session_id": session_id, "mode": req.mode}
+    return {"session_id": session_id, "mode": req.mode,
+            "authenticated": bool(session_headers), "auth_note": auth_note}
 
 
 @app.get("/stream/{session_id}")

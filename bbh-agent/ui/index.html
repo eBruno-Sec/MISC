@@ -156,6 +156,10 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
     <div class="field"><label>Custom Objective <span style="opacity:.5">(optional)</span></label>
       <textarea id="objective" placeholder="Focus on API authorization and admin panels..." style="min-height:48px"></textarea>
     </div>
+    <div class="field"><label>Auth Headers <span style="opacity:.5">(optional — authenticated scan)</span></label>
+      <textarea id="authHeaders" placeholder="Cookie: session=...&#10;Authorization: Bearer ..." style="min-height:44px"></textarea>
+      <div class="hint">Shared with every scanner to reach post-login surface. Redacted in evidence.</div>
+    </div>
     <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous — pre-authorize intrusive gate</label>
     <button class="btn-start" id="btnStart" onclick="startHunt()">Start Hunt</button>
     <button class="btn-stop" id="btnStop" onclick="stopHunt()">Stop Hunt</button>
@@ -178,6 +182,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
       <button class="tab" data-tab="topology">Topology</button>
       <button class="tab" data-tab="curl">cURL</button>
       <button class="tab" data-tab="report">Report</button>
+      <button class="tab" data-tab="archive">Archive</button>
     </div>
 
     <!-- FEED -->
@@ -277,6 +282,12 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
       </div>
       <pre class="mono-out" id="reportContent" style="margin-top:.8rem;max-height:none">Run a hunt to generate a report.</pre>
     </div>
+
+    <!-- ARCHIVE -->
+    <div class="panel" id="p-archive">
+      <h3 class="sec">Mission Archive <span class="muted">(persisted in SQLite)</span> <button class="btn" onclick="loadArchive()">Refresh</button></h3>
+      <div id="archiveList"><p class="muted">No saved missions yet.</p></div>
+    </div>
   </div>
 </main>
 
@@ -333,7 +344,7 @@ function switchTab(name){
   document.getElementById("p-"+name).classList.add("active");
   if(name==="surface")loadSurface(); if(name==="playbooks")loadPlaybook();
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
-  if(name==="report")fetchReport();
+  if(name==="report")fetchReport(); if(name==="archive")loadArchive();
 }
 
 // phase bar
@@ -392,11 +403,13 @@ async function startHunt(){
   const outScope=document.getElementById("outScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
   const body={program_name:programName,in_scope:inScope,out_of_scope:outScope,
     objective:document.getElementById("objective").value.trim()||null,
-    mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked};
+    mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
+    auth_headers:parseHeaders(document.getElementById("authHeaders").value)};
   try{
     const res=await fetch(`${API}/engage`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(!res.ok)throw new Error(await res.text());
-    sessionId=(await res.json()).session_id; running=true;
+    const eng=await res.json(); sessionId=eng.session_id; running=true;
+    if(eng.authenticated)log("info",`Authenticated scan · ${esc(eng.auth_note||"session headers attached")}`);
     document.getElementById("btnStart").disabled=true; document.getElementById("btnStop").style.display="block";
     document.getElementById("sessLabel").textContent=`${programName} [${sessionId}] · ${body.mode}`;
     setStatus("s-run","RUNNING");
@@ -611,6 +624,39 @@ function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/h
 function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");}
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){navigator.clipboard.writeText(reportMd||"").then(()=>log("info","Report markdown copied."));}
+
+// mission archive (persistence)
+async function loadArchive(){
+  try{const d=await(await fetch(`${API}/missions`)).json();
+    const ms=d.missions||[];
+    document.getElementById("archiveList").innerHTML=ms.length?
+      `<table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Created</th><th></th></tr>${ms.map(m=>{
+        const c=m.counts||{}, tot=Object.values(c).reduce((a,b)=>a+b,0);
+        return `<tr><td>${esc(m.program)}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
+          <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
+          <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
+          <td><span class="tag-copy" onclick="loadMission('${m.id}','${esc(m.program)}')">→ load</span>
+              <span class="tag-copy" style="color:var(--accent2)" onclick="delMission('${m.id}')">✕</span></td></tr>`;
+      }).join("")}</table>`
+      :'<p class="muted">No saved missions yet.</p>';
+  }catch(e){}
+}
+async function loadMission(id,program){
+  try{const d=await(await fetch(`${API}/missions/${id}`)).json();
+    sessionId=id; findings=d.findings||[];
+    counts={critical:0,high:0,medium:0,low:0};
+    findings.forEach(f=>{const s=(f.severity||"").toLowerCase();if(s in counts)counts[s]++;});
+    updateCounters(); renderFindings();
+    document.getElementById("sessLabel").textContent=`${program} [${id}] · archived`;
+    reportMd=""; fetchReport();
+    log("info",`Loaded archived mission <strong>${esc(program)}</strong> [${id}] — ${findings.length} findings. Report/Playbook/Workbench/Access tabs are live against it.`);
+    switchTab("findings");
+  }catch(e){alert("Load failed: "+e.message);}
+}
+async function delMission(id){
+  if(!confirm("Delete this saved mission and its findings/evidence?"))return;
+  await fetch(`${API}/missions/${id}`,{method:"DELETE"}); loadArchive();
+}
 
 function updateCounters(){cCrit.textContent=counts.critical;cHigh.textContent=counts.high;cMed.textContent=counts.medium;cLow.textContent=counts.low;}
 function clearTerm(addPrompt=true){document.getElementById("termOut").innerHTML="";if(addPrompt)log("info","Terminal cleared.<span class='blink'>█</span>");}

@@ -354,6 +354,98 @@ def generate_discovery_words(base_url: str, urls: list | None = None) -> list:
     return normalized
 
 
+def normalize_discovered_url(base_url: str, word: str) -> str:
+    parsed = urlparse(base_url)
+    clean_path = posixpath.normpath("/" + word.lstrip("/"))
+    if clean_path == "/.":
+        clean_path = "/"
+    return urlunparse(parsed._replace(path=clean_path, query="", fragment=""))
+
+
+# ── Reflection-based injection probes (CORS / redirect / host-hdr / SSTI) ──
+REDIRECT_PARAM_HINTS = {
+    "next", "url", "target", "redirect", "redirect_uri", "redirect_url",
+    "return", "returnurl", "return_url", "dest", "destination", "continue",
+    "goto", "out", "view", "to", "u", "link",
+}
+SSTI_PARAM_HINTS = {
+    "name", "search", "q", "query", "message", "email", "template",
+    "greeting", "title", "subject", "comment", "text", "content",
+}
+_EVIL_HOST = "bbh-evil.example"
+_REDIRECT_PAYLOADS = ("https://bbh-evil.example", "//bbh-evil.example", "/\\bbh-evil.example")
+_SSTI_PAYLOAD = "{{7*7}}${7*7}"     # detect 49 from either engine
+_SSTI_MARKER = "49"
+
+
+def analyze_cors(origin: str, resp_headers: dict) -> dict | None:
+    """Flag a CORS misconfig: the request Origin is reflected in ACAO, worst when
+    Access-Control-Allow-Credentials is also true."""
+    h = {str(k).lower(): str(v) for k, v in (resp_headers or {}).items()}
+    acao = h.get("access-control-allow-origin", "")
+    acac = h.get("access-control-allow-credentials", "").lower() == "true"
+    if acao == origin:
+        sev = "HIGH" if acac else "MEDIUM"
+        detail = "reflected arbitrary Origin" + (" WITH credentials" if acac else "")
+        return {"severity": sev, "detail": detail, "acao": acao, "credentials": acac}
+    if acao == "*" and acac:
+        return {"severity": "HIGH", "detail": "wildcard ACAO with credentials", "acao": "*", "credentials": True}
+    return None
+
+
+def analyze_open_redirect(status: int, location: str, final_url: str) -> dict | None:
+    """Flag an open redirect: a 3xx Location (or followed final URL) lands on the
+    attacker host we injected."""
+    target = (location or final_url or "")
+    tl = target.lower()
+    if _EVIL_HOST in tl and (300 <= (status or 0) < 400 or _EVIL_HOST in (final_url or "").lower()):
+        return {"severity": "MEDIUM", "detail": f"redirect follows attacker host: {target[:120]}",
+                "location": target}
+    return None
+
+
+def analyze_host_header(body: str, location: str) -> dict | None:
+    """Flag host-header injection: the spoofed Host is reflected into the response
+    body or a redirect Location (link/cache/reset-poisoning primitive)."""
+    if _EVIL_HOST in (location or "").lower():
+        return {"severity": "MEDIUM", "detail": f"spoofed Host reflected in Location: {location[:120]}"}
+    if _EVIL_HOST in (body or "").lower():
+        return {"severity": "LOW", "detail": "spoofed Host reflected in response body"}
+    return None
+
+
+def analyze_ssti(baseline_body: str, probe_body: str) -> dict | None:
+    """Flag SSTI/CSTI: the arithmetic marker 49 appears only after injection."""
+    if _SSTI_MARKER in (probe_body or "") and _SSTI_MARKER not in (baseline_body or ""):
+        return {"severity": "HIGH", "detail": "template expression {{7*7}}/${7*7} evaluated to 49"}
+    return None
+
+
+def build_redirect_probes(url: str, max_probes: int = 6) -> list:
+    probes = []
+    for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
+        if name.lower() in REDIRECT_PARAM_HINTS:
+            for pl in _REDIRECT_PAYLOADS:
+                probes.append(WebProbe(url=_replace_query_value(url, name, pl),
+                                       parameter=name, original_value=value, payload=pl,
+                                       family="open_redirect"))
+                if len(probes) >= max_probes:
+                    return probes
+    return probes
+
+
+def build_ssti_probes(url: str, max_probes: int = 6) -> list:
+    probes = []
+    for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
+        if name.lower() in SSTI_PARAM_HINTS or (value and value.isalpha()):
+            probes.append(WebProbe(url=_replace_query_value(url, name, _SSTI_PAYLOAD),
+                                   parameter=name, original_value=value, payload=_SSTI_PAYLOAD,
+                                   family="ssti"))
+            if len(probes) >= max_probes:
+                return probes
+    return probes
+
+
 # ── Sensitive-path body validation ────────────────────────────────
 _ENV_KV_RE = re.compile(r"^[A-Z_][A-Z0-9_]{2,}\s*=\s*\S+", re.MULTILINE)
 _SECRET_KEYWORDS_RE = re.compile(

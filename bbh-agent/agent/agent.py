@@ -16,12 +16,12 @@ APPROVAL_TIMEOUT = int(os.getenv("BBH_APPROVAL_TIMEOUT", "0"))  # 0 = wait forev
 
 # tool -> assessment phase (drives the phase status bar in the UI)
 PHASE_OF = {
-    "run_subfinder": "recon", "run_crtsh": "recon", "run_wayback": "recon",
+    "run_subfinder": "recon", "run_crtsh": "recon", "run_wayback": "recon", "run_dns": "recon",
     "run_httpx": "enum", "http_probe": "enum", "run_whatweb": "enum",
-    "run_katana": "enum", "fetch_openapi": "enum",
+    "run_katana": "enum", "fetch_openapi": "enum", "check_takeover": "enum",
     "run_nmap": "scan", "run_nuclei": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
-    "run_dalfox": "probe", "run_sqlmap": "probe",
+    "run_injection_probes": "probe", "run_dalfox": "probe", "run_sqlmap": "probe",
     "generate_playbook": "guidance", "store_finding": "report",
 }
 PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
@@ -41,12 +41,12 @@ HARD RULES:
 7. INTRUSIVE tools (content discovery, web probes, ffuf, dalfox, sqlmap) require operator approval unless the run is pre-authorized. If a probe is denied, continue with passive/active work.
 
 RECOMMENDED METHODOLOGY:
-1. Subdomain enumeration: run_subfinder + run_crtsh on every in-scope root domain. run_wayback to seed historical URLs.
-2. Live host probe: run_httpx on discovered subdomains.
+1. Subdomain enumeration: run_subfinder + run_crtsh on every in-scope root domain. run_wayback to seed historical URLs. run_dns for SPF/DMARC/CAA/vendor intel.
+2. Live host probe: run_httpx on discovered subdomains. check_takeover on subdomains to catch dangling-CNAME hijacks.
 3. Enrich: http_probe interesting hosts (captures evidence, reads security headers, seeds the surface). fetch_openapi on any /swagger or /openapi.json. run_whatweb for tech.
 4. Surface scan: run_nuclei with safe tags on live hosts. run_nmap on unusual fingerprints.
 5. Plan: call generate_playbook to get a rule-based, per-surface test playbook (what/how/payloads/confidence/cURL). Use it to target the next step.
-6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_web_probes for traversal/IDOR on parameterized URLs.
+6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_web_probes for traversal/IDOR, run_injection_probes for CORS/open-redirect/host-header/SSTI on parameterized URLs.
 7. Correlate. Store every confirmed reportable vulnerability with store_finding.
 
 HIGH-VALUE SIGNALS:

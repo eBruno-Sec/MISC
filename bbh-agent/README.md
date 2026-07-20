@@ -72,7 +72,9 @@ docker compose logs -f    # troubleshoot
 | 🧭 **cURL console** | Send scope-guarded manual requests; get the exact `curl` back. |
 | 📄 **PoC evidence** | Every scanned request/response is captured with sensitive headers redacted **at rest**, and rendered to copy-ready curl + raw HTTP + Markdown. |
 | 🧠 **Advisory triage** | CWE/OWASP mapping, false-positive advisories, and attack-path chaining — advisory only, findings are never hidden. |
-| 📦 **Persistence** | Missions, findings, evidence, notes, and the event log persist in SQLite on a Docker volume. Backup/restore a session as JSON. |
+| 🌐 **DNS + takeover recon** | DNS-over-HTTPS intel (SPF/DMARC/CAA/vendors) and subdomain-takeover detection (dangling-CNAME provider fingerprints). |
+| 🔐 **Authenticated scanning** | Paste session headers (Cookie/Authorization) or an auto-login (URL + creds); the session is shared with every scanner to reach the post-login surface. |
+| 📦 **Persistence + archive** | Missions, findings, evidence, notes, and the event log persist in SQLite on a Docker volume. The **Archive** tab reloads any past mission; backup/restore a session as JSON. |
 | 📊 **Reports** | HackerOne/Bugcrowd Markdown, a dark-themed standalone HTML report (every field escaped), plus CSV / JSON / PoC-Markdown export. |
 
 ---
@@ -88,11 +90,11 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
      |
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
-  subfinder crtsh wayback httpx nmap nuclei whatweb katana ffuf
-  http_probe fetch_openapi content_discovery web_probes dalfox sqlmap
+  subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
+  http_probe fetch_openapi content_discovery web_probes injection_probes dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance ·
-          triage · poc · report      (deterministic, no AI required)
+          triage · poc · report · dns_recon · auth   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -106,6 +108,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_subfinder | PASSIVE | Subdomain enumeration via OSINT |
 | run_crtsh | PASSIVE | Certificate-transparency lookup |
 | run_wayback | PASSIVE | Historical URLs from the Wayback Machine (seeds surface) |
+| run_dns | PASSIVE | DNS-over-HTTPS: A/NS/MX/TXT/CAA, SPF+DMARC policy, vendor fingerprints |
 | generate_playbook | PASSIVE | Rule-based per-surface test playbook (advisory) |
 | run_httpx | ACTIVE | Live host probing, status, title, tech |
 | http_probe | ACTIVE | Fetch one URL, capture redacted evidence, read security headers, seed surface |
@@ -114,9 +117,11 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_nuclei | ACTIVE | Template-based vuln scanner |
 | fetch_openapi | ACTIVE | Import OpenAPI/Swagger endpoints (host-pinned, scope-safe) |
 | run_katana | ACTIVE | Crawl for links/forms/JS endpoints (optional binary) |
+| check_takeover | ACTIVE | Subdomain-takeover detection (CNAME + provider fingerprints) |
 | run_ffuf | INTRUSIVE | Directory/endpoint fuzzing |
 | run_content_discovery | INTRUSIVE | Body-validated content discovery (defeats catch-all SPA 200s) |
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
+| run_injection_probes | INTRUSIVE | CORS / open-redirect / host-header / SSTI reflection probes |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
 
@@ -227,7 +232,9 @@ bbh-agent/
 │   ├── security.py        # target validation + CIDR + flag hardening
 │   ├── surface.py         # attack-surface inventory + OpenAPI import
 │   ├── replay.py          # workbench: replay/fuzz/diff/access-verdict
-│   ├── web_security.py    # scope-aware traversal/IDOR + sensitive-path validation
+│   ├── web_security.py    # scope-aware traversal/IDOR + injection probes + path validation
+│   ├── dns_recon.py       # DoH DNS/SPF/DMARC/CAA intel + takeover fingerprints
+│   ├── auth.py            # heuristic form login for authenticated scanning
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -235,7 +242,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (23 tests)
+│   └── tests/             # deterministic pytest suite (31 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

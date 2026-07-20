@@ -21,6 +21,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import db
+import dns_recon
 import guidance as guidance_mod
 import surface as surface_mod
 import web_security as ws
@@ -41,6 +42,7 @@ TOOL_PERMISSIONS = {
     "run_subfinder": PermissionLevel.PASSIVE,
     "run_crtsh": PermissionLevel.PASSIVE,
     "run_wayback": PermissionLevel.PASSIVE,
+    "run_dns": PermissionLevel.PASSIVE,
     "generate_playbook": PermissionLevel.PASSIVE,
     "store_finding": PermissionLevel.PASSIVE,
     "run_httpx": PermissionLevel.ACTIVE,
@@ -50,9 +52,11 @@ TOOL_PERMISSIONS = {
     "http_probe": PermissionLevel.ACTIVE,
     "fetch_openapi": PermissionLevel.ACTIVE,
     "run_katana": PermissionLevel.ACTIVE,
+    "check_takeover": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
+    "run_injection_probes": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
 }
@@ -70,6 +74,13 @@ CLAUDE_TOOLS = [
     {"name": "run_wayback",
      "description": "PASSIVE: Gather historical URLs for a domain from the Wayback Machine (web.archive.org). Seeds the attack surface with old endpoints and parameters. No target contact.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "run_dns",
+     "description": "PASSIVE: DNS intelligence via DNS-over-HTTPS — A/NS/MX/TXT/CAA records, SPF + DMARC policy (email-spoofing exposure), and vendor fingerprints from TXT. No target contact. Run on each in-scope root domain to enrich the playbook.",
+     "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "check_takeover",
+     "description": "ACTIVE: Subdomain-takeover detection. Resolves CNAMEs for discovered subdomains and matches provider fingerprints (GitHub Pages, S3, Heroku, Fastly, Shopify, etc.) against the response. Pass 'subdomains' or it uses everything discovered so far.",
+     "input_schema": {"type": "object", "properties": {
+         "subdomains": {"type": "array", "items": {"type": "string"}}}, "required": []}},
     {"name": "run_httpx",
      "description": "ACTIVE: Probe hosts for live HTTP/HTTPS, status, title, tech stack.",
      "input_schema": {"type": "object", "properties": {
@@ -115,6 +126,11 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/api?id=5&file=a.txt"},
          "lab_mode": {"type": "boolean", "default": False}}, "required": ["url"]}},
+    {"name": "run_injection_probes",
+     "description": ("INTRUSIVE: Reflection-based probes on a URL — CORS misconfiguration (reflected Origin + "
+                     "credentials), open redirect, host-header injection, and SSTI ({{7*7}} -> 49). Binary-free; "
+                     "captures evidence and reports only confirmed reflections."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_dalfox",
      "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -141,10 +157,14 @@ CLAUDE_TOOLS = [
 
 
 class ToolRegistry:
-    def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False):
+    def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False,
+                 session_headers: dict = None):
         self.scope = scope
         self.mission_id = mission_id
         self.lab_mode = lab_mode
+        # Authenticated scanning: headers (Cookie/Authorization) shared with every
+        # HTTP request the tools make, so scans reach the post-login surface.
+        self.session_headers = session_headers or {}
         # Shared recon accumulator consumed by guidance + surface.
         dom = ""
         if scope.in_scope:
@@ -213,7 +233,7 @@ class ToolRegistry:
                     body: str = None, capture: bool = True, finding_id: str = None):
         """Send one request via httpx; optionally capture a redacted exchange."""
         import httpx
-        req_headers = {"User-Agent": _UA, **(headers or {})}
+        req_headers = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
         try:
             async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
                 r = await c.request(method.upper(), url, headers=req_headers,
@@ -297,6 +317,24 @@ class ToolRegistry:
         urls = list(dict.fromkeys(urls))
         self._add_urls(urls)
         return ToolResult("wayback", domain, True, f"{len(urls)} archived URLs", [{"url": u} for u in urls[:50]])
+
+    async def _run_dns(self, inp: dict) -> ToolResult:
+        domain = inp["domain"].lstrip("*.")
+        try:
+            frag = await dns_recon.gather_dns(domain)
+        except Exception as e:
+            return ToolResult("dns", domain, False, "", [], str(e))
+        self.recon["email"] = frag["email"]
+        self.recon["caa_records"] = frag["caa_records"]
+        self.recon["vendors"] = frag.get("vendors", [])
+        self.recon["dns"] = frag["dns"]
+        em = frag["email"]
+        out = (f"SPF {'set' if em['spf'] else 'MISSING'}, "
+               f"DMARC {'set' if em['dmarc'] else 'MISSING'}, "
+               f"{len(frag['caa_records'])} CAA, {len(frag['vendors'])} vendors")
+        return ToolResult("dns", domain, True, out, [{
+            "spf": em["spf"], "dmarc": em["dmarc"], "caa": frag["caa_records"],
+            "vendors": frag["vendors"], "mx": frag["dns"]["mx"], "ns": frag["dns"]["ns"]}])
 
     # ── ACTIVE ───────────────────────────────────────────────────
     async def _run_httpx(self, inp: dict) -> ToolResult:
@@ -459,6 +497,28 @@ class ToolRegistry:
         self._add_urls(urls)
         return ToolResult("katana", url, True, f"{len(urls)} crawled URLs", [{"url": u} for u in urls[:50]])
 
+    async def _check_takeover(self, inp: dict) -> ToolResult:
+        subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))
+        subs = [s for s in subs if self.scope.validate(s)[0]][:40]
+        if not subs:
+            return ToolResult("takeover", "", True, "No subdomains to check (run recon first)", [])
+        candidates = []
+        sem = asyncio.Semaphore(10)
+
+        async def check(sub):
+            async with sem:
+                cname = await dns_recon.resolve_cname(sub)
+                if not cname:
+                    return
+                r = await self._http(f"https://{sub}", capture=False)
+                cand = dns_recon.match_takeover(sub, cname, r.get("status", 0), r.get("body", ""))
+                if cand:
+                    candidates.append(cand)
+
+        await asyncio.gather(*[check(s) for s in subs])
+        self.recon["takeover_candidates"].extend(candidates)
+        return ToolResult("takeover", "", True, f"{len(candidates)} takeover candidate(s)", candidates)
+
     # ── INTRUSIVE ────────────────────────────────────────────────
     async def _run_ffuf(self, inp: dict) -> ToolResult:
         url = inp["url"]
@@ -548,6 +608,75 @@ class ToolRegistry:
                     "confidence": verdict["confidence"], "family": "idor", "tags": ["idor"]})
         return ToolResult("web_probes", url, True,
                           f"{len(findings)} anomaly signal(s)", findings)
+
+    async def _run_injection_probes(self, inp: dict) -> ToolResult:
+        import httpx
+        url = inp["url"]
+        findings = []
+        origin = "https://bbh-evil.example"
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=15, headers=headers) as c:
+                base = await c.get(url)
+                base_body = base.text
+                # CORS
+                try:
+                    cr = await c.get(url, headers={"Origin": origin})
+                    v = ws.analyze_cors(origin, dict(cr.headers))
+                    if v:
+                        self.recon["misc"].append({"type": "CORS Misconfiguration", "url": url,
+                                                   "severity": v["severity"], "detail": v["detail"]})
+                        findings.append({"title": "CORS misconfiguration", "severity": v["severity"].lower(),
+                                         "target": url, "description": f"Endpoint {v['detail']} (ACAO={v.get('acao')}).",
+                                         "family": "cors", "tags": ["cors"]})
+                except Exception:
+                    pass
+                # host-header injection
+                try:
+                    hh = await c.get(url, headers={"Host": ws._EVIL_HOST, "X-Forwarded-Host": ws._EVIL_HOST},
+                                     follow_redirects=False)
+                    v = ws.analyze_host_header(hh.text, hh.headers.get("location", ""))
+                    if v:
+                        findings.append({"title": "Host header injection", "severity": v["severity"].lower(),
+                                         "target": url, "description": v["detail"],
+                                         "family": "host_header", "tags": ["hostheader"]})
+                except Exception:
+                    pass
+                # open redirect
+                for probe in ws.build_redirect_probes(url):
+                    if not self.scope.validate(probe.url)[0]:
+                        continue
+                    try:
+                        rr = await c.get(probe.url, follow_redirects=False)
+                        v = ws.analyze_open_redirect(rr.status_code, rr.headers.get("location", ""), str(rr.url))
+                        if v:
+                            findings.append({"title": f"Open redirect on '{probe.parameter}'",
+                                             "severity": v["severity"].lower(), "target": probe.url,
+                                             "description": v["detail"], "family": "open_redirect",
+                                             "tags": ["redirect"]})
+                            break
+                    except Exception:
+                        pass
+                # SSTI
+                for probe in ws.build_ssti_probes(url):
+                    if not self.scope.validate(probe.url)[0]:
+                        continue
+                    try:
+                        sr = await c.get(probe.url)
+                        v = ws.analyze_ssti(base_body, sr.text)
+                        if v:
+                            findings.append({"title": f"Server-side template injection on '{probe.parameter}'",
+                                             "severity": v["severity"].lower(), "target": probe.url,
+                                             "description": v["detail"], "family": "ssti", "tags": ["ssti"]})
+                            break
+                    except Exception:
+                        pass
+        except Exception as e:
+            return ToolResult("injection_probes", url, False, "", [], str(e))
+        # capture baseline evidence
+        if self.mission_id:
+            await self._http(url, capture=True)
+        return ToolResult("injection_probes", url, True, f"{len(findings)} reflection signal(s)", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
