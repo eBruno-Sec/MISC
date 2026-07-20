@@ -8,14 +8,19 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct:free}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      # 0 = HITL intrusive gate waits forever; >0 = auto-deny after N seconds
+      - BBH_APPROVAL_TIMEOUT=${BBH_APPROVAL_TIMEOUT:-0}
     ports:
       - "8000:8000"
     volumes:
       - ./ui:/app/ui:ro
       - nuclei_templates:/root/nuclei-templates
+      - bbh_data:/app/data
     cap_add:
       - NET_RAW
       - NET_ADMIN
 
 volumes:
   nuclei_templates:
+  bbh_data:
