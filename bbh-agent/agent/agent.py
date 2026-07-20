@@ -20,6 +20,7 @@ PHASE_OF = {
     "run_httpx": "enum", "http_probe": "enum", "run_whatweb": "enum",
     "run_katana": "enum", "fetch_openapi": "enum", "check_takeover": "enum",
     "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe", "run_js_review": "enum",
+    "run_csrf": "enum",
     "run_nmap": "scan", "run_nuclei": "scan", "run_zap": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
     "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",

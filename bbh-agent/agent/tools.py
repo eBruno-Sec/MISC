@@ -59,6 +59,7 @@ TOOL_PERMISSIONS = {
     "run_jwt": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
+    "run_csrf": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
@@ -149,6 +150,12 @@ CLAUDE_TOOLS = [
          "header_name": {"type": "string", "default": "Authorization"},
          "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
          "required": ["token"]}},
+    {"name": "run_csrf",
+     "description": ("ACTIVE: Scan a page for CSRF-vulnerable state-changing forms. Parses each form, checks for an "
+                     "anti-CSRF token, reads the session cookie's SameSite attribute, and flags token-less POST forms "
+                     "(graded by SameSite) and sensitive GET state-changing actions. Non-destructive — sends no "
+                     "state-changing requests."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_js_review",
      "description": ("ACTIVE: Static review (SAST-lite) of JavaScript / source. Fetches in-scope JS (or reviews "
                      "pasted `code`) and flags hardcoded secrets/API keys, dangerous sinks (eval/innerHTML/exec/"
@@ -820,6 +827,22 @@ class ToolRegistry:
         return ToolResult("js_review", sources[0][0], True,
                           f"reviewed {len(sources)} source(s), {len(uniq)} finding(s), "
                           f"{len(set(endpoints))} endpoint(s)", uniq)
+
+    async def _run_csrf(self, inp: dict) -> ToolResult:
+        import csrf_tool as csrf
+        url = inp["url"]
+        r = await self._http(url, "GET", capture=True)
+        if r.get("error"):
+            return ToolResult("csrf", url, False, "", [], r["error"])
+        set_cookie = ""
+        for k, v in (r.get("headers") or {}).items():
+            if k.lower() == "set-cookie":
+                set_cookie = v
+                break
+        forms = csrf.parse_forms(r.get("body", ""), r.get("final_url") or url)
+        findings = csrf.analyze(forms, set_cookie, url)
+        return ToolResult("csrf", url, True,
+                          f"{len(forms)} form(s), {len(findings)} CSRF signal(s)", findings)
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))

@@ -30,6 +30,7 @@ import authz_tool as authz
 import race_tool as race
 import xss_tool as xt
 import codereview as cr
+import csrf_tool as csrf
 
 
 # ── security: target validation ──────────────────────────────────
@@ -582,6 +583,40 @@ def test_codereview_review_bundles_findings():
     assert any("Hardcoded secret" in t for t in titles)
     assert any("Dangerous sink" in t for t in titles)
     assert "/api/admin/delete" in res["endpoints"]
+
+
+# ── csrf_tool: form/token/SameSite analysis ──────────────────────
+def test_csrf_parse_forms_and_token_detection():
+    html = ('<form method="POST" action="/change_password">'
+            '<input name="new_password"><input type="submit"></form>'
+            '<form method="post" action="/send"><input name="csrf_token" value="x">'
+            '<input name="msg"></form>')
+    forms = csrf.parse_forms(html, "https://email.example.com/")
+    pw = next(f for f in forms if "change_password" in f["action"])
+    assert pw["method"] == "POST" and not pw["has_token"]
+    send = next(f for f in forms if f["action"].endswith("/send"))
+    assert send["has_token"]
+
+
+def test_csrf_samesite_parse():
+    assert csrf.parse_samesite("PHPSESSID=x; Secure; HttpOnly; SameSite=Strict") == "strict"
+    assert csrf.parse_samesite("sid=x; SameSite=None") == "none"
+    assert csrf.parse_samesite("sid=x; HttpOnly") == ""
+
+
+def test_csrf_analyze_grades_by_samesite():
+    forms = csrf.parse_forms('<form method="POST" action="/change_password"><input name="new_password"></form>',
+                             "https://t/")
+    # SameSite=None -> exploitable in all browsers -> high (sensitive action)
+    high = csrf.analyze(forms, "sid=x; SameSite=None", "https://t/p")
+    assert high and high[0]["severity"] == "high" and high[0]["cwe"] == "CWE-352"
+    # token-protected form -> nothing
+    ok = csrf.parse_forms('<form method="POST" action="/x"><input name="csrf_token"></form>', "https://t/")
+    assert csrf.analyze(ok, "sid=x; SameSite=None", "https://t/p") == []
+    # sensitive GET state change -> flagged even with strict cookie
+    getf = csrf.parse_forms('<form method="GET" action="/password_change"><input name="new_password"></form>', "https://t/")
+    g = csrf.analyze(getf, "sid=x; SameSite=Strict", "https://t/p")
+    assert g and "GET" in g[0]["title"]
 
 
 def _run(coro):

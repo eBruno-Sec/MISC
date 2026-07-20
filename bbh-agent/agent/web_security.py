@@ -364,16 +364,31 @@ def normalize_discovered_url(base_url: str, word: str) -> str:
 
 # ── Reflection-based injection probes (CORS / redirect / host-hdr / SSTI) ──
 REDIRECT_PARAM_HINTS = {
-    "next", "url", "target", "redirect", "redirect_uri", "redirect_url",
-    "return", "returnurl", "return_url", "dest", "destination", "continue",
-    "goto", "out", "view", "to", "u", "link",
+    "next", "url", "target", "redirect", "redir", "redirect_uri", "redirecturi",
+    "redirect_url", "redirecturl", "redirect_to", "return", "returnurl", "return_url",
+    "returnto", "ret", "dest", "destination", "continue", "goto", "out", "view",
+    "to", "u", "n", "r", "uri", "link", "forward", "forwardurl", "forward_url",
+    "relaystate", "callback", "checkout_url", "image_url", "go", "login_url",
 }
 SSTI_PARAM_HINTS = {
     "name", "search", "q", "query", "message", "email", "template",
     "greeting", "title", "subject", "comment", "text", "content",
 }
 _EVIL_HOST = "bbh-evil.example"
-_REDIRECT_PAYLOADS = ("https://bbh-evil.example", "//bbh-evil.example", "/\\bbh-evil.example")
+# Open-redirect payloads incl. filter-bypass forms from Bug Bounty Bootcamp Ch 7
+# (scheme autocorrect, backslash, @-userinfo, whitespace, encoded slash). All
+# resolve to bbh-evil.example so the analyzer's host match fires on a hit.
+_REDIRECT_PAYLOADS = (
+    "https://bbh-evil.example",          # plain absolute
+    "//bbh-evil.example",                # scheme-relative
+    "/\\bbh-evil.example",               # backslash autocorrect
+    "https:/\\bbh-evil.example",         # mangled scheme
+    "https:bbh-evil.example",            # scheme autocorrect (no //)
+    "https://legit.example@bbh-evil.example",   # @ userinfo trick
+    "https://bbh-evil.example%2f@legit.example",  # encoded-slash + @ confusion
+    "/%2f%2fbbh-evil.example",           # encoded scheme-relative
+    "https://bbh-evil.example/%2e%2e",   # path-normalization noise
+)
 _SSTI_PAYLOAD = "{{7*7}}${7*7}"     # detect 49 from either engine
 _SSTI_MARKER = "49"
 
