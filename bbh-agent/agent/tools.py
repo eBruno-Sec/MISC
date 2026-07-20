@@ -54,6 +54,7 @@ TOOL_PERMISSIONS = {
     "run_katana": PermissionLevel.ACTIVE,
     "check_takeover": PermissionLevel.ACTIVE,
     "run_graphql": PermissionLevel.ACTIVE,
+    "run_jwt": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
@@ -117,6 +118,16 @@ CLAUDE_TOOLS = [
                      "exposure, field-suggestion leaks, and request batching (brute-force amplification)."),
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "A base URL or a suspected GraphQL endpoint"}}, "required": ["url"]}},
+    {"name": "run_jwt",
+     "description": ("ACTIVE: Analyze and attack a JWT (Bearer token). Decodes header/payload, then runs offline "
+                     "attacks: alg:none forge, HMAC weak-secret crack, and — if the secret cracks — forges an admin "
+                     "token. Optionally verifies a forged token against an in-scope endpoint (url + header_name)."),
+     "input_schema": {"type": "object", "properties": {
+         "token": {"type": "string", "description": "The JWT to analyze (three dot-separated base64url parts)"},
+         "url": {"type": "string", "description": "Optional in-scope endpoint to test forged tokens against"},
+         "header_name": {"type": "string", "default": "Authorization"},
+         "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
+         "required": ["token"]}},
     {"name": "run_ffuf",
      "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
      "input_schema": {"type": "object", "properties": {
@@ -562,6 +573,40 @@ class ToolRegistry:
         ops = len(schema.get("query_fields", [])) + len(schema.get("mutation_fields", []))
         return ToolResult("graphql", endpoint, True,
                           f"GraphQL at {endpoint}: {ops} operations, {len(findings)} issue(s)", findings)
+
+    async def _run_jwt(self, inp: dict) -> ToolResult:
+        import jwt_tool as jt
+        token = inp["token"]
+        res = jt.analyze(token, inp.get("extra_secrets"))
+        if not res.get("decoded"):
+            return ToolResult("jwt", "", False, "", [], "Not a valid JWT (need three base64url parts)")
+        findings = list(res["findings"])
+        url = inp.get("url")
+        if url and self.scope.validate(url)[0]:
+            hname = inp.get("header_name", "Authorization")
+
+            def wrap(t):
+                return f"Bearer {t}" if hname.lower() == "authorization" else t
+
+            for label, forged in (("alg:none", res.get("forged_none")),
+                                  ("cracked-secret admin", res.get("forged_admin"))):
+                if not forged:
+                    continue
+                r = await self._http(url, headers={hname: wrap(forged)}, capture=True)
+                if 200 <= r.get("status", 0) < 300:
+                    findings.append({
+                        "title": f"Forged JWT accepted ({label})", "severity": "critical", "target": url,
+                        "description": f"The API accepted a {label} forged token (HTTP {r['status']}).",
+                        "impact": "Authentication bypass / account takeover via forged JWT.",
+                        "reproduction_steps": [f"Send the {label} forged token to {url}",
+                                               f"Observe HTTP {r['status']} (authorized)"],
+                        "cwe": "CWE-347", "family": "jwt", "tags": ["jwt", "auth"]})
+        self.recon.setdefault("jwt", []).append(
+            {"header": res["decoded"]["header"], "cracked": bool(res.get("cracked_secret"))})
+        summary = f"alg={res['decoded']['header'].get('alg')}, {len(findings)} issue(s)"
+        if res.get("cracked_secret"):
+            summary += f", secret='{res['cracked_secret']}'"
+        return ToolResult("jwt", url or "token", True, summary, findings)
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))

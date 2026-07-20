@@ -25,6 +25,7 @@ import dns_recon
 import auth
 import zap_client
 import graphql_tool as gql
+import jwt_tool as jt
 
 
 # ── security: target validation ──────────────────────────────────
@@ -409,6 +410,42 @@ def test_graphql_analyze_emits_findings():
     f2 = gql.analyze("https://t/graphql", {"errors": [{"message": "no"}]}, {"data": {}}, 5,
                      {"errors": [{"message": "Did you mean me?"}]})
     assert any(x["title"] == "GraphQL field suggestions leak schema" for x in f2)
+
+
+# ── jwt_tool: decode, none, crack, forge ─────────────────────────
+def test_jwt_decode_and_none():
+    # {"alg":"none"} . {"user":"guest","admin":false} . (no sig)
+    tok = jt.forge_none({"user": "guest", "admin": False})
+    d = jt.decode_jwt(tok)
+    assert d and d["header"]["alg"] == "none" and d["payload"]["user"] == "guest"
+    res = jt.analyze(tok)
+    assert any(f["title"].startswith("JWT signed with alg:none") for f in res["findings"])
+
+
+def test_jwt_crack_and_forge_roundtrip():
+    # forge a real HS256 token with a weak secret, then confirm the tool cracks it
+    secret = "changeme"
+    token = jt.forge_hs({"typ": "JWT"}, {"iss": "https://crapi.example", "sub": "a@x.com",
+                                         "role": "user", "exp": 9999999999}, secret, "HS256")
+    assert jt.verify_hs(token, secret)
+    res = jt.analyze(token)
+    assert res["cracked_secret"] == "changeme"
+    # forged admin token must verify under the recovered secret and carry admin
+    assert jt.verify_hs(res["forged_admin"], secret)
+    assert jt.decode_jwt(res["forged_admin"])["payload"]["admin"] is True
+    titles = {f["title"] for f in res["findings"]}
+    assert "JWT signing secret is weak/crackable" in titles
+
+
+def test_jwt_crack_derives_secret_from_issuer():
+    # secret == issuer host root ("snowtooth") — must be found via candidate_secrets
+    token = jt.forge_hs({}, {"iss": "https://snowtooth.example/"}, "snowtooth", "HS512")
+    assert jt.crack_secret(token, jt.candidate_secrets(jt.decode_jwt(token)["payload"])) == "snowtooth"
+
+
+def test_jwt_strong_secret_not_cracked():
+    token = jt.forge_hs({}, {"sub": "x"}, "M9x!q2Zr7_Lp03Vw-uKf8Nb6Ty1Ce4A", "HS256")
+    assert jt.analyze(token)["cracked_secret"] is None
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────

@@ -91,7 +91,7 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
-  http_probe fetch_openapi graphql content_discovery web_probes injection_probes zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt content_discovery web_probes injection_probes zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
           poc · report · dns_recon · auth · zap_client · graphql_tool   (deterministic, no AI required)
@@ -119,6 +119,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_katana | ACTIVE | Crawl for links/forms/JS endpoints (optional binary) |
 | check_takeover | ACTIVE | Subdomain-takeover detection (CNAME + provider fingerprints) |
 | run_graphql | ACTIVE | GraphQL introspection + enumeration + batching/field-suggestion abuse checks |
+| run_jwt | ACTIVE | JWT attacks: alg:none forge, HMAC weak-secret crack, forged-admin token + live test |
 | run_ffuf | INTRUSIVE | Directory/endpoint fuzzing |
 | run_content_discovery | INTRUSIVE | Body-validated content discovery (defeats catch-all SPA 200s) |
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
@@ -270,6 +271,7 @@ bbh-agent/
 │   ├── auth.py            # heuristic form login for authenticated scanning
 │   ├── zap_client.py      # OWASP ZAP daemon REST client + alert->finding mapping
 │   ├── graphql_tool.py    # GraphQL introspection/enumeration + abuse-signal checks
+│   ├── jwt_tool.py        # JWT decode + alg:none/weak-secret crack/forge attacks
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -277,7 +279,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (39 tests)
+│   └── tests/             # deterministic pytest suite (43 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```
