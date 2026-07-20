@@ -90,11 +90,11 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
      |
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
-  subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
+  subfinder crtsh wayback dns asn httpx nmap nuclei whatweb fingerprint katana ffuf takeover
   http_probe fetch_openapi graphql jwt xss js_review csrf content_discovery web_probes injection_probes bfla race zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool · fingerprint   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -109,10 +109,12 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_crtsh | PASSIVE | Certificate-transparency lookup |
 | run_wayback | PASSIVE | Historical URLs from the Wayback Machine (seeds surface) |
 | run_dns | PASSIVE | DNS-over-HTTPS: A/NS/MX/TXT/CAA, SPF+DMARC policy, vendor fingerprints |
+| run_asn | PASSIVE | IP + ASN + BGP prefix (CIDR range) + org name (scope expansion, via DoH + Team Cymru) |
 | generate_playbook | PASSIVE | Rule-based per-surface test playbook (advisory) |
 | run_httpx | ACTIVE | Live host probing, status, title, tech |
 | http_probe | ACTIVE | Fetch one URL, capture redacted evidence, read security headers, seed surface |
-| run_whatweb | ACTIVE | Web tech fingerprinting |
+| run_whatweb | ACTIVE | Web tech fingerprinting (binary) |
+| run_fingerprint | ACTIVE | Native tech-stack fingerprint from headers/cookies/HTML (server/lang/framework/CMS + versions) |
 | run_nmap | ACTIVE | Port scan + service/version detection |
 | run_nuclei | ACTIVE | Template-based vuln scanner |
 | fetch_openapi | ACTIVE | Import OpenAPI/Swagger endpoints (host-pinned, scope-safe) |
@@ -282,6 +284,7 @@ bbh-agent/
 │   ├── xss_tool.py        # XSS context analysis; run_xss confirms execution in headless Chromium
 │   ├── codereview.py      # SAST-lite: secrets / sinks / weak-crypto / dev-comments / endpoint mining
 │   ├── csrf_tool.py       # CSRF form/token/SameSite analysis
+│   ├── fingerprint.py     # native tech-stack fingerprint (headers/cookies/HTML signatures)
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -289,7 +292,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (61 tests)
+│   └── tests/             # deterministic pytest suite (65 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

@@ -45,10 +45,12 @@ TOOL_PERMISSIONS = {
     "run_crtsh": PermissionLevel.PASSIVE,
     "run_wayback": PermissionLevel.PASSIVE,
     "run_dns": PermissionLevel.PASSIVE,
+    "run_asn": PermissionLevel.PASSIVE,
     "generate_playbook": PermissionLevel.PASSIVE,
     "store_finding": PermissionLevel.PASSIVE,
     "run_httpx": PermissionLevel.ACTIVE,
     "run_whatweb": PermissionLevel.ACTIVE,
+    "run_fingerprint": PermissionLevel.ACTIVE,
     "run_nmap": PermissionLevel.ACTIVE,
     "run_nuclei": PermissionLevel.ACTIVE,
     "http_probe": PermissionLevel.ACTIVE,
@@ -102,6 +104,16 @@ CLAUDE_TOOLS = [
     {"name": "run_dns",
      "description": "PASSIVE: DNS intelligence via DNS-over-HTTPS — A/NS/MX/TXT/CAA records, SPF + DMARC policy (email-spoofing exposure), and vendor fingerprints from TXT. No target contact. Run on each in-scope root domain to enrich the playbook.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "run_asn",
+     "description": ("PASSIVE: IP + ASN + BGP prefix (CIDR range) + AS/org name for a domain, via DNS-over-HTTPS "
+                     "and Team Cymru. Reveals the organization's dedicated IP range for scope expansion. No target "
+                     "contact."),
+     "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "run_fingerprint",
+     "description": ("ACTIVE: Native tech-stack fingerprint of one URL from response headers, cookies, and HTML/JS "
+                     "signatures — server/language/framework/CMS + versions. Binary-free. Flags precise version "
+                     "banners for CVE lookup and feeds the playbook with the detected stack."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "check_takeover",
      "description": "ACTIVE: Subdomain-takeover detection. Resolves CNAMEs for discovered subdomains and matches provider fingerprints (GitHub Pages, S3, Heroku, Fastly, Shopify, etc.) against the response. Pass 'subdomains' or it uses everything discovered so far.",
      "input_schema": {"type": "object", "properties": {
@@ -439,6 +451,23 @@ class ToolRegistry:
             "spf": em["spf"], "dmarc": em["dmarc"], "caa": frag["caa_records"],
             "vendors": frag["vendors"], "mx": frag["dns"]["mx"], "ns": frag["dns"]["ns"]}])
 
+    async def _run_asn(self, inp: dict) -> ToolResult:
+        domain = inp["domain"].lstrip("*.")
+        try:
+            intel = await dns_recon.ip_intel(domain)
+        except Exception as e:
+            return ToolResult("asn", domain, False, "", [], str(e))
+        asn = intel.get("asn") or {}
+        self.recon.setdefault("ip_intel", []).append(intel)
+        out = f"{len(intel.get('ips', []))} IP(s)"
+        if asn.get("asn"):
+            out += f", AS{asn['asn'].split()[0] if asn.get('asn') else ''} {asn.get('as_name', '')} " \
+                   f"range {asn.get('prefix', '')}"
+        return ToolResult("asn", domain, True, out.strip(), [{
+            "ips": intel.get("ips", []), "asn": asn.get("asn", ""), "as_name": asn.get("as_name", ""),
+            "prefix": asn.get("prefix", ""), "country": asn.get("country", ""),
+            "registry": asn.get("registry", "")}])
+
     # ── ACTIVE ───────────────────────────────────────────────────
     async def _run_httpx(self, inp: dict) -> ToolResult:
         targets = inp["targets"]
@@ -520,6 +549,42 @@ class ToolRegistry:
             except Exception:
                 pass
         return ToolResult("whatweb", target, True, "Fingerprint complete", findings)
+
+    async def _run_fingerprint(self, inp: dict) -> ToolResult:
+        import fingerprint as fp
+        url = inp["url"]
+        r = await self._http(url, "GET", capture=True)
+        if r.get("error"):
+            return ToolResult("fingerprint", url, False, "", [], r["error"])
+        set_cookie = ""
+        for k, v in (r.get("headers") or {}).items():
+            if k.lower() == "set-cookie":
+                set_cookie = v
+                break
+        techs = fp.fingerprint(r.get("headers", {}), set_cookie, r.get("body", ""))
+        # merge tech names into recon live_hosts for the guidance engine
+        names = [t["name"] for t in techs]
+        final = r.get("final_url") or url
+        for lh in self.recon["live_hosts"]:
+            if lh.get("url") == final:
+                lh["tech"] = list(dict.fromkeys((lh.get("tech") or []) + names))
+                break
+        else:
+            self.recon["live_hosts"].append({"url": final, "status": r.get("status"),
+                                              "title": "", "tech": names, "webserver": None})
+        findings = []
+        for t in fp.version_disclosures(techs):
+            findings.append({
+                "title": f"Version disclosure: {t['name']} {t['version']}", "severity": "low", "target": final,
+                "description": f"{t['name']} version {t['version']} is disclosed via {t['source']}.",
+                "impact": "A precise version lets an attacker match known CVEs for that build.",
+                "reproduction_steps": [f"Read the {t['source']} on {final}",
+                                       f"Search the CVE database for {t['name']} {t['version']}"],
+                "cwe": "CWE-200", "family": "fingerprint", "tags": ["fingerprint", "disclosure"],
+                "confidence": "candidate"})
+        summary = ", ".join(f"{t['name']}{(' ' + t['version']) if t['version'] else ''}" for t in techs[:8]) or "none"
+        return ToolResult("fingerprint", url, True, f"stack: {summary}",
+                          findings + [{"technologies": techs}])
 
     async def _run_nmap(self, inp: dict) -> ToolResult:
         target = inp["target"]

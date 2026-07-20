@@ -152,3 +152,47 @@ async def gather_dns(domain: str) -> dict:
 async def resolve_cname(host: str) -> str:
     ans = await doh(host, "CNAME")
     return (ans[0].rstrip(".") if ans else "")
+
+
+# ── IP / ASN / NetRange (scope expansion, Ch 5) ──────────────────
+def parse_cymru_asn(txt: str) -> dict:
+    """Parse a Team Cymru origin TXT record: 'ASN | BGP prefix | CC | RIR | date'."""
+    parts = [p.strip() for p in (txt or "").strip('"').split("|")]
+    if len(parts) < 2:
+        return {}
+    return {"asn": parts[0], "prefix": parts[1],
+            "country": parts[2] if len(parts) > 2 else "",
+            "registry": parts[3] if len(parts) > 3 else ""}
+
+
+def parse_cymru_asname(txt: str) -> str:
+    """Parse 'ASN | CC | RIR | date | AS-NAME' -> the AS name."""
+    parts = [p.strip() for p in (txt or "").strip('"').split("|")]
+    return parts[-1] if parts else ""
+
+
+async def asn_lookup(ip: str) -> dict:
+    """IP -> ASN + BGP prefix (CIDR range) + AS name, via Team Cymru over DoH."""
+    octets = ip.split(".")
+    if len(octets) != 4:
+        return {}
+    rev = ".".join(reversed(octets)) + ".origin.asn.cymru.com"
+    txt = await doh(rev, "TXT")
+    info = parse_cymru_asn(txt[0]) if txt else {}
+    if info.get("asn"):
+        asn = info["asn"].split()[0]
+        name_txt = await doh(f"AS{asn}.asn.cymru.com", "TXT")
+        if name_txt:
+            info["as_name"] = parse_cymru_asname(name_txt[0])
+    return info
+
+
+async def ip_intel(domain: str) -> dict:
+    """Resolve a domain to its IP(s) and enrich the primary IP with ASN/range/org."""
+    domain = (domain or "").lstrip("*.").split(":")[0]
+    a = await doh(domain, "A")
+    ips = [x for x in a if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", x)]
+    out = {"domain": domain, "ips": ips, "asn": {}}
+    if ips:
+        out["asn"] = await asn_lookup(ips[0])
+    return out

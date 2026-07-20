@@ -31,6 +31,7 @@ import race_tool as race
 import xss_tool as xt
 import codereview as cr
 import csrf_tool as csrf
+import fingerprint as fp
 
 
 # ── security: target validation ──────────────────────────────────
@@ -617,6 +618,44 @@ def test_csrf_analyze_grades_by_samesite():
     getf = csrf.parse_forms('<form method="GET" action="/password_change"><input name="new_password"></form>', "https://t/")
     g = csrf.analyze(getf, "sid=x; SameSite=Strict", "https://t/p")
     assert g and "GET" in g[0]["title"]
+
+
+# ── fingerprint: headers / cookies / HTML signatures ─────────────
+def test_fingerprint_headers_and_cookies():
+    # the exact headers from Bug Bounty Bootcamp Ch 5
+    techs = fp.fingerprint(
+        {"Server": "Apache/2.0.6 (Ubuntu)", "X-Powered-By": "PHP/5.0.1", "X-Generator": "Drupal 8"},
+        "PHPSESSID=abcde;", "")
+    names = {t["name"] for t in techs}
+    assert "Apache" in names and "PHP" in names
+    apache = next(t for t in techs if t["name"] == "Apache")
+    assert apache["version"] == "2.0.6"
+    php = next(t for t in techs if t["name"] == "PHP")
+    assert php["version"] == "5.0.1"
+    # version disclosures surface for CVE lookup
+    vd = {t["name"] for t in fp.version_disclosures(techs)}
+    assert "Apache" in vd and "PHP" in vd
+
+
+def test_fingerprint_body_signatures():
+    techs = fp.fingerprint({}, "", '<meta name="generator" content="WordPress 6.1">'
+                           '<script src="/js/jquery-3.6.0.min.js"></script><div class="wp-content">')
+    names = {t["name"] for t in techs}
+    assert "WordPress" in names and "jQuery" in names
+    jq = next(t for t in techs if t["name"] == "jQuery")
+    assert jq["version"] == "3.6.0"
+
+
+def test_fingerprint_dedup_and_empty():
+    assert fp.fingerprint({}, "", "") == []
+    techs = fp.fingerprint({"Server": "nginx"}, "JSESSIONID=x", "")
+    assert any(t["name"] == "Java/JSP" for t in techs) and any(t["name"] == "nginx" for t in techs)
+
+
+def test_cymru_asn_parse():
+    info = dns_recon.parse_cymru_asn('"32934 | 157.240.0.0/16 | US | arin | 2015-05-14"')
+    assert info["asn"] == "32934" and info["prefix"] == "157.240.0.0/16" and info["country"] == "US"
+    assert dns_recon.parse_cymru_asname('"32934 | US | arin | 2015 | FACEBOOK, US"') == "FACEBOOK, US"
 
 
 def _run(coro):
