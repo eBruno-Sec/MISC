@@ -72,6 +72,7 @@ TOOL_PERMISSIONS = {
     "run_ssrf": PermissionLevel.INTRUSIVE,
     "run_deserialization": PermissionLevel.INTRUSIVE,
     "run_exposure": PermissionLevel.INTRUSIVE,
+    "run_xxe": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -277,6 +278,16 @@ CLAUDE_TOOLS = [
                      "positive); a readable .git yields a source-recoverable escalation."),
      "input_schema": {"type": "object", "properties": {
          "base_url": {"type": "string", "description": "Base URL, e.g. https://target/"}}, "required": ["base_url"]}},
+    {"name": "run_xxe",
+     "description": ("INTRUSIVE: XML External Entity test on an endpoint that accepts XML. Sends in-band file-read "
+                     "payloads (file:///etc/passwd etc.) and confirms when the file content is reflected; if a native "
+                     "OOB collaborator is configured (BBH_OOB_BASE), also sends a blind parameter-entity payload and "
+                     "confirms via the server-side callback. Pass a sample XML body to graft the payload onto the "
+                     "app's real schema."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "xml": {"type": "string", "description": "Optional sample XML body to mutate (matches the app's schema)"},
+         "content_type": {"type": "string", "default": "application/xml"}}, "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -1489,6 +1500,49 @@ class ToolRegistry:
             await self._http(evid[0], "GET", capture=True)
         return ToolResult("exposure", base_url, True,
                           f"{len(exp.EXPOSURE_CHECKS)} checks, {len(findings)} exposure(s)", findings)
+
+    async def _run_xxe(self, inp: dict) -> ToolResult:
+        import httpx
+        import collaborator as collab
+        import xxe_tool as xxe
+        url = inp["url"]
+        sample = inp.get("xml", "")
+        ctype = inp.get("content_type", "application/xml")
+        headers = {"User-Agent": _UA, "Content-Type": ctype, **(self.session_headers or {})}
+        findings = []
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+            # 1) in-band local file read
+            for file_uri, _rx in xxe.FILE_TARGETS:
+                payload = xxe.build_inband_xml(file_uri, sample)
+                try:
+                    r = await c.post(url, headers=headers, content=payload.encode())
+                except Exception:
+                    continue
+                hit = xxe.analyze_inband(r.text)
+                if hit:
+                    findings.append(xxe.inband_finding(url, hit["file"], hit["match"]))
+                    break
+            # 2) blind XXE via the native OOB collaborator
+            if collab.enabled():
+                token = collab.new_token(); collab.register(token)
+                purl = collab.probe_url(token)
+                try:
+                    await c.post(url, headers=headers, content=xxe.build_oob_xml(purl, sample).encode())
+                except Exception:
+                    pass
+                inter = []
+                for _ in range(6):
+                    inter = collab.hits(token)
+                    if inter:
+                        break
+                    await asyncio.sleep(0.5)
+                if inter:
+                    findings.append(xxe.oob_finding(url, purl, inter))
+                collab.clear(token)
+        if self.mission_id and findings:
+            await self._http(url, "POST", {"Content-Type": ctype}, body=sample or "<root/>", capture=True)
+        conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
+        return ToolResult("xxe", url, True, f"{len(findings)} XXE signal(s), {conf} confirmed", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc

