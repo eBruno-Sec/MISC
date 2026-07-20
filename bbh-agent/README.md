@@ -91,7 +91,7 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
-  http_probe fetch_openapi graphql jwt content_discovery web_probes injection_probes bfla zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt content_discovery web_probes injection_probes bfla race zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
           poc · report · dns_recon · auth · zap_client · graphql_tool   (deterministic, no AI required)
@@ -125,6 +125,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
 | run_injection_probes | INTRUSIVE | CORS / open-redirect / host-header / SSTI reflection probes |
 | run_bfla | INTRUSIVE | Function-level authz (BFLA) method testing + side-channel BOLA oracle |
+| run_race | INTRUSIVE | Race-condition (TOCTOU) test via N simultaneous requests |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
@@ -274,6 +275,7 @@ bbh-agent/
 │   ├── graphql_tool.py    # GraphQL introspection/enumeration + abuse-signal checks
 │   ├── jwt_tool.py        # JWT decode + alg:none/weak-secret crack/forge attacks
 │   ├── authz_tool.py      # BFLA method testing + side-channel BOLA oracle
+│   ├── race_tool.py       # parallel-request race-condition (TOCTOU) analysis
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -281,7 +283,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (46 tests)
+│   └── tests/             # deterministic pytest suite (48 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

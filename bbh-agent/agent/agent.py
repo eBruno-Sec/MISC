@@ -22,7 +22,8 @@ PHASE_OF = {
     "run_graphql": "enum", "run_jwt": "enum",
     "run_nmap": "scan", "run_nuclei": "scan", "run_zap": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
-    "run_injection_probes": "probe", "run_bfla": "probe", "run_dalfox": "probe", "run_sqlmap": "probe",
+    "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",
+    "run_dalfox": "probe", "run_sqlmap": "probe",
     "generate_playbook": "guidance", "store_finding": "report",
 }
 PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
@@ -47,7 +48,7 @@ RECOMMENDED METHODOLOGY:
 3. Enrich: http_probe interesting hosts (captures evidence, reads security headers, seeds the surface). fetch_openapi on any /swagger or /openapi.json. run_graphql on any /graphql endpoint (introspection + batching abuse). run_jwt on any JWT/Bearer token you capture (alg:none, weak-secret crack, forged-admin). run_whatweb for tech.
 4. Surface scan: run_nuclei with safe tags on live hosts. run_nmap on unusual fingerprints. If the ZAP daemon is available, run_zap for a full DAST pass on a primary in-scope web app (spider + AJAX spider + active scan, scope-fenced).
 5. Plan: call generate_playbook to get a rule-based, per-surface test playbook (what/how/payloads/confidence/cURL). Use it to target the next step.
-6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_web_probes for traversal/IDOR, run_injection_probes for CORS/open-redirect/host-header/SSTI on parameterized URLs, run_bfla for broken function-level authorization (write methods / admin paths with a low-priv token) + side-channel BOLA.
+6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_web_probes for traversal/IDOR, run_injection_probes for CORS/open-redirect/host-header/SSTI on parameterized URLs, run_bfla for broken function-level authorization (write methods / admin paths with a low-priv token) + side-channel BOLA, run_race on single-use actions (coupon/transfer/vote) for race conditions.
 7. Correlate. Store every confirmed reportable vulnerability with store_finding.
 
 HIGH-VALUE SIGNALS:

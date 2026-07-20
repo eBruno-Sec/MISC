@@ -27,6 +27,7 @@ import zap_client
 import graphql_tool as gql
 import jwt_tool as jt
 import authz_tool as authz
+import race_tool as race
 
 
 # ── security: target validation ──────────────────────────────────
@@ -477,7 +478,19 @@ def test_side_channel_oracle():
     assert authz.analyze_side_channel({"status": 404, "length": 20}, {"status": 404, "length": 20}) == []
 
 
-# ── agent: async HITL gate + mode enforcement ────────────────────
+# ── race_tool: parallel-request race condition ───────────────────
+def test_race_flags_multiple_successes():
+    # 3 of 10 concurrent requests succeeded where a single-use action should allow one
+    results = [{"status": 200, "length": 50}] * 3 + [{"status": 409, "length": 10}] * 7
+    f = race.analyze_race("https://t/api/coupon/redeem", results, 10)
+    assert f and f[0]["title"].startswith("Race condition")
+    assert f[0]["severity"] == "high"          # mixed success/reject = strong signal
+    assert race.summarize(results)["successes"] == 3
+
+
+def test_race_no_flag_on_single_success():
+    results = [{"status": 200, "length": 50}] + [{"status": 409, "length": 10}] * 9
+    assert race.analyze_race("https://t/x", results, 10) == []
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 

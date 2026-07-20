@@ -61,6 +61,7 @@ TOOL_PERMISSIONS = {
     "run_web_probes": PermissionLevel.INTRUSIVE,
     "run_injection_probes": PermissionLevel.INTRUSIVE,
     "run_bfla": PermissionLevel.INTRUSIVE,
+    "run_race": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -162,6 +163,14 @@ CLAUDE_TOOLS = [
          "url": {"type": "string"},
          "headers": {"type": "object", "description": "Auth headers for the token under test (e.g. Authorization)"},
          "allow_delete": {"type": "boolean", "default": False}}, "required": ["url"]}},
+    {"name": "run_race",
+     "description": ("INTRUSIVE: Race-condition (TOCTOU) test. Fires N identical requests simultaneously at a "
+                     "race-prone action and flags a single-use action succeeding more than once (double-spend, "
+                     "coupon reuse, over-withdrawal). Point it at an action you have authorization to trigger."),
+     "input_schema": {"type": "object", "properties": {
+         "method": {"type": "string", "default": "POST"}, "url": {"type": "string"},
+         "headers": {"type": "object"}, "body": {"type": "string"},
+         "count": {"type": "integer", "default": 20}}, "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -844,6 +853,32 @@ class ToolRegistry:
         if self.mission_id:
             await self._http(url, "GET", test_headers, capture=True)
         return ToolResult("bfla", url, True, f"{len(findings)} authorization signal(s)", findings)
+
+    async def _run_race(self, inp: dict) -> ToolResult:
+        import httpx
+        import race_tool as race
+        url = inp["url"]
+        method = (inp.get("method") or "POST").upper()
+        headers = {"User-Agent": _UA, **(self.session_headers or {}), **(inp.get("headers") or {})}
+        body = inp.get("body")
+        content = body.encode() if isinstance(body, str) and body else None
+        count = max(2, min(int(inp.get("count", 20)), 60))
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
+            async def one():
+                try:
+                    r = await c.request(method, url, headers=headers, content=content)
+                    return {"status": r.status_code, "length": len(r.content)}
+                except Exception:
+                    return {"status": 0, "length": 0}
+            results = await asyncio.gather(*[one() for _ in range(count)])
+
+        findings = race.analyze_race(url, results, count)
+        if self.mission_id:
+            await self._http(url, method, inp.get("headers") or {}, body=body, capture=True)
+        s = race.summarize(results)
+        return ToolResult("race", url, True,
+                          f"{s['successes']}/{count} succeeded, {len(findings)} signal(s)", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc
