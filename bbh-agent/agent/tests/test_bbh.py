@@ -8,6 +8,7 @@ enforcement in the agent. No network, no LLM, no external binaries.
 import asyncio
 import json
 import os
+import re
 import tempfile
 
 import security
@@ -22,6 +23,7 @@ import report
 import db
 import dns_recon
 import auth
+import zap_client
 
 
 # ── security: target validation ──────────────────────────────────
@@ -311,6 +313,32 @@ def test_parse_login_form_finds_fields_and_csrf():
 
 def test_parse_login_form_none_without_password():
     assert auth.parse_login_form("<form><input name='q'></form>", "https://x") is None
+
+
+# ── zap_client: scope regex + alert mapping ──────────────────────
+def test_zap_include_regexes_match_scope():
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com", "api.test.com"], [], "P")
+    rxs = zap_client.include_regexes(eng)
+    assert any(re.match(rx, "https://foo.example.com/x") for rx in rxs)
+    assert any(re.match(rx, "http://api.test.com:8443/v1") for rx in rxs)
+    assert not any(re.match(rx, "https://evil.com/x") for rx in rxs)
+
+
+def test_zap_alert_to_finding_and_dedup():
+    alert = {"alert": "SQL Injection", "risk": "High", "url": "https://t/a?id=1",
+             "param": "id", "cweid": "89", "solution": "Use params", "evidence": "syntax error",
+             "description": "..."}
+    f = zap_client.alert_to_finding(alert)
+    assert f["severity"] == "high" and f["cwe"] == "CWE-89" and f["found_by"] == "zap"
+    assert "id" in f["reproduction_steps"][0]
+    assert zap_client.risk_to_severity("Informational") == "informational"
+    dup = [alert, dict(alert), {"alert": "XSS", "url": "https://t/b", "param": ""}]
+    assert len(zap_client.dedup_alerts(dup)) == 2
+
+
+def test_zap_not_configured_by_default():
+    # ZAP_ADDR unset in the test env -> the tool must skip cleanly, never error
+    assert zap_client.configured() is False
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────

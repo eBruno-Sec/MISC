@@ -57,6 +57,7 @@ TOOL_PERMISSIONS = {
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
     "run_injection_probes": PermissionLevel.INTRUSIVE,
+    "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
 }
@@ -131,6 +132,15 @@ CLAUDE_TOOLS = [
                      "credentials), open redirect, host-header injection, and SSTI ({{7*7}} -> 49). Binary-free; "
                      "captures evidence and reports only confirmed reflections."),
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_zap",
+     "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
+                     "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
+                     "scan in-scope-only, and imports ZAP alerts as findings. Requires the optional ZAP daemon "
+                     "(docker compose --profile zap up); skips cleanly if ZAP_ADDR is unset."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "spider_seconds": {"type": "integer", "default": 180},
+         "scan_seconds": {"type": "integer", "default": 600}}, "required": ["url"]}},
     {"name": "run_dalfox",
      "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -165,6 +175,8 @@ class ToolRegistry:
         # Authenticated scanning: headers (Cookie/Authorization) shared with every
         # HTTP request the tools make, so scans reach the post-login surface.
         self.session_headers = session_headers or {}
+        # set by the agent so long ZAP polls can honor a user stop
+        self.stop_event = None
         # Shared recon accumulator consumed by guidance + surface.
         dom = ""
         if scope.in_scope:
@@ -677,6 +689,56 @@ class ToolRegistry:
         if self.mission_id:
             await self._http(url, capture=True)
         return ToolResult("injection_probes", url, True, f"{len(findings)} reflection signal(s)", findings)
+
+    async def _run_zap(self, inp: dict) -> ToolResult:
+        import zap_client as zc
+        url = inp["url"]
+        if not zc.configured():
+            return ToolResult("zap", url, True,
+                              "ZAP not configured — enable with: docker compose --profile zap up -d "
+                              "and set ZAP_ADDR=http://zap:8090", [])
+        zap = zc.ZapClient()
+        try:
+            await zap.version()
+        except Exception as e:
+            return ToolResult("zap", url, False, "", [], f"ZAP daemon unreachable at ZAP_ADDR: {e}")
+
+        name = f"bbh-{self.mission_id or 'x'}-{os.urandom(2).hex()}"
+        try:
+            ctx_id = await zap.new_context(name)
+            for rx in zc.include_regexes(self.scope):
+                await zap.include_in_context(name, rx)
+            # seed the context: start URL + discovered in-scope URLs on the same host
+            await zap.access_url(url)
+            base = urlparse(url)
+            for s in [u for u in self.urls if urlparse(u).netloc == base.netloc][:40]:
+                try:
+                    await zap.access_url(s)
+                except Exception:
+                    pass
+            # spider -> ajax spider (SPA) -> active scan, all scope-fenced
+            sid = await zap.spider(url, context=name)
+            if sid is not None:
+                await zap.wait_int(lambda: zap.spider_status(sid),
+                                   cap=int(inp.get("spider_seconds", 180)), stop_event=self.stop_event)
+            try:
+                await zap.ajax_start(url, context=name)
+                await zap.wait_str(lambda: zap.ajax_status(), cap=120, stop_event=self.stop_event)
+            except Exception:
+                pass
+            asid = await zap.ascan(url, context_id=ctx_id)
+            if asid is not None:
+                await zap.wait_int(lambda: zap.ascan_status(asid),
+                                   cap=int(inp.get("scan_seconds", 600)), stop_event=self.stop_event)
+            raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
+        except Exception as e:
+            return ToolResult("zap", url, False, "", [], f"ZAP scan error: {e}")
+
+        findings = [zc.alert_to_finding(a) for a in raw]
+        findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
+        self.recon.setdefault("zap", []).extend(findings)
+        return ToolResult("zap", url, True,
+                          f"{len(findings)} ZAP alert(s) (from {len(raw)} raw)", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]

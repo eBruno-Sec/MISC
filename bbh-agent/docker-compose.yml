@@ -11,6 +11,10 @@ services:
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       # 0 = HITL intrusive gate waits forever; >0 = auto-deny after N seconds
       - BBH_APPROVAL_TIMEOUT=${BBH_APPROVAL_TIMEOUT:-0}
+      # OWASP ZAP DAST (optional). Empty ZAP_ADDR = run_zap skips cleanly.
+      # To enable: docker compose --profile zap up -d  (and keep ZAP_ADDR below)
+      - ZAP_ADDR=${ZAP_ADDR:-}
+      - ZAP_API_KEY=${ZAP_API_KEY:-bbh-zap}
     ports:
       - "8000:8000"
     volumes:
@@ -20,6 +24,19 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+
+  # Optional OWASP ZAP daemon for the run_zap tool. Does NOT start by default.
+  # Enable with:  ZAP_ADDR=http://zap:8090 docker compose --profile zap up -d
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    profiles: ["zap"]
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8090
+      -config api.key=${ZAP_API_KEY:-bbh-zap}
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    expose:
+      - "8090"
 
 volumes:
   nuclei_templates:

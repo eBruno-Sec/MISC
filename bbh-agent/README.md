@@ -91,10 +91,10 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
-  http_probe fetch_openapi content_discovery web_probes injection_probes dalfox sqlmap
+  http_probe fetch_openapi content_discovery web_probes injection_probes zap dalfox sqlmap
      |
-Engines:  scope · security · surface · replay · web_security · guidance ·
-          triage · poc · report · dns_recon · auth   (deterministic, no AI required)
+Engines:  scope · security · surface · replay · web_security · guidance · triage ·
+          poc · report · dns_recon · auth · zap_client   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -122,6 +122,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_content_discovery | INTRUSIVE | Body-validated content discovery (defeats catch-all SPA 200s) |
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
 | run_injection_probes | INTRUSIVE | CORS / open-redirect / host-header / SSTI reflection probes |
+| run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
 
@@ -198,6 +199,27 @@ GET  /backup/{id}  POST /restore      Session backup / import as a new mission
 
 ---
 
+## OWASP ZAP DAST (optional)
+
+`run_zap` drives a full OWASP ZAP scan (spider + AJAX spider for SPAs + active
+scan) fenced to a ZAP **context** built from the mission scope, so ZAP is
+physically constrained to in-scope hosts on top of the wrapper scope. It seeds
+ZAP with the URLs BBH already discovered and imports ZAP alerts as findings.
+
+ZAP is a separate optional container that does **not** start by default (the
+single-container quickstart is unchanged). To enable it:
+
+```bash
+# in .env, set:  ZAP_ADDR=http://zap:8090
+ZAP_ADDR=http://zap:8090 docker compose --profile zap up -d
+```
+
+With `ZAP_ADDR` unset, `run_zap` skips cleanly and the rest of the agent runs
+normally. Because it is INTRUSIVE, a ZAP scan rides the same approval gate as
+every other intrusive tool.
+
+---
+
 ## Requirements
 
 - Docker 24+ and Docker Compose v2
@@ -235,6 +257,7 @@ bbh-agent/
 │   ├── web_security.py    # scope-aware traversal/IDOR + injection probes + path validation
 │   ├── dns_recon.py       # DoH DNS/SPF/DMARC/CAA intel + takeover fingerprints
 │   ├── auth.py            # heuristic form login for authenticated scanning
+│   ├── zap_client.py      # OWASP ZAP daemon REST client + alert->finding mapping
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -242,7 +265,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (31 tests)
+│   └── tests/             # deterministic pytest suite (34 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```
