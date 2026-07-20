@@ -34,6 +34,7 @@ import csrf_tool as csrf
 import fingerprint as fp
 import ssrf_tool as ssrf
 import deser_tool as deser
+import oauth_tool as oauth
 
 
 # ── security: target validation ──────────────────────────────────
@@ -766,6 +767,47 @@ def test_deser_error_signature_only_when_new():
     assert any("Unpickling" in h for h in hits)
     # if the baseline already showed it, it is not a new signal
     assert deser.analyze_errors(probe, probe, "Python pickle") == []
+
+
+# ── oauth_tool: SSO / OAuth redirect_uri + state + token leak ────
+def test_oauth_parse_and_detect():
+    info = oauth.parse_authorize("https://sso.t/oauth/authorize?client_id=abc&redirect_uri=https://c.t/cb&"
+                                 "response_type=code&state=xyz")
+    assert info["is_oauth"] and info["endpoint"] == "https://sso.t/oauth/authorize"
+    assert info["redirect_uri"] == "https://c.t/cb" and info["state"] == "xyz"
+    assert oauth.parse_authorize("https://t/home?x=1")["is_oauth"] is False
+
+
+def test_oauth_redirect_variants_target_attacker():
+    vs = oauth.redirect_uri_variants("https://client.t/callback")
+    kinds = {v["name"] for v in vs}
+    assert {"external host", "subdomain suffix", "@-userinfo", "open-redirect chain"} <= kinds
+    assert all(oauth.EVIL_HOST in v["value"] for v in vs)
+
+
+def test_oauth_analyze_redirect_host_vs_chain():
+    host = oauth.analyze_redirect_response(302, f"https://{oauth.EVIL_HOST}/callback?code=AAA")
+    assert host and host["accepted"] == "host"
+    sub = oauth.analyze_redirect_response(302, f"https://client.t.{oauth.EVIL_HOST}/cb?code=AAA")
+    assert sub and sub["accepted"] == "host"
+    chain = oauth.analyze_redirect_response(302, f"https://client.t/redirect?url=https://{oauth.EVIL_HOST}/&code=A")
+    assert chain and chain["accepted"] == "chain"
+    # a proper server that redirects back to the legit client is not a hit
+    assert oauth.analyze_redirect_response(302, "https://client.t/callback?code=AAA") is None
+    assert oauth.analyze_redirect_response(400, "") is None
+
+
+def test_oauth_state_and_token_oracles():
+    assert oauth.analyze_state(302, "https://client.t/cb?code=AAA") is True
+    assert oauth.analyze_state(302, "https://client.t/cb?error=invalid") is False
+    assert oauth.analyze_token_leak(302, "https://client.t/cb#access_token=xyz&token_type=bearer") is True
+    assert oauth.analyze_token_leak(302, "https://client.t/cb?code=AAA") is False
+
+
+def test_oauth_findings_shape():
+    f = oauth.redirect_finding("https://sso.t/authorize",
+                               [{"name": "@-userinfo", "location": f"https://{oauth.EVIL_HOST}/cb?code=1"}])
+    assert f["severity"] == "critical" and f["cwe"] == "CWE-601" and f["confidence"] == "confirmed"
 
 
 def _run(coro):

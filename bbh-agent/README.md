@@ -91,10 +91,10 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns asn httpx nmap nuclei whatweb fingerprint katana ffuf takeover
-  http_probe fetch_openapi graphql jwt xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -122,6 +122,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | check_takeover | ACTIVE | Subdomain-takeover detection (CNAME + provider fingerprints) |
 | run_graphql | ACTIVE | GraphQL introspection + enumeration + batching/field-suggestion abuse checks |
 | run_jwt | ACTIVE | JWT attacks: alg:none forge, HMAC weak-secret crack, forged-admin token + live test |
+| run_oauth | ACTIVE | OAuth/SSO: redirect_uri bypass (code/token theft) + missing-state CSRF + implicit-flow token leak |
 | run_xss | ACTIVE | Context-aware reflected XSS + headless-browser execution proof (catches DOM XSS) |
 | run_js_review | ACTIVE | SAST-lite on JS/source: secrets, dangerous sinks, weak crypto, dev comments, endpoint mining |
 | run_csrf | ACTIVE | CSRF: token-less state-changing forms + SameSite grading (non-destructive) |
@@ -289,6 +290,7 @@ bbh-agent/
 │   ├── fingerprint.py     # native tech-stack fingerprint (headers/cookies/HTML signatures)
 │   ├── ssrf_tool.py       # SSRF: cloud-metadata reflection + blind port oracle + bypass encodings
 │   ├── deser_tool.py      # insecure deserialization: format detection + corrupt-and-confirm sink
+│   ├── oauth_tool.py      # OAuth/SSO: redirect_uri bypass + state CSRF + implicit token leak
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -296,7 +298,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (76 tests)
+│   └── tests/             # deterministic pytest suite (81 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

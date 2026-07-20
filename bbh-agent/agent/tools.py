@@ -59,6 +59,7 @@ TOOL_PERMISSIONS = {
     "check_takeover": PermissionLevel.ACTIVE,
     "run_graphql": PermissionLevel.ACTIVE,
     "run_jwt": PermissionLevel.ACTIVE,
+    "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
     "run_csrf": PermissionLevel.ACTIVE,
@@ -164,6 +165,15 @@ CLAUDE_TOOLS = [
          "header_name": {"type": "string", "default": "Authorization"},
          "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
          "required": ["token"]}},
+    {"name": "run_oauth",
+     "description": ("ACTIVE: OAuth/SSO security test on an authorization URL (one containing client_id/redirect_uri/"
+                     "response_type, e.g. /oauth/authorize?...). Tests redirect_uri validation with bypass variants "
+                     "(external host, subdomain suffix, @-userinfo, path-prefixed host, backslash, open-redirect "
+                     "chain) and confirms code/token theft if the server redirects to an attacker host; also checks "
+                     "missing-state CSRF and implicit-flow token-in-URL leakage. Non-destructive (authorization GETs "
+                     "only)."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "An OAuth authorization URL with its query parameters"}}, "required": ["url"]}},
     {"name": "run_csrf",
      "description": ("ACTIVE: Scan a page for CSRF-vulnerable state-changing forms. Parses each form, checks for an "
                      "anti-CSRF token, reads the session cookie's SameSite attribute, and flags token-less POST forms "
@@ -935,6 +945,55 @@ class ToolRegistry:
         findings = csrf.analyze(forms, set_cookie, url)
         return ToolResult("csrf", url, True,
                           f"{len(forms)} form(s), {len(findings)} CSRF signal(s)", findings)
+
+    async def _run_oauth(self, inp: dict) -> ToolResult:
+        import httpx
+        import oauth_tool as oauth
+        url = inp["url"]
+        info = oauth.parse_authorize(url)
+        if not info["is_oauth"]:
+            return ToolResult("oauth", url, True,
+                              "Not an OAuth authorization URL (needs client_id + redirect_uri/response_type)", [])
+        endpoint, params = info["endpoint"], info["params"]
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, accepted, chain = [], [], []
+
+        async def send(target):
+            try:
+                r = await c.get(target, headers=headers)
+                return r.status_code, r.headers.get("location", "")
+            except Exception:
+                return 0, ""
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+            # 1) redirect_uri validation bypass
+            for v in oauth.redirect_uri_variants(info["redirect_uri"]):
+                target = oauth.build_authorize(endpoint, params, {"redirect_uri": v["value"]})
+                status, loc = await send(target)
+                verdict = oauth.analyze_redirect_response(status, loc)
+                if verdict and verdict["accepted"] == "host":
+                    accepted.append({**v, "location": verdict["location"]})
+                elif verdict and verdict["accepted"] == "chain":
+                    chain.append({**v, "location": verdict["location"]})
+            if accepted:
+                findings.append(oauth.redirect_finding(endpoint, accepted))
+            elif chain:
+                findings.append(oauth.redirect_finding(endpoint, chain, chain_only=True))
+            # 2) missing-state CSRF (only meaningful if a state was present)
+            if info["state"]:
+                status, loc = await send(oauth.build_authorize(endpoint, params, {}, drop=["state"]))
+                if oauth.analyze_state(status, loc):
+                    findings.append(oauth.state_finding(endpoint))
+            # 3) implicit-flow token leakage
+            status, loc = await send(oauth.build_authorize(endpoint, params, {"response_type": "token"}))
+            if oauth.analyze_token_leak(status, loc):
+                findings.append(oauth.token_leak_finding(endpoint, loc))
+
+        if self.mission_id and findings:
+            await self._http(endpoint, "GET", capture=True)
+        conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
+        return ToolResult("oauth", endpoint, True,
+                          f"{len(findings)} OAuth signal(s), {conf} confirmed", findings)
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))
