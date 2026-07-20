@@ -491,6 +491,14 @@ def test_race_flags_multiple_successes():
 def test_race_no_flag_on_single_success():
     results = [{"status": 200, "length": 50}] + [{"status": 409, "length": 10}] * 9
     assert race.analyze_race("https://t/x", results, 10) == []
+
+
+def test_race_best_round_picks_most_successes():
+    r1 = [{"status": 200}] + [{"status": 409}] * 4
+    r2 = [{"status": 200}] * 3 + [{"status": 409}] * 2   # best round
+    r3 = [{"status": 409}] * 5
+    best = race.best_round([r1, r2, r3])
+    assert race.summarize(best)["successes"] == 3
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 

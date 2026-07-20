@@ -170,7 +170,9 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "method": {"type": "string", "default": "POST"}, "url": {"type": "string"},
          "headers": {"type": "object"}, "body": {"type": "string"},
-         "count": {"type": "integer", "default": 20}}, "required": ["url"]}},
+         "count": {"type": "integer", "default": 20},
+         "rounds": {"type": "integer", "default": 3, "description": "Retry the burst N times; race success is luck-dependent"}},
+         "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -863,7 +865,9 @@ class ToolRegistry:
         body = inp.get("body")
         content = body.encode() if isinstance(body, str) and body else None
         count = max(2, min(int(inp.get("count", 20)), 60))
+        rounds = max(1, min(int(inp.get("rounds", 3)), 5))
 
+        all_rounds = []
         async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
             async def one():
                 try:
@@ -871,14 +875,16 @@ class ToolRegistry:
                     return {"status": r.status_code, "length": len(r.content)}
                 except Exception:
                     return {"status": 0, "length": 0}
-            results = await asyncio.gather(*[one() for _ in range(count)])
+            for _ in range(rounds):
+                all_rounds.append(await asyncio.gather(*[one() for _ in range(count)]))
 
-        findings = race.analyze_race(url, results, count)
+        results = race.best_round(all_rounds)
+        findings = race.analyze_race(url, results, count, rounds)
         if self.mission_id:
             await self._http(url, method, inp.get("headers") or {}, body=body, capture=True)
         s = race.summarize(results)
         return ToolResult("race", url, True,
-                          f"{s['successes']}/{count} succeeded, {len(findings)} signal(s)", findings)
+                          f"best {s['successes']}/{count} over {rounds} round(s), {len(findings)} signal(s)", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc
