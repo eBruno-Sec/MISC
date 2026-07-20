@@ -1,2 +1,10 @@
 # Claude Code local-only settings (per-machine permissions; not shared)
 .claude/settings.local.json
+
+# Python compiled artifacts
+__pycache__/
+*.py[cod]
+
+# BBH Agent local runtime data (SQLite mission store)
+bbh-agent/agent/data/
+*.db
