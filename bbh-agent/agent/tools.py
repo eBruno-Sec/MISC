@@ -75,6 +75,7 @@ TOOL_PERMISSIONS = {
     "run_exposure": PermissionLevel.INTRUSIVE,
     "run_xxe": PermissionLevel.INTRUSIVE,
     "run_sqli": PermissionLevel.INTRUSIVE,
+    "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -309,6 +310,16 @@ CLAUDE_TOOLS = [
                      "Complements run_sqlmap without needing the binary."),
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/item?id=1"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"},
+         "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
+         "required": ["url"]}},
+    {"name": "run_cmdi",
+     "description": ("INTRUSIVE: OS command-injection test on a parameterized URL. Three baseline-confirmed oracles: "
+                     "computed-output (echo of an arithmetic product across ; | & backtick $() separators — an echoed "
+                     "payload cannot false-positive), time-based blind (sleep with a sleep-0 control), and OOB (curl/"
+                     "wget to the native collaborator when BBH_OOB_BASE is set). Non-destructive payloads only."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/ping?host=x"},
          "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"},
          "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
          "required": ["url"]}},
@@ -1683,6 +1694,80 @@ class ToolRegistry:
             await self._http(ev[0], "GET", capture=True)
         return ToolResult("sqli", url, True,
                           f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
+
+    async def _run_cmdi(self, inp: dict) -> ToolResult:
+        import time
+        import httpx
+        import collaborator as collab
+        import cmdi_tool as cmdi
+        from urllib.parse import parse_qsl
+        url = inp["url"]
+        params = (inp.get("params") or xt.params_of(url))[:8]
+        if not params:
+            return ToolResult("cmdi", url, True, "No query parameters to test", [])
+        seconds = max(3, min(int(inp.get("delay", 5)), 15))
+        qvals = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, ev = [], []
+
+        async def get(c, target):
+            if not self.scope.validate(target)[0]:
+                return None, 0.0
+            t0 = time.perf_counter()
+            try:
+                r = await c.get(target)
+                return r, time.perf_counter() - t0
+            except Exception:
+                return None, time.perf_counter() - t0
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers,
+                                     timeout=seconds + 20) as c:
+            base_r, _ = await get(c, url)
+            base_body = base_r.text if base_r is not None else ""
+            for p in params:
+                orig = qvals.get(p, "1")
+                confirmed = False
+                # 1) computed-output
+                for item in cmdi.output_payloads(orig):
+                    r, _ = await get(c, xt.set_param(url, p, item["payload"]))
+                    if r is None:
+                        continue
+                    hit = cmdi.analyze_output(base_body, r.text)
+                    if hit:
+                        findings.append(cmdi.output_finding(url, p, item["payload"], hit))
+                        ev.append(xt.set_param(url, p, item["payload"])); confirmed = True
+                        break
+                if confirmed:
+                    continue
+                # 2) time-based blind
+                for item in cmdi.time_payloads(orig, seconds):
+                    _, ctl = await get(c, xt.set_param(url, p, item["control"]))
+                    _, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    if cmdi.analyze_time(ctl, slp, seconds):
+                        findings.append(cmdi.time_finding(url, p, item, ctl, slp, seconds))
+                        ev.append(xt.set_param(url, p, item["payload"])); confirmed = True
+                        break
+                if confirmed or not collab.enabled():
+                    continue
+                # 3) OOB (blind, via the native collaborator)
+                token = collab.new_token(); collab.register(token)
+                purl = collab.probe_url(token)
+                for payload in cmdi.oob_payloads(orig, purl):
+                    await get(c, xt.set_param(url, p, payload))
+                inter = []
+                for _ in range(6):
+                    inter = collab.hits(token)
+                    if inter:
+                        break
+                    await asyncio.sleep(0.5)
+                if inter:
+                    findings.append(cmdi.oob_finding(url, p, purl, inter))
+                collab.clear(token)
+
+        if self.mission_id and ev:
+            await self._http(ev[0], "GET", capture=True)
+        return ToolResult("cmdi", url, True,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed command injection", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc

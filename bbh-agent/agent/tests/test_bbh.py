@@ -40,6 +40,7 @@ import collaborator as collab
 import xxe_tool as xxe
 import github_recon as ghr
 import sqli_tool as sqli
+import cmdi_tool as cmdi
 
 
 # ── security: target validation ──────────────────────────────────
@@ -995,6 +996,42 @@ def test_sqli_findings_shape():
     tf = sqli.time_finding("https://t/i?id=1", "id",
                            {"dbms": "MySQL", "payload": "1' AND SLEEP(5)-- -"}, 0.2, 5.3, 5)
     assert tf["severity"] == "critical" and "time-blind" in tf["tags"]
+
+
+# ── cmdi_tool: computed-output / time / OOB command injection ────
+def test_cmdi_output_hit_only_on_execution_not_echo():
+    # the payload contains the arithmetic, NOT the product -> echoing it back is safe
+    payload = cmdi.output_payloads("8.8.8.8")[0]["payload"]
+    assert cmdi.EXPECTED not in payload
+    assert cmdi.analyze_output("ping stats", f"ping stats\n{cmdi.EXPECTED}\n") == \
+        {"kind": "computed-echo", "match": cmdi.EXPECTED}
+    # a server that just reflects the raw payload must NOT be flagged
+    assert cmdi.analyze_output("x", f"you sent: {payload}") is None
+
+
+def test_cmdi_output_detects_id_and_ignores_baseline():
+    body = "uid=33(www-data) gid=33(www-data) groups=33(www-data)"
+    assert cmdi.analyze_output("home", body)["kind"] == "command-output"
+    assert cmdi.analyze_output(body, body) is None       # already in baseline -> not new
+
+
+def test_cmdi_time_oracle_correlates():
+    assert cmdi.analyze_time(0.1, 5.2, 5) is True
+    assert cmdi.analyze_time(0.1, 0.3, 5) is False
+    assert cmdi.analyze_time(4.8, 5.0, 5) is False        # both slow (jitter)
+
+
+def test_cmdi_payloads_cover_separators_and_oob():
+    tp = cmdi.time_payloads("x", 5)
+    assert any("; sleep 5" in i["payload"] for i in tp) and any("`sleep 5`" in i["payload"] for i in tp)
+    assert any("ping -n 6" in i["payload"] for i in tp)   # windows
+    oob = cmdi.oob_payloads("x", "http://c/oob/t")
+    assert any("curl -s http://c/oob/t" in p for p in oob)
+
+
+def test_cmdi_finding_shapes():
+    of = cmdi.output_finding("https://t/p?host=1", "host", "1; id", {"kind": "command-output", "match": "uid=0"})
+    assert of["cwe"] == "CWE-78" and of["severity"] == "critical" and "rce" in of["tags"]
 
 
 def _run(coro):

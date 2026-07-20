@@ -91,10 +91,10 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns asn github_recon httpx nmap nuclei whatweb fingerprint katana ffuf takeover
-  http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization exposure xxe sqli zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization exposure xxe sqli cmdi zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool · collaborator · xxe_tool · github_recon · sqli_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool · collaborator · xxe_tool · github_recon · sqli_tool · cmdi_tool   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -138,6 +138,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_exposure | INTRUSIVE | Information disclosure: exposed .git/.svn/.env/backups/.aws/phpinfo, signature-confirmed + source-recoverable escalation |
 | run_xxe | INTRUSIVE | XXE: in-band local file read (file:///etc/passwd) + blind OOB confirmation via the native collaborator |
 | run_sqli | INTRUSIVE | Native SQLi: error-signature (DBMS fingerprint) + boolean-diff + time-based blind, all baseline-confirmed |
+| run_cmdi | INTRUSIVE | OS command injection: computed-output (echo can't false-positive) + time-based blind + OOB via collaborator |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
@@ -311,6 +312,7 @@ bbh-agent/
 │   ├── xxe_tool.py        # XXE: in-band file-read + blind OOB payloads (external/parameter entities)
 │   ├── github_recon.py    # public-GitHub leaked-secret dorking (operator PAT; reuses codereview scanner)
 │   ├── sqli_tool.py       # native SQLi: error-signature + boolean-diff + time-based oracles
+│   ├── cmdi_tool.py       # OS command injection: computed-output + time + OOB oracles
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -318,7 +320,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (103 tests)
+│   └── tests/             # deterministic pytest suite (108 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```
