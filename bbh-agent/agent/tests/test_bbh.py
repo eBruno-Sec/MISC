@@ -39,6 +39,7 @@ import exposure_tool as exp
 import collaborator as collab
 import xxe_tool as xxe
 import github_recon as ghr
+import sqli_tool as sqli
 
 
 # ── security: target validation ──────────────────────────────────
@@ -953,6 +954,47 @@ def test_ghr_sensitive_file_is_a_lead_plain_mention_is_not():
     assert ghr.classify_hit(item, "acme.com", '"acme.com" filename:.env')["severity"] == "low"
     plain = {"repo": "x/y", "path": "README.md", "url": "u", "fragments": ["see acme.com for info"]}
     assert ghr.classify_hit(plain, "acme.com", '"acme.com"') is None
+
+
+# ── sqli_tool: error / boolean / time oracles ───────────────────
+def test_sqli_error_signature_fingerprints_dbms_and_ignores_baseline():
+    base = "<html>results for widget</html>"
+    probe = "<html>You have an error in your SQL syntax; check the manual that corresponds to your MySQL</html>"
+    hits = sqli.error_signatures(base, probe)
+    assert hits and hits[0]["dbms"] == "MySQL"
+    # the same signature already in the baseline is not a new signal
+    assert sqli.error_signatures(probe, probe) == []
+
+
+def test_sqli_boolean_true_tracks_baseline_false_diverges():
+    base = "Product: Widget (in stock)"
+    t = "Product: Widget (in stock)"
+    f = "No results found"
+    assert sqli.analyze_boolean(base, t, f) is True
+    # a param that changes nothing (true==false) is not injectable
+    assert sqli.analyze_boolean(base, base, base) is False
+
+
+def test_sqli_time_oracle_needs_correlated_delay():
+    assert sqli.analyze_time(0.2, 5.3, 5) is True         # control fast, sleep slow by ~5s
+    assert sqli.analyze_time(0.2, 0.4, 5) is False        # both fast -> not injectable
+    assert sqli.analyze_time(4.9, 5.1, 5) is False        # both slow (jitter) -> not correlated
+
+
+def test_sqli_payloads_embed_value_and_controls():
+    bp = sqli.boolean_payloads("7")
+    assert any(p["true"].startswith("7") and "1=1" in p["true"] for p in bp)
+    tp = sqli.time_payloads("7", 5)
+    assert any("SLEEP(5)" in i["payload"] and "SLEEP(0)" in i["control"] for i in tp)
+    assert any("pg_sleep(5)" in i["payload"] for i in tp)
+
+
+def test_sqli_findings_shape():
+    ef = sqli.error_finding("https://t/i?id=1", "id", "'", [{"dbms": "SQLite", "pattern": "x"}])
+    assert ef["cwe"] == "CWE-89" and ef["confidence"] == "confirmed" and ef["severity"] == "high"
+    tf = sqli.time_finding("https://t/i?id=1", "id",
+                           {"dbms": "MySQL", "payload": "1' AND SLEEP(5)-- -"}, 0.2, 5.3, 5)
+    assert tf["severity"] == "critical" and "time-blind" in tf["tags"]
 
 
 def _run(coro):

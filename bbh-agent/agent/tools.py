@@ -74,6 +74,7 @@ TOOL_PERMISSIONS = {
     "run_deserialization": PermissionLevel.INTRUSIVE,
     "run_exposure": PermissionLevel.INTRUSIVE,
     "run_xxe": PermissionLevel.INTRUSIVE,
+    "run_sqli": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -300,6 +301,17 @@ CLAUDE_TOOLS = [
          "url": {"type": "string"},
          "xml": {"type": "string", "description": "Optional sample XML body to mutate (matches the app's schema)"},
          "content_type": {"type": "string", "default": "application/xml"}}, "required": ["url"]}},
+    {"name": "run_sqli",
+     "description": ("INTRUSIVE: Native SQL-injection test on a parameterized URL. Three baseline-confirmed oracles: "
+                     "error-based (injects a quote, detects a DBMS error + fingerprints MySQL/Postgres/MSSQL/Oracle/"
+                     "SQLite), boolean-blind (always-true vs always-false condition diff), and time-based blind "
+                     "(SLEEP/pg_sleep/WAITFOR with a sleep(0) control). Read-only payloads (no stacked writes). "
+                     "Complements run_sqlmap without needing the binary."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/item?id=1"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"},
+         "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
+         "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -1602,6 +1614,75 @@ class ToolRegistry:
             await self._http(url, "POST", {"Content-Type": ctype}, body=sample or "<root/>", capture=True)
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
         return ToolResult("xxe", url, True, f"{len(findings)} XXE signal(s), {conf} confirmed", findings)
+
+    async def _run_sqli(self, inp: dict) -> ToolResult:
+        import time
+        import httpx
+        import sqli_tool as sqli
+        from urllib.parse import parse_qsl
+        url = inp["url"]
+        params = (inp.get("params") or xt.params_of(url))[:8]
+        if not params:
+            return ToolResult("sqli", url, True, "No query parameters to test", [])
+        seconds = max(3, min(int(inp.get("delay", 5)), 15))
+        qvals = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, ev = [], []
+
+        async def get(c, target):
+            if not self.scope.validate(target)[0]:
+                return None, 0.0
+            t0 = time.perf_counter()
+            try:
+                r = await c.get(target)
+                return r, time.perf_counter() - t0
+            except Exception:
+                return None, time.perf_counter() - t0
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers,
+                                     timeout=seconds + 20) as c:
+            base_r, _ = await get(c, url)
+            base_body = base_r.text if base_r is not None else ""
+            for p in params:
+                orig = qvals.get(p, "1")
+                confirmed = False
+                # 1) error-based
+                for probe in sqli.ERROR_PROBES[:3]:
+                    r, _ = await get(c, xt.set_param(url, p, orig + probe))
+                    if r is None:
+                        continue
+                    hits = sqli.error_signatures(base_body, r.text)
+                    if hits:
+                        findings.append(sqli.error_finding(url, p, probe, hits))
+                        ev.append(xt.set_param(url, p, orig + probe)); confirmed = True
+                        break
+                if confirmed:
+                    continue
+                # 2) boolean-based blind
+                for pair in sqli.boolean_payloads(orig):
+                    rt, _ = await get(c, xt.set_param(url, p, pair["true"]))
+                    rf, _ = await get(c, xt.set_param(url, p, pair["false"]))
+                    if rt is None or rf is None:
+                        continue
+                    if sqli.analyze_boolean(base_body, rt.text, rf.text):
+                        findings.append(sqli.boolean_finding(url, p, pair))
+                        ev.append(xt.set_param(url, p, pair["false"])); confirmed = True
+                        break
+                if confirmed:
+                    continue
+                # 3) time-based blind (only when quieter oracles found nothing)
+                for item in sqli.time_payloads(orig, seconds):
+                    _, ctl = await get(c, xt.set_param(url, p, item["control"]))
+                    _, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    if sqli.analyze_time(ctl, slp, seconds):
+                        findings.append(sqli.time_finding(url, p, item, ctl, slp, seconds))
+                        ev.append(xt.set_param(url, p, item["payload"]))
+                        break
+
+        if self.mission_id and ev:
+            await self._http(ev[0], "GET", capture=True)
+        return ToolResult("sqli", url, True,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc
