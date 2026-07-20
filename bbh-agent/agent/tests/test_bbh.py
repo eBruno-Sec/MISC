@@ -33,6 +33,7 @@ import codereview as cr
 import csrf_tool as csrf
 import fingerprint as fp
 import ssrf_tool as ssrf
+import deser_tool as deser
 
 
 # ── security: target validation ──────────────────────────────────
@@ -715,6 +716,56 @@ def test_ssrf_findings_are_shaped_for_the_report():
     bf = ssrf.blind_finding("https://t/fetch?url=x", "url", "http://127.0.0.1:80/",
                             "http://127.0.0.1:1/", {"reason": "r", "confidence": "confirmed"})
     assert bf["severity"] == "high" and "blind" in bf["tags"]
+
+
+# ── deser_tool: serialized-object detection + sink confirmation ──
+def test_deser_detects_php_java_pickle_dotnet_ruby():
+    import base64, pickle
+    assert deser.detect_format('O:4:"User":1:{s:4:"name";s:5:"admin";}')["format"] == "PHP"
+    # Java ObjectInputStream -> base64 starts rO0AB
+    java = base64.b64encode(b"\xac\xed\x00\x05stuff").decode()
+    assert deser.detect_format(java)["format"] == "Java" and java.startswith("rO0")
+    py = base64.b64encode(pickle.dumps({"user": "guest"})).decode()
+    assert deser.detect_format(py)["format"] == "Python pickle"
+    net = base64.b64encode(b"\x00\x01\x00\x00\x00\xff\xff\xff\xffmore").decode()
+    assert deser.detect_format(net)["format"] == ".NET"
+    ruby = base64.b64encode(b"\x04\x08{\x06").decode()
+    assert deser.detect_format(ruby)["format"] == "Ruby Marshal"
+
+
+def test_deser_ignores_plain_values():
+    assert deser.detect_format("hello world") is None
+    assert deser.detect_format("eyJhbGciOiJIUzI1NiJ9") is None   # a JWT header, not serialized
+    assert deser.detect_format("12345") is None
+
+
+def test_deser_find_inputs_across_query_and_cookies():
+    import base64, pickle
+    py = base64.b64encode(pickle.dumps([1, 2, 3])).decode()
+    found = deser.find_serialized_inputs({"q": "x", "data": py}, {"sess": 'a:0:{}'})
+    locs = {(f["location"], f["name"], f["format"]) for f in found}
+    assert ("query", "data", "Python pickle") in locs
+    assert ("cookie", "sess", "PHP") in locs
+
+
+def test_deser_corrupt_changes_blob_and_stays_base64():
+    import base64, pickle
+    py = base64.b64encode(pickle.dumps({"a": 1})).decode()
+    bad = deser.corrupt(py, {"encoding": "base64"})
+    assert bad != py
+    # a corrupted pickle must not re-load cleanly
+    import pytest
+    with pytest.raises(Exception):
+        pickle.loads(base64.b64decode(bad + "=" * (-len(bad) % 4)))
+
+
+def test_deser_error_signature_only_when_new():
+    base = "welcome back"
+    probe = "Traceback ... _pickle.UnpicklingError: pickle data was truncated"
+    hits = deser.analyze_errors(base, probe, "Python pickle")
+    assert any("Unpickling" in h for h in hits)
+    # if the baseline already showed it, it is not a new signal
+    assert deser.analyze_errors(probe, probe, "Python pickle") == []
 
 
 def _run(coro):

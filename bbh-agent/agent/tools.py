@@ -69,6 +69,7 @@ TOOL_PERMISSIONS = {
     "run_bfla": PermissionLevel.INTRUSIVE,
     "run_race": PermissionLevel.INTRUSIVE,
     "run_ssrf": PermissionLevel.INTRUSIVE,
+    "run_deserialization": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -246,6 +247,17 @@ CLAUDE_TOOLS = [
          "open_port": {"type": "integer", "default": 80, "description": "A likely-OPEN internal port for the blind oracle"},
          "closed_port": {"type": "integer", "default": 1, "description": "A likely-CLOSED internal port for the blind oracle"},
          "oob_domain": {"type": "string", "description": "Optional collaborator domain for an out-of-band probe (e.g. xyz.oast.pro)"}},
+         "required": ["url"]}},
+    {"name": "run_deserialization",
+     "description": ("INTRUSIVE: Insecure-deserialization test. Detects serialized objects (PHP serialize(), Java "
+                     "ObjectInputStream / base64 rO0, Python pickle, .NET BinaryFormatter, Ruby Marshal) in query "
+                     "parameters and cookies, then CONFIRMS the sink non-destructively by sending a corrupted copy and "
+                     "watching for a deserialization exception in the response. Never sends gadget chains. Pass a URL; "
+                     "cookies are read from the session or the optional cookies map."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "cookies": {"type": "object", "description": "Optional name->value cookies to test (adds to session cookies)"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Restrict to these query params (default: all)"}},
          "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
@@ -1289,6 +1301,77 @@ class ToolRegistry:
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
         return ToolResult("ssrf", url, True,
                           f"tested {len(params)} param(s), {len(findings)} SSRF signal(s), {conf} confirmed",
+                          findings)
+
+    def _parse_cookies(self, extra: dict) -> dict:
+        """Merge session-header cookies with an explicit cookies map."""
+        jar = {}
+        raw = ""
+        for k, v in (self.session_headers or {}).items():
+            if k.lower() == "cookie":
+                raw = v
+                break
+        for part in raw.split(";"):
+            if "=" in part:
+                n, _, val = part.strip().partition("=")
+                if n:
+                    jar[n] = val
+        jar.update({k: str(v) for k, v in (extra or {}).items()})
+        return jar
+
+    async def _run_deserialization(self, inp: dict) -> ToolResult:
+        import httpx
+        import deser_tool as deser
+        from urllib.parse import parse_qsl, urlencode
+        url = inp["url"]
+        p = urlparse(url)
+        query = dict(parse_qsl(p.query, keep_blank_values=True))
+        only = set(inp.get("params") or [])
+        if only:
+            query = {k: v for k, v in query.items() if k in only}
+        cookies = self._parse_cookies(inp.get("cookies"))
+        inputs = deser.find_serialized_inputs(query, cookies)
+        if not inputs:
+            return ToolResult("deserialization", url, True,
+                              "No serialized objects found in query params or cookies", [])
+
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        all_q = dict(parse_qsl(p.query, keep_blank_values=True))
+
+        def q_url(name, value):
+            q = dict(all_q); q[name] = value
+            return urlunparse(p._replace(query=urlencode(q)))
+
+        def cookie_header(name, value):
+            jar = dict(cookies); jar[name] = value
+            return "; ".join(f"{k}={v}" for k, v in jar.items())
+
+        findings = []
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+            for it in inputs:
+                orig = it["value"] if isinstance(it["value"], str) else str(it["value"])
+                bad = deser.corrupt(orig, it)
+                try:
+                    if it["location"] == "query":
+                        base = await c.get(q_url(it["name"], orig), headers=headers)
+                        probe = await c.get(q_url(it["name"], bad), headers=headers)
+                    else:  # cookie
+                        h_ok = {**headers, "Cookie": cookie_header(it["name"], orig)}
+                        h_bad = {**headers, "Cookie": cookie_header(it["name"], bad)}
+                        base = await c.get(url, headers=h_ok)
+                        probe = await c.get(url, headers=h_bad)
+                except Exception:
+                    findings.append(deser.exposure_finding(url, it))
+                    continue
+                matched = deser.analyze_errors(base.text, probe.text, it["format"])
+                findings.append(deser.error_finding(url, it, matched) if matched
+                                else deser.exposure_finding(url, it))
+
+        if self.mission_id and findings:
+            await self._http(url, "GET", capture=True)
+        conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
+        return ToolResult("deserialization", url, True,
+                          f"{len(inputs)} serialized input(s), {len(findings)} signal(s), {conf} confirmed",
                           findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
