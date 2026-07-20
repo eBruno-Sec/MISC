@@ -19,7 +19,7 @@ PHASE_OF = {
     "run_subfinder": "recon", "run_crtsh": "recon", "run_wayback": "recon", "run_dns": "recon",
     "run_httpx": "enum", "http_probe": "enum", "run_whatweb": "enum",
     "run_katana": "enum", "fetch_openapi": "enum", "check_takeover": "enum",
-    "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe",
+    "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe", "run_js_review": "enum",
     "run_nmap": "scan", "run_nuclei": "scan", "run_zap": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
     "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",
@@ -45,7 +45,7 @@ HARD RULES:
 RECOMMENDED METHODOLOGY:
 1. Subdomain enumeration: run_subfinder + run_crtsh on every in-scope root domain. run_wayback to seed historical URLs. run_dns for SPF/DMARC/CAA/vendor intel.
 2. Live host probe: run_httpx on discovered subdomains. check_takeover on subdomains to catch dangling-CNAME hijacks.
-3. Enrich: http_probe interesting hosts (captures evidence, reads security headers, seeds the surface). fetch_openapi on any /swagger or /openapi.json. run_graphql on any /graphql endpoint (introspection + batching abuse). run_jwt on any JWT/Bearer token you capture (alg:none, weak-secret crack, forged-admin). run_whatweb for tech.
+3. Enrich: http_probe interesting hosts (captures evidence, reads security headers, seeds the surface). fetch_openapi on any /swagger or /openapi.json. run_graphql on any /graphql endpoint (introspection + batching abuse). run_jwt on any JWT/Bearer token you capture (alg:none, weak-secret crack, forged-admin). run_js_review on discovered .js bundles (hardcoded secrets, dangerous sinks, hidden endpoints). run_whatweb for tech.
 4. Surface scan: run_nuclei with safe tags on live hosts. run_nmap on unusual fingerprints. If the ZAP daemon is available, run_zap for a full DAST pass on a primary in-scope web app (spider + AJAX spider + active scan, scope-fenced).
 5. Plan: call generate_playbook to get a rule-based, per-surface test playbook (what/how/payloads/confidence/cURL). Use it to target the next step.
 6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_web_probes for traversal/IDOR, run_injection_probes for CORS/open-redirect/host-header/SSTI on parameterized URLs, run_bfla for broken function-level authorization (write methods / admin paths with a low-priv token) + side-channel BOLA, run_race on single-use actions (coupon/transfer/vote) for race conditions, run_xss on reflected parameters and pages with client-side sinks (browser-confirmed, catches DOM XSS).

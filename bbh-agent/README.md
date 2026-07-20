@@ -91,10 +91,10 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns httpx nmap nuclei whatweb katana ffuf takeover
-  http_probe fetch_openapi graphql jwt xss content_discovery web_probes injection_probes bfla race zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt xss js_review content_discovery web_probes injection_probes bfla race zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -121,6 +121,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_graphql | ACTIVE | GraphQL introspection + enumeration + batching/field-suggestion abuse checks |
 | run_jwt | ACTIVE | JWT attacks: alg:none forge, HMAC weak-secret crack, forged-admin token + live test |
 | run_xss | ACTIVE | Context-aware reflected XSS + headless-browser execution proof (catches DOM XSS) |
+| run_js_review | ACTIVE | SAST-lite on JS/source: secrets, dangerous sinks, weak crypto, dev comments, endpoint mining |
 | run_ffuf | INTRUSIVE | Directory/endpoint fuzzing |
 | run_content_discovery | INTRUSIVE | Body-validated content discovery (defeats catch-all SPA 200s) |
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
@@ -278,6 +279,7 @@ bbh-agent/
 │   ├── authz_tool.py      # BFLA method testing + side-channel BOLA oracle
 │   ├── race_tool.py       # parallel-request race-condition (TOCTOU) analysis
 │   ├── xss_tool.py        # XSS context analysis; run_xss confirms execution in headless Chromium
+│   ├── codereview.py      # SAST-lite: secrets / sinks / weak-crypto / dev-comments / endpoint mining
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -285,7 +287,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (54 tests)
+│   └── tests/             # deterministic pytest suite (58 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

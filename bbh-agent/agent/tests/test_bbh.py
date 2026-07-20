@@ -29,6 +29,7 @@ import jwt_tool as jt
 import authz_tool as authz
 import race_tool as race
 import xss_tool as xt
+import codereview as cr
 
 
 # ── security: target validation ──────────────────────────────────
@@ -542,6 +543,45 @@ def test_xss_set_param_and_fragment():
     out = xt.set_param("https://t/s?q=1&z=2", "q", "<x>")
     assert "q=%3Cx%3E" in out or "q=<x>" in out
     assert xt.set_fragment("https://t/p?a=1", "<img>").endswith("#<img>")
+
+
+# ── codereview: secrets / sinks / comments / endpoints ───────────
+def test_codereview_finds_secrets():
+    # the exact hardcoded GitHub token from Bug Bounty Bootcamp Ch 22
+    src = 'GITHUB_ACCESS_TOKEN = "0518fb3b4f52a1494576eee7ed7c75ae8948ce70"\n'
+    types = {s["type"] for s in cr.scan_secrets(src)}
+    assert any("GitHub" in t for t in types)
+    # AWS key + generic assignment
+    aws = cr.scan_secrets('const k = "AKIAIOSFODNN7EXAMPLE"; api_key: "s3cr3tValue123"')
+    assert any(s["type"] == "AWS access key id" for s in aws)
+    assert any("api_key" in s["type"] for s in aws)
+    # placeholder must NOT be flagged
+    assert cr.scan_secrets('password = "your_password_here"') == []
+    # redaction: full secret not echoed
+    assert all("0518fb3b4f52" not in s["match"] for s in cr.scan_secrets(src))
+
+
+def test_codereview_finds_sinks_and_crypto():
+    sinks = {s["sink"] for s in cr.scan_sinks("el.innerHTML = userInput; eval(x); unserialize($_COOKIE['d']);")}
+    assert "innerHTML =" in sinks and "eval()" in sinks and "unserialize()" in sinks
+    assert any(w["algorithm"] == "MD5" for w in cr.scan_weak_crypto("hash = md5(password)"))
+
+
+def test_codereview_dev_comments_and_endpoints():
+    c = cr.scan_comments("// todo: Implement CSRF protection on the change_password endpoint\ncode();")
+    assert c and "csrf" in c[0]["comment"].lower()
+    eps = cr.extract_endpoints('fetch("/api/v1/users"); var u="https://api.example.com/new_password";')
+    assert "/api/v1/users" in eps and "https://api.example.com/new_password" in eps
+
+
+def test_codereview_review_bundles_findings():
+    src = ('const T="ghp_' + "a" * 36 + '"; el.innerHTML=x; // FIXME insecure hardcoded token\n'
+           'fetch("/api/admin/delete");')
+    res = cr.review(src, "https://t/app.js")
+    titles = {f["title"] for f in res["findings"]}
+    assert any("Hardcoded secret" in t for t in titles)
+    assert any("Dangerous sink" in t for t in titles)
+    assert "/api/admin/delete" in res["endpoints"]
 
 
 def _run(coro):

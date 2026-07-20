@@ -58,6 +58,7 @@ TOOL_PERMISSIONS = {
     "run_graphql": PermissionLevel.ACTIVE,
     "run_jwt": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
+    "run_js_review": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
@@ -148,6 +149,15 @@ CLAUDE_TOOLS = [
          "header_name": {"type": "string", "default": "Authorization"},
          "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
          "required": ["token"]}},
+    {"name": "run_js_review",
+     "description": ("ACTIVE: Static review (SAST-lite) of JavaScript / source. Fetches in-scope JS (or reviews "
+                     "pasted `code`) and flags hardcoded secrets/API keys, dangerous sinks (eval/innerHTML/exec/"
+                     "unserialize/pickle), weak crypto, and revealing developer comments — and mines endpoints/paths "
+                     "into the attack surface. Run after crawl/wayback to review discovered .js bundles."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "A single JS/source URL"},
+         "urls": {"type": "array", "items": {"type": "string"}},
+         "code": {"type": "string", "description": "Paste source to review directly (no fetch)"}}, "required": []}},
     {"name": "run_xss",
      "description": ("ACTIVE: Cross-site scripting test on a URL. First does context-aware reflection analysis "
                      "(finds where each parameter reflects — HTML/attribute/script/comment — and whether a breakout "
@@ -759,6 +769,57 @@ class ToolRegistry:
         except Exception:
             return findings
         return findings
+
+    async def _run_js_review(self, inp: dict) -> ToolResult:
+        import codereview as cr
+        sources = []
+        if inp.get("code"):
+            sources.append((inp.get("source") or "inline-source", inp["code"]))
+        urls = list(inp.get("urls") or [])
+        if inp.get("url"):
+            urls.append(inp["url"])
+        if not sources and not urls:
+            urls = [u for u in self.urls if u.lower().split("?")[0].endswith(".js")][:15]
+
+        for u in urls[:20]:
+            if not self.scope.validate(u)[0]:
+                continue
+            r = await self._http(u, "GET", capture=False)
+            if not r.get("error") and r.get("body"):
+                sources.append((u, r["body"]))
+        if not sources:
+            return ToolResult("js_review", "", True,
+                              "No JS/source to review (crawl first, or pass url/urls/code)", [])
+
+        findings, endpoints = [], []
+        for label, text in sources:
+            res = cr.review(text, label)
+            findings += res["findings"]
+            endpoints += res["endpoints"]
+
+        # resolve + seed in-scope endpoints into the surface
+        src_host = next((urlparse(l).netloc for l, _ in sources if l.startswith("http")), "")
+        abs_eps = []
+        for e in endpoints:
+            if e.startswith("http"):
+                abs_eps.append(e)
+            elif e.startswith("/") and src_host:
+                scheme = "https"
+                abs_eps.append(f"{scheme}://{src_host}{e}")
+        self._add_urls(abs_eps)
+
+        seen, uniq = set(), []
+        for f in findings:
+            k = (f["title"], f.get("evidence", ""), f.get("target"))
+            if k in seen:
+                continue
+            seen.add(k)
+            uniq.append(f)
+        self.recon.setdefault("js_review", []).append(
+            {"sources": len(sources), "endpoints": len(set(endpoints))})
+        return ToolResult("js_review", sources[0][0], True,
+                          f"reviewed {len(sources)} source(s), {len(uniq)} finding(s), "
+                          f"{len(set(endpoints))} endpoint(s)", uniq)
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))
