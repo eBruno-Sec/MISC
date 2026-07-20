@@ -354,6 +354,7 @@ def test_zap_client_issues_expected_api_calls():
         await c.ascan("https://t/a", context_id="2", policy="My Policy")
         await c.set_injectable()
         await c.add_scan_header()
+        await c.set_oast_service("BOAST")
 
     asyncio.get_event_loop().run_until_complete(go())
     ascan = next(x for x in calls if x[2] == "scan")
@@ -362,6 +363,8 @@ def test_zap_client_issues_expected_api_calls():
     assert inj[3]["Integer"] == 27
     rep = next(x for x in calls if x[0] == "replacer" and x[2] == "addRule")
     assert rep[3]["matchType"] == "REQ_HEADER"
+    oast = next(x for x in calls if x[0] == "oast")
+    assert oast[2] == "setActiveScanServiceForOast" and oast[3]["name"] == "BOAST"
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────

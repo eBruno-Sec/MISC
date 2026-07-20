@@ -137,6 +137,12 @@ class ZapClient:
                                 enabled="true", matchType="REQ_HEADER", matchString=name,
                                 matchRegex="false", replacement=value, initiators="")
 
+    async def set_oast_service(self, name: str = "BOAST"):
+        """Point ZAP's active scanner at an OAST service (BOAST / Interactsh /
+        Callbacks) so blind, out-of-band vulns — OOB SSRF, XXE, blind SQLi, OOB
+        RCE — get detected and reported as alerts. Requires the ZAP oast add-on."""
+        return await self._call("oast", "action", "setActiveScanServiceForOast", name=name)
+
     async def ascan_status(self, sid: str) -> int:
         return int((await self._call("ascan", "view", "status", scanId=sid)).get("status", 0))
 

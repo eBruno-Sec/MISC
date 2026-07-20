@@ -15,6 +15,8 @@ services:
       # To enable: docker compose --profile zap up -d  (and keep ZAP_ADDR below)
       - ZAP_ADDR=${ZAP_ADDR:-}
       - ZAP_API_KEY=${ZAP_API_KEY:-bbh-zap}
+      # OAST for blind/OOB vulns (SSRF/XXE/RCE). Empty = off. e.g. BOAST or Interactsh
+      - ZAP_OAST_SERVICE=${ZAP_OAST_SERVICE:-}
     ports:
       - "8000:8000"
     volumes:

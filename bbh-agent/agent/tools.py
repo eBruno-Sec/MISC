@@ -141,7 +141,8 @@ CLAUDE_TOOLS = [
          "url": {"type": "string"},
          "spider_seconds": {"type": "integer", "default": 180},
          "scan_seconds": {"type": "integer", "default": 600},
-         "scan_policy": {"type": "string", "description": "Optional ZAP scan-policy name; empty uses ZAP's Default Policy"}},
+         "scan_policy": {"type": "string", "description": "Optional ZAP scan-policy name; empty uses ZAP's Default Policy"},
+         "oast_service": {"type": "string", "description": "Optional OAST service for out-of-band detection: BOAST or Interactsh (needs the ZAP oast add-on)"}},
          "required": ["url"]}},
     {"name": "run_dalfox",
      "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
@@ -730,7 +731,13 @@ class ToolRegistry:
                 pass
             # tune the active scan: identify our traffic + widen input vectors
             # (POST/JSON/headers/cookie) so API bodies get fuzzed. Best-effort.
-            for setup in (zap.add_scan_header(), zap.set_injectable()):
+            setups = [zap.add_scan_header(), zap.set_injectable()]
+            # enable out-of-band detection (blind SSRF/XXE/RCE) if an OAST
+            # service is configured (env ZAP_OAST_SERVICE or the tool param).
+            oast = inp.get("oast_service") or os.getenv("ZAP_OAST_SERVICE", "")
+            if oast:
+                setups.append(zap.set_oast_service(oast))
+            for setup in setups:
                 try:
                     await setup
                 except Exception:

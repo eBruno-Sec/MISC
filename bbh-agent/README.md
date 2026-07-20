@@ -223,6 +223,11 @@ data, JSON bodies, headers, and cookies (not just the query string), an optional
 `scan_policy` selects a custom ZAP policy, and every ZAP request carries an
 `X-Scanner` header so the target owner can identify authorized scan traffic.
 
+For blind / out-of-band vulns (OOB SSRF, XXE, blind SQLi, OOB RCE), set
+`ZAP_OAST_SERVICE=BOAST` (or `Interactsh`) so ZAP's active scanner fires
+out-of-band payloads; any callbacks surface as normal ZAP alerts. Needs the ZAP
+`oast` add-on.
+
 ---
 
 ## Requirements
