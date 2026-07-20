@@ -94,7 +94,7 @@ ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + eviden
   http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization exposure zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool · collaborator   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -241,6 +241,17 @@ For blind / out-of-band vulns (OOB SSRF, XXE, blind SQLi, OOB RCE), set
 out-of-band payloads; any callbacks surface as normal ZAP alerts. Needs the ZAP
 `oast` add-on.
 
+### Native OOB collaborator
+
+For blind SSRF confirmation without any external service, the agent ships its own
+out-of-band collaborator on the FastAPI app. Set `BBH_OOB_BASE` to the agent's
+externally-reachable URL (e.g. `https://oob.you.example`); `run_ssrf` then injects
+a unique `/oob/<token>` probe, and any server-side callback the target makes is
+recorded and correlated in-process — turning a blind SSRF from "probe sent" into a
+**confirmed** finding with the caller's source IP as evidence. Set
+`BBH_OOB_DOMAIN` (a wildcard-DNS domain you control) to use DNS-triggerable
+`<token>.domain` probes as well. Left unset, OOB probes stay advisory.
+
 ---
 
 ## Requirements
@@ -293,6 +304,7 @@ bbh-agent/
 │   ├── deser_tool.py      # insecure deserialization: format detection + corrupt-and-confirm sink
 │   ├── oauth_tool.py      # OAuth/SSO: redirect_uri bypass + state CSRF + implicit token leak
 │   ├── exposure_tool.py   # information disclosure: signature-confirmed exposed .git/.env/backup/cred files
+│   ├── collaborator.py    # native OOB collaborator: token/probe/correlation for blind-SSRF confirmation
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -300,7 +312,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (85 tests)
+│   └── tests/             # deterministic pytest suite (89 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

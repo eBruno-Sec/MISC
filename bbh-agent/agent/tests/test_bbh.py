@@ -36,6 +36,7 @@ import ssrf_tool as ssrf
 import deser_tool as deser
 import oauth_tool as oauth
 import exposure_tool as exp
+import collaborator as collab
 
 
 # ── security: target validation ──────────────────────────────────
@@ -842,6 +843,49 @@ def test_exposure_no_false_positive_on_catchall_and_404():
 def test_exposure_git_reconstruct_finding():
     f = exp.git_reconstruct_finding([".git/HEAD", ".git/config"])
     assert "source recoverable" in f["title"].lower() and f["cwe"] == "CWE-527"
+
+
+# ── collaborator: native OOB token / correlation ────────────────
+def test_collab_probe_url_path_vs_subdomain():
+    os.environ.pop("BBH_OOB_DOMAIN", None)
+    assert collab.probe_url("abc123", base_url="http://agent:8000") == "http://agent:8000/oob/abc123"
+    os.environ["BBH_OOB_DOMAIN"] = "oast.bbh.test"
+    try:
+        assert collab.probe_url("abc123") == "http://abc123.oast.bbh.test/"
+    finally:
+        os.environ.pop("BBH_OOB_DOMAIN", None)
+
+
+def test_collab_token_extraction_path_and_host():
+    os.environ.pop("BBH_OOB_DOMAIN", None)
+    assert collab.token_from_request("oob/deadbeef/x", "agent:8000") == "deadbeef"
+    os.environ["BBH_OOB_DOMAIN"] = "oast.bbh.test"
+    try:
+        assert collab.token_from_request("/", "cafe1234.oast.bbh.test") == "cafe1234"
+    finally:
+        os.environ.pop("BBH_OOB_DOMAIN", None)
+
+
+def test_collab_record_correlates_and_confirms():
+    tok = collab.new_token()
+    collab.register(tok)
+    assert collab.hits(tok) == []
+    known = collab.record(tok, {"source_ip": "203.0.113.9", "method": "GET"})
+    assert known and len(collab.hits(tok)) == 1
+    f = collab.oob_finding("https://t/fetch?url=x", "url", collab.probe_url(tok, "http://a"), collab.hits(tok))
+    assert f["confidence"] == "confirmed" and f["cwe"] == "CWE-918" and "203.0.113.9" in f["evidence"]
+    collab.clear(tok)
+    assert collab.hits(tok) == []
+
+
+def test_collab_enabled_follows_env():
+    os.environ.pop("BBH_OOB_BASE", None)
+    assert collab.enabled() is False
+    os.environ["BBH_OOB_BASE"] = "http://agent:8000"
+    try:
+        assert collab.enabled() is True and collab.base() == "http://agent:8000"
+    finally:
+        os.environ.pop("BBH_OOB_BASE", None)
 
 
 def _run(coro):

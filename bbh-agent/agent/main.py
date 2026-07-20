@@ -4,7 +4,7 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
@@ -121,8 +121,31 @@ async def ui():
 
 @app.get("/config")
 async def config():
+    import collaborator as collab
     model = OPENROUTER_MODEL if AI_PROVIDER == "openrouter" else ANTHROPIC_MODEL
-    return {"provider": AI_PROVIDER, "model": model}
+    return {"provider": AI_PROVIDER, "model": model,
+            "oob_enabled": collab.enabled(), "oob_base": collab.base()}
+
+
+# ── native OOB collaborator: inbound interaction sink + correlation ──
+@app.api_route("/oob/{token:path}", methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"])
+async def oob_sink(token: str, request: Request):
+    """Catch-all endpoint that records any inbound OOB interaction. A blind-vuln
+    probe injected earlier points a target's server here; the callback is the
+    proof. Returns a tiny, harmless 200."""
+    import collaborator as collab
+    tok = collab.token_from_request(f"oob/{token}", request.headers.get("host", ""))
+    collab.record(tok, {
+        "source_ip": request.client.host if request.client else "?",
+        "method": request.method, "path": "/oob/" + token,
+        "host": request.headers.get("host", ""), "ua": request.headers.get("user-agent", "")})
+    return PlainTextResponse("ok")
+
+
+@app.get("/api/oob/{token}")
+async def oob_hits(token: str):
+    import collaborator as collab
+    return {"token": token, "interactions": collab.hits(token)}
 
 
 # ── mission lifecycle ────────────────────────────────────────────

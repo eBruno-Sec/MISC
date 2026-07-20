@@ -11,6 +11,12 @@ services:
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       # 0 = HITL intrusive gate waits forever; >0 = auto-deny after N seconds
       - BBH_APPROVAL_TIMEOUT=${BBH_APPROVAL_TIMEOUT:-0}
+      # Native OOB collaborator for blind SSRF/XXE confirmation. Empty = OOB stays
+      # advisory. Set to the agent's externally-reachable base URL so targets can
+      # call back, e.g. https://oob.you.example . Optional wildcard-DNS domain in
+      # BBH_OOB_DOMAIN enables DNS-triggerable subdomain probes.
+      - BBH_OOB_BASE=${BBH_OOB_BASE:-}
+      - BBH_OOB_DOMAIN=${BBH_OOB_DOMAIN:-}
       # OWASP ZAP DAST (optional). Empty ZAP_ADDR = run_zap skips cleanly.
       # To enable: docker compose --profile zap up -d  (and keep ZAP_ADDR below)
       - ZAP_ADDR=${ZAP_ADDR:-}

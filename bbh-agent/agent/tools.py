@@ -1303,6 +1303,7 @@ class ToolRegistry:
     async def _run_ssrf(self, inp: dict) -> ToolResult:
         import time
         import httpx
+        import collaborator as collab
         import ssrf_tool as ssrf
         url = inp["url"]
         params = inp.get("params") or ssrf.ssrf_params(url)
@@ -1356,12 +1357,25 @@ class ToolRegistry:
                     if o and o.get("target"):
                         evidence_targets.append(o["target"])
                     continue
-                # 3) OOB fallback probe (advisory; confirmation is out-of-band)
-                if oob_domain:
+                # 3) OOB: native collaborator confirms blind SSRF end-to-end
+                if collab.enabled():
+                    token = collab.new_token(); collab.register(token)
+                    purl = collab.probe_url(token)
+                    await probe(c, p, purl, timeout=8)
+                    inter = []
+                    for _ in range(6):                    # poll ~3s for the callback
+                        inter = collab.hits(token)
+                        if inter:
+                            break
+                        await asyncio.sleep(0.5)
+                    findings.append(collab.oob_finding(url, p, purl, inter) if inter
+                                    else ssrf.oob_finding(url, p, purl))
+                    collab.clear(token)
+                elif oob_domain:                          # external collaborator (advisory)
                     token = os.urandom(4).hex()
-                    probe_url = f"http://{token}.{oob_domain}/"
-                    await probe(c, p, probe_url, timeout=8)
-                    findings.append(ssrf.oob_finding(url, p, probe_url))
+                    purl = f"http://{token}.{oob_domain}/"
+                    await probe(c, p, purl, timeout=8)
+                    findings.append(ssrf.oob_finding(url, p, purl))
 
         if self.mission_id and evidence_targets:
             await self._http(evidence_targets[0], "GET", capture=True)
