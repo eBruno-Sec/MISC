@@ -479,18 +479,35 @@ def test_side_channel_oracle():
 
 
 # ── race_tool: parallel-request race condition ───────────────────
-def test_race_flags_multiple_successes():
-    # 3 of 10 concurrent requests succeeded where a single-use action should allow one
+def test_race_without_verify_is_conservative_candidate():
+    # 3 of 10 accepted, but no state proof -> stays a candidate, NOT high/critical
     results = [{"status": 200, "length": 50}] * 3 + [{"status": 409, "length": 10}] * 7
     f = race.analyze_race("https://t/api/coupon/redeem", results, 10)
-    assert f and f[0]["title"].startswith("Race condition")
-    assert f[0]["severity"] == "high"          # mixed success/reject = strong signal
-    assert race.summarize(results)["successes"] == 3
+    assert f and f[0]["confidence"] == "candidate"
+    assert f[0]["severity"] in ("low", "medium")
+    assert f[0]["title"].endswith("candidate")
+
+
+def test_race_confirmed_by_state_change():
+    # same successes, but a verify request proves the balance jumped -> confirmed
+    results = [{"status": 200, "length": 50}] * 3 + [{"status": 409}] * 7
+    verify = race.verify_delta({"body": "balance: 500", "length": 12},
+                               {"body": "balance: 2000", "length": 13})
+    assert verify["changed"] and verify["max_numeric_jump"] == 1500
+    f = race.analyze_race("https://t/transfer", results, 10, verify=verify)
+    assert f[0]["confidence"] == "confirmed" and f[0]["severity"] == "critical"
+    assert f[0]["title"] == "Race condition (TOCTOU)"   # no "candidate" suffix
 
 
 def test_race_no_flag_on_single_success():
     results = [{"status": 200, "length": 50}] + [{"status": 409, "length": 10}] * 9
     assert race.analyze_race("https://t/x", results, 10) == []
+
+
+def test_verify_delta_no_change():
+    v = race.verify_delta({"body": "balance: 500", "length": 12},
+                          {"body": "balance: 500", "length": 12})
+    assert v["available"] and not v["changed"]
 
 
 def test_race_best_round_picks_most_successes():

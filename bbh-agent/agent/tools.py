@@ -164,14 +164,18 @@ CLAUDE_TOOLS = [
          "headers": {"type": "object", "description": "Auth headers for the token under test (e.g. Authorization)"},
          "allow_delete": {"type": "boolean", "default": False}}, "required": ["url"]}},
     {"name": "run_race",
-     "description": ("INTRUSIVE: Race-condition (TOCTOU) test. Fires N identical requests simultaneously at a "
-                     "race-prone action and flags a single-use action succeeding more than once (double-spend, "
-                     "coupon reuse, over-withdrawal). Point it at an action you have authorization to trigger."),
+     "description": ("INTRUSIVE: Race-condition (TOCTOU) test. Warms an HTTP/2 pool, parks N workers on a gate and "
+                     "releases them together (tight synchronization), then optionally reads a verify_url (a state "
+                     "endpoint like a balance/vote count) before and after — a state CHANGE is the confirmed race, "
+                     "not just repeated 200s. Point it at an action you are authorized to trigger; use a request that "
+                     "should be allowed once but not multiple times."),
      "input_schema": {"type": "object", "properties": {
          "method": {"type": "string", "default": "POST"}, "url": {"type": "string"},
          "headers": {"type": "object"}, "body": {"type": "string"},
          "count": {"type": "integer", "default": 20},
-         "rounds": {"type": "integer", "default": 3, "description": "Retry the burst N times; race success is luck-dependent"}},
+         "rounds": {"type": "integer", "default": 3, "description": "Retry the burst N times; race success is luck-dependent"},
+         "verify_url": {"type": "string", "description": "In-scope GET endpoint whose response reflects state (balance/count) to confirm the race"},
+         "verify_headers": {"type": "object", "description": "Headers for the verify request (defaults to headers)"}},
          "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
@@ -866,25 +870,67 @@ class ToolRegistry:
         content = body.encode() if isinstance(body, str) and body else None
         count = max(2, min(int(inp.get("count", 20)), 60))
         rounds = max(1, min(int(inp.get("rounds", 3)), 5))
+        verify_url = inp.get("verify_url")
+        if verify_url and not self.scope.validate(verify_url)[0]:
+            verify_url = None  # drop off-scope verify endpoint
+        verify_headers = {"User-Agent": _UA, **(self.session_headers or {}),
+                          **(inp.get("verify_headers") or inp.get("headers") or {})}
 
-        all_rounds = []
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
-            async def one():
-                try:
-                    r = await c.request(method, url, headers=headers, content=content)
-                    return {"status": r.status_code, "length": len(r.content)}
-                except Exception:
-                    return {"status": 0, "length": 0}
+        limits = httpx.Limits(max_connections=count + 4, max_keepalive_connections=count + 4)
+
+        def make_client():
+            # HTTP/2 multiplexes the burst over one warmed connection (closest to a
+            # single-packet race); fall back cleanly if the h2 package is absent.
+            try:
+                return httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20,
+                                         http2=True, limits=limits)
+            except Exception:
+                return httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20, limits=limits)
+
+        async def read_state(c):
+            try:
+                r = await c.get(verify_url, headers=verify_headers)
+                return {"status": r.status_code, "length": len(r.content), "body": r.text[:2000]}
+            except Exception:
+                return {}
+
+        best, best_verify, best_score = [], None, (-1, -1)
+        async with make_client() as c:
+            # warm the pool without triggering the action (OPTIONS, not the method)
+            try:
+                await c.request("OPTIONS", url, headers=headers)
+            except Exception:
+                pass
             for _ in range(rounds):
-                all_rounds.append(await asyncio.gather(*[one() for _ in range(count)]))
+                before = await read_state(c) if verify_url else None
+                gate = asyncio.Event()
 
-        results = race.best_round(all_rounds)
-        findings = race.analyze_race(url, results, count, rounds)
+                async def worker():
+                    await gate.wait()          # all workers park here first...
+                    try:
+                        r = await c.request(method, url, headers=headers, content=content)
+                        return {"status": r.status_code, "length": len(r.content)}
+                    except Exception:
+                        return {"status": 0, "length": 0}
+
+                tasks = [asyncio.create_task(worker()) for _ in range(count)]
+                await asyncio.sleep(0.05)       # ...let them all reach the gate...
+                gate.set()                       # ...then release simultaneously
+                results = await asyncio.gather(*tasks)
+                after = await read_state(c) if verify_url else None
+                v = race.verify_delta(before, after) if verify_url else None
+                score = (1 if (v and v.get("changed")) else 0, race.summarize(results)["successes"])
+                if score > best_score:
+                    best, best_verify, best_score = results, v, score
+
+        findings = race.analyze_race(url, best, count, rounds, verify=best_verify)
         if self.mission_id:
             await self._http(url, method, inp.get("headers") or {}, body=body, capture=True)
-        s = race.summarize(results)
+        s = race.summarize(best)
+        changed = " · state changed" if (best_verify and best_verify.get("changed")) else ""
         return ToolResult("race", url, True,
-                          f"best {s['successes']}/{count} over {rounds} round(s), {len(findings)} signal(s)", findings)
+                          f"best {s['successes']}/{count} over {rounds} round(s){changed}, {len(findings)} signal(s)",
+                          findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc

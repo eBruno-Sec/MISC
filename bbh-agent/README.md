@@ -125,7 +125,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_web_probes | INTRUSIVE | Scope-aware traversal + IDOR probing with baseline comparison |
 | run_injection_probes | INTRUSIVE | CORS / open-redirect / host-header / SSTI reflection probes |
 | run_bfla | INTRUSIVE | Function-level authz (BFLA) method testing + side-channel BOLA oracle |
-| run_race | INTRUSIVE | Race-condition (TOCTOU) test via N simultaneous requests |
+| run_race | INTRUSIVE | Race-condition (TOCTOU): gate-synchronized burst + before/after state verify |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
