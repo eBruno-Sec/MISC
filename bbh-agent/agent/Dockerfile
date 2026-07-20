@@ -1,12 +1,23 @@
 # Stage 1: compile Go-based security tools
-FROM golang:1.22-bookworm AS go-builder
+# Go 1.24 satisfies current ProjectDiscovery module requirements; GOTOOLCHAIN=auto
+# lets `go install` fetch a newer toolchain automatically if a tool bumps its
+# requirement later. CGO off => static binaries that run on the Kali stage with
+# no shared-lib deps.
+FROM golang:1.24-bookworm AS go-builder
+ENV CGO_ENABLED=0
+ENV GOTOOLCHAIN=auto
+RUN mkdir -p /go/bin
 
-RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest 2>/dev/null
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest 2>/dev/null
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 2>/dev/null
-RUN go install -v github.com/projectdiscovery/katana/cmd/katana@latest 2>/dev/null
-RUN go install -v github.com/ffuf/ffuf/v2@latest 2>/dev/null
-RUN go install -v github.com/hahwul/dalfox/v2@latest 2>/dev/null
+# Each install is best-effort: a single tool that fails to build (Go-version bump,
+# transient network) must not kill the whole image — the agent skips any missing
+# binary at runtime and uses its native equivalents. Errors stay visible in the
+# build log (no 2>/dev/null) so a real failure can be diagnosed.
+RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || echo "[WARN] subfinder build skipped"
+RUN go install github.com/projectdiscovery/httpx/cmd/httpx@latest         || echo "[WARN] httpx build skipped"
+RUN go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest    || echo "[WARN] nuclei build skipped"
+RUN go install github.com/projectdiscovery/katana/cmd/katana@latest       || echo "[WARN] katana build skipped"
+RUN go install github.com/ffuf/ffuf/v2@latest                             || echo "[WARN] ffuf build skipped"
+RUN go install github.com/hahwul/dalfox/v2@latest                         || echo "[WARN] dalfox build skipped"
 
 # Stage 2: Kali Linux runtime
 FROM kalilinux/kali-rolling
@@ -24,12 +35,9 @@ RUN apt-get update -q && apt-get install -y -q \
     libpcap-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=go-builder /go/bin/subfinder /usr/local/bin/
-COPY --from=go-builder /go/bin/httpx /usr/local/bin/
-COPY --from=go-builder /go/bin/nuclei /usr/local/bin/
-COPY --from=go-builder /go/bin/katana /usr/local/bin/
-COPY --from=go-builder /go/bin/ffuf /usr/local/bin/
-COPY --from=go-builder /go/bin/dalfox /usr/local/bin/
+# Copy every binary that built (whichever succeeded above). The trailing slash
+# copies the directory contents; tools that were skipped simply aren't present.
+COPY --from=go-builder /go/bin/ /usr/local/bin/
 
 WORKDIR /app
 COPY requirements.txt .
