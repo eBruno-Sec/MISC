@@ -26,6 +26,7 @@ import auth
 import zap_client
 import graphql_tool as gql
 import jwt_tool as jt
+import authz_tool as authz
 
 
 # ── security: target validation ──────────────────────────────────
@@ -446,6 +447,34 @@ def test_jwt_crack_derives_secret_from_issuer():
 def test_jwt_strong_secret_not_cracked():
     token = jt.forge_hs({}, {"sub": "x"}, "M9x!q2Zr7_Lp03Vw-uKf8Nb6Ty1Ce4A", "HS256")
     assert jt.analyze(token)["cracked_secret"] is None
+
+
+# ── authz_tool: BFLA method testing + side-channel BOLA ──────────
+def test_bfla_flags_write_method_not_public():
+    mr = {"GET": {"status": 200, "length": 100}, "PUT": {"status": 200, "length": 50},
+          "DELETE": {"status": 204, "length": 0}}
+    anon = {"GET": {"status": 200, "length": 100}}   # GET is public; writes are not
+    f = authz.analyze_methods("https://t/api/picture/2", mr, anon)
+    titles = {x["title"] for x in f}
+    assert "Broken function-level authorization (PUT)" in titles
+    assert "Broken function-level authorization (DELETE)" in titles
+    # a write method that is also public (anon 2xx) is NOT flagged
+    f2 = authz.analyze_methods("https://t/x", {"POST": {"status": 200}}, {"POST": {"status": 200}})
+    assert f2 == []
+
+
+def test_bfla_admin_path_get():
+    f = authz.analyze_methods("https://t/api/admin/find/user", {"GET": {"status": 200, "length": 80}}, {})
+    assert any(x["title"] == "Admin endpoint reachable by non-admin token" for x in f)
+    assert not authz.is_admin_path("https://t/api/user/2")
+
+
+def test_side_channel_oracle():
+    # nonexistent -> 404, existing-unauthorized -> 403  => distinguishable
+    f = authz.analyze_side_channel({"status": 404, "length": 20}, {"status": 403, "length": 20})
+    assert f and f[0]["title"].startswith("Side-channel BOLA")
+    # both 404 => no oracle
+    assert authz.analyze_side_channel({"status": 404, "length": 20}, {"status": 404, "length": 20}) == []
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────

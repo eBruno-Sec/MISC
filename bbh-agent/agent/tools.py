@@ -18,8 +18,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
+import authz_tool as authz
 import db
 import dns_recon
 import guidance as guidance_mod
@@ -59,6 +60,7 @@ TOOL_PERMISSIONS = {
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
     "run_injection_probes": PermissionLevel.INTRUSIVE,
+    "run_bfla": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -150,6 +152,16 @@ CLAUDE_TOOLS = [
                      "credentials), open redirect, host-header injection, and SSTI ({{7*7}} -> 49). Binary-free; "
                      "captures evidence and reports only confirmed reflections."),
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_bfla",
+     "description": ("INTRUSIVE: Function-level authorization test (BFLA) + side-channel BOLA oracle. Sends multiple "
+                     "HTTP methods (GET/POST/PUT/PATCH; DELETE only if allow_delete=true) with the supplied token and "
+                     "flags 2xx on write methods or admin paths that the token should not reach. Also compares an "
+                     "existing vs nonexistent resource to detect an enumeration oracle. Provide a token that should "
+                     "NOT be authorized (a low-priv / other-user token)."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "headers": {"type": "object", "description": "Auth headers for the token under test (e.g. Authorization)"},
+         "allow_delete": {"type": "boolean", "default": False}}, "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -788,6 +800,50 @@ class ToolRegistry:
         if self.mission_id:
             await self._http(url, capture=True)
         return ToolResult("injection_probes", url, True, f"{len(findings)} reflection signal(s)", findings)
+
+    async def _run_bfla(self, inp: dict) -> ToolResult:
+        import httpx
+        url = inp["url"]
+        test_headers = dict(inp.get("headers") or {})
+        allow_delete = bool(inp.get("allow_delete", False))
+        methods = list(authz.SAFE_SWEEP) + (["DELETE"] if allow_delete else [])
+        method_results, anon_results = {}, {}
+
+        async def send(c, method, headers):
+            body = b"{}" if method in ("POST", "PUT", "PATCH") else None
+            h = dict(headers)
+            if body:
+                h.setdefault("Content-Type", "application/json")
+            r = await c.request(method, url, headers={"User-Agent": _UA, **h}, content=body)
+            return {"status": r.status_code, "length": len(r.content)}
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+            for m in methods:
+                try:
+                    method_results[m] = await send(c, m, test_headers)
+                except Exception:
+                    pass
+                try:
+                    anon_results[m] = await send(c, m, {})
+                except Exception:
+                    pass
+            nonexistent = {}
+            p = urlparse(url)
+            segs = (p.path or "").rstrip("/").split("/")
+            if segs and segs[-1]:
+                segs[-1] = "bbh-nonexistent-" + os.urandom(3).hex()
+                ne_url = urlunparse(p._replace(path="/".join(segs)))
+                try:
+                    rn = await c.get(ne_url, headers={"User-Agent": _UA, **test_headers})
+                    nonexistent = {"status": rn.status_code, "length": len(rn.content)}
+                except Exception:
+                    pass
+
+        findings = authz.analyze_methods(url, method_results, anon_results)
+        findings += authz.analyze_side_channel(nonexistent, method_results.get("GET") or {})
+        if self.mission_id:
+            await self._http(url, "GET", test_headers, capture=True)
+        return ToolResult("bfla", url, True, f"{len(findings)} authorization signal(s)", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc
