@@ -1,130 +1,257 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BBH Agent | eBruno-Sec</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@800&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BBH Agent</title>
 <style>
+/* ── Theme tokens (Night default; Light override). CSS variables only. ── */
 :root{
-  --bg:#020608;--surface:#080e12;--surface2:#0c1820;--border:#0e2535;
-  --accent:#00e5ff;--accent2:#ff3d6b;--accent3:#39ff14;--gold:#f59e0b;--purple:#a78bfa;
-  --text:#c8dde6;--text-dim:#6a8a9a;--text-bright:#f0f8fc;
-  --mono:'JetBrains Mono','Courier New',monospace;--sans:'Syne',sans-serif;
+  --bg:#12151d; --surface:#1a1f2b; --surface2:#222a39; --surface3:#2a3446;
+  --border:#2c3546; --border2:#3a4658;
+  --text:#d8dee9; --text-dim:#8b97a9; --text-bright:#f3f6fb;
+  --accent:#7aa2ff; --primary:#4f6ef2; --primary-ink:#ffffff;
+  --ok:#5bd1a0; --warn:#f0b866; --danger:#f0728f; --purple:#b6a0e6;
+  --sev-crit:#ef6a8c; --sev-high:#e79457; --sev-med:#d8b455; --sev-low:#74a0ee; --sev-info:#8b97a9;
+  --shadow:0 1px 2px rgba(0,0,0,.28),0 4px 16px rgba(0,0,0,.18);
+  --radius:10px; --radius-sm:7px;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
 }
-/* Light mode — same variable names, ink-on-paper values. Night mode is the
-   default (no data-theme attribute), so the existing look is unchanged. */
 :root[data-theme="light"]{
-  --bg:#f4f7f9;--surface:#ffffff;--surface2:#eaf1f5;--border:#cdd9e0;
-  --accent:#0a6ea1;--accent2:#d11e5f;--accent3:#1a7f37;--gold:#b45309;--purple:#6d28d9;
-  --text:#17262e;--text-dim:#566871;--text-bright:#0a1418;
+  --bg:#f3f5f9; --surface:#ffffff; --surface2:#eef2f8; --surface3:#e5ebf4;
+  --border:#d8dfea; --border2:#c6d0de;
+  --text:#2b3442; --text-dim:#647084; --text-bright:#0f1620;
+  --accent:#2f66d6; --primary:#3b6fd4; --primary-ink:#ffffff;
+  --ok:#1f9d6b; --warn:#c07d1a; --danger:#d64d6e; --purple:#6d49c9;
+  --sev-crit:#d64d6e; --sev-high:#c07d1a; --sev-med:#b0901f; --sev-low:#2f66d6; --sev-info:#647084;
+  --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 14px rgba(20,30,50,.06);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden}
-body{background:var(--bg);color:var(--text);font-family:var(--mono);display:grid;grid-template-rows:44px 30px 1fr 34px;font-size:13px}
-header{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;padding:0 1.1rem}
-.logo{font-family:var(--sans);font-size:1rem;font-weight:800;color:var(--accent);white-space:nowrap}
-.logo span{color:var(--accent2)}
-.logo-sub{font-family:var(--mono);font-size:.72rem;color:var(--text-dim)}
-.hdr-divider{flex:1}
-.provider-badge,.status-pill{font-size:.6rem;padding:.18rem .6rem;border:1px solid;letter-spacing:.14em;text-transform:uppercase}
-.pb-openrouter{border-color:rgba(167,139,250,.4);color:var(--purple)}.pb-anthropic{border-color:rgba(0,229,255,.35);color:var(--accent)}
-.s-idle{border-color:var(--text-dim);color:var(--text-dim)}.s-run{border-color:var(--accent3);color:var(--accent3);animation:pulse 1.2s step-end infinite}
-.s-done{border-color:var(--accent);color:var(--accent)}.s-err{border-color:var(--accent2);color:var(--accent2)}.s-stop{border-color:var(--gold);color:var(--gold)}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;
+  display:grid;grid-template-rows:auto auto 1fr auto;overflow:hidden}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,kbd{font-family:var(--mono)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:6px}
+::-webkit-scrollbar-track{background:transparent}
 
-/* phase bar */
-.phasebar{background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.4rem;padding:0 1.1rem;overflow-x:auto}
-.phase{font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);border:1px solid var(--border);padding:.12rem .5rem;white-space:nowrap}
-.phase.active{color:var(--accent);border-color:var(--accent);box-shadow:0 0 8px rgba(0,229,255,.25)}
-.phase.done{color:var(--accent3);border-color:rgba(57,255,20,.4)}
+/* ── Header ── */
+header{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;
+  gap:.9rem;padding:.6rem 1.1rem}
+.logo{font-weight:800;font-size:1.02rem;color:var(--text-bright);letter-spacing:-.01em;white-space:nowrap}
+.logo span{color:var(--accent)}
+.logo-sub{font-size:.74rem;color:var(--text-dim)}
+.spacer{flex:1}
+.provider-badge{font-size:.68rem;font-weight:600;padding:.28rem .6rem;border-radius:999px;border:1px solid var(--border2);
+  color:var(--text-dim);background:var(--surface2);white-space:nowrap}
+.pb-openrouter{color:var(--purple);border-color:color-mix(in srgb,var(--purple) 45%,transparent)}
+.pb-anthropic{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.hint-auth{font-size:.7rem;color:var(--text-dim);white-space:nowrap}
+.icon-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text-dim);border-radius:999px;
+  font-family:var(--sans);font-size:.72rem;font-weight:600;padding:.3rem .7rem;cursor:pointer}
+.icon-btn:hover{color:var(--text-bright);border-color:var(--accent)}
+.status-pill{font-size:.66rem;font-weight:700;letter-spacing:.08em;padding:.3rem .7rem;border-radius:999px;
+  border:1px solid;text-transform:uppercase;white-space:nowrap}
+.s-idle{border-color:var(--border2);color:var(--text-dim)}
+.s-run{border-color:var(--ok);color:var(--ok)}
+.s-done{border-color:var(--accent);color:var(--accent)}
+.s-err{border-color:var(--danger);color:var(--danger)}
+.s-stop{border-color:var(--warn);color:var(--warn)}
+.s-run{animation:soft 1.6s ease-in-out infinite}@keyframes soft{50%{opacity:.55}}
 
-main{display:grid;grid-template-columns:290px 1fr;overflow:hidden;min-height:0}
-.config{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:.75rem;padding:.9rem;overflow-y:auto}
-label{display:block;font-size:.6rem;color:var(--text-dim);letter-spacing:.16em;text-transform:uppercase;margin-bottom:.3rem}
-input[type=text],textarea,select{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.76rem;padding:.5rem .6rem;outline:none;resize:vertical}
-input[type=text]:focus,textarea:focus,select:focus{border-color:var(--accent)}
-textarea{min-height:64px;line-height:1.6}
-.hint{font-size:.6rem;color:var(--text-dim);opacity:.6;line-height:1.5;margin-top:.25rem}
-.row{display:flex;gap:.5rem;align-items:center}
-.chk{display:flex;gap:.5rem;align-items:center;font-size:.7rem;color:var(--text-dim);cursor:pointer}
-.btn-start{width:100%;background:var(--accent3);color:var(--bg);border:none;font-family:var(--mono);font-size:.76rem;font-weight:700;padding:.65rem;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
-.btn-start:hover:not(:disabled){background:var(--accent)}.btn-start:disabled{background:var(--border);color:var(--text-dim);cursor:not-allowed}
-.btn-stop{width:100%;background:transparent;color:var(--accent2);border:1px solid var(--accent2);font-family:var(--mono);font-size:.76rem;padding:.55rem;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;display:none}
-.btn-file{width:100%;background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-family:var(--mono);font-size:.68rem;padding:.45rem;cursor:pointer}
-.btn-file:hover{border-color:var(--accent);color:var(--accent)}
-.perm-legend{border-top:1px solid var(--border);padding-top:.7rem}
-.perm-row{display:flex;align-items:center;gap:.55rem;margin-bottom:.35rem;font-size:.7rem;color:var(--text-dim)}
-.perm-badge{font-size:.58rem;padding:.1rem .4rem;border:1px solid;letter-spacing:.1em;white-space:nowrap}
-.pb-p{border-color:rgba(0,229,255,.3);color:var(--accent)}.pb-a{border-color:rgba(245,158,11,.35);color:var(--gold)}.pb-i{border-color:rgba(255,61,107,.35);color:var(--accent2)}
+/* ── Primary navigation ── */
+nav.primary{background:var(--surface);border-bottom:1px solid var(--border);display:flex;gap:.35rem;
+  padding:.45rem 1.1rem;overflow-x:auto}
+.navbtn{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--sans);font-size:.82rem;font-weight:600;
+  color:var(--text-dim);background:transparent;border:1px solid transparent;border-radius:999px;
+  padding:.42rem .95rem;cursor:pointer;white-space:nowrap;transition:.15s}
+.navbtn:hover{color:var(--text-bright);background:var(--surface2)}
+.navbtn.active{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+:root[data-theme="light"] .navbtn.active{color:#fff}
+.navbadge{background:var(--danger);color:#fff;border-radius:999px;font-size:.62rem;font-weight:700;
+  padding:.02rem .4rem;min-width:1.2rem;text-align:center}
+.navbtn.active .navbadge{background:rgba(255,255,255,.28)}
 
-.workspace{display:flex;flex-direction:column;overflow:hidden;min-height:0}
-.tabs{background:var(--surface2);border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;flex-shrink:0}
-.tab{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);background:transparent;border:none;border-right:1px solid var(--border);padding:.55rem .9rem;cursor:pointer;white-space:nowrap;position:relative}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--accent);background:var(--bg)}
-.tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
-.tab .badge{background:var(--accent2);color:var(--bg);border-radius:8px;font-size:.55rem;padding:0 .35rem;margin-left:.35rem;font-weight:700}
-.panel{flex:1;overflow-y:auto;padding:1rem 1.1rem;min-height:0;display:none}
-.panel.active{display:block}
-.panel::-webkit-scrollbar{width:5px}.panel::-webkit-scrollbar-thumb{background:var(--border)}
+/* ── Main / content ── */
+main{overflow:hidden;min-height:0;display:flex;flex-direction:column}
+.subnav{display:flex;gap:.25rem;padding:.55rem 1.1rem 0;flex-wrap:wrap}
+.subtab{font-family:var(--sans);font-size:.78rem;font-weight:600;color:var(--text-dim);background:transparent;
+  border:none;border-bottom:2px solid transparent;padding:.4rem .55rem;cursor:pointer}
+.subtab:hover{color:var(--text-bright)}
+.subtab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.content{flex:1;overflow-y:auto;min-height:0;padding:1.15rem 1.25rem 2rem}
+.panel{display:none;max-width:1080px;margin:0 auto}
+.panel.active{display:block;animation:fade .18s ease}
+@keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
-/* feed */
-.ev{display:flex;gap:.7rem;margin-bottom:.1rem;align-items:flex-start;line-height:1.75}
-.ev-tag{min-width:96px;font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;padding:.13rem .4rem;text-align:center;margin-top:.2rem;flex-shrink:0;border:1px solid}
+/* ── Headings / generic ── */
+.view-head{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem}
+h3.sec{font-size:1.12rem;font-weight:700;color:var(--text-bright)}
+h5{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin:.9rem 0 .4rem}
+.muted{color:var(--text-dim);font-size:.82rem}
+.empty{border:1px dashed var(--border2);border-radius:var(--radius);background:var(--surface);
+  padding:2rem 1.5rem;text-align:center;color:var(--text-dim)}
+.empty h4{color:var(--text);font-size:.95rem;margin-bottom:.35rem}
+.empty p{font-size:.82rem;max-width:34rem;margin:0 auto}
+
+/* ── Forms ── */
+label{display:block;font-size:.72rem;font-weight:600;color:var(--text-dim);letter-spacing:.02em;margin-bottom:.35rem}
+input[type=text],textarea,select{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);
+  font-family:var(--sans);font-size:.85rem;padding:.55rem .65rem;border-radius:var(--radius-sm);outline:none}
+textarea{min-height:70px;line-height:1.55;resize:vertical;font-family:var(--mono);font-size:.8rem}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.field{margin-bottom:.85rem}
+.hint{font-size:.72rem;color:var(--text-dim);margin-top:.3rem}
+.chk{display:flex;gap:.5rem;align-items:center;font-size:.82rem;color:var(--text);cursor:pointer;user-select:none}
+.chk input{width:auto}
+.form-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:.85rem}
+.span-sm{grid-column:span 2}.span-lg{grid-column:span 4}.span-half{grid-column:span 3}.span-full{grid-column:1/-1}
+.tworow{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;font-family:var(--sans);
+  font-size:.82rem;font-weight:600;padding:.55rem .95rem;border-radius:var(--radius-sm);
+  border:1px solid var(--border2);background:var(--surface2);color:var(--text);cursor:pointer;transition:.14s}
+.btn:hover{border-color:var(--accent);color:var(--text-bright)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn.primary:hover{filter:brightness(1.08);color:var(--primary-ink)}
+.btn.ghost{background:transparent}
+.btn.danger{border-color:color-mix(in srgb,var(--danger) 55%,transparent);color:var(--danger);background:transparent}
+.btn.danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent)}
+.btn.sm{font-size:.74rem;padding:.35rem .65rem}
+.btn.block{width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.btn-row{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;margin-top:.4rem}
+.link-act{color:var(--accent);cursor:pointer;font-size:.76rem;font-weight:600}
+.link-act:hover{text-decoration:underline}
+.link-danger{color:var(--danger)}
+
+/* ── Cards / tables / code ── */
+.card{border:1px solid var(--border);border-left:3px solid var(--c,var(--border2));background:var(--surface);
+  border-radius:var(--radius);padding:1rem 1.1rem;margin-bottom:.9rem;box-shadow:var(--shadow)}
+.card h4{color:var(--text-bright);font-size:.95rem;font-weight:700;margin-bottom:.4rem;display:flex;gap:.55rem;align-items:center;flex-wrap:wrap}
+.pill,.chip{font-size:.66rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;letter-spacing:.03em;white-space:nowrap}
+.pill{border:1px solid var(--c,var(--border2));color:var(--c,var(--text-dim))}
+.chip{background:var(--surface2);color:var(--text);border:1px solid var(--border2);font-weight:600;font-family:var(--mono)}
+.chip.sev{color:#fff;border:none;background:var(--c,var(--sev-info))}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap}
+.kv{display:flex;flex-wrap:wrap;gap:.4rem 1rem;font-size:.76rem;color:var(--text-dim);margin:.4rem 0}
+.kv code,td code,code.inline{color:var(--accent);word-break:break-all;font-size:.78rem}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{text-align:left;padding:.6rem .55rem;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--text-dim);text-transform:uppercase;font-size:.64rem;letter-spacing:.06em;font-weight:700}
+tbody tr:hover{background:var(--surface2)}
+.table-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:auto;background:var(--surface)}
+pre.code,.code{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.65rem .7rem;
+  overflow-x:auto;font-family:var(--mono);font-size:.76rem;white-space:pre-wrap;word-break:break-word;color:var(--text)}
+details{margin-top:.5rem}summary{cursor:pointer;color:var(--accent);font-size:.8rem;font-weight:600}
+.sev-critical{color:var(--sev-crit);font-weight:700}.sev-high{color:var(--sev-high);font-weight:700}
+.sev-medium{color:var(--sev-med);font-weight:700}.sev-low{color:var(--sev-low);font-weight:700}
+.sev-informational,.sev-info{color:var(--sev-info)}
+.src-chip{display:inline-flex;align-items:center;gap:.4rem;font-size:.76rem;color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);
+  border-radius:999px;padding:.3rem .7rem;margin-bottom:.8rem}
+.warn-box{font-size:.78rem;line-height:1.5;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);
+  background:color-mix(in srgb,var(--danger) 10%,transparent);border-radius:var(--radius-sm);padding:.55rem .7rem}
+
+/* ── Launch view ── */
+.launch-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:1.1rem;align-items:start}
+.block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.1rem 1.15rem;
+  box-shadow:var(--shadow);margin-bottom:1.1rem}
+.block h4{font-size:.86rem;font-weight:700;color:var(--text-bright);margin-bottom:.8rem}
+.perm-row{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem;font-size:.8rem;color:var(--text-dim)}
+.perm-badge{font-size:.62rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;border:1px solid;letter-spacing:.04em}
+.pb-p{border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--accent)}
+.pb-a{border-color:color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn)}
+.pb-i{border-color:color-mix(in srgb,var(--danger) 45%,transparent);color:var(--danger)}
+
+/* ── Live-run feed ── */
+.phasebar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:.6rem .8rem;margin-bottom:1rem}
+.phase{font-size:.66rem;font-weight:600;text-transform:capitalize;color:var(--text-dim);border:1px solid var(--border2);
+  border-radius:999px;padding:.22rem .7rem}
+.phase.active{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+.phase.done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+#termOut{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.9rem 1rem;
+  font-family:var(--mono);font-size:.8rem}
+.ev{display:flex;gap:.75rem;padding:.28rem 0;align-items:flex-start;line-height:1.6}
+.ev-tag{min-width:88px;font-size:.6rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;text-align:center;
+  padding:.16rem .35rem;border-radius:6px;flex-shrink:0;margin-top:.1rem;border:1px solid var(--border2);color:var(--text-dim)}
 .ev-content{flex:1;word-break:break-word}
-.ev-sub{font-size:.68rem;color:var(--text-dim);margin-top:.12rem;line-height:1.55}
-.t-passive .ev-tag{border-color:rgba(0,229,255,.25);color:var(--accent);background:rgba(0,229,255,.04)}
-.t-active .ev-tag{border-color:rgba(245,158,11,.3);color:var(--gold);background:rgba(245,158,11,.04)}
-.t-intrusive .ev-tag{border-color:rgba(255,61,107,.3);color:var(--accent2);background:rgba(255,61,107,.04)}
-.t-finding .ev-tag{border-color:rgba(57,255,20,.35);color:var(--accent3);background:rgba(57,255,20,.06)}
-.t-block .ev-tag{border-color:rgba(255,61,107,.15);color:#ff6b6b}
-.t-text .ev-tag,.t-info .ev-tag,.t-result .ev-tag{border-color:var(--border);color:var(--text-dim)}
-.t-complete .ev-tag,.t-triage .ev-tag{border-color:rgba(57,255,20,.4);color:var(--accent3);background:rgba(57,255,20,.08)}
-.t-error .ev-tag{border-color:rgba(255,61,107,.35);color:var(--accent2)}
-.t-phase .ev-tag{border-color:var(--purple);color:var(--purple)}
-.t-finding .ev-content{color:var(--accent3)}.t-block .ev-content{color:#ff6b6b;opacity:.75}
-.t-complete .ev-content,.t-triage .ev-content{color:var(--accent3);font-weight:bold}.t-error .ev-content{color:var(--accent2)}
-.sev-critical{color:var(--accent2);font-weight:bold}.sev-high{color:#fb923c;font-weight:bold}.sev-medium{color:var(--gold)}.sev-low{color:var(--accent)}.sev-informational,.sev-info{color:var(--text-dim)}
+.ev-sub{font-size:.74rem;color:var(--text-dim);margin-top:.15rem}
+.t-passive .ev-tag{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.t-active .ev-tag{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.t-intrusive .ev-tag{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.t-finding .ev-tag,.t-complete .ev-tag,.t-triage .ev-tag{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.t-error .ev-tag,.t-block .ev-tag{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.t-phase .ev-tag{color:var(--purple);border-color:color-mix(in srgb,var(--purple) 45%,transparent)}
+.t-finding .ev-content{color:var(--ok)}
+.t-complete .ev-content,.t-triage .ev-content{color:var(--ok);font-weight:600}
+.t-error .ev-content{color:var(--danger)}.t-block .ev-content{color:var(--danger);opacity:.85}
+.blink{animation:soft 1s step-end infinite}
 
-/* generic */
-h3.sec{font-family:var(--sans);color:var(--text-bright);font-size:.9rem;margin:.2rem 0 .8rem}
-.muted{color:var(--text-dim);font-size:.75rem}
-table{width:100%;border-collapse:collapse;font-size:.72rem}
-th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--border);vertical-align:top}
-th{color:var(--text-dim);text-transform:uppercase;font-size:.58rem;letter-spacing:.1em}
-td code{color:var(--accent);word-break:break-all}
-.btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:.66rem;padding:.3rem .7rem;cursor:pointer;letter-spacing:.06em}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn-acc{border-color:var(--accent);color:var(--accent)}
-.card{border:1px solid var(--border);border-left:3px solid var(--c,#0e2535);background:var(--surface);padding:.8rem;margin-bottom:.7rem}
-.card h4{color:var(--text-bright);font-size:.8rem;margin-bottom:.3rem;display:flex;gap:.5rem;align-items:center}
-.pill{border:1px solid var(--c,#6a8a9a);color:var(--c,#6a8a9a);font-size:.56rem;padding:.08rem .4rem;letter-spacing:.08em}
-.kv{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.68rem;color:var(--text-dim);margin:.3rem 0}
-pre.code{background:var(--bg);border:1px solid var(--border);padding:.5rem;overflow-x:auto;font-size:.7rem;white-space:pre-wrap;margin:.3rem 0;color:var(--text)}
-details{margin-top:.4rem}summary{cursor:pointer;color:var(--accent);font-size:.7rem}
-.field{margin-bottom:.6rem}
-.tworow{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
-.mono-out{background:var(--bg);border:1px solid var(--border);padding:.6rem;font-size:.7rem;white-space:pre-wrap;max-height:340px;overflow:auto}
-.copybtn{cursor:pointer}
-.tag-copy{color:var(--accent);cursor:pointer;font-size:.62rem}
+/* ── Playbook cards ── */
+.pb-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.1rem 1.2rem;
+  margin-bottom:1.05rem;box-shadow:var(--shadow)}
+.pb-head{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.pb-title{display:flex;align-items:center;gap:.55rem;flex:1;min-width:14rem}
+.pb-title h4{font-size:1rem;font-weight:700;color:var(--text-bright)}
+.pb-conf{font-size:.74rem;font-weight:600;color:var(--text-dim);white-space:nowrap}
+.pb-meta{display:flex;gap:.4rem 1rem;flex-wrap:wrap;font-size:.76rem;color:var(--text-dim);margin:.55rem 0 .8rem}
+.pb-curl{border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);margin:.2rem 0 .9rem;overflow:hidden}
+.pb-curl-head{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap;
+  padding:.5rem .7rem;background:var(--surface2);border-bottom:1px solid var(--border)}
+.pb-curl-head span{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+.pb-curl-actions{display:flex;gap:.45rem}
+.pb-curl pre{border:none;border-radius:0;margin:0}
+.pb-curl.empty{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.6rem .7rem;flex-wrap:wrap}
+.pb-curl.empty span{font-size:.78rem;color:var(--text-dim)}
+.pb-obj{font-size:.86rem;margin-bottom:.5rem}
+.pb-sec ol,.pb-sec ul,.pb-adv ul{padding-left:1.2rem;font-size:.83rem}
+.pb-sec li,.pb-adv li{margin:.2rem 0}
+.pb-adv{margin-top:.7rem;border-top:1px solid var(--border);padding-top:.5rem}
+.pb-refs{margin-top:.8rem;display:flex;gap:.4rem 1rem;flex-wrap:wrap;font-size:.78rem}
 
-footer{background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 1.1rem}
-.fc-row{display:flex;gap:1.1rem;font-size:.72rem}.fc span{font-weight:700}
-.fc-c span{color:var(--accent2)}.fc-h span{color:#fb923c}.fc-m span{color:var(--gold)}.fc-l span{color:var(--accent)}
-.footer-btns{display:flex;gap:.5rem}
+/* ── cURL / response viewer ── */
+.resp-status{display:inline-block;font-family:var(--mono);font-size:.78rem;font-weight:700;padding:.35rem .7rem;
+  border-radius:var(--radius-sm);margin:.9rem 0 .5rem;border:1px solid var(--border2)}
+.resp-status.s-ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.resp-status.s-redir{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.resp-status.s-cli{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.resp-status.s-srv{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+.resp-body,.mono-out{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:.75rem .8rem;font-family:var(--mono);font-size:.76rem;white-space:pre-wrap;word-break:break-word;
+  max-height:420px;overflow:auto;margin-top:.5rem}
 
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:100}
+/* ── Footer ── */
+footer{background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;
+  justify-content:space-between;gap:1rem;padding:.5rem 1.1rem;flex-wrap:wrap}
+.fc-row{display:flex;gap:1.1rem;font-size:.78rem;color:var(--text-dim)}
+.fc span{font-weight:700}.fc-c span{color:var(--sev-crit)}.fc-h span{color:var(--sev-high)}
+.fc-m span{color:var(--sev-med)}.fc-l span{color:var(--sev-low)}
+.foot-right{display:flex;align-items:center;gap:.8rem}
+
+/* ── Modal ── */
+.overlay{position:fixed;inset:0;background:rgba(8,10,16,.72);backdrop-filter:blur(2px);display:none;
+  align-items:center;justify-content:center;z-index:100;padding:1rem}
 .overlay.open{display:flex}
-.modal{background:var(--surface);border:1px solid var(--border);width:min(560px,94vw);max-height:88vh;display:flex;flex-direction:column}
-.modal.wide{width:min(880px,96vw)}
-.modal-hdr{padding:.8rem 1.1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.modal-title{font-family:var(--sans);font-size:.88rem;color:var(--text-bright)}
-.modal-body{flex:1;overflow-y:auto;padding:1.1rem}
-.modal-actions{display:flex;gap:.5rem}
-.btn-approve{background:var(--accent3);color:var(--bg);border:none;font-family:var(--mono);font-weight:700;font-size:.72rem;padding:.5rem 1.1rem;cursor:pointer;letter-spacing:.08em}
-.btn-deny{background:transparent;color:var(--accent2);border:1px solid var(--accent2);font-family:var(--mono);font-size:.72rem;padding:.5rem 1.1rem;cursor:pointer}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}.blink{animation:pulse 1s step-end infinite}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);width:min(560px,96vw);
+  max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.4)}
+.modal-hdr{padding:.9rem 1.15rem;border-bottom:1px solid var(--border)}
+.modal-title{font-size:.98rem;font-weight:700;color:var(--danger)}
+.modal-body{flex:1;overflow-y:auto;padding:1.15rem}
+.modal-foot{padding:.9rem 1.15rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:.6rem}
+
+/* ── Responsive ── */
+@media (max-width:900px){
+  .launch-grid,.tworow,.form-grid{grid-template-columns:1fr}
+  .span-sm,.span-lg,.span-half{grid-column:1/-1}
+  .content{padding:1rem}
+}
+@media (max-width:620px){
+  header{gap:.6rem;flex-wrap:wrap}.hint-auth{display:none}.logo-sub{display:none}
+}
 svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 </style>
 </head>
@@ -132,204 +259,232 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 
 <header>
   <div class="logo">e<span>Bruno</span>-Sec</div>
-  <div class="logo-sub">/ BBH Agent</div>
-  <div class="provider-badge pb-openrouter" id="providerBadge">loading...</div>
-  <div class="hdr-divider"></div>
-  <div style="font-size:.63rem;color:var(--text-dim);margin-right:.7rem">Authorized Testing Only</div>
-  <button id="themeToggle" onclick="toggleTheme()" title="Toggle light / night mode"
-    style="background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;padding:.2rem .55rem;margin-right:.6rem;cursor:pointer;text-transform:uppercase">◐ Theme</button>
-  <div class="status-pill s-idle" id="statusPill">IDLE</div>
+  <div class="logo-sub">BBH Agent</div>
+  <div class="provider-badge pb-openrouter" id="providerBadge">loading…</div>
+  <div class="spacer"></div>
+  <div class="hint-auth">Authorized testing only</div>
+  <button id="themeToggle" class="icon-btn" onclick="toggleTheme()" title="Toggle light / night mode">☾ Night</button>
+  <div class="status-pill s-idle" id="statusPill">Idle</div>
 </header>
 
-<div class="phasebar" id="phaseBar"></div>
+<nav class="primary" id="primaryNav">
+  <button class="navbtn active" data-view="launch" onclick="showView('launch')">Launch</button>
+  <button class="navbtn" data-view="run" onclick="showView('run')">Live Run</button>
+  <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
+  <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
+  <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
+</nav>
 
 <main>
-  <div class="config">
-    <div class="field"><label>Program Name</label><input type="text" id="programName" placeholder="e.g. Shopify Bug Bounty"></div>
-    <div class="field"><label>Assessment Mode</label>
-      <select id="mode">
-        <option value="passive">Passive — recon + playbook only</option>
-        <option value="active" selected>Active — + scanning (1 gate)</option>
-        <option value="full">Full — + deep probing (gated)</option>
-      </select>
-    </div>
-    <div class="field"><label>In-Scope Domains</label>
-      <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com"></textarea>
-      <div class="hint">One per line. Wildcards: *.domain.com</div>
-    </div>
-    <div class="field"><label>Out-of-Scope <span style="opacity:.5">(optional)</span></label>
-      <textarea id="outScope" placeholder="status.shopify.com" style="min-height:48px"></textarea>
-    </div>
-    <input type="file" id="scopeFile" accept=".csv,.json,.txt" style="display:none">
-    <button class="btn-file" onclick="document.getElementById('scopeFile').click()">↑ Import scope file (H1 / Bugcrowd / Burp / text)</button>
-    <div class="field"><label>Custom Objective <span style="opacity:.5">(optional)</span></label>
-      <textarea id="objective" placeholder="Focus on API authorization and admin panels..." style="min-height:48px"></textarea>
-    </div>
-    <div class="field"><label>Auth Headers <span style="opacity:.5">(optional — authenticated scan)</span></label>
-      <textarea id="authHeaders" placeholder="Cookie: session=...&#10;Authorization: Bearer ..." style="min-height:44px"></textarea>
-      <div class="hint">Shared with every scanner to reach post-login surface. Redacted in evidence.</div>
-    </div>
-    <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous — pre-authorize intrusive gate</label>
-    <div id="cfgWarn" style="display:none;font-size:.62rem;line-height:1.5;color:var(--accent2);border:1px solid var(--accent2);padding:.45rem .55rem"></div>
-    <button class="btn-start" id="btnStart" onclick="startHunt()">Start Hunt</button>
-    <button class="btn-stop" id="btnStop" onclick="stopHunt()">Stop Hunt</button>
-    <div class="perm-legend">
-      <label>Permission Levels</label>
-      <div class="perm-row"><span class="perm-badge pb-p">PASSIVE</span>No target contact, auto-run</div>
-      <div class="perm-row"><span class="perm-badge pb-a">ACTIVE</span>Direct target contact</div>
-      <div class="perm-row"><span class="perm-badge pb-i">INTRUSIVE</span>Gated, scope-verified</div>
-    </div>
-  </div>
+  <div class="subnav" id="subnav" style="display:none"></div>
+  <div class="content">
 
-  <div class="workspace">
-    <div class="tabs" id="tabs">
-      <button class="tab active" data-tab="feed">Feed</button>
-      <button class="tab" data-tab="findings">Findings<span class="badge" id="findBadge" style="display:none">0</span></button>
-      <button class="tab" data-tab="surface">Surface</button>
-      <button class="tab" data-tab="playbooks">Playbooks</button>
-      <button class="tab" data-tab="workbench">Workbench</button>
-      <button class="tab" data-tab="access">Access</button>
-      <button class="tab" data-tab="topology">Topology</button>
-      <button class="tab" data-tab="curl">cURL</button>
-      <button class="tab" data-tab="report">Report</button>
-      <button class="tab" data-tab="archive">Archive</button>
-    </div>
+    <!-- LAUNCH / CONFIGURE -->
+    <section class="panel active" id="p-launch">
+      <div class="view-head"><h3 class="sec">Launch a mission</h3><span class="muted">Configure scope and start, or rescan a past run.</span></div>
+      <div class="launch-grid">
+        <div>
+          <div class="block">
+            <h4>Program &amp; scope</h4>
+            <div class="field"><label>Program name</label><input type="text" id="programName" placeholder="e.g. Shopify Bug Bounty"></div>
+            <div class="field"><label>Assessment mode</label>
+              <select id="mode">
+                <option value="passive">Passive — recon + playbook only</option>
+                <option value="active" selected>Active — + scanning (1 approval gate)</option>
+                <option value="full">Full — + deep probing (gated)</option>
+              </select>
+            </div>
+            <div class="field"><label>In-scope domains</label>
+              <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com"></textarea>
+              <div class="hint">One per line. Wildcards allowed: <code class="inline">*.domain.com</code></div>
+            </div>
+            <div class="field"><label>Out-of-scope <span class="muted">(optional)</span></label>
+              <textarea id="outScope" placeholder="status.shopify.com" style="min-height:52px"></textarea>
+            </div>
+            <input type="file" id="scopeFile" accept=".csv,.json,.txt" style="display:none">
+            <button class="btn ghost sm" onclick="document.getElementById('scopeFile').click()">↑ Import scope file (H1 / Bugcrowd / Burp / text)</button>
+          </div>
+          <div class="block">
+            <h4>Objective &amp; authentication <span class="muted">(optional)</span></h4>
+            <div class="field"><label>Custom objective</label>
+              <textarea id="objective" placeholder="Focus on API authorization and admin panels…" style="min-height:52px"></textarea>
+            </div>
+            <div class="field"><label>Auth headers <span class="muted">(authenticated scan)</span></label>
+              <textarea id="authHeaders" placeholder="Cookie: session=…&#10;Authorization: Bearer …" style="min-height:52px"></textarea>
+              <div class="hint">Shared with every scanner to reach the post-login surface. Redacted in evidence and never shown in reports.</div>
+            </div>
+            <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous run — pre-authorize the intrusive gate</label>
+          </div>
+        </div>
+        <div>
+          <div class="block">
+            <h4>Start</h4>
+            <div id="cfgWarn" class="warn-box" style="display:none;margin-bottom:.8rem"></div>
+            <button class="btn primary block" id="btnStart" onclick="startHunt()">Start Hunt</button>
+            <button class="btn danger block" id="btnStop" style="display:none;margin-top:.6rem" onclick="stopHunt()">Stop Hunt</button>
+            <p class="hint" style="margin-top:.7rem">The agent decides tool order in a ReAct loop; every tool is scope-checked at the wrapper level.</p>
+          </div>
+          <div class="block">
+            <h4>Permission levels</h4>
+            <div class="perm-row"><span class="perm-badge pb-p">PASSIVE</span> No target contact, auto-run</div>
+            <div class="perm-row"><span class="perm-badge pb-a">ACTIVE</span> Direct target contact</div>
+            <div class="perm-row"><span class="perm-badge pb-i">INTRUSIVE</span> Gated, scope-verified</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <!-- FEED -->
-    <div class="panel active" id="p-feed">
-      <div id="termOut"><div class="ev t-info"><div class="ev-tag">INFO</div>
-        <div class="ev-content">BBH Agent ready. Configure scope and click Start Hunt.<span class="blink">█</span></div></div></div>
-    </div>
+    <!-- LIVE RUN -->
+    <section class="panel" id="p-feed">
+      <div class="view-head"><h3 class="sec">Live run</h3><span class="muted" id="runSub">Activity feed, phase progress, and approvals.</span></div>
+      <div class="phasebar" id="phaseBar"></div>
+      <div id="termOut"><div class="ev t-info"><div class="ev-tag">Info</div>
+        <div class="ev-content">BBH Agent ready. Configure a mission on the <strong>Launch</strong> tab and start.<span class="blink">▍</span></div></div></div>
+    </section>
 
     <!-- FINDINGS -->
-    <div class="panel" id="p-findings"><h3 class="sec">Confirmed Findings</h3><div id="findingsList"><p class="muted">No findings yet.</p></div></div>
+    <section class="panel" id="p-findings">
+      <div class="view-head"><h3 class="sec">Confirmed findings</h3><span class="muted">Only reproducible, evidence-backed issues.</span></div>
+      <div id="findingsList"><div class="empty"><h4>No findings yet</h4><p>Findings appear here as the agent confirms them during a run.</p></div></div>
+    </section>
 
     <!-- SURFACE -->
-    <div class="panel" id="p-surface">
-      <h3 class="sec">Attack Surface <button class="btn" onclick="loadSurface()">Refresh</button></h3>
-      <div id="surfaceStats" class="kv"></div>
-      <div id="surfaceTable"><p class="muted">Run recon, then refresh.</p></div>
-    </div>
-
-    <!-- PLAYBOOKS -->
-    <div class="panel" id="p-playbooks">
-      <h3 class="sec">Test Playbooks <span class="muted">(rule-based · advisory)</span> <button class="btn" onclick="loadPlaybook()">Refresh</button></h3>
-      <div id="playbookList"><p class="muted">Ask the agent to call <code>generate_playbook</code>, or refresh after recon.</p></div>
-    </div>
-
-    <!-- WORKBENCH -->
-    <div class="panel" id="p-workbench">
-      <h3 class="sec">Request Workbench <span class="muted">(scope-guarded)</span></h3>
-      <div class="tworow">
-        <div>
-          <div class="field"><label>Method</label><select id="wbMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option></select></div>
-          <div class="field"><label>URL</label><input type="text" id="wbUrl" placeholder="https://api.example.com/orders/1"></div>
-          <div class="field"><label>Headers (one per line: Name: value)</label><textarea id="wbHeaders" placeholder="Cookie: session=..."></textarea></div>
-          <div class="field"><label>Body</label><textarea id="wbBody" style="min-height:44px"></textarea></div>
-          <button class="btn btn-acc" onclick="wbReplay()">Repeater → Send</button>
-        </div>
-        <div>
-          <div class="field"><label>Intruder — param</label><input type="text" id="wbParam" placeholder="id"></div>
-          <div class="field"><label>Param in</label><select id="wbParamIn"><option>query</option><option>body</option><option>header</option></select></div>
-          <div class="field"><label>Payloads (one per line) or pick wordlist</label>
-            <textarea id="wbPayloads" placeholder="1&#10;2&#10;' OR 1=1--"></textarea>
-            <select id="wbWordlist"><option value="">— wordlist —</option></select>
-          </div>
-          <button class="btn btn-acc" onclick="wbFuzz()">Intruder → Fuzz</button>
-        </div>
-      </div>
-      <div id="wbOut" class="mono-out" style="margin-top:.7rem;display:none"></div>
-    </div>
-
-    <!-- ACCESS -->
-    <div class="panel" id="p-access">
-      <h3 class="sec">Cross-Role Access Check <span class="muted">(IDOR / BOLA / BFLA)</span></h3>
-      <div class="tworow">
-        <div>
-          <div class="field"><label>Role name</label><input type="text" id="acName" placeholder="userA"></div>
-          <div class="field"><label>Auth headers (Name: value per line)</label><textarea id="acHeaders" placeholder="Cookie: session=abc"></textarea></div>
-          <label class="chk"><input type="checkbox" id="acOwner"> This role owns the object</label>
-          <button class="btn" onclick="addProfile()" style="margin-top:.5rem">+ Register role</button>
-          <div id="profileList" style="margin-top:.6rem"></div>
-        </div>
-        <div>
-          <div class="field"><label>Method</label><select id="acMethod"><option>GET</option><option>POST</option></select></div>
-          <div class="field"><label>Target URL</label><input type="text" id="acUrl" placeholder="https://api.example.com/orders/1"></div>
-          <button class="btn btn-acc" onclick="runAccessCheck()">Run access check</button>
-          <div id="acOut" class="mono-out" style="margin-top:.7rem;display:none"></div>
-        </div>
-      </div>
-    </div>
+    <section class="panel" id="p-surface">
+      <div class="view-head"><h3 class="sec">Attack surface</h3><button class="btn ghost sm" onclick="loadSurface()">Refresh</button></div>
+      <div id="surfaceStats" class="chips" style="margin-bottom:.9rem"></div>
+      <div id="surfaceTable"><div class="empty"><h4>Nothing discovered yet</h4><p>Run recon, then refresh to see hosts, paths, and parameters.</p></div></div>
+    </section>
 
     <!-- TOPOLOGY -->
-    <div class="panel" id="p-topology">
-      <h3 class="sec">Attack-Surface Topology <button class="btn" onclick="loadTopology()">Refresh</button></h3>
-      <div id="topoWrap"><p class="muted">Run recon, then refresh to map domain → hosts → endpoints.</p></div>
-    </div>
+    <section class="panel" id="p-topology">
+      <div class="view-head"><h3 class="sec">Surface topology</h3><button class="btn ghost sm" onclick="loadTopology()">Refresh</button></div>
+      <div id="topoWrap"><div class="empty"><h4>No map yet</h4><p>Run recon, then refresh to map domain → hosts → endpoints.</p></div></div>
+    </section>
 
-    <!-- CURL -->
-    <div class="panel" id="p-curl">
-      <h3 class="sec">cURL Console <span class="muted">(scope-guarded manual requests)</span></h3>
-      <div class="field"><label>Method</label><select id="cuMethod" style="width:auto"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></div>
-      <div class="field"><label>URL</label><input type="text" id="cuUrl" placeholder="https://app.example.com/"></div>
-      <div class="field"><label>Headers (Name: value per line)</label><textarea id="cuHeaders"></textarea></div>
-      <div class="field"><label>Body</label><textarea id="cuBody" style="min-height:44px"></textarea></div>
-      <button class="btn btn-acc" onclick="sendCurl()">Send</button>
-      <div id="cuCurl" class="pre code" style="display:none"></div>
-      <div id="cuOut" class="mono-out" style="margin-top:.7rem;display:none"></div>
-    </div>
+    <!-- PLAYBOOKS -->
+    <section class="panel" id="p-playbooks">
+      <div class="view-head"><h3 class="sec">Test playbooks</h3><span class="muted">Rule-based · advisory · cURL-ready</span><button class="btn ghost sm" style="margin-left:auto" onclick="loadPlaybook()">Refresh</button></div>
+      <div id="playbookList"><div class="empty"><h4>No playbook yet</h4><p>The agent builds a per-surface playbook via <code class="inline">generate_playbook</code> after recon. Refresh once a run is underway.</p></div></div>
+    </section>
+
+    <!-- CURL CONSOLE -->
+    <section class="panel" id="p-curl">
+      <div class="view-head"><h3 class="sec">cURL Console</h3><span class="muted">Scope-guarded manual requests</span></div>
+      <div id="cuSource" class="src-chip" style="display:none"></div>
+      <div class="form-grid">
+        <div class="field span-sm"><label>Method</label><select id="cuMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></div>
+        <div class="field span-lg"><label>URL</label><input type="text" id="cuUrl" placeholder="https://app.example.com/"></div>
+        <div class="field span-full"><label>Headers <span class="muted">(Name: value per line)</span></label><textarea id="cuHeaders" placeholder="Content-Type: application/json"></textarea></div>
+        <div class="field span-full"><label>Body</label><textarea id="cuBody" style="min-height:56px"></textarea></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="sendCurl()">Send request</button>
+        <button class="btn ghost" onclick="copyCurlRequest()">Copy request</button>
+        <button class="btn ghost" onclick="clearCurl()">Clear</button>
+      </div>
+      <div id="cuStatus" class="resp-status" style="display:none"></div>
+      <div id="cuCurl" class="code" style="display:none"></div>
+      <div id="cuOut" class="resp-body" style="display:none"></div>
+    </section>
+
+    <!-- WORKBENCH -->
+    <section class="panel" id="p-workbench">
+      <div class="view-head"><h3 class="sec">Request workbench</h3><span class="muted">Repeater + Intruder · scope-guarded</span></div>
+      <div class="tworow">
+        <div class="block">
+          <h4>Repeater</h4>
+          <div class="field"><label>Method</label><select id="wbMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option></select></div>
+          <div class="field"><label>URL</label><input type="text" id="wbUrl" placeholder="https://api.example.com/orders/1"></div>
+          <div class="field"><label>Headers <span class="muted">(Name: value per line)</span></label><textarea id="wbHeaders" placeholder="Cookie: session=…"></textarea></div>
+          <div class="field"><label>Body</label><textarea id="wbBody" style="min-height:52px"></textarea></div>
+          <button class="btn primary" onclick="wbReplay()">Send</button>
+        </div>
+        <div class="block">
+          <h4>Intruder</h4>
+          <div class="field"><label>Parameter</label><input type="text" id="wbParam" placeholder="id"></div>
+          <div class="field"><label>Parameter in</label><select id="wbParamIn"><option>query</option><option>body</option><option>header</option></select></div>
+          <div class="field"><label>Payloads <span class="muted">(one per line)</span> or wordlist</label>
+            <textarea id="wbPayloads" placeholder="1&#10;2&#10;' OR 1=1--"></textarea>
+            <select id="wbWordlist" style="margin-top:.5rem"><option value="">— wordlist —</option></select>
+          </div>
+          <button class="btn primary" onclick="wbFuzz()">Fuzz (anomaly-ranked)</button>
+        </div>
+      </div>
+      <div id="wbOut" class="mono-out" style="display:none"></div>
+    </section>
+
+    <!-- ACCESS -->
+    <section class="panel" id="p-access">
+      <div class="view-head"><h3 class="sec">Cross-role access check</h3><span class="muted">IDOR / BOLA / BFLA</span></div>
+      <div class="tworow">
+        <div class="block">
+          <h4>Register a role</h4>
+          <div class="field"><label>Role name</label><input type="text" id="acName" placeholder="userA"></div>
+          <div class="field"><label>Auth headers <span class="muted">(Name: value per line)</span></label><textarea id="acHeaders" placeholder="Cookie: session=abc"></textarea></div>
+          <label class="chk"><input type="checkbox" id="acOwner"> This role owns the object</label>
+          <button class="btn" style="margin-top:.7rem" onclick="addProfile()">+ Register role</button>
+          <div id="profileList" style="margin-top:.8rem"></div>
+        </div>
+        <div class="block">
+          <h4>Run the check</h4>
+          <div class="field"><label>Method</label><select id="acMethod"><option>GET</option><option>POST</option></select></div>
+          <div class="field"><label>Target URL</label><input type="text" id="acUrl" placeholder="https://api.example.com/orders/1"></div>
+          <button class="btn primary" onclick="runAccessCheck()">Run access check</button>
+          <div id="acOut" class="mono-out" style="display:none"></div>
+        </div>
+      </div>
+    </section>
 
     <!-- REPORT -->
-    <div class="panel" id="p-report">
-      <h3 class="sec">Report &amp; Export</h3>
-      <div class="footer-btns" style="flex-wrap:wrap;gap:.5rem">
-        <button class="btn btn-acc" onclick="openHtmlReport()">Open HTML / PDF ↗</button>
-        <button class="btn" onclick="dl('md')">Download Markdown</button>
-        <button class="btn" onclick="dl('csv')">Export CSV</button>
-        <button class="btn" onclick="dl('json')">Export JSON</button>
+    <section class="panel" id="p-report">
+      <div class="view-head"><h3 class="sec">Report &amp; export</h3><span class="muted">HTML / PDF · Markdown · CSV · JSON · PoC</span></div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="openHtmlReport()">Open HTML / PDF ↗</button>
+        <button class="btn" onclick="dl('md')">Markdown</button>
+        <button class="btn" onclick="dl('csv')">CSV</button>
+        <button class="btn" onclick="dl('json')">JSON</button>
         <button class="btn" onclick="dl('poc')">PoC Markdown</button>
-        <button class="btn" onclick="copyReport()">Copy Markdown</button>
-        <button class="btn" onclick="rescanCurrent()">↻ Rescan (new mission)</button>
-        <button class="btn" onclick="dlBackup()">↓ Backup session</button>
+        <button class="btn ghost" onclick="copyReport()">Copy Markdown</button>
+        <button class="btn ghost" onclick="rescanCurrent()">↻ Rescan (new mission)</button>
+        <button class="btn ghost" onclick="dlBackup()">↓ Backup session</button>
       </div>
-      <pre class="mono-out" id="reportContent" style="margin-top:.8rem;max-height:none">Run a hunt to generate a report.</pre>
-    </div>
+      <pre class="mono-out" id="reportContent" style="margin-top:1rem;max-height:none;display:block">Run or load a mission to generate a report.</pre>
+    </section>
 
     <!-- ARCHIVE -->
-    <div class="panel" id="p-archive">
-      <h3 class="sec">Mission Archive <span class="muted">(persisted in SQLite)</span> <button class="btn" onclick="loadArchive()">Refresh</button></h3>
-      <div id="archiveList"><p class="muted">No saved missions yet.</p></div>
-    </div>
+    <section class="panel" id="p-archive">
+      <div class="view-head"><h3 class="sec">Mission archive</h3><span class="muted">Persisted in SQLite</span><button class="btn ghost sm" style="margin-left:auto" onclick="loadArchive()">Refresh</button></div>
+      <div id="archiveList"><div class="empty"><h4>No saved missions</h4><p>Completed and in-progress missions are stored here — load or rescan any of them.</p></div></div>
+    </section>
+
   </div>
 </main>
 
 <footer>
   <div class="fc-row">
-    <div class="fc fc-c">Critical: <span id="cCrit">0</span></div>
-    <div class="fc fc-h">High: <span id="cHigh">0</span></div>
-    <div class="fc fc-m">Medium: <span id="cMed">0</span></div>
-    <div class="fc fc-l">Low: <span id="cLow">0</span></div>
+    <div class="fc fc-c">Critical <span id="cCrit">0</span></div>
+    <div class="fc fc-h">High <span id="cHigh">0</span></div>
+    <div class="fc fc-m">Medium <span id="cMed">0</span></div>
+    <div class="fc fc-l">Low <span id="cLow">0</span></div>
   </div>
-  <div class="footer-btns">
-    <div class="muted" id="sessLabel">no active session</div>
-    <button class="btn" onclick="clearTerm()">Clear</button>
+  <div class="foot-right">
+    <span class="muted" id="sessLabel">No active session</span>
+    <button class="btn ghost sm" onclick="clearTerm()">Clear feed</button>
   </div>
 </footer>
 
 <!-- Approval gate -->
 <div class="overlay" id="approvalOverlay">
   <div class="modal">
-    <div class="modal-hdr"><div class="modal-title" style="color:var(--accent2)">⚠ Intrusive Action — Authorization Required</div></div>
+    <div class="modal-hdr"><div class="modal-title">⚠ Intrusive action — authorization required</div></div>
     <div class="modal-body">
-      <p id="approvalPrompt" style="margin-bottom:.8rem"></p>
+      <p id="approvalPrompt" style="margin-bottom:.9rem"></p>
       <pre class="code" id="approvalDetail"></pre>
-      <p class="muted" style="margin-top:.6rem">Approving authorizes the intrusive phase for this engagement. Denying keeps the hunt to passive/active work.</p>
+      <p class="muted" style="margin-top:.8rem">Approving authorizes the intrusive phase for this engagement. Denying keeps the hunt to passive / active work.</p>
     </div>
-    <div class="modal-hdr" style="border-top:1px solid var(--border);border-bottom:none;justify-content:flex-end">
-      <div class="modal-actions">
-        <button class="btn-deny" onclick="resolveApproval(false)">Deny</button>
-        <button class="btn-approve" onclick="resolveApproval(true)">Authorize</button>
-      </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="resolveApproval(false)">Deny</button>
+      <button class="btn primary" onclick="resolveApproval(true)">Authorize</button>
     </div>
   </div>
 </div>
@@ -337,60 +492,67 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 <script>
 const API = window.location.origin;
 let sessionId=null, es=null, running=false, reportMd="", pendingApproval=null;
-let aiReady=true, pendingParent=null;
-
-// theme: night mode is the default; persisted in localStorage
-function applyTheme(t){document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");
-  try{localStorage.setItem("bbh-theme",t);}catch(e){}}
-function toggleTheme(){const cur=document.documentElement.getAttribute("data-theme")||"dark";
-  applyTheme(cur==="light"?"dark":"light");}
-applyTheme((()=>{try{return localStorage.getItem("bbh-theme")||"dark";}catch(e){return "dark";}})());
+let aiReady=true, pendingParent=null, pbData=[];
 let counts={critical:0,high:0,medium:0,low:0}, findings=[];
 const PHASES=["recon","enum","scan","probe","guidance","report"];
 let phaseState={};
+const SEV_HEX={critical:"#ef6a8c",high:"#e79457",medium:"#d8b455",low:"#74a0ee",info:"#8b97a9",informational:"#8b97a9"};
 
-const TAG_LABELS={passive:"PASSIVE",active:"ACTIVE",intrusive:"INTRUSIVE",finding:"FINDING",scope_block:"SCOPE",
-  text:"AGENT",tool_result:"RESULT",complete:"DONE",error:"ERROR",tool_error:"ERROR",info:"INFO",
-  phase:"PHASE",triage:"TRIAGE",approval_required:"GATE",approval_resolved:"GATE"};
-const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
-  text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
-  phase:"t-phase",triage:"t-triage"};
+/* ── theme (Night default; persisted) ── */
+function updateThemeBtn(){const t=document.documentElement.getAttribute("data-theme")||"dark";
+  const b=document.getElementById("themeToggle"); if(b)b.textContent=t==="light"?"☀ Light":"☾ Night";}
+function applyTheme(t){document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");
+  try{localStorage.setItem("bbh-theme",t);}catch(e){} updateThemeBtn();}
+function toggleTheme(){const cur=document.documentElement.getAttribute("data-theme")||"dark";
+  applyTheme(cur==="light"?"dark":"light");}
+applyTheme((()=>{try{return localStorage.getItem("bbh-theme")||"dark";}catch(e){return "dark";}})());
 
-// tabs
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+/* ── views + navigation (grouped; preserves switchTab for every caller) ── */
+const VIEWS={
+  launch:   [["launch","Configure"]],
+  run:      [["feed","Activity feed"]],
+  findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
+  playbooks:[["playbooks","Playbooks"]],
+  tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["report","Report & export"],["archive","Archive"]],
+};
+const PANEL_VIEW={};
+Object.entries(VIEWS).forEach(([v,tabs])=>tabs.forEach(([p])=>PANEL_VIEW[p]=v));
+
+function showView(v){switchTab(VIEWS[v][0][0]);}
+function renderSubnav(view,active){
+  const el=document.getElementById("subnav"), tabs=VIEWS[view]||[];
+  if(tabs.length<=1){el.style.display="none";el.innerHTML="";return;}
+  el.style.display="flex";
+  el.innerHTML=tabs.map(([p,label])=>`<button class="subtab ${p===active?"active":""}" onclick="switchTab('${p}')">${label}</button>`).join("");
+}
 function switchTab(name){
-  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===name));
+  const view=PANEL_VIEW[name]||"run";
+  document.querySelectorAll(".navbtn").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
   document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
-  document.getElementById("p-"+name).classList.add("active");
+  const p=document.getElementById("p-"+name); if(p)p.classList.add("active");
+  renderSubnav(view,name);
+  document.querySelector(".content").scrollTop=0;
   if(name==="surface")loadSurface(); if(name==="playbooks")loadPlaybook();
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
 }
 
-// phase bar
-function renderPhaseBar(){
-  const bar=document.getElementById("phaseBar");
-  bar.innerHTML=PHASES.map(p=>`<span class="phase ${phaseState[p]||''}">${p}</span>`).join("");
-}
-function setPhase(p){
-  const idx=PHASES.indexOf(p);
-  PHASES.forEach((ph,i)=>{ if(i<idx)phaseState[ph]="done"; });
-  phaseState[p]="active";
-  renderPhaseBar();
-}
+/* ── phase bar ── */
+function renderPhaseBar(){document.getElementById("phaseBar").innerHTML=PHASES.map(p=>`<span class="phase ${phaseState[p]||''}">${p}</span>`).join("");}
+function setPhase(p){const idx=PHASES.indexOf(p);PHASES.forEach((ph,i)=>{if(i<idx)phaseState[ph]="done";});phaseState[p]="active";renderPhaseBar();}
 renderPhaseBar();
 
+/* ── config / readiness ── */
 function refreshConfig(){
   return fetch(`${API}/config`).then(r=>r.json()).then(cfg=>{
     aiReady = cfg.ready !== false;
     const b=document.getElementById("providerBadge"), or=cfg.provider==="openrouter";
     b.className=`provider-badge ${or?"pb-openrouter":"pb-anthropic"}`;
     const short=(cfg.model||"").split("/").pop();
-    b.textContent = aiReady ? (or?`OR / ${short}`:`Anthropic / ${short}`) : "NO KEY";
+    b.textContent = aiReady ? (or?`OpenRouter · ${short}`:`Anthropic · ${short}`) : "No API key";
     b.title = aiReady ? (cfg.model||"") : (cfg.hint||"AI credentials missing");
     const w=document.getElementById("cfgWarn"), start=document.getElementById("btnStart");
-    if(!aiReady){ w.style.display="block"; w.textContent="⚠ "+(cfg.hint||"AI credentials missing.");
-      if(!running) start.disabled=true; }
+    if(!aiReady){ w.style.display="block"; w.textContent="⚠ "+(cfg.hint||"AI credentials missing."); if(!running) start.disabled=true; }
     else{ w.style.display="none"; if(!running) start.disabled=false; }
   }).catch(()=>{document.getElementById("providerBadge").textContent="provider unknown";});
 }
@@ -402,14 +564,23 @@ fetch(`${API}/wordlists`).then(r=>r.json()).then(d=>{
 
 function setStatus(s,l){const el=document.getElementById("statusPill");el.className="status-pill "+s;el.textContent=l;}
 function esc(s){if(typeof s!=="string")s=JSON.stringify(s)??"";return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function emptyState(t,s){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p></div>`;}
+function copyText(str,msg){navigator.clipboard.writeText(str||"").then(()=>log("info",msg||"Copied to clipboard.")).catch(()=>{});}
+
+const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
+  text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
+  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate"};
+const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
+  text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
+  phase:"t-phase",triage:"t-triage"};
 function log(type,html,sub=""){
   const out=document.getElementById("termOut"), cls=TYPE_MAP[type]||"t-info", tag=TAG_LABELS[type]||type.toUpperCase();
   const d=document.createElement("div"); d.className=`ev ${cls}`;
   d.innerHTML=`<div class="ev-tag">${tag}</div><div class="ev-content">${html}${sub?`<div class="ev-sub">${sub}</div>`:""}</div>`;
-  out.appendChild(d); out.parentElement.scrollTop=out.parentElement.scrollHeight;
+  out.appendChild(d); out.scrollTop=out.scrollHeight;
 }
 
-// scope file import
+/* ── scope file import ── */
 document.getElementById("scopeFile").onchange=async e=>{
   const f=e.target.files[0]; if(!f)return;
   const fd=new FormData(); fd.append("file",f);
@@ -422,10 +593,11 @@ document.getElementById("scopeFile").onchange=async e=>{
   }catch(err){alert("Scope parse failed: "+err.message);}
 };
 
+/* ── start / stream ── */
 async function startHunt(){
   const programName=document.getElementById("programName").value.trim();
   const inRaw=document.getElementById("inScope").value.trim();
-  if(!programName||!inRaw){alert("Program name and at least one in-scope domain required.");return;}
+  if(!programName||!inRaw){alert("Program name and at least one in-scope domain are required.");return;}
   if(!aiReady){alert("AI credentials are missing. Set AI_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env and restart the container.");return;}
   counts={critical:0,high:0,medium:0,low:0}; findings=[]; updateCounters(); renderFindings();
   phaseState={}; renderPhaseBar(); clearTerm(false); reportMd="";
@@ -436,6 +608,7 @@ async function startHunt(){
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
     auth_headers:parseHeaders(document.getElementById("authHeaders").value),
     parent_id:pendingParent||null};
+  showView("run");
   try{
     const res=await fetch(`${API}/engage`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(!res.ok){
@@ -447,13 +620,13 @@ async function startHunt(){
     pendingParent=null;
     if(eng.authenticated)log("info",`Authenticated scan · ${esc(eng.auth_note||"session headers attached")}`);
     document.getElementById("btnStart").disabled=true; document.getElementById("btnStop").style.display="block";
-    document.getElementById("sessLabel").textContent=`${programName} [${sessionId}] · ${body.mode}`;
-    setStatus("s-run","RUNNING");
+    document.getElementById("sessLabel").textContent=`${programName} · ${sessionId} · ${body.mode}`;
+    setStatus("s-run","Running");
     log("info",`Session <strong>${sessionId}</strong> started · mode <strong>${body.mode}</strong> · scope: ${esc(inScope.join(", "))}`);
     es=new EventSource(`${API}/stream/${sessionId}`);
     es.onmessage=e=>handleEvent(JSON.parse(e.data));
-    es.onerror=()=>{if(running){log("error","Stream connection lost.");finishHunt("s-err","ERROR");}};
-  }catch(err){log("error",esc(err.message));setStatus("s-err","ERROR");}
+    es.onerror=()=>{if(running){log("error","Stream connection lost.");finishHunt("s-err","Error");}};
+  }catch(err){log("error",esc(err.message));setStatus("s-err","Error");}
 }
 
 function handleEvent(d){
@@ -462,7 +635,7 @@ function handleEvent(d){
     case "phase": setPhase(d.phase); log("phase",`Phase → <strong>${esc(d.phase)}</strong>`); break;
     case "tool_call":{
       const perm=d.permission||"active";
-      const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" | ");
+      const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" · ");
       log(perm,`<strong>${esc(d.tool)}</strong>`,s); break;}
     case "tool_result": log("tool_result",`${esc(d.tool)}: ${esc(d.output)}${d.count>0?` <span style="color:var(--accent)">(${d.count})</span>`:""}`); break;
     case "scope_block": log("scope_block",esc(d.error||d.tool)); break;
@@ -476,14 +649,14 @@ function handleEvent(d){
       findings.push(f); renderFindings();
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title)}</strong>`,esc(f.target)); break;}
     case "triage": log("triage",esc(d.verdict)); break;
-    case "complete": log("complete",esc(d.content)); fetchReport(); finishHunt("s-done","DONE"); break;
-    case "error": log("error",esc(d.content)); finishHunt("s-err","ERROR"); break;
+    case "complete": log("complete",esc(d.content)); fetchReport(); finishHunt("s-done","Done"); break;
+    case "error": log("error",esc(d.content)); finishHunt("s-err","Error"); break;
   }
 }
 function finishHunt(sc,sl){running=false;if(es){es.close();es=null;}document.getElementById("btnStart").disabled=false;document.getElementById("btnStop").style.display="none";setStatus(sc,sl);}
-function stopHunt(){if(sessionId)fetch(`${API}/stop/${sessionId}`,{method:"POST"}).catch(()=>{});log("info","Hunt stopped.");finishHunt("s-stop","STOPPED");}
+function stopHunt(){if(sessionId)fetch(`${API}/stop/${sessionId}`,{method:"POST"}).catch(()=>{});log("info","Hunt stopped.");finishHunt("s-stop","Stopped");}
 
-// approval gate
+/* ── approval gate ── */
 function showApproval(d){
   pendingApproval=d.approval_id;
   document.getElementById("approvalPrompt").textContent=d.prompt||"Authorize intrusive probing?";
@@ -497,98 +670,185 @@ async function resolveApproval(ok){
   hideApproval();
 }
 
-// findings tab
+/* ── findings ── */
 function renderFindings(){
   const el=document.getElementById("findingsList"), badge=document.getElementById("findBadge");
-  if(!findings.length){el.innerHTML='<p class="muted">No findings yet.</p>';badge.style.display="none";return;}
+  if(!findings.length){el.innerHTML=emptyState("No findings yet","Findings appear here as the agent confirms them during a run.");badge.style.display="none";return;}
   badge.style.display="inline-block"; badge.textContent=findings.length;
   el.innerHTML=findings.map(f=>{
     const sev=(f.severity||"info").toLowerCase();
-    const col={critical:"#ff3d6b",high:"#fb923c",medium:"#f59e0b",low:"#00e5ff",info:"#6a8a9a",informational:"#6a8a9a"}[sev]||"#6a8a9a";
+    const col=SEV_HEX[sev]||SEV_HEX.info;
     const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
-    return `<div class="card" style="--c:${col}"><h4><span class="pill" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}</h4>
-      <div class="kv"><span>Target: <code>${esc(f.target||"")}</code></span><span>CVSS: ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE: ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP: ${esc(f.owasp)}</span>`:""}</div>
-      <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps</summary><ol>${steps}</ol></details>`:""}
-      ${f.analyst_notes?`<div class="muted" style="margin-top:.4rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
+    return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}</h4>
+      <div class="kv"><span>Target <code>${esc(f.target||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
+      <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
+      ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
   }).join("");
 }
 
-// surface
+/* ── surface ── */
 async function loadSurface(){
   if(!sessionId)return;
   try{const d=await(await fetch(`${API}/surface/${sessionId}`)).json();
     const s=d.stats||{}; document.getElementById("surfaceStats").innerHTML=
-      Object.entries(s).map(([k,v])=>`<span><strong style="color:var(--accent)">${v}</strong> ${esc(k.replace(/_/g," "))}</span>`).join("");
+      Object.entries(s).map(([k,v])=>`<span class="chip"><strong style="color:var(--accent)">${v}</strong> ${esc(k.replace(/_/g," "))}</span>`).join("");
     const inv=d.inventory||[];
     document.getElementById("surfaceTable").innerHTML=inv.length?
-      `<table><tr><th>Host</th><th>Path</th><th>Params</th><th></th></tr>${inv.map(e=>
+      `<div class="table-wrap"><table><tr><th>Host</th><th>Path</th><th>Params</th><th></th></tr>${inv.map(e=>
         `<tr><td>${esc(e.host)}</td><td><code>${esc(e.path)}</code></td><td>${esc((e.params||[]).join(", "))}</td>
-         <td><span class="tag-copy" onclick="toWorkbench('${esc(e.example)}')">→ workbench</span></td></tr>`).join("")}</table>`
-      :'<p class="muted">No surface discovered yet.</p>';
+         <td><span class="link-act" onclick="toWorkbench('${esc(e.example)}')">→ workbench</span></td></tr>`).join("")}</table></div>`
+      :emptyState("Nothing discovered yet","Run recon, then refresh to see hosts, paths, and parameters.");
   }catch(e){}
 }
 function toWorkbench(url){document.getElementById("wbUrl").value=url;switchTab("workbench");}
 
-// playbooks
+/* ── playbooks (cURL-first cards) ── */
 async function loadPlaybook(){
-  if(!sessionId)return;
+  if(!sessionId){document.getElementById("playbookList").innerHTML=emptyState("No active session","Start or load a mission, then refresh once recon has run.");return;}
   try{const d=await(await fetch(`${API}/playbook/${sessionId}`)).json();
-    const pb=d.playbook||[];
-    document.getElementById("playbookList").innerHTML=pb.length?pb.map(g=>{
-      const col={CRITICAL:"#ff3d6b",HIGH:"#fb923c",MEDIUM:"#f59e0b",LOW:"#00e5ff",INFO:"#6a8a9a"}[g.severity]||"#6a8a9a";
-      const pl=(g.payloads||[]).map(p=>`<pre class="code">${esc(p)}</pre>`).join("");
-      const how=(g.how_to_test||[]).map(h=>`<li>${esc(h)}</li>`).join("");
-      const curl=(g.curl_steps||[]).map(c=>`<div class="muted">${esc(c.desc)}</div><pre class="code">${esc(c.cmd)}</pre>`).join("");
-      const refs=(g.references||[]).map(r=>`<a href="${esc(r.url)}" target="_blank" style="color:var(--accent);font-size:.65rem">${esc(r.title)}</a>`).join(" · ");
-      return `<div class="card" style="--c:${col}"><h4><span class="pill" style="--c:${col}">${esc(g.severity)}</span>${esc(g.title)}
-        <span class="pill" style="--c:var(--purple);margin-left:auto">${esc(g.confidence_label||"")} ${g.confidence}%</span></h4>
-        <div class="kv"><span>Surface: <code>${esc(g.surface)}</code></span><span>${esc(g.category)} · ${esc(g.wstg||"")}</span></div>
-        <div>${esc(g.what_to_test)}</div>
-        <details><summary>How to test · payloads · cURL</summary>${how?`<ol>${how}</ol>`:""}${pl}${curl}<div style="margin-top:.4rem">${refs}</div></details></div>`;
-    }).join(""):'<p class="muted">No playbook yet. The agent generates one via <code>generate_playbook</code> after recon.</p>';
-  }catch(e){}
+    pbData=d.playbook||[];
+    document.getElementById("playbookList").innerHTML=pbData.length
+      ? pbData.map((g,i)=>renderPlaybookCard(g,i)).join("")
+      : emptyState("No playbook yet","The agent builds one via <code class=\"inline\">generate_playbook</code> after recon. Refresh once a run is underway.");
+  }catch(e){document.getElementById("playbookList").innerHTML=emptyState("Could not load playbook",esc(e.message));}
+}
+function renderPlaybookCard(g,i){
+  const col=SEV_HEX[(g.severity||"info").toLowerCase()]||SEV_HEX.info;
+  const cmd=(g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd)||"";
+  const curlBlock = cmd
+    ? `<div class="pb-curl"><div class="pb-curl-head"><span>Recommended cURL</span><div class="pb-curl-actions">
+         <button class="btn ghost sm" onclick="copyPlaybookCurl(${i})">Copy cURL</button>
+         <button class="btn primary sm" onclick="sendToCurl(${i})">Send to cURL Console →</button></div></div>
+       <pre class="code">${esc(cmd)}</pre></div>`
+    : `<div class="pb-curl empty"><span>No prebuilt cURL for this surface.</span>
+         <button class="btn ghost sm" onclick="sendToCurl(${i})">Open in cURL Console →</button></div>`;
+  const steps=(g.how_to_test||[]).map(h=>`<li>${esc(h)}</li>`).join("");
+  const payloads=(g.payloads||[]).map(p=>`<code class="chip">${esc(p)}</code>`).join("");
+  const adv=(g.bypass||[]).map(b=>`<li>${esc(b)}</li>`).join("");
+  const refs=(g.references||[]).map(r=>`<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>`).join("");
+  return `<article class="pb-card">
+    <div class="pb-head"><div class="pb-title"><span class="chip sev" style="--c:${col}">${esc(g.severity||"INFO")}</span><h4>${esc(g.title||"")}</h4></div>
+      <span class="pb-conf">${esc(g.confidence_label||"")} · ${esc(String(g.confidence??""))}%</span></div>
+    <div class="pb-meta"><span>Surface <code>${esc(g.surface||"")}</code></span>${g.category?`<span>${esc(g.category)}</span>`:""}${g.wstg?`<span>${esc(g.wstg)}</span>`:""}</div>
+    ${curlBlock}
+    <div class="pb-obj"><strong>Objective.</strong> ${esc(g.what_to_test||"")}</div>
+    ${steps?`<div class="pb-sec"><h5>Step-by-step</h5><ol>${steps}</ol></div>`:""}
+    ${payloads?`<div class="pb-sec"><h5>Payloads &amp; variants</h5><div class="chips">${payloads}</div></div>`:""}
+    ${adv?`<details class="pb-adv"><summary>Advanced (for experienced testers)</summary><ul>${adv}</ul></details>`:""}
+    ${refs?`<div class="pb-refs"><strong class="muted">References:</strong> ${refs}</div>`:""}
+  </article>`;
+}
+function copyPlaybookCurl(i){const g=pbData[i];const cmd=g&&g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd;
+  if(cmd)copyText(cmd,"cURL copied to clipboard.");}
+
+/* ── cURL Console ergonomics (client-side only; same scope-guarded endpoint) ── */
+function buildCurl(m,u,h,b){
+  let s=`curl -sk -X ${m} '${u}'`;
+  Object.entries(h||{}).forEach(([k,v])=>{s+=` \\\n  -H '${k}: ${v}'`;});
+  if(b)s+=` \\\n  --data '${String(b).replace(/'/g,"'\\''")}'`;
+  return s;
+}
+function parseCurl(cmd){
+  const toks=[]; let cur="", q=null; const src=(cmd||"").replace(/\\\r?\n/g," ");
+  for(let i=0;i<src.length;i++){const c=src[i];
+    if(q){ if(c===q)q=null; else cur+=c; }
+    else if(c==="'"||c==='"'){q=c;}
+    else if(/\s/.test(c)){ if(cur){toks.push(cur);cur="";} }
+    else cur+=c;
+  }
+  if(cur)toks.push(cur);
+  let method="GET",url="",headers={},body="";
+  for(let j=0;j<toks.length;j++){const t=toks[j];
+    if(t==="-X"||t==="--request")method=(toks[++j]||"GET").toUpperCase();
+    else if(t==="-H"||t==="--header"){const hd=toks[++j]||"";const k=hd.indexOf(":");if(k>0)headers[hd.slice(0,k).trim()]=hd.slice(k+1).trim();}
+    else if(t==="-d"||t==="--data"||t==="--data-raw"||t==="--data-binary"){body=toks[++j]||"";if(method==="GET")method="POST";}
+    else if(/^https?:\/\//i.test(t))url=t;
+  }
+  return {method,url,headers,body};
+}
+function setCurlSource(text){const el=document.getElementById("cuSource");
+  if(text){el.textContent="↳ "+text;el.style.display="inline-flex";}else{el.style.display="none";}}
+function sendToCurl(i){
+  const g=pbData[i]; if(!g)return;
+  const cmd=(g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd)||"";
+  const p = cmd?parseCurl(cmd):{method:"GET",url:(/^https?:\/\//i.test(g.surface||"")?g.surface:""),headers:{},body:""};
+  document.getElementById("cuMethod").value=["GET","POST","PUT","DELETE"].includes(p.method)?p.method:"GET";
+  document.getElementById("cuUrl").value=p.url||"";
+  document.getElementById("cuHeaders").value=Object.entries(p.headers||{}).map(([k,v])=>`${k}: ${v}`).join("\n");
+  document.getElementById("cuBody").value=p.body||"";
+  ["cuStatus","cuCurl","cuOut"].forEach(id=>document.getElementById(id).style.display="none");
+  setCurlSource(`From playbook — ${g.title||"item"}`);
+  switchTab("curl");
+}
+function copyCurlRequest(){
+  const m=document.getElementById("cuMethod").value, u=document.getElementById("cuUrl").value;
+  if(!u)return alert("Enter a URL first.");
+  copyText(buildCurl(m,u,parseHeaders(document.getElementById("cuHeaders").value),document.getElementById("cuBody").value),"Request copied as cURL.");
+}
+function clearCurl(){
+  document.getElementById("cuMethod").value="GET";
+  ["cuUrl","cuHeaders","cuBody"].forEach(id=>document.getElementById(id).value="");
+  ["cuStatus","cuCurl","cuOut"].forEach(id=>{const e=document.getElementById(id);e.style.display="none";e.textContent="";});
+  setCurlSource("");
+}
+async function sendCurl(){
+  if(!sessionId)return alert("Start or load a mission first.");
+  const out=document.getElementById("cuOut"),cc=document.getElementById("cuCurl"),st=document.getElementById("cuStatus");
+  st.style.display="block";st.className="resp-status";st.textContent="Sending…";
+  out.style.display="none";cc.style.display="none";
+  try{const r=await fetch(`${API}/curl/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({method:document.getElementById("cuMethod").value,url:document.getElementById("cuUrl").value,
+      headers:parseHeaders(document.getElementById("cuHeaders").value),body:document.getElementById("cuBody").value||null,follow_redirects:true})});
+    const d=await r.json();
+    if(!r.ok){st.className="resp-status s-srv";st.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
+    const cls=d.status<300?"s-ok":d.status<400?"s-redir":d.status<500?"s-cli":"s-srv";
+    st.className="resp-status "+cls;st.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`;
+    cc.style.display="block";cc.textContent="$ "+d.curl;
+    out.style.display="block";
+    out.textContent=`--- headers ---\n`+Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
+  }catch(e){st.className="resp-status s-srv";st.textContent="Error: "+e.message;}
 }
 
-// workbench
+/* ── workbench ── */
 function parseHeaders(t){const h={};(t||"").split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();});return h;}
 async function wbReplay(){
-  if(!sessionId)return alert("Start a hunt first.");
-  const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Sending...";
+  if(!sessionId)return alert("Start or load a mission first.");
+  const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Sending…";
   try{const r=await fetch(`${API}/workbench/${sessionId}/replay`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("wbMethod").value,url:document.getElementById("wbUrl").value,
       headers:parseHeaders(document.getElementById("wbHeaders").value),body:document.getElementById("wbBody").value||null})});
-    const d=await r.json(); if(!r.ok){out.textContent="ERROR: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
     out.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms\n\ncurl: ${d.curl}\n\n--- headers ---\n`+
       Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
-  }catch(e){out.textContent="ERROR: "+e.message;}
+  }catch(e){out.textContent="Error: "+e.message;}
 }
 async function wbFuzz(){
-  if(!sessionId)return alert("Start a hunt first.");
-  const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Fuzzing...";
+  if(!sessionId)return alert("Start or load a mission first.");
+  const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Fuzzing…";
   const pls=document.getElementById("wbPayloads").value.split("\n").map(s=>s.trim()).filter(Boolean);
   try{const r=await fetch(`${API}/workbench/${sessionId}/fuzz`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("wbMethod").value,url:document.getElementById("wbUrl").value,
       headers:parseHeaders(document.getElementById("wbHeaders").value),body:document.getElementById("wbBody").value||null,
       param:document.getElementById("wbParam").value,param_in:document.getElementById("wbParamIn").value,
       payloads:pls,wordlist_id:document.getElementById("wbWordlist").value||null})});
-    const d=await r.json(); if(!r.ok){out.textContent="ERROR: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
     out.textContent=`Baseline HTTP ${d.baseline.status} · ${d.baseline.length}B\nTop results (anomaly-ranked):\n\n`+
       d.results.slice(0,20).map(x=>`score ${x.score||0}  ${x.status||"ERR"}  ${x.length||0}B  ${x.duration_ms||0}ms  ${x.error_signatures&&x.error_signatures.length?"⚠SQL":""}  ${String(x.payload).slice(0,60)}`).join("\n");
-  }catch(e){out.textContent="ERROR: "+e.message;}
+  }catch(e){out.textContent="Error: "+e.message;}
 }
 
-// access check
+/* ── access check ── */
 async function loadProfiles(){
   if(!sessionId)return;
   try{const d=await(await fetch(`${API}/profiles/${sessionId}`)).json();
     document.getElementById("profileList").innerHTML=(d.profiles||[]).map(p=>
-      `<div class="row" style="justify-content:space-between;border:1px solid var(--border);padding:.3rem .5rem;margin-bottom:.3rem;font-size:.7rem">
-        <span>${esc(p.name)} ${p.is_owner?'<span class="pill" style="--c:var(--accent3)">OWNER</span>':""}</span>
-        <span class="tag-copy" onclick="delProfile('${p.id}')">✕</span></div>`).join("")||'<p class="muted">No roles registered.</p>';
+      `<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.4rem .6rem;margin-bottom:.35rem;font-size:.82rem">
+        <span>${esc(p.name)} ${p.is_owner?'<span class="pill" style="--c:var(--ok)">OWNER</span>':""}</span>
+        <span class="link-act link-danger" onclick="delProfile('${p.id}')">Remove</span></div>`).join("")||'<p class="muted">No roles registered yet.</p>';
   }catch(e){}
 }
 async function addProfile(){
-  if(!sessionId)return alert("Start a hunt first.");
+  if(!sessionId)return alert("Start or load a mission first.");
   await fetch(`${API}/profiles/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({name:document.getElementById("acName").value||"role",role:"",
       headers:parseHeaders(document.getElementById("acHeaders").value),is_owner:document.getElementById("acOwner").checked})});
@@ -597,73 +857,61 @@ async function addProfile(){
 }
 async function delProfile(pid){await fetch(`${API}/profiles/${sessionId}/${pid}`,{method:"DELETE"});loadProfiles();}
 async function runAccessCheck(){
-  if(!sessionId)return alert("Start a hunt first.");
-  const out=document.getElementById("acOut"); out.style.display="block"; out.textContent="Running...";
+  if(!sessionId)return alert("Start or load a mission first.");
+  const out=document.getElementById("acOut"); out.style.display="block"; out.textContent="Running…";
   try{const r=await fetch(`${API}/access-check/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("acMethod").value,url:document.getElementById("acUrl").value,headers:{}})});
-    const d=await r.json(); if(!r.ok){out.textContent="ERROR: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
     out.textContent=`VERDICT: ${d.verdict}\n\n`+d.results.map(x=>
       `${(x.role||"").padEnd(12)} ${x.error?("ERR "+x.error):`HTTP ${x.status} · ${x.length}B`} ${x.is_owner?"(owner)":""} ${x.flag?("⚠ "+x.flag):""}`).join("\n");
-  }catch(e){out.textContent="ERROR: "+e.message;}
+  }catch(e){out.textContent="Error: "+e.message;}
 }
 
-// topology (layered SVG: domain -> hosts -> endpoints)
+/* ── topology (layered SVG) ── */
 async function loadTopology(){
   if(!sessionId){return;}
   try{const d=await(await fetch(`${API}/surface/${sessionId}`)).json();
     const inv=d.inventory||[]; const hosts={};
     inv.forEach(e=>{(hosts[e.host]=hosts[e.host]||[]).push(e.path);});
     const hostNames=Object.keys(hosts);
-    if(!hostNames.length){document.getElementById("topoWrap").innerHTML='<p class="muted">No surface to map yet.</p>';return;}
+    if(!hostNames.length){document.getElementById("topoWrap").innerHTML=emptyState("No map yet","Run recon, then refresh to map domain → hosts → endpoints.");return;}
+    const cs=getComputedStyle(document.documentElement);
+    const cRoot=cs.getPropertyValue("--accent").trim()||"#7aa2ff", cHost=cs.getPropertyValue("--purple").trim()||"#b6a0e6",
+          cLeaf=cs.getPropertyValue("--ok").trim()||"#5bd1a0", cLine=cs.getPropertyValue("--border2").trim()||"#3a4658",
+          cText=cs.getPropertyValue("--text").trim()||"#d8dee9", cBright=cs.getPropertyValue("--text-bright").trim()||"#f3f6fb";
     const W=Math.max(720,hostNames.length*150), H=140+Math.max(...hostNames.map(h=>hosts[h].length))*22+120;
     let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
     const rootX=W/2, rootY=40;
-    svg+=`<circle cx="${rootX}" cy="${rootY}" r="8" fill="#00e5ff"/><text x="${rootX+12}" y="${rootY+4}" fill="#f0f8fc">${esc(document.getElementById("programName").value||"target")}</text>`;
+    svg+=`<circle cx="${rootX}" cy="${rootY}" r="8" fill="${cRoot}"/><text x="${rootX+12}" y="${rootY+4}" fill="${cBright}">${esc(document.getElementById("programName").value||"target")}</text>`;
     hostNames.forEach((h,i)=>{
       const hx=(i+0.5)*(W/hostNames.length), hy=130;
-      svg+=`<path d="M${rootX} ${rootY} C ${rootX} 90, ${hx} 80, ${hx} ${hy}" stroke="#0e2535" fill="none"/>`;
-      svg+=`<circle cx="${hx}" cy="${hy}" r="6" fill="#a78bfa"/><text x="${hx+9}" y="${hy+3}" fill="#c8dde6">${esc(h)}</text>`;
+      svg+=`<path d="M${rootX} ${rootY} C ${rootX} 90, ${hx} 80, ${hx} ${hy}" stroke="${cLine}" fill="none"/>`;
+      svg+=`<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+9}" y="${hy+3}" fill="${cText}">${esc(h)}</text>`;
       hosts[h].slice(0,10).forEach((p,j)=>{
         const py=hy+30+j*22;
-        svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="#0e2535"/>`;
-        svg+=`<circle cx="${hx}" cy="${py}" r="3" fill="#39ff14"/><text x="${hx+8}" y="${py+3}">${esc(p.slice(0,26))}</text>`;
+        svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"/>`;
+        svg+=`<circle cx="${hx}" cy="${py}" r="3" fill="${cLeaf}"/><text x="${hx+8}" y="${py+3}">${esc(p.slice(0,26))}</text>`;
       });
     });
     svg+=`</svg>`;
-    document.getElementById("topoWrap").innerHTML=`<div style="overflow:auto">${svg}</div>`;
+    document.getElementById("topoWrap").innerHTML=`<div class="table-wrap" style="padding:.5rem">${svg}</div>`;
   }catch(e){}
 }
 
-// curl console
-async function sendCurl(){
-  if(!sessionId)return alert("Start a hunt first.");
-  const out=document.getElementById("cuOut"),cc=document.getElementById("cuCurl");
-  out.style.display="block";out.textContent="Sending...";
-  try{const r=await fetch(`${API}/curl/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({method:document.getElementById("cuMethod").value,url:document.getElementById("cuUrl").value,
-      headers:parseHeaders(document.getElementById("cuHeaders").value),body:document.getElementById("cuBody").value||null,follow_redirects:true})});
-    const d=await r.json(); if(!r.ok){out.textContent="ERROR: "+(d.detail||JSON.stringify(d));cc.style.display="none";return;}
-    cc.style.display="block";cc.className="mono-out";cc.textContent="$ "+d.curl;
-    out.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms\n\n--- headers ---\n`+
-      Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
-  }catch(e){out.textContent="ERROR: "+e.message;}
-}
-
-// report
+/* ── report ── */
 async function fetchReport(){
   if(!sessionId)return;
   try{const d=await(await fetch(`${API}/report/${sessionId}`)).json();
     reportMd=d.markdown; document.getElementById("reportContent").textContent=reportMd;
   }catch(e){}
 }
-function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/html`,"_blank");}
-function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");}
+function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/html`,"_blank");else alert("Start or load a mission first.");}
+function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");else alert("Start or load a mission first.");}
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
-function copyReport(){navigator.clipboard.writeText(reportMd||"").then(()=>log("info","Report markdown copied."));}
+function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
 
-// Rescan: clone an existing mission's config into the form for a NEW mission
-// (the original is never mutated). Start Hunt then creates a linked child.
+/* ── rescan: clone config into a NEW mission (originals never mutated) ── */
 async function rescan(id){
   try{
     const d=await(await fetch(`${API}/missions/${id}`)).json();
@@ -674,27 +922,27 @@ async function rescan(id){
     document.getElementById("objective").value=m.objective||"";
     if(m.mode)document.getElementById("mode").value=m.mode;
     pendingParent=id;
-    switchTab("feed");
-    log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> [${esc(id)}]. Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
+    showView("launch");
+    log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> (${esc(id)}). Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
   }catch(e){alert("Rescan prefill failed: "+e.message);}
 }
 
-// mission archive (persistence)
+/* ── archive ── */
 async function loadArchive(){
   try{const d=await(await fetch(`${API}/missions`)).json();
     const ms=d.missions||[];
     document.getElementById("archiveList").innerHTML=ms.length?
-      `<table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Created</th><th></th></tr>${ms.map(m=>{
+      `<div class="table-wrap"><table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Created</th><th></th></tr>${ms.map(m=>{
         const c=m.counts||{}, tot=Object.values(c).reduce((a,b)=>a+b,0);
         const child=m.parent_id?` <span class="muted" title="cloned from ${esc(m.parent_id)}">↳ child</span>`:"";
         return `<tr><td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
-          <td><span class="tag-copy" onclick="loadMission('${m.id}','${esc(m.program)}')">→ load</span>
-              <span class="tag-copy" onclick="rescan('${m.id}')">↻ rescan</span>
-              <span class="tag-copy" style="color:var(--accent2)" onclick="delMission('${m.id}')">✕</span></td></tr>`;
-      }).join("")}</table>`
-      :'<p class="muted">No saved missions yet.</p>';
+          <td style="white-space:nowrap"><span class="link-act" onclick="loadMission('${m.id}','${esc(m.program)}')">Load</span>
+              &nbsp;<span class="link-act" onclick="rescan('${m.id}')">Rescan</span>
+              &nbsp;<span class="link-act link-danger" onclick="delMission('${m.id}')">Delete</span></td></tr>`;
+      }).join("")}</table></div>`
+      :emptyState("No saved missions","Completed and in-progress missions are stored here — load or rescan any of them.");
   }catch(e){}
 }
 async function loadMission(id,program){
@@ -703,9 +951,9 @@ async function loadMission(id,program){
     counts={critical:0,high:0,medium:0,low:0};
     findings.forEach(f=>{const s=(f.severity||"").toLowerCase();if(s in counts)counts[s]++;});
     updateCounters(); renderFindings();
-    document.getElementById("sessLabel").textContent=`${program} [${id}] · archived`;
+    document.getElementById("sessLabel").textContent=`${program} · ${id} · archived`;
     reportMd=""; fetchReport();
-    log("info",`Loaded archived mission <strong>${esc(program)}</strong> [${id}] — ${findings.length} findings. Report/Playbook/Workbench/Access tabs are live against it.`);
+    log("info",`Loaded archived mission <strong>${esc(program)}</strong> (${id}) — ${findings.length} findings. Report / Playbooks / Tools are live against it.`);
     switchTab("findings");
   }catch(e){alert("Load failed: "+e.message);}
 }
@@ -715,8 +963,11 @@ async function delMission(id){
 }
 
 function updateCounters(){cCrit.textContent=counts.critical;cHigh.textContent=counts.high;cMed.textContent=counts.medium;cLow.textContent=counts.low;}
-function clearTerm(addPrompt=true){document.getElementById("termOut").innerHTML="";if(addPrompt)log("info","Terminal cleared.<span class='blink'>█</span>");}
-document.getElementById("approvalOverlay").addEventListener("click",function(e){/* modal is decision-forcing: no click-away */});
+function clearTerm(addPrompt=true){document.getElementById("termOut").innerHTML="";if(addPrompt)log("info","Feed cleared.<span class='blink'>▍</span>");}
+document.getElementById("approvalOverlay").addEventListener("click",function(e){/* decision-forcing: no click-away */});
+
+/* land on the Launch view */
+showView("launch");
 </script>
 </body>
 </html>
