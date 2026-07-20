@@ -94,7 +94,7 @@ ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + eviden
   http_probe fetch_openapi graphql jwt xss js_review csrf content_discovery web_probes injection_probes bfla race zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool · fingerprint   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool · fingerprint · ssrf_tool   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -131,6 +131,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_injection_probes | INTRUSIVE | CORS / open-redirect (with bypass payloads) / host-header / SSTI probes |
 | run_bfla | INTRUSIVE | Function-level authz (BFLA) method testing + side-channel BOLA oracle |
 | run_race | INTRUSIVE | Race-condition (TOCTOU): gate-synchronized burst + before/after state verify |
+| run_ssrf | INTRUSIVE | SSRF: cloud-metadata reflection (AWS/GCP/Azure/Alibaba/DO) + internal open/closed port oracle + filter-bypass encodings |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
@@ -285,6 +286,7 @@ bbh-agent/
 │   ├── codereview.py      # SAST-lite: secrets / sinks / weak-crypto / dev-comments / endpoint mining
 │   ├── csrf_tool.py       # CSRF form/token/SameSite analysis
 │   ├── fingerprint.py     # native tech-stack fingerprint (headers/cookies/HTML signatures)
+│   ├── ssrf_tool.py       # SSRF: cloud-metadata reflection + blind port oracle + bypass encodings
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -292,7 +294,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (65 tests)
+│   └── tests/             # deterministic pytest suite (71 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

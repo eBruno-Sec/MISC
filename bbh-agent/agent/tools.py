@@ -68,6 +68,7 @@ TOOL_PERMISSIONS = {
     "run_injection_probes": PermissionLevel.INTRUSIVE,
     "run_bfla": PermissionLevel.INTRUSIVE,
     "run_race": PermissionLevel.INTRUSIVE,
+    "run_ssrf": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -231,6 +232,20 @@ CLAUDE_TOOLS = [
          "rounds": {"type": "integer", "default": 3, "description": "Retry the burst N times; race success is luck-dependent"},
          "verify_url": {"type": "string", "description": "In-scope GET endpoint whose response reflects state (balance/count) to confirm the race"},
          "verify_headers": {"type": "object", "description": "Headers for the verify request (defaults to headers)"}},
+         "required": ["url"]}},
+    {"name": "run_ssrf",
+     "description": ("INTRUSIVE: Server-Side Request Forgery test on a parameterized URL. Three layers: (1) regular "
+                     "SSRF — points URL-ish parameters at cloud metadata endpoints (AWS/GCP/Azure/Alibaba/DO) and "
+                     "detects real metadata content in the response (not the echoed payload, so no false positives); "
+                     "(2) blind SSRF — an internal open-vs-closed port oracle (status/timing/connect differential); "
+                     "(3) optional OOB probe if a collaborator domain is configured. Also carries filter-bypass "
+                     "encodings (decimal/octal/hex/IPv6 of 127.0.0.1 and 169.254.169.254)."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/fetch?url=x"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Parameters to test (default: URL-ish ones, else all)"},
+         "open_port": {"type": "integer", "default": 80, "description": "A likely-OPEN internal port for the blind oracle"},
+         "closed_port": {"type": "integer", "default": 1, "description": "A likely-CLOSED internal port for the blind oracle"},
+         "oob_domain": {"type": "string", "description": "Optional collaborator domain for an out-of-band probe (e.g. xyz.oast.pro)"}},
          "required": ["url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
@@ -1204,6 +1219,76 @@ class ToolRegistry:
         changed = " · state changed" if (best_verify and best_verify.get("changed")) else ""
         return ToolResult("race", url, True,
                           f"best {s['successes']}/{count} over {rounds} round(s){changed}, {len(findings)} signal(s)",
+                          findings)
+
+    async def _run_ssrf(self, inp: dict) -> ToolResult:
+        import time
+        import httpx
+        import ssrf_tool as ssrf
+        url = inp["url"]
+        params = inp.get("params") or ssrf.ssrf_params(url)
+        params = [p for p in params][:8]
+        if not params:
+            return ToolResult("ssrf", url, True,
+                              "No query parameters to test (SSRF needs a URL-ish parameter)", [])
+        open_port = int(inp.get("open_port", 80))
+        closed_port = int(inp.get("closed_port", 1))
+        oob_domain = (inp.get("oob_domain") or os.getenv("BBH_OOB_DOMAIN", "")).strip()
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, evidence_targets = [], []
+
+        async def probe(c, param, value, timeout):
+            tgt = ssrf.set_param(url, param, value)
+            if not self.scope.validate(tgt)[0]:
+                return None
+            t0 = time.perf_counter()
+            try:
+                r = await c.get(tgt, timeout=timeout)
+                return {"status": r.status_code, "error": False,
+                        "elapsed": time.perf_counter() - t0, "body": r.text, "target": tgt}
+            except Exception:
+                return {"status": 0, "error": True,
+                        "elapsed": time.perf_counter() - t0, "body": "", "target": tgt}
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers) as c:
+            for p in params:
+                confirmed = False
+                # 1) regular SSRF — fetch cloud metadata and detect real content
+                for payload, cloud in ssrf.METADATA_PAYLOADS:
+                    r = await probe(c, p, payload, timeout=12)
+                    if not r or r["error"]:
+                        continue
+                    hit = ssrf.analyze_reflection(r["body"], payload)
+                    if hit:
+                        findings.append(ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"]))
+                        evidence_targets.append(r["target"])
+                        confirmed = True
+                        break
+                if confirmed:
+                    continue
+                # 2) blind SSRF — internal open-vs-closed port oracle
+                open_pl = f"http://127.0.0.1:{open_port}/"
+                closed_pl = f"http://127.0.0.1:{closed_port}/"
+                o = await probe(c, p, open_pl, timeout=8)
+                cl = await probe(c, p, closed_pl, timeout=8)
+                sig = ssrf.analyze_blind(o, cl)
+                if sig:
+                    findings.append(ssrf.blind_finding(url, p, open_pl, closed_pl, sig))
+                    if o and o.get("target"):
+                        evidence_targets.append(o["target"])
+                    continue
+                # 3) OOB fallback probe (advisory; confirmation is out-of-band)
+                if oob_domain:
+                    token = os.urandom(4).hex()
+                    probe_url = f"http://{token}.{oob_domain}/"
+                    await probe(c, p, probe_url, timeout=8)
+                    findings.append(ssrf.oob_finding(url, p, probe_url))
+
+        if self.mission_id and evidence_targets:
+            await self._http(evidence_targets[0], "GET", capture=True)
+        conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
+        return ToolResult("ssrf", url, True,
+                          f"tested {len(params)} param(s), {len(findings)} SSRF signal(s), {conf} confirmed",
                           findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:

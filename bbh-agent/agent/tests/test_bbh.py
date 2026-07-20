@@ -32,6 +32,7 @@ import xss_tool as xt
 import codereview as cr
 import csrf_tool as csrf
 import fingerprint as fp
+import ssrf_tool as ssrf
 
 
 # ── security: target validation ──────────────────────────────────
@@ -656,6 +657,64 @@ def test_cymru_asn_parse():
     info = dns_recon.parse_cymru_asn('"32934 | 157.240.0.0/16 | US | arin | 2015-05-14"')
     assert info["asn"] == "32934" and info["prefix"] == "157.240.0.0/16" and info["country"] == "US"
     assert dns_recon.parse_cymru_asname('"32934 | US | arin | 2015 | FACEBOOK, US"') == "FACEBOOK, US"
+
+
+# ── ssrf_tool: metadata reflection + blind port oracle ───────────
+def test_ssrf_params_prefers_url_ish():
+    ps = ssrf.ssrf_params("https://t/fetch?url=x&note=hi&image_url=y")
+    assert ps == ["url", "image_url"]          # note is dropped, url-ish kept
+    # no url-ish param -> fall back to every parameter
+    assert ssrf.ssrf_params("https://t/a?q=1&z=2") == ["q", "z"]
+
+
+def test_ssrf_reflection_detects_aws_metadata_not_echo():
+    body = ('{"Code" : "Success", "AccessKeyId" : "ASIA...", "SecretAccessKey" : "x", '
+            '"Token" : "y", "instance-id" : "i-0abc"}')
+    hit = ssrf.analyze_reflection(body, "http://169.254.169.254/latest/meta-data/iam/security-credentials/")
+    assert hit and hit["cloud"] == "AWS" and "AccessKeyId" in hit["matched"]
+
+
+def test_ssrf_reflection_no_false_positive_on_echoed_url():
+    # the app merely reflects the injected URL — must NOT be treated as a hit
+    payload = "http://169.254.169.254/latest/meta-data/"
+    assert ssrf.analyze_reflection(f"You requested: {payload} (blocked)", payload) is None
+    assert ssrf.analyze_reflection("<html>normal page</html>", payload) is None
+
+
+def test_ssrf_blind_status_and_connect_and_timing_oracles():
+    # status differential
+    s = ssrf.analyze_blind({"status": 200, "error": False, "elapsed": 0.1},
+                           {"status": 502, "error": False, "elapsed": 0.1})
+    assert s and s["kind"] == "status"
+    # connect differential (open answers, closed errors)
+    s = ssrf.analyze_blind({"status": 200, "error": False, "elapsed": 0.1},
+                           {"status": 0, "error": True, "elapsed": 0.1})
+    assert s and s["kind"] == "connect"
+    # timing oracle (closed hangs to timeout)
+    s = ssrf.analyze_blind({"status": 200, "error": False, "elapsed": 0.2},
+                           {"status": 200, "error": False, "elapsed": 5.0})
+    assert s and s["kind"] == "timing"
+    # identical behavior -> no oracle (conservative)
+    assert ssrf.analyze_blind({"status": 200, "error": False, "elapsed": 0.2},
+                              {"status": 200, "error": False, "elapsed": 0.2}) is None
+
+
+def test_ssrf_bypass_payloads_encode_loopback_and_metadata_ip():
+    pl = ssrf.bypass_payloads()
+    assert "http://2130706433/" in pl            # 127.0.0.1 as a dword
+    assert "http://0x7f000001/" in pl            # 127.0.0.1 as hex
+    assert "http://[::1]/" in pl                 # IPv6 loopback
+    assert any("2852039166" in p for p in pl)    # 169.254.169.254 as a dword
+
+
+def test_ssrf_findings_are_shaped_for_the_report():
+    rf = ssrf.reflection_finding("https://t/fetch?url=x", "url",
+                                 "http://169.254.169.254/latest/meta-data/", "AWS", ["AccessKeyId"])
+    assert rf["severity"] == "critical" and rf["cwe"] == "CWE-918" and rf["confidence"] == "confirmed"
+    assert "169.254.169.254" in rf["target"]
+    bf = ssrf.blind_finding("https://t/fetch?url=x", "url", "http://127.0.0.1:80/",
+                            "http://127.0.0.1:1/", {"reason": "r", "confidence": "confirmed"})
+    assert bf["severity"] == "high" and "blind" in bf["tags"]
 
 
 def _run(coro):
