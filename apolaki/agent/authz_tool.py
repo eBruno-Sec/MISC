@@ -2,7 +2,7 @@
 Function-level authorization testing (BFLA) + side-channel BOLA oracle.
 
 From Hacking APIs (Ball, Ch 10). Complements the cross-role access-check (BOLA)
-and the IDOR neighbor probes already in BBH:
+and the IDOR neighbor probes already in Apolaki:
   - BFLA: send multiple HTTP methods (incl. write methods and admin paths) with a
     token that SHOULD NOT be authorized; any 2xx is a candidate broken
     function-level authorization / privilege escalation.

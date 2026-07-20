@@ -19,7 +19,7 @@ from agent import BBHAgent, ai_status
 from scope import ScopeEngine
 from tools import ToolRegistry
 
-app = FastAPI(title="BBH Agent")
+app = FastAPI(title="Apolaki")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # live sessions (agent + scope + stop_event); persisted state lives in SQLite

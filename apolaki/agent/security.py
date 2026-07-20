@@ -1,5 +1,5 @@
 """
-BBH Agent security helpers: target validation + CIDR expansion.
+Apolaki security helpers: target validation + CIDR expansion.
 
 Target validation rejects anything that is not a bare hostname, wildcard
 hostname, IPv4, or IPv4 CIDR, and rejects any value beginning with '-'

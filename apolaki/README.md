@@ -1,19 +1,19 @@
-# BBH Agent
+# Apolaki
 
-AI-powered bug bounty hunting platform in a single Docker container. An LLM ReAct
+AI-powered web application security testing platform in a single Docker container. An LLM ReAct
 loop drives a full recon-to-report pipeline against in-scope targets, with hard
 scope enforcement at the tool-wrapper level, human-in-the-loop gates before
 intrusive probing, a manual testing workbench, a rule-based test-playbook engine,
 and persistent findings/evidence.
 
-Built for Tier 1 HackerOne/Bugcrowd public programs with BBH-safe guardrails.
+Built for Tier 1 HackerOne/Bugcrowd public programs with authorized-testing-safe guardrails.
 
 > This release folds the distinctive capabilities of three sibling projects —
 > **Round Table** (rule-based test playbooks, scoped cURL console, topology,
 > multi-format reports), **Olympus** (HITL gates, manual workbench, cross-role
 > access-check, PoC evidence, scope-file parsing, advisory triage, persistence),
 > and **Yggdrasil** (scope-aware traversal/IDOR probing, body-validated
-> sensitive-path detection) — into the single-container BBH Agent.
+> sensitive-path detection) — into the single-container Apolaki.
 
 ---
 
@@ -26,7 +26,7 @@ Kali, Ubuntu, Debian, Fedora, RHEL, and Arch.
 
 ```bash
 git clone https://github.com/eBruno-Sec/MISC.git
-cd MISC/bbh-agent
+cd MISC/apolaki
 chmod +x install.sh
 ./install.sh
 ```
@@ -38,7 +38,7 @@ container, and opens `http://localhost:8000`.
 
 ```bash
 git clone https://github.com/eBruno-Sec/MISC.git
-cd MISC/bbh-agent
+cd MISC/apolaki
 cp .env.example .env
 # edit .env: pick a provider and paste your key
 docker compose build    # 10-15 min first time (Go tool compilation)
@@ -229,7 +229,7 @@ return a clear **422** (not a 500) and the UI disables Start Hunt with a warning
 `run_zap` drives a full OWASP ZAP scan (spider + AJAX spider for SPAs + active
 scan) fenced to a ZAP **context** built from the mission scope, so ZAP is
 physically constrained to in-scope hosts on top of the wrapper scope. It seeds
-ZAP with the URLs BBH already discovered and imports ZAP alerts as findings.
+ZAP with the URLs Apolaki already discovered and imports ZAP alerts as findings.
 
 ZAP is a separate optional container that does **not** start by default (the
 single-container quickstart is unchanged). To enable it:

@@ -1,5 +1,5 @@
 """
-Deterministic test suite for the BBH Agent platform engines.
+Deterministic test suite for the Apolaki platform engines.
 
 Covers the ported/adapted engines (security, scope, poc, surface, replay,
 web_security, guidance, triage, report, db) plus the async HITL gate + mode
@@ -1123,7 +1123,7 @@ def test_report_markdown_csv_json_and_print_css():
                  "description": "d", "impact": "i", "reproduction_steps": ["a", "b"]}]
     scope = {"in_scope": ["t.com"]}
     md = report.generate_report("Prog", findings, scope)
-    assert "# Bug Bounty Report: Prog" in md and "SQLi" in md and "CWE-89" in md
+    assert "# Security Assessment Report: Prog" in md and "SQLi" in md and "CWE-89" in md
     csv_out = report.findings_csv(findings)
     assert csv_out.splitlines()[0].startswith("title,severity,target") and "SQLi" in csv_out
     j = json.loads(report.findings_json("Prog", findings, scope))

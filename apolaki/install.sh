@@ -15,7 +15,7 @@ fail()    { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo -e "\n${BOLD}BBH Agent Installer${NC}"
+echo -e "\n${BOLD}Apolaki Installer${NC}"
 echo -e "─────────────────────────────────────────────\n"
 
 # Detect OS
@@ -183,14 +183,14 @@ $COMPOSE build
 success "Image built."
 
 # Start
-info "Starting BBH Agent..."
+info "Starting Apolaki..."
 $COMPOSE up -d
 
 sleep 2
 
 if $COMPOSE ps | grep -q "Up\|running"; then
     echo ""
-    echo -e "${GREEN}${BOLD}BBH Agent is running.${NC}"
+    echo -e "${GREEN}${BOLD}Apolaki is running.${NC}"
     echo -e "Open: ${CYAN}http://localhost:8000${NC}"
     echo ""
 

@@ -1,7 +1,7 @@
 """
 OWASP ZAP daemon client (REST API over httpx) + pure alert->finding mapping.
 
-BBH drives ZAP in daemon mode via its JSON API. The scan is fenced to a ZAP
+Apolaki drives ZAP in daemon mode via its JSON API. The scan is fenced to a ZAP
 *context* built from the mission scope (an include-regex per in-scope host) and
 run in-scope-only, so ZAP is physically constrained on top of our wrapper scope.
 The mapping/regex helpers are pure and unit-tested; only ZapClient touches the
@@ -41,7 +41,7 @@ def include_regexes(scope) -> list:
 
 
 def alert_to_finding(a: dict) -> dict:
-    """Map one ZAP alert dict to a BBH finding."""
+    """Map one ZAP alert dict to a Apolaki finding."""
     name = a.get("alert") or a.get("name") or "ZAP alert"
     cweid = str(a.get("cweid", "")).strip()
     cwe = f"CWE-{cweid}" if cweid and cweid not in ("", "-1", "0") else ""
@@ -130,7 +130,7 @@ class ZapClient:
         await self._call("ascan", "action", "setOptionTargetParamsInjectable", Integer=injectable)
         await self._call("ascan", "action", "setOptionTargetParamsEnabledRPC", Integer=rpc)
 
-    async def add_scan_header(self, name: str = "X-Scanner", value: str = "BBH-ZAP-authorized"):
+    async def add_scan_header(self, name: str = "X-Scanner", value: str = "Apolaki-ZAP-authorized"):
         """Tag every ZAP request with an identifying header (AddZAPHeader.js idea)
         so the target owner can spot authorized scan traffic and allowlist it."""
         return await self._call("replacer", "action", "addRule", description=f"bbh-{name}",

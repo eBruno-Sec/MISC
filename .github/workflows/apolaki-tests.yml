@@ -1,11 +1,11 @@
-name: bbh-agent tests
+name: apolaki tests
 
 on:
   push:
     branches: [ main ]
-    paths: [ 'bbh-agent/**', '.github/workflows/bbh-agent-tests.yml' ]
+    paths: [ 'apolaki/**', '.github/workflows/apolaki-tests.yml' ]
   pull_request:
-    paths: [ 'bbh-agent/**', '.github/workflows/bbh-agent-tests.yml' ]
+    paths: [ 'apolaki/**', '.github/workflows/apolaki-tests.yml' ]
 
 jobs:
   pytest:
@@ -21,4 +21,4 @@ jobs:
       - name: Install test deps
         run: python -m pip install --upgrade pip pytest "httpx[http2]>=0.27.0" openai anthropic fastapi python-multipart
       - name: Run tests
-        run: python -m pytest bbh-agent/agent/tests/ -q
+        run: python -m pytest apolaki/agent/tests/ -q

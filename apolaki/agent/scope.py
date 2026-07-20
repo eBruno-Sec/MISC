@@ -4,7 +4,7 @@ Scope enforcement engine + multi-format scope-file parsing.
 Enforces scope at the tool-wrapper level (deny-overrides-allow, wildcard match)
 and parses program scope from HackerOne / Bugcrowd CSV, Burp JSON, and
 section/prefix/markdown plain-text. The parser is adapted from OLYMPUS
-routers/scope.py; the engine keeps BBH's original wildcard semantics and adds a
+routers/scope.py; the engine keeps Apolaki's original wildcard semantics and adds a
 structured-rules view for web_security.is_url_in_scope.
 """
 import csv

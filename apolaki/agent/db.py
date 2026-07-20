@@ -1,7 +1,7 @@
 """
 SQLite persistence layer.
 
-OLYMPUS uses Postgres across a multi-container stack; BBH stays single-container,
+OLYMPUS uses Postgres across a multi-container stack; Apolaki stays single-container,
 so we persist missions, findings, HTTP-exchange evidence, the event log, notes,
 and auth profiles to a single SQLite file on a mounted volume. Findings and
 exchange payloads are stored as JSON blobs so new fields never require a

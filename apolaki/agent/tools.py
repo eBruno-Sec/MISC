@@ -81,7 +81,7 @@ TOOL_PERMISSIONS = {
     "run_sqlmap": PermissionLevel.INTRUSIVE,
 }
 
-_UA = "Mozilla/5.0 (compatible; BBH-Agent/2.0; +authorized-testing)"
+_UA = "Mozilla/5.0 (compatible; Apolaki/2.0; +authorized-testing)"
 
 
 def _chrome_path():

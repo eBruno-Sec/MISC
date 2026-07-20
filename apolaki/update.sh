@@ -19,7 +19,7 @@ else
     COMPOSE="docker-compose"
 fi
 
-echo -e "\n${BOLD}BBH Agent Updater${NC}\n"
+echo -e "\n${BOLD}Apolaki Updater${NC}\n"
 
 info "Pulling latest code..."
 git pull origin main

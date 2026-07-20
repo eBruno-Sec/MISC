@@ -1,4 +1,4 @@
-# BBH Agent — Quick Start (Plain English)
+# Apolaki — Quick Start (Plain English)
 
 Follow these steps in order. Do not skip any.
 

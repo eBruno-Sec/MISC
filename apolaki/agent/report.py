@@ -34,7 +34,7 @@ def generate_report(program: str, findings: list, scope: dict,
     now = _now()
     if not findings:
         return (
-            f"# Bug Bounty Report: {program}\n\n"
+            f"# Security Assessment Report: {program}\n\n"
             f"**Date:** {now}\n"
             f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
             "No confirmed vulnerabilities found during this engagement.\n"
@@ -44,7 +44,7 @@ def generate_report(program: str, findings: list, scope: dict,
     counts = _counts(findings)
 
     lines = [
-        f"# Bug Bounty Report: {program}", "",
+        f"# Security Assessment Report: {program}", "",
         f"**Date:** {now}",
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",
@@ -145,7 +145,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
     scope_str = e(", ".join(scope.get("in_scope", [])))
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BBH Report — {e(program)}</title>
+<title>Apolaki Report — {e(program)}</title>
 <style>
 :root{{--bg:#020608;--surface:#080e12;--border:#0e2535;--text:#c8dde6;--dim:#6a8a9a;--bright:#f0f8fc;--accent:#00e5ff}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',ui-monospace,monospace;line-height:1.6}}
@@ -180,14 +180,14 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 </style></head><body>
 <button class="pdfbtn noprint" onclick="window.print()">Save as PDF</button>
 <div class="wrap">
-<div class="head"><h1>Bug Bounty Report — {e(program)}</h1>
+<div class="head"><h1>Security Assessment Report — {e(program)}</h1>
 <div class="sub">Generated {e(_now())} · Scope: {scope_str} · {len(findings)} finding(s)</div>
 <div class="chips">{peek}</div></div>
 {cov_html}
 {chain_html}
 <h2>Findings</h2>
 {''.join(cards) if cards else "<p class='sub'>No confirmed vulnerabilities found during this engagement.</p>"}
-<footer>BBH Agent · authorized security research only. Verify every finding before submitting.</footer>
+<footer>Apolaki · authorized security research only. Verify every finding before submitting.</footer>
 </div></body></html>"""
 
 
