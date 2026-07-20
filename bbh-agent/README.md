@@ -75,7 +75,8 @@ docker compose logs -f    # troubleshoot
 | 🌐 **DNS + takeover recon** | DNS-over-HTTPS intel (SPF/DMARC/CAA/vendors) and subdomain-takeover detection (dangling-CNAME provider fingerprints). |
 | 🔐 **Authenticated scanning** | Paste session headers (Cookie/Authorization) or an auto-login (URL + creds); the session is shared with every scanner to reach the post-login surface. |
 | 📦 **Persistence + archive** | Missions, findings, evidence, notes, and the event log persist in SQLite on a Docker volume. The **Archive** tab reloads any past mission; backup/restore a session as JSON. |
-| 📊 **Reports** | HackerOne/Bugcrowd Markdown, a dark-themed standalone HTML report (every field escaped), plus CSV / JSON / PoC-Markdown export. |
+| 📊 **Reports** | HackerOne/Bugcrowd Markdown (view + download), a standalone HTML report with a one-click **Save as PDF** (print-optimized), plus CSV / JSON / PoC-Markdown export. |
+| 🌓 **Theme + rescan** | Night-mode default with a light/dark toggle (persisted). Rescan any archived mission — clones its config into a **new** linked child mission (originals never mutated). |
 
 ---
 
@@ -204,13 +205,20 @@ GET  /backup/{id}  POST /restore      Session backup / import as a new mission
 
 ## Configuration (`.env`)
 
+Preferred: set the provider plus the three generic `AI_*` vars. Provider-specific
+vars still work and take precedence per field (provider-specific > generic `AI_*` >
+default), so existing `.env` files keep working. `/config` reports the effective
+provider/model/readiness and never returns the key; a missing key makes `/engage`
+return a clear **422** (not a 500) and the UI disables Start Hunt with a warning.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `AI_PROVIDER` | `openrouter` | `openrouter` or `anthropic` |
-| `OPENROUTER_API_KEY` | — | required when provider is openrouter |
-| `OPENROUTER_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` | any tool-calling OpenRouter model |
-| `ANTHROPIC_API_KEY` | — | required when provider is anthropic |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Anthropic model id |
+| `AI_API_KEY` | — | **preferred** generic key (used when the provider-specific key is unset) |
+| `AI_MODEL` | per-provider default | **preferred** generic model id |
+| `AI_BASE_URL` | provider default | **preferred** generic API base URL |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | — | optional overrides (win over `AI_*`) |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | — | optional overrides (win over `AI_*`) |
 | `BBH_APPROVAL_TIMEOUT` | `0` | seconds before an unanswered intrusive gate auto-denies (`0` = wait forever) |
 | `BBH_DB_PATH` | `/app/data/bbh.db` | SQLite path (mounted volume) |
 
@@ -320,7 +328,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (108 tests)
+│   └── tests/             # deterministic pytest suite (113 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

@@ -13,6 +13,13 @@
   --text:#c8dde6;--text-dim:#6a8a9a;--text-bright:#f0f8fc;
   --mono:'JetBrains Mono','Courier New',monospace;--sans:'Syne',sans-serif;
 }
+/* Light mode — same variable names, ink-on-paper values. Night mode is the
+   default (no data-theme attribute), so the existing look is unchanged. */
+:root[data-theme="light"]{
+  --bg:#f4f7f9;--surface:#ffffff;--surface2:#eaf1f5;--border:#cdd9e0;
+  --accent:#0a6ea1;--accent2:#d11e5f;--accent3:#1a7f37;--gold:#b45309;--purple:#6d28d9;
+  --text:#17262e;--text-dim:#566871;--text-bright:#0a1418;
+}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--text);font-family:var(--mono);display:grid;grid-template-rows:44px 30px 1fr 34px;font-size:13px}
@@ -129,6 +136,8 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <div class="provider-badge pb-openrouter" id="providerBadge">loading...</div>
   <div class="hdr-divider"></div>
   <div style="font-size:.63rem;color:var(--text-dim);margin-right:.7rem">Authorized Testing Only</div>
+  <button id="themeToggle" onclick="toggleTheme()" title="Toggle light / night mode"
+    style="background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;padding:.2rem .55rem;margin-right:.6rem;cursor:pointer;text-transform:uppercase">◐ Theme</button>
   <div class="status-pill s-idle" id="statusPill">IDLE</div>
 </header>
 
@@ -161,6 +170,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
       <div class="hint">Shared with every scanner to reach post-login surface. Redacted in evidence.</div>
     </div>
     <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous — pre-authorize intrusive gate</label>
+    <div id="cfgWarn" style="display:none;font-size:.62rem;line-height:1.5;color:var(--accent2);border:1px solid var(--accent2);padding:.45rem .55rem"></div>
     <button class="btn-start" id="btnStart" onclick="startHunt()">Start Hunt</button>
     <button class="btn-stop" id="btnStop" onclick="stopHunt()">Stop Hunt</button>
     <div class="perm-legend">
@@ -273,11 +283,13 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
     <div class="panel" id="p-report">
       <h3 class="sec">Report &amp; Export</h3>
       <div class="footer-btns" style="flex-wrap:wrap;gap:.5rem">
-        <button class="btn btn-acc" onclick="openHtmlReport()">Open HTML report ↗</button>
+        <button class="btn btn-acc" onclick="openHtmlReport()">Open HTML / PDF ↗</button>
+        <button class="btn" onclick="dl('md')">Download Markdown</button>
         <button class="btn" onclick="dl('csv')">Export CSV</button>
         <button class="btn" onclick="dl('json')">Export JSON</button>
         <button class="btn" onclick="dl('poc')">PoC Markdown</button>
         <button class="btn" onclick="copyReport()">Copy Markdown</button>
+        <button class="btn" onclick="rescanCurrent()">↻ Rescan (new mission)</button>
         <button class="btn" onclick="dlBackup()">↓ Backup session</button>
       </div>
       <pre class="mono-out" id="reportContent" style="margin-top:.8rem;max-height:none">Run a hunt to generate a report.</pre>
@@ -325,6 +337,14 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 <script>
 const API = window.location.origin;
 let sessionId=null, es=null, running=false, reportMd="", pendingApproval=null;
+let aiReady=true, pendingParent=null;
+
+// theme: night mode is the default; persisted in localStorage
+function applyTheme(t){document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");
+  try{localStorage.setItem("bbh-theme",t);}catch(e){}}
+function toggleTheme(){const cur=document.documentElement.getAttribute("data-theme")||"dark";
+  applyTheme(cur==="light"?"dark":"light");}
+applyTheme((()=>{try{return localStorage.getItem("bbh-theme")||"dark";}catch(e){return "dark";}})());
 let counts={critical:0,high:0,medium:0,low:0}, findings=[];
 const PHASES=["recon","enum","scan","probe","guidance","report"];
 let phaseState={};
@@ -360,12 +380,21 @@ function setPhase(p){
 }
 renderPhaseBar();
 
-fetch(`${API}/config`).then(r=>r.json()).then(cfg=>{
-  const b=document.getElementById("providerBadge"), or=cfg.provider==="openrouter";
-  b.className=`provider-badge ${or?"pb-openrouter":"pb-anthropic"}`;
-  b.textContent=or?`OR / ${cfg.model.split("/").pop()}`:`Anthropic / ${cfg.model.split("-").slice(1,3).join(" ")}`;
-  b.title=cfg.model;
-}).catch(()=>document.getElementById("providerBadge").textContent="provider unknown");
+function refreshConfig(){
+  return fetch(`${API}/config`).then(r=>r.json()).then(cfg=>{
+    aiReady = cfg.ready !== false;
+    const b=document.getElementById("providerBadge"), or=cfg.provider==="openrouter";
+    b.className=`provider-badge ${or?"pb-openrouter":"pb-anthropic"}`;
+    const short=(cfg.model||"").split("/").pop();
+    b.textContent = aiReady ? (or?`OR / ${short}`:`Anthropic / ${short}`) : "NO KEY";
+    b.title = aiReady ? (cfg.model||"") : (cfg.hint||"AI credentials missing");
+    const w=document.getElementById("cfgWarn"), start=document.getElementById("btnStart");
+    if(!aiReady){ w.style.display="block"; w.textContent="⚠ "+(cfg.hint||"AI credentials missing.");
+      if(!running) start.disabled=true; }
+    else{ w.style.display="none"; if(!running) start.disabled=false; }
+  }).catch(()=>{document.getElementById("providerBadge").textContent="provider unknown";});
+}
+refreshConfig();
 fetch(`${API}/wordlists`).then(r=>r.json()).then(d=>{
   const sel=document.getElementById("wbWordlist");
   (d.wordlists||[]).forEach(w=>sel.insertAdjacentHTML("beforeend",`<option value="${w.id}">${w.label} (${w.count})</option>`));
@@ -397,6 +426,7 @@ async function startHunt(){
   const programName=document.getElementById("programName").value.trim();
   const inRaw=document.getElementById("inScope").value.trim();
   if(!programName||!inRaw){alert("Program name and at least one in-scope domain required.");return;}
+  if(!aiReady){alert("AI credentials are missing. Set AI_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env and restart the container.");return;}
   counts={critical:0,high:0,medium:0,low:0}; findings=[]; updateCounters(); renderFindings();
   phaseState={}; renderPhaseBar(); clearTerm(false); reportMd="";
   const inScope=inRaw.split("\n").map(s=>s.trim()).filter(Boolean);
@@ -404,11 +434,17 @@ async function startHunt(){
   const body={program_name:programName,in_scope:inScope,out_of_scope:outScope,
     objective:document.getElementById("objective").value.trim()||null,
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
-    auth_headers:parseHeaders(document.getElementById("authHeaders").value)};
+    auth_headers:parseHeaders(document.getElementById("authHeaders").value),
+    parent_id:pendingParent||null};
   try{
     const res=await fetch(`${API}/engage`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(!res.ok)throw new Error(await res.text());
+    if(!res.ok){
+      let msg; try{const j=await res.json(); msg=j.detail||JSON.stringify(j);}catch(_){msg=await res.text();}
+      throw new Error(`${res.status}: ${msg}`);
+    }
     const eng=await res.json(); sessionId=eng.session_id; running=true;
+    if(eng.parent_id)log("info",`Rescan of mission <strong>${esc(eng.parent_id)}</strong> — new child mission created.`);
+    pendingParent=null;
     if(eng.authenticated)log("info",`Authenticated scan · ${esc(eng.auth_note||"session headers attached")}`);
     document.getElementById("btnStart").disabled=true; document.getElementById("btnStop").style.display="block";
     document.getElementById("sessLabel").textContent=`${programName} [${sessionId}] · ${body.mode}`;
@@ -624,6 +660,24 @@ function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/h
 function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");}
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){navigator.clipboard.writeText(reportMd||"").then(()=>log("info","Report markdown copied."));}
+function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
+
+// Rescan: clone an existing mission's config into the form for a NEW mission
+// (the original is never mutated). Start Hunt then creates a linked child.
+async function rescan(id){
+  try{
+    const d=await(await fetch(`${API}/missions/${id}`)).json();
+    const sc=d.scope||{}, m=d.mission||{};
+    document.getElementById("programName").value=m.program||"";
+    document.getElementById("inScope").value=(sc.in_scope||[]).join("\n");
+    document.getElementById("outScope").value=(sc.out_of_scope||[]).join("\n");
+    document.getElementById("objective").value=m.objective||"";
+    if(m.mode)document.getElementById("mode").value=m.mode;
+    pendingParent=id;
+    switchTab("feed");
+    log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> [${esc(id)}]. Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
+  }catch(e){alert("Rescan prefill failed: "+e.message);}
+}
 
 // mission archive (persistence)
 async function loadArchive(){
@@ -632,10 +686,12 @@ async function loadArchive(){
     document.getElementById("archiveList").innerHTML=ms.length?
       `<table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Created</th><th></th></tr>${ms.map(m=>{
         const c=m.counts||{}, tot=Object.values(c).reduce((a,b)=>a+b,0);
-        return `<tr><td>${esc(m.program)}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
+        const child=m.parent_id?` <span class="muted" title="cloned from ${esc(m.parent_id)}">↳ child</span>`:"";
+        return `<tr><td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
           <td><span class="tag-copy" onclick="loadMission('${m.id}','${esc(m.program)}')">→ load</span>
+              <span class="tag-copy" onclick="rescan('${m.id}')">↻ rescan</span>
               <span class="tag-copy" style="color:var(--accent2)" onclick="delMission('${m.id}')">✕</span></td></tr>`;
       }).join("")}</table>`
       :'<p class="muted">No saved missions yet.</p>';

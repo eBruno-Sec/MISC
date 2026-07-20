@@ -15,7 +15,7 @@ import replay as replay_mod
 import report as report_mod
 import scope as scope_mod
 import wordlists as wl
-from agent import BBHAgent, AI_PROVIDER, OPENROUTER_MODEL, ANTHROPIC_MODEL
+from agent import BBHAgent, ai_status
 from scope import ScopeEngine
 from tools import ToolRegistry
 
@@ -38,6 +38,7 @@ class EngageRequest(BaseModel):
     # authenticated scanning: raw session headers and/or an auto-login
     auth_headers: dict = {}        # e.g. {"Cookie": "session=..."} or {"Authorization": "Bearer ..."}
     login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
+    parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
 
 
 class ReplayRequest(BaseModel):
@@ -122,9 +123,9 @@ async def ui():
 @app.get("/config")
 async def config():
     import collaborator as collab
-    model = OPENROUTER_MODEL if AI_PROVIDER == "openrouter" else ANTHROPIC_MODEL
-    return {"provider": AI_PROVIDER, "model": model,
-            "oob_enabled": collab.enabled(), "oob_base": collab.base()}
+    # ai_status() reports the effective provider/model/base_url + credential
+    # readiness; it never returns the API key.
+    return {**ai_status(), "oob_enabled": collab.enabled(), "oob_base": collab.base()}
 
 
 # ── native OOB collaborator: inbound interaction sink + correlation ──
@@ -151,6 +152,14 @@ async def oob_hits(token: str):
 # ── mission lifecycle ────────────────────────────────────────────
 @app.post("/engage")
 async def engage(req: EngageRequest):
+    # Credential preflight: fail clearly with 422 (not a raw 500) before we build
+    # the agent/provider client. The message names the missing var, never the key.
+    st = ai_status()
+    if not st["ready"]:
+        raise HTTPException(422, st["hint"])
+    if not req.in_scope:
+        raise HTTPException(422, "At least one in-scope target is required.")
+
     session_id = uuid.uuid4().hex[:8]
     scope = ScopeEngine()
     scope.load_manual(req.in_scope, req.out_of_scope, req.program_name)
@@ -171,6 +180,8 @@ async def engage(req: EngageRequest):
     tools = ToolRegistry(scope, mission_id=session_id, lab_mode=(req.mode == "full"),
                          session_headers=session_headers)
     stop_event = asyncio.Event()
+    # A fresh agent + stop_event per mission — rescans clone config into a NEW
+    # session and never reuse a prior mission's in-memory objects.
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
                      auto_approve=req.auto_approve, mission_id=session_id)
 
@@ -178,14 +189,17 @@ async def engage(req: EngageRequest):
         f"Perform comprehensive bug bounty recon and vulnerability discovery on {req.program_name}. "
         f"In-scope targets: {', '.join(req.in_scope)}")
 
-    db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(),
-                      {"auto_approve": req.auto_approve,
-                       "authenticated": bool(session_headers), "auth_note": auth_note})
+    context = {"auto_approve": req.auto_approve,
+               "authenticated": bool(session_headers), "auth_note": auth_note}
+    if req.parent_id and db.get_mission(req.parent_id):
+        context["parent_id"] = req.parent_id   # archive parent/child linkage
+    db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
                             "status": "created", "streaming": False}
     return {"session_id": session_id, "mode": req.mode,
-            "authenticated": bool(session_headers), "auth_note": auth_note}
+            "authenticated": bool(session_headers), "auth_note": auth_note,
+            "parent_id": context.get("parent_id")}
 
 
 @app.get("/stream/{session_id}")
@@ -256,7 +270,8 @@ async def list_missions():
 async def mission_detail(session_id: str):
     m = _require_mission(session_id)
     return {
-        "mission": {k: m[k] for k in ("id", "program", "mode", "status", "phase", "objective", "created_at")},
+        "mission": {**{k: m[k] for k in ("id", "program", "mode", "status", "phase", "objective", "created_at")},
+                    "parent_id": m["context"].get("parent_id")},
         "scope": m["scope"],
         "findings": db.get_findings(session_id),
         "notes": db.get_notes(session_id),
@@ -300,6 +315,15 @@ async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains)
     return {"markdown": md, "findings": findings}
+
+
+@app.get("/report/{session_id}/md")
+async def get_report_md(session_id: str):
+    m, findings, scope, coverage, chains = _report_bundle(session_id)
+    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains)
+    fname = f"bbh-report-{session_id}.md"
+    return PlainTextResponse(md, media_type="text/markdown",
+                             headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 @app.get("/report/{session_id}/html")
@@ -588,11 +612,11 @@ async def restore(payload: dict):
 @app.on_event("startup")
 async def startup():
     db.init()
-    provider = AI_PROVIDER
-    if provider == "openrouter" and not os.getenv("OPENROUTER_API_KEY"):
-        print("[WARN] AI_PROVIDER=openrouter but OPENROUTER_API_KEY is not set")
-    elif provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
-        print("[WARN] AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")
+    st = ai_status()   # secret-free; never prints the key
+    if not st["ready"]:
+        print(f"[WARN] AI provider '{st['provider']}' has no credentials — {st['hint']}")
+    else:
+        print(f"[INFO] AI ready: {st['provider']} / {st['model']} (key from {st['key_source']})")
 
     # background nuclei template update (best-effort; skipped if binary absent)
     import shutil

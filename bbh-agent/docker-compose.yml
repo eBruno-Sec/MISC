@@ -3,10 +3,15 @@ services:
     build: ./agent
     environment:
       - AI_PROVIDER=${AI_PROVIDER:-openrouter}
+      # Generic AI config (preferred). Provider-specific vars below still win if set.
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-}
+      - AI_BASE_URL=${AI_BASE_URL:-}
+      # Provider-specific (optional; take precedence over the generic AI_* above).
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct:free}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
       # 0 = HITL intrusive gate waits forever; >0 = auto-deny after N seconds
       - BBH_APPROVAL_TIMEOUT=${BBH_APPROVAL_TIMEOUT:-0}
       # Native OOB collaborator for blind SSRF/XXE confirmation. Empty = OOB stays

@@ -1034,6 +1034,113 @@ def test_cmdi_finding_shapes():
     assert of["cwe"] == "CWE-78" and of["severity"] == "critical" and "rce" in of["tags"]
 
 
+# ── AI config resolution + credential preflight + secret safety ──
+_AI_ENV = ("AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "OPENROUTER_API_KEY",
+           "OPENROUTER_MODEL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL")
+
+
+def _env_snapshot():
+    return {k: os.environ.get(k) for k in _AI_ENV}
+
+
+def _env_restore(snap):
+    for k, v in snap.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+def test_resolve_ai_config_precedence_and_generic_fallback():
+    import agent as agmod
+    snap = _env_snapshot()
+    try:
+        for k in _AI_ENV:
+            os.environ.pop(k, None)
+        # the exact 500 scenario: OPENROUTER_API_KEY injected empty, generic set
+        os.environ["AI_PROVIDER"] = "openrouter"
+        os.environ["OPENROUTER_API_KEY"] = ""
+        os.environ["AI_API_KEY"] = "sk-generic"
+        os.environ["AI_MODEL"] = "vendor/model"
+        c = agmod.resolve_ai_config()
+        assert c["api_key"] == "sk-generic" and c["model"] == "vendor/model"
+        assert c["base_url"] == "https://openrouter.ai/api/v1"
+        # provider-specific wins over the generic alias
+        os.environ["OPENROUTER_API_KEY"] = "sk-specific"
+        os.environ["OPENROUTER_MODEL"] = "p/m"
+        c = agmod.resolve_ai_config()
+        assert c["api_key"] == "sk-specific" and c["model"] == "p/m"
+        # default model when neither specific nor generic model is set
+        os.environ.pop("OPENROUTER_MODEL"); os.environ.pop("AI_MODEL")
+        assert agmod.resolve_ai_config()["model"] == agmod.DEFAULT_OPENROUTER_MODEL
+    finally:
+        _env_restore(snap)
+
+
+def test_ai_status_is_secret_free_and_reports_readiness():
+    import agent as agmod
+    snap = _env_snapshot()
+    try:
+        for k in _AI_ENV:
+            os.environ.pop(k, None)
+        os.environ["AI_PROVIDER"] = "openrouter"
+        os.environ["AI_API_KEY"] = "sk-SECRET-VALUE"
+        st = agmod.ai_status()
+        assert st["ready"] is True and st["key_source"] == "AI_API_KEY"
+        assert "api_key" not in st and "sk-SECRET-VALUE" not in json.dumps(st)
+        os.environ.pop("AI_API_KEY")
+        st = agmod.ai_status()
+        assert st["ready"] is False and "OPENROUTER_API_KEY" in st["hint"]
+    finally:
+        _env_restore(snap)
+
+
+def test_config_endpoint_and_engage_preflight_422():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    snap = _env_snapshot()
+    try:
+        for k in _AI_ENV:
+            os.environ.pop(k, None)
+        os.environ["AI_PROVIDER"] = "openrouter"          # no key configured
+        client = TestClient(mainmod.app)                   # no lifespan -> no DB needed here
+        cfg = client.get("/config").json()
+        assert cfg["ready"] is False and "api_key" not in cfg
+        r = client.post("/engage", json={"program_name": "P", "in_scope": ["x.com"]})
+        assert r.status_code == 422 and "OPENROUTER_API_KEY" in r.json()["detail"]
+        # with a key present, /config reports ready and never echoes the secret
+        os.environ["AI_API_KEY"] = "sk-DO-NOT-LEAK"
+        cfg = client.get("/config").json()
+        assert cfg["ready"] is True and "sk-DO-NOT-LEAK" not in json.dumps(cfg)
+    finally:
+        _env_restore(snap)
+
+
+def test_report_markdown_csv_json_and_print_css():
+    findings = [{"title": "SQLi", "severity": "critical", "target": "https://t/i?id=1", "cwe": "CWE-89",
+                 "description": "d", "impact": "i", "reproduction_steps": ["a", "b"]}]
+    scope = {"in_scope": ["t.com"]}
+    md = report.generate_report("Prog", findings, scope)
+    assert "# Bug Bounty Report: Prog" in md and "SQLi" in md and "CWE-89" in md
+    csv_out = report.findings_csv(findings)
+    assert csv_out.splitlines()[0].startswith("title,severity,target") and "SQLi" in csv_out
+    j = json.loads(report.findings_json("Prog", findings, scope))
+    assert j["program"] == "Prog" and j["findings"][0]["title"] == "SQLi"
+    html = report.generate_html_report("Prog", findings, scope)
+    assert "@media print" in html and "Save as PDF" in html      # print-to-PDF ready
+
+
+def test_rescan_parent_linkage_surfaces_in_list():
+    d = tempfile.mkdtemp()
+    db.init(os.path.join(d, "t.db"))
+    db.create_mission("par", "P", "active", "o", {"in_scope": ["x"]}, {})
+    db.create_mission("chi", "P", "full", "o", {"in_scope": ["x"]}, {"parent_id": "par"})
+    ms = {m["id"]: m for m in db.list_missions()}
+    assert ms["chi"]["parent_id"] == "par" and ms["par"]["parent_id"] is None
+
+
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 

@@ -165,7 +165,21 @@ code{{color:var(--accent)}}.ev{{background:var(--bg);border:1px solid var(--bord
 .notes{{color:var(--dim);font-style:italic;font-size:.78rem;border-top:1px dashed var(--border);padding-top:.5rem}}
 ol,ul{{padding-left:1.3rem}}.chains li{{margin:.3rem 0}}
 footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid var(--border);padding-top:1rem}}
-</style></head><body><div class="wrap">
+.pdfbtn{{position:fixed;top:1rem;right:1rem;background:var(--accent);color:#001;border:none;font-family:inherit;
+  font-size:.8rem;font-weight:700;padding:.5rem .9rem;cursor:pointer;border-radius:3px;z-index:10}}
+/* Print / Save-as-PDF: white background, ink-friendly, keep findings whole */
+@media print{{
+  :root{{--bg:#fff;--surface:#fff;--border:#bbb;--text:#111;--dim:#555;--bright:#000;--accent:#04c}}
+  body{{background:#fff;color:#111}}
+  .wrap{{max-width:100%;padding:0 .5rem}}
+  .finding{{break-inside:avoid;page-break-inside:avoid}}
+  .ev{{white-space:pre-wrap;word-break:break-word}}
+  a{{color:#04c}}
+  .pdfbtn,.noprint{{display:none!important}}
+}}
+</style></head><body>
+<button class="pdfbtn noprint" onclick="window.print()">Save as PDF</button>
+<div class="wrap">
 <div class="head"><h1>Bug Bounty Report — {e(program)}</h1>
 <div class="sub">Generated {e(_now())} · Scope: {scope_str} · {len(findings)} finding(s)</div>
 <div class="chips">{peek}</div></div>

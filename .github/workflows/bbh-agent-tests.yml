@@ -19,6 +19,6 @@ jobs:
       # __init__ builds the provider client — so openai + anthropic are needed.
       # (fastapi/playwright stay out: main.py and the browser pass aren't tested.)
       - name: Install test deps
-        run: python -m pip install --upgrade pip pytest "httpx[http2]>=0.27.0" openai anthropic
+        run: python -m pip install --upgrade pip pytest "httpx[http2]>=0.27.0" openai anthropic fastapi
       - name: Run tests
         run: python -m pytest bbh-agent/agent/tests/ -q

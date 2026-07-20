@@ -114,10 +114,14 @@ def list_missions(limit: int = 100) -> list:
     out = []
     for m in rows:
         counts = finding_counts(m["id"])
+        try:
+            parent_id = json.loads(m.get("context") or "{}").get("parent_id")
+        except (ValueError, TypeError):
+            parent_id = None
         out.append({
             "id": m["id"], "program": m["program"], "mode": m["mode"],
             "status": m["status"], "phase": m["phase"], "created_at": m["created_at"],
-            "counts": counts,
+            "counts": counts, "parent_id": parent_id,
         })
     return out
 

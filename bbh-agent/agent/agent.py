@@ -9,10 +9,53 @@ import triage as triage_mod
 from scope import ScopeEngine, PermissionLevel
 from tools import ToolRegistry, TOOL_PERMISSIONS
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").lower()
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 APPROVAL_TIMEOUT = int(os.getenv("BBH_APPROVAL_TIMEOUT", "0"))  # 0 = wait forever
+
+DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+DEFAULT_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+
+
+def resolve_ai_config() -> dict:
+    """Resolve the effective AI provider/key/model/base_url.
+
+    Precedence for every field: provider-specific var > generic AI_* alias >
+    default. This keeps the original OPENROUTER_* / ANTHROPIC_* vars working while
+    also accepting the generic AI_API_KEY / AI_MODEL / AI_BASE_URL format. Empty
+    provider vars (e.g. OPENROUTER_API_KEY="" injected by compose) fall through to
+    the generic alias, which is the fix for the empty-key 500. Read fresh each call
+    so it reflects the current environment; the api_key is never logged."""
+    provider = os.getenv("AI_PROVIDER", "openrouter").lower()
+    g_key = os.getenv("AI_API_KEY", "").strip()
+    g_model = os.getenv("AI_MODEL", "").strip()
+    g_base = os.getenv("AI_BASE_URL", "").strip()
+    if provider == "anthropic":
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip() or g_key
+        model = os.getenv("ANTHROPIC_MODEL", "").strip() or g_model or DEFAULT_ANTHROPIC_MODEL
+        base = g_base  # empty -> the anthropic SDK uses its own default endpoint
+        key_var = "ANTHROPIC_API_KEY"
+    else:
+        provider = "openrouter"
+        key = os.getenv("OPENROUTER_API_KEY", "").strip() or g_key
+        model = os.getenv("OPENROUTER_MODEL", "").strip() or g_model or DEFAULT_OPENROUTER_MODEL
+        base = g_base or DEFAULT_OPENROUTER_BASE
+        key_var = "OPENROUTER_API_KEY"
+    return {"provider": provider, "api_key": key, "model": model,
+            "base_url": base, "key_var": key_var}
+
+
+def ai_status() -> dict:
+    """Secret-free view of the effective AI config for /config and the /engage
+    preflight. Reports readiness and where the key came from, but never the key."""
+    c = resolve_ai_config()
+    ready = bool(c["api_key"])
+    if ready:
+        source = c["key_var"] if os.getenv(c["key_var"], "").strip() else "AI_API_KEY"
+    else:
+        source = ""
+    hint = "" if ready else f"{c['key_var']} is missing — set it (or AI_API_KEY) with your {c['provider']} API key."
+    return {"provider": c["provider"], "model": c["model"], "base_url": c["base_url"],
+            "ready": ready, "key_var": c["key_var"], "key_source": source, "hint": hint}
 
 # tool -> assessment phase (drives the phase status bar in the UI)
 PHASE_OF = {
@@ -89,13 +132,23 @@ class BBHAgent:
         self._approval_event = asyncio.Event()
         self._approval_result = None
 
-        if AI_PROVIDER == "openrouter":
+        cfg = resolve_ai_config()
+        self.provider = cfg["provider"]
+        self.model = cfg["model"]
+        if cfg["provider"] == "openrouter":
             from openai import AsyncOpenAI
-            self.client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1",
-                                      api_key=os.environ.get("OPENROUTER_API_KEY", "missing"))
+            # "missing" is a defensive placeholder so construction never raises;
+            # /engage runs a credential preflight and rejects with 422 before here.
+            self.client = AsyncOpenAI(base_url=cfg["base_url"] or DEFAULT_OPENROUTER_BASE,
+                                      api_key=cfg["api_key"] or "missing")
         else:
             import anthropic
-            self.client = anthropic.AsyncAnthropic()
+            kwargs = {}
+            if cfg["api_key"]:
+                kwargs["api_key"] = cfg["api_key"]
+            if cfg["base_url"]:
+                kwargs["base_url"] = cfg["base_url"]
+            self.client = anthropic.AsyncAnthropic(**kwargs)
 
     # ── HITL approval API (called by main.py) ────────────────────
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
@@ -188,7 +241,7 @@ class BBHAgent:
     # ── entry ────────────────────────────────────────────────────
     async def run(self, objective: str, session_id: str) -> AsyncGenerator[dict, None]:
         yield {"type": "phase", "phase": "recon"}
-        if AI_PROVIDER == "openrouter":
+        if self.provider == "openrouter":
             gen = self._run_openrouter(objective, session_id)
         else:
             gen = self._run_anthropic(objective, session_id)
@@ -238,7 +291,7 @@ class BBHAgent:
                 yield {"type": "complete", "content": "Hunt stopped by user."}
                 return
             response = await self.client.chat.completions.create(
-                model=OPENROUTER_MODEL, messages=messages, tools=openai_tools, max_tokens=4096)
+                model=self.model, messages=messages, tools=openai_tools, max_tokens=4096)
             msg = response.choices[0].message
             if msg.content:
                 yield {"type": "text", "content": msg.content}
@@ -274,7 +327,7 @@ class BBHAgent:
                 yield {"type": "complete", "content": "Hunt stopped by user."}
                 return
             response = await self.client.messages.create(
-                model=ANTHROPIC_MODEL, max_tokens=4096, system=self._system(),
+                model=self.model, max_tokens=4096, system=self._system(),
                 tools=tool_defs, messages=messages)
             for block in response.content:
                 if getattr(block, "text", None):

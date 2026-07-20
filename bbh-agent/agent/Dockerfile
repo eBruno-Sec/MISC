@@ -55,6 +55,9 @@ RUN python3 -m playwright install --with-deps chromium || \
 
 RUN mkdir -p /app/data
 COPY *.py .
+# Ship the test suite so `docker compose exec agent python3 -m pytest tests/ -q`
+# works as documented (conftest.py adds /app to sys.path).
+COPY tests ./tests
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
