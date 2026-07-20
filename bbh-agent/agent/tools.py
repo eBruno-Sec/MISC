@@ -26,6 +26,7 @@ import dns_recon
 import guidance as guidance_mod
 import surface as surface_mod
 import web_security as ws
+import xss_tool as xt
 from scope import ScopeEngine, PermissionLevel
 
 
@@ -56,6 +57,7 @@ TOOL_PERMISSIONS = {
     "check_takeover": PermissionLevel.ACTIVE,
     "run_graphql": PermissionLevel.ACTIVE,
     "run_jwt": PermissionLevel.ACTIVE,
+    "run_xss": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
@@ -68,6 +70,21 @@ TOOL_PERMISSIONS = {
 }
 
 _UA = "Mozilla/5.0 (compatible; BBH-Agent/2.0; +authorized-testing)"
+
+
+def _chrome_path():
+    """Locate a headless Chromium for the XSS execution pass (env override or the
+    Playwright browser bundle). Returns None if none is available."""
+    import glob
+    env = os.getenv("BBH_CHROME_PATH")
+    if env and os.path.exists(env):
+        return env
+    for pat in ("/opt/pw-browsers/chromium-*/chrome-linux/chrome",
+                "/opt/pw-browsers/chromium-*/chrome-linux64/chrome"):
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[-1]
+    return None
 
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
@@ -131,6 +148,15 @@ CLAUDE_TOOLS = [
          "header_name": {"type": "string", "default": "Authorization"},
          "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
          "required": ["token"]}},
+    {"name": "run_xss",
+     "description": ("ACTIVE: Cross-site scripting test on a URL. First does context-aware reflection analysis "
+                     "(finds where each parameter reflects — HTML/attribute/script/comment — and whether a breakout "
+                     "survives unescaped), then CONFIRMS execution in a real headless browser (alert fires). The "
+                     "browser pass also catches DOM-only XSS via the URL fragment. Pass a URL with query parameters."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Parameters to test (default: all in the URL)"}},
+         "required": ["url"]}},
     {"name": "run_ffuf",
      "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
      "input_schema": {"type": "object", "properties": {
@@ -634,6 +660,105 @@ class ToolRegistry:
         if res.get("cracked_secret"):
             summary += f", secret='{res['cracked_secret']}'"
         return ToolResult("jwt", url or "token", True, summary, findings)
+
+    async def _run_xss(self, inp: dict) -> ToolResult:
+        import httpx
+        url = inp["url"]
+        params = inp.get("params") or xt.params_of(url)
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        reflected = []
+
+        # 1) context-aware reflection analysis (fast, no browser)
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
+            for p in params:
+                cu = xt.set_param(url, p, xt.CANARY)
+                if not self.scope.validate(cu)[0]:
+                    continue
+                try:
+                    r = await c.get(cu, headers=headers)
+                except Exception:
+                    continue
+                for ctx in xt.contexts_of(r.text):
+                    bu = xt.set_param(url, p, xt.BREAKOUTS[ctx])
+                    try:
+                        rb = await c.get(bu, headers=headers)
+                    except Exception:
+                        continue
+                    if xt.reflected_exploitable(rb.text, ctx):
+                        reflected.append((p, xt.reflection_finding(url, p, ctx)))
+                        break
+
+        # 2) execution confirmation in a real browser (also catches DOM-only XSS)
+        exec_findings = await self._xss_execute(url, params)
+
+        def _param_of(title):
+            bits = title.rsplit("'", 2)
+            return bits[1] if len(bits) >= 2 else ""
+        confirmed = {_param_of(f["title"]) for f in exec_findings}
+        # drop a reflected candidate when the same param was browser-confirmed
+        findings = [f for p, f in reflected if p not in confirmed] + exec_findings
+
+        if self.mission_id and findings:
+            await self._http(findings[0]["target"], "GET", capture=True)
+        conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
+        return ToolResult("xss", url, True,
+                          f"{len(findings)} XSS signal(s), {conf} browser-confirmed", findings)
+
+    async def _xss_execute(self, url: str, params: list) -> list:
+        """Load payloads in headless Chromium; an alert() firing = confirmed XSS.
+        Best-effort: returns [] if Playwright/Chromium is unavailable."""
+        chrome = _chrome_path()
+        if not chrome:
+            return []
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return []
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        findings = []
+        # (where, param) injection targets
+        targets = [("query", p, pl, xt.set_param(url, p, pl))
+                   for p in (params or []) for pl in xt.EXEC_PAYLOADS]
+        targets += [("fragment", "<fragment>", pl, xt.set_fragment(url, pl)) for pl in xt.EXEC_PAYLOADS]
+
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True, executable_path=chrome,
+                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                ctx = await browser.new_context(ignore_https_errors=True)
+                if self.session_headers:
+                    hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hdrs:
+                        await ctx.set_extra_http_headers(hdrs)
+                page = await ctx.new_page()
+                fired = {"msg": None}
+
+                async def on_dialog(d):
+                    fired["msg"] = d.message
+                    try:
+                        await d.dismiss()
+                    except Exception:
+                        pass
+                page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
+
+                done = set()
+                for where, p, pl, tu in targets:
+                    if (where, p) in done or not self.scope.validate(tu)[0]:
+                        continue
+                    fired["msg"] = None
+                    try:
+                        await page.goto(tu, wait_until="load", timeout=8000)
+                        await page.wait_for_timeout(350)
+                    except Exception:
+                        pass
+                    if fired["msg"] and xt.MARK in str(fired["msg"]):
+                        findings.append(xt.execution_finding(url, p, pl, where))
+                        done.add((where, p))
+                await browser.close()
+        except Exception:
+            return findings
+        return findings
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))

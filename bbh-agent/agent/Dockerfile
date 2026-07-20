@@ -35,6 +35,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
 
+# Headless Chromium for the browser-based XSS execution pass (run_xss).
+# Best-effort: if the fetch fails (offline build), run_xss falls back to
+# reflection-only analysis and the rest of the agent is unaffected.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN python3 -m playwright install --with-deps chromium || \
+    echo "[WARN] Chromium install skipped; run_xss will use reflection-only mode"
+
 RUN mkdir -p /app/data
 COPY *.py .
 

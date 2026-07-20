@@ -28,6 +28,7 @@ import graphql_tool as gql
 import jwt_tool as jt
 import authz_tool as authz
 import race_tool as race
+import xss_tool as xt
 
 
 # ── security: target validation ──────────────────────────────────
@@ -516,6 +517,33 @@ def test_race_best_round_picks_most_successes():
     r3 = [{"status": 409}] * 5
     best = race.best_round([r1, r2, r3])
     assert race.summarize(best)["successes"] == 3
+
+
+# ── xss_tool: context detection + breakout exploitability ────────
+def test_xss_context_detection():
+    c = xt.CANARY
+    assert xt.contexts_of(f"<p>hello {c} world</p>") == ["html"]
+    assert xt.contexts_of(f'<input value="{c}">') == ["attr_dq"]
+    assert xt.contexts_of(f"<input value='{c}'>") == ["attr_sq"]
+    assert xt.contexts_of(f"<script>var x='{c}';</script>") == ["script"]
+    assert xt.contexts_of(f"<!-- {c} -->") == ["comment"]
+
+
+def test_xss_reflected_exploitable_needs_unescaped_breakout():
+    body_vuln = f"<p>you searched {xt.BREAKOUTS['html']}</p>"
+    assert xt.reflected_exploitable(body_vuln, "html")
+    # same input HTML-escaped -> NOT exploitable (the whole point)
+    body_safe = "<p>you searched &lt;bbhx7h&gt;</p>"
+    assert not xt.reflected_exploitable(body_safe, "html")
+    assert xt.reflected_exploitable(f'<input value="{xt.BREAKOUTS["attr_dq"]}">', "attr_dq")
+
+
+def test_xss_set_param_and_fragment():
+    out = xt.set_param("https://t/s?q=1&z=2", "q", "<x>")
+    assert "q=%3Cx%3E" in out or "q=<x>" in out
+    assert xt.set_fragment("https://t/p?a=1", "<img>").endswith("#<img>")
+
+
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
