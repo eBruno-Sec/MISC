@@ -19,8 +19,11 @@ RUN go install github.com/projectdiscovery/katana/cmd/katana@latest       || ech
 RUN go install github.com/ffuf/ffuf/v2@latest                             || echo "[WARN] ffuf build skipped"
 RUN go install github.com/hahwul/dalfox/v2@latest                         || echo "[WARN] dalfox build skipped"
 
-# Stage 2: Kali Linux runtime
-FROM kalilinux/kali-rolling
+# Stage 2: runtime — Debian slim (Python preinstalled) rather than Kali, whose
+# rolling mirror (http.kali.org) frequently 503s mid-build. Every security package
+# we use (nmap/whatweb/dirb/sqlmap) is in Debian too, served from the reliable
+# deb.debian.org CDN.
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -28,12 +31,12 @@ ENV PYTHONUNBUFFERED=1
 # SQLite database for mission/finding/evidence persistence (mounted volume)
 ENV BBH_DB_PATH=/app/data/bbh.db
 
-RUN apt-get update -q && apt-get install -y -q \
-    python3 python3-pip \
-    nmap whatweb \
-    dirb sqlmap \
-    libpcap-dev \
-    && rm -rf /var/lib/apt/lists/*
+# These CLI tools are optional — the agent skips any that are missing and uses its
+# native equivalents — so a transient apt hiccup must not fail the build.
+RUN apt-get update -o Acquire::Retries=3 -q && \
+    apt-get install -y --no-install-recommends -q nmap whatweb dirb sqlmap \
+      || echo "[WARN] apt security tools skipped; native equivalents will be used"; \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy every binary that built (whichever succeeded above). The trailing slash
 # copies the directory contents; tools that were skipped simply aren't present.
@@ -41,7 +44,7 @@ COPY --from=go-builder /go/bin/ /usr/local/bin/
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Headless Chromium for the browser-based XSS execution pass (run_xss).
 # Best-effort: if the fetch fails (offline build), run_xss falls back to

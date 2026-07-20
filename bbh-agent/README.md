@@ -283,7 +283,7 @@ bbh-agent/
 ├── docker-compose.yml     # single service + persistence volume
 ├── install.sh / update.sh
 ├── agent/
-│   ├── Dockerfile         # Go tools -> Kali runtime
+│   ├── Dockerfile         # Go tools -> Debian-slim runtime
 │   ├── requirements.txt
 │   ├── main.py            # FastAPI server + SSE + all endpoints
 │   ├── agent.py           # ReAct orchestrator, modes, HITL gate, phase + triage
