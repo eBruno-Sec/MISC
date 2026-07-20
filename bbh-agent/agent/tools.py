@@ -71,6 +71,7 @@ TOOL_PERMISSIONS = {
     "run_race": PermissionLevel.INTRUSIVE,
     "run_ssrf": PermissionLevel.INTRUSIVE,
     "run_deserialization": PermissionLevel.INTRUSIVE,
+    "run_exposure": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
@@ -269,6 +270,13 @@ CLAUDE_TOOLS = [
          "cookies": {"type": "object", "description": "Optional name->value cookies to test (adds to session cookies)"},
          "params": {"type": "array", "items": {"type": "string"}, "description": "Restrict to these query params (default: all)"}},
          "required": ["url"]}},
+    {"name": "run_exposure",
+     "description": ("INTRUSIVE: Information-disclosure scan for exposed high-value files — .git/.svn directories, "
+                     ".env / wp-config backups / .aws credentials, phpinfo / server-status, .htpasswd, and DB dumps. "
+                     "Each hit is confirmed by a strong content signature (so a catch-all 200 page cannot false-"
+                     "positive); a readable .git yields a source-recoverable escalation."),
+     "input_schema": {"type": "object", "properties": {
+         "base_url": {"type": "string", "description": "Base URL, e.g. https://target/"}}, "required": ["base_url"]}},
     {"name": "run_zap",
      "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
@@ -1432,6 +1440,41 @@ class ToolRegistry:
         return ToolResult("deserialization", url, True,
                           f"{len(inputs)} serialized input(s), {len(findings)} signal(s), {conf} confirmed",
                           findings)
+
+    async def _run_exposure(self, inp: dict) -> ToolResult:
+        import exposure_tool as exp
+        base_url = inp["base_url"].rstrip("/")
+        baseline = await self._http(f"{base_url}/bbh-nonexistent-{os.urandom(4).hex()}", capture=False)
+        base_body = baseline.get("body", "")
+        findings, confirmed_git, evid = [], [], []
+        sem = asyncio.Semaphore(10)
+
+        async def probe(check):
+            url = f"{base_url}/{check['path']}"
+            if not self.scope.validate(url)[0]:
+                return
+            async with sem:
+                r = await self._http(url, capture=False)
+            if r.get("error"):
+                return
+            f = exp.classify(check, r.get("status", 0), r.get("body", ""),
+                             r["headers"].get("content-type", ""), base_body)
+            if f:
+                f["target"] = url
+                findings.append(f)
+                evid.append(url)
+                if check["family"] == "git_exposure":
+                    confirmed_git.append(check["path"])
+
+        await asyncio.gather(*[probe(c) for c in exp.EXPOSURE_CHECKS])
+        if any(p in confirmed_git for p in (".git/HEAD", ".git/config", ".git/index")):
+            findings.append({**exp.git_reconstruct_finding(confirmed_git),
+                             "target": f"{base_url}/.git/"})
+        self.recon.setdefault("exposure", []).extend(f["title"] for f in findings)
+        if self.mission_id and evid:
+            await self._http(evid[0], "GET", capture=True)
+        return ToolResult("exposure", base_url, True,
+                          f"{len(exp.EXPOSURE_CHECKS)} checks, {len(findings)} exposure(s)", findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc

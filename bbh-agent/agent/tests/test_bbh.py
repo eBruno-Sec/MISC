@@ -35,6 +35,7 @@ import fingerprint as fp
 import ssrf_tool as ssrf
 import deser_tool as deser
 import oauth_tool as oauth
+import exposure_tool as exp
 
 
 # ── security: target validation ──────────────────────────────────
@@ -808,6 +809,39 @@ def test_oauth_findings_shape():
     f = oauth.redirect_finding("https://sso.t/authorize",
                                [{"name": "@-userinfo", "location": f"https://{oauth.EVIL_HOST}/cb?code=1"}])
     assert f["severity"] == "critical" and f["cwe"] == "CWE-601" and f["confidence"] == "confirmed"
+
+
+# ── exposure_tool: information-disclosure file checks ────────────
+def _check(path):
+    return next(c for c in exp.EXPOSURE_CHECKS if c["path"] == path)
+
+
+def test_exposure_confirms_git_config_by_signature():
+    body = "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = git@x:y.git\n"
+    f = exp.classify(_check(".git/config"), 200, body, "text/plain", "not found")
+    assert f and f["family"] == "git_exposure" and f["cwe"] == "CWE-527" and f["confidence"] == "confirmed"
+
+
+def test_exposure_confirms_dotenv_and_aws():
+    env = exp.classify(_check(".env"), 200, "APP_KEY=base64:abc\nDB_PASSWORD=secret\n", "text/plain", "")
+    assert env and env["severity"] == "critical"
+    aws = exp.classify(_check(".aws/credentials"), 200,
+                       "[default]\naws_access_key_id = AKIA...\naws_secret_access_key = x\n", "", "")
+    assert aws and aws["family"] == "credential_exposure"
+
+
+def test_exposure_no_false_positive_on_catchall_and_404():
+    spa = "<!doctype html><title>App</title><div id=root></div>"
+    # catch-all 200 returning the SPA for every path -> no signature -> no hit
+    assert exp.classify(_check(".env"), 200, spa, "text/html", spa) is None
+    assert exp.classify(_check(".git/config"), 200, spa, "text/html", "") is None
+    # 404 with the real content is still not a positive
+    assert exp.classify(_check(".git/config"), 404, "[core]", "text/plain", "") is None
+
+
+def test_exposure_git_reconstruct_finding():
+    f = exp.git_reconstruct_finding([".git/HEAD", ".git/config"])
+    assert "source recoverable" in f["title"].lower() and f["cwe"] == "CWE-527"
 
 
 def _run(coro):

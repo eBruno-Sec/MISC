@@ -91,10 +91,10 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
   subfinder crtsh wayback dns asn httpx nmap nuclei whatweb fingerprint katana ffuf takeover
-  http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization zap dalfox sqlmap
+  http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization exposure zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -134,6 +134,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_race | INTRUSIVE | Race-condition (TOCTOU): gate-synchronized burst + before/after state verify |
 | run_ssrf | INTRUSIVE | SSRF: cloud-metadata reflection (AWS/GCP/Azure/Alibaba/DO) + internal open/closed port oracle + filter-bypass encodings |
 | run_deserialization | INTRUSIVE | Insecure deserialization: detect PHP/Java/pickle/.NET/Ruby blobs in params/cookies + corrupt-and-confirm the sink (no gadgets) |
+| run_exposure | INTRUSIVE | Information disclosure: exposed .git/.svn/.env/backups/.aws/phpinfo, signature-confirmed + source-recoverable escalation |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
@@ -291,6 +292,7 @@ bbh-agent/
 │   ├── ssrf_tool.py       # SSRF: cloud-metadata reflection + blind port oracle + bypass encodings
 │   ├── deser_tool.py      # insecure deserialization: format detection + corrupt-and-confirm sink
 │   ├── oauth_tool.py      # OAuth/SSO: redirect_uri bypass + state CSRF + implicit token leak
+│   ├── exposure_tool.py   # information disclosure: signature-confirmed exposed .git/.env/backup/cred files
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -298,7 +300,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (81 tests)
+│   └── tests/             # deterministic pytest suite (85 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```
