@@ -125,6 +125,10 @@ class BBHAgent:
         self.auto_approve = auto_approve
         self.mission_id = mission_id
         self.recon_cycles = max(1, min(int(recon_cycles or 1), 3))
+        # Warm-start directive from cross-session memory (set by /engage when a
+        # prior mission on the same target left intel). Empty by default so a
+        # first-ever scan behaves exactly as before.
+        self.memory_note = ""
         self.findings: list = []
         self.current_phase = "init"
 
@@ -296,6 +300,7 @@ class BBHAgent:
 
     def _system(self) -> str:
         return (SYSTEM_PROMPT + MODE_NOTES.get(self.mode, "") + self._recon_note()
+                + (self.memory_note or "")
                 + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}")
 
     # ── OpenRouter / OpenAI ──────────────────────────────────────

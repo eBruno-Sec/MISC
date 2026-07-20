@@ -10,10 +10,13 @@ from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, Pla
 from pydantic import BaseModel
 
 import db
+import graph_model
+import memory as memory_mod
 import poc
 import replay as replay_mod
 import report as report_mod
 import scope as scope_mod
+import surface as surface_mod
 import wordlists as wl
 from agent import BBHAgent, ai_status
 from scope import ScopeEngine
@@ -115,6 +118,48 @@ def _require_mission(sid: str) -> dict:
     return m
 
 
+def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
+    """Seed a new mission's surface from prior-mission memory on the same target.
+
+    Returns a small summary ({seeded, subdomains, hosts, endpoints, prior_findings})
+    for the UI/log; also sets ``agent.memory_note`` so the model knows these
+    assets are already known and can go straight to deeper coverage. Everything is
+    scope-validated here, so a since-changed scope silently drops stale intel."""
+    tkey = memory_mod.target_key(scope.to_dict())
+    assets = db.get_memory_assets(tkey)
+    if not assets:
+        return {"seeded": False}
+
+    subs = [a["value"] for a in assets.get("subdomains", []) if scope.validate(a["value"])[0]]
+    for s in subs:
+        if s not in tools.recon["subdomains"]:
+            tools.recon["subdomains"].append(s)
+
+    host_urls = [f"https://{a['value']}" for a in assets.get("hosts", [])]
+    ep_urls = []
+    for a in assets.get("endpoints", []):
+        v = a["value"]                        # stored as "host/path"
+        ep_urls.append("https://" + v if "://" not in v else v)
+    before = len(tools.urls)
+    tools._add_urls(host_urls + ep_urls)      # each URL re-validated against scope
+    seeded_urls = len(tools.urls) - before
+
+    prior = db.get_prior_snapshot(tkey)
+    prior_findings = len(prior.get("findings", [])) if prior else 0
+
+    summary = {"seeded": bool(subs or seeded_urls), "subdomains": len(subs),
+               "endpoints": seeded_urls, "prior_findings": prior_findings,
+               "assets_known": sum(len(v) for v in assets.values())}
+    if summary["seeded"] or prior_findings:
+        agent.memory_note = (
+            f"\n\nPRIOR INTEL (cross-session memory for this target): a previous mission already "
+            f"mapped {len(subs)} in-scope subdomain(s) and {seeded_urls} endpoint(s), now pre-loaded into "
+            f"the attack surface, and confirmed {prior_findings} finding(s). Do NOT waste cycles rediscovering "
+            "these — treat them as known, verify they still hold, and spend your effort finding NEW surface and "
+            "NEW vulnerabilities beyond what was seen before. Every seeded asset is already scope-validated.")
+    return summary
+
+
 # ── UI + config ──────────────────────────────────────────────────
 @app.get("/")
 async def ui():
@@ -189,13 +234,20 @@ async def engage(req: EngageRequest):
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
                      auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles)
 
+    # ── warm-start from cross-session memory ─────────────────────────
+    # If a prior mission on the SAME target (keyed by scope, not id) left intel,
+    # seed the known-good subdomains / hosts / endpoints back in — every value is
+    # re-validated against THIS mission's scope, so a tightened scope drops stale
+    # assets. No prior memory ⇒ nothing seeded and the scan behaves as a cold run.
+    warm_start = _warm_start(scope, tools, agent)
+
     objective = req.objective or (
         f"Perform comprehensive bug bounty recon and vulnerability discovery on {req.program_name}. "
         f"In-scope targets: {', '.join(req.in_scope)}")
 
     context = {"auto_approve": req.auto_approve,
                "authenticated": bool(session_headers), "auth_note": auth_note,
-               "recon_cycles": recon_cycles}
+               "recon_cycles": recon_cycles, "warm_start": warm_start}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
@@ -204,7 +256,7 @@ async def engage(req: EngageRequest):
                             "status": "created", "streaming": False}
     return {"session_id": session_id, "mode": req.mode,
             "authenticated": bool(session_headers), "auth_note": auth_note,
-            "parent_id": context.get("parent_id")}
+            "parent_id": context.get("parent_id"), "warm_start": warm_start}
 
 
 @app.get("/stream/{session_id}")
@@ -232,6 +284,7 @@ async def stream(session_id: str):
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
         finally:
             sess["status"] = "complete"
+            _record_memory(session_id)   # persist intel for the next mission + archived views
             db.update_mission(session_id, status="complete")
 
     return StreamingResponse(event_gen(), media_type="text/event-stream",
@@ -361,13 +414,80 @@ async def get_report_poc(session_id: str, redact: bool = True):
     return PlainTextResponse(md, media_type="text/markdown")
 
 
+# ── cross-session memory: record + graph + diff ──────────────────
+def _graph_inputs(session_id: str):
+    """(recon, urls, findings) for graph/surface — from the live agent if the
+    session is in memory, else from the snapshot persisted at mission end."""
+    findings = db.get_findings(session_id)
+    if session_id in sessions:
+        t = sessions[session_id]["tools"]
+        return t.recon, t.urls, findings
+    m = db.get_mission(session_id)
+    gd = (m or {}).get("context", {}).get("graph_data", {}) if m else {}
+    return gd.get("recon", {}), gd.get("urls", []), findings
+
+
+def _record_memory(session_id: str) -> None:
+    """At mission end: snapshot the discovered surface into cross-session memory
+    (for warm-start + diffing) and stash a compact graph_data blob in the mission
+    context so archived views render without the live agent. Best-effort — never
+    breaks the stream teardown."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        tools = sessions[session_id]["tools"]
+        findings = db.get_findings(session_id)
+        tkey = memory_mod.target_key(m["scope"])
+        snap = memory_mod.snapshot(tools.recon, tools.urls, findings)
+        db.record_memory(tkey, session_id, snap)
+        ctx = dict(m["context"])
+        ctx["graph_data"] = {
+            "recon": {"live_hosts": tools.recon.get("live_hosts", []),
+                      "subdomains": tools.recon.get("subdomains", [])},
+            "urls": tools.urls[:1000],
+        }
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+
+
 # ── attack surface + evidence + playbook ─────────────────────────
 @app.get("/surface/{session_id}")
 async def get_surface(session_id: str):
     _require_mission(session_id)
     if session_id in sessions:
         return sessions[session_id]["tools"].surface_inventory()
-    return {"inventory": [], "stats": {}}
+    # Archived mission: rebuild the inventory from the persisted URL list.
+    _, urls, _ = _graph_inputs(session_id)
+    inv = surface_mod.build_inventory(urls)
+    return {"inventory": inv, "stats": surface_mod.surface_stats(inv)}
+
+
+@app.get("/graph/{session_id}")
+async def get_graph(session_id: str):
+    """Knowledge graph over this mission's surface: domain→host→endpoint→finding,
+    plus host→tech. Deterministic; drives the topology view and lets the agent
+    reason over relationships. Works live or from the archived snapshot."""
+    _require_mission(session_id)
+    recon, urls, findings = _graph_inputs(session_id)
+    return graph_model.build_graph(recon, urls, findings)
+
+
+@app.get("/memory/{session_id}/diff")
+async def get_memory_diff(session_id: str):
+    """'Since last scan' — diff this mission's surface against the most recent
+    prior mission on the same target: new/removed subdomains, endpoints, tech and
+    findings. Empty (has_prior=false) when this is the target's first scan."""
+    m = _require_mission(session_id)
+    recon, urls, findings = _graph_inputs(session_id)
+    curr = memory_mod.snapshot(recon, urls, findings)
+    tkey = memory_mod.target_key(m["scope"])
+    prior = db.get_prior_snapshot(tkey, before_mission=session_id)
+    return {"target_key": tkey, "diff": memory_mod.diff(prior, curr),
+            "current": curr.get("counts", {})}
 
 
 @app.get("/exchanges/{session_id}")

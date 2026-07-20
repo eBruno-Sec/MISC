@@ -54,9 +54,18 @@ def init(path: str = None) -> None:
             CREATE TABLE IF NOT EXISTS profiles(
                 id TEXT PRIMARY KEY, mission_id TEXT, name TEXT, role TEXT,
                 headers TEXT, is_owner INTEGER, created_at TEXT);
+            CREATE TABLE IF NOT EXISTS memory_assets(
+                target_key TEXT, kind TEXT, value TEXT,
+                first_seen TEXT, last_seen TEXT,
+                PRIMARY KEY(target_key, kind, value));
+            CREATE TABLE IF NOT EXISTS memory_snapshots(
+                id TEXT PRIMARY KEY, target_key TEXT, mission_id TEXT,
+                data TEXT, created_at TEXT);
             CREATE INDEX IF NOT EXISTS ix_find_mid ON findings(mission_id);
             CREATE INDEX IF NOT EXISTS ix_exch_mid ON exchanges(mission_id);
             CREATE INDEX IF NOT EXISTS ix_log_mid ON logs(mission_id);
+            CREATE INDEX IF NOT EXISTS ix_mem_tk ON memory_assets(target_key);
+            CREATE INDEX IF NOT EXISTS ix_snap_tk ON memory_snapshots(target_key, created_at);
             """
         )
         _conn.commit()
@@ -244,3 +253,60 @@ def get_profiles_raw(mid: str) -> list:
 
 def delete_profile(pid: str) -> None:
     _exec("DELETE FROM profiles WHERE id=?", (pid,))
+
+
+# ── Cross-session memory (per-target intel, keyed by scope, not mission) ──
+def record_memory(target_key: str, mission_id: str, snapshot: dict) -> str:
+    """Persist a mission's snapshot: upsert accumulated assets (first/last seen)
+    and append the snapshot for later diffing. Only in-scope, secret-free data
+    ever reaches here (the caller builds the snapshot from recon/surface)."""
+    import memory as memory_mod
+    now = _now()
+    with _lock:
+        for kind, value in memory_mod.asset_pairs(snapshot):
+            _conn.execute(
+                "INSERT INTO memory_assets(target_key,kind,value,first_seen,last_seen) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(target_key,kind,value) "
+                "DO UPDATE SET last_seen=excluded.last_seen",
+                (target_key, kind, value, now, now))
+        sid = uuid.uuid4().hex[:12]
+        _conn.execute("INSERT INTO memory_snapshots VALUES(?,?,?,?,?)",
+                      (sid, target_key, mission_id, json.dumps(snapshot), now))
+        _conn.commit()
+    return sid
+
+
+def get_memory_assets(target_key: str) -> dict:
+    """Accumulated assets for a target grouped by kind, each with first/last
+    seen — the warm-start seed for a new mission on the same program."""
+    rows = _query(
+        "SELECT kind,value,first_seen,last_seen FROM memory_assets "
+        "WHERE target_key=? ORDER BY kind,value", (target_key,))
+    out = {}
+    for r in rows:
+        out.setdefault(r["kind"], []).append(
+            {"value": r["value"], "first_seen": r["first_seen"], "last_seen": r["last_seen"]})
+    return out
+
+
+def get_prior_snapshot(target_key: str, before_mission: str = None) -> dict:
+    """Most recent snapshot for a target, excluding one mission (the current
+    one) — the baseline a 'since last scan' diff compares against."""
+    if before_mission:
+        rows = _query(
+            "SELECT data FROM memory_snapshots WHERE target_key=? AND mission_id!=? "
+            "ORDER BY created_at DESC LIMIT 1", (target_key, before_mission))
+    else:
+        rows = _query(
+            "SELECT data FROM memory_snapshots WHERE target_key=? "
+            "ORDER BY created_at DESC LIMIT 1", (target_key,))
+    return json.loads(rows[0]["data"]) if rows else {}
+
+
+def get_snapshot(mission_id: str) -> dict:
+    """This mission's own recorded snapshot (used to render surface/topology for
+    an archived mission whose live agent is gone)."""
+    rows = _query(
+        "SELECT data FROM memory_snapshots WHERE mission_id=? "
+        "ORDER BY created_at DESC LIMIT 1", (mission_id,))
+    return json.loads(rows[0]["data"]) if rows else {}

@@ -41,6 +41,8 @@ import xxe_tool as xxe
 import github_recon as ghr
 import sqli_tool as sqli
 import cmdi_tool as cmdi
+import graph_model
+import memory as memory_mod
 
 
 # ── security: target validation ──────────────────────────────────
@@ -1254,3 +1256,163 @@ def test_intrusive_gate_requires_and_denies():
     assert a.intrusive_state == "denied"
     assert any(ev.get("type") == "approval_required" for ev in events)
     assert any(ev.get("type") == "scope_block" for ev in events)  # tool skipped after deny
+
+
+# ── knowledge graph ──────────────────────────────────────────────
+_G_RECON = {
+    "live_hosts": [{"url": "https://api.example.com", "tech": ["nginx", "Django"]},
+                   {"url": "https://www.example.com", "tech": ["nginx"]}],
+    "subdomains": ["api.example.com", "www.example.com", "dev.example.com"],
+}
+_G_URLS = ["https://api.example.com/orders/1?id=1", "https://api.example.com/orders/2?id=2",
+           "https://www.example.com/login", "https://api.example.com/orders/1?id=3"]
+_G_FINDINGS = [
+    {"id": "f1", "title": "IDOR on /orders", "severity": "high", "category": "Authorization",
+     "target": "https://api.example.com/orders/1"},
+    {"id": "f2", "title": "Missing security headers", "severity": "low", "category": "Config",
+     "target": "https://www.example.com/login"},
+]
+
+
+def test_graph_build_typed_nodes_and_edges():
+    g = graph_model.build_graph(_G_RECON, _G_URLS, _G_FINDINGS)
+    kinds = {n["kind"] for n in g["nodes"]}
+    assert {"domain", "host", "endpoint", "tech", "finding"} <= kinds
+    # dev.example.com (subdomain-only, no url) is still a host node
+    assert any(n["id"] == "host:dev.example.com" for n in g["nodes"])
+    assert g["stats"]["findings"] == 2
+    # duplicated (host,path) with different query collapses to ONE endpoint node
+    orders1 = [n for n in g["nodes"] if n["id"] == "ep:api.example.com/orders/1"]
+    assert len(orders1) == 1
+    rels = {e["rel"] for e in g["edges"]}
+    assert {"has_host", "serves", "runs", "found"} <= rels
+
+
+def test_graph_neighbors_and_related_findings():
+    g = graph_model.build_graph(_G_RECON, _G_URLS, _G_FINDINGS)
+    hid = "host:api.example.com"
+    nb = graph_model.neighbors(g, hid)
+    assert "tech:Django" in nb and any(x.startswith("ep:api.example.com") for x in nb)
+    rf = graph_model.related_findings(g, hid)          # host->endpoint->finding (2 hops)
+    assert any("IDOR" in f["label"] for f in rf)
+    # the www finding is NOT reachable from the api host
+    assert not any("headers" in f["label"].lower() for f in rf)
+
+
+def test_graph_edges_only_between_known_nodes():
+    g = graph_model.build_graph(_G_RECON, _G_URLS, _G_FINDINGS)
+    ids = {n["id"] for n in g["nodes"]}
+    for e in g["edges"]:
+        assert e["source"] in ids and e["target"] in ids
+
+
+def test_graph_empty_inputs_safe():
+    g = graph_model.build_graph({}, [], [])
+    assert g["nodes"] == [] and g["edges"] == [] and g["stats"]["nodes"] == 0
+
+
+# ── cross-session memory ─────────────────────────────────────────
+def test_memory_target_key_stable_across_wildcards_and_order():
+    a = memory_mod.target_key({"in_scope": ["*.example.com", "api.example.com"]})
+    b = memory_mod.target_key({"in_scope": ["https://api.example.com:443/x", "www.example.com"]})
+    assert a == b == "example.com"
+    # two distinct roots sort deterministically
+    c = memory_mod.target_key({"in_scope": ["b.com", "a.com"]})
+    assert c == "a.com|b.com"
+
+
+def test_memory_finding_fp_ignores_severity_and_wording():
+    f1 = {"title": "IDOR here", "severity": "high", "category": "Authorization",
+          "target": "https://api.example.com/orders/1"}
+    f2 = {"title": "totally different words", "severity": "low", "category": "Authorization",
+          "target": "https://api.example.com/orders/1?id=9"}
+    assert memory_mod.finding_fp(f1) == memory_mod.finding_fp(f2)  # same class + location
+    f3 = {"title": "IDOR here", "category": "Authorization",
+          "target": "https://api.example.com/other"}
+    assert memory_mod.finding_fp(f1) != memory_mod.finding_fp(f3)  # different path
+
+
+def test_memory_snapshot_and_diff():
+    snap = memory_mod.snapshot(_G_RECON, _G_URLS, _G_FINDINGS)
+    assert "dev.example.com" in snap["subdomains"]
+    assert snap["counts"]["findings"] == 2
+    # dedup: /orders/1 appears twice in urls -> one endpoint
+    assert snap["endpoints"].count("api.example.com/orders/1") == 1
+    prior = {"hosts": ["api.example.com"], "subdomains": ["api.example.com", "www.example.com"],
+             "endpoints": ["api.example.com/orders/1"], "tech": ["nginx"],
+             "findings": [{"fp": memory_mod.finding_fp(_G_FINDINGS[0])}]}
+    d = memory_mod.diff(prior, snap)
+    assert d["has_prior"] is True
+    assert "dev.example.com" in d["subdomains"]["added"]
+    assert any(f["title"] == "Missing security headers" for f in d["findings"]["added"])
+    assert d["findings"]["removed"] == []
+    # no prior -> has_prior false, nothing "added" spuriously flagged as change vs empty
+    d0 = memory_mod.diff({}, snap)
+    assert d0["has_prior"] is False
+
+
+def test_db_memory_roundtrip_assets_and_prior_snapshot():
+    db.init(os.path.join(tempfile.mkdtemp(), "mem.db"))
+    tk = memory_mod.target_key({"in_scope": ["*.example.com"]})
+    s1 = memory_mod.snapshot(_G_RECON, _G_URLS, _G_FINDINGS)
+    db.record_memory(tk, "m1", s1)
+    assets = db.get_memory_assets(tk)
+    assert len(assets["subdomains"]) == 3 and assets["tech"]
+    # re-recording keeps assets unique (PK on target_key,kind,value) and bumps last_seen
+    db.record_memory(tk, "m1b", s1)
+    assert len(db.get_memory_assets(tk)["subdomains"]) == 3
+    # a later mission's "prior" excludes itself and returns m1's snapshot
+    s2 = memory_mod.snapshot(_G_RECON, _G_URLS + ["https://new.example.com/x"], _G_FINDINGS)
+    db.record_memory(tk, "m2", s2)
+    prior = db.get_prior_snapshot(tk, before_mission="m2")
+    assert "new.example.com" not in prior["hosts"]
+    assert db.get_snapshot("m2")["counts"]["endpoints"] > db.get_snapshot("m1")["counts"]["endpoints"]
+
+
+def test_graph_and_memory_endpoints_via_testclient():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    import db as dbmod
+    snap = _env_snapshot()
+    try:
+        for k in _AI_ENV:
+            os.environ.pop(k, None)
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-test"
+        dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+        with TestClient(mainmod.app) as c:
+            e = c.post("/engage", json={"program_name": "P", "in_scope": ["*.example.com"]})
+            assert e.status_code == 200
+            j = e.json()
+            assert j["warm_start"] == {"seeded": False}       # first-ever scan: cold
+            sid = j["session_id"]
+            # graph endpoint responds even before the agent runs (empty but well-formed)
+            g = c.get(f"/graph/{sid}").json()
+            assert "nodes" in g and "edges" in g and "stats" in g
+            # inject a live surface + finding, then re-query graph + diff
+            tools = mainmod.sessions[sid]["tools"]
+            tools.recon.update(_G_RECON)
+            tools._add_urls(_G_URLS)
+            for f in _G_FINDINGS:
+                dbmod.add_finding(sid, dict(f))
+            g2 = c.get(f"/graph/{sid}").json()
+            assert g2["stats"]["findings"] == 2 and g2["stats"]["hosts"] >= 2
+            d = c.get(f"/memory/{sid}/diff").json()
+            assert d["diff"]["has_prior"] is False            # no prior mission yet
+            assert d["current"]["findings"] == 2
+            # record this mission's memory, then a SECOND mission warm-starts from it
+            mainmod._record_memory(sid)
+            e2 = c.post("/engage", json={"program_name": "P", "in_scope": ["*.example.com"]})
+            ws2 = e2.json()["warm_start"]
+            assert ws2["seeded"] is True and ws2["subdomains"] >= 1
+            sid2 = e2.json()["session_id"]
+            # the second agent carries a prior-intel note; surface is pre-seeded
+            assert "PRIOR INTEL" in mainmod.sessions[sid2]["agent"].memory_note
+            surf = c.get(f"/surface/{sid2}").json()
+            assert surf["stats"]["endpoints"] >= 1
+            # and the diff now sees a prior baseline
+            d2 = c.get(f"/memory/{sid2}/diff").json()
+            assert d2["diff"]["has_prior"] is True
+    finally:
+        _env_restore(snap)
