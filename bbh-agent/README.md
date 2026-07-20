@@ -218,6 +218,11 @@ With `ZAP_ADDR` unset, `run_zap` skips cleanly and the rest of the agent runs
 normally. Because it is INTRUSIVE, a ZAP scan rides the same approval gate as
 every other intrusive tool.
 
+The active scan is tuned for real targets: input vectors are widened to POST
+data, JSON bodies, headers, and cookies (not just the query string), an optional
+`scan_policy` selects a custom ZAP policy, and every ZAP request carries an
+`X-Scanner` header so the target owner can identify authorized scan traffic.
+
 ---
 
 ## Requirements

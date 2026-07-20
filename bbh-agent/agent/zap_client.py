@@ -117,9 +117,25 @@ class ZapClient:
     async def ajax_status(self) -> str:
         return (await self._call("ajaxSpider", "view", "status")).get("status", "")
 
-    async def ascan(self, url: str, context_id: str = None) -> str:
+    async def ascan(self, url: str, context_id: str = None, policy: str = None) -> str:
         return (await self._call("ascan", "action", "scan", url=url, contextId=context_id,
-                                 recurse="true", inScopeOnly="true")).get("scan")
+                                 recurse="true", inScopeOnly="true",
+                                 scanPolicyName=(policy or None))).get("scan")
+
+    async def set_injectable(self, injectable: int = 27, rpc: int = 7):
+        """Tune active-scan input vectors. injectable bitmask: querystring(1) +
+        postdata(2) + headers(8) + cookie(16) = 27. rpc: multipart(1)+xml(2)+
+        json(4) = 7 — so JSON API bodies get fuzzed. Best-effort; option names
+        vary by ZAP version."""
+        await self._call("ascan", "action", "setOptionTargetParamsInjectable", Integer=injectable)
+        await self._call("ascan", "action", "setOptionTargetParamsEnabledRPC", Integer=rpc)
+
+    async def add_scan_header(self, name: str = "X-Scanner", value: str = "BBH-ZAP-authorized"):
+        """Tag every ZAP request with an identifying header (AddZAPHeader.js idea)
+        so the target owner can spot authorized scan traffic and allowlist it."""
+        return await self._call("replacer", "action", "addRule", description=f"bbh-{name}",
+                                enabled="true", matchType="REQ_HEADER", matchString=name,
+                                matchRegex="false", replacement=value, initiators="")
 
     async def ascan_status(self, sid: str) -> int:
         return int((await self._call("ascan", "view", "status", scanId=sid)).get("status", 0))

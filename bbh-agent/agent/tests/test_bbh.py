@@ -341,6 +341,29 @@ def test_zap_not_configured_by_default():
     assert zap_client.configured() is False
 
 
+def test_zap_client_issues_expected_api_calls():
+    calls = []
+
+    class _Client(zap_client.ZapClient):
+        async def _call(self, component, kind, action, **params):
+            calls.append((component, kind, action, params))
+            return {"scan": "1"}
+
+    async def go():
+        c = _Client(addr="http://zap:8090", api_key="k")
+        await c.ascan("https://t/a", context_id="2", policy="My Policy")
+        await c.set_injectable()
+        await c.add_scan_header()
+
+    asyncio.get_event_loop().run_until_complete(go())
+    ascan = next(x for x in calls if x[2] == "scan")
+    assert ascan[3]["scanPolicyName"] == "My Policy" and ascan[3]["inScopeOnly"] == "true"
+    inj = next(x for x in calls if x[2] == "setOptionTargetParamsInjectable")
+    assert inj[3]["Integer"] == 27
+    rep = next(x for x in calls if x[0] == "replacer" and x[2] == "addRule")
+    assert rep[3]["matchType"] == "REQ_HEADER"
+
+
 # ── agent: async HITL gate + mode enforcement ────────────────────
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)

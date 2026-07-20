@@ -140,7 +140,9 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string"},
          "spider_seconds": {"type": "integer", "default": 180},
-         "scan_seconds": {"type": "integer", "default": 600}}, "required": ["url"]}},
+         "scan_seconds": {"type": "integer", "default": 600},
+         "scan_policy": {"type": "string", "description": "Optional ZAP scan-policy name; empty uses ZAP's Default Policy"}},
+         "required": ["url"]}},
     {"name": "run_dalfox",
      "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -726,7 +728,14 @@ class ToolRegistry:
                 await zap.wait_str(lambda: zap.ajax_status(), cap=120, stop_event=self.stop_event)
             except Exception:
                 pass
-            asid = await zap.ascan(url, context_id=ctx_id)
+            # tune the active scan: identify our traffic + widen input vectors
+            # (POST/JSON/headers/cookie) so API bodies get fuzzed. Best-effort.
+            for setup in (zap.add_scan_header(), zap.set_injectable()):
+                try:
+                    await setup
+                except Exception:
+                    pass
+            asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
             if asid is not None:
                 await zap.wait_int(lambda: zap.ascan_status(asid),
                                    cap=int(inp.get("scan_seconds", 600)), stop_event=self.stop_event)
