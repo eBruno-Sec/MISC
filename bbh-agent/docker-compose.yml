@@ -17,6 +17,9 @@ services:
       # BBH_OOB_DOMAIN enables DNS-triggerable subdomain probes.
       - BBH_OOB_BASE=${BBH_OOB_BASE:-}
       - BBH_OOB_DOMAIN=${BBH_OOB_DOMAIN:-}
+      # GitHub recon: YOUR OWN read-only PAT (no scopes needed), only to lift the
+      # code-search rate limit. Empty = run_github_recon skips cleanly.
+      - BBH_GITHUB_TOKEN=${BBH_GITHUB_TOKEN:-}
       # OWASP ZAP DAST (optional). Empty ZAP_ADDR = run_zap skips cleanly.
       # To enable: docker compose --profile zap up -d  (and keep ZAP_ADDR below)
       - ZAP_ADDR=${ZAP_ADDR:-}

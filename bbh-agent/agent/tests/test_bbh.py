@@ -38,6 +38,7 @@ import oauth_tool as oauth
 import exposure_tool as exp
 import collaborator as collab
 import xxe_tool as xxe
+import github_recon as ghr
 
 
 # ── security: target validation ──────────────────────────────────
@@ -920,6 +921,38 @@ def test_xxe_finding_shapes():
     assert ib["severity"] == "critical" and ib["cwe"] == "CWE-611" and ib["confidence"] == "confirmed"
     ob = xxe.oob_finding("https://t/api", "http://a/oob/t", [{"source_ip": "198.51.100.7"}])
     assert ob["confidence"] == "confirmed" and "198.51.100.7" in ob["evidence"]
+
+
+# ── github_recon: dork building + secret classification ──────────
+def test_ghr_dorks_pair_domain_with_secret_indicators():
+    d = ghr.build_dorks("acme.com", org="acme-inc")
+    assert any("filename:.env" in q for q in d)
+    assert any("aws_access_key_id" in q for q in d)
+    assert any("org:acme-inc" in q for q in d)
+    assert len(d) == len(set(d))          # deduped
+
+
+def test_ghr_parse_code_search_extracts_fragments():
+    data = {"items": [{"repository": {"full_name": "acme/app"}, "path": "config/.env",
+                       "html_url": "https://github.com/acme/app/blob/main/config/.env",
+                       "text_matches": [{"fragment": "AWS_KEY=AKIAIOSFODNN7EXAMPLE"}]}]}
+    items = ghr.parse_code_search(data)
+    assert items[0]["repo"] == "acme/app" and items[0]["fragments"][0].startswith("AWS_KEY=")
+
+
+def test_ghr_classify_flags_secret_and_redacts():
+    item = {"repo": "acme/app", "path": ".env", "url": "https://github.com/acme/app/blob/main/.env",
+            "fragments": ["aws_access_key_id = AKIAIOSFODNN7EXAMPLE"]}
+    f = ghr.classify_hit(item, "acme.com", '"acme.com" filename:.env')
+    assert f and f["cwe"] == "CWE-540" and "github-recon" in f["tags"]
+    assert "AKIAIOSFODNN7EXAMPLE" not in f["evidence"]        # redacted, not raw
+
+
+def test_ghr_sensitive_file_is_a_lead_plain_mention_is_not():
+    item = {"repo": "acme/app", "path": ".env", "url": "u", "fragments": ["DOMAIN=acme.com"]}
+    assert ghr.classify_hit(item, "acme.com", '"acme.com" filename:.env')["severity"] == "low"
+    plain = {"repo": "x/y", "path": "README.md", "url": "u", "fragments": ["see acme.com for info"]}
+    assert ghr.classify_hit(plain, "acme.com", '"acme.com"') is None
 
 
 def _run(coro):

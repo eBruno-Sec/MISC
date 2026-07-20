@@ -90,11 +90,11 @@ BBHAgent (agent.py)  --  ReAct loop, mode gate, HITL approval, phase tracking
      |
 ToolRegistry (tools.py)  --  scope-checked wrappers + recon accumulator + evidence capture
      |
-  subfinder crtsh wayback dns asn httpx nmap nuclei whatweb fingerprint katana ffuf takeover
+  subfinder crtsh wayback dns asn github_recon httpx nmap nuclei whatweb fingerprint katana ffuf takeover
   http_probe fetch_openapi graphql jwt oauth xss js_review csrf content_discovery web_probes injection_probes bfla race ssrf deserialization exposure xxe zap dalfox sqlmap
      |
 Engines:  scope · security · surface · replay · web_security · guidance · triage ·
-          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool · collaborator · xxe_tool   (deterministic, no AI required)
+          poc · report · dns_recon · auth · zap_client · graphql_tool · xss_tool · codereview · csrf_tool· fingerprint · ssrf_tool · deser_tool · oauth_tool · exposure_tool · collaborator · xxe_tool · github_recon   (deterministic, no AI required)
      |
 SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs · notes · profiles
 ```
@@ -110,6 +110,7 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_wayback | PASSIVE | Historical URLs from the Wayback Machine (seeds surface) |
 | run_dns | PASSIVE | DNS-over-HTTPS: A/NS/MX/TXT/CAA, SPF+DMARC policy, vendor fingerprints |
 | run_asn | PASSIVE | IP + ASN + BGP prefix (CIDR range) + org name (scope expansion, via DoH + Team Cymru) |
+| run_github_recon | PASSIVE | Leaked-secret hunting on public GitHub (code-search dorks + secret scan); uses your own read-only PAT |
 | generate_playbook | PASSIVE | Rule-based per-surface test playbook (advisory) |
 | run_httpx | ACTIVE | Live host probing, status, title, tech |
 | http_probe | ACTIVE | Fetch one URL, capture redacted evidence, read security headers, seed surface |
@@ -307,6 +308,7 @@ bbh-agent/
 │   ├── exposure_tool.py   # information disclosure: signature-confirmed exposed .git/.env/backup/cred files
 │   ├── collaborator.py    # native OOB collaborator: token/probe/correlation for blind SSRF/XXE confirmation
 │   ├── xxe_tool.py        # XXE: in-band file-read + blind OOB payloads (external/parameter entities)
+│   ├── github_recon.py    # public-GitHub leaked-secret dorking (operator PAT; reuses codereview scanner)
 │   ├── guidance.py        # rule-based test-playbook engine
 │   ├── remediation.py     # developer-facing fix catalog
 │   ├── wordlists.py       # seed catalog + target-specific generation
@@ -314,7 +316,7 @@ bbh-agent/
 │   ├── poc.py             # curl / raw HTTP / Markdown PoC + header redaction
 │   ├── report.py          # Markdown + dark HTML + CSV/JSON export
 │   ├── db.py              # SQLite persistence
-│   └── tests/             # deterministic pytest suite (94 tests)
+│   └── tests/             # deterministic pytest suite (98 tests)
 └── ui/
     └── index.html         # multi-tab terminal-style SPA
 ```

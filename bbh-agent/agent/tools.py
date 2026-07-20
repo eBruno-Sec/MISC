@@ -46,6 +46,7 @@ TOOL_PERMISSIONS = {
     "run_wayback": PermissionLevel.PASSIVE,
     "run_dns": PermissionLevel.PASSIVE,
     "run_asn": PermissionLevel.PASSIVE,
+    "run_github_recon": PermissionLevel.PASSIVE,
     "generate_playbook": PermissionLevel.PASSIVE,
     "store_finding": PermissionLevel.PASSIVE,
     "run_httpx": PermissionLevel.ACTIVE,
@@ -114,6 +115,17 @@ CLAUDE_TOOLS = [
                      "and Team Cymru. Reveals the organization's dedicated IP range for scope expansion. No target "
                      "contact."),
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "run_github_recon",
+     "description": ("PASSIVE: Hunt for leaked secrets on PUBLIC GitHub. Queries GitHub's code-search API (never the "
+                     "target) with secret dorks against the org's domain/name and scans returned code fragments for "
+                     "hardcoded credentials (AWS/Google/Slack/Stripe keys, private keys, tokens, passwords). Uses the "
+                     "operator's own read-only PAT (BBH_GITHUB_TOKEN) only to lift the rate limit; skips cleanly if "
+                     "unset. Secret samples are redacted."),
+     "input_schema": {"type": "object", "properties": {
+         "domain": {"type": "string"},
+         "org": {"type": "string", "description": "Optional GitHub org / company name (defaults to the domain label)"},
+         "extra_terms": {"type": "array", "items": {"type": "string"}, "description": "Extra search terms (employee handles, product names)"}},
+         "required": ["domain"]}},
     {"name": "run_fingerprint",
      "description": ("ACTIVE: Native tech-stack fingerprint of one URL from response headers, cookies, and HTML/JS "
                      "signatures — server/language/framework/CMS + versions. Binary-free. Flags precise version "
@@ -523,6 +535,53 @@ class ToolRegistry:
             "ips": intel.get("ips", []), "asn": asn.get("asn", ""), "as_name": asn.get("as_name", ""),
             "prefix": asn.get("prefix", ""), "country": asn.get("country", ""),
             "registry": asn.get("registry", "")}])
+
+    async def _run_github_recon(self, inp: dict) -> ToolResult:
+        import httpx
+        import github_recon as ghr
+        domain = inp["domain"].lstrip("*.")
+        token = os.getenv("BBH_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
+        if not token:
+            return ToolResult("github_recon", domain, True,
+                              "Skipped — set BBH_GITHUB_TOKEN (your own read-only GitHub PAT) to enable", [])
+        base = os.getenv("BBH_GITHUB_API", "https://api.github.com").rstrip("/")
+        delay = float(os.getenv("BBH_GITHUB_DELAY", "2"))   # respect ~30/min code search
+        dorks = ghr.build_dorks(domain, inp.get("org", ""), inp.get("extra_terms"))[:14]
+        headers = {"User-Agent": _UA, "Authorization": f"Bearer {token}",
+                   "Accept": "application/vnd.github.text-match+json"}
+        findings, seen, hits_total, rate_limited = [], set(), 0, False
+        async with httpx.AsyncClient(timeout=20, headers=headers) as c:
+            for i, q in enumerate(dorks):
+                try:
+                    r = await c.get(f"{base}/search/code", params={"q": q, "per_page": 10})
+                except Exception:
+                    continue
+                if r.status_code in (403, 429):             # rate limited — stop politely
+                    rate_limited = True
+                    break
+                if r.status_code != 200:
+                    continue
+                try:
+                    items = ghr.parse_code_search(r.json())
+                except Exception:
+                    items = []
+                hits_total += len(items)
+                for it in items:
+                    key = (it["repo"], it["path"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    f = ghr.classify_hit(it, domain, q)
+                    if f:
+                        findings.append(f)
+                if i < len(dorks) - 1 and delay > 0:
+                    await asyncio.sleep(delay)
+        self.recon.setdefault("github", []).append(
+            {"domain": domain, "dorks": len(dorks), "hits": hits_total, "findings": len(findings)})
+        note = " (rate-limited, partial)" if rate_limited else ""
+        return ToolResult("github_recon", domain, True,
+                          f"{len(dorks)} dorks, {hits_total} hits, {len(findings)} secret/lead finding(s){note}",
+                          findings)
 
     # ── ACTIVE ───────────────────────────────────────────────────
     async def _run_httpx(self, inp: dict) -> ToolResult:
