@@ -53,6 +53,7 @@ TOOL_PERMISSIONS = {
     "fetch_openapi": PermissionLevel.ACTIVE,
     "run_katana": PermissionLevel.ACTIVE,
     "check_takeover": PermissionLevel.ACTIVE,
+    "run_graphql": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
@@ -110,6 +111,12 @@ CLAUDE_TOOLS = [
     {"name": "run_katana",
      "description": "ACTIVE: Crawl a URL for in-scope links, forms, and JS endpoints (requires katana; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_graphql",
+     "description": ("ACTIVE: Probe a GraphQL endpoint. Auto-discovers the endpoint (/graphql etc.), runs introspection "
+                     "to enumerate queries/mutations/subscriptions, and tests for common security gaps: introspection "
+                     "exposure, field-suggestion leaks, and request batching (brute-force amplification)."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "A base URL or a suspected GraphQL endpoint"}}, "required": ["url"]}},
     {"name": "run_ffuf",
      "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
      "input_schema": {"type": "object", "properties": {
@@ -511,6 +518,50 @@ class ToolRegistry:
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
         return ToolResult("katana", url, True, f"{len(urls)} crawled URLs", [{"url": u} for u in urls[:50]])
+
+    async def _gql_post(self, c, endpoint: str, payload):
+        """POST a GraphQL query/batch; return parsed JSON or None."""
+        try:
+            r = await c.post(endpoint, json=payload)
+            return r.json()
+        except Exception:
+            return None
+
+    async def _run_graphql(self, inp: dict) -> ToolResult:
+        import httpx
+        import graphql_tool as gql
+        url = inp["url"]
+        headers = {"User-Agent": _UA, "Content-Type": "application/json", **(self.session_headers or {})}
+        endpoint = None
+        introspection = None
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=headers) as c:
+            # discover the live GraphQL endpoint among common paths (in-scope only)
+            for cand in gql.endpoint_candidates(url):
+                if not self.scope.validate(cand)[0]:
+                    continue
+                resp = await self._gql_post(c, cand, {"query": "{__typename}"})
+                if gql.looks_like_graphql(resp):
+                    endpoint = cand
+                    break
+            if not endpoint:
+                return ToolResult("graphql", url, True, "No GraphQL endpoint found", [])
+
+            introspection = await self._gql_post(c, endpoint, {"query": gql.INTROSPECTION_QUERY})
+            batch_n = 5
+            batch_resp = await self._gql_post(c, endpoint, gql.build_batch_array("{__typename}", batch_n))
+            bogus_resp = await self._gql_post(c, endpoint, {"query": gql.BOGUS_FIELD_QUERY})
+
+        findings = gql.analyze(endpoint, introspection, batch_resp, batch_n, bogus_resp)
+        schema = gql.parse_schema(introspection)
+        # seed the surface with the endpoint + enumerated operations
+        self._add_urls([endpoint])
+        self.recon.setdefault("graphql", []).append({"endpoint": endpoint, **schema})
+        if self.mission_id:
+            await self._http(endpoint, "POST", {"Content-Type": "application/json"},
+                             body=json.dumps({"query": "{__typename}"}), capture=True)
+        ops = len(schema.get("query_fields", [])) + len(schema.get("mutation_fields", []))
+        return ToolResult("graphql", endpoint, True,
+                          f"GraphQL at {endpoint}: {ops} operations, {len(findings)} issue(s)", findings)
 
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))

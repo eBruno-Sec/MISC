@@ -24,6 +24,7 @@ import db
 import dns_recon
 import auth
 import zap_client
+import graphql_tool as gql
 
 
 # ── security: target validation ──────────────────────────────────
@@ -365,6 +366,49 @@ def test_zap_client_issues_expected_api_calls():
     assert rep[3]["matchType"] == "REQ_HEADER"
     oast = next(x for x in calls if x[0] == "oast")
     assert oast[2] == "setActiveScanServiceForOast" and oast[3]["name"] == "BOAST"
+
+
+# ── graphql_tool: introspection parse + abuse signals ────────────
+def test_graphql_endpoint_candidates_and_detection():
+    cands = gql.endpoint_candidates("https://api.example.com/")
+    assert "https://api.example.com/graphql" in cands
+    assert gql.looks_like_graphql({"data": {"__typename": "Query"}})
+    assert gql.looks_like_graphql({"errors": [{"message": "x"}]})
+    assert not gql.looks_like_graphql({"random": 1})
+
+
+def test_graphql_parse_schema_roots():
+    resp = {"data": {"__schema": {
+        "queryType": {"name": "Query"}, "mutationType": {"name": "Mutation"},
+        "subscriptionType": None,
+        "types": [
+            {"name": "Query", "fields": [{"name": "allLifts"}, {"name": "Lift"}]},
+            {"name": "Mutation", "fields": [{"name": "setLiftStatus"}]},
+            {"name": "__Type", "fields": []},
+        ]}}}
+    s = gql.parse_schema(resp)
+    assert s["introspection"] and s["query_fields"] == ["allLifts", "Lift"]
+    assert s["mutation_fields"] == ["setLiftStatus"] and s["type_count"] == 2
+
+
+def test_graphql_abuse_signals():
+    assert gql.detect_batching([{}, {}, {}], 3) and not gql.detect_batching({"data": {}}, 3)
+    assert gql.detect_field_suggestion({"errors": [{"message": "Cannot query field x. Did you mean y?"}]})
+    assert not gql.detect_field_suggestion({"errors": [{"message": "syntax error"}]})
+
+
+def test_graphql_analyze_emits_findings():
+    intro = {"data": {"__schema": {"queryType": {"name": "Query"}, "mutationType": None,
+             "subscriptionType": None, "types": [{"name": "Query", "fields": [{"name": "me"}]}]}}}
+    batch = [{"data": {}}] * 5
+    f = gql.analyze("https://t/graphql", intro, batch, 5, {})
+    keys = {x["title"] for x in f}
+    assert "GraphQL introspection enabled" in keys
+    assert "GraphQL request batching enabled" in keys
+    # introspection disabled but suggestions leak -> low finding instead
+    f2 = gql.analyze("https://t/graphql", {"errors": [{"message": "no"}]}, {"data": {}}, 5,
+                     {"errors": [{"message": "Did you mean me?"}]})
+    assert any(x["title"] == "GraphQL field suggestions leak schema" for x in f2)
 
 
 # ── agent: async HITL gate + mode enforcement ────────────────────
