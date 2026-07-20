@@ -115,7 +115,8 @@ MODE_NOTES = {
 
 class BBHAgent:
     def __init__(self, scope: ScopeEngine, tools: ToolRegistry, stop_event: asyncio.Event,
-                 mode: str = "active", auto_approve: bool = False, mission_id: str = None):
+                 mode: str = "active", auto_approve: bool = False, mission_id: str = None,
+                 recon_cycles: int = 1):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
@@ -123,6 +124,7 @@ class BBHAgent:
         self.mode = mode if mode in ("passive", "active", "full") else "active"
         self.auto_approve = auto_approve
         self.mission_id = mission_id
+        self.recon_cycles = max(1, min(int(recon_cycles or 1), 3))
         self.findings: list = []
         self.current_phase = "init"
 
@@ -241,6 +243,9 @@ class BBHAgent:
     # ── entry ────────────────────────────────────────────────────
     async def run(self, objective: str, session_id: str) -> AsyncGenerator[dict, None]:
         yield {"type": "phase", "phase": "recon"}
+        if self.recon_cycles > 1:
+            yield {"type": "info", "content": f"Iterative recon enabled: up to {self.recon_cycles} cycles "
+                   "(refine from discovered assets each pass; intrusive tools are not looped)."}
         if self.provider == "openrouter":
             gen = self._run_openrouter(objective, session_id)
         else:
@@ -275,8 +280,22 @@ class BBHAgent:
         db.update_mission(self.mission_id, context=ctx)
         yield {"type": "triage", "verdict": result["verdict"], "chains": result["chains"]}
 
+    def _recon_note(self) -> str:
+        """Iterative-recon directive. Empty at 1 cycle (default = unchanged)."""
+        n = self.recon_cycles
+        if n <= 1:
+            return ""
+        return (
+            f"\n\nITERATIVE RECON: Perform up to {n} recon cycles before active/intrusive testing. "
+            "After each recon pass, review the newly discovered in-scope subdomains, live hosts, URLs, "
+            "technologies, and OpenAPI/GraphQL hints, then run passive/active recon again ONLY on assets you "
+            "have not yet covered, to deepen the surface. Deduplicate — never re-run the same tool against a "
+            "target already covered, and do not repeat intrusive tools across cycles. Every discovered target "
+            "is still scope-validated. Stop early and proceed to the next phase once a cycle yields no new "
+            "in-scope assets.")
+
     def _system(self) -> str:
-        return (SYSTEM_PROMPT + MODE_NOTES.get(self.mode, "")
+        return (SYSTEM_PROMPT + MODE_NOTES.get(self.mode, "") + self._recon_note()
                 + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}")
 
     # ── OpenRouter / OpenAI ──────────────────────────────────────

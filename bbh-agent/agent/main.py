@@ -39,6 +39,7 @@ class EngageRequest(BaseModel):
     auth_headers: dict = {}        # e.g. {"Cookie": "session=..."} or {"Authorization": "Bearer ..."}
     login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
     parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
+    recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
 
 
 class ReplayRequest(BaseModel):
@@ -164,8 +165,10 @@ async def engage(req: EngageRequest):
     scope = ScopeEngine()
     scope.load_manual(req.in_scope, req.out_of_scope, req.program_name)
 
-    # authenticated scanning: raw headers first, then optional auto-login (scoped)
-    session_headers = dict(req.auth_headers or {})
+    # authenticated scanning: raw headers first, then optional auto-login (scoped).
+    # Drop empty-value headers (e.g. the UI's prefilled template names) so they
+    # never break a scan.
+    session_headers = {k: v for k, v in (req.auth_headers or {}).items() if str(v).strip()}
     auth_note = ""
     if req.login and req.login.get("url"):
         import auth as auth_mod
@@ -182,15 +185,17 @@ async def engage(req: EngageRequest):
     stop_event = asyncio.Event()
     # A fresh agent + stop_event per mission — rescans clone config into a NEW
     # session and never reuse a prior mission's in-memory objects.
+    recon_cycles = max(1, min(int(req.recon_cycles or 1), 3))
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
-                     auto_approve=req.auto_approve, mission_id=session_id)
+                     auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles)
 
     objective = req.objective or (
         f"Perform comprehensive bug bounty recon and vulnerability discovery on {req.program_name}. "
         f"In-scope targets: {', '.join(req.in_scope)}")
 
     context = {"auto_approve": req.auto_approve,
-               "authenticated": bool(session_headers), "auth_note": auth_note}
+               "authenticated": bool(session_headers), "auth_note": auth_note,
+               "recon_cycles": recon_cycles}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
@@ -327,9 +332,11 @@ async def get_report_md(session_id: str):
 
 
 @app.get("/report/{session_id}/html")
-async def get_report_html(session_id: str):
+async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    return HTMLResponse(report_mod.generate_html_report(m["program"], findings, scope, coverage, chains))
+    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains)
+    headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
+    return HTMLResponse(html, headers=headers)
 
 
 @app.get("/report/{session_id}/csv")
@@ -565,10 +572,22 @@ async def parse_scope(file: Optional[UploadFile] = File(None), text: Optional[st
         raise HTTPException(400, "Provide a file upload or raw text")
     parsed = scope_mod.parse_scope(content)
     ins, outs = scope_mod.web_targets(parsed)
-    return {"format_detected": parsed.get("format"),
+    skipped = int(parsed.get("skipped", 0))
+    non_web = (len(parsed["in_scope"]) - len(ins)) + (len(parsed["out_of_scope"]) - len(outs))
+    fmt = parsed.get("format")
+    summary = f"Detected {fmt}: {len(ins)} in-scope, {len(outs)} out-of-scope web target(s)."
+    extra = []
+    if non_web > 0:
+        extra.append(f"{non_web} non-web asset(s) (mobile/source) skipped")
+    if skipped > 0:
+        extra.append(f"{skipped} unparseable/empty row(s) skipped")
+    if extra:
+        summary += " " + "; ".join(extra) + "."
+    return {"format_detected": fmt,
             "in_scope": parsed["in_scope"], "out_of_scope": parsed["out_of_scope"],
             "web_in_scope": ins, "web_out_of_scope": outs,
-            "total_in": len(parsed["in_scope"]), "total_out": len(parsed["out_of_scope"])}
+            "total_in": len(parsed["in_scope"]), "total_out": len(parsed["out_of_scope"]),
+            "skipped": skipped, "summary": summary}
 
 
 # ── backup / restore ─────────────────────────────────────────────

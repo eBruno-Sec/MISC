@@ -1141,6 +1141,59 @@ def test_rescan_parent_linkage_surfaces_in_list():
     assert ms["chi"]["parent_id"] == "par" and ms["par"]["parent_id"] is None
 
 
+# ── recon cycles + scope import + report download + empty-header filter ──
+def test_recon_cycles_clamp_and_directive():
+    import agent as agmod
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["*.x.com"], [], "P")
+    a3 = agmod.BBHAgent(eng, ToolRegistry(eng), asyncio.Event(), recon_cycles=3)
+    assert a3.recon_cycles == 3 and "3 recon cycles" in a3._recon_note()
+    assert agmod.BBHAgent(eng, ToolRegistry(eng), asyncio.Event(), recon_cycles=9).recon_cycles == 3   # clamped
+    a1 = agmod.BBHAgent(eng, ToolRegistry(eng), asyncio.Event(), recon_cycles=1)
+    assert a1.recon_cycles == 1 and a1._recon_note() == ""        # default is unchanged behavior
+
+
+def test_scope_generic_csv_and_hackerone_still_detected():
+    g = scope_mod.parse_scope("endpoint,type\napi.x.com,url\n*.x.com,wildcard\n,url")
+    assert g["format"] == "csv"
+    ids = [e["identifier"] for e in g["in_scope"]]
+    assert "api.x.com" in ids and "*.x.com" in ids and g["skipped"] >= 1     # empty row counted
+    # a real HackerOne header (identifier + eligible_for_bounty) still routes correctly
+    h = scope_mod.parse_scope("identifier,asset_type,eligible_for_bounty\napi.x.com,URL,true\nold.x.com,URL,false")
+    assert h["format"] == "hackerone_csv" and len(h["out_of_scope"]) == 1
+
+
+def test_scope_summary_report_download_and_empty_header_filter():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    import db as dbmod
+    snap = _env_snapshot()
+    try:
+        for k in _AI_ENV:
+            os.environ.pop(k, None)
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-test"
+        dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+        with TestClient(mainmod.app) as c:                 # lifespan runs db.init()
+            # scope import returns a human summary + skipped count
+            r = c.post("/scope/parse", data={"text": "endpoint,type\napi.z.com,url\n,url"})
+            j = r.json()
+            assert j["skipped"] >= 1 and "skipped" in j["summary"].lower() and "api.z.com" in j["web_in_scope"]
+            # /engage drops empty-value auth headers (prefilled template) -> unauthenticated
+            e = c.post("/engage", json={"program_name": "P", "in_scope": ["*.z.com"],
+                                        "auth_headers": {"Authorization": "", "Cookie": ""}, "recon_cycles": 2})
+            assert e.status_code == 200 and e.json()["authenticated"] is False
+            sid = e.json()["session_id"]
+            # HTML report download carries an attachment disposition; inline does not
+            rd = c.get(f"/report/{sid}/html", params={"download": 1})
+            assert rd.status_code == 200 and "attachment" in rd.headers.get("content-disposition", "").lower()
+            ri = c.get(f"/report/{sid}/html")
+            assert "content-disposition" not in {k.lower() for k in ri.headers}
+    finally:
+        _env_restore(snap)
+
+
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 

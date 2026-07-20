@@ -171,18 +171,21 @@ def _parse_hackerone_csv(content: str) -> dict:
     type_col = next((h for h in hdrs if "type" in h), None)
     if not id_col:
         return _parse_sections(content)
+    skipped = 0
     for row in reader:
         raw = (row.get(id_col) or "").strip()
         if not raw or raw.lower() in ("n/a", "none", "-", ""):
+            skipped += 1
             continue
         entry = _parse_target(raw)
         if not entry:
+            skipped += 1
             continue
         if type_col:
             entry["type"] = (row.get(type_col) or entry["type"]).strip().lower()
         eligible = (row.get(bounty_col) or "true").strip().lower()
         (in_scope if eligible in ("true", "yes", "1") else out_of_scope).append(entry)
-    return {"in_scope": in_scope, "out_of_scope": out_of_scope, "format": "hackerone_csv"}
+    return {"in_scope": in_scope, "out_of_scope": out_of_scope, "format": "hackerone_csv", "skipped": skipped}
 
 
 def _parse_bugcrowd_csv(content: str) -> dict:
@@ -193,16 +196,59 @@ def _parse_bugcrowd_csv(content: str) -> dict:
     focus_col = next((h for h in hdrs if "focus" in h), None)
     if not target_col:
         return _parse_sections(content)
+    skipped = 0
     for row in reader:
         raw = (row.get(target_col) or "").strip()
         if not raw:
+            skipped += 1
             continue
         entry = _parse_target(raw)
         if not entry:
+            skipped += 1
             continue
         focus = (row.get(focus_col) or "in").strip().lower()
         (out_of_scope if "out" in focus or "excluded" in focus else in_scope).append(entry)
-    return {"in_scope": in_scope, "out_of_scope": out_of_scope, "format": "bugcrowd_csv"}
+    return {"in_scope": in_scope, "out_of_scope": out_of_scope, "format": "bugcrowd_csv", "skipped": skipped}
+
+
+_ID_HINTS = ("identifier", "target", "asset", "endpoint", "url", "domain", "host", "scope", "name")
+
+
+def _parse_generic_csv(content: str) -> dict:
+    """Best-effort CSV for platforms beyond H1/Bugcrowd (Intigriti, YesWeHack,
+    plain exports). Heuristically finds an identifier column and an optional
+    eligibility/scope column; unparseable/empty rows are counted, not dropped
+    silently."""
+    in_scope, out_of_scope, skipped = [], [], 0
+    reader = csv.DictReader(io.StringIO(content))
+    hdrs = [h.lower().strip() for h in (reader.fieldnames or [])]
+    if not hdrs:
+        return {"in_scope": [], "out_of_scope": [], "format": "csv", "skipped": 0}
+    id_col = next((h for h in hdrs if any(k in h for k in _ID_HINTS)), hdrs[0])
+    elig_col = next((h for h in hdrs if any(k in h for k in ("eligible", "bounty", "submission"))), None)
+    focus_col = next((h for h in hdrs if any(k in h for k in ("focus", "in_scope", "in scope", "out_of_scope", "out of scope"))), None)
+    type_col = next((h for h in hdrs if h == "type" or h.endswith("_type") or "asset_type" in h), None)
+    for row in reader:
+        raw = (row.get(id_col) or "").strip()
+        if not raw or raw.lower() in ("n/a", "none", "-"):
+            skipped += 1
+            continue
+        entry = _parse_target(raw)
+        if not entry:
+            skipped += 1
+            continue
+        if type_col:
+            tv = (row.get(type_col) or "").strip().lower()
+            if tv:
+                entry["type"] = tv
+        is_out = False
+        if elig_col is not None:
+            v = (row.get(elig_col) or "true").strip().lower()
+            is_out = v in ("false", "no", "0", "ineligible", "out")
+        elif focus_col is not None:
+            is_out = "out" in (row.get(focus_col) or "").strip().lower()
+        (out_of_scope if is_out else in_scope).append(entry)
+    return {"in_scope": in_scope, "out_of_scope": out_of_scope, "format": "csv", "skipped": skipped}
 
 
 def _parse_burp_json(content: str) -> dict:
@@ -242,11 +288,16 @@ def parse_scope(content: str) -> dict:
         except Exception:
             pass
     first = content.splitlines()[0].lower().strip()
-    if "," in first and len(first.split(",")) >= 2:
-        if "asset_identifier" in first or "eligible_for_bounty" in first:
+    cols = [c.strip() for c in first.split(",")]
+    if "," in first and len(cols) >= 2:
+        if "asset_identifier" in first or "eligible_for_bounty" in first or ("identifier" in cols and "eligible_for_submission" in first):
             return _parse_hackerone_csv(content)
         if "target" in first and any(k in first for k in ("category", "severity", "focus")):
             return _parse_bugcrowd_csv(content)
+        # any other CSV with a recognizable identifier/scope column (Intigriti,
+        # YesWeHack, plain exports) -> generic best-effort parser
+        if any(any(k in c for k in _ID_HINTS) for c in cols):
+            return _parse_generic_csv(content)
     return _parse_sections(content)
 
 

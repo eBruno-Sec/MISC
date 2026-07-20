@@ -273,6 +273,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
+  <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
 </nav>
 
 <main>
@@ -294,6 +295,14 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
                 <option value="full">Full — + deep probing (gated)</option>
               </select>
             </div>
+            <div class="field"><label>Recon cycles</label>
+              <select id="reconCycles">
+                <option value="1" selected>1 — single pass (default)</option>
+                <option value="2">2 — iterative (refine once from results)</option>
+                <option value="3">3 — deep iterative recon</option>
+              </select>
+              <div class="hint">Higher = the agent repeats recon, learning from discovered hosts / URLs / tech to widen the surface before scanning. Intrusive tools are never looped.</div>
+            </div>
             <div class="field"><label>In-scope domains</label>
               <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com"></textarea>
               <div class="hint">One per line. Wildcards allowed: <code class="inline">*.domain.com</code></div>
@@ -307,11 +316,16 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
           <div class="block">
             <h4>Objective &amp; authentication <span class="muted">(optional)</span></h4>
             <div class="field"><label>Custom objective</label>
-              <textarea id="objective" placeholder="Focus on API authorization and admin panels…" style="min-height:52px"></textarea>
+              <textarea id="objective" placeholder="Focus on authorization, exposed sensitive files, and API access control. Report only confirmed, reproducible vulnerabilities." style="min-height:64px"></textarea>
+              <div class="hint">Guides the agent's <strong>priorities</strong> only — it never overrides scope or permission gates. Leave blank to use the default broad objective.</div>
             </div>
             <div class="field"><label>Auth headers <span class="muted">(authenticated scan)</span></label>
-              <textarea id="authHeaders" placeholder="Cookie: session=…&#10;Authorization: Bearer …" style="min-height:52px"></textarea>
-              <div class="hint">Shared with every scanner to reach the post-login surface. Redacted in evidence and never shown in reports.</div>
+              <textarea id="authHeaders" style="min-height:96px">Authorization:
+Cookie:
+X-CSRF-Token:
+X-API-Key:
+X-Requested-With: </textarea>
+              <div class="hint"><strong>What is this?</strong> If the target needs login, paste the header(s) your logged-in browser sends so scanners reach the post-login area. Fill the value after the colon (e.g. <code class="inline">Authorization: Bearer eyJ…</code> or <code class="inline">Cookie: session=abc123</code>). <strong>Blank ones are ignored.</strong> Values are redacted in evidence and never shown in reports.</div>
             </div>
             <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous run — pre-authorize the intrusive gate</label>
           </div>
@@ -336,7 +350,10 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 
     <!-- LIVE RUN -->
     <section class="panel" id="p-feed">
-      <div class="view-head"><h3 class="sec">Live run</h3><span class="muted" id="runSub">Activity feed, phase progress, and approvals.</span></div>
+      <div class="view-head"><h3 class="sec">Live run</h3><span class="muted" id="runSub">Activity feed, phase progress, and approvals.</span>
+        <label class="chk" style="margin-left:auto;font-size:.76rem"><input type="checkbox" id="autoScroll" checked onchange="autoScrollOn=this.checked;if(autoScrollOn)scrollFeed()"> Auto-scroll</label>
+      </div>
+      <div id="reconBanner" class="src-chip" style="display:none"></div>
       <div class="phasebar" id="phaseBar"></div>
       <div id="termOut"><div class="ev t-info"><div class="ev-tag">Info</div>
         <div class="ev-content">BBH Agent ready. Configure a mission on the <strong>Launch</strong> tab and start.<span class="blink">▍</span></div></div></div>
@@ -345,7 +362,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
     <!-- FINDINGS -->
     <section class="panel" id="p-findings">
       <div class="view-head"><h3 class="sec">Confirmed findings</h3><span class="muted">Only reproducible, evidence-backed issues.</span></div>
-      <div id="findingsList"><div class="empty"><h4>No findings yet</h4><p>Findings appear here as the agent confirms them during a run.</p></div></div>
+      <div id="findingsList"></div>
     </section>
 
     <!-- SURFACE -->
@@ -440,6 +457,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
       <div class="view-head"><h3 class="sec">Report &amp; export</h3><span class="muted">HTML / PDF · Markdown · CSV · JSON · PoC</span></div>
       <div class="btn-row">
         <button class="btn primary" onclick="openHtmlReport()">Open HTML / PDF ↗</button>
+        <button class="btn" onclick="downloadHtml()">Download HTML</button>
         <button class="btn" onclick="dl('md')">Markdown</button>
         <button class="btn" onclick="dl('csv')">CSV</button>
         <button class="btn" onclick="dl('json')">JSON</button>
@@ -455,6 +473,12 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
     <section class="panel" id="p-archive">
       <div class="view-head"><h3 class="sec">Mission archive</h3><span class="muted">Persisted in SQLite</span><button class="btn ghost sm" style="margin-left:auto" onclick="loadArchive()">Refresh</button></div>
       <div id="archiveList"><div class="empty"><h4>No saved missions</h4><p>Completed and in-progress missions are stored here — load or rescan any of them.</p></div></div>
+    </section>
+
+    <!-- HELP -->
+    <section class="panel" id="p-help">
+      <div class="view-head"><h3 class="sec">How to use BBH Agent</h3><span class="muted">Authorized testing only — stay inside your program's scope.</span></div>
+      <div id="helpList"></div>
     </section>
 
   </div>
@@ -492,7 +516,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 <script>
 const API = window.location.origin;
 let sessionId=null, es=null, running=false, reportMd="", pendingApproval=null;
-let aiReady=true, pendingParent=null, pbData=[];
+let aiReady=true, pendingParent=null, pbData=[], autoScrollOn=true;
 let counts={critical:0,high:0,medium:0,low:0}, findings=[];
 const PHASES=["recon","enum","scan","probe","guidance","report"];
 let phaseState={};
@@ -514,6 +538,7 @@ const VIEWS={
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["report","Report & export"],["archive","Archive"]],
+  help:     [["help","How to use"]],
 };
 const PANEL_VIEW={};
 Object.entries(VIEWS).forEach(([v,tabs])=>tabs.forEach(([p])=>PANEL_VIEW[p]=v));
@@ -532,6 +557,7 @@ function switchTab(name){
   const p=document.getElementById("p-"+name); if(p)p.classList.add("active");
   renderSubnav(view,name);
   document.querySelector(".content").scrollTop=0;
+  if(name==="findings")renderFindings();
   if(name==="surface")loadSurface(); if(name==="playbooks")loadPlaybook();
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
@@ -566,6 +592,9 @@ function setStatus(s,l){const el=document.getElementById("statusPill");el.classN
 function esc(s){if(typeof s!=="string")s=JSON.stringify(s)??"";return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function emptyState(t,s){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p></div>`;}
 function copyText(str,msg){navigator.clipboard.writeText(str||"").then(()=>log("info",msg||"Copied to clipboard.")).catch(()=>{});}
+// Log a manual tool action to the Live Run feed — method + URL only, never header
+// or body values (which may hold secrets).
+function logManual(tool,method,url){log("active",`<strong>${esc(tool)}</strong> · ${esc(method)} ${esc(url||"")}`);}
 
 const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
   text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
@@ -573,12 +602,20 @@ const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",findin
 const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
   text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
   phase:"t-phase",triage:"t-triage"};
+function scrollFeed(){const out=document.getElementById("termOut");out.scrollTop=out.scrollHeight;}
 function log(type,html,sub=""){
   const out=document.getElementById("termOut"), cls=TYPE_MAP[type]||"t-info", tag=TAG_LABELS[type]||type.toUpperCase();
   const d=document.createElement("div"); d.className=`ev ${cls}`;
   d.innerHTML=`<div class="ev-tag">${tag}</div><div class="ev-content">${html}${sub?`<div class="ev-sub">${sub}</div>`:""}</div>`;
-  out.appendChild(d); out.scrollTop=out.scrollHeight;
+  out.appendChild(d); if(autoScrollOn)scrollFeed();
 }
+// pause auto-scroll when the user scrolls up; resume when they return to the bottom
+document.getElementById("termOut").addEventListener("scroll",function(){
+  const out=this, atBottom=out.scrollHeight-out.scrollTop-out.clientHeight<24;
+  const box=document.getElementById("autoScroll");
+  if(!atBottom && autoScrollOn){autoScrollOn=false;box.checked=false;}
+  else if(atBottom && !autoScrollOn){autoScrollOn=true;box.checked=true;}
+});
 
 /* ── scope file import ── */
 document.getElementById("scopeFile").onchange=async e=>{
@@ -589,7 +626,10 @@ document.getElementById("scopeFile").onchange=async e=>{
     const d=await res.json();
     document.getElementById("inScope").value=(d.web_in_scope||[]).join("\n");
     document.getElementById("outScope").value=(d.web_out_of_scope||[]).join("\n");
-    log("info",`Imported ${d.total_in} in-scope / ${d.total_out} out-of-scope from <strong>${esc(d.format_detected)}</strong>. Non-web assets skipped.`);
+    const summary=d.summary||`Imported ${d.total_in} in-scope / ${d.total_out} out-of-scope (${esc(d.format_detected)}).`;
+    log("info",`Scope import — ${esc(summary)}`);
+    if(!(d.web_in_scope||[]).length)
+      alert("Import summary:\n\n"+summary+"\n\nNo web targets were detected. Check the file format or paste scope manually.");
   }catch(err){alert("Scope parse failed: "+err.message);}
 };
 
@@ -603,11 +643,16 @@ async function startHunt(){
   phaseState={}; renderPhaseBar(); clearTerm(false); reportMd="";
   const inScope=inRaw.split("\n").map(s=>s.trim()).filter(Boolean);
   const outScope=document.getElementById("outScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
+  const cycles=parseInt(document.getElementById("reconCycles").value,10)||1;
   const body={program_name:programName,in_scope:inScope,out_of_scope:outScope,
     objective:document.getElementById("objective").value.trim()||null,
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
     auth_headers:parseHeaders(document.getElementById("authHeaders").value),
-    parent_id:pendingParent||null};
+    parent_id:pendingParent||null,recon_cycles:cycles};
+  const rb=document.getElementById("reconBanner");
+  if(cycles>1){rb.style.display="inline-flex";rb.textContent=`Iterative recon: up to ${cycles} cycles — refining from discovered assets each pass.`;}
+  else rb.style.display="none";
+  autoScrollOn=true; document.getElementById("autoScroll").checked=true;
   showView("run");
   try{
     const res=await fetch(`${API}/engage`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -673,13 +718,16 @@ async function resolveApproval(ok){
 /* ── findings ── */
 function renderFindings(){
   const el=document.getElementById("findingsList"), badge=document.getElementById("findBadge");
-  if(!findings.length){el.innerHTML=emptyState("No findings yet","Findings appear here as the agent confirms them during a run.");badge.style.display="none";return;}
+  if(!findings.length){el.innerHTML=emptyState("No confirmed findings yet",
+    "This list holds only <strong>confirmed, reproducible</strong> vulnerabilities. Playbooks are <em>test recommendations / leads</em>, not findings — work them in the cURL Console, Workbench, or Access Check, and anything you confirm (or the agent stores as verified) shows up here.");
+    badge.style.display="none";return;}
   badge.style.display="inline-block"; badge.textContent=findings.length;
-  el.innerHTML=findings.map(f=>{
+  el.innerHTML=findings.map((f,i)=>{
     const sev=(f.severity||"info").toLowerCase();
     const col=SEV_HEX[sev]||SEV_HEX.info;
     const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
-    return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}</h4>
+    const retest=/^https?:\/\//i.test(f.target||"")?`<span class="link-act" style="margin-left:auto" onclick="testFindingIdx(${i})">Re-test in cURL →</span>`:"";
+    return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}${retest}</h4>
       <div class="kv"><span>Target <code>${esc(f.target||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
       <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
       ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
@@ -696,7 +744,9 @@ async function loadSurface(){
     document.getElementById("surfaceTable").innerHTML=inv.length?
       `<div class="table-wrap"><table><tr><th>Host</th><th>Path</th><th>Params</th><th></th></tr>${inv.map(e=>
         `<tr><td>${esc(e.host)}</td><td><code>${esc(e.path)}</code></td><td>${esc((e.params||[]).join(", "))}</td>
-         <td><span class="link-act" onclick="toWorkbench('${esc(e.example)}')">→ workbench</span></td></tr>`).join("")}</table></div>`
+         <td style="white-space:nowrap"><span class="link-act" onclick="toWorkbench('${esc(e.example)}')">Workbench</span>
+           &nbsp;<span class="link-act" onclick="toCurl('${esc(e.example)}')">cURL</span>
+           &nbsp;<span class="link-act" onclick="toAccess('${esc(e.example)}')">Access</span></td></tr>`).join("")}</table></div>`
       :emptyState("Nothing discovered yet","Run recon, then refresh to see hosts, paths, and parameters.");
   }catch(e){}
 }
@@ -718,6 +768,7 @@ function renderPlaybookCard(g,i){
   const curlBlock = cmd
     ? `<div class="pb-curl"><div class="pb-curl-head"><span>Recommended cURL</span><div class="pb-curl-actions">
          <button class="btn ghost sm" onclick="copyPlaybookCurl(${i})">Copy cURL</button>
+         <button class="btn ghost sm" onclick="accessFromPlaybook(${i})">Access check</button>
          <button class="btn primary sm" onclick="sendToCurl(${i})">Send to cURL Console →</button></div></div>
        <pre class="code">${esc(cmd)}</pre></div>`
     : `<div class="pb-curl empty"><span>No prebuilt cURL for this surface.</span>
@@ -780,6 +831,40 @@ function sendToCurl(i){
   setCurlSource(`From playbook — ${g.title||"item"}`);
   switchTab("curl");
 }
+// Generic prefills used by Surface / Topology / Playbooks / Findings. Scope is
+// still enforced server-side on every request — these only fill form fields.
+function hdrObj(h){return Object.entries(h||{}).map(([k,v])=>`${k}: ${v}`).join("\n");}
+function prefillCurl(method,url,headers,body,source){
+  document.getElementById("cuMethod").value=["GET","POST","PUT","DELETE"].includes(method)?method:"GET";
+  document.getElementById("cuUrl").value=url||"";
+  document.getElementById("cuHeaders").value=hdrObj(headers);
+  document.getElementById("cuBody").value=body||"";
+  ["cuStatus","cuCurl","cuOut"].forEach(id=>document.getElementById(id).style.display="none");
+  setCurlSource(source||"Manual"); switchTab("curl");
+}
+function prefillWorkbench(method,url,headers,body,param){
+  document.getElementById("wbMethod").value=["GET","POST","PUT","DELETE","PATCH"].includes(method)?method:"GET";
+  document.getElementById("wbUrl").value=url||"";
+  document.getElementById("wbHeaders").value=hdrObj(headers);
+  document.getElementById("wbBody").value=body||"";
+  if(param!==undefined)document.getElementById("wbParam").value=param||"";
+  switchTab("workbench");
+}
+function prefillAccess(method,url){
+  document.getElementById("acMethod").value=method==="POST"?"POST":"GET";
+  document.getElementById("acUrl").value=url||"";
+  switchTab("access");
+}
+function toCurl(url){prefillCurl("GET",url,{},"",`Surface — ${url}`);}
+function toAccess(url){prefillAccess("GET",url);}
+function accessFromPlaybook(i){const g=pbData[i];if(!g)return;
+  const cmd=(g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd)||"";
+  const p=cmd?parseCurl(cmd):{method:"GET",url:(/^https?:\/\//i.test(g.surface||"")?g.surface:"")};
+  prefillAccess(p.method==="POST"?"POST":"GET",p.url||"");
+}
+function testFinding(f){const u=(f&&f.target)||"";const p=/^https?:\/\//i.test(u)?u:"";prefillCurl("GET",p,{},"",`Finding — ${(f&&f.title)||""}`);}
+function testFindingIdx(i){testFinding(findings[i]);}
+
 function copyCurlRequest(){
   const m=document.getElementById("cuMethod").value, u=document.getElementById("cuUrl").value;
   if(!u)return alert("Enter a URL first.");
@@ -793,6 +878,7 @@ function clearCurl(){
 }
 async function sendCurl(){
   if(!sessionId)return alert("Start or load a mission first.");
+  logManual("cURL Console",document.getElementById("cuMethod").value,document.getElementById("cuUrl").value);
   const out=document.getElementById("cuOut"),cc=document.getElementById("cuCurl"),st=document.getElementById("cuStatus");
   st.style.display="block";st.className="resp-status";st.textContent="Sending…";
   out.style.display="none";cc.style.display="none";
@@ -810,9 +896,12 @@ async function sendCurl(){
 }
 
 /* ── workbench ── */
-function parseHeaders(t){const h={};(t||"").split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();});return h;}
+// Parse "Name: value" lines. Empty values (prefilled template names) are ignored
+// so they never break a request.
+function parseHeaders(t){const h={};(t||"").split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0){const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k&&v)h[k]=v;}});return h;}
 async function wbReplay(){
   if(!sessionId)return alert("Start or load a mission first.");
+  logManual("Workbench replay",document.getElementById("wbMethod").value,document.getElementById("wbUrl").value);
   const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Sending…";
   try{const r=await fetch(`${API}/workbench/${sessionId}/replay`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("wbMethod").value,url:document.getElementById("wbUrl").value,
@@ -824,6 +913,7 @@ async function wbReplay(){
 }
 async function wbFuzz(){
   if(!sessionId)return alert("Start or load a mission first.");
+  logManual("Workbench fuzz",document.getElementById("wbMethod").value,document.getElementById("wbUrl").value);
   const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Fuzzing…";
   const pls=document.getElementById("wbPayloads").value.split("\n").map(s=>s.trim()).filter(Boolean);
   try{const r=await fetch(`${API}/workbench/${sessionId}/fuzz`,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -858,6 +948,7 @@ async function addProfile(){
 async function delProfile(pid){await fetch(`${API}/profiles/${sessionId}/${pid}`,{method:"DELETE"});loadProfiles();}
 async function runAccessCheck(){
   if(!sessionId)return alert("Start or load a mission first.");
+  logManual("Access check",document.getElementById("acMethod").value,document.getElementById("acUrl").value);
   const out=document.getElementById("acOut"); out.style.display="block"; out.textContent="Running…";
   try{const r=await fetch(`${API}/access-check/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("acMethod").value,url:document.getElementById("acUrl").value,headers:{}})});
@@ -867,34 +958,43 @@ async function runAccessCheck(){
   }catch(e){out.textContent="Error: "+e.message;}
 }
 
-/* ── topology (layered SVG) ── */
+/* ── topology (layered SVG; nodes are clickable) ── */
+let topoNodes=[];
+function topoClick(i){const n=topoNodes[i];if(!n)return;
+  if(n.kind==="host")switchTab("surface");
+  else if(n.kind==="endpoint")prefillWorkbench("GET",n.url||"",{},"");}
 async function loadTopology(){
   if(!sessionId){return;}
   try{const d=await(await fetch(`${API}/surface/${sessionId}`)).json();
     const inv=d.inventory||[]; const hosts={};
-    inv.forEach(e=>{(hosts[e.host]=hosts[e.host]||[]).push(e.path);});
+    inv.forEach(e=>{(hosts[e.host]=hosts[e.host]||[]).push({path:e.path,url:e.example});});
     const hostNames=Object.keys(hosts);
-    if(!hostNames.length){document.getElementById("topoWrap").innerHTML=emptyState("No map yet","Run recon, then refresh to map domain → hosts → endpoints.");return;}
+    if(!hostNames.length){document.getElementById("topoWrap").innerHTML=emptyState("No map yet","Run recon, then refresh to map domain → hosts → endpoints. Nodes become clickable once discovered.");return;}
     const cs=getComputedStyle(document.documentElement);
     const cRoot=cs.getPropertyValue("--accent").trim()||"#7aa2ff", cHost=cs.getPropertyValue("--purple").trim()||"#b6a0e6",
           cLeaf=cs.getPropertyValue("--ok").trim()||"#5bd1a0", cLine=cs.getPropertyValue("--border2").trim()||"#3a4658",
           cText=cs.getPropertyValue("--text").trim()||"#d8dee9", cBright=cs.getPropertyValue("--text-bright").trim()||"#f3f6fb";
     const W=Math.max(720,hostNames.length*150), H=140+Math.max(...hostNames.map(h=>hosts[h].length))*22+120;
+    topoNodes=[];
     let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
     const rootX=W/2, rootY=40;
     svg+=`<circle cx="${rootX}" cy="${rootY}" r="8" fill="${cRoot}"/><text x="${rootX+12}" y="${rootY+4}" fill="${cBright}">${esc(document.getElementById("programName").value||"target")}</text>`;
     hostNames.forEach((h,i)=>{
       const hx=(i+0.5)*(W/hostNames.length), hy=130;
+      const hIdx=topoNodes.push({kind:"host",host:h})-1;
       svg+=`<path d="M${rootX} ${rootY} C ${rootX} 90, ${hx} 80, ${hx} ${hy}" stroke="${cLine}" fill="none"/>`;
-      svg+=`<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+9}" y="${hy+3}" fill="${cText}">${esc(h)}</text>`;
-      hosts[h].slice(0,10).forEach((p,j)=>{
+      svg+=`<g style="cursor:pointer" onclick="topoClick(${hIdx})"><title>Open Surface for ${esc(h)}</title>`+
+           `<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+9}" y="${hy+3}" fill="${cText}">${esc(h)}</text></g>`;
+      hosts[h].slice(0,10).forEach((leaf,j)=>{
         const py=hy+30+j*22;
+        const eIdx=topoNodes.push({kind:"endpoint",url:leaf.url,path:leaf.path})-1;
         svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"/>`;
-        svg+=`<circle cx="${hx}" cy="${py}" r="3" fill="${cLeaf}"/><text x="${hx+8}" y="${py+3}">${esc(p.slice(0,26))}</text>`;
+        svg+=`<g style="cursor:pointer" onclick="topoClick(${eIdx})"><title>Send ${esc(leaf.path)} to Workbench</title>`+
+             `<circle cx="${hx}" cy="${py}" r="3" fill="${cLeaf}"/><text x="${hx+8}" y="${py+3}">${esc(String(leaf.path).slice(0,26))}</text></g>`;
       });
     });
     svg+=`</svg>`;
-    document.getElementById("topoWrap").innerHTML=`<div class="table-wrap" style="padding:.5rem">${svg}</div>`;
+    document.getElementById("topoWrap").innerHTML=`<div class="muted" style="margin-bottom:.5rem">Tip: click a host to open its Surface, or an endpoint to send it to the Workbench.</div><div class="table-wrap" style="padding:.5rem">${svg}</div>`;
   }catch(e){}
 }
 
@@ -906,6 +1006,7 @@ async function fetchReport(){
   }catch(e){}
 }
 function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/html`,"_blank");else alert("Start or load a mission first.");}
+function downloadHtml(){if(sessionId)window.open(`${API}/report/${sessionId}/html?download=1`,"_blank");else alert("Start or load a mission first.");}
 function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");else alert("Start or load a mission first.");}
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
@@ -965,6 +1066,59 @@ async function delMission(id){
 function updateCounters(){cCrit.textContent=counts.critical;cHigh.textContent=counts.high;cMed.textContent=counts.medium;cLow.textContent=counts.low;}
 function clearTerm(addPrompt=true){document.getElementById("termOut").innerHTML="";if(addPrompt)log("info","Feed cleared.<span class='blink'>▍</span>");}
 document.getElementById("approvalOverlay").addEventListener("click",function(e){/* decision-forcing: no click-away */});
+
+/* ── Help content ── */
+const HELP=[
+  ["Launch / Scope","Where you tell the agent what you're allowed to test and press start.",
+   "Enter the program name, pick a mode, and list in-scope domains (one per line; <code class=\"inline\">*.domain.com</code> matches subdomains). Out-of-scope is honored with deny-overrides-allow. You can import a scope file (HackerOne / Bugcrowd / Intigriti / YesWeHack / Burp / plain text) — an import summary tells you what was detected and what was skipped.",
+   "Example: in-scope <code class=\"inline\">*.example.com</code> and <code class=\"inline\">example.com</code>; out-of-scope <code class=\"inline\">status.example.com</code>."],
+  ["Assessment mode & Recon cycles","How aggressive the run is, and how many times recon repeats.",
+   "Passive = recon + playbook only. Active = adds scanning behind one approval gate. Full = adds deep probing (still gated). Recon cycles (1–3) let the agent repeat recon, learning from discovered hosts/URLs/tech to widen the surface before scanning. Intrusive tools are never looped.",
+   "Example: mode Active, recon cycles 2, for a program with many subdomains."],
+  ["Auth Headers","Lets scanners reach pages that require login.",
+   "Paste the header(s) your logged-in browser sends. Fill the value after each colon; blank template rows are ignored and never sent. Values are redacted in stored evidence and never appear in reports.",
+   "Example: <code class=\"inline\">Cookie: session=abc123</code> or <code class=\"inline\">Authorization: Bearer eyJ…</code>."],
+  ["Custom Objective","A short note that steers the agent's priorities.",
+   "It changes what the agent focuses on first — it never overrides scope or the approval gates. Leave it blank to use the default broad objective.",
+   "Example: “Focus on authorization, exposed sensitive files, and API access control. Report only confirmed, reproducible vulnerabilities.”"],
+  ["Live Run","The real-time activity feed for a running mission.",
+   "Shows each tool call with its permission level, phase transitions, approval prompts, and confirmed findings. Auto-scroll follows new lines; scroll up to pause it (it resumes at the bottom). Manual actions you run in cURL / Workbench / Access are logged here too (method + URL only).",
+   "Watch for the amber Intrusive gate — nothing intrusive runs until you authorize it."],
+  ["Playbooks","Recommended tests and leads — not confirmed bugs.",
+   "A rule-based, per-surface list of what to test, with a ready-to-run cURL, step-by-step guidance, payloads/variants, an advanced section, confidence, and references. Use Copy cURL, Send to cURL Console, or Access check to act on one.",
+   "Example: an IDOR playbook on <code class=\"inline\">/orders/{id}</code> hands you a baseline cURL to swap the id."],
+  ["Findings","Only confirmed, reproducible vulnerabilities.",
+   "Findings are evidence-backed and safe to report. They can be empty even when Playbooks are full — playbooks are leads you still need to validate. Confirm a lead in the tools and it appears here.",
+   "Each finding carries target, CVSS, CWE, steps, and a Re-test in cURL shortcut."],
+  ["Surface","The discovered attack surface (hosts, paths, parameters).",
+   "Built from recon. Each row can jump straight to the Workbench, cURL Console, or Access Check prefilled with that endpoint.",
+   "Example: click cURL next to <code class=\"inline\">/api/orders/1?id=1</code> to probe it."],
+  ["Topology","A visual map of domain → hosts → endpoints.",
+   "Click a host node to open its Surface; click an endpoint node to send it to the Workbench prefilled. It stays polished and shows an empty state when there's no data.",""],
+  ["cURL Console","Send one scope-guarded manual request and read the response.",
+   "Method / URL / Headers / Body. Every request is validated against scope server-side. Prefill it from a Playbook, Surface row, Topology node, or Finding; Copy request gives you the equivalent cURL; the response shows a colored status, headers, and body.",
+   "Off-scope URLs are rejected by the server — the guard is not client-side."],
+  ["Workbench","Repeater + Intruder for iterative manual testing.",
+   "Repeater replays one request; Intruder fuzzes a single parameter with your payloads or a wordlist and ranks results by anomaly. Both are scope-guarded.",
+   "Example: fuzz <code class=\"inline\">id</code> with <code class=\"inline\">1,2,3,' OR 1=1--</code> and watch for anomalies."],
+  ["Access Check","Compares one request across roles to spot IDOR / BOLA / BFLA.",
+   "Register roles (each with its own auth headers), then run one target URL as every role plus anonymous. A role that reaches another's object is flagged.",
+   "Example: register userA (owner) and userB, then request userA's order as userB."],
+  ["Reports","Export the confirmed findings.",
+   "Open the HTML report (with one-click Save as PDF) or download it as a file; also Markdown, CSV, JSON, and PoC Markdown, plus Copy Markdown.",
+   "Use Download HTML for an offline copy you can share."],
+  ["Archive / Rescan","Every mission is saved; rescan clones one into a new run.",
+   "Load a past mission to browse its findings/report, or Rescan to copy its scope/mode/objective into the Launch form for a brand-new child mission (the original is never changed).",
+   "Example: rescan last week's run after new subdomains appeared."],
+];
+function renderHelp(){
+  document.getElementById("helpList").innerHTML=HELP.map(([t,nontech,tech,ex])=>
+    `<div class="card"><h4>${esc(t)}</h4>
+      <div style="font-size:.86rem;margin-bottom:.4rem">${nontech}</div>
+      <div class="muted" style="font-size:.82rem;line-height:1.55"><strong>Details:</strong> ${tech}</div>
+      ${ex?`<div class="muted" style="font-size:.82rem;margin-top:.4rem">${ex}</div>`:""}</div>`).join("");
+}
+renderHelp();
 
 /* land on the Launch view */
 showView("launch");
