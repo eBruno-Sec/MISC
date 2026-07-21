@@ -58,6 +58,7 @@ REFS = {
     "mongo": [{"t": "Unauthenticated MongoDB", "u": "https://www.mongodb.com/docs/manual/administration/security-checklist/"}],
     "elastic": [{"t": "Unauthenticated Elasticsearch", "u": "https://www.elastic.co/guide/en/elasticsearch/reference/current/security-minimal-setup.html"}],
     "hostheader": [{"t": "WSTG-INPV-17 · Host Header Injection", "u": f"{PS}/host-header"}],
+    "crlf": [{"t": "WSTG-INPV-16 · HTTP Splitting / Smuggling (CRLF)", "u": f"{PS}/http-request-smuggling"}],
     "methods": [{"t": "WSTG-CONF-06 · HTTP Methods", "u": f"{WSTG}/02-Configuration_and_Deployment_Management_Testing/06-Test_HTTP_Methods"}],
     "listing": [{"t": "WSTG-CONF-04 · Directory Listing", "u": f"{WSTG}/02-Configuration_and_Deployment_Management_Testing"}],
     "secrets": [{"t": "Exposed Secrets / .env", "u": "https://owasp.org/www-community/vulnerabilities/Information_exposure_through_query_strings_in_url"}],
@@ -72,6 +73,7 @@ PARAMS = {
     "lfi": ["file", "path", "page", "include", "doc", "document", "template", "folder", "download"],
     "cmdi": ["cmd", "exec", "command", "ping", "query", "host", "ip", "domain"],
     "ssti": ["name", "search", "q", "query", "message", "email", "template", "greeting"],
+    "crlf": ["url", "redirect", "return", "next", "lang", "category", "page", "location"],
 }
 
 # ── payload libraries (copy-ready; benign-first) ────────────────────────────
@@ -115,6 +117,12 @@ PAYLOADS = {
     "cmdi": ["; id", "| id", "$(id)", "`id`", "%0aid", "& ping -c 3 YOUR-COLLABORATOR-ID.oastify.com"],
     "ssti": ["${7*7}", "{{7*7}}", "#{7*7}", "<%= 7*7 %>", "{{7*'7'}}", "${{7*7}}"],
     "graphql": ["{__schema{types{name}}}", "{__typename}", "query{__schema{queryType{name}}}"],
+    "crlf": [
+        "%0d%0aX-Injected: bbhcrlf",
+        "%0d%0aSet-Cookie: bbh=pwned",
+        "value%0d%0a%0d%0a<html>split-body</html>",
+        "%E5%98%8A%E5%98%8DX-Injected: bbhcrlf",
+    ],
 }
 
 # ── WAF / filter bypass techniques (per class) ──────────────────────────────
@@ -606,6 +614,16 @@ def _rule_param_injections(recon: dict) -> Iterable[dict]:
              "For AngularJS/client-side, treat a rendered 49 as CSTI → in-browser JS execution."],
             ["ssti"], ["ssti", "injection"], ["tplmap (manual)", "Burp Suite", "curl"],
         )
+        yield _param_finding(
+            base, "crlf", "CRLF / HTTP response-header injection surface", "Injection", "WSTG-INPV-16",
+            "MEDIUM", 35,
+            "Parameters written into a response header (Set-Cookie, Location, custom headers) without stripping "
+            "CR/LF let an attacker inject headers or split the response — cache poisoning, cookie/redirect injection.",
+            ["Append an encoded CRLF and a marker header (%0d%0aX-Injected: bbhcrlf) to a reflected param.",
+             "Inspect the RESPONSE headers (curl -i) for your injected header or a split Set-Cookie.",
+             "Params that feed redirects/cookies/language are the usual sinks — confirm the header actually appears."],
+            ["crlf"], ["crlf", "injection"], ["curl -i", "Burp Suite"],
+        )
 
 
 def _rule_paths(recon: dict) -> Iterable[dict]:
@@ -826,7 +844,8 @@ def _rule_host_header(recon: dict) -> Iterable[dict]:
 
 
 _XML_SIGNAL = re.compile(
-    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|api|import|export|upload|ews|services|b2b)(?:/|$|\?)"
+    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|api|import|export|upload|ews|services|b2b|"
+    r"stock|inventory|price|quote|checkout|order)(?:/|$|\?)"
     r"|\.xml(?:$|\?)|wsdl", re.I)
 
 

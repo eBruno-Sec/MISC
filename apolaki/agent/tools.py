@@ -1074,11 +1074,24 @@ class ToolRegistry:
             return ToolResult("js_review", "", True,
                               "No JS/source to review (crawl first, or pass url/urls/code)", [])
 
+        import dependency_intel as dep
         findings, endpoints = [], []
+        seen_comp = set()
         for label, text in sources:
             res = cr.review(text, label)
             findings += res["findings"]
             endpoints += res["endpoints"]
+            # SCA: fingerprint library version from content + URL, map exact,
+            # evidence-backed versions to known CVEs (guardrail: no version, no CVE).
+            comps = dep.fingerprint_js_content(text, label) + dep.fingerprint_url(label)
+            for comp in comps:
+                key = (comp["name"], comp["version"])
+                if not comp["version"] or key in seen_comp:
+                    continue
+                seen_comp.add(key)
+                vulns = dep.assess_component(comp)
+                if vulns:
+                    findings.append(dep.vulnerable_component_finding(comp, vulns))
 
         # resolve + seed in-scope endpoints into the surface
         src_host = next((urlparse(l).netloc for l, _ in sources if l.startswith("http")), "")
@@ -1342,6 +1355,23 @@ class ToolRegistry:
                             findings.append({"title": f"Server-side template injection on '{probe.parameter}'",
                                              "severity": v["severity"].lower(), "target": probe.url,
                                              "description": v["detail"], "family": "ssti", "tags": ["ssti"]})
+                            break
+                    except Exception:
+                        pass
+                # CRLF / response-header injection
+                for probe in ws.build_crlf_probes(url):
+                    if not self.scope.validate(probe.url)[0]:
+                        continue
+                    try:
+                        cl = await c.get(probe.url, follow_redirects=False)
+                        v = ws.analyze_crlf(dict(cl.headers), cl.status_code)
+                        if v:
+                            findings.append({"title": f"CRLF / response-header injection on '{probe.parameter}'",
+                                             "severity": v["severity"].lower(), "target": probe.url,
+                                             "description": v["detail"],
+                                             "evidence": f"marker header '{ws.CRLF_MARKER}' surfaced in the response",
+                                             "confidence": "confirmed", "cwe": "CWE-113",
+                                             "family": "crlf", "tags": ["crlf", "response-splitting"]})
                             break
                     except Exception:
                         pass
@@ -1729,10 +1759,11 @@ class ToolRegistry:
                                      timeout=seconds + 20) as c:
             base_r, _ = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
+            base_status = base_r.status_code if base_r is not None else 0
             for p in params:
                 orig = qvals.get(p, "1")
                 confirmed = False
-                # 1) error-based
+                # 1) error-based (DBMS error TEXT)
                 for probe in sqli.ERROR_PROBES[:3]:
                     r, _ = await get(c, xt.set_param(url, p, orig + probe))
                     if r is None:
@@ -1742,6 +1773,16 @@ class ToolRegistry:
                         findings.append(sqli.error_finding(url, p, probe, hits))
                         ev.append(xt.set_param(url, p, orig + probe)); confirmed = True
                         break
+                # 1b) quote-break / doubled-quote-recovery (status differential — fires
+                #     when a 500 leaks no SQL text, as on ginandjuice's category filter)
+                if not confirmed:
+                    r_sq, _ = await get(c, xt.set_param(url, p, orig + "'"))
+                    r_dq, _ = await get(c, xt.set_param(url, p, orig + "''"))
+                    if r_sq is not None and r_dq is not None and sqli.quote_break_recovers(
+                            base_status, r_sq.status_code, r_dq.status_code):
+                        findings.append(sqli.quote_recovery_finding(
+                            url, p, base_status, r_sq.status_code, r_dq.status_code))
+                        ev.append(xt.set_param(url, p, orig + "'")); confirmed = True
                 if confirmed:
                     continue
                 # 2) boolean-based blind

@@ -436,6 +436,39 @@ def analyze_ssti(baseline_body: str, probe_body: str) -> dict | None:
     return None
 
 
+# ── CRLF / response-header injection ─────────────────────────────
+CRLF_MARKER = "bbhcrlf"
+
+
+def build_crlf_probes(url: str, max_probes: int = 6) -> list:
+    """One probe per query param: append an encoded CRLF + a marker header. If the
+    app writes the value into a response header (e.g. Set-Cookie) unescaped, the
+    header block splits and our marker header appears in the response."""
+    inj = f"\r\nX-{CRLF_MARKER}: {CRLF_MARKER}pwned"
+    probes = []
+    for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
+        probes.append(WebProbe(url=_replace_query_value(url, name, (value or "1") + inj),
+                               parameter=name, original_value=value, payload=inj, family="crlf"))
+        if len(probes) >= max_probes:
+            break
+    return probes
+
+
+def analyze_crlf(resp_headers: dict, resp_status: int = 0) -> dict | None:
+    """Confirmed when our injected marker made it into the RESPONSE header block —
+    either as its own header name or a value split into an existing header
+    (Set-Cookie is the classic sink). Header-key/value match = a real split, so
+    no baseline is needed (the marker cannot occur naturally)."""
+    for k, v in (resp_headers or {}).items():
+        kl, vl = str(k).lower(), str(v).lower()
+        if CRLF_MARKER in kl or f"{CRLF_MARKER}pwned" in vl:
+            where = k if CRLF_MARKER in kl else f"{k} (value split)"
+            return {"severity": "HIGH",
+                    "detail": f"injected header surfaced in the response ({where}) — response-splitting/"
+                              "header-injection primitive (cache poisoning, cookie/redirect injection)"}
+    return None
+
+
 def build_redirect_probes(url: str, max_probes: int = 6) -> list:
     probes = []
     for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):

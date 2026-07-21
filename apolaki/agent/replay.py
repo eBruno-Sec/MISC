@@ -96,10 +96,22 @@ def mutate(url: str, body: str, param: str, param_in: str, payload: str):
 
 def score_result(baseline: dict, res: dict) -> int:
     score = 0
-    if res.get("status") != baseline.get("status"):
+    b_status = baseline.get("status") or 0
+    r_status = res.get("status") or 0
+    if r_status != b_status:
         score += 3
-    if abs((res.get("length") or 0) - (baseline.get("length") or 0)) > 40:
+    # A status-CLASS jump is a top-tier anomaly; benign -> 5xx server error is the
+    # strongest single signal (SQLi/parser break). This must never rank low.
+    if r_status // 100 != b_status // 100:
+        score += 2
+    if r_status >= 500 and b_status < 500:
+        score += 4
+    b_len = baseline.get("length") or 0
+    delta = abs((res.get("length") or 0) - b_len)
+    if delta > 40:
         score += 1
+    if b_len and delta / b_len > 0.5:
+        score += 2   # large relative length change
     if res.get("reflected"):
         score += 2
     if res.get("error_signatures"):
@@ -107,6 +119,18 @@ def score_result(baseline: dict, res: dict) -> int:
     if (res.get("duration_ms") or 0) > (baseline.get("duration_ms") or 0) + 4000:
         score += 3  # time-based (blind SQLi / SSRF timeout)
     return score
+
+
+def anomaly_label(score: int) -> str:
+    """Human/UI label for a fuzz row's score — never None (a scored row is always
+    classified, so an obvious 5xx anomaly can't render as 'nothing')."""
+    if score >= 6:
+        return "high"
+    if score >= 3:
+        return "medium"
+    if score >= 1:
+        return "low"
+    return "none"
 
 
 # ── Cross-role access control (IDOR / BOLA / BFLA) ───────────────
@@ -189,7 +213,9 @@ async def fuzz(c, method: str, url: str, headers: dict, body: str,
         try:
             r = await send(c, method, u, h, b)
         except Exception as e:
-            results.append({"payload": pl, "error": str(e), "score": 0})
+            # A transport error is itself notable — surface it, don't drop it to a
+            # scoreless row that renders as "no anomaly".
+            results.append({"payload": pl, "error": str(e), "score": 2, "anomaly": "error"})
             continue
         low = (r["body"] or "").lower()
         res = {
@@ -201,6 +227,7 @@ async def fuzz(c, method: str, url: str, headers: dict, body: str,
             "error_signatures": [s for s in ERROR_SIGNATURES if s in low],
         }
         res["score"] = score_result(baseline, res)
+        res["anomaly"] = anomaly_label(res["score"])
         results.append(res)
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)

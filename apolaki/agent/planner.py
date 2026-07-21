@@ -42,6 +42,12 @@ _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "d
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
 _FILE_PARAM = ("file", "path", "page", "doc", "document", "template", "include", "load", "read", "dir", "folder")
 _CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "ip", "dns", "query", "shell", "code")
+# Path signals for endpoints that likely parse an XML/SOAP request body — the XXE
+# sinks the GET-param probes never reach (e.g. ginandjuice /catalog/product/stock).
+import re as _re
+_XML_SINK = _re.compile(
+    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|upload|ews|services|b2b|"
+    r"stock|inventory|price|quote|checkout|order)(?:/|$|\?)|\.xml(?:$|\?)", _re.I)
 
 
 def _host(u: str) -> str:
@@ -164,6 +170,12 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_ssrf", {"url": u}, f"run_ssrf:{tag}"))
         if any(p in _CMD_PARAM for p in params_l):
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
+    # XML/SOAP body sinks (POST XML) — probe for XXE. These are path-driven, not
+    # query-param-driven, so they come from the whole inventory, not param_eps.
+    xml_eps = [e for e in inv if _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
+    for ep in xml_eps:
+        u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
+        e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
     for h in host_bases:
         e_steps.append(_step("run_content_discovery", {"base_url": f"https://{h}"}, f"run_content_discovery:{h}"))
         e_steps.append(_step("run_exposure", {"base_url": f"https://{h}"}, f"run_exposure:{h}"))

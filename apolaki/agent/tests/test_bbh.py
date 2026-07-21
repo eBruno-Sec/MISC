@@ -147,6 +147,18 @@ def test_replay_mutate_and_score():
     assert replay.score_result(base, hit) >= 7
 
 
+def test_fuzz_scorer_ranks_benign_to_5xx_top_tier():
+    # P0-3: a 2xx -> 5xx with a big length delta must be a HIGH anomaly, never
+    # scored like a minor status wobble (the ginandjuice Gin'->500 row).
+    base = {"status": 200, "length": 13110, "duration_ms": 20}
+    five = {"status": 500, "length": 3761, "duration_ms": 20}     # Gin' -> 500
+    twoxx = {"status": 200, "length": 13130, "duration_ms": 20}   # trivial change
+    s5 = replay.score_result(base, five)
+    assert s5 >= 9 and replay.anomaly_label(s5) == "high", s5
+    assert replay.anomaly_label(replay.score_result(base, twoxx)) in ("none", "low")
+    assert replay.anomaly_label(0) == "none"     # never Python None
+
+
 def test_access_verdict_flags_bola():
     res = [
         {"role": "userA", "status": 200, "length": 500, "is_owner": True},
@@ -999,6 +1011,32 @@ def test_ghr_sensitive_file_is_a_lead_plain_mention_is_not():
     assert ghr.classify_hit(plain, "acme.com", '"acme.com"') is None
 
 
+# ── dependency_intel: SCA fingerprint + CVE map + guardrail (P1-3) ──────────
+def test_sca_maps_exact_version_to_cve_with_guardrail():
+    import dependency_intel as dep
+    # ginandjuice's odd-separator filename -> exact version (HIGH)
+    comp = dep.fingerprint_url("https://t/js/angular_1-7-7.js")[0]
+    assert comp["name"] == "angular" and comp["version"] == "1.7.7" and dep.cve_eligible(comp)
+    vulns = dep.assess_component(comp)
+    assert vulns and any("CVE-2023-26117" in v["ids"] for v in vulns)
+    f = dep.vulnerable_component_finding(comp, vulns)
+    assert f["confidence"] == "confirmed" and f["severity"] == "high" and f["evidence"]
+    # GUARDRAIL: no version, or LOW confidence -> never CVE-eligible, no vulns
+    assert dep.assess_component(dep.make_component("jquery", "", "x", dep.LOW)) == []
+    assert dep.assess_component(dep.make_component("angular", "1.7.7", "guess", dep.LOW)) == []
+    # a patched version is clean; an old one is flagged
+    assert dep.assess_component(dep.make_component("jquery", "3.6.0", "f", dep.HIGH)) == []
+    assert dep.assess_component(dep.make_component("jquery", "3.4.0", "f", dep.HIGH))
+
+
+def test_sca_content_banner_is_confirmed():
+    import dependency_intel as dep
+    body = "/*! jQuery JavaScript Library v3.3.1 */ ;(function(){})();"
+    comps = dep.fingerprint_js_content(body, "https://t/app.js")
+    assert comps and comps[0]["name"] == "jquery" and comps[0]["version"] == "3.3.1"
+    assert comps[0]["confidence"] == "confirmed"
+
+
 # ── sqli_tool: error / boolean / time oracles ───────────────────
 def test_sqli_error_signature_fingerprints_dbms_and_ignores_baseline():
     base = "<html>results for widget</html>"
@@ -1016,6 +1054,18 @@ def test_sqli_boolean_true_tracks_baseline_false_diverges():
     assert sqli.analyze_boolean(base, t, f) is True
     # a param that changes nothing (true==false) is not injectable
     assert sqli.analyze_boolean(base, base, base) is False
+
+
+def test_sqli_quote_break_recovery_oracle():
+    # P0-2: ginandjuice category filter — benign 200, single quote 500, doubled
+    # quote recovers to 200. Confirms SQLi with NO leaked DBMS error text.
+    assert sqli.quote_break_recovers(200, 500, 200) is True
+    # a bare 500 that does NOT recover is not this signal (could be any error)
+    assert sqli.quote_break_recovers(200, 500, 500) is False
+    # baseline already erroring -> inconclusive, not a break
+    assert sqli.quote_break_recovers(500, 500, 200) is False
+    f = sqli.quote_recovery_finding("https://t/catalog?category=Gin", "category", 200, 500, 200)
+    assert f["confidence"] == "confirmed" and f["family"] == "sqli" and f["evidence"]
 
 
 def test_sqli_time_oracle_needs_correlated_delay():

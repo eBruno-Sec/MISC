@@ -285,10 +285,16 @@ async def engage(req: EngageRequest):
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
                             "status": "created", "events": [], "task": None, "done": False}
+    # /engage only PREPARES the mission (status=created). An API/CLI caller that
+    # stops here sees no progress forever; the UI hides this by opening /stream.
+    # Tell every caller explicitly how to start the run.
     return {"session_id": session_id, "mode": req.mode,
             "authenticated": bool(session_headers), "auth_note": auth_note,
             "parent_id": context.get("parent_id"), "warm_start": warm_start,
-            "strategy": strategy, "max_ai_calls": agent.max_ai_calls}
+            "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
+            "status": "created", "started": False,
+            "next_step": f"POST /run/{session_id} (or open GET /stream/{session_id}) to begin the scan",
+            "run_url": f"/run/{session_id}", "stream_url": f"/stream/{session_id}"}
 
 
 @app.post("/estimate")

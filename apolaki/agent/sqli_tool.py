@@ -56,6 +56,28 @@ def error_signatures(baseline_body: str, probe_body: str) -> list:
     return hits
 
 
+# ── quote-break / recovery (status differential — no DBMS text needed) ──
+def quote_break_recovers(base_status: int, single_status: int, double_status: int) -> bool:
+    """Classic quote-injection signature that needs NO leaked SQL text: a benign
+    value works, a single quote breaks the query into a SERVER ERROR (5xx) the
+    baseline did not have, and DOUBLING the quote (escaping it) recovers to a
+    non-error. The break+recover pair is what rules out a generic 500 — the
+    parameter is concatenated straight into SQL."""
+    return base_status < 500 and single_status >= 500 and 200 <= double_status < 500
+
+
+def quote_recovery_finding(url: str, param: str, base_status: int,
+                           single_status: int, double_status: int) -> dict:
+    return _base(url, param, "error-recovery", "high",
+                 (f"A single quote in '{param}' changed the response from HTTP {base_status} to {single_status} "
+                  f"(server error), and doubling the quote recovered it to HTTP {double_status}. The quote breaks "
+                  "the SQL statement and escaping it restores it, so the value is concatenated into a query."),
+                 f"HTTP {base_status} (benign) -> {single_status} (single quote) -> {double_status} (doubled quote)",
+                 [f"Set '{param}' to VALUE'  — server error (HTTP {single_status})",
+                  f"Set '{param}' to VALUE'' — recovers (HTTP {double_status})",
+                  "Confirm/exploit with a boolean or UNION payload (authorized testing only)"])
+
+
 # ── boolean-based blind ──────────────────────────────────────────
 _COMMENTS = ("-- -", "#", "-- ")
 
