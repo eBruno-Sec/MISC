@@ -57,24 +57,40 @@ def _exec_note(execution: dict) -> str:
     return " — ".join(parts)
 
 
+def _leads_md(leads: list) -> str:
+    if not leads:
+        return ""
+    lines = ["", "## Unconfirmed Leads", "",
+             "_Signals worth manual verification — NOT confirmed vulnerabilities. "
+             "Confirm before reporting to a program._", "",
+             "| Severity | Confidence | Lead | Target |", "|---|---|---|---|"]
+    for l in sorted(leads, key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)):
+        lines.append(f"| {(l.get('severity') or 'info').capitalize()} | {l.get('confidence','candidate')} "
+                     f"| {l.get('title','')} | `{l.get('target','')}` |")
+    return "\n".join(lines) + "\n"
+
+
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
-                     ai_summary: str = None, execution: dict = None) -> str:
+                     ai_summary: str = None, execution: dict = None, leads: list = None) -> str:
     now = _now()
-    banner = _status_note(status)
-    exec_note = _exec_note(execution)
-    if exec_note:
-        banner = (banner + "\n\n" + exec_note) if banner else exec_note
+    status_banner = _status_note(status)          # only failed/stopped/interrupted
+    exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
+    banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
     ai_block = (f"## Executive Summary\n\n{ai_summary.strip()}\n\n" if (ai_summary or "").strip() else "")
+    leads_md = _leads_md(leads)
     if not findings:
+        # "ended early" only when the STATUS says so — not merely because an
+        # execution note is present (which it always is for deterministic/low-AI).
+        tail = " before the run ended early." if status_banner else " during this engagement."
         return (
             f"# Security Assessment Report: {program}\n\n"
             + (banner + "\n\n" if banner else "")
             + f"**Date:** {now}\n"
             f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
             + ai_block
-            + ("No confirmed vulnerabilities were recorded"
-               + (" before the run ended early." if banner else " during this engagement.") + "\n")
+            + "No confirmed vulnerabilities were recorded" + tail + "\n"
+            + leads_md
         )
 
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -82,6 +98,10 @@ def generate_report(program: str, findings: list, scope: dict,
 
     lines = [
         f"# Security Assessment Report: {program}", "",
+    ]
+    if banner:
+        lines += [banner, ""]
+    lines += [
         f"**Date:** {now}",
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",
@@ -131,13 +151,15 @@ def generate_report(program: str, findings: list, scope: dict,
         for c in chains:
             lines += [f"- **{c.get('host')}** ({(c.get('severity') or '').upper()}): {c.get('narrative')}"]
         lines.append("")
+    if leads_md:
+        lines.append(leads_md)
     return "\n".join(lines)
 
 
 # ── HTML (dark-themed standalone, all fields escaped) ────────────
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
-                         ai_summary: str = None, execution: dict = None) -> str:
+                         ai_summary: str = None, execution: dict = None, leads: list = None) -> str:
     e = _html.escape
     counts = _counts(findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -193,6 +215,17 @@ def generate_html_report(program: str, findings: list, scope: dict,
     if (ai_summary or "").strip():
         _paras = "".join(f"<p>{e(p.strip())}</p>" for p in ai_summary.strip().split("\n") if p.strip())
         ai_html = f'<h2>Executive Summary</h2><div class="aisum">{_paras}</div>'
+    leads_html = ""
+    if leads:
+        rows = "".join(
+            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get((l.get('severity') or 'info').lower(),'#6a8a9a')}'>"
+            f"{e((l.get('severity') or 'info').upper())}</span></td><td>{e(l.get('confidence','candidate'))}</td>"
+            f"<td>{e(l.get('title',''))}</td><td><code>{e(l.get('target',''))}</code></td></tr>"
+            for l in sorted(leads, key=lambda x: SEV_ORDER.get((x.get('severity') or 'info').lower(), 5)))
+        leads_html = ("<h2>Unconfirmed Leads</h2><p class='sub'>Signals worth manual verification — "
+                      "NOT confirmed vulnerabilities. Confirm before reporting.</p>"
+                      "<table class='leads'><tr><th>Severity</th><th>Confidence</th><th>Lead</th><th>Target</th></tr>"
+                      + rows + "</table>")
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
@@ -223,6 +256,9 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   padding:.8rem 1rem;margin:.6rem 0}}.aisum p{{margin:.4rem 0}}
 .execbar{{background:var(--surface);border:1px solid var(--border);color:var(--dim);padding:.45rem .8rem;
   margin:.6rem 0;border-radius:4px;font-size:.76rem}}
+table.leads{{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:.5rem}}
+table.leads th,table.leads td{{border:1px solid var(--border);padding:.4rem .6rem;text-align:left}}
+table.leads th{{color:var(--dim);text-transform:uppercase;font-size:.68rem;letter-spacing:.06em}}
 /* Print / Save-as-PDF: white background, ink-friendly, keep findings whole */
 @media print{{
   :root{{--bg:#fff;--surface:#fff;--border:#bbb;--text:#111;--dim:#555;--bright:#000;--accent:#04c}}
@@ -246,6 +282,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {chain_html}
 <h2>Findings</h2>
 {''.join(cards) if cards else "<p class='sub'>No confirmed vulnerabilities found during this engagement.</p>"}
+{leads_html}
 <footer>Apolaki · authorized security research only. Verify every finding before submitting.</footer>
 </div></body></html>"""
 

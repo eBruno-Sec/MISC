@@ -85,6 +85,10 @@ _AUTO_STORE_TOOLS = {
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
     "run_content_discovery", "run_ffuf",
 }
+# Confirmatory tools that emit no per-finding confidence grade — their results are
+# confirmed by construction (a template/active-scan/fingerprint match). Everything
+# else must carry confidence=="confirmed" to enter the report.
+_CONFIRMED_BY_TOOL = {"run_nuclei", "run_zap", "check_takeover", "run_sqlmap", "run_dalfox"}
 
 SYSTEM_PROMPT = """You are a professional bug bounty hunter operating exclusively within provided scope.
 
@@ -161,6 +165,7 @@ class BBHAgent:
         # first-ever scan behaves exactly as before.
         self.memory_note = ""
         self.findings: list = []
+        self.leads: list = []           # unconfirmed candidate/static signals (not report findings)
         self._stored_fps: set = set()   # fingerprints already stored (auto-store dedup)
         self.current_phase = "init"
         self._recon_passes = 0   # counts entries into the recon phase (cycle labels)
@@ -244,7 +249,10 @@ class BBHAgent:
             # phase, so iterative recon reads as "cycle 1 → 2 → 3" instead of an
             # opaque phase bounce. Only when >1 cycle is configured (default run
             # is unchanged and emits none).
-            if ph == "recon" and self.recon_cycles > 1:
+            # Only the agentic ReAct flow emits cycle banners here on recon re-entry;
+            # deterministic/low_ai own their cycle banners in _execute_plan (avoids
+            # a duplicate "Recon cycle 1" message).
+            if ph == "recon" and self.recon_cycles > 1 and self.strategy == "agentic":
                 self._recon_passes += 1
                 n = min(self._recon_passes, self.recon_cycles)
                 yield {"type": "cycle", "cycle": n, "total": self.recon_cycles,
@@ -303,30 +311,48 @@ class BBHAgent:
         })[:3500]
         yield {"_content": content}
 
+    def _is_confirmed(self, tool: str, f: dict) -> bool:
+        """A finding is report-worthy CONFIRMED only when the probe says so. The
+        native tools grade every finding (confirmed / candidate / possible /
+        probable); we trust that grade. A tool that confirms by construction but
+        emits no grade (nuclei/zap/takeover) is treated as confirmed; anything
+        graded weaker — reflection candidates, IDOR signals, static JS review — is
+        a LEAD, never a confirmed report finding."""
+        c = str(f.get("confidence", "")).strip().lower()
+        if c == "confirmed":
+            return True
+        if c:                                 # candidate / possible / probable
+            return False
+        return tool in _CONFIRMED_BY_TOOL      # no grade + confirmatory tool
+
     async def _auto_store(self, result):
-        """Persist confirmed, finding-shaped probe results (deterministic/low_ai),
-        deduped by fingerprint so re-probes and any later model store don't double.
-        `severity` is the discriminator (data items lack it); the title is derived
-        from whichever label key the tool used."""
+        """Route finding-shaped probe results (deterministic/low_ai) when no model
+        drives the scan: CONFIRMED → /findings + report; weaker signals → Leads.
+        Deduped by fingerprint. `severity` is the finding discriminator; the title
+        is derived from whichever label key the tool used."""
         import memory as memory_mod
         for f in (result.findings or []):
             if not isinstance(f, dict) or not f.get("severity"):
-                continue                      # data item, not a confirmed finding
+                continue                      # data item, not a finding
             title = (f.get("title") or f.get("name") or f.get("issue")
                      or f.get("type") or f.get("detail") or f"{result.tool} finding")
             f = dict(f)
             f["title"] = str(title)[:140]
             f["target"] = f.get("target") or f.get("url") or result.target or ""
-            f.setdefault("severity", (f.get("severity") or "info"))
-            f["severity"] = str(f["severity"]).lower()
+            f["severity"] = str(f.get("severity") or "info").lower()
             fp = memory_mod.finding_fp(f)
             if fp in self._stored_fps:
                 continue
             self._stored_fps.add(fp)
-            if self.mission_id:
-                f["id"] = db.add_finding(self.mission_id, f)
-            self.findings.append(f)
-            yield {"type": "finding", "finding": f}
+            if self._is_confirmed(result.tool, f):
+                if self.mission_id:
+                    f["id"] = db.add_finding(self.mission_id, f)
+                self.findings.append(f)
+                yield {"type": "finding", "finding": f}
+            else:
+                f.setdefault("confidence", "candidate")
+                self.leads.append(f)
+                yield {"type": "lead", "lead": f}
 
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:
@@ -463,6 +489,7 @@ class BBHAgent:
                 yield self._budget_event()
             except Exception as e:
                 yield {"type": "info", "content": f"AI prioritization skipped ({type(e).__name__})."}
+                yield self._budget_event()   # the attempt counted; keep the chip in sync
 
         yield {"type": "info", "content": f"Low-AI scan — deterministic planner ({self.mode} mode) with an "
                "AI wrap-up. Budget: " + f"{self.ai_calls}/{self.max_ai_calls} calls used."}
@@ -479,6 +506,7 @@ class BBHAgent:
             except Exception as e:
                 self.ai_note = f"Low-AI: deterministic scan completed; AI wrap-up skipped ({type(e).__name__})."
                 yield {"type": "info", "content": f"AI wrap-up skipped ({type(e).__name__})."}
+                yield self._budget_event()   # the attempt counted; keep the chip in sync
         if not self.ai_note:
             self.ai_note = (f"Low-AI: deterministic scan + AI wrap-up ({self.ai_calls} AI call(s))."
                             if wrapped else f"Low-AI: deterministic scan ({self.ai_calls} AI call(s)).")

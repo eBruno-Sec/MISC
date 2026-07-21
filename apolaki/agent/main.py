@@ -395,6 +395,7 @@ async def mission_detail(session_id: str):
         "playbook": m["context"].get("playbook", []),
         "playbook_stats": m["context"].get("playbook_stats", {}),
         "chains": m["context"].get("chains", []),
+        "leads": m["context"].get("leads", []),
     }
 
 
@@ -423,6 +424,10 @@ def _execution(m) -> dict:
     return (m.get("context", {}) or {}).get("execution", {})
 
 
+def _leads(m) -> list:
+    return (m.get("context", {}) or {}).get("leads", [])
+
+
 def _coverage(session_id: str) -> dict:
     logs = db.get_logs(session_id, limit=2000)
     tools_run = {}
@@ -438,15 +443,17 @@ def _coverage(session_id: str) -> dict:
 async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
-                                    status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
-    return {"markdown": md, "findings": findings, "status": m["status"]}
+                                    status=m["status"], ai_summary=_ai_summary(m),
+                                    execution=_execution(m), leads=_leads(m))
+    return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
 
 
 @app.get("/report/{session_id}/md")
 async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
-                                    status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
+                                    status=m["status"], ai_summary=_ai_summary(m),
+                                    execution=_execution(m), leads=_leads(m))
     fname = f"bbh-report-{session_id}.md"
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -456,7 +463,8 @@ async def get_report_md(session_id: str):
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains,
-                                           status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
+                                           status=m["status"], ai_summary=_ai_summary(m),
+                                           execution=_execution(m), leads=_leads(m))
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
@@ -480,7 +488,8 @@ async def get_report_poc(session_id: str, redact: bool = True):
     findings = db.get_findings(session_id)
     ex_by_f = {f.get("id"): db.get_exchanges(session_id, f.get("id")) for f in findings}
     md = poc.mission_markdown(m["program"], findings, ex_by_f, redact=redact)
-    return PlainTextResponse(md, media_type="text/markdown")
+    return PlainTextResponse(md, media_type="text/markdown",
+                             headers={"Content-Disposition": f'attachment; filename="bbh-poc-{session_id}.md"'})
 
 
 # ── cross-session memory: record + graph + diff ──────────────────
@@ -568,6 +577,18 @@ def _record_execution(session_id: str) -> None:
                             "ai_calls": getattr(agent, "ai_calls", 0),
                             "max_ai_calls": getattr(agent, "max_ai_calls", 0),
                             "ai_note": getattr(agent, "ai_note", "")}
+        # Unconfirmed leads (candidate/static signals) live separately from findings
+        # so the report stays bounty-trustworthy. Dedup + cap.
+        leads, seen = [], set()
+        for lead in getattr(agent, "leads", []):
+            key = (lead.get("title", ""), lead.get("target", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            leads.append({"title": lead.get("title", ""), "severity": lead.get("severity", "info"),
+                          "target": lead.get("target", ""), "confidence": lead.get("confidence", "candidate"),
+                          "description": lead.get("description", "") or lead.get("detail", "")})
+        ctx["leads"] = leads[:60]
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
@@ -749,6 +770,15 @@ async def curl_console(session_id: str, req: ReplayRequest):
     _scope_guard(eng, req.url)
     async with replay_mod.client(req.follow_redirects) as c:
         r = await replay_mod.send(c, req.method, req.url, req.headers, req.body)
+    # Persist the manual request like Workbench replay does — as redacted evidence
+    # and a log entry — so archived missions can reconstruct what was tested.
+    if session_id in sessions or db.get_mission(session_id):
+        db.add_exchange(session_id, {"url": req.url, "method": req.method,
+                                     "request_headers": req.headers, "request_body": req.body,
+                                     "status_code": r["status"], "response_headers": r["headers"],
+                                     "response_body": r["body"][:4000], "notes": "cURL console"})
+        db.add_log(session_id, "tool_result", {"tool": "cURL Console",
+                   "output": f"{req.method} {req.url} → HTTP {r['status']} · {r['length']}B · {r['duration_ms']}ms"})
     return {
         "status": r["status"], "length": r["length"], "duration_ms": r["duration_ms"],
         "headers": r["headers"], "body": r["body"][:12000],

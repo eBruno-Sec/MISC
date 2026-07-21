@@ -1609,8 +1609,10 @@ def test_health_endpoint():
 def _cycle_agent(recon_cycles):
     import agent as agent_mod
     eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com"], [], "P")
-    return agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(),
-                              mode="active", mission_id=None, recon_cycles=recon_cycles)
+    # cycle labels via _run_tool are the AGENTIC-flow behavior (deterministic owns
+    # its own cycle banners in _execute_plan, tested separately).
+    return agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), mode="active",
+                              strategy="agentic", mission_id=None, recon_cycles=recon_cycles)
 
 
 def _events(agent, tool):
@@ -1888,6 +1890,10 @@ class _FindTools(_PlanTools):
             return ToolResult("sqli", inp.get("url", ""), True, "1 confirmed SQLi",
                               [{"title": "SQL injection (error-based) in 'id'", "severity": "high",
                                 "target": inp.get("url", ""), "description": "x", "confidence": "confirmed"}])
+        if name == "run_xss":     # reflection only -> candidate -> LEAD, not a finding
+            return ToolResult("xss", inp.get("url", ""), True, "reflected",
+                              [{"title": "Reflected value in 'q'", "severity": "high",
+                                "target": inp.get("url", ""), "confidence": "candidate"}])
         return ToolResult(name, inp.get("url") or inp.get("domain") or "", True, "ran", [])
 
 
@@ -1902,10 +1908,15 @@ def test_deterministic_auto_stores_confirmed_probe_findings():
 
     evs, a = _run(go("deterministic"))
     finds = [e for e in evs if e.get("type") == "finding"]
-    assert finds and any("SQL injection" in f["finding"]["title"] for f in finds), \
-        "confirmed probe finding was dropped in deterministic mode"
-    assert len(a.findings) >= 1
-    # auto-store is fingerprint-deduped: the same confirmed finding isn't stored twice
+    leads = [e for e in evs if e.get("type") == "lead"]
+    # CONFIRMED sqli -> a finding; CANDIDATE xss reflection -> a lead (never a finding)
+    assert finds and all("SQL injection" in f["finding"]["title"] for f in finds), \
+        "confirmed probe finding missing / a candidate leaked into findings"
+    assert not any("Reflected value" in f["finding"]["title"] for f in finds), \
+        "candidate reflection was wrongly stored as a confirmed finding"
+    assert leads and any("Reflected value" in l["lead"]["title"] for l in leads), \
+        "candidate signal was not captured as a lead"
+    assert len(a.findings) >= 1 and len(a.leads) >= 1
     titles = [f["finding"]["title"] for f in finds]
     assert len(titles) == len(set(titles)), "auto-store did not dedup by fingerprint"
 

@@ -243,6 +243,9 @@ footer{background:var(--surface);border-top:1px solid var(--border);display:flex
 .topo-panel li{padding:.18rem 0;border-bottom:1px solid var(--border);word-break:break-all}
 .topo-panel .tp-act{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
 .topo-dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.4rem;vertical-align:middle}
+.leads-sec{margin-top:1.2rem;border-top:1px dashed var(--border2);padding-top:.8rem}
+.leads-sec>h4{font-size:.9rem;color:var(--text-bright);margin:.2rem 0 .6rem}
+.lead-card{opacity:.92}
 .topo-chiprow{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.6rem}
 .topo-chip{display:inline-flex;align-items:center;gap:.1rem;background:var(--surface);border:1px solid var(--border);
   color:var(--text);border-radius:999px;padding:.28rem .7rem;font-size:.78rem;cursor:pointer;font-family:inherit}
@@ -429,7 +432,7 @@ X-Requested-With: </textarea>
       <div class="form-grid">
         <div class="field span-sm"><label>Method</label><select id="cuMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></div>
         <div class="field span-lg"><label>URL</label><input type="text" id="cuUrl" placeholder="https://app.example.com/"></div>
-        <div class="field span-full"><label>Headers <span class="muted">(Name: value per line)</span></label><textarea id="cuHeaders" placeholder="Content-Type: application/json"></textarea></div>
+        <div class="field span-full"><label>Headers <span class="muted">(Name: value per line)</span> <button type="button" class="btn ghost sm" style="float:right" onclick="insertAuthTemplate('cuHeaders')">+ auth template</button></label><textarea id="cuHeaders" placeholder="Content-Type: application/json&#10;Authorization: Bearer …&#10;Cookie: session=…"></textarea></div>
         <div class="field span-full"><label>Body</label><textarea id="cuBody" style="min-height:56px"></textarea></div>
       </div>
       <div class="btn-row">
@@ -450,7 +453,7 @@ X-Requested-With: </textarea>
           <h4>Repeater</h4>
           <div class="field"><label>Method</label><select id="wbMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option></select></div>
           <div class="field"><label>URL</label><input type="text" id="wbUrl" placeholder="https://api.example.com/orders/1"></div>
-          <div class="field"><label>Headers <span class="muted">(Name: value per line)</span></label><textarea id="wbHeaders" placeholder="Cookie: session=…"></textarea></div>
+          <div class="field"><label>Headers <span class="muted">(Name: value per line)</span> <button type="button" class="btn ghost sm" style="float:right" onclick="insertAuthTemplate('wbHeaders')">+ auth template</button></label><textarea id="wbHeaders" placeholder="Cookie: session=…&#10;Authorization: Bearer …"></textarea></div>
           <div class="field"><label>Body</label><textarea id="wbBody" style="min-height:52px"></textarea></div>
           <button class="btn primary" onclick="wbReplay()">Send</button>
         </div>
@@ -475,7 +478,7 @@ X-Requested-With: </textarea>
         <div class="block">
           <h4>Register a role</h4>
           <div class="field"><label>Role name</label><input type="text" id="acName" placeholder="userA"></div>
-          <div class="field"><label>Auth headers <span class="muted">(Name: value per line)</span></label><textarea id="acHeaders" placeholder="Cookie: session=abc"></textarea></div>
+          <div class="field"><label>Auth headers <span class="muted">(Name: value per line)</span> <button type="button" class="btn ghost sm" style="float:right" onclick="insertAuthTemplate('acHeaders')">+ auth template</button></label><textarea id="acHeaders" placeholder="Cookie: session=abc&#10;Authorization: Bearer …"></textarea></div>
           <label class="chk"><input type="checkbox" id="acOwner"> This role owns the object</label>
           <button class="btn" style="margin-top:.7rem" onclick="addProfile()">+ Register role</button>
           <div id="profileList" style="margin-top:.8rem"></div>
@@ -555,7 +558,7 @@ X-Requested-With: </textarea>
 const API = window.location.origin;
 let sessionId=null, es=null, running=false, reportMd="", pendingApproval=null;
 let aiReady=true, pendingParent=null, pbData=[], autoScrollOn=true;
-let counts={critical:0,high:0,medium:0,low:0}, findings=[];
+let counts={critical:0,high:0,medium:0,low:0}, findings=[], leads=[];
 const PHASES=["recon","enum","scan","probe","guidance","report"];
 let phaseState={};
 const SEV_HEX={critical:"#ef6a8c",high:"#e79457",medium:"#d8b455",low:"#74a0ee",info:"#8b97a9",informational:"#8b97a9"};
@@ -692,10 +695,10 @@ function logManualResult(tool,summary){log("tool_result",`${esc(tool)}: ${esc(su
 
 const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
   text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
-  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate",cycle:"Cycle",manual:"Manual",summary:"Summary"};
+  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate",cycle:"Cycle",manual:"Manual",summary:"Summary",lead:"Lead"};
 const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
   text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
-  phase:"t-phase",triage:"t-triage",cycle:"t-phase",manual:"t-active",summary:"t-complete"};
+  phase:"t-phase",triage:"t-triage",cycle:"t-phase",manual:"t-active",summary:"t-complete",lead:"t-triage"};
 function scrollFeed(){const out=document.getElementById("termOut");out.scrollTop=out.scrollHeight;}
 function log(type,html,sub=""){
   const out=document.getElementById("termOut"), cls=TYPE_MAP[type]||"t-info", tag=TAG_LABELS[type]||type.toUpperCase();
@@ -735,7 +738,7 @@ async function startHunt(){
   const strategy=document.getElementById("strategy").value;
   // AI credentials are only required for AI strategies; deterministic/manual run without them.
   if((strategy==="low_ai"||strategy==="agentic")&&!aiReady){alert("AI credentials are missing. Set AI_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env and restart, or pick the Deterministic / Manual mode which needs no AI.");return;}
-  counts={critical:0,high:0,medium:0,low:0}; findings=[]; updateCounters(); renderFindings();
+  counts={critical:0,high:0,medium:0,low:0}; findings=[]; leads=[]; updateCounters(); renderFindings();
   phaseState={}; renderPhaseBar(); clearTerm(false); reportMd="";
   const inScope=inRaw.split("\n").map(s=>s.trim()).filter(Boolean);
   const outScope=document.getElementById("outScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
@@ -799,6 +802,9 @@ function handleEvent(d){
       if(sev in counts)counts[sev]++; updateCounters();
       findings.push(f); renderFindings();
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title)}</strong>`,esc(f.target)); break;}
+    case "lead":{
+      const l=d.lead||{}; leads.push(l); renderFindings();
+      log("lead",`<strong>${esc(l.title||"lead")}</strong> <span class="muted">(${esc(l.confidence||"candidate")} — verify)</span>`,esc(l.target||"")); break;}
     case "triage": log("triage",esc(d.verdict)); break;
     case "complete": log("complete",esc(d.content)); fetchReport(); finishHunt("s-done","Done"); break;
     case "error": log("error",esc(d.content)); finishHunt("s-err","Error"); break;
@@ -823,6 +829,7 @@ function renderLogEntry(d){
     case "approval_resolved": log("info",`Gate ${esc(d.resolution||"")}.`); break;
     case "finding":{const f=d.finding||{},sev=(f.severity||"low").toLowerCase();
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title||"")}</strong>`,esc(f.target||"")); break;}
+    case "lead":{const l=d.lead||{};log("lead",`<strong>${esc(l.title||"lead")}</strong> <span class="muted">(${esc(l.confidence||"candidate")} — verify)</span>`,esc(l.target||"")); break;}
     case "triage": log("triage",esc(d.verdict||"")); break;
     case "complete": log("complete",esc(d.content||"")); break;
     case "error": log("error",esc(d.content||"")); break;   // surface a failed run on replay
@@ -849,11 +856,7 @@ async function resolveApproval(ok){
 /* ── findings ── */
 function renderFindings(){
   const el=document.getElementById("findingsList"), badge=document.getElementById("findBadge");
-  if(!findings.length){el.innerHTML=emptyState("No confirmed findings yet",
-    "This list holds only <strong>confirmed, reproducible</strong> vulnerabilities. Playbooks are <em>test recommendations / leads</em>, not findings — work them in the cURL Console, Workbench, or Access Check, and anything you confirm (or the agent stores as verified) shows up here.");
-    badge.style.display="none";return;}
-  badge.style.display="inline-block"; badge.textContent=findings.length;
-  el.innerHTML=findings.map((f,i)=>{
+  const fHtml = findings.length ? findings.map((f,i)=>{
     const sev=(f.severity||"info").toLowerCase();
     const col=SEV_HEX[sev]||SEV_HEX.info;
     const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
@@ -862,8 +865,22 @@ function renderFindings(){
       <div class="kv"><span>Target <code>${esc(f.target||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
       <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
       ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
-  }).join("");
+  }).join("") : emptyState("No confirmed findings yet",
+    "This list holds only <strong>confirmed, reproducible</strong> vulnerabilities. Weaker signals appear under <em>Unconfirmed Leads</em> below (or as Playbooks) — verify them in the cURL Console / Workbench / Access Check, and anything confirmed shows up here.");
+  // Unconfirmed leads: candidate / static signals, clearly separated from findings.
+  let lHtml="";
+  if(leads.length){
+    lHtml=`<div class="leads-sec"><h4>Unconfirmed Leads <span class="muted">(${leads.length} — verify before reporting)</span></h4>`+
+      leads.map((l,i)=>{const sev=(l.severity||"info").toLowerCase();const col=SEV_HEX[sev]||SEV_HEX.info;
+        const rt=/^https?:\/\//i.test(l.target||"")?`<button type="button" class="btn ghost sm link-act" style="margin-left:auto" onclick="testLeadIdx(${i})">Verify in cURL →</button>`:"";
+        return `<div class="card lead-card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(l.title||"Lead")} <span class="pill" style="--c:var(--sev-info)">${esc(l.confidence||"candidate")}</span>${rt}</h4>
+          <div class="kv"><span>Target <code>${esc(l.target||"")}</code></span></div>${l.description?`<div class="muted">${esc(l.description)}</div>`:""}</div>`;
+      }).join("")+`</div>`;
+  }
+  el.innerHTML=fHtml+lHtml;
+  if(findings.length){badge.style.display="inline-block";badge.textContent=findings.length;}else{badge.style.display="none";}
 }
+function testLeadIdx(i){const l=leads[i];if(!l)return;const p=/^https?:\/\//i.test(l.target||"")?l.target:"";prefillCurl("GET",p,{},"",`Lead — ${l.title||""}`);}
 
 /* ── "since last scan" diff (cross-session memory) ── */
 async function loadDiff(){
@@ -1056,6 +1073,10 @@ async function sendCurl(){
 // Parse "Name: value" lines. Empty values (prefilled template names) are ignored
 // so they never break a request.
 function parseHeaders(t){const h={};(t||"").split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0){const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k&&v)h[k]=v;}});return h;}
+// Insert the same blank-safe auth-header template the Launch form uses (empty
+// values are ignored by parseHeaders, so it never breaks a request).
+const AUTH_TMPL="Authorization: \nCookie: \nX-CSRF-Token: \nX-API-Key: ";
+function insertAuthTemplate(id){const el=document.getElementById(id);if(!el)return;const cur=el.value.trim();el.value=(cur?cur+"\n":"")+AUTH_TMPL;el.focus();}
 async function wbReplay(){
   if(!sessionId)return alert("Start or load a mission first.");
   const _m=document.getElementById("wbMethod").value,_u=document.getElementById("wbUrl").value;
@@ -1319,7 +1340,7 @@ async function loadArchive(){
 }
 async function loadMission(id,program){
   try{const d=await(await fetch(`${API}/missions/${id}`)).json();
-    sessionId=id; findings=d.findings||[];
+    sessionId=id; findings=d.findings||[]; leads=d.leads||[];
     counts={critical:0,high:0,medium:0,low:0};
     findings.forEach(f=>{const s=(f.severity||"").toLowerCase();if(s in counts)counts[s]++;});
     updateCounters(); renderFindings();
