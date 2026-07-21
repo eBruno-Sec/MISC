@@ -29,15 +29,34 @@ def _counts(findings: list) -> dict:
 
 
 # ── Markdown (original H1/BC format, enhanced) ───────────────────
+def _status_note(status: str) -> str:
+    """A one-line run-outcome note for a mission that did not finish cleanly, so a
+    report never silently reads 'no vulnerabilities' for an aborted run."""
+    s = (status or "").lower()
+    if s in ("failed", "error"):
+        return ("> ⚠ **Run status: FAILED.** This assessment did not complete (commonly a provider "
+                "quota/rate-limit or network error, not a target result). Coverage below is partial — re-run to finish.")
+    if s in ("stopped", "stopping"):
+        return "> ⏹ **Run status: STOPPED by operator.** Coverage below is partial."
+    if s == "interrupted":
+        return "> ⚠ **Run status: INTERRUPTED.** The run was cut short; coverage below is partial."
+    if s == "running":
+        return "> ⏳ **Run status: RUNNING.** This report is a snapshot of an in-progress assessment."
+    return ""
+
+
 def generate_report(program: str, findings: list, scope: dict,
-                     coverage: dict = None, chains: list = None) -> str:
+                     coverage: dict = None, chains: list = None, status: str = None) -> str:
     now = _now()
+    banner = _status_note(status)
     if not findings:
         return (
             f"# Security Assessment Report: {program}\n\n"
-            f"**Date:** {now}\n"
+            + (banner + "\n\n" if banner else "")
+            + f"**Date:** {now}\n"
             f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
-            "No confirmed vulnerabilities found during this engagement.\n"
+            + ("No confirmed vulnerabilities were recorded"
+               + (" before the run ended early." if banner else " during this engagement.") + "\n")
         )
 
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -95,7 +114,7 @@ def generate_report(program: str, findings: list, scope: dict,
 
 # ── HTML (dark-themed standalone, all fields escaped) ────────────
 def generate_html_report(program: str, findings: list, scope: dict,
-                         coverage: dict = None, chains: list = None) -> str:
+                         coverage: dict = None, chains: list = None, status: str = None) -> str:
     e = _html.escape
     counts = _counts(findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -143,6 +162,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
         chain_html = f"<h2>Attack-Path Chains</h2><ul class='chains'>{items}</ul>"
 
     scope_str = e(", ".join(scope.get("in_scope", [])))
+    _sn = _status_note(status)
+    status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
@@ -167,6 +188,8 @@ ol,ul{{padding-left:1.3rem}}.chains li{{margin:.3rem 0}}
 footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid var(--border);padding-top:1rem}}
 .pdfbtn{{position:fixed;top:1rem;right:1rem;background:var(--accent);color:#001;border:none;font-family:inherit;
   font-size:.8rem;font-weight:700;padding:.5rem .9rem;cursor:pointer;border-radius:3px;z-index:10}}
+.statusbar{{background:rgba(231,148,87,.14);border:1px solid #e79457;color:#e79457;padding:.6rem .8rem;
+  margin:1rem 0;border-radius:4px;font-size:.8rem}}
 /* Print / Save-as-PDF: white background, ink-friendly, keep findings whole */
 @media print{{
   :root{{--bg:#fff;--surface:#fff;--border:#bbb;--text:#111;--dim:#555;--bright:#000;--accent:#04c}}
@@ -182,6 +205,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 <div class="wrap">
 <div class="head"><h1>Security Assessment Report — {e(program)}</h1>
 <div class="sub">Generated {e(_now())} · Scope: {scope_str} · {len(findings)} finding(s)</div>
+{status_html}
 <div class="chips">{peek}</div></div>
 {cov_html}
 {chain_html}

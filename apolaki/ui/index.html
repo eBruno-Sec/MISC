@@ -610,6 +610,10 @@ fetch(`${API}/wordlists`).then(r=>r.json()).then(d=>{
 }).catch(()=>{});
 
 function setStatus(s,l){const el=document.getElementById("statusPill");el.className="status-pill "+s;el.textContent=l;}
+// Map a persisted mission status to the status pill (used when loading archives).
+const _PILL={complete:["s-done","Done"],failed:["s-err","Failed"],interrupted:["s-err","Interrupted"],
+  stopped:["s-stop","Stopped"],stopping:["s-stop","Stopping"],running:["s-run","Running"]};
+function setMissionPill(status){const m=_PILL[status]||["s-idle","Archived"];setStatus(m[0],m[1]);}
 function esc(s){if(typeof s!=="string")s=JSON.stringify(s)??"";return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function emptyState(t,s,action){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p>${action||resumeAffordance()}</div>`;}
 // When there's no active session, every empty state offers a direct way back in:
@@ -630,6 +634,9 @@ function logManual(tool,method,url){log("manual",`<strong>${esc(tool)}</strong> 
 // (BLOCKED) entry — never left looking like a successful active request.
 function logManualBlocked(tool,method,url,detail){
   log("scope_block",`<strong>${esc(tool)}</strong> · ${esc(method)} ${esc(url||"")} → BLOCKED`,esc(detail||""));}
+// Sanitized manual-result event: status / length / timing only — never response
+// headers, body, or any secret.
+function logManualResult(tool,summary){log("tool_result",`${esc(tool)}: ${esc(summary)}`);}
 
 const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
   text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
@@ -711,9 +718,13 @@ async function startHunt(){
   }catch(err){log("error",esc(err.message));setStatus("s-err","Error");}
 }
 
+// Keep the feed operator-useful: the model's prose can run to huge paragraphs,
+// so agent "text" is trimmed to a readable lead. Tool calls/results/phase/cycle/
+// finding/error events are never trimmed.
+function trimAgent(s){s=String(s||"").trim();return s.length>360?esc(s.slice(0,360))+' <span class="muted">… (trimmed)</span>':esc(s);}
 function handleEvent(d){
   switch(d.type){
-    case "text": if(d.content?.trim())log("text",esc(d.content)); break;
+    case "text": if(d.content?.trim())log("text",trimAgent(d.content)); break;
     case "phase": setPhase(d.phase); log("phase",`Phase → <strong>${esc(d.phase)}</strong>`); break;
     case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
     case "tool_call":{
@@ -740,7 +751,7 @@ function handleEvent(d){
 // to replay an archived mission's original tool calls/results into the feed.
 function renderLogEntry(d){
   switch(d.type){
-    case "text": if(d.content?.trim())log("text",esc(d.content)); break;
+    case "text": if(d.content?.trim())log("text",trimAgent(d.content)); break;
     case "phase": log("phase",`Phase → <strong>${esc(d.phase||"")}</strong>`); break;
     case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
     case "tool_call":{
@@ -755,6 +766,7 @@ function renderLogEntry(d){
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title||"")}</strong>`,esc(f.target||"")); break;}
     case "triage": log("triage",esc(d.verdict||"")); break;
     case "complete": log("complete",esc(d.content||"")); break;
+    case "error": log("error",esc(d.content||"")); break;   // surface a failed run on replay
   }
 }
 function replayLogs(logs){(logs||[]).forEach(renderLogEntry);}
@@ -786,7 +798,7 @@ function renderFindings(){
     const sev=(f.severity||"info").toLowerCase();
     const col=SEV_HEX[sev]||SEV_HEX.info;
     const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
-    const retest=/^https?:\/\//i.test(f.target||"")?`<span class="link-act" style="margin-left:auto" onclick="testFindingIdx(${i})">Re-test in cURL →</span>`:"";
+    const retest=/^https?:\/\//i.test(f.target||"")?`<button type="button" class="btn ghost sm link-act" style="margin-left:auto" onclick="testFindingIdx(${i})">Re-test in cURL →</button>`:"";
     return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}${retest}</h4>
       <div class="kv"><span>Target <code>${esc(f.target||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
       <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
@@ -826,9 +838,9 @@ async function loadSurface(){
     document.getElementById("surfaceTable").innerHTML=inv.length?
       `<div class="table-wrap"><table><tr><th>Host</th><th>Path</th><th>Params</th><th></th></tr>${inv.map(e=>
         `<tr><td>${esc(e.host)}</td><td><code>${esc(e.path)}</code></td><td>${esc((e.params||[]).join(", "))}</td>
-         <td style="white-space:nowrap"><span class="link-act" onclick="toWorkbench('${esc(e.example)}')">Workbench</span>
-           &nbsp;<span class="link-act" onclick="toCurl('${esc(e.example)}')">cURL</span>
-           &nbsp;<span class="link-act" onclick="toAccess('${esc(e.example)}')">Access</span></td></tr>`).join("")}</table></div>`
+         <td style="white-space:nowrap"><button type="button" class="btn ghost sm link-act" onclick="toWorkbench('${esc(e.example)}')">Workbench</button>
+           <button type="button" class="btn ghost sm link-act" onclick="toCurl('${esc(e.example)}')">cURL</button>
+           <button type="button" class="btn ghost sm link-act" onclick="toAccess('${esc(e.example)}')">Access</button></td></tr>`).join("")}</table></div>`
       :emptyState("Nothing discovered yet","Run recon, then refresh to see hosts, paths, and parameters.");
   }catch(e){}
 }
@@ -974,6 +986,7 @@ async function sendCurl(){
     if(!r.ok){const msg=d.detail||JSON.stringify(d);st.className="resp-status s-srv";st.textContent="Blocked / error: "+msg;clearResp();logManualBlocked("cURL Console",_m,_u,msg);return;}
     const cls=d.status<300?"s-ok":d.status<400?"s-redir":d.status<500?"s-cli":"s-srv";
     st.className="resp-status "+cls;st.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`;
+    logManualResult("cURL Console",`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`);
     cc.style.display="block";cc.textContent="$ "+d.curl;
     out.style.display="block";
     out.textContent=`--- headers ---\n`+Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
@@ -993,6 +1006,7 @@ async function wbReplay(){
     body:JSON.stringify({method:_m,url:_u,
       headers:parseHeaders(document.getElementById("wbHeaders").value),body:document.getElementById("wbBody").value||null})});
     const d=await r.json(); if(!r.ok){const msg=d.detail||JSON.stringify(d);out.textContent="Blocked / error: "+msg;logManualBlocked("Workbench replay",_m,_u,msg);return;}
+    logManualResult("Workbench replay",`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`);
     out.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms\n\ncurl: ${d.curl}\n\n--- headers ---\n`+
       Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
   }catch(e){out.textContent="Error: "+e.message;}
@@ -1009,6 +1023,7 @@ async function wbFuzz(){
       param:document.getElementById("wbParam").value,param_in:document.getElementById("wbParamIn").value,
       payloads:pls,wordlist_id:document.getElementById("wbWordlist").value||null})});
     const d=await r.json(); if(!r.ok){const msg=d.detail||JSON.stringify(d);out.textContent="Blocked / error: "+msg;logManualBlocked("Workbench fuzz",_m,_u,msg);return;}
+    logManualResult("Workbench fuzz",`baseline HTTP ${d.baseline.status} · ${(d.results||[]).length} payload(s) ranked`);
     out.textContent=`Baseline HTTP ${d.baseline.status} · ${d.baseline.length}B\nTop results (anomaly-ranked):\n\n`+
       d.results.slice(0,20).map(x=>`score ${x.score||0}  ${x.status||"ERR"}  ${x.length||0}B  ${x.duration_ms||0}ms  ${x.error_signatures&&x.error_signatures.length?"⚠SQL":""}  ${String(x.payload).slice(0,60)}`).join("\n");
   }catch(e){out.textContent="Error: "+e.message;}
@@ -1021,14 +1036,16 @@ async function loadProfiles(){
     document.getElementById("profileList").innerHTML=(d.profiles||[]).map(p=>
       `<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.4rem .6rem;margin-bottom:.35rem;font-size:.82rem">
         <span>${esc(p.name)} ${p.is_owner?'<span class="pill" style="--c:var(--ok)">OWNER</span>':""}</span>
-        <span class="link-act link-danger" onclick="delProfile('${p.id}')">Remove</span></div>`).join("")||'<p class="muted">No roles registered yet.</p>';
+        <button type="button" class="btn ghost sm link-danger" onclick="delProfile('${p.id}')">Remove</button></div>`).join("")||'<p class="muted">No roles registered yet.</p>';
   }catch(e){}
 }
 async function addProfile(){
   if(!sessionId)return alert("Start or load a mission first.");
-  await fetch(`${API}/profiles/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name:document.getElementById("acName").value||"role",role:"",
-      headers:parseHeaders(document.getElementById("acHeaders").value),is_owner:document.getElementById("acOwner").checked})});
+  const hdrs=parseHeaders(document.getElementById("acHeaders").value);   // drops blank values
+  if(!Object.keys(hdrs).length)return alert("A role needs at least one non-empty auth header (e.g. Cookie or Authorization). A blank-auth role is just anonymous and would produce false access-control flags.");
+  const r=await fetch(`${API}/profiles/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name:document.getElementById("acName").value||"role",role:"",headers:hdrs,is_owner:document.getElementById("acOwner").checked})});
+  if(!r.ok){const d=await r.json().catch(()=>({}));return alert("Could not add role: "+(d.detail||r.status));}
   document.getElementById("acName").value="";document.getElementById("acHeaders").value="";document.getElementById("acOwner").checked=false;
   loadProfiles();
 }
@@ -1039,7 +1056,8 @@ async function runAccessCheck(){
   const out=document.getElementById("acOut"); out.style.display="block"; out.textContent="Running…";
   try{const r=await fetch(`${API}/access-check/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("acMethod").value,url:document.getElementById("acUrl").value,headers:{}})});
-    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){const msg=d.detail||JSON.stringify(d);out.textContent="Blocked / error: "+msg;logManualBlocked("Access check",document.getElementById("acMethod").value,document.getElementById("acUrl").value,msg);return;}
+    logManualResult("Access check",`${(d.results||[]).length} role(s) tested · ${d.anomaly?"⚠ possible anomaly":"no anomaly"}`);
     out.textContent=`VERDICT: ${d.verdict}\n\n`+d.results.map(x=>
       `${(x.role||"").padEnd(12)} ${x.error?("ERR "+x.error):`HTTP ${x.status} · ${x.length}B`} ${x.is_owner?"(owner)":""} ${x.flag?("⚠ "+x.flag):""}`).join("\n");
   }catch(e){out.textContent="Error: "+e.message;}
@@ -1097,7 +1115,7 @@ function renderTopology(){
     const hIdx=topoNodes.push({id:hid,kind:"host",label:host})-1;
     svg+=`<path d="M${rootX} ${rootY} C ${rootX} 92, ${hx} 82, ${hx} ${hy}" stroke="${cLine}" fill="none"${dim(hid)}/>`;
     const ring=hSev?`<circle cx="${hx}" cy="${hy}" r="10" fill="none" stroke="${SEV_HEX[hSev]||cHost}" stroke-width="2"/>`:"";
-    svg+=`<g style="cursor:pointer" onclick="topoClick(${hIdx})"${dim(hid)}><title>${esc(host)} — click to trace</title>`+
+    svg+=`<g class="topo-node" data-idx="${hIdx}" style="cursor:pointer"${dim(hid)}><title>${esc(host)} — click to trace</title>`+
          ring+`<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+12}" y="${hy+3}" fill="${cText}">${esc(host)}</text></g>`;
     (epByHost[hid]||[]).slice(0,10).forEach((eid,j)=>{
       const ep=byId[eid], py=hy+30+j*22;
@@ -1105,7 +1123,7 @@ function renderTopology(){
       const eIdx=topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||host})-1;
       svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"${dim(eid)}/>`;
       const eColor=eSev?SEV_HEX[eSev]:cLeaf, r=eSev?4.5:3;
-      svg+=`<g style="cursor:pointer" onclick="topoClick(${eIdx})"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":""} — click to trace</title>`+
+      svg+=`<g class="topo-node" data-idx="${eIdx}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":""} — click to trace</title>`+
            `<circle cx="${hx}" cy="${py}" r="${r}" fill="${eColor}"/><text x="${hx+8}" y="${py+3}">${esc(String(ep.label).slice(0,26))}</text></g>`;
     });
     const more=(epByHost[hid]||[]).length-10;
@@ -1113,6 +1131,9 @@ function renderTopology(){
   });
   svg+=`</svg>`;
   wrap.innerHTML=`<div class="muted" style="margin-bottom:.5rem">Click any node to trace its connections. Ringed nodes carry findings.</div><div class="table-wrap" style="padding:.5rem">${svg}</div>`;
+  // Bind clicks with addEventListener (NOT inline onclick — inline handlers on
+  // SVG <g> proved unreliable across browsers; this is the robust fix).
+  wrap.querySelectorAll("g.topo-node").forEach(g=>g.addEventListener("click",()=>topoClick(+g.dataset.idx)));
   const st=topoGraph.stats||{};
   if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`;
   renderTopoPanel();
@@ -1186,9 +1207,13 @@ async function rescan(id){
     document.getElementById("outScope").value=(sc.out_of_scope||[]).join("\n");
     document.getElementById("objective").value=m.objective||"";
     if(m.mode)document.getElementById("mode").value=m.mode;
+    // Preserve the source mission's recon cycles (clamped to the selector's range)
+    // so a 3-cycle rescan does not silently reset to 1.
+    const rc=String(Math.max(1,Math.min(parseInt(m.recon_cycles,10)||1,3)));
+    const rcSel=document.getElementById("reconCycles"); if(rcSel)rcSel.value=rc;
     pendingParent=id;
     showView("launch");
-    log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> (${esc(id)}). Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
+    log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> (${esc(id)}) · recon cycles ${rc}. Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
   }catch(e){alert("Rescan prefill failed: "+e.message);}
 }
 
@@ -1226,6 +1251,11 @@ async function loadMission(id,program){
     if(hist.length)log("info",`— Replaying ${hist.length} log entr${hist.length===1?"y":"ies"} from the archived run —`);
     replayLogs(hist);
     if(d.mission&&d.mission.phase)setPhase(d.mission.phase);
+    // Reflect the archived mission's terminal state in the status pill (a failed
+    // run must not read as IDLE).
+    const mstatus=(d.mission&&d.mission.status)||"";
+    setMissionPill(mstatus);
+    if(mstatus==="failed")log("error",`This mission ended in a FAILED state — see the error above. (Often a provider quota / network issue, not a target finding.)`);
     log("info",`Loaded archived mission <strong>${esc(program)}</strong> (${id}) — ${findings.length} findings. Report / Playbooks / Tools are live against it.`);
     switchTab("findings");
   }catch(e){alert("Load failed: "+e.message);}

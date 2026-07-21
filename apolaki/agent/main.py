@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -339,7 +340,8 @@ async def mission_detail(session_id: str):
     m = _require_mission(session_id)
     return {
         "mission": {**{k: m[k] for k in ("id", "program", "mode", "status", "phase", "objective", "created_at")},
-                    "parent_id": m["context"].get("parent_id")},
+                    "parent_id": m["context"].get("parent_id"),
+                    "recon_cycles": m["context"].get("recon_cycles", 1)},
         "scope": m["scope"],
         "findings": db.get_findings(session_id),
         "notes": db.get_notes(session_id),
@@ -381,14 +383,14 @@ def _coverage(session_id: str) -> dict:
 @app.get("/report/{session_id}")
 async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains)
-    return {"markdown": md, "findings": findings}
+    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains, status=m["status"])
+    return {"markdown": md, "findings": findings, "status": m["status"]}
 
 
 @app.get("/report/{session_id}/md")
 async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains)
+    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains, status=m["status"])
     fname = f"bbh-report-{session_id}.md"
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -397,7 +399,7 @@ async def get_report_md(session_id: str):
 @app.get("/report/{session_id}/html")
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains)
+    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains, status=m["status"])
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
@@ -501,6 +503,25 @@ def _finalize_mission(session_id: str) -> None:
     _record_memory(session_id)
 
 
+def _sanitize_error(e: Exception) -> str:
+    """Turn a raw provider/client exception into an operator-safe message. Never
+    leaks a key, and gives quota/rate-limit/auth failures a clear, actionable
+    line instead of a raw stack string."""
+    s = str(e)
+    low = s.lower()
+    if "429" in s or "rate limit" in low or "rate-limit" in low or "quota" in low or "free-models-per-day" in low:
+        return ("Provider quota reached (HTTP 429) — the model's request limit was hit "
+                "(e.g. a free-tier daily cap). The run stopped early; retry after the limit "
+                "resets or configure a model with more headroom. This is a provider limit, not a target result.")
+    if "401" in s or "invalid api key" in low or "unauthorized" in low or "authentication" in low:
+        return "Provider authentication failed (HTTP 401) — check the configured API key/model. The run stopped early."
+    if "timeout" in low or "timed out" in low:
+        return "Provider request timed out. The run stopped early; retry."
+    # Generic: keep the exception class + a short, key-free message.
+    msg = re.sub(r"(sk-[A-Za-z0-9_\-]{6,}|Bearer\s+\S+)", "[redacted]", s)
+    return f"Run error ({type(e).__name__}): {msg[:300]}"
+
+
 async def _drive_mission(session_id: str) -> None:
     """Run the agent to completion in a BACKGROUND task, independent of any SSE
     connection. Events are persisted (DB logs) and buffered on the session so
@@ -524,7 +545,7 @@ async def _drive_mission(session_id: str) -> None:
         sess["done"] = True
         raise
     except Exception as e:
-        err = {"type": "error", "content": str(e)}
+        err = {"type": "error", "content": _sanitize_error(e)}
         db.add_log(session_id, "error", err)
         sess["events"].append(err)
         sess["status"] = "failed"
@@ -668,7 +689,14 @@ async def list_profiles(session_id: str):
 @app.post("/profiles/{session_id}")
 async def add_profile(session_id: str, req: ProfileRequest):
     _require_mission(session_id)
-    pid = db.add_profile(session_id, req.name, req.role, req.headers, req.is_owner)
+    # A role must carry a real credential. Drop empty-value template headers; a
+    # role with no non-empty auth header is indistinguishable from anonymous and
+    # would make the access-check flag public pages (the Codex FP), so reject it.
+    headers = {k: v for k, v in (req.headers or {}).items() if str(v).strip()}
+    if not headers:
+        raise HTTPException(422, "A role needs at least one non-empty auth header "
+                                 "(e.g. Cookie or Authorization) — a blank-auth role is just anonymous.")
+    pid = db.add_profile(session_id, req.name, req.role, headers, req.is_owner)
     return {"id": pid}
 
 

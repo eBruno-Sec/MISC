@@ -1632,3 +1632,53 @@ def test_recon_cycle_labels_emitted_on_reentry():
 def test_no_cycle_labels_when_single_cycle():
     a = _cycle_agent(1)                               # default run: unchanged
     assert not any(e.get("type") == "cycle" for e in _events(a, "run_subfinder"))
+
+
+# ── failed-run surfacing: report banner + error sanitisation ─────
+def test_report_status_banner_on_failed_run():
+    md = report.generate_report("P", [], {"in_scope": ["x.com"]}, status="failed")
+    assert "FAILED" in md and "provider quota" in md.lower()
+    html = report.generate_html_report("P", [], {"in_scope": ["x.com"]}, status="failed")
+    assert "statusbar" in html and "FAILED" in html
+    # a clean/complete run has no banner (unchanged behaviour)
+    ok = report.generate_report("P", [], {"in_scope": ["x.com"]}, status="complete")
+    assert "FAILED" not in ok and "No confirmed vulnerabilities" in ok
+
+
+def test_sanitize_error_maps_quota_and_redacts_keys():
+    import pytest
+    pytest.importorskip("fastapi")
+    import main as mainmod
+    m429 = mainmod._sanitize_error(Exception("Error code: 429 - free-models-per-day limit"))
+    assert "429" in m429 and "quota" in m429.lower() and "provider limit" in m429.lower()
+    leak = mainmod._sanitize_error(Exception("boom with key sk-abcdef123456 inside"))
+    assert "sk-abcdef123456" not in leak and "[redacted]" in leak
+
+
+# ── blank-auth role rejection (access-check FP source) ───────────
+def test_add_profile_rejects_blank_auth_role():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    import db as dbmod
+    snap = _env_snapshot()
+    try:
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-x"
+        dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+        with TestClient(mainmod.app) as c:
+            sid = c.post("/engage", json={"program_name": "P", "in_scope": ["*.x.com"], "recon_cycles": 3}).json()["session_id"]
+            # blank/whitespace headers -> 422, role not created
+            r = c.post(f"/profiles/{sid}", json={"name": "ownerish", "headers": {"Authorization": "", "Cookie": "  "}, "is_owner": True})
+            assert r.status_code == 422
+            assert not c.get(f"/profiles/{sid}").json()["profiles"]
+            # a real credential is accepted (empty template rows are dropped)
+            r2 = c.post(f"/profiles/{sid}", json={"name": "userA", "headers": {"Cookie": "session=abc", "X-CSRF": ""}, "is_owner": True})
+            assert r2.status_code == 200
+            profs = c.get(f"/profiles/{sid}").json()["profiles"]
+            assert len(profs) == 1 and profs[0]["name"] == "userA"
+            # rescan surfaces the source recon_cycles
+            md = c.get(f"/missions/{sid}").json()["mission"]
+            assert md["recon_cycles"] == 3
+    finally:
+        _env_restore(snap)
