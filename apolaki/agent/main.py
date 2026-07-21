@@ -164,7 +164,9 @@ def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
 # ── UI + config ──────────────────────────────────────────────────
 @app.get("/")
 async def ui():
-    return FileResponse(UI_PATH)
+    # no-store so a rebuilt image never serves a browser-cached stale index.html
+    # (a stale UI is the most likely reason a JS fix appears "not applied").
+    return FileResponse(UI_PATH, headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/health")
@@ -269,6 +271,19 @@ async def engage(req: EngageRequest):
     return {"session_id": session_id, "mode": req.mode,
             "authenticated": bool(session_headers), "auth_note": auth_note,
             "parent_id": context.get("parent_id"), "warm_start": warm_start}
+
+
+@app.post("/run/{session_id}")
+async def run_mission(session_id: str):
+    """Start execution WITHOUT opening an SSE stream — for API-only clients.
+
+    /stream also starts the run (that's the UI path), but a caller that only POSTs
+    /engage and never streams would otherwise sit at 'created'. This kicks off the
+    same background task; poll /status and read /missions/{id} logs for progress."""
+    if session_id not in sessions:
+        raise HTTPException(404, "Session not found")
+    _ensure_run_started(session_id)   # idempotent
+    return {"ok": True, "status": sessions[session_id]["status"]}
 
 
 @app.get("/stream/{session_id}")

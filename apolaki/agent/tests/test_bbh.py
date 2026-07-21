@@ -1682,3 +1682,33 @@ def test_add_profile_rejects_blank_auth_role():
             assert md["recon_cycles"] == 3
     finally:
         _env_restore(snap)
+
+
+async def _hang(objective, sid):
+    yield {"type": "phase", "phase": "recon"}
+    await asyncio.Event().wait()
+
+
+def test_api_only_run_endpoint_starts_execution():
+    """POST /run starts the background task for an API-only client (no SSE), so a
+    session no longer sits at 'created' until something streams it."""
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    import db as dbmod
+    snap = _env_snapshot()
+    try:
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-x"
+        dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+        with TestClient(mainmod.app) as c:
+            sid = c.post("/engage", json={"program_name": "P", "in_scope": ["*.x.com"]}).json()["session_id"]
+            assert c.get(f"/status/{sid}").json()["status"] == "created"   # not running yet
+            mainmod.sessions[sid]["agent"] = _LAgent(_hang)                 # stub: no network
+            r = c.post(f"/run/{sid}")
+            assert r.status_code == 200 and r.json()["status"] == "running"
+            assert c.get(f"/status/{sid}").json()["status"] == "running"
+            assert mainmod.sessions[sid]["task"] is not None
+            mainmod.sessions[sid]["task"].cancel()                          # cleanup
+    finally:
+        _env_restore(snap)

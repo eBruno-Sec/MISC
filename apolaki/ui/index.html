@@ -751,7 +751,7 @@ function handleEvent(d){
 // to replay an archived mission's original tool calls/results into the feed.
 function renderLogEntry(d){
   switch(d.type){
-    case "text": if(d.content?.trim())log("text",trimAgent(d.content)); break;
+    case "text": break;   // replay: suppress model reasoning/recap chatter (read the report for the narrative)
     case "phase": log("phase",`Phase → <strong>${esc(d.phase||"")}</strong>`); break;
     case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
     case "tool_call":{
@@ -1131,9 +1131,9 @@ function renderTopology(){
   });
   svg+=`</svg>`;
   wrap.innerHTML=`<div class="muted" style="margin-bottom:.5rem">Click any node to trace its connections. Ringed nodes carry findings.</div><div class="table-wrap" style="padding:.5rem">${svg}</div>`;
-  // Bind clicks with addEventListener (NOT inline onclick — inline handlers on
-  // SVG <g> proved unreliable across browsers; this is the robust fix).
-  wrap.querySelectorAll("g.topo-node").forEach(g=>g.addEventListener("click",()=>topoClick(+g.dataset.idx)));
+  // Click handling is DELEGATED (see initTopoDelegation) on the #topoWrap
+  // container, which survives every innerHTML re-render — more robust than
+  // per-node or inline handlers, which proved flaky across browsers.
   const st=topoGraph.stats||{};
   if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`;
   renderTopoPanel();
@@ -1142,6 +1142,18 @@ function topoClick(i){const n=topoNodes[i];if(!n)return;
   topoSelected=(topoSelected===n.id)?null:n.id;   // toggle: click again to clear
   renderTopology();
 }
+// Delegated, one-time click handler on the persistent #topoWrap container. It
+// survives every innerHTML re-render and resolves the clicked SVG child up to its
+// <g class="topo-node"> via closest() — the most robust binding available.
+function initTopoDelegation(){
+  const wrap=document.getElementById("topoWrap"); if(!wrap||wrap._topoBound)return;
+  wrap._topoBound=true;
+  wrap.addEventListener("click",e=>{
+    const g=e.target&&e.target.closest?e.target.closest("g.topo-node"):null;
+    if(g&&g.dataset&&g.dataset.idx!=null)topoClick(+g.dataset.idx);
+  });
+}
+initTopoDelegation();
 function renderTopoPanel(){
   const el=document.getElementById("topoPanel"); if(!el)return;
   if(!topoSelected||!topoGraph){el.innerHTML=`<div class="muted">Click a node to see what it relates to — its endpoints, technologies, and any findings.</div>`;return;}
