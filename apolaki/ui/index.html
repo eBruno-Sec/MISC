@@ -625,14 +625,18 @@ function resumeLast(){const lm=lastMission();if(lm)loadMission(lm.id,lm.program)
 function copyText(str,msg){navigator.clipboard.writeText(str||"").then(()=>log("info",msg||"Copied to clipboard.")).catch(()=>{});}
 // Log a manual tool action to the Live Run feed — method + URL only, never header
 // or body values (which may hold secrets).
-function logManual(tool,method,url){log("active",`<strong>${esc(tool)}</strong> · ${esc(method)} ${esc(url||"")}`);}
+function logManual(tool,method,url){log("manual",`<strong>${esc(tool)}</strong> · ${esc(method)} ${esc(url||"")}`);}
+// Log the OUTCOME of a manual action. A scope/HTTP block renders as a Scope
+// (BLOCKED) entry — never left looking like a successful active request.
+function logManualBlocked(tool,method,url,detail){
+  log("scope_block",`<strong>${esc(tool)}</strong> · ${esc(method)} ${esc(url||"")} → BLOCKED`,esc(detail||""));}
 
 const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
   text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
-  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate"};
+  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate",cycle:"Cycle",manual:"Manual"};
 const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
   text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
-  phase:"t-phase",triage:"t-triage"};
+  phase:"t-phase",triage:"t-triage",cycle:"t-phase",manual:"t-active"};
 function scrollFeed(){const out=document.getElementById("termOut");out.scrollTop=out.scrollHeight;}
 function log(type,html,sub=""){
   const out=document.getElementById("termOut"), cls=TYPE_MAP[type]||"t-info", tag=TAG_LABELS[type]||type.toUpperCase();
@@ -711,6 +715,7 @@ function handleEvent(d){
   switch(d.type){
     case "text": if(d.content?.trim())log("text",esc(d.content)); break;
     case "phase": setPhase(d.phase); log("phase",`Phase → <strong>${esc(d.phase)}</strong>`); break;
+    case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
     case "tool_call":{
       const perm=d.permission||"active";
       const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" · ");
@@ -731,6 +736,28 @@ function handleEvent(d){
     case "error": log("error",esc(d.content)); finishHunt("s-err","Error"); break;
   }
 }
+// Display-only render of a stored event (no counters/report side effects) — used
+// to replay an archived mission's original tool calls/results into the feed.
+function renderLogEntry(d){
+  switch(d.type){
+    case "text": if(d.content?.trim())log("text",esc(d.content)); break;
+    case "phase": log("phase",`Phase → <strong>${esc(d.phase||"")}</strong>`); break;
+    case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
+    case "tool_call":{
+      const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" · ");
+      log(d.permission||"active",`<strong>${esc(d.tool)}</strong>`,s); break;}
+    case "tool_result": log("tool_result",`${esc(d.tool)}: ${esc(d.output||"")}${d.count>0?` <span style="color:var(--accent)">(${d.count})</span>`:""}`); break;
+    case "scope_block": log("scope_block",esc(d.error||d.tool||"")); break;
+    case "tool_error": log("tool_error",`${esc(d.tool||"")}: ${esc(d.error||"")}`); break;
+    case "info": log("info",esc(d.content||"")); break;
+    case "approval_resolved": log("info",`Gate ${esc(d.resolution||"")}.`); break;
+    case "finding":{const f=d.finding||{},sev=(f.severity||"low").toLowerCase();
+      log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title||"")}</strong>`,esc(f.target||"")); break;}
+    case "triage": log("triage",esc(d.verdict||"")); break;
+    case "complete": log("complete",esc(d.content||"")); break;
+  }
+}
+function replayLogs(logs){(logs||[]).forEach(renderLogEntry);}
 function finishHunt(sc,sl){running=false;if(es){es.close();es=null;}document.getElementById("btnStart").disabled=false;document.getElementById("btnStop").style.display="none";setStatus(sc,sl);}
 function stopHunt(){if(sessionId)fetch(`${API}/stop/${sessionId}`,{method:"POST"}).catch(()=>{});log("info","Hunt stopped.");finishHunt("s-stop","Stopped");}
 
@@ -933,7 +960,8 @@ function clearCurl(){
 }
 async function sendCurl(){
   if(!sessionId)return alert("Start or load a mission first.");
-  logManual("cURL Console",document.getElementById("cuMethod").value,document.getElementById("cuUrl").value);
+  const _m=document.getElementById("cuMethod").value,_u=document.getElementById("cuUrl").value;
+  logManual("cURL Console",_m,_u);
   const out=document.getElementById("cuOut"),cc=document.getElementById("cuCurl"),st=document.getElementById("cuStatus");
   // Clear any prior response up front so a new request (or an error) never shows
   // stale output underneath it.
@@ -943,7 +971,7 @@ async function sendCurl(){
     body:JSON.stringify({method:document.getElementById("cuMethod").value,url:document.getElementById("cuUrl").value,
       headers:parseHeaders(document.getElementById("cuHeaders").value),body:document.getElementById("cuBody").value||null,follow_redirects:true})});
     const d=await r.json();
-    if(!r.ok){st.className="resp-status s-srv";st.textContent="Blocked / error: "+(d.detail||JSON.stringify(d));clearResp();return;}
+    if(!r.ok){const msg=d.detail||JSON.stringify(d);st.className="resp-status s-srv";st.textContent="Blocked / error: "+msg;clearResp();logManualBlocked("cURL Console",_m,_u,msg);return;}
     const cls=d.status<300?"s-ok":d.status<400?"s-redir":d.status<500?"s-cli":"s-srv";
     st.className="resp-status "+cls;st.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`;
     cc.style.display="block";cc.textContent="$ "+d.curl;
@@ -958,27 +986,29 @@ async function sendCurl(){
 function parseHeaders(t){const h={};(t||"").split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0){const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k&&v)h[k]=v;}});return h;}
 async function wbReplay(){
   if(!sessionId)return alert("Start or load a mission first.");
-  logManual("Workbench replay",document.getElementById("wbMethod").value,document.getElementById("wbUrl").value);
+  const _m=document.getElementById("wbMethod").value,_u=document.getElementById("wbUrl").value;
+  logManual("Workbench replay",_m,_u);
   const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Sending…";
   try{const r=await fetch(`${API}/workbench/${sessionId}/replay`,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({method:document.getElementById("wbMethod").value,url:document.getElementById("wbUrl").value,
+    body:JSON.stringify({method:_m,url:_u,
       headers:parseHeaders(document.getElementById("wbHeaders").value),body:document.getElementById("wbBody").value||null})});
-    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){const msg=d.detail||JSON.stringify(d);out.textContent="Blocked / error: "+msg;logManualBlocked("Workbench replay",_m,_u,msg);return;}
     out.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms\n\ncurl: ${d.curl}\n\n--- headers ---\n`+
       Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
   }catch(e){out.textContent="Error: "+e.message;}
 }
 async function wbFuzz(){
   if(!sessionId)return alert("Start or load a mission first.");
-  logManual("Workbench fuzz",document.getElementById("wbMethod").value,document.getElementById("wbUrl").value);
+  const _m=document.getElementById("wbMethod").value,_u=document.getElementById("wbUrl").value;
+  logManual("Workbench fuzz",_m,_u);
   const out=document.getElementById("wbOut"); out.style.display="block"; out.textContent="Fuzzing…";
   const pls=document.getElementById("wbPayloads").value.split("\n").map(s=>s.trim()).filter(Boolean);
   try{const r=await fetch(`${API}/workbench/${sessionId}/fuzz`,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({method:document.getElementById("wbMethod").value,url:document.getElementById("wbUrl").value,
+    body:JSON.stringify({method:_m,url:_u,
       headers:parseHeaders(document.getElementById("wbHeaders").value),body:document.getElementById("wbBody").value||null,
       param:document.getElementById("wbParam").value,param_in:document.getElementById("wbParamIn").value,
       payloads:pls,wordlist_id:document.getElementById("wbWordlist").value||null})});
-    const d=await r.json(); if(!r.ok){out.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
+    const d=await r.json(); if(!r.ok){const msg=d.detail||JSON.stringify(d);out.textContent="Blocked / error: "+msg;logManualBlocked("Workbench fuzz",_m,_u,msg);return;}
     out.textContent=`Baseline HTTP ${d.baseline.status} · ${d.baseline.length}B\nTop results (anomaly-ranked):\n\n`+
       d.results.slice(0,20).map(x=>`score ${x.score||0}  ${x.status||"ERR"}  ${x.length||0}B  ${x.duration_ms||0}ms  ${x.error_signatures&&x.error_signatures.length?"⚠SQL":""}  ${String(x.payload).slice(0,60)}`).join("\n");
   }catch(e){out.textContent="Error: "+e.message;}
@@ -1189,6 +1219,13 @@ async function loadMission(id,program){
     document.getElementById("sessLabel").textContent=`${program} · ${id} · archived`;
     try{localStorage.setItem("apolaki-last-mission",JSON.stringify({id,program}));}catch(e){}
     reportMd=""; fetchReport();
+    // Replay the mission's original run into Live Run so its tool calls/results
+    // are inspectable — not just the "Loaded" line + new manual actions.
+    clearTerm(false);
+    const hist=d.logs||[];
+    if(hist.length)log("info",`— Replaying ${hist.length} log entr${hist.length===1?"y":"ies"} from the archived run —`);
+    replayLogs(hist);
+    if(d.mission&&d.mission.phase)setPhase(d.mission.phase);
     log("info",`Loaded archived mission <strong>${esc(program)}</strong> (${id}) — ${findings.length} findings. Report / Playbooks / Tools are live against it.`);
     switchTab("findings");
   }catch(e){alert("Load failed: "+e.message);}
@@ -1247,7 +1284,7 @@ const HELP=[
    "Open the HTML report (with one-click Save as PDF) or download it as a file; also Markdown, CSV, JSON, and PoC Markdown, plus Copy Markdown.",
    "Use Download HTML for an offline copy you can share."],
   ["Archive / Rescan","Every mission is saved; rescan clones one into a new run.",
-   "Load a past mission to browse its findings/report, or Rescan to copy its scope/mode/objective into the Launch form for a brand-new child mission (the original is never changed).",
+   "Load a past mission to browse its findings/report — its original run is replayed into Live Run so you can inspect the tool calls and results too. Rescan copies its scope/mode/objective into the Launch form for a brand-new child mission (the original is never changed). Load / Rescan / Delete are keyboard-accessible buttons.",
    "Example: rescan last week's run after new subdomains appeared."],
 ];
 function renderHelp(){

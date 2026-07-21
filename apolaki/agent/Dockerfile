@@ -55,8 +55,11 @@ RUN python3 -m playwright install --with-deps chromium || \
 
 RUN mkdir -p /app/data
 COPY *.py .
-# Ship the test suite so `docker compose exec agent python3 -m pytest tests/ -q`
-# works as documented (conftest.py adds /app to sys.path).
+# Ship the test suite + pytest config so `docker compose exec agent python -m
+# pytest tests/ -q` works as documented (pytest is in requirements.txt; conftest.py
+# adds /app to sys.path; pytest.ini sets testpaths). NOTE: the suite is pytest-style,
+# so `unittest discover` finds 0 tests by design — use pytest.
+COPY pytest.ini .
 COPY tests ./tests
 
 EXPOSE 8000

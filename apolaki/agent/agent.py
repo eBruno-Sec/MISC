@@ -90,6 +90,7 @@ HARD RULES:
 7. INTRUSIVE tools (content discovery, web probes, ffuf, dalfox, sqlmap) require operator approval unless the run is pre-authorized. If a probe is denied, continue with passive/active work.
 8. SEVERITY DISCIPLINE — be consistent between what you say and what you store. Missing SPF/DMARC/DKIM, missing CAA, and missing security headers (CSP/HSTS/X-Frame-Options) are LOW or INFORMATIONAL email/transport-hygiene observations — never "Critical". Do not narrate an issue as a "Critical finding" unless you also store_finding it with that severity and reproducible evidence. If you choose not to store something, present it as an observation/recommendation, not a confirmed finding, so the report and your summary never disagree.
 9. Before you finish, ALWAYS call generate_playbook once the surface is populated (any mode), so the operator gets cURL-ready manual tests even if you ran out of active/intrusive budget.
+10. CLOSING SUMMARY — when you have no further tool to run, end with a short, CONCLUSIVE wrap-up: what was covered, what was confirmed (or that nothing reproducible was), and where the operator should look next (point at the playbook). Do NOT end on an open-ended "we need to continue testing…" — the run is finishing, so the final message must read as a conclusion, not a cliffhanger.
 
 RECOMMENDED METHODOLOGY:
 1. Subdomain enumeration: run_subfinder + run_crtsh on every in-scope root domain. run_wayback to seed historical URLs. run_dns for SPF/DMARC/CAA/vendor intel. run_asn to map the org's IP range (scope expansion). run_github_recon to hunt leaked secrets in public repos (passive, uses the operator's own PAT).
@@ -133,6 +134,7 @@ class BBHAgent:
         self.memory_note = ""
         self.findings: list = []
         self.current_phase = "init"
+        self._recon_passes = 0   # counts entries into the recon phase (cycle labels)
 
         # HITL gate state (one session-level intrusive authorization)
         self.intrusive_state = None  # None | "approved" | "denied"
@@ -203,6 +205,16 @@ class BBHAgent:
         ph = self._set_phase(tool_name)
         if ph:
             yield {"type": "phase", "phase": ph}
+            # Explicit recon-cycle label each time the run (re-)enters the recon
+            # phase, so iterative recon reads as "cycle 1 → 2 → 3" instead of an
+            # opaque phase bounce. Only when >1 cycle is configured (default run
+            # is unchanged and emits none).
+            if ph == "recon" and self.recon_cycles > 1:
+                self._recon_passes += 1
+                n = min(self._recon_passes, self.recon_cycles)
+                yield {"type": "cycle", "cycle": n, "total": self.recon_cycles,
+                       "content": f"Recon cycle {n} of {self.recon_cycles}: enumerate, then learn "
+                                  "from newly discovered in-scope assets before the next pass."}
 
         # Mode enforcement: passive mode forbids active + intrusive.
         if self.mode == "passive" and perm != PermissionLevel.PASSIVE:

@@ -1602,3 +1602,33 @@ def test_health_endpoint():
             assert r.status_code == 200 and r.json()["status"] == "ok"
     finally:
         _env_restore(snap)
+
+
+# ── recon-cycle labels (only when >1 cycle configured) ───────────
+def _cycle_agent(recon_cycles):
+    import agent as agent_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com"], [], "P")
+    return agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(),
+                              mode="active", mission_id=None, recon_cycles=recon_cycles)
+
+
+def _events(agent, tool):
+    async def go():
+        return [ev async for ev in agent._run_tool(tool, {"domain": "a.example.com", "url": "https://a.example.com/"}, "s")]
+    return _run(go())
+
+
+def test_recon_cycle_labels_emitted_on_reentry():
+    a = _cycle_agent(3)
+    e1 = _events(a, "run_subfinder")                 # init -> recon = cycle 1
+    cyc = [e for e in e1 if e.get("type") == "cycle"]
+    assert cyc and cyc[0]["cycle"] == 1 and cyc[0]["total"] == 3
+    _events(a, "run_httpx")                           # recon -> enum (no cycle)
+    e3 = _events(a, "run_crtsh")                      # enum -> recon = cycle 2
+    cyc3 = [e for e in e3 if e.get("type") == "cycle"]
+    assert cyc3 and cyc3[0]["cycle"] == 2
+
+
+def test_no_cycle_labels_when_single_cycle():
+    a = _cycle_agent(1)                               # default run: unchanged
+    assert not any(e.get("type") == "cycle" for e in _events(a, "run_subfinder"))
