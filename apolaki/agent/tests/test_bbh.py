@@ -1110,7 +1110,8 @@ def test_config_endpoint_and_engage_preflight_422():
         client = TestClient(mainmod.app)                   # no lifespan -> no DB needed here
         cfg = client.get("/config").json()
         assert cfg["ready"] is False and "api_key" not in cfg
-        r = client.post("/engage", json={"program_name": "P", "in_scope": ["x.com"]})
+        # an AI strategy still requires a credential -> 422 before any DB access
+        r = client.post("/engage", json={"program_name": "P", "in_scope": ["x.com"], "strategy": "low_ai"})
         assert r.status_code == 422 and "OPENROUTER_API_KEY" in r.json()["detail"]
         # with a key present, /config reports ready and never echoes the secret
         os.environ["AI_API_KEY"] = "sk-DO-NOT-LEAK"
@@ -1710,5 +1711,126 @@ def test_api_only_run_endpoint_starts_execution():
             assert c.get(f"/status/{sid}").json()["status"] == "running"
             assert mainmod.sessions[sid]["task"] is not None
             mainmod.sessions[sid]["task"].cancel()                          # cleanup
+    finally:
+        _env_restore(snap)
+
+
+# ── deterministic planner (no AI) ────────────────────────────────
+def test_planner_terminates_and_orders_phases():
+    import planner
+    state = {"mode": "full", "roots": ["ex.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": []}, "urls": []}
+    firsts, guard = [], 0
+    while True:
+        guard += 1
+        assert guard < 200, "planner did not terminate"
+        batch = planner.next_batch(state)
+        if not batch:
+            break
+        firsts.append(batch[0]["tool"])
+        for s in batch:
+            state["done"].add(s["key"])
+        if any(s["tool"] == "run_subfinder" for s in batch):
+            state["recon"]["subdomains"] = ["api.ex.com", "ex.com"]
+        if any(s["tool"] == "http_probe" for s in batch):
+            state["recon"]["live_hosts"] = [{"url": "https://ex.com", "tech": ["Angular"]}]
+            state["urls"] = ["https://ex.com/item?id=1", "https://ex.com/fetch?url=x", "https://ex.com/a.js"]
+    # recon precedes probes precedes playbook
+    assert firsts.index("run_subfinder") < firsts.index("generate_playbook")
+    assert "run_httpx" in firsts and "generate_playbook" in firsts
+
+
+def test_planner_passive_mode_stays_passive():
+    import planner
+    st = {"mode": "passive", "roots": ["x.com"], "done": set(), "recon": {"subdomains": []}, "urls": []}
+    tools, g = set(), 0
+    while True:
+        g += 1
+        assert g < 60
+        b = planner.next_batch(st)
+        if not b:
+            break
+        for s in b:
+            st["done"].add(s["key"]); tools.add(s["tool"])
+    assert tools <= {"run_subfinder", "run_crtsh", "run_wayback", "run_dns", "run_asn",
+                     "run_github_recon", "generate_playbook"}
+
+
+def test_planner_estimate_scales_with_mode():
+    import planner
+    assert planner.estimate("passive", ["a.com"])["intrusive_steps"] == 0
+    assert planner.estimate("full", ["a.com"])["intrusive_steps"] > 0
+    assert planner.estimate("full", ["a.com", "b.com"])["passive_steps"] == 12
+
+
+def test_agent_strategy_budget_defaults():
+    import agent as agent_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["*.x.com"], [], "P")
+    mk = lambda strat, **kw: agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(),
+                                                strategy=strat, mission_id=None, **kw)
+    assert mk("deterministic").max_ai_calls == 0
+    assert mk("manual").max_ai_calls == 0
+    assert mk("low_ai").max_ai_calls == 2
+    assert mk("agentic").max_ai_calls == 40
+    assert mk("low_ai", max_ai_calls=5).max_ai_calls == 5   # explicit override
+
+
+class _PlanTools:
+    """Tool stand-in for a deterministic run: no network, records executed tools."""
+    def __init__(self):
+        self.recon = {"target": "example.com", "domain": "example.com", "subdomains": [], "live_hosts": []}
+        self.urls = []
+
+    async def execute(self, name, inp, sid):
+        from tools import ToolResult
+        tgt = inp.get("url") or inp.get("domain") or inp.get("target") or inp.get("base_url") or ""
+        return ToolResult(name, tgt, True, "ran", [])
+
+
+def test_deterministic_mode_runs_no_ai_end_to_end():
+    import agent as agent_mod
+
+    async def go():
+        eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com", "example.com"], [], "P")
+        a = agent_mod.BBHAgent(eng, _PlanTools(), asyncio.Event(), mode="full",
+                               strategy="deterministic", auto_approve=True, mission_id=None)
+        evs = [ev async for ev in a.run("obj", "s")]
+        return evs, a
+
+    evs, a = _run(go())
+    assert a.ai_calls == 0                                  # zero AI spend
+    tools = [e["tool"] for e in evs if e.get("type") == "tool_call"]
+    assert "run_subfinder" in tools and "generate_playbook" in tools
+    assert any(e.get("type") == "complete" for e in evs)
+    # a manual-mode agent runs nothing automated
+    async def go2():
+        eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com"], [], "P")
+        a2 = agent_mod.BBHAgent(eng, _PlanTools(), asyncio.Event(), strategy="manual", mission_id=None)
+        return [ev async for ev in a2.run("obj", "s")], a2
+    evs2, a2 = _run(go2())
+    assert a2.ai_calls == 0 and not [e for e in evs2 if e.get("type") == "tool_call"]
+    assert any(e.get("type") == "complete" for e in evs2)
+
+
+def test_report_includes_ai_summary():
+    md = report.generate_report("P", [], {"in_scope": ["x.com"]}, ai_summary="Nothing confirmed. Top leads: check IDOR.")
+    assert "Executive Summary" in md and "Top leads" in md
+    html = report.generate_html_report("P", [], {"in_scope": ["x.com"]}, ai_summary="Exec line here.")
+    assert "Executive Summary" in html and "aisum" in html
+
+
+def test_estimate_endpoint():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    snap = _env_snapshot()
+    try:
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-x"
+        with TestClient(mainmod.app) as c:
+            j = c.post("/estimate", json={"in_scope": ["*.x.com"], "mode": "full", "strategy": "low_ai"}).json()
+            assert j["estimated_ai_calls"] == 2 and j["deterministic_steps"]["intrusive_steps"] > 0
+            jd = c.post("/estimate", json={"in_scope": ["x.com"], "mode": "passive", "strategy": "deterministic"}).json()
+            assert jd["estimated_ai_calls"] == 0
     finally:
         _env_restore(snap)

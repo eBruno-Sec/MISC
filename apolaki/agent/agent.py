@@ -116,10 +116,21 @@ MODE_NOTES = {
 }
 
 
+def _is_generic_objective(objective: str) -> bool:
+    """True when the objective is the default template (adds no steering signal)."""
+    o = (objective or "").strip().lower()
+    return (not o) or o.startswith("perform comprehensive bug bounty recon")
+
+
 class BBHAgent:
+    # execution strategies (how tools are chosen), orthogonal to `mode` (which
+    # tiers of tool are allowed). Default budgets: manual/deterministic use no AI,
+    # low_ai spends at most 2 calls, agentic caps the ReAct loop.
+    _DEFAULT_BUDGET = {"manual": 0, "deterministic": 0, "low_ai": 2, "agentic": 40}
+
     def __init__(self, scope: ScopeEngine, tools: ToolRegistry, stop_event: asyncio.Event,
                  mode: str = "active", auto_approve: bool = False, mission_id: str = None,
-                 recon_cycles: int = 1):
+                 recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
@@ -128,6 +139,11 @@ class BBHAgent:
         self.auto_approve = auto_approve
         self.mission_id = mission_id
         self.recon_cycles = max(1, min(int(recon_cycles or 1), 3))
+        self.strategy = strategy if strategy in self._DEFAULT_BUDGET else "low_ai"
+        self.ai_calls = 0
+        self.ai_degraded = False
+        self.max_ai_calls = (max(0, int(max_ai_calls)) if max_ai_calls is not None
+                             else self._DEFAULT_BUDGET[self.strategy])
         # Warm-start directive from cross-session memory (set by /engage when a
         # prior mission on the same target left intel). Empty by default so a
         # first-ever scan behaves exactly as before.
@@ -145,20 +161,26 @@ class BBHAgent:
         cfg = resolve_ai_config()
         self.provider = cfg["provider"]
         self.model = cfg["model"]
-        if cfg["provider"] == "openrouter":
-            from openai import AsyncOpenAI
-            # "missing" is a defensive placeholder so construction never raises;
-            # /engage runs a credential preflight and rejects with 422 before here.
-            self.client = AsyncOpenAI(base_url=cfg["base_url"] or DEFAULT_OPENROUTER_BASE,
-                                      api_key=cfg["api_key"] or "missing")
-        else:
-            import anthropic
-            kwargs = {}
-            if cfg["api_key"]:
-                kwargs["api_key"] = cfg["api_key"]
-            if cfg["base_url"]:
-                kwargs["base_url"] = cfg["base_url"]
-            self.client = anthropic.AsyncAnthropic(**kwargs)
+        self._has_key = bool(cfg["api_key"])
+        # Client construction is best-effort: deterministic/manual strategies run
+        # with NO AI at all, so a missing key must never stop the agent from being
+        # built. low_ai/agentic get a credential preflight in /engage.
+        self.client = None
+        try:
+            if cfg["provider"] == "openrouter":
+                from openai import AsyncOpenAI
+                self.client = AsyncOpenAI(base_url=cfg["base_url"] or DEFAULT_OPENROUTER_BASE,
+                                          api_key=cfg["api_key"] or "missing")
+            else:
+                import anthropic
+                kwargs = {}
+                if cfg["api_key"]:
+                    kwargs["api_key"] = cfg["api_key"]
+                if cfg["base_url"]:
+                    kwargs["base_url"] = cfg["base_url"]
+                self.client = anthropic.AsyncAnthropic(**kwargs)
+        except Exception:
+            self.client = None
 
     # ── HITL approval API (called by main.py) ────────────────────
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
@@ -258,21 +280,162 @@ class BBHAgent:
         })[:3500]
         yield {"_content": content}
 
+    # ── AI-call budget helpers ───────────────────────────────────
+    def _ai_usable(self) -> bool:
+        return bool(self.client) and self._has_key
+
+    def _budget_left(self) -> bool:
+        return self.ai_calls < self.max_ai_calls
+
+    def _budget_event(self) -> dict:
+        return {"type": "ai_budget", "used": self.ai_calls, "max": self.max_ai_calls,
+                "strategy": self.strategy}
+
+    async def _ai_text(self, system: str, user: str, max_tokens: int = 800) -> str:
+        """One plain (no-tool) LLM completion; counts against the budget."""
+        self.ai_calls += 1
+        if self.provider == "openrouter":
+            r = await self.client.chat.completions.create(
+                model=self.model, max_tokens=max_tokens,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+            return (r.choices[0].message.content or "").strip()
+        r = await self.client.messages.create(
+            model=self.model, max_tokens=max_tokens, system=system,
+            messages=[{"role": "user", "content": user}])
+        return "".join(getattr(b, "text", "") for b in r.content).strip()
+
     # ── entry ────────────────────────────────────────────────────
     async def run(self, objective: str, session_id: str) -> AsyncGenerator[dict, None]:
         yield {"type": "phase", "phase": "recon"}
         if self.recon_cycles > 1:
             yield {"type": "info", "content": f"Iterative recon enabled: up to {self.recon_cycles} cycles "
                    "(refine from discovered assets each pass; intrusive tools are not looped)."}
-        if self.provider == "openrouter":
-            gen = self._run_openrouter(objective, session_id)
+        yield self._budget_event()
+
+        strat = self.strategy
+        # Degrade to deterministic when AI is needed but unusable (missing key /
+        # exhausted quota) — the platform stays useful without AI (item 4).
+        if strat in ("low_ai", "agentic") and not self._ai_usable():
+            self.ai_degraded = True
+            yield {"type": "info", "content": "AI unavailable — completing with deterministic coverage."}
+            strat = "deterministic"
+
+        if strat == "manual":
+            yield {"type": "complete", "content": "Manual mode: no automated run. Drive testing yourself "
+                   "with the cURL Console, Workbench, and Access Check."}
+            return
+        if strat == "deterministic":
+            async for ev in self._run_deterministic(session_id):
+                yield ev
+        elif strat == "low_ai":
+            async for ev in self._run_low_ai(objective, session_id):
+                yield ev
         else:
-            gen = self._run_anthropic(objective, session_id)
-        async for event in gen:
-            yield event
+            gen = self._run_openrouter(objective, session_id) if self.provider == "openrouter" \
+                else self._run_anthropic(objective, session_id)
+            async for event in gen:
+                yield event
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev
+
+    # ── deterministic executor (planner-driven, no AI) ───────────
+    async def _execute_plan(self, session_id: str):
+        """Drive planner.next_batch through the SAME scoped, HITL-gated tool
+        pipeline. Dedup + termination are guaranteed by the planner's stable keys;
+        a hard step cap is the ultimate guard."""
+        import planner
+        roots = [e.value.lower().lstrip("*.") for e in self.scope.in_scope]
+        done, steps = set(), 0
+        MAX_STEPS = 140
+        while steps < MAX_STEPS:
+            if self.stop_event.is_set():
+                return
+            state = {"mode": self.mode, "roots": roots, "done": done,
+                     "recon": self.tools.recon, "urls": self.tools.urls}
+            batch = planner.next_batch(state)
+            if not batch:
+                break
+            for step in batch:
+                if self.stop_event.is_set():
+                    return
+                done.add(step["key"])
+                steps += 1
+                async for ev in self._run_tool(step["tool"], step["input"], session_id):
+                    if "_content" not in ev:      # no model to feed; drop the tool-result payload
+                        yield ev
+        self._plan_steps = steps
+
+    async def _run_deterministic(self, session_id: str):
+        yield {"type": "info", "content": f"Deterministic scan planner engaged ({self.mode} mode, no AI) — "
+               "recon → live hosts → fingerprint → enrich → surface probes → nuclei → playbook."}
+        async for ev in self._execute_plan(session_id):
+            yield ev
+        note = " AI was unavailable; deterministic coverage completed." if self.ai_degraded else ""
+        yield {"type": "complete", "content":
+               f"Deterministic scan complete — {getattr(self, '_plan_steps', 0)} step(s).{note} "
+               "See Playbooks for cURL-ready leads and the report."}
+
+    # ── low-AI executor (planner + ≤2 targeted AI calls) ─────────
+    async def _run_low_ai(self, objective: str, session_id: str):
+        # AI call #1 (optional): only when there IS a specific objective and budget
+        # allows — a generic objective adds no signal, so we save the call for #2.
+        if self._budget_left() and objective and not _is_generic_objective(objective):
+            try:
+                pri = await self._ai_text(
+                    "You are a lead penetration tester. Given the objective and scope, list 3-6 concise, "
+                    "weighted testing priorities (most important first) as short bullet lines. No preamble.",
+                    f"OBJECTIVE:\n{objective}\n\nSCOPE:\n{json.dumps(self.scope.to_dict())}")
+                if pri:
+                    yield {"type": "text", "content": "Testing priorities (AI):\n" + pri}
+                yield self._budget_event()
+            except Exception as e:
+                yield {"type": "info", "content": f"AI prioritization skipped ({type(e).__name__})."}
+
+        yield {"type": "info", "content": f"Low-AI scan — deterministic planner ({self.mode} mode) with an "
+               "AI wrap-up. Budget: " + f"{self.ai_calls}/{self.max_ai_calls} calls used."}
+        async for ev in self._execute_plan(session_id):
+            yield ev
+
+        # AI call #2 (the high-value one): summarize evidence + prioritize leads.
+        if self._budget_left():
+            try:
+                async for ev in self._ai_wrapup(session_id):
+                    yield ev
+            except Exception as e:
+                yield {"type": "info", "content": f"AI wrap-up skipped ({type(e).__name__})."}
+        yield {"type": "complete", "content":
+               f"Low-AI scan complete — {getattr(self, '_plan_steps', 0)} step(s), "
+               f"{self.ai_calls}/{self.max_ai_calls} AI call(s). See Playbooks and the report."}
+
+    async def _ai_wrapup(self, session_id: str):
+        """AI call #2: turn the deterministic evidence into an executive summary +
+        prioritized next leads, stored on the mission for the report."""
+        inv = self.tools.surface_inventory()
+        findings = db.get_findings(self.mission_id) if self.mission_id else []
+        pb = []
+        if self.mission_id:
+            m = db.get_mission(self.mission_id)
+            pb = [g.get("title") for g in ((m or {}).get("context", {}).get("playbook") or [])][:15]
+        payload = {"scope": self.scope.to_dict().get("in_scope", []),
+                   "surface": inv.get("stats", {}),
+                   "findings": [{"title": f.get("title"), "severity": f.get("severity"),
+                                 "target": f.get("target")} for f in findings],
+                   "playbook_leads": pb}
+        summary = await self._ai_text(
+            "You are a lead penetration tester writing the executive summary of an authorized assessment. "
+            "Given the surface stats, any confirmed findings, and the rule-based playbook leads, write: "
+            "(1) a 2-4 sentence honest summary (if nothing was confirmed, say so plainly), then "
+            "(2) 'Top leads to test next:' with 3-6 prioritized bullets referencing the playbook. Be specific.",
+            json.dumps(payload), max_tokens=900)
+        yield self._budget_event()
+        if summary:
+            yield {"type": "summary", "content": summary}
+            if self.mission_id:
+                m = db.get_mission(self.mission_id)
+                ctx = dict((m or {}).get("context", {}))
+                ctx["ai_summary"] = summary
+                db.update_mission(self.mission_id, context=ctx)
 
     async def _triage(self):
         if not self.mission_id:
@@ -317,17 +480,46 @@ class BBHAgent:
                 + (self.memory_note or "")
                 + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}")
 
+    # ── ReAct loop guards (dedup + no-progress + budget) ─────────
+    def _surface_size(self) -> int:
+        return (len(self.tools.urls) + len(self.tools.recon.get("subdomains", []))
+                + len(self.tools.recon.get("live_hosts", [])) + len(self.findings))
+
+    @staticmethod
+    def _tool_sig(name: str, inp: dict) -> str:
+        try:
+            return name + ":" + json.dumps(inp, sort_keys=True)[:200]
+        except Exception:
+            return name + ":?"
+
+    async def _react_finish(self, session_id: str, reason: str):
+        """Deterministic wrap-up when the ReAct loop hits its budget or stalls —
+        guarantees a playbook and a clean completion instead of burning calls."""
+        yield {"type": "info", "content": f"Wrapping up ({reason}) — generating the deterministic playbook."}
+        m = db.get_mission(self.mission_id) if self.mission_id else None
+        if not ((m or {}).get("context", {}).get("playbook")):
+            async for ev in self._run_tool("generate_playbook", {}, session_id):
+                if "_content" not in ev:
+                    yield ev
+        yield {"type": "complete", "content": f"Analysis complete ({reason}). See Playbooks and the report."}
+
     # ── OpenRouter / OpenAI ──────────────────────────────────────
     async def _run_openrouter(self, objective: str, session_id: str):
         messages = [{"role": "system", "content": self._system()},
                     {"role": "user", "content": objective}]
         openai_tools = self.tools.get_openai_tools()
-        max_iter = 40
+        called, stall, last = set(), 0, self._surface_size()
 
-        for _ in range(max_iter):
+        while True:
             if self.stop_event.is_set():
                 yield {"type": "complete", "content": "Hunt stopped by user."}
                 return
+            if not self._budget_left():
+                async for ev in self._react_finish(session_id, f"AI budget reached ({self.max_ai_calls} calls)"):
+                    yield ev
+                return
+            self.ai_calls += 1
+            yield self._budget_event()
             response = await self.client.chat.completions.create(
                 model=self.model, messages=messages, tools=openai_tools, max_tokens=4096)
             msg = response.choices[0].message
@@ -345,6 +537,16 @@ class BBHAgent:
                     tool_input = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
                     tool_input = {}
+                sig = self._tool_sig(tc.function.name, tool_input)
+                # dedup: an identical earlier call is skipped (loop guard), except
+                # generate_playbook/store_finding which are legitimately repeatable.
+                if sig in called and tc.function.name not in ("generate_playbook", "store_finding"):
+                    yield {"type": "info", "content": f"Skipped duplicate {tc.function.name} (loop guard)."}
+                    messages.append({"role": "tool", "tool_call_id": tc.id,
+                                     "content": json.dumps({"success": True,
+                                     "note": "deduplicated: identical call already executed this run"})})
+                    continue
+                called.add(sig)
                 content = "{}"
                 async for ev in self._run_tool(tc.function.name, tool_input, session_id):
                     if "_content" in ev:
@@ -352,18 +554,31 @@ class BBHAgent:
                     else:
                         yield ev
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
-        yield {"type": "complete", "content": f"Reached max iterations ({max_iter}). Generating report."}
+            # no-progress guard: stop looping if surface stops growing
+            cur = self._surface_size()
+            stall = stall + 1 if cur <= last else 0
+            last = cur
+            if stall >= 3:
+                async for ev in self._react_finish(session_id, "no new surface discovered"):
+                    yield ev
+                return
 
     # ── Anthropic ────────────────────────────────────────────────
     async def _run_anthropic(self, objective: str, session_id: str):
         messages = [{"role": "user", "content": objective}]
         tool_defs = self.tools.get_claude_tools()
-        max_iter = 40
+        called, stall, last = set(), 0, self._surface_size()
 
-        for _ in range(max_iter):
+        while True:
             if self.stop_event.is_set():
                 yield {"type": "complete", "content": "Hunt stopped by user."}
                 return
+            if not self._budget_left():
+                async for ev in self._react_finish(session_id, f"AI budget reached ({self.max_ai_calls} calls)"):
+                    yield ev
+                return
+            self.ai_calls += 1
+            yield self._budget_event()
             response = await self.client.messages.create(
                 model=self.model, max_tokens=4096, system=self._system(),
                 tools=tool_defs, messages=messages)
@@ -376,6 +591,14 @@ class BBHAgent:
                 return
             tool_results = []
             for call in tool_calls:
+                sig = self._tool_sig(call.name, call.input)
+                if sig in called and call.name not in ("generate_playbook", "store_finding"):
+                    yield {"type": "info", "content": f"Skipped duplicate {call.name} (loop guard)."}
+                    tool_results.append({"type": "tool_result", "tool_use_id": call.id,
+                                         "content": json.dumps({"success": True,
+                                         "note": "deduplicated: identical call already executed this run"})})
+                    continue
+                called.add(sig)
                 content = "{}"
                 async for ev in self._run_tool(call.name, call.input, session_id):
                     if "_content" in ev:
@@ -385,4 +608,10 @@ class BBHAgent:
                 tool_results.append({"type": "tool_result", "tool_use_id": call.id, "content": content})
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
-        yield {"type": "complete", "content": f"Reached max iterations ({max_iter}). Generating report."}
+            cur = self._surface_size()
+            stall = stall + 1 if cur <= last else 0
+            last = cur
+            if stall >= 3:
+                async for ev in self._react_finish(session_id, "no new surface discovered"):
+                    yield ev
+                return

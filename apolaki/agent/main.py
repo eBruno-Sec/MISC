@@ -44,6 +44,14 @@ class EngageRequest(BaseModel):
     login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
     parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
     recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
+    strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: adaptive)
+    max_ai_calls: Optional[int] = None  # override the per-strategy AI-call budget
+
+
+class EstimateRequest(BaseModel):
+    in_scope: list = []
+    mode: str = "active"
+    strategy: Optional[str] = None
 
 
 class ReplayRequest(BaseModel):
@@ -212,10 +220,14 @@ async def oob_hits(token: str):
 # ── mission lifecycle ────────────────────────────────────────────
 @app.post("/engage")
 async def engage(req: EngageRequest):
-    # Credential preflight: fail clearly with 422 (not a raw 500) before we build
-    # the agent/provider client. The message names the missing var, never the key.
+    # Resolve the execution strategy. Default is adaptive: low_ai when AI is ready,
+    # else deterministic — so the platform still runs a scan without a key/quota.
     st = ai_status()
-    if not st["ready"]:
+    strategy = req.strategy or ("low_ai" if st["ready"] else "deterministic")
+    if strategy not in ("manual", "deterministic", "low_ai", "agentic"):
+        raise HTTPException(422, "strategy must be manual | deterministic | low_ai | agentic")
+    # Credential preflight only for AI strategies — deterministic/manual need none.
+    if strategy in ("low_ai", "agentic") and not st["ready"]:
         raise HTTPException(422, st["hint"])
     if not req.in_scope:
         raise HTTPException(422, "At least one in-scope target is required.")
@@ -246,7 +258,8 @@ async def engage(req: EngageRequest):
     # session and never reuse a prior mission's in-memory objects.
     recon_cycles = max(1, min(int(req.recon_cycles or 1), 3))
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
-                     auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles)
+                     auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles,
+                     strategy=strategy, max_ai_calls=req.max_ai_calls)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
@@ -261,7 +274,8 @@ async def engage(req: EngageRequest):
 
     context = {"auto_approve": req.auto_approve,
                "authenticated": bool(session_headers), "auth_note": auth_note,
-               "recon_cycles": recon_cycles, "warm_start": warm_start}
+               "recon_cycles": recon_cycles, "warm_start": warm_start,
+               "strategy": strategy, "max_ai_calls": agent.max_ai_calls}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
@@ -270,7 +284,22 @@ async def engage(req: EngageRequest):
                             "status": "created", "events": [], "task": None, "done": False}
     return {"session_id": session_id, "mode": req.mode,
             "authenticated": bool(session_headers), "auth_note": auth_note,
-            "parent_id": context.get("parent_id"), "warm_start": warm_start}
+            "parent_id": context.get("parent_id"), "warm_start": warm_start,
+            "strategy": strategy, "max_ai_calls": agent.max_ai_calls}
+
+
+@app.post("/estimate")
+async def estimate(req: EstimateRequest):
+    """Pre-launch estimate of deterministic workload + AI-call budget per strategy,
+    so the UI can show 'this will use ~N AI calls' before Start."""
+    import planner
+    st = ai_status()
+    strategy = req.strategy or ("low_ai" if st["ready"] else "deterministic")
+    roots = sorted({(v or "").lower().lstrip("*.").split("/")[0] for v in (req.in_scope or []) if v})
+    det = planner.estimate(req.mode, roots)
+    ai_budget = {"manual": 0, "deterministic": 0, "low_ai": 2, "agentic": "≤40 (ReAct)"}.get(strategy, 0)
+    return {"strategy": strategy, "mode": req.mode, "ai_ready": st["ready"],
+            "deterministic_steps": det, "estimated_ai_calls": ai_budget}
 
 
 @app.post("/run/{session_id}")
@@ -356,7 +385,9 @@ async def mission_detail(session_id: str):
     return {
         "mission": {**{k: m[k] for k in ("id", "program", "mode", "status", "phase", "objective", "created_at")},
                     "parent_id": m["context"].get("parent_id"),
-                    "recon_cycles": m["context"].get("recon_cycles", 1)},
+                    "recon_cycles": m["context"].get("recon_cycles", 1),
+                    "strategy": m["context"].get("strategy", "agentic"),
+                    "ai_summary": m["context"].get("ai_summary", "")},
         "scope": m["scope"],
         "findings": db.get_findings(session_id),
         "notes": db.get_notes(session_id),
@@ -384,6 +415,10 @@ def _report_bundle(session_id: str):
     return m, findings, m["scope"], coverage, ctx.get("chains", [])
 
 
+def _ai_summary(m) -> str:
+    return (m.get("context", {}) or {}).get("ai_summary", "")
+
+
 def _coverage(session_id: str) -> dict:
     logs = db.get_logs(session_id, limit=2000)
     tools_run = {}
@@ -398,14 +433,16 @@ def _coverage(session_id: str) -> dict:
 @app.get("/report/{session_id}")
 async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains, status=m["status"])
+    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
+                                    status=m["status"], ai_summary=_ai_summary(m))
     return {"markdown": md, "findings": findings, "status": m["status"]}
 
 
 @app.get("/report/{session_id}/md")
 async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains, status=m["status"])
+    md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
+                                    status=m["status"], ai_summary=_ai_summary(m))
     fname = f"bbh-report-{session_id}.md"
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -414,7 +451,8 @@ async def get_report_md(session_id: str):
 @app.get("/report/{session_id}/html")
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains, status=m["status"])
+    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains,
+                                           status=m["status"], ai_summary=_ai_summary(m))
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 

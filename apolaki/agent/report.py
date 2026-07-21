@@ -46,15 +46,18 @@ def _status_note(status: str) -> str:
 
 
 def generate_report(program: str, findings: list, scope: dict,
-                     coverage: dict = None, chains: list = None, status: str = None) -> str:
+                     coverage: dict = None, chains: list = None, status: str = None,
+                     ai_summary: str = None) -> str:
     now = _now()
     banner = _status_note(status)
+    ai_block = (f"## Executive Summary\n\n{ai_summary.strip()}\n\n" if (ai_summary or "").strip() else "")
     if not findings:
         return (
             f"# Security Assessment Report: {program}\n\n"
             + (banner + "\n\n" if banner else "")
             + f"**Date:** {now}\n"
             f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
+            + ai_block
             + ("No confirmed vulnerabilities were recorded"
                + (" before the run ended early." if banner else " during this engagement.") + "\n")
         )
@@ -67,6 +70,10 @@ def generate_report(program: str, findings: list, scope: dict,
         f"**Date:** {now}",
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",
+    ]
+    if ai_block:
+        lines += [ai_block.rstrip(), ""]
+    lines += [
         "## Summary", "",
         "| Severity | Count |", "|----------|-------|",
     ]
@@ -114,7 +121,8 @@ def generate_report(program: str, findings: list, scope: dict,
 
 # ── HTML (dark-themed standalone, all fields escaped) ────────────
 def generate_html_report(program: str, findings: list, scope: dict,
-                         coverage: dict = None, chains: list = None, status: str = None) -> str:
+                         coverage: dict = None, chains: list = None, status: str = None,
+                         ai_summary: str = None) -> str:
     e = _html.escape
     counts = _counts(findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -164,6 +172,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
     scope_str = e(", ".join(scope.get("in_scope", [])))
     _sn = _status_note(status)
     status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
+    ai_html = ""
+    if (ai_summary or "").strip():
+        _paras = "".join(f"<p>{e(p.strip())}</p>" for p in ai_summary.strip().split("\n") if p.strip())
+        ai_html = f'<h2>Executive Summary</h2><div class="aisum">{_paras}</div>'
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
@@ -190,6 +202,8 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   font-size:.8rem;font-weight:700;padding:.5rem .9rem;cursor:pointer;border-radius:3px;z-index:10}}
 .statusbar{{background:rgba(231,148,87,.14);border:1px solid #e79457;color:#e79457;padding:.6rem .8rem;
   margin:1rem 0;border-radius:4px;font-size:.8rem}}
+.aisum{{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+  padding:.8rem 1rem;margin:.6rem 0}}.aisum p{{margin:.4rem 0}}
 /* Print / Save-as-PDF: white background, ink-friendly, keep findings whole */
 @media print{{
   :root{{--bg:#fff;--surface:#fff;--border:#bbb;--text:#111;--dim:#555;--bright:#000;--accent:#04c}}
@@ -207,6 +221,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 <div class="sub">Generated {e(_now())} · Scope: {scope_str} · {len(findings)} finding(s)</div>
 {status_html}
 <div class="chips">{peek}</div></div>
+{ai_html}
 {cov_html}
 {chain_html}
 <h2>Findings</h2>

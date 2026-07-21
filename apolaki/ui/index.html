@@ -303,11 +303,20 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <h4>Program &amp; scope</h4>
             <div class="field"><label>Program name</label><input type="text" id="programName" placeholder="e.g. Shopify Bug Bounty"></div>
             <div class="field"><label>Assessment mode</label>
-              <select id="mode">
+              <select id="mode" onchange="refreshEstimate()">
                 <option value="passive">Passive — recon + playbook only</option>
                 <option value="active" selected>Active — + scanning (1 approval gate)</option>
                 <option value="full">Full — + deep probing (gated)</option>
               </select>
+            </div>
+            <div class="field"><label>AI usage</label>
+              <select id="strategy" onchange="refreshEstimate()">
+                <option value="low_ai" selected>Low-AI — deterministic scan + AI wrap-up (recommended)</option>
+                <option value="deterministic">Deterministic — rule-based, no AI at all</option>
+                <option value="agentic">Agentic — full ReAct loop (many AI calls)</option>
+                <option value="manual">Manual — no automated run, you drive the tools</option>
+              </select>
+              <div class="hint" id="estimateHint">A deterministic planner sequences the tools; AI is used only where it adds value.</div>
             </div>
             <div class="field"><label>Recon cycles</label>
               <select id="reconCycles">
@@ -318,7 +327,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
               <div class="hint">Higher = the agent repeats recon, learning from discovered hosts / URLs / tech to widen the surface before scanning. Intrusive tools are never looped.</div>
             </div>
             <div class="field"><label>In-scope domains</label>
-              <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com"></textarea>
+              <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com" oninput="refreshEstimate()"></textarea>
               <div class="hint">One per line. Wildcards allowed: <code class="inline">*.domain.com</code></div>
             </div>
             <div class="field"><label>Out-of-scope <span class="muted">(optional)</span></label>
@@ -368,6 +377,7 @@ X-Requested-With: </textarea>
         <label class="chk" style="margin-left:auto;font-size:.76rem"><input type="checkbox" id="autoScroll" checked onchange="autoScrollOn=this.checked;if(autoScrollOn)scrollFeed()"> Auto-scroll</label>
       </div>
       <div id="reconBanner" class="src-chip" style="display:none"></div>
+      <div id="aiBudget" class="src-chip" style="display:none"></div>
       <div class="phasebar" id="phaseBar"></div>
       <div id="termOut"><div class="ev t-info"><div class="ev-tag">Info</div>
         <div class="ev-content">Apolaki ready. Configure a mission on the <strong>Launch</strong> tab and start.<span class="blink">▍</span></div></div></div>
@@ -610,6 +620,34 @@ fetch(`${API}/wordlists`).then(r=>r.json()).then(d=>{
 }).catch(()=>{});
 
 function setStatus(s,l){const el=document.getElementById("statusPill");el.className="status-pill "+s;el.textContent=l;}
+const STRAT_LABEL={manual:"Manual",deterministic:"Deterministic (no AI)",low_ai:"Low-AI",agentic:"Agentic"};
+// Live AI-call budget chip. Deterministic/manual show "no AI"; others show used/max.
+function setBudget(strategy,used,max){
+  const el=document.getElementById("aiBudget"); if(!el)return;
+  const label=STRAT_LABEL[strategy]||strategy||"";
+  if(!strategy){el.style.display="none";return;}
+  el.style.display="inline-flex";
+  el.textContent=(max===0||strategy==="deterministic"||strategy==="manual")
+    ? `${label} · no AI calls`
+    : `${label} · AI calls ${used||0}/${max==null?"?":max}`;
+}
+// Pre-launch estimate: ask the backend how much this run will cost.
+let _estT=null;
+function refreshEstimate(){
+  clearTimeout(_estT);
+  _estT=setTimeout(async()=>{
+    const hint=document.getElementById("estimateHint"); if(!hint)return;
+    const inScope=document.getElementById("inScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
+    const mode=document.getElementById("mode").value, strategy=document.getElementById("strategy").value;
+    try{
+      const d=await(await fetch(`${API}/estimate`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({in_scope:inScope,mode,strategy})})).json();
+      const s=d.deterministic_steps||{};
+      const det=(s.passive_steps||0)+(s.active_steps||0)+(s.intrusive_steps||0);
+      hint.innerHTML=`Estimated: <strong>~${det}</strong> deterministic tool step(s) · AI calls: <strong>${d.estimated_ai_calls}</strong>${d.ai_ready?"":' · <span style="color:var(--sev-high)">AI key not detected — will run deterministic</span>'}`;
+    }catch(e){/* estimate is advisory */}
+  },250);
+}
 // Map a persisted mission status to the status pill (used when loading archives).
 const _PILL={complete:["s-done","Done"],failed:["s-err","Failed"],interrupted:["s-err","Interrupted"],
   stopped:["s-stop","Stopped"],stopping:["s-stop","Stopping"],running:["s-run","Running"]};
@@ -640,10 +678,10 @@ function logManualResult(tool,summary){log("tool_result",`${esc(tool)}: ${esc(su
 
 const TAG_LABELS={passive:"Passive",active:"Active",intrusive:"Intrusive",finding:"Finding",scope_block:"Scope",
   text:"Agent",tool_result:"Result",complete:"Done",error:"Error",tool_error:"Error",info:"Info",
-  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate",cycle:"Cycle",manual:"Manual"};
+  phase:"Phase",triage:"Triage",approval_required:"Gate",approval_resolved:"Gate",cycle:"Cycle",manual:"Manual",summary:"Summary"};
 const TYPE_MAP={passive:"t-passive",active:"t-active",intrusive:"t-intrusive",finding:"t-finding",scope_block:"t-block",
   text:"t-text",tool_result:"t-result",complete:"t-complete",error:"t-error",tool_error:"t-error",info:"t-info",
-  phase:"t-phase",triage:"t-triage",cycle:"t-phase",manual:"t-active"};
+  phase:"t-phase",triage:"t-triage",cycle:"t-phase",manual:"t-active",summary:"t-complete"};
 function scrollFeed(){const out=document.getElementById("termOut");out.scrollTop=out.scrollHeight;}
 function log(type,html,sub=""){
   const out=document.getElementById("termOut"), cls=TYPE_MAP[type]||"t-info", tag=TAG_LABELS[type]||type.toUpperCase();
@@ -680,7 +718,9 @@ async function startHunt(){
   const programName=document.getElementById("programName").value.trim();
   const inRaw=document.getElementById("inScope").value.trim();
   if(!programName||!inRaw){alert("Program name and at least one in-scope domain are required.");return;}
-  if(!aiReady){alert("AI credentials are missing. Set AI_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env and restart the container.");return;}
+  const strategy=document.getElementById("strategy").value;
+  // AI credentials are only required for AI strategies; deterministic/manual run without them.
+  if((strategy==="low_ai"||strategy==="agentic")&&!aiReady){alert("AI credentials are missing. Set AI_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env and restart, or pick the Deterministic / Manual mode which needs no AI.");return;}
   counts={critical:0,high:0,medium:0,low:0}; findings=[]; updateCounters(); renderFindings();
   phaseState={}; renderPhaseBar(); clearTerm(false); reportMd="";
   const inScope=inRaw.split("\n").map(s=>s.trim()).filter(Boolean);
@@ -690,7 +730,7 @@ async function startHunt(){
     objective:document.getElementById("objective").value.trim()||null,
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
     auth_headers:parseHeaders(document.getElementById("authHeaders").value),
-    parent_id:pendingParent||null,recon_cycles:cycles};
+    parent_id:pendingParent||null,recon_cycles:cycles,strategy:strategy};
   const rb=document.getElementById("reconBanner");
   if(cycles>1){rb.style.display="inline-flex";rb.textContent=`Iterative recon: up to ${cycles} cycles — refining from discovered assets each pass.`;}
   else rb.style.display="none";
@@ -711,7 +751,8 @@ async function startHunt(){
     document.getElementById("btnStart").disabled=true; document.getElementById("btnStop").style.display="block";
     document.getElementById("sessLabel").textContent=`${programName} · ${sessionId} · ${body.mode}`;
     setStatus("s-run","Running");
-    log("info",`Session <strong>${sessionId}</strong> started · mode <strong>${body.mode}</strong> · scope: ${esc(inScope.join(", "))}`);
+    setBudget(eng.strategy||strategy, 0, eng.max_ai_calls);
+    log("info",`Session <strong>${sessionId}</strong> started · mode <strong>${body.mode}</strong> · <strong>${esc(STRAT_LABEL[eng.strategy||strategy]||eng.strategy||strategy)}</strong> · scope: ${esc(inScope.join(", "))}`);
     es=new EventSource(`${API}/stream/${sessionId}`);
     es.onmessage=e=>handleEvent(JSON.parse(e.data));
     es.onerror=()=>{if(running){log("error","Stream connection lost.");finishHunt("s-err","Error");}};
@@ -727,6 +768,8 @@ function handleEvent(d){
     case "text": if(d.content?.trim())log("text",trimAgent(d.content)); break;
     case "phase": setPhase(d.phase); log("phase",`Phase → <strong>${esc(d.phase)}</strong>`); break;
     case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
+    case "ai_budget": setBudget(d.strategy,d.used,d.max); break;
+    case "summary": log("summary",`<strong>Executive summary (AI)</strong>`,esc(d.content||"")); break;
     case "tool_call":{
       const perm=d.permission||"active";
       const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" · ");
@@ -754,6 +797,8 @@ function renderLogEntry(d){
     case "text": break;   // replay: suppress model reasoning/recap chatter (read the report for the narrative)
     case "phase": log("phase",`Phase → <strong>${esc(d.phase||"")}</strong>`); break;
     case "cycle": log("cycle",`<strong>Recon cycle ${esc(String(d.cycle))}/${esc(String(d.total))}</strong>`,esc(d.content||"")); break;
+    case "summary": log("summary",`<strong>Executive summary (AI)</strong>`,esc(d.content||"")); break;
+    case "ai_budget": setBudget(d.strategy,d.used,d.max); break;
     case "tool_call":{
       const s=Object.entries(d.input||{}).map(([k,v])=>`${k}: ${Array.isArray(v)?`[${v.length}]`:esc(String(v))}`).join(" · ");
       log(d.permission||"active",`<strong>${esc(d.tool)}</strong>`,s); break;}
@@ -1223,6 +1268,9 @@ async function rescan(id){
     // so a 3-cycle rescan does not silently reset to 1.
     const rc=String(Math.max(1,Math.min(parseInt(m.recon_cycles,10)||1,3)));
     const rcSel=document.getElementById("reconCycles"); if(rcSel)rcSel.value=rc;
+    const stSel=document.getElementById("strategy");
+    if(stSel&&m.strategy&&["manual","deterministic","low_ai","agentic"].includes(m.strategy))stSel.value=m.strategy;
+    refreshEstimate();
     pendingParent=id;
     showView("launch");
     log("info",`Rescan configured from <strong>${esc(m.program||id)}</strong> (${esc(id)}) · recon cycles ${rc}. Adjust scope / mode / objective / auth, then Start Hunt to launch a new child mission.`);
@@ -1259,6 +1307,7 @@ async function loadMission(id,program){
     // Replay the mission's original run into Live Run so its tool calls/results
     // are inspectable — not just the "Loaded" line + new manual actions.
     clearTerm(false);
+    setBudget("");   // reset; replay repopulates it if the archived run recorded budget
     const hist=d.logs||[];
     if(hist.length)log("info",`— Replaying ${hist.length} log entr${hist.length===1?"y":"ies"} from the archived run —`);
     replayLogs(hist);
@@ -1286,6 +1335,9 @@ const HELP=[
   ["Launch / Scope","Where you tell the agent what you're allowed to test and press start.",
    "Enter the program name, pick a mode, and list in-scope domains (one per line; <code class=\"inline\">*.domain.com</code> matches subdomains). Out-of-scope is honored with deny-overrides-allow. You can import a scope file (HackerOne / Bugcrowd / Intigriti / YesWeHack / Burp / plain text) — an import summary tells you what was detected and what was skipped.",
    "Example: in-scope <code class=\"inline\">*.example.com</code> and <code class=\"inline\">example.com</code>; out-of-scope <code class=\"inline\">status.example.com</code>."],
+  ["AI usage mode","How much the AI is involved — from none to a full agent.",
+   "A deterministic planner sequences Apolaki's tools (recon → live hosts → fingerprint → enrich → surface probes → nuclei → playbook) with NO AI. On top of that you choose how much AI to spend: <strong>Manual</strong> runs nothing automated (you drive the cURL Console / Workbench / Access Check). <strong>Deterministic</strong> runs the full rule-based scan with zero AI calls — it always finishes, even with no API key or exhausted quota. <strong>Low-AI</strong> (recommended) runs that same scan plus at most 2 targeted AI calls (optional objective→priorities at the start, an executive summary + prioritized leads at the end). <strong>Agentic</strong> is the classic ReAct loop where the model drives every step — most capable for chaining and business logic, but many AI calls. The estimate under the selector shows the expected tool steps + AI calls before you launch, and a live chip shows AI calls used during the run.",
+   "Example: on a free/limited model, pick Deterministic or Low-AI so the run completes and still produces surface, playbooks, and a report."],
   ["Assessment mode & Recon cycles","How aggressive the run is, and how many times recon repeats.",
    "Passive = recon + playbook only. Active = adds scanning behind one approval gate. Full = adds deep probing (still gated). Recon cycles (1–3) let the agent repeat recon, learning from discovered hosts/URLs/tech to widen the surface before scanning. Intrusive tools are never looped.",
    "Example: mode Active, recon cycles 2, for a program with many subdomains."],
@@ -1346,6 +1398,7 @@ Object.assign(window,{topoClick,topoAction,loadMission,rescan,delMission,switchT
 
 /* land on the Launch view */
 showView("launch");
+refreshEstimate();
 </script>
 </body>
 </html>
