@@ -1436,8 +1436,9 @@ def test_memory_snapshot_and_diff():
     snap = memory_mod.snapshot(_G_RECON, _G_URLS, _G_FINDINGS)
     assert "dev.example.com" in snap["subdomains"]
     assert snap["counts"]["findings"] == 2
-    # dedup: /orders/1 appears twice in urls -> one endpoint
-    assert snap["endpoints"].count("api.example.com/orders/1") == 1
+    # dedup: /orders/1 appears twice in urls -> one endpoint, with its param name
+    # preserved (so a warm-start re-seed stays parameterized and gets re-probed).
+    assert snap["endpoints"].count("api.example.com/orders/1?id") == 1
     prior = {"hosts": ["api.example.com"], "subdomains": ["api.example.com", "www.example.com"],
              "endpoints": ["api.example.com/orders/1"], "tech": ["nginx"],
              "findings": [{"fp": memory_mod.finding_fp(_G_FINDINGS[0])}]}
@@ -1449,6 +1450,19 @@ def test_memory_snapshot_and_diff():
     # no prior -> has_prior false, nothing "added" spuriously flagged as change vs empty
     d0 = memory_mod.diff({}, snap)
     assert d0["has_prior"] is False
+
+
+def test_warm_start_reseeds_parameterized_endpoint_for_reprobe():
+    # The trust-critical re-scan bug: a stored endpoint must round-trip through
+    # warm-start as PARAMETERIZED, so the deterministic planner re-probes it and
+    # re-confirms a still-present finding (instead of the diff calling it resolved).
+    import surface as surface_mod
+    snap = memory_mod.snapshot({}, ["https://ginandjuice.shop/catalog?category=Gin"], [])
+    ep = snap["endpoints"][0]
+    assert ep == "ginandjuice.shop/catalog?category"          # param NAME kept, value dropped
+    seeded_url = "https://" + ep                               # exactly how _warm_start rebuilds it
+    inv = surface_mod.build_inventory([seeded_url])
+    assert inv[0]["parameterized"] is True and inv[0]["params"] == ["category"]
 
 
 def test_db_memory_roundtrip_assets_and_prior_snapshot():

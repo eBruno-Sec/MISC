@@ -86,7 +86,15 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
             hosts.add(hh)
 
     inv = surface_mod.build_inventory(urls)
-    endpoints = sorted({f"{e['host']}{e['path']}" for e in inv})
+    # Keep the param NAMES on the stored endpoint (not values) so a future
+    # warm-start re-seeds a PARAMETERIZED endpoint. Without this the seed is
+    # host/path only, the endpoint looks param-free, and the deterministic
+    # planner never re-probes it — which silently drops still-present findings
+    # on any re-scan. Names only keeps memory compact and the diff stable.
+    endpoints = sorted({
+        f"{e['host']}{e['path']}" + ("?" + "&".join(e["params"]) if e.get("params") else "")
+        for e in inv
+    })
 
     finds = []
     seen_fp = set()

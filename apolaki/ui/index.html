@@ -899,13 +899,17 @@ async function loadDiff(){
     chip("New endpoints",d.endpoints&&d.endpoints.added),
     chip("New tech",d.tech&&d.tech.added),
     nf.length?`<span class="chip" style="background:var(--sev-high);color:#fff;border:none">New findings +${nf.length}</span>`:"",
-    gf.length?`<span class="chip" style="background:var(--sev-info);color:#fff;border:none">Resolved ${gf.length}</span>`:"",
+    // NOT "Resolved": absence from this run only means it wasn't re-confirmed
+    // (maybe not re-tested, maybe a flaky probe) — never proof it's fixed. The
+    // operator must verify these before treating them as gone.
+    gf.length?`<span class="chip" style="background:var(--warn);color:#111;border:none" title="Seen in a prior mission but NOT re-confirmed this run — verify, do not assume fixed">Not re-confirmed ${gf.length}</span>`:"",
   ].filter(Boolean);
   const quiet=!parts.length;
   const newFindHtml=nf.length?`<div class="muted" style="margin-top:.4rem">New since last scan: ${nf.map(f=>`<span class="sev-${(f.severity||"info").toLowerCase()}">${esc(f.title)}</span>`).join(", ")}</div>`:"";
+  const goneHtml=gf.length?`<div class="muted" style="margin-top:.4rem"><strong>Verify (prior findings not re-confirmed this run — not necessarily fixed):</strong> ${gf.map(f=>`<span class="sev-${(f.severity||"info").toLowerCase()}">${esc(f.title)}</span>`).join(", ")}</div>`:"";
   card.style.display="block";
   card.innerHTML=`<div class="card" style="--c:var(--accent)"><h4>Since last scan</h4>
-    <div class="chips">${quiet?`<span class="muted">No change versus the previous mission on this target.</span>`:parts.join("")}</div>${newFindHtml}</div>`;
+    <div class="chips">${quiet?`<span class="muted">No change versus the previous mission on this target.</span>`:parts.join("")}</div>${newFindHtml}${goneHtml}</div>`;
 }
 
 /* ── surface ── */
