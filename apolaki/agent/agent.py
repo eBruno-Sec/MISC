@@ -142,6 +142,7 @@ class BBHAgent:
         self.strategy = strategy if strategy in self._DEFAULT_BUDGET else "low_ai"
         self.ai_calls = 0
         self.ai_degraded = False
+        self.ai_note = ""   # human-readable AI-usage outcome for the report
         self.max_ai_calls = (max(0, int(max_ai_calls)) if max_ai_calls is not None
                              else self._DEFAULT_BUDGET[self.strategy])
         # Warm-start directive from cross-session memory (set by /engage when a
@@ -317,6 +318,7 @@ class BBHAgent:
         # exhausted quota) — the platform stays useful without AI (item 4).
         if strat in ("low_ai", "agentic") and not self._ai_usable():
             self.ai_degraded = True
+            self.ai_note = f"AI unavailable (no usable credential) — {strat} degraded to deterministic coverage."
             yield {"type": "info", "content": "AI unavailable — completing with deterministic coverage."}
             strat = "deterministic"
 
@@ -342,28 +344,48 @@ class BBHAgent:
     # ── deterministic executor (planner-driven, no AI) ───────────
     async def _execute_plan(self, session_id: str):
         """Drive planner.next_batch through the SAME scoped, HITL-gated tool
-        pipeline. Dedup + termination are guaranteed by the planner's stable keys;
-        a hard step cap is the ultimate guard."""
+        pipeline. recon_cycles are honored: each cycle folds newly discovered
+        subdomains into the root set so recon + discovery deepen, and re-runs the
+        playbook over everything found. Dedup + a hard step cap guarantee it ends."""
         import planner
-        roots = [e.value.lower().lstrip("*.") for e in self.scope.in_scope]
+        base_roots = [e.value.lower().lstrip("*.") for e in self.scope.in_scope]
         done, steps = set(), 0
-        MAX_STEPS = 140
-        while steps < MAX_STEPS:
-            if self.stop_event.is_set():
-                return
-            state = {"mode": self.mode, "roots": roots, "done": done,
-                     "recon": self.tools.recon, "urls": self.tools.urls}
-            batch = planner.next_batch(state)
-            if not batch:
+        MAX_STEPS = 220
+        cycles = self.recon_cycles
+        for cyc in range(1, cycles + 1):
+            if self.stop_event.is_set() or steps >= MAX_STEPS:
                 break
-            for step in batch:
+            if cycles > 1:
+                yield {"type": "cycle", "cycle": cyc, "total": cycles,
+                       "content": f"Deterministic recon cycle {cyc} of {cycles} — folding in newly "
+                                  "discovered in-scope assets."}
+            before = self._surface_size()
+            # a fresh playbook each cycle reflects everything found so far
+            done.discard("generate_playbook")
+            roots = sorted(set(base_roots) | set(self.tools.recon.get("subdomains", [])))
+            while steps < MAX_STEPS:
                 if self.stop_event.is_set():
+                    self._plan_steps = steps
                     return
-                done.add(step["key"])
-                steps += 1
-                async for ev in self._run_tool(step["tool"], step["input"], session_id):
-                    if "_content" not in ev:      # no model to feed; drop the tool-result payload
-                        yield ev
+                state = {"mode": self.mode, "roots": roots, "done": done,
+                         "recon": self.tools.recon, "urls": self.tools.urls}
+                batch = planner.next_batch(state)
+                if not batch:
+                    break
+                for step in batch:
+                    if self.stop_event.is_set():
+                        self._plan_steps = steps
+                        return
+                    done.add(step["key"])
+                    steps += 1
+                    async for ev in self._run_tool(step["tool"], step["input"], session_id):
+                        if "_content" not in ev:      # no model to feed; drop the tool-result payload
+                            yield ev
+            # stop early once a cycle stops finding new surface
+            if cyc < cycles and self._surface_size() <= before:
+                yield {"type": "info", "content": f"Recon cycle {cyc} found no new in-scope assets — "
+                       "stopping early."}
+                break
         self._plan_steps = steps
 
     async def _run_deterministic(self, session_id: str):
@@ -372,6 +394,9 @@ class BBHAgent:
         async for ev in self._execute_plan(session_id):
             yield ev
         note = " AI was unavailable; deterministic coverage completed." if self.ai_degraded else ""
+        if not self.ai_note:
+            self.ai_note = ("Deterministic (no-AI) coverage completed." if not self.ai_degraded
+                            else self.ai_note)
         yield {"type": "complete", "content":
                f"Deterministic scan complete — {getattr(self, '_plan_steps', 0)} step(s).{note} "
                "See Playbooks for cURL-ready leads and the report."}
@@ -398,12 +423,18 @@ class BBHAgent:
             yield ev
 
         # AI call #2 (the high-value one): summarize evidence + prioritize leads.
+        wrapped = False
         if self._budget_left():
             try:
                 async for ev in self._ai_wrapup(session_id):
                     yield ev
+                wrapped = True
             except Exception as e:
+                self.ai_note = f"Low-AI: deterministic scan completed; AI wrap-up skipped ({type(e).__name__})."
                 yield {"type": "info", "content": f"AI wrap-up skipped ({type(e).__name__})."}
+        if not self.ai_note:
+            self.ai_note = (f"Low-AI: deterministic scan + AI wrap-up ({self.ai_calls} AI call(s))."
+                            if wrapped else f"Low-AI: deterministic scan ({self.ai_calls} AI call(s)).")
         yield {"type": "complete", "content":
                f"Low-AI scan complete — {getattr(self, '_plan_steps', 0)} step(s), "
                f"{self.ai_calls}/{self.max_ai_calls} AI call(s). See Playbooks and the report."}

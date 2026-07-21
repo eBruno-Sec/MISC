@@ -45,11 +45,26 @@ def _status_note(status: str) -> str:
     return ""
 
 
+def _exec_note(execution: dict) -> str:
+    """One line stating how the mission ran (strategy + AI usage)."""
+    if not execution:
+        return ""
+    strat = (execution.get("strategy") or "").replace("_", "-")
+    note = (execution.get("ai_note") or "").strip()
+    label = {"deterministic": "Deterministic (no AI)", "low-ai": "Low-AI",
+             "agentic": "Agentic", "manual": "Manual"}.get(strat, strat or "")
+    parts = [p for p in (f"**Execution:** {label}" if label else "", note) if p]
+    return " — ".join(parts)
+
+
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
-                     ai_summary: str = None) -> str:
+                     ai_summary: str = None, execution: dict = None) -> str:
     now = _now()
     banner = _status_note(status)
+    exec_note = _exec_note(execution)
+    if exec_note:
+        banner = (banner + "\n\n" + exec_note) if banner else exec_note
     ai_block = (f"## Executive Summary\n\n{ai_summary.strip()}\n\n" if (ai_summary or "").strip() else "")
     if not findings:
         return (
@@ -122,7 +137,7 @@ def generate_report(program: str, findings: list, scope: dict,
 # ── HTML (dark-themed standalone, all fields escaped) ────────────
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
-                         ai_summary: str = None) -> str:
+                         ai_summary: str = None, execution: dict = None) -> str:
     e = _html.escape
     counts = _counts(findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -172,6 +187,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
     scope_str = e(", ".join(scope.get("in_scope", [])))
     _sn = _status_note(status)
     status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
+    _en = _exec_note(execution)
+    exec_html = (f'<div class="execbar">{e(_en.replace("**",""))}</div>' if _en else "")
     ai_html = ""
     if (ai_summary or "").strip():
         _paras = "".join(f"<p>{e(p.strip())}</p>" for p in ai_summary.strip().split("\n") if p.strip())
@@ -204,6 +221,8 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   margin:1rem 0;border-radius:4px;font-size:.8rem}}
 .aisum{{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
   padding:.8rem 1rem;margin:.6rem 0}}.aisum p{{margin:.4rem 0}}
+.execbar{{background:var(--surface);border:1px solid var(--border);color:var(--dim);padding:.45rem .8rem;
+  margin:.6rem 0;border-radius:4px;font-size:.76rem}}
 /* Print / Save-as-PDF: white background, ink-friendly, keep findings whole */
 @media print{{
   :root{{--bg:#fff;--surface:#fff;--border:#bbb;--text:#111;--dim:#555;--bright:#000;--accent:#04c}}
@@ -219,6 +238,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 <div class="wrap">
 <div class="head"><h1>Security Assessment Report — {e(program)}</h1>
 <div class="sub">Generated {e(_now())} · Scope: {scope_str} · {len(findings)} finding(s)</div>
+{exec_html}
 {status_html}
 <div class="chips">{peek}</div></div>
 {ai_html}

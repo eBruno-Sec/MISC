@@ -1894,7 +1894,9 @@ class ToolRegistry:
     async def _generate_playbook(self, inp: dict) -> ToolResult:
         recon = dict(self.recon)
         recon["urls"] = self.urls
-        guide = guidance_mod.build_guidance(recon)
+        # consolidate: a wide surface emits the same class once per host; group into
+        # the top actionable, prioritized leads so the operator isn't buried.
+        guide = guidance_mod.consolidate(guidance_mod.build_guidance(recon))
         stats = guidance_mod.guidance_stats(guide)
         # persist the playbook so the UI Playbooks tab can render it
         if self.mission_id:

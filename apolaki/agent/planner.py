@@ -72,13 +72,23 @@ def estimate(mode: str, roots: list) -> dict:
 def next_batch(state: dict) -> list:
     """Return the next batch of steps (earliest incomplete phase), or []."""
     mode = state.get("mode", "active")
-    roots = [r.lower().lstrip("*.") for r in (state.get("roots") or []) if r]
+    roots = sorted({r.lower().lstrip("*.") for r in (state.get("roots") or []) if r})
     done = state.get("done") or set()
     recon = state.get("recon") or {}
     urls = state.get("urls") or []
 
     def fresh(steps):
-        return [s for s in steps if s["key"] not in done and _allowed(s["tool"], mode)]
+        # dedup against `done` AND within this freshly built batch (a step's key can
+        # be generated twice in one phase, e.g. run_graphql from a URL hint and from
+        # a host root) — so the same call never fires twice.
+        out, seen = [], set()
+        for s in steps:
+            k = s["key"]
+            if k in done or k in seen or not _allowed(s["tool"], mode):
+                continue
+            seen.add(k)
+            out.append(s)
+        return out
 
     # ── phase A: passive recon on each root ──
     a = []
@@ -98,7 +108,8 @@ def next_batch(state: dict) -> list:
     b = []
     targets = sorted(set(roots) | set(subs))
     if targets:
-        b.append(_step("run_httpx", {"targets": targets}, "run_httpx:all"))
+        # key on target count so a later recon cycle (more subdomains) re-runs httpx
+        b.append(_step("run_httpx", {"targets": targets}, f"run_httpx:{len(targets)}"))
     b.append(_step("check_takeover", {}, "check_takeover"))
     # http_probe each in-scope host root once (extracts links + params → surface)
     host_roots = []

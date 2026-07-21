@@ -901,6 +901,42 @@ def sort_guidance(items: list[dict]) -> list[dict]:
     return out
 
 
+def consolidate(guide: list[dict], cap: int = 40) -> list[dict]:
+    """Collapse the playbook into the top actionable leads.
+
+    A wide surface (many hosts/endpoints) makes the rule engine emit the same
+    vuln-class card once per host — dozens of near-identical HIGH cards. This
+    groups by (family key, severity), keeps the highest-confidence representative,
+    aggregates every affected surface into `grouped_surfaces` (+ `group_count`),
+    sorts most-severe/most-confident first, and caps the list. Deterministic."""
+    groups: dict = {}
+    for g in guide:
+        fam = (g.get("key") or g.get("category") or (g.get("title") or "")[:24],
+               (g.get("severity") or "info").upper())
+        rep = groups.get(fam)
+        if rep is None:
+            rep = dict(g)
+            rep["grouped_surfaces"] = []
+            rep["group_count"] = 0
+            groups[fam] = rep
+        rep["group_count"] += 1
+        s = g.get("surface")
+        if s and s not in rep["grouped_surfaces"]:
+            rep["grouped_surfaces"].append(s)
+        # keep the strongest representative's actionable fields
+        if (g.get("confidence") or 0) > (rep.get("confidence") or 0):
+            for k in ("confidence", "confidence_label", "surface", "curl_steps",
+                      "what_to_test", "how_to_test", "payloads", "bypass", "references", "evidence"):
+                if k in g:
+                    rep[k] = g[k]
+    out = list(groups.values())
+    for rep in out:
+        rep["grouped_surfaces"] = rep["grouped_surfaces"][:12]
+    out.sort(key=lambda g: (-SEVERITY_RANK.get(g.get("severity"), 0), -(g.get("confidence") or 0),
+                            -(g.get("group_count") or 0)))
+    return out[:cap]
+
+
 def build_guidance(recon: dict) -> list[dict]:
     """Run every rule over the recon context and return sorted, de-duped guidance."""
     import remediation as remediation_mod

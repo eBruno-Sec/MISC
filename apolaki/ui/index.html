@@ -243,6 +243,13 @@ footer{background:var(--surface);border-top:1px solid var(--border);display:flex
 .topo-panel li{padding:.18rem 0;border-bottom:1px solid var(--border);word-break:break-all}
 .topo-panel .tp-act{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
 .topo-dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.4rem;vertical-align:middle}
+.topo-chiprow{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.6rem}
+.topo-chip{display:inline-flex;align-items:center;gap:.1rem;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:999px;padding:.28rem .7rem;font-size:.78rem;cursor:pointer;font-family:inherit}
+.topo-chip:hover{border-color:var(--accent)}.topo-chip.sel{border-color:var(--accent);color:var(--text-bright);background:var(--surface2,var(--surface))}
+.tp-eps{max-height:220px;overflow:auto}
+.tp-link{background:none;border:none;color:var(--accent);cursor:pointer;font-family:inherit;font-size:inherit;
+  padding:0;text-align:left;word-break:break-all}.tp-link:hover{text-decoration:underline}
 #topoWrap svg text{font-size:11px;font-family:var(--mono,monospace)}
 #topoWrap g{transition:opacity .12s}
 
@@ -359,7 +366,7 @@ X-Requested-With: </textarea>
             <div id="cfgWarn" class="warn-box" style="display:none;margin-bottom:.8rem"></div>
             <button class="btn primary block" id="btnStart" onclick="startHunt()">Start Hunt</button>
             <button class="btn danger block" id="btnStop" style="display:none;margin-top:.6rem" onclick="stopHunt()">Stop Hunt</button>
-            <p class="hint" style="margin-top:.7rem">The agent decides tool order in a ReAct loop; every tool is scope-checked at the wrapper level.</p>
+            <p class="hint" id="planHint" style="margin-top:.7rem">A deterministic planner sequences the tools; AI is used only where it helps. Every tool is scope-checked at the wrapper level.</p>
           </div>
           <div class="block">
             <h4>Permission levels</h4>
@@ -639,6 +646,13 @@ function refreshEstimate(){
     const hint=document.getElementById("estimateHint"); if(!hint)return;
     const inScope=document.getElementById("inScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
     const mode=document.getElementById("mode").value, strategy=document.getElementById("strategy").value;
+    const ph=document.getElementById("planHint");
+    if(ph)ph.innerHTML=({
+      manual:"Manual: nothing runs automatically — you drive the cURL Console / Workbench / Access Check.",
+      deterministic:"Deterministic: a rule-based planner sequences the tools with <strong>no AI</strong>. Every tool is scope-checked at the wrapper level.",
+      low_ai:"Low-AI: the deterministic planner runs the scan, then AI writes an executive summary of the evidence. Every tool is scope-checked.",
+      agentic:"Agentic: the model decides tool order in a ReAct loop (many AI calls). Every tool is scope-checked at the wrapper level."
+    })[strategy]||ph.innerHTML;
     try{
       const d=await(await fetch(`${API}/estimate`,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({in_scope:inScope,mode,strategy})})).json();
@@ -919,7 +933,7 @@ function renderPlaybookCard(g,i){
   return `<article class="pb-card">
     <div class="pb-head"><div class="pb-title"><span class="chip sev" style="--c:${col}">${esc(g.severity||"INFO")}</span><h4>${esc(g.title||"")}</h4></div>
       <span class="pb-conf">${esc(g.confidence_label||"")} · ${esc(String(g.confidence??""))}%</span></div>
-    <div class="pb-meta"><span>Surface <code>${esc(g.surface||"")}</code></span>${g.category?`<span>${esc(g.category)}</span>`:""}${g.wstg?`<span>${esc(g.wstg)}</span>`:""}</div>
+    <div class="pb-meta"><span>Surface <code>${esc(g.surface||"")}</code></span>${g.group_count>1?`<span title="${esc((g.grouped_surfaces||[]).join(', '))}">×${g.group_count} endpoints</span>`:""}${g.category?`<span>${esc(g.category)}</span>`:""}${g.wstg?`<span>${esc(g.wstg)}</span>`:""}</div>
     ${curlBlock}
     <div class="pb-obj"><strong>Objective.</strong> ${esc(g.what_to_test||"")}</div>
     ${steps?`<div class="pb-sec"><h5>Step-by-step</h5><ol>${steps}</ol></div>`:""}
@@ -1160,7 +1174,7 @@ function renderTopology(){
     const hIdx=topoNodes.push({id:hid,kind:"host",label:host})-1;
     svg+=`<path d="M${rootX} ${rootY} C ${rootX} 92, ${hx} 82, ${hx} ${hy}" stroke="${cLine}" fill="none"${dim(hid)}/>`;
     const ring=hSev?`<circle cx="${hx}" cy="${hy}" r="10" fill="none" stroke="${SEV_HEX[hSev]||cHost}" stroke-width="2"/>`:"";
-    svg+=`<g class="topo-node" data-idx="${hIdx}" style="cursor:pointer"${dim(hid)}><title>${esc(host)} — click to trace</title>`+
+    svg+=`<g class="topo-node" data-idx="${hIdx}" data-topo-select="${esc(hid)}" style="cursor:pointer"${dim(hid)}><title>${esc(host)} — click to trace</title>`+
          ring+`<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+12}" y="${hy+3}" fill="${cText}">${esc(host)}</text></g>`;
     (epByHost[hid]||[]).slice(0,10).forEach((eid,j)=>{
       const ep=byId[eid], py=hy+30+j*22;
@@ -1168,14 +1182,23 @@ function renderTopology(){
       const eIdx=topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||host})-1;
       svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"${dim(eid)}/>`;
       const eColor=eSev?SEV_HEX[eSev]:cLeaf, r=eSev?4.5:3;
-      svg+=`<g class="topo-node" data-idx="${eIdx}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":""} — click to trace</title>`+
+      svg+=`<g class="topo-node" data-idx="${eIdx}" data-topo-select="${esc(eid)}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":""} — click to trace</title>`+
            `<circle cx="${hx}" cy="${py}" r="${r}" fill="${eColor}"/><text x="${hx+8}" y="${py+3}">${esc(String(ep.label).slice(0,26))}</text></g>`;
     });
     const more=(epByHost[hid]||[]).length-10;
     if(more>0)svg+=`<text x="${hx+8}" y="${hy+30+10*22+3}" fill="${cText}" opacity=".6">+${more} more…</text>`;
   });
   svg+=`</svg>`;
-  wrap.innerHTML=`<div class="muted" style="margin-bottom:.5rem">Click any node to trace its connections. Ringed nodes carry findings.</div><div class="table-wrap" style="padding:.5rem">${svg}</div>`;
+  // Guaranteed-clickable HTML host chips (SVG events proved unreliable in some
+  // browsers; buttons are not). Clicking a chip traces that host in the panel.
+  const chips=hosts.map(hid=>{
+    const hf=findByNode[hid]||[], hs=_worstSev(hf);
+    return `<button type="button" class="topo-chip${topoSelected===hid?' sel':''}" data-topo-select="${esc(hid)}">`+
+           `<span class="topo-dot" style="background:${hs?SEV_HEX[hs]:'var(--ok)'}"></span>${esc(byId[hid].label)}</button>`;
+  }).join("");
+  wrap.innerHTML=`<div class="muted" style="margin-bottom:.4rem">Pick a host below (or click a node in the map) to trace its endpoints, tech, and findings.</div>`+
+    (chips?`<div class="topo-chiprow">${chips}</div>`:"")+
+    `<div class="table-wrap" style="padding:.5rem">${svg}</div>`;
   // Click handling is DELEGATED (see initTopoDelegation) on the #topoWrap
   // container, which survives every innerHTML re-render — more robust than
   // per-node or inline handlers, which proved flaky across browsers.
@@ -1183,22 +1206,21 @@ function renderTopology(){
   if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`;
   renderTopoPanel();
 }
-function topoClick(i){const n=topoNodes[i];if(!n)return;
-  topoSelected=(topoSelected===n.id)?null:n.id;   // toggle: click again to clear
-  renderTopology();
-}
-// Delegated, one-time click handler on the persistent #topoWrap container. It
-// survives every innerHTML re-render and resolves the clicked SVG child up to its
-// <g class="topo-node"> via closest() — the most robust binding available.
-function initTopoDelegation(){
-  const wrap=document.getElementById("topoWrap"); if(!wrap||wrap._topoBound)return;
-  wrap._topoBound=true;
-  wrap.addEventListener("click",e=>{
-    const g=e.target&&e.target.closest?e.target.closest("g.topo-node"):null;
-    if(g&&g.dataset&&g.dataset.idx!=null)topoClick(+g.dataset.idx);
+// Select a topology node BY ID (works for any node, incl. endpoints not drawn in
+// the capped SVG). This is the single source of truth for selection.
+function topoSelectId(id){if(!id)return;topoSelected=(topoSelected===id)?null:id;renderTopology();}
+function topoClick(i){const n=topoNodes[i];if(n)topoSelectId(n.id);}   // idx wrapper (SVG/tests)
+// ONE document-level delegated click handler for every clickable topology target
+// — SVG <g data-topo-select>, HTML host chips, and panel endpoint links all carry
+// data-topo-select. Document-level + closest() survives any innerHTML re-render
+// and every SVG-event quirk that made per-node/inline handlers unreliable.
+if(!window._topoDelegated){
+  window._topoDelegated=true;
+  document.addEventListener("click",e=>{
+    const t=e.target&&e.target.closest?e.target.closest("[data-topo-select]"):null;
+    if(t)topoSelectId(t.getAttribute("data-topo-select"));
   });
 }
-initTopoDelegation();
 function renderTopoPanel(){
   const el=document.getElementById("topoPanel"); if(!el)return;
   if(!topoSelected||!topoGraph){el.innerHTML=`<div class="muted">Click a node to see what it relates to — its endpoints, technologies, and any findings.</div>`;return;}
@@ -1216,8 +1238,8 @@ function renderTopoPanel(){
   let h=`<h4>${esc(sel.label)}</h4><div class="muted" style="margin-top:-.35rem">${kindLabel}</div>`;
   if(relFinds.length){h+=`<div class="tp-sec">Findings (${relFinds.length})</div><ul>`+
     relFinds.map(f=>`<li><span class="topo-dot" style="background:${SEV_HEX[_sevOf(f)]||SEV_HEX.info}"></span>${esc(f.label)}</li>`).join("")+`</ul>`;}
-  if(eps.length){h+=`<div class="tp-sec">Endpoints (${eps.length})</div><ul>`+
-    eps.slice(0,20).map(e=>`<li>${esc(e.label)}</li>`).join("")+`</ul>`;}
+  if(eps.length){h+=`<div class="tp-sec">Endpoints (${eps.length})</div><ul class="tp-eps">`+
+    eps.slice(0,30).map(e=>`<li><button type="button" class="tp-link" data-topo-select="${esc(e.id)}">${esc(e.label)}</button></li>`).join("")+`</ul>`;}
   if(techs.length){h+=`<div class="tp-sec">Technology</div><div class="chips">`+
     techs.map(t=>`<span class="chip">${esc(t.label)}</span>`).join("")+`</div>`;}
   // quick actions per node kind (act on the selected node — no inline interpolation)
@@ -1393,8 +1415,8 @@ renderHelp();
 /* Expose handlers referenced by inline SVG/HTML onclick attributes on window, so
    they resolve even if this script is ever loaded as a module or bundled (an
    inline onclick can only see the global scope). Belt-and-suspenders. */
-Object.assign(window,{topoClick,topoAction,loadMission,rescan,delMission,switchTab,
-  showView,resumeLast,prefillWorkbench,toCurl,prefillAccess});
+Object.assign(window,{topoClick,topoSelectId,topoAction,loadMission,rescan,delMission,switchTab,
+  showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate});
 
 /* land on the Launch view */
 showView("launch");

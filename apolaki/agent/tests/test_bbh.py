@@ -1740,6 +1740,22 @@ def test_planner_terminates_and_orders_phases():
     assert "run_httpx" in firsts and "generate_playbook" in firsts
 
 
+def test_planner_no_duplicate_keys_within_a_batch():
+    import planner
+    # duplicate roots + a graphql url could emit run_graphql twice in one batch
+    state = {"mode": "full", "roots": ["ex.com", "ex.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://ex.com"}]},
+             "urls": ["https://ex.com/graphql", "https://ex.com/x?id=1"]}
+    for _ in range(12):
+        batch = planner.next_batch(state)
+        if not batch:
+            break
+        keys = [s["key"] for s in batch]
+        assert len(keys) == len(set(keys)), f"duplicate keys in one batch: {keys}"
+        for s in batch:
+            state["done"].add(s["key"])
+
+
 def test_planner_passive_mode_stays_passive():
     import planner
     st = {"mode": "passive", "roots": ["x.com"], "done": set(), "recon": {"subdomains": []}, "urls": []}
@@ -1810,6 +1826,62 @@ def test_deterministic_mode_runs_no_ai_end_to_end():
     evs2, a2 = _run(go2())
     assert a2.ai_calls == 0 and not [e for e in evs2 if e.get("type") == "tool_call"]
     assert any(e.get("type") == "complete" for e in evs2)
+
+
+class _GrowTools(_PlanTools):
+    """Deterministic-run stub that DISCOVERS assets, so recon cycles have new
+    surface to fold in on later passes."""
+    async def execute(self, name, inp, sid):
+        from tools import ToolResult
+        if name == "run_subfinder" and "sub.example.com" not in self.recon["subdomains"]:
+            self.recon["subdomains"].append("sub.example.com")
+        if name == "http_probe":
+            u = f"https://{inp.get('url','x').split('//')[-1].split('/')[0]}/found?id=1"
+            if u not in self.urls:
+                self.urls.append(u)
+        return ToolResult(name, inp.get("url") or inp.get("domain") or "", True, "ran", [])
+
+
+def test_deterministic_recon_cycles_are_honored():
+    import agent as agent_mod
+
+    async def go():
+        eng = scope_mod.ScopeEngine(); eng.load_manual(["*.example.com", "example.com"], [], "P")
+        a = agent_mod.BBHAgent(eng, _GrowTools(), asyncio.Event(), mode="active",
+                               strategy="deterministic", recon_cycles=3, auto_approve=True, mission_id=None)
+        return [ev async for ev in a.run("obj", "s")], a
+
+    evs, a = _run(go())
+    cyc = [e["cycle"] for e in evs if e.get("type") == "cycle"]
+    assert 1 in cyc and 2 in cyc, f"deterministic run did not honor multiple recon cycles: {cyc}"
+    assert a.ai_calls == 0
+
+
+def test_guidance_consolidate_groups_and_caps():
+    import guidance
+    # emulate a wide surface: the same vuln class discovered across many hosts
+    allg = []
+    for h in range(8):
+        recon = {"target": f"h{h}.com", "domain": f"h{h}.com",
+                 "http": {"ok": True, "headers": {}, "final_url": f"https://h{h}.com/", "is_https": True},
+                 "urls": [f"https://h{h}.com/a?id=1", f"https://h{h}.com/b?url=x"]}
+        allg += guidance.build_guidance(recon)
+    con = guidance.consolidate(allg, cap=20)
+    assert len(con) < len(allg) and len(con) <= 20
+    top = con[0]
+    assert top.get("group_count", 0) >= 2 and len(top.get("grouped_surfaces", [])) >= 2
+    # sorted most-severe first
+    ranks = [guidance.SEVERITY_RANK.get(g["severity"], 0) for g in con]
+    assert ranks == sorted(ranks, reverse=True)
+
+
+def test_report_execution_note():
+    det = report.generate_report("P", [], {"in_scope": ["x.com"]},
+                                 execution={"strategy": "deterministic", "ai_note": "Deterministic (no-AI) coverage completed."})
+    assert "Deterministic" in det and "no-AI" in det
+    low = report.generate_html_report("P", [], {"in_scope": ["x.com"]},
+                                      execution={"strategy": "low_ai", "ai_note": "AI wrap-up skipped (RateLimitError)."})
+    assert "execbar" in low and "RateLimitError" in low
 
 
 def test_report_includes_ai_summary():

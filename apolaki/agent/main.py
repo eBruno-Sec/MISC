@@ -419,6 +419,10 @@ def _ai_summary(m) -> str:
     return (m.get("context", {}) or {}).get("ai_summary", "")
 
 
+def _execution(m) -> dict:
+    return (m.get("context", {}) or {}).get("execution", {})
+
+
 def _coverage(session_id: str) -> dict:
     logs = db.get_logs(session_id, limit=2000)
     tools_run = {}
@@ -434,7 +438,7 @@ def _coverage(session_id: str) -> dict:
 async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
-                                    status=m["status"], ai_summary=_ai_summary(m))
+                                    status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
     return {"markdown": md, "findings": findings, "status": m["status"]}
 
 
@@ -442,7 +446,7 @@ async def get_report(session_id: str):
 async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
-                                    status=m["status"], ai_summary=_ai_summary(m))
+                                    status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
     fname = f"bbh-report-{session_id}.md"
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -452,7 +456,7 @@ async def get_report_md(session_id: str):
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains,
-                                           status=m["status"], ai_summary=_ai_summary(m))
+                                           status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m))
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
@@ -537,7 +541,7 @@ def _ensure_playbook(session_id: str) -> None:
         import guidance as guidance_mod
         recon = dict(tools.recon)
         recon["urls"] = tools.urls
-        guide = guidance_mod.build_guidance(recon)
+        guide = guidance_mod.consolidate(guidance_mod.build_guidance(recon))
         if not guide:
             return
         ctx = dict(m["context"])
@@ -549,10 +553,31 @@ def _ensure_playbook(session_id: str) -> None:
         pass
 
 
+def _record_execution(session_id: str) -> None:
+    """Persist how the mission ran (strategy + AI usage) so the report can state it
+    honestly — 'deterministic no-AI coverage' or 'AI wrap-up skipped (RateLimitError)'."""
+    try:
+        if session_id not in sessions:
+            return
+        agent = sessions[session_id]["agent"]
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        ctx = dict(m["context"])
+        ctx["execution"] = {"strategy": getattr(agent, "strategy", "agentic"),
+                            "ai_calls": getattr(agent, "ai_calls", 0),
+                            "max_ai_calls": getattr(agent, "max_ai_calls", 0),
+                            "ai_note": getattr(agent, "ai_note", "")}
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+
+
 def _finalize_mission(session_id: str) -> None:
     """One place that runs when a mission's agent loop ends: guarantee a playbook,
-    then persist cross-session memory + archived-render data."""
+    then persist cross-session memory + archived-render data + execution note."""
     _ensure_playbook(session_id)
+    _record_execution(session_id)
     _record_memory(session_id)
 
 
