@@ -98,6 +98,46 @@ def _chrome_path():
             return hits[-1]
     return None
 
+
+# Cached result of the startup XSS-confirmer probe. None = not probed yet.
+# Presence of a chrome binary is NOT enough on slim images (missing shared libs);
+# the only honest signal is "a headless launch actually succeeds".
+_XSS_CONFIRM_OK = None
+
+
+async def probe_xss_confirm() -> bool:
+    """Actually launch headless Chromium and open about:blank. Caches + returns
+    the result so /health, /config, and the run banner can report truthfully
+    whether reflected XSS can be browser-CONFIRMED (vs. staying advisory leads)."""
+    global _XSS_CONFIRM_OK
+    chrome = _chrome_path()
+    if not chrome:
+        _XSS_CONFIRM_OK = False
+        return False
+
+    async def _launch():
+        from playwright.async_api import async_playwright
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        async with async_playwright() as pw:
+            b = await pw.chromium.launch(headless=True, executable_path=chrome,
+                                         args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+            page = await b.new_page()
+            await page.goto("about:blank", timeout=5000)
+            await b.close()
+
+    try:
+        await asyncio.wait_for(_launch(), timeout=15)   # a hung launch never blocks startup
+        _XSS_CONFIRM_OK = True
+    except Exception:
+        _XSS_CONFIRM_OK = False
+    return _XSS_CONFIRM_OK
+
+
+def xss_confirm_status():
+    """Cached probe result: True (launchable), False (absent/broken), or None
+    (not yet probed)."""
+    return _XSS_CONFIRM_OK
+
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
     {"name": "run_subfinder",

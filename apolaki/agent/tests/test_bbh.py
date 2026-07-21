@@ -552,6 +552,15 @@ def test_xss_reflected_exploitable_needs_unescaped_breakout():
     assert xt.reflected_exploitable(f'<input value="{xt.BREAKOUTS["attr_dq"]}">', "attr_dq")
 
 
+def test_xss_reflection_confirms_element_injecting_contexts():
+    # A surviving breakout that injects a new element is proof on its own —
+    # CONFIRMED without a browser (the round-9 fix). Weaker contexts stay leads.
+    for ctx in ("html", "attr_dq", "attr_sq"):
+        assert xt.reflection_finding("https://t/s?q=1", "q", ctx)["confidence"] == "confirmed", ctx
+    for ctx in ("attr_uq", "script", "comment"):
+        assert xt.reflection_finding("https://t/s?q=1", "q", ctx)["confidence"] == "candidate", ctx
+
+
 def test_xss_set_param_and_fragment():
     out = xt.set_param("https://t/s?q=1&z=2", "q", "<x>")
     assert "q=%3Cx%3E" in out or "q=<x>" in out

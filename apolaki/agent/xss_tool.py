@@ -36,6 +36,13 @@ BREAKOUTS = {
     "comment":  f"--><{MARK}c>",
 }
 
+# Contexts where a surviving breakout injects a NEW HTML ELEMENT into the
+# response — i.e. reflection alone proves executable markup, no browser needed.
+# script / comment / attr_uq are deliberately excluded: the breakout there is
+# weaker proof (JS-string escaping edge cases, attribute-only injection), so
+# they stay candidates for the browser-execution pass to confirm.
+EXECUTABLE_ON_REFLECTION = {"html", "attr_dq", "attr_sq"}
+
 # Auto-firing execution payloads for the browser confirmation pass.
 EXEC_PAYLOADS = (
     f'"><img src=x onerror=alert("{MARK}")>',
@@ -105,17 +112,23 @@ def reflected_exploitable(body: str, context: str) -> bool:
 
 
 def reflection_finding(url: str, param: str, context: str, where: str = "query") -> dict:
+    # A surviving breakout that injects a new element is proof of exploitable
+    # markup on its own — grade it CONFIRMED. Weaker contexts stay candidate so
+    # the browser pass (or a human) confirms execution.
+    proven = context in EXECUTABLE_ON_REFLECTION
+    label = "confirmed" if proven else "candidate"
     return {
         "title": f"Reflected XSS ({context}) in '{param}'",
         "severity": "high", "target": set_param(url, param, BREAKOUTS[context]) if where == "query" else url,
         "description": (f"User input in the {where} parameter '{param}' reflects into a {context} context with the "
                         f"structural characters unescaped (breakout '{BREAKOUTS[context]}' survived literally). "
-                        "This is injectable HTML/script."),
+                        + ("The breakout injects a new HTML element, so this is directly exploitable markup."
+                           if proven else "This is injectable HTML/script; execution needs browser/manual confirmation.")),
         "impact": "Execute script in victims' browsers: session/CSRF-token theft, account takeover, page defacement.",
         "reproduction_steps": [f"Set '{param}' to {BREAKOUTS[context]}",
                                "Observe it reflected unescaped in the response",
                                "Replace with an executing payload (e.g. \"><img src=x onerror=alert(1)>)"],
-        "cwe": "CWE-79", "family": "xss", "tags": ["xss"], "confidence": "candidate",
+        "cwe": "CWE-79", "family": "xss", "tags": ["xss"], "confidence": label,
     }
 
 

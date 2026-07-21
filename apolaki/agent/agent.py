@@ -384,6 +384,12 @@ class BBHAgent:
         if self.recon_cycles > 1:
             yield {"type": "info", "content": f"Iterative recon enabled: up to {self.recon_cycles} cycles "
                    "(refine from discovered assets each pass; intrusive tools are not looped)."}
+        # Be honest when the browser XSS confirmer is dead: reflected XSS in
+        # script/DOM contexts can then only ever be advisory leads.
+        import tools as _tools_mod
+        if _tools_mod.xss_confirm_status() is False:
+            yield {"type": "info", "content": "Headless-browser XSS confirmer unavailable — reflected XSS in "
+                   "script/DOM contexts will stay advisory leads (HTML/attribute-context reflections still confirm)."}
         yield self._budget_event()
 
         strat = self.strategy

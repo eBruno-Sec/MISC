@@ -18,6 +18,7 @@ import replay as replay_mod
 import report as report_mod
 import scope as scope_mod
 import surface as surface_mod
+import tools as tools_mod
 import wordlists as wl
 from agent import BBHAgent, ai_status
 from scope import ScopeEngine
@@ -181,7 +182,8 @@ async def ui():
 async def health():
     """Liveness probe for Docker / monitoring. Cheap, no secrets, always 200 when
     the app is up; reports AI readiness so a health check can also see config."""
-    return {"status": "ok", "app": "apolaki", "ai_ready": ai_status().get("ready", False)}
+    return {"status": "ok", "app": "apolaki", "ai_ready": ai_status().get("ready", False),
+            "xss_confirm": tools_mod.xss_confirm_status()}
 
 
 @app.get("/config")
@@ -189,7 +191,8 @@ async def config():
     import collaborator as collab
     # ai_status() reports the effective provider/model/base_url + credential
     # readiness; it never returns the API key.
-    return {**ai_status(), "oob_enabled": collab.enabled(), "oob_base": collab.base()}
+    return {**ai_status(), "oob_enabled": collab.enabled(), "oob_base": collab.base(),
+            "xss_confirm": tools_mod.xss_confirm_status()}
 
 
 # ── native OOB collaborator: inbound interaction sink + correlation ──
@@ -989,6 +992,14 @@ async def startup():
         print(f"[WARN] AI provider '{st['provider']}' has no credentials — {st['hint']}")
     else:
         print(f"[INFO] AI ready: {st['provider']} / {st['model']} (key from {st['key_source']})")
+
+    # Probe the headless-browser XSS confirmer ONCE (launch, not just presence).
+    # When it's dead, reflected XSS in JS/DOM contexts can only ever be leads —
+    # say so loudly instead of shipping silent "0 findings" runs.
+    xc = await tools_mod.probe_xss_confirm()
+    print("[INFO] XSS execution confirmer: headless browser OK" if xc else
+          "[WARN] XSS execution confirmer UNAVAILABLE (no launchable headless browser) — "
+          "reflected XSS in script/DOM contexts will remain advisory leads, not confirmed findings")
 
     # background nuclei template update (best-effort; skipped if binary absent)
     import shutil
