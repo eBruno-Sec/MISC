@@ -317,10 +317,16 @@ class BBHAgent:
         probable); we trust that grade. A tool that confirms by construction but
         emits no grade (nuclei/zap/takeover) is treated as confirmed; anything
         graded weaker — reflection candidates, IDOR signals, static JS review — is
-        a LEAD, never a confirmed report finding."""
+        a LEAD, never a confirmed report finding.
+
+        HARD GUARD: a native-graded "confirmed" with NO proof at all (no evidence,
+        reason, or detail) is downgraded to a lead. Evidence is what makes a
+        confirmed finding trustworthy; a proofless "confirmed" is the exact shape
+        of the round-9 reflected-XSS false positive, so we refuse to promote it."""
         c = str(f.get("confidence", "")).strip().lower()
         if c == "confirmed":
-            return True
+            proof = f.get("evidence") or f.get("reason") or f.get("detail")
+            return bool(str(proof).strip()) if proof is not None else False
         if c:                                 # candidate / possible / probable
             return False
         return tool in _CONFIRMED_BY_TOOL      # no grade + confirmatory tool

@@ -975,8 +975,10 @@ class ToolRegistry:
                         rb = await c.get(bu, headers=headers)
                     except Exception:
                         continue
-                    if xt.reflected_exploitable(rb.text, ctx):
-                        reflected.append((p, xt.reflection_finding(url, p, ctx)))
+                    idx = xt.breakout_index(rb.text, ctx)
+                    if idx != -1:
+                        ev_snip = xt._evidence_snippet(rb.text, idx, xt.BREAKOUTS[ctx])
+                        reflected.append((p, xt.reflection_finding(url, p, ctx, evidence=ev_snip)))
                         break
 
         # 2) execution confirmation in a real browser (also catches DOM-only XSS)
@@ -1262,6 +1264,7 @@ class ToolRegistry:
                     "title": f"Path traversal signal on '{probe.parameter}'",
                     "severity": verdict["severity"], "target": probe.url,
                     "description": f"Traversal probe ({probe.payload}) — {verdict['reason']}",
+                    "evidence": f"{probe.payload}: {verdict['reason']}",
                     "confidence": verdict["confidence"], "family": "path_traversal",
                     "tags": ["lfi", "traversal"]})
         # idor
@@ -1275,6 +1278,7 @@ class ToolRegistry:
                     "title": f"IDOR signal on '{probe.parameter}'",
                     "severity": verdict["severity"], "target": probe.url,
                     "description": f"Neighboring object ({probe.payload}) — {verdict['reason']}",
+                    "evidence": f"{probe.payload}: {verdict['reason']}",
                     "confidence": verdict["confidence"], "family": "idor", "tags": ["idor"]})
         return ToolResult("web_probes", url, True,
                           f"{len(findings)} anomaly signal(s)", findings)

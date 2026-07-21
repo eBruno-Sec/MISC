@@ -105,17 +105,59 @@ def _classify(prefix: str) -> str:
     return "html"
 
 
-def reflected_exploitable(body: str, context: str) -> bool:
-    """True when the context's breakout appears LITERALLY (unescaped) in body."""
+def _escaped(body: str, i: int) -> bool:
+    """True when the char at index i is backslash-escaped (odd run of preceding
+    backslashes). A `"` written as `\\"` inside a JS string is NOT a breakout."""
+    n, j = 0, i - 1
+    while j >= 0 and body[j] == "\\":
+        n += 1
+        j -= 1
+    return n % 2 == 1
+
+
+def breakout_index(body: str, context: str) -> int:
+    """Index where the context's breakout survives as a REAL breakout: present
+    literally, NOT backslash-escaped, AND at a position that re-classifies to the
+    SAME context. The context re-check rejects cross-context false matches — e.g.
+    an attr_dq breakout that only appears inside a <script> JS string (where the
+    delimiter is escaped and the true context is `script`). -1 if never real."""
     b = BREAKOUTS.get(context)
-    return bool(b) and b in (body or "")
+    if not b:
+        return -1
+    body = body or ""
+    start = 0
+    while True:
+        i = body.find(b, start)
+        if i == -1:
+            return -1
+        start = i + 1
+        if _escaped(body, i):
+            continue                       # escaped delimiter — trapped, not a breakout
+        if _classify(body[:i]) != context:
+            continue                       # breakout landed in a different context
+        return i
 
 
-def reflection_finding(url: str, param: str, context: str, where: str = "query") -> dict:
+def reflected_exploitable(body: str, context: str) -> bool:
+    """True when the context's breakout genuinely survives (see breakout_index)."""
+    return breakout_index(body, context) != -1
+
+
+def _evidence_snippet(body: str, idx: int, breakout: str) -> str:
+    """A short window around a surviving breakout, for the finding's evidence."""
+    if idx < 0:
+        return ""
+    seg = (body or "")[max(0, idx - 48): idx + len(breakout) + 24]
+    return " ".join(seg.split())[:200]
+
+
+def reflection_finding(url: str, param: str, context: str, where: str = "query",
+                       evidence: str = "") -> dict:
     # A surviving breakout that injects a new element is proof of exploitable
-    # markup on its own — grade it CONFIRMED. Weaker contexts stay candidate so
-    # the browser pass (or a human) confirms execution.
-    proven = context in EXECUTABLE_ON_REFLECTION
+    # markup — but grade it CONFIRMED only WITH real in-context evidence. No
+    # evidence => candidate, never confirmed. script / comment / unquoted-attr
+    # always stay candidate for the browser-execution pass (or a human).
+    proven = context in EXECUTABLE_ON_REFLECTION and bool(evidence)
     label = "confirmed" if proven else "candidate"
     return {
         "title": f"Reflected XSS ({context}) in '{param}'",
@@ -128,6 +170,7 @@ def reflection_finding(url: str, param: str, context: str, where: str = "query")
         "reproduction_steps": [f"Set '{param}' to {BREAKOUTS[context]}",
                                "Observe it reflected unescaped in the response",
                                "Replace with an executing payload (e.g. \"><img src=x onerror=alert(1)>)"],
+        "evidence": evidence,
         "cwe": "CWE-79", "family": "xss", "tags": ["xss"], "confidence": label,
     }
 

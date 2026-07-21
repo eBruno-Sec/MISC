@@ -552,13 +552,44 @@ def test_xss_reflected_exploitable_needs_unescaped_breakout():
     assert xt.reflected_exploitable(f'<input value="{xt.BREAKOUTS["attr_dq"]}">', "attr_dq")
 
 
-def test_xss_reflection_confirms_element_injecting_contexts():
-    # A surviving breakout that injects a new element is proof on its own —
-    # CONFIRMED without a browser (the round-9 fix). Weaker contexts stay leads.
+def test_xss_reflection_confirms_only_with_evidence():
+    # Element-injecting context + REAL evidence => confirmed (round-9, tightened).
     for ctx in ("html", "attr_dq", "attr_sq"):
-        assert xt.reflection_finding("https://t/s?q=1", "q", ctx)["confidence"] == "confirmed", ctx
-    for ctx in ("attr_uq", "script", "comment"):
+        assert xt.reflection_finding("https://t/s?q=1", "q", ctx, evidence="…<bbhx7a>…")["confidence"] == "confirmed", ctx
+    # No evidence => never confirmed (round-10: no proofless "confirmed").
+    for ctx in ("html", "attr_dq", "attr_sq"):
         assert xt.reflection_finding("https://t/s?q=1", "q", ctx)["confidence"] == "candidate", ctx
+    # Weak contexts stay candidate even with evidence — browser pass must confirm.
+    for ctx in ("attr_uq", "script", "comment"):
+        assert xt.reflection_finding("https://t/s?q=1", "q", ctx, evidence="x")["confidence"] == "candidate", ctx
+
+
+def test_xss_script_jsstring_reflection_is_not_a_breakout():
+    # round-10 regression (ginandjuice FP): the attr_dq breakout appears in the
+    # bytes but INSIDE a <script> JS string with the quote backslash-escaped
+    # (const c = "\"><bbhx7a>"). It does NOT break out — escaped + wrong context.
+    assert xt.contexts_of('<script>const c = "bbhCanary8842";</script>') == ["script"]
+    body = '<script>const c = "\\"><bbhx7a>";</script>'
+    assert xt.breakout_index(body, "attr_dq") == -1
+    assert not xt.reflected_exploitable(body, "attr_dq")
+    # a GENUINE attribute breakout (unescaped, real attr context) still confirms
+    real = '<input value="' + xt.BREAKOUTS["attr_dq"] + '">'
+    assert xt.breakout_index(real, "attr_dq") != -1
+
+
+def test_confirmed_findings_require_proof():
+    import agent as agmod
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["*.x.com"], [], "P")
+    a = agmod.BBHAgent(eng, ToolRegistry(eng), asyncio.Event())
+    # proofless "confirmed" (the FP shape) -> downgraded to a lead
+    assert not a._is_confirmed("run_xss", {"confidence": "confirmed", "evidence": ""})
+    assert not a._is_confirmed("run_xss", {"confidence": "confirmed"})
+    # confirmed WITH evidence stays confirmed; reason/detail also count as proof
+    assert a._is_confirmed("run_xss", {"confidence": "confirmed", "evidence": "<bbhx7a> survived"})
+    assert a._is_confirmed("run_web_probes", {"confidence": "confirmed", "reason": "root:x:0:0"})
+    # confirm-by-construction tools (no grade) are unaffected by the proof guard
+    assert a._is_confirmed("run_nuclei", {})
 
 
 def test_xss_set_param_and_fragment():
@@ -1907,7 +1938,8 @@ class _FindTools(_PlanTools):
         if name == "run_sqli":
             return ToolResult("sqli", inp.get("url", ""), True, "1 confirmed SQLi",
                               [{"title": "SQL injection (error-based) in 'id'", "severity": "high",
-                                "target": inp.get("url", ""), "description": "x", "confidence": "confirmed"}])
+                                "target": inp.get("url", ""), "description": "x", "confidence": "confirmed",
+                                "evidence": "MySQL error triggered by \"'\""}])
         if name == "run_xss":     # reflection only -> candidate -> LEAD, not a finding
             return ToolResult("xss", inp.get("url", ""), True, "reflected",
                               [{"title": "Reflected value in 'q'", "severity": "high",
