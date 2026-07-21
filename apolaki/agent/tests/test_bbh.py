@@ -1129,19 +1129,28 @@ def test_report_markdown_csv_json_and_print_css():
     assert "# Security Assessment Report: Prog" in md and "SQLi" in md and "CWE-89" in md
     csv_out = report.findings_csv(findings)
     assert csv_out.splitlines()[0].startswith("title,severity,target") and "SQLi" in csv_out
-    j = json.loads(report.findings_json("Prog", findings, scope))
+    leads = [{"title": "Reflected value", "severity": "high", "target": "https://t/a?q=1", "confidence": "candidate"}]
+    j = json.loads(report.findings_json("Prog", findings, scope, leads=leads))
     assert j["program"] == "Prog" and j["findings"][0]["title"] == "SQLi"
-    html = report.generate_html_report("Prog", findings, scope)
+    # Leads export separately from findings so downstream consumers never treat
+    # candidate/static signals as confirmed vulnerabilities.
+    assert j["leads"][0]["title"] == "Reflected value" and j["lead_counts"]["high"] == 1
+    assert j["counts"].get("high") is None                       # the lead is NOT a finding
+    html = report.generate_html_report("Prog", findings, scope, leads=leads)
     assert "@media print" in html and "Save as PDF" in html      # print-to-PDF ready
+    assert "LEADS: 1" in html and "Unconfirmed Leads" in html    # separate lead summary chip + table
 
 
 def test_rescan_parent_linkage_surfaces_in_list():
     d = tempfile.mkdtemp()
     db.init(os.path.join(d, "t.db"))
     db.create_mission("par", "P", "active", "o", {"in_scope": ["x"]}, {})
-    db.create_mission("chi", "P", "full", "o", {"in_scope": ["x"]}, {"parent_id": "par"})
+    db.create_mission("chi", "P", "full", "o", {"in_scope": ["x"]},
+                      {"parent_id": "par", "leads": [{"title": "l1"}, {"title": "l2"}]})
     ms = {m["id"]: m for m in db.list_missions()}
     assert ms["chi"]["parent_id"] == "par" and ms["par"]["parent_id"] is None
+    # Archive list surfaces the lead count so a 0-findings run isn't invisible.
+    assert ms["chi"]["leads"] == 2 and ms["par"]["leads"] == 0
 
 
 # ── recon cycles + scope import + report download + empty-header filter ──

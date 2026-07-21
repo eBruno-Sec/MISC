@@ -228,7 +228,7 @@ details{margin-top:.5rem}summary{cursor:pointer;color:var(--accent);font-size:.8
 footer{background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;
   justify-content:space-between;gap:1rem;padding:.5rem 1.1rem;flex-wrap:wrap}
 .fc-row{display:flex;gap:1.1rem;font-size:.78rem;color:var(--text-dim)}
-.fc span{font-weight:700}.fc-c span{color:var(--sev-crit)}.fc-h span{color:var(--sev-high)}
+.fc span{font-weight:700}.fc-c span{color:var(--sev-crit)}.fc-h span{color:var(--sev-high)}.fc-lead span{color:var(--warn)}
 .fc-m span{color:var(--sev-med)}.fc-l span{color:var(--sev-low)}
 .foot-right{display:flex;align-items:center;gap:.8rem}
 
@@ -246,6 +246,9 @@ footer{background:var(--surface);border-top:1px solid var(--border);display:flex
 .leads-sec{margin-top:1.2rem;border-top:1px dashed var(--border2);padding-top:.8rem}
 .leads-sec>h4{font-size:.9rem;color:var(--text-bright);margin:.2rem 0 .6rem}
 .lead-card{opacity:.92}
+.lead-chip{display:inline-block;min-width:1.2rem;text-align:center;background:color-mix(in srgb,var(--warn) 20%,transparent);
+  border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn);border-radius:999px;
+  padding:.05rem .5rem;font-size:.72rem;font-weight:700}
 .topo-chiprow{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.6rem}
 .topo-chip{display:inline-flex;align-items:center;gap:.1rem;background:var(--surface);border:1px solid var(--border);
   color:var(--text);border-radius:999px;padding:.28rem .7rem;font-size:.78rem;cursor:pointer;font-family:inherit}
@@ -531,6 +534,7 @@ X-Requested-With: </textarea>
     <div class="fc fc-h">High <span id="cHigh">0</span></div>
     <div class="fc fc-m">Medium <span id="cMed">0</span></div>
     <div class="fc fc-l">Low <span id="cLow">0</span></div>
+    <div class="fc fc-lead" title="unconfirmed candidate/static signals — verify before reporting">Leads <span id="cLeads">0</span></div>
   </div>
   <div class="foot-right">
     <span class="muted" id="sessLabel">No active session</span>
@@ -803,7 +807,7 @@ function handleEvent(d){
       findings.push(f); renderFindings();
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title)}</strong>`,esc(f.target)); break;}
     case "lead":{
-      const l=d.lead||{}; leads.push(l); renderFindings();
+      const l=d.lead||{}; leads.push(l); updateCounters(); renderFindings();
       log("lead",`<strong>${esc(l.title||"lead")}</strong> <span class="muted">(${esc(l.confidence||"candidate")} — verify)</span>`,esc(l.target||"")); break;}
     case "triage": log("triage",esc(d.verdict)); break;
     case "complete": log("complete",esc(d.content)); fetchReport(); finishHunt("s-done","Done"); break;
@@ -1158,6 +1162,9 @@ async function loadTopology(){
   try{topoGraph=await(await fetch(`${API}/graph/${sessionId}`)).json();}catch(e){topoGraph=null;}
   renderTopology();
 }
+// Normalize a URL to host+path (drop scheme/query/trailing slash) so lead targets
+// can be matched against topology endpoint nodes for the "verify next" overlay.
+function _normTarget(u){try{const x=new URL(u);return (x.host+x.pathname).replace(/\/+$/,"").toLowerCase();}catch(e){return "";}}
 function renderTopology(){
   const wrap=document.getElementById("topoWrap"), legend=document.getElementById("topoLegend");
   if(!topoGraph||!(topoGraph.nodes||[]).length){
@@ -1179,7 +1186,11 @@ function renderTopology(){
   const cs=getComputedStyle(document.documentElement);
   const cRoot=cs.getPropertyValue("--accent").trim()||"#7aa2ff", cHost=cs.getPropertyValue("--purple").trim()||"#b6a0e6",
         cLeaf=cs.getPropertyValue("--ok").trim()||"#5bd1a0", cLine=cs.getPropertyValue("--border2").trim()||"#3a4658",
-        cText=cs.getPropertyValue("--text").trim()||"#d8dee9", cBright=cs.getPropertyValue("--text-bright").trim()||"#f3f6fb";
+        cText=cs.getPropertyValue("--text").trim()||"#d8dee9", cBright=cs.getPropertyValue("--text-bright").trim()||"#f3f6fb",
+        cWarn=cs.getPropertyValue("--warn").trim()||"#f0b866";
+  // Endpoints with an unconfirmed lead get a dashed amber ring ("verify next").
+  // Confirmed-finding rings always take precedence over the lead overlay.
+  const leadTargets=new Set((leads||[]).map(l=>_normTarget(l.target)).filter(Boolean));
   const maxLeaves=Math.max(1,...hosts.map(h=>(epByHost[h]||[]).length));
   const W=Math.max(720,hosts.length*160), H=150+Math.min(maxLeaves,10)*22+110;
   topoNodes=[];
@@ -1203,8 +1214,10 @@ function renderTopology(){
       const eIdx=topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||host})-1;
       svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"${dim(eid)}/>`;
       const eColor=eSev?SEV_HEX[eSev]:cLeaf, r=eSev?4.5:3;
-      svg+=`<g class="topo-node" data-idx="${eIdx}" data-topo-select="${esc(eid)}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":""} — click to trace</title>`+
-           `<circle cx="${hx}" cy="${py}" r="${r}" fill="${eColor}"/><text x="${hx+8}" y="${py+3}">${esc(String(ep.label).slice(0,26))}</text></g>`;
+      const isLead=!eSev&&leadTargets.has(_normTarget(ep.example||ep.url||""));
+      const leadRing=isLead?`<circle cx="${hx}" cy="${py}" r="8" fill="none" stroke="${cWarn}" stroke-width="1.5" stroke-dasharray="2 2"/>`:"";
+      svg+=`<g class="topo-node" data-idx="${eIdx}" data-topo-select="${esc(eid)}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":isLead?" — unconfirmed lead, verify next":""} — click to trace</title>`+
+           leadRing+`<circle cx="${hx}" cy="${py}" r="${r}" fill="${eColor}"/><text x="${hx+8}" y="${py+3}">${esc(String(ep.label).slice(0,26))}</text></g>`;
     });
     const more=(epByHost[hid]||[]).length-10;
     if(more>0)svg+=`<text x="${hx+8}" y="${hy+30+10*22+3}" fill="${cText}" opacity=".6">+${more} more…</text>`;
@@ -1224,7 +1237,9 @@ function renderTopology(){
   // container, which survives every innerHTML re-render — more robust than
   // per-node or inline handlers, which proved flaky across browsers.
   const st=topoGraph.stats||{};
-  if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`;
+  const nLeads=(leads||[]).length;
+  if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`
+    +(nLeads?` · ${nLeads} leads (dashed = verify next)`:"");
   renderTopoPanel();
 }
 // Select a topology node BY ID (works for any node, incl. endpoints not drawn in
@@ -1325,11 +1340,13 @@ async function loadArchive(){
   try{const d=await(await fetch(`${API}/missions`)).json();
     const ms=d.missions||[];
     document.getElementById("archiveList").innerHTML=ms.length?
-      `<div class="table-wrap"><table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Created</th><th></th></tr>${ms.map(m=>{
+      `<div class="table-wrap"><table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Leads</th><th>Created</th><th></th></tr>${ms.map(m=>{
         const c=m.counts||{}, tot=Object.values(c).reduce((a,b)=>a+b,0);
         const child=m.parent_id?` <span class="muted" title="cloned from ${esc(m.parent_id)}">↳ child</span>`:"";
+        const leads=m.leads||0;
         return `<tr><td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
+          <td>${leads?`<span class="lead-chip" title="unconfirmed candidate/static signals — verify before reporting">${leads}</span>`:`<span class="muted">0</span>`}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
           <td style="white-space:nowrap"><button type="button" class="btn ghost sm" onclick="loadMission('${m.id}','${esc(m.program)}')">Load</button>
               <button type="button" class="btn ghost sm" onclick="rescan('${m.id}')">Rescan</button>
@@ -1369,7 +1386,7 @@ async function delMission(id){
   await fetch(`${API}/missions/${id}`,{method:"DELETE"}); loadArchive();
 }
 
-function updateCounters(){cCrit.textContent=counts.critical;cHigh.textContent=counts.high;cMed.textContent=counts.medium;cLow.textContent=counts.low;}
+function updateCounters(){cCrit.textContent=counts.critical;cHigh.textContent=counts.high;cMed.textContent=counts.medium;cLow.textContent=counts.low;cLeads.textContent=(leads||[]).length;}
 function clearTerm(addPrompt=true){document.getElementById("termOut").innerHTML="";if(addPrompt)log("info","Feed cleared.<span class='blink'>▍</span>");}
 document.getElementById("approvalOverlay").addEventListener("click",function(e){/* decision-forcing: no click-away */});
 

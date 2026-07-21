@@ -167,7 +167,11 @@ def generate_html_report(program: str, findings: list, scope: dict,
     peek = "".join(
         f'<span class="chip" style="--c:{SEV_COLORS.get(s, "#6a8a9a")}">{e(s.upper())}: {counts[s]}</span>'
         for s in ["critical", "high", "medium", "low", "info", "informational"] if s in counts
-    ) or '<span class="chip" style="--c:#6a8a9a">NO FINDINGS</span>'
+    ) or '<span class="chip" style="--c:#6a8a9a">NO CONFIRMED FINDINGS</span>'
+    # Leads are counted separately so a 0-findings run still shows what's pending
+    # manual verification (never mixed into the confirmed-severity chips).
+    if leads:
+        peek += f'<span class="chip lead" title="unconfirmed — verify before reporting">LEADS: {len(leads)}</span>'
 
     cov_html = ""
     if coverage:
@@ -238,6 +242,7 @@ h3{{color:var(--bright);margin:.2rem 0}}h4{{color:var(--dim);text-transform:uppe
 .head{{border-bottom:1px solid var(--border);padding-bottom:1rem}}.sub{{color:var(--dim);font-size:.8rem}}
 .chips{{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0}}
 .chip{{border:1px solid var(--c);color:var(--c);padding:.2rem .6rem;font-size:.72rem;letter-spacing:.08em}}
+.chip.lead{{--c:#c98a2b;border-style:dashed}}
 .cov-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem}}
 .cov{{border:1px solid var(--border);background:var(--surface);padding:.7rem;text-align:center}}
 .cov span{{display:block;font-size:1.4rem;color:var(--accent);font-weight:700}}.cov label{{font-size:.62rem;color:var(--dim);text-transform:uppercase}}
@@ -301,13 +306,18 @@ def findings_csv(findings: list) -> str:
 
 
 def findings_json(program: str, findings: list, scope: dict,
-                  coverage: dict = None, chains: list = None) -> str:
+                  coverage: dict = None, chains: list = None, leads: list = None) -> str:
+    leads = leads or []
     return json.dumps({
         "program": program,
         "generated": _now(),
         "scope": scope,
         "counts": _counts(findings),
+        "lead_counts": _counts(leads),
         "coverage": coverage or {},
         "chains": chains or [],
         "findings": findings,
+        # Unconfirmed candidate/static signals — never confirmed vulnerabilities.
+        # Consumers must treat these as advisory until manually verified.
+        "leads": leads,
     }, indent=2, default=str)

@@ -478,8 +478,9 @@ async def get_report_csv(session_id: str):
 @app.get("/report/{session_id}/json")
 async def get_report_json(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    return PlainTextResponse(report_mod.findings_json(m["program"], findings, scope, coverage, chains),
-                             media_type="application/json")
+    return PlainTextResponse(
+        report_mod.findings_json(m["program"], findings, scope, coverage, chains, leads=_leads(m)),
+        media_type="application/json")
 
 
 @app.get("/report/{session_id}/poc")
