@@ -1875,6 +1875,57 @@ def test_guidance_consolidate_groups_and_caps():
     assert ranks == sorted(ranks, reverse=True)
 
 
+class _FindTools(_PlanTools):
+    """Deterministic-run stub whose run_sqli CONFIRMS a finding — proves the probe
+    result is actually stored (not dropped) when no model drives the scan."""
+    async def execute(self, name, inp, sid):
+        from tools import ToolResult
+        if name == "http_probe":
+            u = "https://ex.com/item?id=1"
+            if u not in self.urls:
+                self.urls.append(u)
+        if name == "run_sqli":
+            return ToolResult("sqli", inp.get("url", ""), True, "1 confirmed SQLi",
+                              [{"title": "SQL injection (error-based) in 'id'", "severity": "high",
+                                "target": inp.get("url", ""), "description": "x", "confidence": "confirmed"}])
+        return ToolResult(name, inp.get("url") or inp.get("domain") or "", True, "ran", [])
+
+
+def test_deterministic_auto_stores_confirmed_probe_findings():
+    import agent as agent_mod
+
+    async def go(strategy):
+        eng = scope_mod.ScopeEngine(); eng.load_manual(["*.ex.com", "ex.com"], [], "P")
+        a = agent_mod.BBHAgent(eng, _FindTools(), asyncio.Event(), mode="full",
+                               strategy=strategy, auto_approve=True, mission_id=None)
+        return [ev async for ev in a.run("obj", "s")], a
+
+    evs, a = _run(go("deterministic"))
+    finds = [e for e in evs if e.get("type") == "finding"]
+    assert finds and any("SQL injection" in f["finding"]["title"] for f in finds), \
+        "confirmed probe finding was dropped in deterministic mode"
+    assert len(a.findings) >= 1
+    # auto-store is fingerprint-deduped: the same confirmed finding isn't stored twice
+    titles = [f["finding"]["title"] for f in finds]
+    assert len(titles) == len(set(titles)), "auto-store did not dedup by fingerprint"
+
+
+def test_planner_full_mode_covers_lfi_and_cmdi():
+    import planner
+    state = {"mode": "full", "roots": ["ex.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://ex.com"}]},
+             "urls": ["https://ex.com/read?file=a.txt", "https://ex.com/ping?host=x&cmd=ls"]}
+    tools = set()
+    for _ in range(30):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+    assert "run_web_probes" in tools, "LFI/traversal probe missing from deterministic plan"
+    assert "run_cmdi" in tools, "command-injection probe missing for cmd-ish params"
+
+
 def test_report_execution_note():
     det = report.generate_report("P", [], {"in_scope": ["x.com"]},
                                  execution={"strategy": "deterministic", "ai_note": "Deterministic (no-AI) coverage completed."})

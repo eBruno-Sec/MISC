@@ -75,6 +75,17 @@ PHASE_OF = {
 }
 PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 
+# Tools whose confirmed, finding-shaped results should be auto-stored when no model
+# is driving (deterministic / low_ai). These native probes only emit CONFIRMED
+# vulns; without auto-store a deterministic scan would confirm and then drop them.
+_AUTO_STORE_TOOLS = {
+    "run_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_xxe", "run_deserialization",
+    "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
+    "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
+    "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
+    "run_content_discovery", "run_ffuf",
+}
+
 SYSTEM_PROMPT = """You are a professional bug bounty hunter operating exclusively within provided scope.
 
 CURRENT PHASE: Tier 1 — HackerOne/Bugcrowd public programs.
@@ -150,6 +161,7 @@ class BBHAgent:
         # first-ever scan behaves exactly as before.
         self.memory_note = ""
         self.findings: list = []
+        self._stored_fps: set = set()   # fingerprints already stored (auto-store dedup)
         self.current_phase = "init"
         self._recon_passes = 0   # counts entries into the recon phase (cycle labels)
 
@@ -275,11 +287,46 @@ class BBHAgent:
             self.findings.append(fin)
             yield {"type": "finding", "finding": fin}
 
+        # Auto-store confirmed findings from the native confirmatory probes when NO
+        # model is driving (deterministic / low_ai). Without this the probes confirm
+        # e.g. a SQLi and it is silently dropped — a deterministic scan would report
+        # zero findings. In agentic mode the model stores them, so we don't here
+        # (avoids duplicates). Deduped by fingerprint.
+        if (not result.error and self.strategy in ("deterministic", "low_ai")
+                and tool_name in _AUTO_STORE_TOOLS):
+            async for ev in self._auto_store(result):
+                yield ev
+
         content = json.dumps({
             "success": result.success, "output": result.output,
             "findings": result.findings[:25], "error": result.error,
         })[:3500]
         yield {"_content": content}
+
+    async def _auto_store(self, result):
+        """Persist confirmed, finding-shaped probe results (deterministic/low_ai),
+        deduped by fingerprint so re-probes and any later model store don't double.
+        `severity` is the discriminator (data items lack it); the title is derived
+        from whichever label key the tool used."""
+        import memory as memory_mod
+        for f in (result.findings or []):
+            if not isinstance(f, dict) or not f.get("severity"):
+                continue                      # data item, not a confirmed finding
+            title = (f.get("title") or f.get("name") or f.get("issue")
+                     or f.get("type") or f.get("detail") or f"{result.tool} finding")
+            f = dict(f)
+            f["title"] = str(title)[:140]
+            f["target"] = f.get("target") or f.get("url") or result.target or ""
+            f.setdefault("severity", (f.get("severity") or "info"))
+            f["severity"] = str(f["severity"]).lower()
+            fp = memory_mod.finding_fp(f)
+            if fp in self._stored_fps:
+                continue
+            self._stored_fps.add(fp)
+            if self.mission_id:
+                f["id"] = db.add_finding(self.mission_id, f)
+            self.findings.append(f)
+            yield {"type": "finding", "finding": f}
 
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:

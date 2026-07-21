@@ -39,7 +39,9 @@ CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
 CAP_JS = 40             # js urls handed to js_review
 
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
-                 "target", "proxy", "image", "img", "file", "path", "callback", "webhook", "u", "r")
+                 "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
+_FILE_PARAM = ("file", "path", "page", "doc", "document", "template", "include", "load", "read", "dir", "folder")
+_CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "ip", "dns", "query", "shell", "code")
 
 
 def _host(u: str) -> str:
@@ -153,11 +155,15 @@ def next_batch(state: dict) -> list:
     for ep in param_eps:
         u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
         tag = f"{ep['host']}{ep['path']}"
+        params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
         e_steps.append(_step("run_injection_probes", {"url": u}, f"run_injection_probes:{tag}"))
-        if any(p.lower() in _URLISH_PARAM for p in (ep.get("params") or [])):
+        e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
+        if any(p in _URLISH_PARAM for p in params_l):
             e_steps.append(_step("run_ssrf", {"url": u}, f"run_ssrf:{tag}"))
+        if any(p in _CMD_PARAM for p in params_l):
+            e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
     for h in host_bases:
         e_steps.append(_step("run_content_discovery", {"base_url": f"https://{h}"}, f"run_content_discovery:{h}"))
         e_steps.append(_step("run_exposure", {"base_url": f"https://{h}"}, f"run_exposure:{h}"))
