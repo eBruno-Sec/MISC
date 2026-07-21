@@ -88,6 +88,8 @@ HARD RULES:
 5. Call store_finding only when: evidence is real, the PoC is reproducible, impact is clearly articulated, and you have exact reproduction steps a triage reviewer can follow.
 6. Do not store theoretical or speculative findings.
 7. INTRUSIVE tools (content discovery, web probes, ffuf, dalfox, sqlmap) require operator approval unless the run is pre-authorized. If a probe is denied, continue with passive/active work.
+8. SEVERITY DISCIPLINE — be consistent between what you say and what you store. Missing SPF/DMARC/DKIM, missing CAA, and missing security headers (CSP/HSTS/X-Frame-Options) are LOW or INFORMATIONAL email/transport-hygiene observations — never "Critical". Do not narrate an issue as a "Critical finding" unless you also store_finding it with that severity and reproducible evidence. If you choose not to store something, present it as an observation/recommendation, not a confirmed finding, so the report and your summary never disagree.
+9. Before you finish, ALWAYS call generate_playbook once the surface is populated (any mode), so the operator gets cURL-ready manual tests even if you ran out of active/intrusive budget.
 
 RECOMMENDED METHODOLOGY:
 1. Subdomain enumeration: run_subfinder + run_crtsh on every in-scope root domain. run_wayback to seed historical URLs. run_dns for SPF/DMARC/CAA/vendor intel. run_asn to map the org's IP range (scope expansion). run_github_recon to hunt leaked secrets in public repos (passive, uses the operator's own PAT).

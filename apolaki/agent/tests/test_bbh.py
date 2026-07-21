@@ -1416,3 +1416,189 @@ def test_graph_and_memory_endpoints_via_testclient():
             assert d2["diff"]["has_prior"] is True
     finally:
         _env_restore(snap)
+
+
+# ── URL sanitisation (surface / memory / graph pollution) ────────
+def test_clean_url_filters_html_extraction_artifacts():
+    bad = ["https://x.com/%3C/a%3E", "https://x.com/)%3C/a%3E",
+           "https://x.com/about%3C/a%3E%3C/span%3E", "https://x.com/users/delete/carlos%3C/a%3E&quot",
+           "https://x.com/%5C", "https://x.com/)", "https://x.com/<script>",
+           'https://x.com/a"b', "https://x.com/x&lt;y"]
+    for u in bad:
+        assert surface.clean_url(u) is False, u
+    good = ["https://x.com/", "https://x.com/?ref=abc", "https://x.com/orders/1?id=1",
+            "https://api.x.com/v2/users?limit=10", "https://x.com/a/b/c",
+            "https://x.com/search?q=a%20b"]      # %20 (space) is legitimate, must pass
+    for u in good:
+        assert surface.clean_url(u) is True, u
+
+
+def test_build_inventory_drops_artifacts():
+    urls = ["https://x.com/orders/1?id=1", "https://x.com/%3C/a%3E",
+            "https://x.com/about%3C/a%3E", "https://x.com/login"]
+    inv = surface.build_inventory(urls)
+    paths = {e["path"] for e in inv}
+    assert "/orders/1" in paths and "/login" in paths
+    assert not any("%3C" in p or "<" in p for p in paths)
+    assert len(inv) == 2
+
+
+# ── access-check false positive (public page must not flag) ──────
+def test_access_verdict_public_page_not_flagged():
+    # anonymous 200 with content, no roles, non-protected URL -> NO anomaly
+    res = [{"role": "anonymous", "status": 200, "length": 4000, "is_anon": True, "is_owner": False}]
+    v = replay.access_verdict(res, "https://x.com/?ref=homepage")
+    assert v["anomaly"] is False and "Public resource" in v["verdict"]
+
+
+def test_access_verdict_protected_path_flags_anon():
+    res = [{"role": "anonymous", "status": 200, "length": 4000, "is_anon": True, "is_owner": False}]
+    v = replay.access_verdict(res, "https://x.com/admin/users")
+    assert v["anomaly"] is True and "anonymous" in v["flags"]
+    # object-scoped resource also counts as protected-looking
+    v2 = replay.access_verdict(res, "https://x.com/orders/1042")
+    assert v2["anomaly"] is True
+
+
+def test_access_verdict_owner_comparison_still_works():
+    res = [
+        {"role": "owner", "status": 200, "length": 5000, "is_owner": True, "is_anon": False},
+        {"role": "userB", "status": 200, "length": 5000, "is_owner": False, "is_anon": False},
+    ]
+    v = replay.access_verdict(res, "https://x.com/account/orders/9")
+    assert v["anomaly"] is True and "userB" in v["flags"]
+    assert replay.looks_protected("https://x.com/admin") is True
+    assert replay.looks_protected("https://x.com/") is False
+
+
+# ── mission lifecycle: status owned by the background task ───────
+class _LTools:
+    def __init__(self):
+        self.recon = {"target": "x.com", "domain": "x.com", "live_hosts": [], "subdomains": []}
+        self.urls = []
+
+
+class _LAgent:
+    def __init__(self, runner):
+        self._runner = runner
+
+    def run(self, objective, sid):
+        return self._runner(objective, sid)
+
+
+def _life_session(runner):
+    return {"scope": None, "agent": _LAgent(runner), "tools": _LTools(),
+            "stop_event": asyncio.Event(), "objective": "o",
+            "status": "created", "events": [], "task": None, "done": False}
+
+
+def _life_setup():
+    import pytest
+    pytest.importorskip("fastapi")
+    import main as mainmod
+    import db as dbmod
+    dbmod.init(os.path.join(tempfile.mkdtemp(), "life.db"))
+    return mainmod, dbmod
+
+
+def test_driver_marks_complete_stopped_and_failed():
+    mainmod, dbmod = _life_setup()
+
+    async def run_ok(o, sid):
+        yield {"type": "phase", "phase": "recon"}
+        yield {"type": "text", "content": "hi"}
+        yield {"type": "complete", "content": "done"}
+
+    async def run_boom(o, sid):
+        yield {"type": "phase", "phase": "recon"}
+        raise RuntimeError("kaboom")
+
+    # complete
+    dbmod.create_mission("lc1", "P", "full", "o", {"in_scope": ["x.com"]}, {})
+    mainmod.sessions["lc1"] = _life_session(run_ok)
+    _run(mainmod._drive_mission("lc1"))
+    assert dbmod.get_mission("lc1")["status"] == "complete"
+    assert mainmod.sessions["lc1"]["done"] is True
+    assert any(e.get("type") == "complete" for e in mainmod.sessions["lc1"]["events"])
+
+    # stopped (stop_event set -> terminal status is 'stopped', not 'complete')
+    dbmod.create_mission("lc2", "P", "full", "o", {"in_scope": ["x.com"]}, {})
+    sess = _life_session(run_ok); sess["stop_event"].set()
+    mainmod.sessions["lc2"] = sess
+    _run(mainmod._drive_mission("lc2"))
+    assert dbmod.get_mission("lc2")["status"] == "stopped"
+
+    # failed (exception in the agent loop)
+    dbmod.create_mission("lc3", "P", "full", "o", {"in_scope": ["x.com"]}, {})
+    mainmod.sessions["lc3"] = _life_session(run_boom)
+    _run(mainmod._drive_mission("lc3"))
+    assert dbmod.get_mission("lc3")["status"] == "failed"
+
+
+def test_stream_disconnect_does_not_false_complete():
+    """The regression Codex found: a client disconnect must NOT mark an unfinished
+    run 'complete'. Status is owned solely by the background task."""
+    mainmod, dbmod = _life_setup()
+
+    async def run_hang(o, sid):
+        yield {"type": "phase", "phase": "recon"}
+        yield {"type": "text", "content": "working"}
+        await asyncio.Event().wait()      # never completes
+
+    dbmod.create_mission("ld1", "P", "full", "o", {"in_scope": ["x.com"]}, {})
+    mainmod.sessions["ld1"] = _life_session(run_hang)
+
+    async def go():
+        mainmod._ensure_run_started("ld1")
+        await asyncio.sleep(0.05)                     # let the driver emit a couple events
+        resp = await mainmod.stream("ld1")            # a viewer attaches
+        gen = resp.body_iterator
+        chunk = await gen.__anext__()                 # receives first SSE event
+        await gen.aclose()                            # viewer disconnects mid-run
+        await asyncio.sleep(0.05)
+        status = dbmod.get_mission("ld1")["status"]
+        done = mainmod.sessions["ld1"]["done"]
+        mainmod.sessions["ld1"]["task"].cancel()      # cleanup the hung task
+        try:
+            await mainmod.sessions["ld1"]["task"]
+        except (asyncio.CancelledError, Exception):
+            pass
+        return chunk, status, done
+
+    chunk, status, done = _run(go())
+    assert "recon" in chunk                            # the viewer did get live data
+    assert status == "running" and done is False       # ...but disconnect left it RUNNING
+
+
+def test_ensure_playbook_fallback_generates_when_missing():
+    """Full mode sometimes skips generate_playbook; the safety-net builds one from
+    the deterministic guidance engine so Playbooks is never empty with surface."""
+    mainmod, dbmod = _life_setup()
+    dbmod.create_mission("pb1", "P", "full", "o", {"in_scope": ["x.com"]}, {})
+    sess = _life_session(None)
+    sess["tools"].urls = ["https://x.com/search?q=1", "https://x.com/product?id=1"]
+    sess["tools"].recon["http"] = {"ok": True, "headers": {}, "final_url": "https://x.com/", "is_https": True}
+    mainmod.sessions["pb1"] = sess
+    assert not dbmod.get_mission("pb1")["context"].get("playbook")
+    mainmod._ensure_playbook("pb1")
+    ctx = dbmod.get_mission("pb1")["context"]
+    assert ctx.get("playbook") and ctx.get("playbook_auto") is True
+    # idempotent: a second call does not clobber an existing playbook
+    n = len(ctx["playbook"])
+    mainmod._ensure_playbook("pb1")
+    assert len(dbmod.get_mission("pb1")["context"]["playbook"]) == n
+
+
+def test_health_endpoint():
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    snap = _env_snapshot()
+    try:
+        os.environ["AI_PROVIDER"] = "openrouter"; os.environ["AI_API_KEY"] = "sk-x"
+        with TestClient(mainmod.app) as c:
+            r = c.get("/health")
+            assert r.status_code == 200 and r.json()["status"] == "ok"
+    finally:
+        _env_restore(snap)

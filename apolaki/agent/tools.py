@@ -432,7 +432,8 @@ class ToolRegistry:
 
     def _add_urls(self, urls) -> None:
         for u in urls:
-            if u and u not in self.urls and self.scope.validate(u)[0]:
+            if (u and u not in self.urls and surface_mod.clean_url(u)
+                    and self.scope.validate(u)[0]):
                 self.urls.append(u)
 
     async def _http(self, url: str, method: str = "GET", headers: dict = None,
@@ -622,22 +623,52 @@ class ToolRegistry:
         finally:
             if tmp and os.path.exists(tmp):
                 os.unlink(tmp)
-        if err.startswith("__MISSING__"):
-            return ToolResult("httpx", "", False, "", [], "httpx not installed")
         hosts = []
-        for line in out.strip().split("\n"):
-            if not line.strip():
-                continue
-            try:
-                d = json.loads(line)
-                h = {"url": d.get("url"), "status": d.get("status-code"), "title": d.get("title"),
-                     "tech": d.get("technologies", []), "webserver": d.get("webserver")}
-                hosts.append(h)
-            except Exception:
-                pass
+        missing = err.startswith("__MISSING__")
+        if not missing:
+            for line in out.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line)
+                    h = {"url": d.get("url"), "status": d.get("status-code"), "title": d.get("title"),
+                         "tech": d.get("technologies", []), "webserver": d.get("webserver")}
+                    hosts.append(h)
+                except Exception:
+                    pass
+        # Fallback probe: if the binary is absent OR returned nothing, a plain
+        # HTTP(S) request still tells us which targets are live — so run_httpx
+        # never reports "0 live" for a host that http_probe can reach.
+        note = ""
+        if not hosts:
+            hosts = await self._httpx_fallback(targets)
+            if missing and hosts:
+                note = " (via direct probe; httpx binary absent)"
         self.recon["live_hosts"].extend(hosts)
         self._add_urls([h["url"] for h in hosts if h.get("url")])
-        return ToolResult("httpx", f"{len(targets)} probed", True, f"{len(hosts)} live hosts", hosts)
+        if not hosts and missing:
+            return ToolResult("httpx", "", False, "", [], "httpx not installed and no target answered a direct probe")
+        return ToolResult("httpx", f"{len(targets)} probed", True, f"{len(hosts)} live hosts{note}", hosts)
+
+    async def _httpx_fallback(self, targets: list) -> list:
+        """Detect liveness with a direct GET when the httpx binary is missing or
+        found nothing. Bounded, scheme-normalised, scope already validated."""
+        hosts = []
+        for t in targets[:25]:
+            base = t if "://" in t else None
+            candidates = [base] if base else [f"https://{t}", f"http://{t}"]
+            for url in candidates:
+                r = await self._http(url, "GET", capture=False)
+                if not r.get("error") and r.get("status"):
+                    title = ""
+                    m = re.search(r"<title[^>]*>(.*?)</title>", r.get("body", ""), re.I | re.S)
+                    if m:
+                        title = m.group(1).strip()[:120]
+                    hosts.append({"url": r.get("final_url") or url, "status": r["status"],
+                                  "title": title, "tech": [],
+                                  "webserver": {k.lower(): v for k, v in r["headers"].items()}.get("server")})
+                    break   # first scheme that answers wins
+        return hosts
 
     async def _http_probe(self, inp: dict) -> ToolResult:
         url = inp["url"]

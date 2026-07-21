@@ -6,15 +6,51 @@ into the workbench (fuzz a param) or access-check (test an endpoint per role).
 Pure and deterministic — no network, no AI. Ported from OLYMPUS core/surface.py.
 """
 import re
-from urllib.parse import urlparse, parse_qsl
+from urllib.parse import urlparse, parse_qsl, unquote
+
+# HTML entities that only appear in a URL because it was scraped out of markup
+# (e.g. an <a href> value that swallowed the closing tag). Decoded markup chars
+# (< > " \) are caught separately after percent-decoding.
+_ENTITY_RE = re.compile(r"&(?:quot|lt|gt|nbsp|amp;lt|amp;gt|#x?[0-9a-f]+);?", re.I)
+_MARKUP_CHARS_RE = re.compile(r'[<>"\\]')
+
+
+def clean_url(u) -> bool:
+    """True if `u` is a real, testable URL — not an HTML-extraction artifact.
+
+    Wayback / HTML link mining routinely emits fragments like `/%3C/a%3E`,
+    `/about%3C/a%3E%3C/span%3E`, `/users/delete/carlos%3C/a%3E&quot`, `/%5C` or a
+    bare `/)`. These pollute the surface, topology, memory, playbooks and
+    prefills, so we drop them before they are ever stored. Conservative: it only
+    rejects clear markup residue, never a normal path/query."""
+    if not isinstance(u, str) or not u:
+        return False
+    if _ENTITY_RE.search(u):
+        return False
+    # percent-decode once so %3C/%3E/%22/%5C surface as the raw markup chars
+    if _MARKUP_CHARS_RE.search(unquote(u)):
+        return False
+    try:
+        p = urlparse(u)
+    except Exception:
+        return False
+    if not p.netloc:
+        return False
+    first = (p.path or "/").lstrip("/").split("/")[0]
+    if first and first[0] in ")(<>&;'\"`,":     # punctuation-led segment = artifact
+        return False
+    return True
 
 
 def build_inventory(urls, cap: int = 1000) -> list:
-    """Group URLs by (host, path); union the query params seen for each."""
+    """Group URLs by (host, path); union the query params seen for each.
+
+    Markup-artifact URLs are filtered here too, so even already-stored / archived
+    URL lists render a clean inventory."""
     by_key = {}
     order = []
     for u in urls or []:
-        if not isinstance(u, str) or not u:
+        if not isinstance(u, str) or not u or not clean_url(u):
             continue
         try:
             p = urlparse(u)

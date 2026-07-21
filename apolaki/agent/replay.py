@@ -7,6 +7,7 @@ it, mutates one parameter across a payload list, and ranks results by anomaly.
 Ported from OLYMPUS core/replay.py.
 """
 import difflib
+import re
 import time
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
@@ -116,10 +117,38 @@ def _similar(a: int, b: int, tol: float = 0.15) -> bool:
     return abs(a - b) / (max(a, b) or 1) <= tol
 
 
-def access_verdict(results: list) -> dict:
+_PROTECTED_HINT_RE = re.compile(
+    r"/(admin|account|accounts|settings|dashboard|internal|manage|management|users?|"
+    r"orders?|profile|invoices?|billing|me|private|owner|secret|config|api/(?:v\d+/)?\w)",
+    re.I)
+_OBJECT_ID_RE = re.compile(r"/[A-Za-z0-9_-]+/(\d+|[0-9a-fA-F]{8,})(?:/|$|\?)")
+
+
+def looks_protected(url: str) -> bool:
+    """Heuristic: does this URL look like a resource that SHOULD require auth?
+
+    Used so a plain public page (e.g. `/`, `/?ref=x`) returning 200 to an
+    anonymous request is NOT mislabelled broken access control. A protected look
+    means an admin/account/api path or an object-scoped resource (`/orders/42`)."""
+    if not url:
+        return False
+    try:
+        path = urlparse(url).path or "/"
+    except Exception:
+        return False
+    return bool(_PROTECTED_HINT_RE.search(path) or _OBJECT_ID_RE.search(path))
+
+
+def access_verdict(results: list, url: str = None) -> dict:
     """Compare the same request sent under different roles and flag broken access
-    control. `results` items: {role, status, length, is_owner, is_anon}."""
+    control. `results` items: {role, status, length, is_owner, is_anon}.
+
+    With a registered owner, a non-owner receiving the owner's response is the
+    real BOLA signal. Without any roles, an anonymous 200 is only suspicious when
+    the URL looks like it should be protected — otherwise it is just a public
+    page, and flagging it produces the false positive Codex hit on `/?ref=…`."""
     owner = next((r for r in results if r.get("is_owner")), None)
+    protected = looks_protected(url)
     flags = []
     for r in results:
         if r.get("is_owner") or r.get("error"):
@@ -132,11 +161,16 @@ def access_verdict(results: list) -> dict:
                 r["flag"] = (f"BROKEN_ACCESS_CONTROL: '{r.get('role')}' received the owner's "
                              f"response (status {status}, ~{r.get('length')}B)")
                 flags.append(r.get("role"))
-        elif r.get("is_anon") and ok and (r.get("length") or 0) > 200:
-            r["flag"] = f"UNAUTHENTICATED_ACCESS: '{r.get('role')}' received a {status} with content"
+        elif r.get("is_anon") and ok and (r.get("length") or 0) > 200 and protected:
+            r["flag"] = (f"UNAUTHENTICATED_ACCESS: anonymous request reached a protected-looking "
+                         f"resource ({status}, ~{r.get('length')}B) — verify it should require auth")
             flags.append(r.get("role"))
-    verdict = ("Possible broken access control — " + ", ".join(str(f) for f in flags)) if flags \
-        else "No cross-role access-control anomaly detected"
+    if flags:
+        verdict = "Possible broken access control — " + ", ".join(str(f) for f in flags)
+    elif not owner and not protected:
+        verdict = "Public resource — no auth expected; register roles to test cross-role access"
+    else:
+        verdict = "No cross-role access-control anomaly detected"
     return {"flags": flags, "verdict": verdict, "anomaly": bool(flags)}
 
 

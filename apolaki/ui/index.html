@@ -611,7 +611,17 @@ fetch(`${API}/wordlists`).then(r=>r.json()).then(d=>{
 
 function setStatus(s,l){const el=document.getElementById("statusPill");el.className="status-pill "+s;el.textContent=l;}
 function esc(s){if(typeof s!=="string")s=JSON.stringify(s)??"";return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
-function emptyState(t,s){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p></div>`;}
+function emptyState(t,s,action){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p>${action||resumeAffordance()}</div>`;}
+// When there's no active session, every empty state offers a direct way back in:
+// resume the last-loaded mission (remembered in localStorage) or jump to Archive.
+function lastMission(){try{return JSON.parse(localStorage.getItem("apolaki-last-mission")||"null");}catch(e){return null;}}
+function resumeAffordance(){
+  if(sessionId)return "";
+  const lm=lastMission();
+  const resume=lm?`<button type="button" class="btn sm" onclick='loadMission(${JSON.stringify(lm.id)},${JSON.stringify(lm.program)})'>Resume “${esc(lm.program)}”</button>`:"";
+  return `<div class="empty-actions" style="margin-top:.8rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap">${resume}<button type="button" class="btn ghost sm" onclick="switchTab('archive')">Load from Archive</button></div>`;
+}
+function resumeLast(){const lm=lastMission();if(lm)loadMission(lm.id,lm.program);else switchTab("archive");}
 function copyText(str,msg){navigator.clipboard.writeText(str||"").then(()=>log("info",msg||"Copied to clipboard.")).catch(()=>{});}
 // Log a manual tool action to the Live Run feed — method + URL only, never header
 // or body values (which may hold secrets).
@@ -925,19 +935,21 @@ async function sendCurl(){
   if(!sessionId)return alert("Start or load a mission first.");
   logManual("cURL Console",document.getElementById("cuMethod").value,document.getElementById("cuUrl").value);
   const out=document.getElementById("cuOut"),cc=document.getElementById("cuCurl"),st=document.getElementById("cuStatus");
-  st.style.display="block";st.className="resp-status";st.textContent="Sending…";
-  out.style.display="none";cc.style.display="none";
+  // Clear any prior response up front so a new request (or an error) never shows
+  // stale output underneath it.
+  const clearResp=()=>{out.style.display="none";out.textContent="";cc.style.display="none";cc.textContent="";};
+  st.style.display="block";st.className="resp-status";st.textContent="Sending…";clearResp();
   try{const r=await fetch(`${API}/curl/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({method:document.getElementById("cuMethod").value,url:document.getElementById("cuUrl").value,
       headers:parseHeaders(document.getElementById("cuHeaders").value),body:document.getElementById("cuBody").value||null,follow_redirects:true})});
     const d=await r.json();
-    if(!r.ok){st.className="resp-status s-srv";st.textContent="Error: "+(d.detail||JSON.stringify(d));return;}
+    if(!r.ok){st.className="resp-status s-srv";st.textContent="Blocked / error: "+(d.detail||JSON.stringify(d));clearResp();return;}
     const cls=d.status<300?"s-ok":d.status<400?"s-redir":d.status<500?"s-cli":"s-srv";
     st.className="resp-status "+cls;st.textContent=`HTTP ${d.status} · ${d.length}B · ${d.duration_ms}ms`;
     cc.style.display="block";cc.textContent="$ "+d.curl;
     out.style.display="block";
     out.textContent=`--- headers ---\n`+Object.entries(d.headers).map(([k,v])=>`${k}: ${v}`).join("\n")+`\n\n--- body ---\n`+(d.body||"");
-  }catch(e){st.className="resp-status s-srv";st.textContent="Error: "+e.message;}
+  }catch(e){st.className="resp-status s-srv";st.textContent="Error: "+e.message;clearResp();}
 }
 
 /* ── workbench ── */
@@ -1161,9 +1173,9 @@ async function loadArchive(){
         return `<tr><td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
-          <td style="white-space:nowrap"><span class="link-act" onclick="loadMission('${m.id}','${esc(m.program)}')">Load</span>
-              &nbsp;<span class="link-act" onclick="rescan('${m.id}')">Rescan</span>
-              &nbsp;<span class="link-act link-danger" onclick="delMission('${m.id}')">Delete</span></td></tr>`;
+          <td style="white-space:nowrap"><button type="button" class="btn ghost sm" onclick="loadMission('${m.id}','${esc(m.program)}')">Load</button>
+              <button type="button" class="btn ghost sm" onclick="rescan('${m.id}')">Rescan</button>
+              <button type="button" class="btn ghost sm link-danger" onclick="delMission('${m.id}')">Delete</button></td></tr>`;
       }).join("")}</table></div>`
       :emptyState("No saved missions","Completed and in-progress missions are stored here — load or rescan any of them.");
   }catch(e){}
@@ -1175,6 +1187,7 @@ async function loadMission(id,program){
     findings.forEach(f=>{const s=(f.severity||"").toLowerCase();if(s in counts)counts[s]++;});
     updateCounters(); renderFindings();
     document.getElementById("sessLabel").textContent=`${program} · ${id} · archived`;
+    try{localStorage.setItem("apolaki-last-mission",JSON.stringify({id,program}));}catch(e){}
     reportMd=""; fetchReport();
     log("info",`Loaded archived mission <strong>${esc(program)}</strong> (${id}) — ${findings.length} findings. Report / Playbooks / Tools are live against it.`);
     switchTab("findings");
@@ -1245,6 +1258,12 @@ function renderHelp(){
       ${ex?`<div class="muted" style="font-size:.82rem;margin-top:.4rem">${ex}</div>`:""}</div>`).join("");
 }
 renderHelp();
+
+/* Expose handlers referenced by inline SVG/HTML onclick attributes on window, so
+   they resolve even if this script is ever loaded as a module or bundled (an
+   inline onclick can only see the global scope). Belt-and-suspenders. */
+Object.assign(window,{topoClick,topoAction,loadMission,rescan,delMission,switchTab,
+  showView,resumeLast,prefillWorkbench,toCurl,prefillAccess});
 
 /* land on the Launch view */
 showView("launch");

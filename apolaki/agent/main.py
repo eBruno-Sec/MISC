@@ -166,6 +166,13 @@ async def ui():
     return FileResponse(UI_PATH)
 
 
+@app.get("/health")
+async def health():
+    """Liveness probe for Docker / monitoring. Cheap, no secrets, always 200 when
+    the app is up; reports AI readiness so a health check can also see config."""
+    return {"status": "ok", "app": "apolaki", "ai_ready": ai_status().get("ready", False)}
+
+
 @app.get("/config")
 async def config():
     import collaborator as collab
@@ -175,7 +182,11 @@ async def config():
 
 
 # ── native OOB collaborator: inbound interaction sink + correlation ──
-@app.api_route("/oob/{token:path}", methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"])
+# include_in_schema=False: this one path answers 7 methods, which otherwise makes
+# FastAPI emit a duplicate-operation-id warning at startup. It's an internal sink,
+# not part of the API surface, so keeping it out of the schema is correct anyway.
+@app.api_route("/oob/{token:path}", include_in_schema=False,
+               methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"])
 async def oob_sink(token: str, request: Request):
     """Catch-all endpoint that records any inbound OOB interaction. A blind-vuln
     probe injected earlier points a target's server here; the callback is the
@@ -253,7 +264,7 @@ async def engage(req: EngageRequest):
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
-                            "status": "created", "streaming": False}
+                            "status": "created", "events": [], "task": None, "done": False}
     return {"session_id": session_id, "mode": req.mode,
             "authenticated": bool(session_headers), "auth_note": auth_note,
             "parent_id": context.get("parent_id"), "warm_start": warm_start}
@@ -264,28 +275,25 @@ async def stream(session_id: str):
     if session_id not in sessions:
         raise HTTPException(404, "Session not found (live agent gone; reload mission from archive)")
     sess = sessions[session_id]
-    if sess["streaming"]:
-        raise HTTPException(409, "Session already streaming")
-    sess["streaming"] = True
-    sess["status"] = "running"
-    db.update_mission(session_id, status="running")
+    _ensure_run_started(session_id)   # idempotent — the run is a background task
 
     async def event_gen():
+        # Replay buffered events first (so a reconnecting client catches up), then
+        # tail live. Client disconnect (CancelledError) just stops this consumer —
+        # the background task keeps running and owns the final status.
+        idx = 0
         try:
-            async for event in sess["agent"].run(sess["objective"], session_id):
-                db.add_log(session_id, event.get("type", "info"), event)
-                if event.get("type") == "phase":
-                    db.update_mission(session_id, phase=event.get("phase", ""))
-                yield f"data: {json.dumps(event)}\n\n"
-                await asyncio.sleep(0)
+            while True:
+                events = sess["events"]
+                while idx < len(events):
+                    ev = events[idx]
+                    idx += 1
+                    yield f"data: {json.dumps(ev)}\n\n"
+                if sess.get("done") and idx >= len(sess["events"]):
+                    break
+                await asyncio.sleep(0.2)
         except asyncio.CancelledError:
-            yield f"data: {json.dumps({'type': 'complete', 'content': 'Stream disconnected.'})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-        finally:
-            sess["status"] = "complete"
-            _record_memory(session_id)   # persist intel for the next mission + archived views
-            db.update_mission(session_id, status="complete")
+            return   # viewer left; do NOT touch mission status
 
     return StreamingResponse(event_gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -296,8 +304,10 @@ async def stop(session_id: str):
     if session_id not in sessions:
         raise HTTPException(404, "Session not found")
     sessions[session_id]["stop_event"].set()
-    sessions[session_id]["status"] = "stopped"
-    db.update_mission(session_id, status="stopped")
+    # The background task sets the terminal 'stopped' status when the agent loop
+    # unwinds; reflect the intent immediately for the UI.
+    sessions[session_id]["status"] = "stopping"
+    db.update_mission(session_id, status="stopping")
     return {"ok": True}
 
 
@@ -431,7 +441,7 @@ def _record_memory(session_id: str) -> None:
     """At mission end: snapshot the discovered surface into cross-session memory
     (for warm-start + diffing) and stash a compact graph_data blob in the mission
     context so archived views render without the live agent. Best-effort — never
-    breaks the stream teardown."""
+    breaks the run teardown."""
     try:
         if session_id not in sessions:
             return
@@ -452,6 +462,92 @@ def _record_memory(session_id: str) -> None:
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
+
+
+def _ensure_playbook(session_id: str) -> None:
+    """Deterministic playbook safety-net. In full/active mode the model sometimes
+    dives into scanning and never calls generate_playbook, so a mission with a
+    populated surface ends up with an empty Playbooks tab (Codex hit this). If
+    none was produced but there IS surface, build one from the same deterministic
+    guidance engine the tool uses — passive and full now reach parity."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m or (m["context"].get("playbook") or []):
+            return
+        tools = sessions[session_id]["tools"]
+        if not tools.urls and not tools.recon.get("live_hosts"):
+            return
+        import guidance as guidance_mod
+        recon = dict(tools.recon)
+        recon["urls"] = tools.urls
+        guide = guidance_mod.build_guidance(recon)
+        if not guide:
+            return
+        ctx = dict(m["context"])
+        ctx["playbook"] = guide
+        ctx["playbook_stats"] = guidance_mod.guidance_stats(guide)
+        ctx["playbook_auto"] = True     # note it was generated by the safety-net
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+
+
+def _finalize_mission(session_id: str) -> None:
+    """One place that runs when a mission's agent loop ends: guarantee a playbook,
+    then persist cross-session memory + archived-render data."""
+    _ensure_playbook(session_id)
+    _record_memory(session_id)
+
+
+async def _drive_mission(session_id: str) -> None:
+    """Run the agent to completion in a BACKGROUND task, independent of any SSE
+    connection. Events are persisted (DB logs) and buffered on the session so
+    /stream can attach, detach and re-attach without affecting the run. The final
+    mission status is owned HERE — a client disconnect can no longer mark an
+    unfinished run 'complete' (the lifecycle bug Codex found)."""
+    sess = sessions.get(session_id)
+    if not sess:
+        return
+    stop_event = sess["stop_event"]
+    try:
+        async for event in sess["agent"].run(sess["objective"], session_id):
+            db.add_log(session_id, event.get("type", "info"), event)
+            if event.get("type") == "phase":
+                db.update_mission(session_id, phase=event.get("phase", ""))
+            sess["events"].append(event)
+    except asyncio.CancelledError:
+        # process/app shutdown cancelled the task — not a normal completion
+        sess["status"] = "interrupted"
+        db.update_mission(session_id, status="interrupted")
+        sess["done"] = True
+        raise
+    except Exception as e:
+        err = {"type": "error", "content": str(e)}
+        db.add_log(session_id, "error", err)
+        sess["events"].append(err)
+        sess["status"] = "failed"
+        db.update_mission(session_id, status="failed")
+        sess["done"] = True
+        return
+    final = "stopped" if stop_event.is_set() else "complete"
+    _finalize_mission(session_id)
+    sess["status"] = final
+    db.update_mission(session_id, status=final)
+    sess["done"] = True
+
+
+def _ensure_run_started(session_id: str) -> None:
+    """Start the background agent task exactly once for a session."""
+    sess = sessions[session_id]
+    if sess.get("task") is not None:
+        return
+    sess["events"] = sess.get("events", [])
+    sess["done"] = False
+    sess["status"] = "running"
+    db.update_mission(session_id, status="running")
+    sess["task"] = asyncio.create_task(_drive_mission(session_id))
 
 
 # ── attack surface + evidence + playbook ─────────────────────────
@@ -604,7 +700,7 @@ async def access_check(session_id: str, req: AccessCheckRequest):
                                 "is_owner": p["is_owner"], "is_anon": False})
             except Exception as e:
                 results.append({"role": p["name"], "error": str(e), "is_owner": p["is_owner"]})
-    verdict = replay_mod.access_verdict(results)
+    verdict = replay_mod.access_verdict(results, req.url)
     return {"url": req.url, "results": results, **verdict}
 
 
