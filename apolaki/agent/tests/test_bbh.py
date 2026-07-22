@@ -644,6 +644,25 @@ def test_codereview_finds_sinks_and_crypto():
     assert any(w["algorithm"] == "MD5" for w in cr.scan_weak_crypto("hash = md5(password)"))
 
 
+def test_codereview_client_side_classes_named():
+    # ginandjuice /blog client-side classes must surface with their real names.
+    vulns = {s["vuln"] for s in cr.scan_sinks(
+        "obj['__proto__'][k]=v; $.extend(true,{},o); window.location=location.hash;")}
+    assert any("prototype pollution" in v for v in vulns)
+    assert any("open redirect" in v for v in vulns)
+    csti = {s["vuln"] for s in cr.scan_sinks("<div ng-app>{{x}}</div>")}
+    assert any("CSTI" in v for v in csti)
+
+
+def test_sca_deparam_gadget_is_a_lead():
+    import dependency_intel as dep
+    g = dep.gadget_findings("https://ginandjuice.shop/resources/js/deparam.js")
+    assert g and g[0]["family"] == "prototype_pollution" and g[0]["confidence"] == "candidate"
+    assert g[0]["cwe"] == "CWE-1321"
+    # a non-gadget script produces nothing
+    assert dep.gadget_findings("https://x/resources/js/app.js") == []
+
+
 def test_codereview_dev_comments_and_endpoints():
     c = cr.scan_comments("// todo: Implement CSRF protection on the change_password endpoint\ncode();")
     assert c and "csrf" in c[0]["comment"].lower()

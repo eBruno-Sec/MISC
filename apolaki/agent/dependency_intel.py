@@ -50,6 +50,16 @@ LIB_SIGNATURES = [
      "filename": _rx(r"(?:purify|dompurify)[-.]" + _VER)},
 ]
 
+# Known client-side gadget libraries that don't self-report a version but are a
+# vulnerability by their mere presence (filename match). deparam is the classic
+# jQuery prototype-pollution gadget shipped by PortSwigger's ginandjuice /blog.
+GADGET_LIBS = [
+    ("deparam", _rx(r"(?:jquery[.-])?deparam(?:\.min)?\.js"),
+     "client-side prototype pollution", "medium",
+     "jQuery deparam is a known client-side prototype-pollution gadget; combined with a "
+     "sink (e.g. AngularJS) it can escalate to DOM XSS."),
+]
+
 _CDN_PATH = _rx(r"/(?:ajax/libs|npm|gh)/([a-z0-9._-]+)/" + _VER + r"/")
 _CDN_NAME_FIX = {"angular.js": "angular", "vue.js": "vue", "lodash.js": "lodash", "moment.js": "moment"}
 _FLEX_LIBS = ("jquery-ui", "jquery", "angularjs", "angular", "bootstrap", "lodash",
@@ -198,6 +208,24 @@ def vulnerable_component_finding(component, vulns):
         "cwe": "CWE-1104", "family": "vulnerable_component", "tags": ["sca", "dependency", comp],
         "confidence": CONFIRMED,
     }
+
+
+def gadget_findings(url):
+    """Known client-side GADGET libraries detected by filename. Presence-only, so
+    these are LEADS (candidate) — a gadget is exploitable only once it reaches a
+    sink, which needs dynamic confirmation. Names the exact script for the operator."""
+    path = urlparse(url).path if "://" in (url or "") else (url or "")
+    out = []
+    for name, rx, vuln, sev, note in GADGET_LIBS:
+        if rx.search(path):
+            out.append({
+                "title": f"Client-side gadget library: {name} ({vuln})",
+                "severity": sev, "target": url, "confidence": "candidate",
+                "description": note, "impact": "Client-side prototype pollution can be chained to DOM XSS.",
+                "family": "prototype_pollution", "cwe": "CWE-1321",
+                "evidence": f"gadget library served at {path}",
+                "tags": ["prototype-pollution", "sca", name]})
+    return out
 
 
 def _snippet(text, needle, width=80):

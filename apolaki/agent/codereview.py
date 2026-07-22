@@ -77,7 +77,15 @@ _SINKS = [
     (re.compile(r"\.insertAdjacentHTML\s*\("), "insertAdjacentHTML()", "DOM XSS", "medium"),
     (re.compile(r"\$\([^)]*\)\.html\s*\("), "jQuery .html()", "DOM XSS", "medium"),
     (re.compile(r"\bset(?:Timeout|Interval)\s*\(\s*['\"]"), "setTimeout/Interval(string)", "code injection", "low"),
-    (re.compile(r"\b(?:location|document\.location)\s*(?:\.href)?\s*=\s*[^;\n]*(?:\+|\$|`)"), "location = dynamic", "open redirect", "low"),
+    (re.compile(r"\b(?:location|document\.location)\s*(?:\.href|\.assign\s*\(|\.replace\s*\()?\s*[=(][^;\n]*(?:hash|search|location|referrer|\bname\b)"),
+     "location <- URL source", "DOM open redirect / DOM XSS", "medium"),
+    # client-side prototype pollution — the deparam gadget + unsafe deep-merge/
+    # __proto__ writes (ginandjuice's /blog vector is deparam.js).
+    (re.compile(r"\bdeparam\s*\("), "deparam()", "client-side prototype pollution (deparam gadget)", "medium"),
+    (re.compile(r"(?:\$|jQuery)\.extend\s*\(\s*true\b"), "$.extend(true, ...)", "client-side prototype pollution", "medium"),
+    (re.compile(r"__proto__|constructor\s*\[\s*['\"]prototype|\bprototype\s*\[\s*[^\]]+\]\s*="), "__proto__ / prototype write", "client-side prototype pollution", "medium"),
+    # client-side template injection surface (AngularJS evaluates {{ }} in the DOM)
+    (re.compile(r"\bng-app\b|angular\.bootstrap\s*\(|\[ng-app\]"), "AngularJS ng-app", "client-side template injection (CSTI)", "medium"),
     (re.compile(r"child_process|\.execSync?\s*\(|\.spawn\s*\("), "child_process/exec()", "command injection / RCE", "high"),
     (re.compile(r"\bunserialize\s*\("), "unserialize()", "insecure deserialization", "high"),
     (re.compile(r"\b(?:system|shell_exec|passthru|popen|assert)\s*\("), "PHP system/shell_exec()", "RCE", "high"),

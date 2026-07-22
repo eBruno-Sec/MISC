@@ -1106,6 +1106,11 @@ class ToolRegistry:
                 vulns = dep.assess_component(comp)
                 if vulns:
                     findings.append(dep.vulnerable_component_finding(comp, vulns))
+            # known client-side gadget libraries (e.g. deparam -> prototype pollution)
+            for g in dep.gadget_findings(label):
+                if (g["title"], g["target"]) not in seen_comp:
+                    seen_comp.add((g["title"], g["target"]))
+                    findings.append(g)
 
         # resolve + seed in-scope endpoints into the surface
         src_host = next((urlparse(l).netloc for l, _ in sources if l.startswith("http")), "")
