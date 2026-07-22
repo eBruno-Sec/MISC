@@ -363,13 +363,13 @@ X-API-Key:
 X-Requested-With: </textarea>
               <div class="hint"><strong>What is this?</strong> If the target needs login, paste the header(s) your logged-in browser sends so scanners reach the post-login area. Fill the value after the colon (e.g. <code class="inline">Authorization: Bearer eyJ…</code> or <code class="inline">Cookie: session=abc123</code>). <strong>Blank ones are ignored.</strong> Values are redacted in evidence and never shown in reports.</div>
             </div>
-            <label class="chk"><input type="checkbox" id="autoApprove"> Autonomous run — pre-authorize the intrusive gate</label>
           </div>
         </div>
         <div>
           <div class="block">
             <h4>Start</h4>
             <div id="cfgWarn" class="warn-box" style="display:none;margin-bottom:.8rem"></div>
+            <label class="chk" style="margin-bottom:.7rem"><input type="checkbox" id="autoApprove"> <strong>Autonomous run</strong> — pre-authorize the intrusive gate (no approval modal to babysit)</label>
             <button class="btn primary block" id="btnStart" onclick="startHunt()">Start Hunt</button>
             <button class="btn danger block" id="btnStop" style="display:none;margin-top:.6rem" onclick="stopHunt()">Stop Hunt</button>
             <p class="hint" id="planHint" style="margin-top:.7rem">A deterministic planner sequences the tools; AI is used only where it helps. Every tool is scope-checked at the wrapper level.</p>

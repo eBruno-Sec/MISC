@@ -644,8 +644,17 @@ async def _drive_mission(session_id: str) -> None:
     try:
         async for event in sess["agent"].run(sess["objective"], session_id):
             db.add_log(session_id, event.get("type", "info"), event)
-            if event.get("type") == "phase":
+            etype = event.get("type")
+            if etype == "phase":
                 db.update_mission(session_id, phase=event.get("phase", ""))
+            elif etype == "approval_required":
+                # Make the pause observable to pollers/API clients, not just the
+                # modal (the mission is blocked, not silently "running").
+                sess["status"] = "awaiting_approval"
+                db.update_mission(session_id, status="awaiting_approval")
+            elif etype == "approval_resolved" and sess.get("status") == "awaiting_approval":
+                sess["status"] = "running"
+                db.update_mission(session_id, status="running")
             sess["events"].append(event)
     except asyncio.CancelledError:
         # process/app shutdown cancelled the task — not a normal completion

@@ -129,6 +129,18 @@ def test_surface_inventory_dedup():
     assert set(a["params"]) == {"id", "x"} and a["parameterized"]
 
 
+def test_surface_flags_xml_body_sinks():
+    # U3: an XML/SOAP path with no query params is a POST-body sink, not an inert
+    # param-free GET endpoint — so run_xxe targets it (and skips /checkout noise).
+    inv = surface.build_inventory([
+        "https://h/catalog/product/stock", "https://h/checkout?x=1", "https://h/soap/api"])
+    stock = next(e for e in inv if e["path"] == "/catalog/product/stock")
+    assert stock["body_sink"] and stock["content_type"] == "application/xml" and not stock["parameterized"]
+    assert next(e for e in inv if e["path"] == "/soap/api")["body_sink"] is True
+    # a generic commerce endpoint is NOT flagged (no XML spraying)
+    assert next(e for e in inv if e["path"] == "/checkout")["body_sink"] is False
+
+
 def test_openapi_pins_base_host():
     spec = {"servers": [{"url": "https://EVIL.com/api"}],
             "paths": {"/users/{id}": {"get": {"parameters": [{"in": "query", "name": "q"}]}}}}

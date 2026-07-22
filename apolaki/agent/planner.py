@@ -45,9 +45,12 @@ _CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "ip", "dns", "que
 # Path signals for endpoints that likely parse an XML/SOAP request body — the XXE
 # sinks the GET-param probes never reach (e.g. ginandjuice /catalog/product/stock).
 import re as _re
+# Strong XML/SOAP body-sink signals only. Deliberately NOT the generic commerce
+# words (checkout/order/price/cart) — those are almost always JSON/form endpoints,
+# and matching them made run_xxe fire ~14x on non-XML endpoints for zero result.
 _XML_SINK = _re.compile(
-    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|upload|ews|services|b2b|"
-    r"stock|inventory|price|quote|checkout|order)(?:/|$|\?)|\.xml(?:$|\?)", _re.I)
+    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|ews|services|b2b|stock|stockcheck)(?:/|$|\?)"
+    r"|\.xml(?:$|\?)", _re.I)
 
 
 def _host(u: str) -> str:
@@ -172,7 +175,8 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
     # XML/SOAP body sinks (POST XML) — probe for XXE. These are path-driven, not
     # query-param-driven, so they come from the whole inventory, not param_eps.
-    xml_eps = [e for e in inv if _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
+    # The surface inventory flags them (body_sink); fall back to the local pattern.
+    xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
     for ep in xml_eps:
         u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
         e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))

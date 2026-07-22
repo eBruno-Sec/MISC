@@ -216,7 +216,9 @@ class BBHAgent:
         self._approval_result = None
         yield {"type": "approval_required", "approval_id": approval_id, "tool": tool_name,
                "input": tool_input, "phase": "probe",
-               "prompt": f"Authorize INTRUSIVE probing for this engagement? First request: {tool_name}"}
+               "prompt": f"Authorize INTRUSIVE probing for this engagement? First request: {tool_name}",
+               "content": f"Awaiting operator authorization for INTRUSIVE probing (first request: {tool_name}). "
+                          "Approve or deny in the gate modal — the run is paused until you do."}
         try:
             if APPROVAL_TIMEOUT > 0:
                 await asyncio.wait_for(self._approval_event.wait(), timeout=APPROVAL_TIMEOUT)
@@ -227,7 +229,10 @@ class BBHAgent:
         self.intrusive_state = self._approval_result or "denied"
         self.pending_approval = None
         yield {"type": "approval_resolved", "approval_id": approval_id,
-               "resolution": self.intrusive_state}
+               "resolution": self.intrusive_state,
+               "content": f"Intrusive gate {self.intrusive_state} — "
+                          + ("resuming intrusive probes." if self.intrusive_state == "approved"
+                             else "intrusive probes skipped; continuing with passive/active work.")}
 
     def _set_phase(self, tool_name: str):
         ph = PHASE_OF.get(tool_name)

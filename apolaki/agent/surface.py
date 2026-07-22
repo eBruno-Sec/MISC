@@ -13,6 +13,11 @@ from urllib.parse import urlparse, parse_qsl, unquote
 # (< > " \) are caught separately after percent-decoding.
 _ENTITY_RE = re.compile(r"&(?:quot|lt|gt|nbsp|amp;lt|amp;gt|#x?[0-9a-f]+);?", re.I)
 _MARKUP_CHARS_RE = re.compile(r'[<>"\\]')
+# Paths that likely accept an XML/SOAP request BODY (XXE sinks) rather than query
+# params — kept in sync with the planner's run_xxe trigger.
+_XML_SINK_PATH = re.compile(
+    r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|ews|services|b2b|stock|stockcheck)(?:/|$|\?)"
+    r"|\.xml(?:$|\?)", re.I)
 
 
 def clean_url(u) -> bool:
@@ -71,11 +76,16 @@ def build_inventory(urls, cap: int = 1000) -> list:
     out = []
     for key in order[:cap]:
         e = by_key[key]
+        body_sink = bool(_XML_SINK_PATH.search(e["path"] or ""))
         out.append({
             "host": e["host"],
             "path": e["path"],
             "params": sorted(e["params"]),
             "parameterized": bool(e["params"]),
+            # An XML/SOAP path is a likely POST-body sink even with no query params,
+            # so the UI/planner stop treating it as an inert param-free GET endpoint.
+            "body_sink": body_sink,
+            "content_type": "application/xml" if body_sink else "",
             "example": e["example"],
         })
     return out
