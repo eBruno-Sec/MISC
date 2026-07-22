@@ -201,6 +201,192 @@ def _adv_curl(base: str, param: str, cls: str) -> list[dict]:
     }
     return common + extra.get(cls, [])
 
+# ── result indicators (beginner-proof: how to READ the response) ─────────────
+# Per-class "you found it" vs "keep looking" signals, plus a false-positive
+# check. Deterministic and copy-adaptable — they teach a hunter to tell a real
+# hit from an echo/error, which is the difference between a valid report and
+# noise. Keyed by the normalized vuln class (see _norm_cls).
+EVIDENCE_TEMPLATE = ("Target:\nParameter:\nCommand:\nExpected (baseline):\n"
+                     "Actual (payload):\nWhy it proves the bug:\nImpact:\n"
+                     "Response/screenshot saved:")
+
+INDICATORS: dict[str, dict[str, Any]] = {
+    "lfi": {
+        "vulnerable_if": ["`root:x:0:0` or other `/etc/passwd` lines in the body",
+                          "`[extensions]` / `for 16-bit app support` from win.ini",
+                          "base64 that decodes to source when using php://filter"],
+        "safe_if": ["403 / 404 / generic error", "identical length to the baseline",
+                    "the payload is only reflected as text, no file contents"],
+        "false_positive_check": "Re-request with a path that cannot exist (e.g. "
+        "`../../../../no_such_file_12345`). If the 'vulnerable' response is unchanged, "
+        "you are seeing an echo or a catch-all page, not file disclosure.",
+    },
+    "sqli": {
+        "vulnerable_if": ["a database error naming the engine (SQL syntax, ORA-, PG::, SQLSTATE)",
+                          "boolean pair diverges: `' AND 1=1--` normal vs `' AND 1=2--` empty/changed",
+                          "a correlated time delay ONLY on the SLEEP/pg_sleep payload"],
+        "safe_if": ["same response for true and false payloads", "a generic 500 with no DB signature",
+                    "WAF block page for every payload"],
+        "false_positive_check": "Confirm the delay is causal: run the SLEEP payload 2-3x and a "
+        "no-sleep control. A delay that also appears on the control is network jitter, not SQLi.",
+    },
+    "xss": {
+        "vulnerable_if": ["your marker breaks out of its context UNescaped (`<`,`>`,`\"` intact)",
+                          "the injected script actually EXECUTES in a real browser (alert/DOM change)"],
+        "safe_if": ["the marker is HTML-entity-encoded (`&lt;`,`&gt;`,`&quot;`)",
+                    "reflected only inside a quoted attribute/JS string with no breakout",
+                    "CSP blocks inline execution"],
+        "false_positive_check": "Reflection is NOT execution. Load the payload in a browser (not just "
+        "curl|grep) and confirm the script runs; an encoded or inert reflection is not reportable.",
+    },
+    "crlf": {
+        "vulnerable_if": ["your injected header appears as a REAL header in the `-i` response",
+                          "a Set-Cookie or redirect you controlled is emitted"],
+        "safe_if": ["the CRLF sequence is stripped or URL-encoded in the reflected value",
+                    "the marker shows up only in the body, never in the headers"],
+        "false_positive_check": "Diff the response headers with and without the payload. The marker "
+        "must be a distinct header line, not text inside an existing value.",
+    },
+    "ssrf": {
+        "vulnerable_if": ["cloud metadata returned (e.g. an IAM role JSON from 169.254.169.254)",
+                          "an out-of-band hit lands on YOUR collaborator/OAST from the target IP",
+                          "internal-only host content or a differing connect/timing oracle"],
+        "safe_if": ["the URL is only echoed back, never fetched", "identical error for internal and bogus hosts"],
+        "false_positive_check": "An echoed URL is not a fetch. Require an OAST callback or metadata content; "
+        "point at a bogus internal IP and confirm the behavior differs from a real one.",
+    },
+    "ssti": {
+        "vulnerable_if": ["a math payload is EVALUATED (`{{7*7}}` -> `49`, `${7*7}` -> `49`)",
+                          "engine-specific object access leaks config/class internals"],
+        "safe_if": ["`{{7*7}}` is returned literally", "the value is HTML-encoded and never evaluated"],
+        "false_positive_check": "Use a unique product (e.g. 7*7 and 7*'7'). Only server-side evaluation "
+        "turns 7*7 into 49 while 7*'7' errors or gives 7777777 — reflection alone does not.",
+    },
+    "cmdi": {
+        "vulnerable_if": ["command output appears (`uid=0(root)` from `;id`, hostname from `;hostname`)",
+                          "a correlated delay only on the `;sleep 5` payload",
+                          "an OAST DNS/HTTP callback from `;curl <oast>`"],
+        "safe_if": ["the payload is echoed verbatim with no execution", "same timing for sleep and control"],
+        "false_positive_check": "Distinguish execution from echo: `;id` must yield a real `uid=` line, not "
+        "the literal string `;id`. Confirm any delay with a no-sleep control run.",
+    },
+    "redirect": {
+        "vulnerable_if": ["a 3xx `Location:` (or JS/meta redirect) sends you to the attacker host you supplied"],
+        "safe_if": ["the redirect stays on the original host", "the value is validated against an allowlist",
+                    "only a relative path is honored"],
+        "false_positive_check": "Confirm the FINAL destination host is attacker-controlled (`-i -L`); a "
+        "redirect that keeps your domain as a path segment (`/redirect?url=/evil`) is not open redirect.",
+    },
+    "xxe": {
+        "vulnerable_if": ["file contents from a declared external entity appear in the response",
+                          "an OAST callback fires from a parameter/external entity"],
+        "safe_if": ["the parser rejects the DOCTYPE / entities", "identical response with and without the entity"],
+        "false_positive_check": "Declare an entity that reads a real file vs a random path; only the real "
+        "file should surface content. No content and no OAST hit means DTD/entity processing is disabled.",
+    },
+    "idor": {
+        "vulnerable_if": ["swapping the id/UUID returns ANOTHER user's data with your own session",
+                          "a resource you do not own is readable/writable by id"],
+        "safe_if": ["403/404 for ids you do not own", "the object is public by design"],
+        "false_positive_check": "Prove ownership crossing: fetch your own object, then a neighbour's id with "
+        "the SAME session. Data that only YOU can already see is not IDOR.",
+    },
+    "csrf": {
+        "vulnerable_if": ["a state-changing request succeeds with NO CSRF token and cross-site cookies",
+                          "the token is not validated / is reusable across users"],
+        "safe_if": ["a valid unique token is required", "SameSite=Lax/Strict blocks the cross-site send",
+                    "the endpoint only accepts JSON with a custom header"],
+        "false_positive_check": "Replay the request from a different origin without the token. Success only "
+        "counts if the session cookie is actually sent cross-site (check SameSite).",
+    },
+    "hostheader": {
+        "vulnerable_if": ["your spoofed Host is reflected into an absolute link, cache key, or reset email",
+                          "the app routes/renders based on your attacker Host"],
+        "safe_if": ["the Host is ignored / validated against an allowlist", "a fixed canonical host is used"],
+        "false_positive_check": "Confirm the injected Host reaches a security-relevant sink (password-reset "
+        "link, cache poisoning); a reflected Host with no downstream effect is informational.",
+    },
+    "takeover": {
+        "vulnerable_if": ["the dangling CNAME's provider returns its unclaimed 'no such app' fingerprint",
+                          "you can register the target resource on that provider"],
+        "safe_if": ["the CNAME resolves to a live, claimed resource", "no provider fingerprint present"],
+        "false_positive_check": "Match BOTH the dangling CNAME and the provider's specific takeover "
+        "signature before claiming — an NXDOMAIN or generic 404 alone is not a takeover.",
+    },
+    "cors": {
+        "vulnerable_if": ["the response reflects your arbitrary Origin AND sets "
+                          "`Access-Control-Allow-Credentials: true`"],
+        "safe_if": ["the Origin is not reflected", "credentials are not allowed with a wildcard/echo origin"],
+        "false_positive_check": "A reflected Origin WITHOUT allow-credentials (or on a public endpoint) leaks "
+        "nothing sensitive — confirm credentialed, authenticated data is actually readable.",
+    },
+    "jwt": {
+        "vulnerable_if": ["`alg:none` or a weak/guessable secret lets you forge an accepted token",
+                          "the signature is not verified server-side"],
+        "safe_if": ["forged/tampered tokens are rejected", "a strong secret resists cracking"],
+        "false_positive_check": "A decodable JWT is not a vuln. You must forge a token the server ACCEPTS "
+        "(privilege change honored), not merely read the claims.",
+    },
+    "graphql": {
+        "vulnerable_if": ["introspection is enabled and exposes hidden mutations/fields",
+                          "an unauthorized query/mutation returns or changes protected data"],
+        "safe_if": ["introspection disabled and access controls enforced per field"],
+        "false_positive_check": "Introspection alone is info-only; escalate only if a specific field/mutation "
+        "actually returns or changes data you should not reach.",
+    },
+    "exposure": {
+        "vulnerable_if": ["the file returns real sensitive content (a `[core]` .git/config, live keys in .env)"],
+        "safe_if": ["403/404", "an HTML catch-all/login page instead of the raw file", "empty body"],
+        "false_positive_check": "Verify the body signature (e.g. `.git/config` starts with `[core]`); a 200 "
+        "that serves the app's HTML shell for every path is a catch-all, not an exposed file.",
+    },
+    "vulnerable_component": {
+        "vulnerable_if": ["the exact vulnerable version is confirmed AND the vulnerable code path is reachable"],
+        "safe_if": ["version not actually in the affected range", "the vulnerable feature is unused/unreachable"],
+        "false_positive_check": "A version banner is a LEAD. Confirm the precise version and that the CVE's "
+        "affected feature is actually exercised before calling it exploitable.",
+    },
+    "clickjacking": {
+        "vulnerable_if": ["the page frames with no X-Frame-Options / frame-ancestors AND a sensitive action exists"],
+        "safe_if": ["frame-ancestors/XFO deny framing", "no state-changing action worth framing"],
+        "false_positive_check": "Build a real framing PoC and confirm a sensitive click can be tricked; a "
+        "missing header on a static page is hardening-only.",
+    },
+}
+
+_CLS_ALIASES = {"traversal": "lfi", "open_redirect": "redirect", "openredirect": "redirect",
+                "host-header": "hostheader", "host_header": "hostheader", "bola": "idor",
+                "vcs": "exposure", "secrets": "exposure", "listing": "exposure",
+                "vulnerable-component": "vulnerable_component", "sca": "vulnerable_component",
+                "server-version": "vulnerable_component"}
+
+
+def _norm_cls(key: str, category: str = "", tags: Optional[list[str]] = None) -> str:
+    """Normalize a playbook's key/category to an INDICATORS class token."""
+    for raw in ([key or ""] + [t for t in (tags or [])] + [category or ""]):
+        c = str(raw).lower().strip()
+        for pre in ("param-", "path-", "port-"):
+            if c.startswith(pre):
+                c = c[len(pre):]
+        c = _CLS_ALIASES.get(c, c)
+        if c in INDICATORS:
+            return c
+    return ""
+
+
+def _indicators_for(key: str, category: str = "", tags: Optional[list[str]] = None) -> dict:
+    """The four beginner-proof read-the-result fields for a playbook, or empty
+    strings/lists when we have no class-specific mapping (never invented)."""
+    cls = _norm_cls(key, category, tags)
+    ind = INDICATORS.get(cls, {})
+    return {
+        "vulnerable_if": ind.get("vulnerable_if", []),
+        "safe_if": ind.get("safe_if", []),
+        "false_positive_check": ind.get("false_positive_check", ""),
+        "evidence_template": EVIDENCE_TEMPLATE,
+    }
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 def _conf_label(v: int) -> str:
     return "High" if v >= 70 else ("Medium" if v >= 40 else "Low")
@@ -248,6 +434,7 @@ def _finding(
     refs: list[dict] = []
     for rk in ref_keys or []:
         refs.extend(REFS.get(rk, []))
+    ind = _indicators_for(key, category, tags)
     return {
         "id": _gid(key, surface),
         "key": key,
@@ -267,6 +454,11 @@ def _finding(
         "curl_steps": curl_steps or [],
         "references": [{"title": r["t"], "url": r["u"]} for r in refs],
         "tags": tags or [],
+        # beginner-proof "how to read the result" fields (empty when unmapped)
+        "vulnerable_if": ind["vulnerable_if"],
+        "safe_if": ind["safe_if"],
+        "false_positive_check": ind["false_positive_check"],
+        "evidence_template": ind["evidence_template"],
     }
 
 
@@ -945,7 +1137,8 @@ def consolidate(guide: list[dict], cap: int = 40) -> list[dict]:
         # keep the strongest representative's actionable fields
         if (g.get("confidence") or 0) > (rep.get("confidence") or 0):
             for k in ("confidence", "confidence_label", "surface", "curl_steps",
-                      "what_to_test", "how_to_test", "payloads", "bypass", "references", "evidence"):
+                      "what_to_test", "how_to_test", "payloads", "bypass", "references", "evidence",
+                      "vulnerable_if", "safe_if", "false_positive_check", "evidence_template"):
                 if k in g:
                     rep[k] = g[k]
     out = list(groups.values())

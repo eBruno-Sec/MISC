@@ -238,6 +238,38 @@ def test_guidance_emits_playbooks():
         assert x["what_to_test"] and "confidence" in x and "tools" in x
 
 
+def test_playbook_result_indicators_and_evidence_template():
+    # P0.6: every playbook exposes the four "how to read the result" fields; a
+    # mapped vuln class fills them, an unmapped class leaves them empty (no
+    # invention). Matches the LFI quality bar from the directive.
+    lfi = guidance._indicators_for("param-lfi", "LFI")
+    assert any("root:x:0:0" in s for s in lfi["vulnerable_if"])
+    assert any("403" in s for s in lfi["safe_if"])
+    assert "no_such_file_12345" in lfi["false_positive_check"]
+    assert lfi["evidence_template"].startswith("Target:")
+    # prefix strip + aliases normalize (param-lfi -> lfi, traversal -> lfi,
+    # bola -> idor, path-vcs -> exposure)
+    assert guidance._norm_cls("param-lfi") == "lfi"
+    assert guidance._norm_cls("traversal") == "lfi"
+    assert guidance._norm_cls("bola") == "idor"
+    assert guidance._norm_cls("path-vcs") == "exposure"
+    # unmapped stays empty but the template is always present
+    u = guidance._indicators_for("totally-unknown", "Nope")
+    assert u["vulnerable_if"] == [] and u["false_positive_check"] == "" and u["evidence_template"]
+    # end-to-end: generated playbooks all carry the 4 keys; vuln-class ones filled
+    recon = {"target": "t.com", "http": {"ok": True, "headers": {}, "final_url": "https://t.com"},
+             "live_hosts": [{"url": "https://t.com", "tech": ["php"]}]}
+    pbs = guidance.build_guidance(recon)
+    req = {"vulnerable_if", "safe_if", "false_positive_check", "evidence_template"}
+    assert all(req <= set(p) for p in pbs)                 # never KeyError downstream
+    assert any(p["vulnerable_if"] for p in pbs)            # at least one filled
+    # the HTML report renders them under clear headings
+    filled = next(p for p in pbs if p["vulnerable_if"])
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, playbook=[filled])
+    assert "Vulnerable if" in html and "Safe / inconclusive if" in html
+    assert "False-positive check" in html and "Evidence to capture" in html
+
+
 # ── triage: advisory only, chains, cwe mapping ───────────────────
 def test_triage_maps_cwe_and_never_hides():
     findings = [
@@ -1253,6 +1285,109 @@ def test_report_business_impact_plain_english():
         "P", [{"title": "CRLF on category", "severity": "medium", "family": "crlf",
                "cwe": "CWE-113", "evidence": "marker surfaced"}], {"in_scope": ["x"]})
     assert "Why This Matters" in html and "If left unpatched" in html
+
+
+def _delta_fixture():
+    return {"has_prior": True, "hosts": {"added": [], "removed": []},
+            "subdomains": {"added": ["new.t.com"], "removed": []},
+            "endpoints": {"added": [], "removed": []}, "tech": {"added": [], "removed": []},
+            "findings": {"added": [{"title": "New XSS", "target": "https://t/x", "severity": "high"}],
+                         "removed": [{"title": "Old SQLi", "target": "https://t/old", "severity": "critical"}]}}
+
+
+def _ledger_fixture(zap="not_configured"):
+    return {"tools": [{"tool": "run_zap", "status": "skipped", "calls": 1, "findings": 0,
+                       "note": "ZAP not configured"},
+                      {"tool": "run_nuclei", "status": "executed", "calls": 1, "findings": 2, "note": "2 alerts"}],
+            "zap_status": zap, "authenticated": True, "strategy": "low_ai", "ai_calls": 2}
+
+
+def test_report_light_default_and_dark_toggle():
+    # P0.2: the exported HTML report opens LIGHT (client-ready). Dark is a one-click
+    # toggle, and print/PDF is forced light even when dark is toggled on.
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]})
+    # the light :root rule must precede the dark data-theme override
+    assert html.index(":root{--bg:#f5f7fa") < html.index(':root[data-theme="dark"]{--bg:#0a0e14')
+    assert ':root,:root[data-theme="dark"]{--bg:#fff' in html   # print forces light in both themes
+    assert "themebtn" in html and "Save as PDF" in html and "@media print" in html
+
+
+def test_report_since_last_scan_is_truth_first():
+    # P0.8: "Not Re-confirmed" is never called fixed/resolved; when 0 are confirmed
+    # this run but prior findings existed, the report states it explicitly.
+    delta = _delta_fixture()
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, delta=delta)
+    assert "Since Last Scan" in html and "Not Re-confirmed" in html and "not necessarily fixed" in html
+    assert "not re-confirmed and require verification before closure" in html
+    md = report.generate_report("P", [], {"in_scope": ["x"]}, delta=delta)
+    assert "Since Last Scan" in md and "Not Re-confirmed" in md
+    assert "not re-confirmed and require verification before closure" in md
+    # a first-ever scan (no prior) renders no history section
+    assert "Since Last Scan" not in report.generate_report("P", [], {"in_scope": ["x"]},
+                                                            delta={"has_prior": False})
+
+
+def test_report_methodology_ledger_and_zap_status():
+    # P0.5 / P0.10: methodology section carries the tool ledger + the three explicit
+    # ZAP states, plus auth posture and AI-call count.
+    for zap, label in (("not_configured", "ZAP Skipped Cleanly"),
+                       ("executed", "ZAP Executed"), ("failed", "ZAP Failed")):
+        led = _ledger_fixture(zap)
+        html = report.generate_html_report("P", [], {"in_scope": ["x"]}, tool_ledger=led)
+        assert "Methodology" in html and label in html and "run_nuclei" in html
+        md = report.generate_report("P", [], {"in_scope": ["x"]}, tool_ledger=led)
+        assert "Methodology & Tool Ledger" in md and label in md and "AI calls used" in md
+
+
+def test_json_data_package_enriched_and_backward_compatible():
+    # P0.7: the native JSON package gains scan config, risk, attack surface, tool
+    # ledger, playbooks, prior-scan delta and export metadata — WITHOUT dropping any
+    # of the original keys downstream consumers rely on.
+    findings = [{"title": "SQLi", "severity": "critical", "target": "https://t/i?id=1", "cwe": "CWE-89"}]
+    leads = [{"title": "Reflected", "severity": "high", "target": "https://t/a?q=1", "confidence": "candidate"}]
+    scope = {"in_scope": ["t.com"]}
+    j = json.loads(report.findings_json(
+        "Prog", findings, scope, coverage={"tools_invoked": 5}, leads=leads,
+        config={"mode": "full", "strategy": "low_ai"}, attack_surface={"endpoints": 12},
+        playbook=[{"title": "XSS"}], tool_ledger=_ledger_fixture(), delta=_delta_fixture(),
+        execution={"strategy": "low_ai", "ai_calls": 2}, report_id="abcd1234"))
+    # original keys intact
+    for k in ("program", "generated", "scope", "counts", "lead_counts", "coverage", "chains",
+              "findings", "leads"):
+        assert k in j, f"lost original key {k}"
+    assert j["findings"][0]["title"] == "SQLi" and j["leads"][0]["title"] == "Reflected"
+    assert j["counts"].get("high") is None and j["lead_counts"]["high"] == 1
+    # additive richness
+    assert j["report_id"] == "abcd1234" and j["risk"]["score"] > 0
+    assert j["config"]["mode"] == "full" and j["attack_surface"]["endpoints"] == 12
+    assert j["tool_ledger"]["zap_status"] == "not_configured" and j["playbooks"][0]["title"] == "XSS"
+    assert j["since_last_scan"]["has_prior"] is True and j["export"]["format"] == "json"
+
+
+def test_report_capec_from_cwe_and_no_invention():
+    # P0.5 depth: findings gain a CAPEC attack-pattern id from a known CWE mapping,
+    # an explicit capec wins, and an unmapped CWE gets none (never invented).
+    assert report.capec_for({"cwe": "CWE-89"}).startswith("CAPEC-66")
+    assert report.capec_for({"cwe": "CWE-79"}).startswith("CAPEC-63")
+    assert report.capec_for({"cwe": "CWE-611"}).startswith("CAPEC-201")
+    assert report.capec_for({"cwe": "CWE-89", "capec": "CAPEC-999: custom"}) == "CAPEC-999: custom"
+    assert report.capec_for({"cwe": "CWE-99999"}) is None and report.capec_for({}) is None
+    findings = [{"title": "SQLi", "severity": "critical", "target": "https://t/i?id=1", "cwe": "CWE-89"},
+                {"title": "Odd", "severity": "low", "target": "https://t/x", "cwe": "CWE-99999"}]
+    scope = {"in_scope": ["t.com"]}
+    # HTML + markdown render the CAPEC only for the mapped finding
+    html = report.generate_html_report("P", findings, scope)
+    assert "CAPEC: CAPEC-66" in html and html.count("CAPEC:") == 1     # unmapped one omitted
+    md = report.generate_report("P", findings, scope)
+    assert "**CAPEC:** CAPEC-66" in md
+    # CSV header carries capec; JSON findings gain it without dropping originals
+    csv_out = report.findings_csv(findings)
+    assert "capec" in csv_out.splitlines()[0]
+    j = json.loads(report.findings_json("P", findings, scope))
+    got = {f["title"]: f.get("capec") for f in j["findings"]}
+    assert got["SQLi"].startswith("CAPEC-66") and got["Odd"] is None
+    # the source finding dicts were NOT mutated
+    assert "capec" not in findings[0]
 
 
 def test_rescan_parent_linkage_surfaces_in_list():
