@@ -676,6 +676,43 @@ def test_codereview_finds_sinks_and_crypto():
     assert any(w["algorithm"] == "MD5" for w in cr.scan_weak_crypto("hash = md5(password)"))
 
 
+def test_codereview_client_side_classes_named():
+    # ginandjuice /blog client-side classes must surface with their real names.
+    vulns = {s["vuln"] for s in cr.scan_sinks(
+        "obj['__proto__'][k]=v; $.extend(true,{},o); window.location=location.hash;")}
+    assert any("prototype pollution" in v for v in vulns)
+    assert any("open redirect" in v for v in vulns)
+    csti = {s["vuln"] for s in cr.scan_sinks("<div ng-app>{{x}}</div>")}
+    assert any("CSTI" in v for v in csti)
+
+
+def test_dom_audit_probes_and_confirmation():
+    import dom_tool as dom
+    probes = dom.build_probes("https://ginandjuice.shop/blog")
+    classes = {p["class"] for p in probes}
+    assert {"proto", "redirect", "xss", "csti"} <= classes
+    assert all(p["nav"] for p in probes) and len(probes) <= 16
+    # each confirmation keys on the unique canary — no false positives
+    assert dom.confirmed_proto(dom.MARK) and not dom.confirmed_proto("other")
+    assert dom.confirmed_redirect([f"https://{dom.EVIL}/"]) and not dom.confirmed_redirect(["https://safe/"])
+    assert dom.confirmed_xss(dom.MARK) and not dom.confirmed_xss(None)
+    assert dom.confirmed_csti("x 49" + dom.MARK) and not dom.confirmed_csti("{{7*7}}" + dom.MARK)
+    # builder emits a CONFIRMED, evidence-backed finding
+    f = dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=dom.MARK)
+    assert f["confidence"] == "confirmed" and f["family"] == "prototype_pollution" and f["evidence"]
+    # a probe whose result does NOT prove the class yields nothing
+    assert dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=None) is None
+
+
+def test_sca_deparam_gadget_is_a_lead():
+    import dependency_intel as dep
+    g = dep.gadget_findings("https://ginandjuice.shop/resources/js/deparam.js")
+    assert g and g[0]["family"] == "prototype_pollution" and g[0]["confidence"] == "candidate"
+    assert g[0]["cwe"] == "CWE-1321"
+    # a non-gadget script produces nothing
+    assert dep.gadget_findings("https://x/resources/js/app.js") == []
+
+
 def test_codereview_dev_comments_and_endpoints():
     c = cr.scan_comments("// todo: Implement CSRF protection on the change_password endpoint\ncode();")
     assert c and "csrf" in c[0]["comment"].lower()

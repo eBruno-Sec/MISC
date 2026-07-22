@@ -37,6 +37,7 @@ _ALLOWED = {
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
 CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
 CAP_JS = 40             # js urls handed to js_review
+CAP_DOM = 6             # HTML pages handed to the (slow) headless DOM audit
 
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
@@ -175,6 +176,19 @@ def next_batch(state: dict) -> list:
     param_eps = [e for e in inv if e.get("parameterized")][:CAP_ENDPOINTS]
     host_bases = sorted({e["host"] for e in inv})[:CAP_HOSTS]
     e_steps = []
+    # DOM audit (headless browser, client-side confirmation) — bounded because it
+    # is slow: the live-host roots + a few HTML pages, skipping static assets.
+    dom_pages, dom_seen = [], set()
+    for u in [f"https://{h}" for h in host_bases] + [
+            e.get("example") or f"https://{e['host']}{e['path']}" for e in param_eps]:
+        low = u.split("?")[0].lower()
+        if any(low.endswith(ext) for ext in (".js", ".css", ".png", ".jpg", ".svg", ".woff", ".ttf", ".gif", ".mp4")):
+            continue
+        if u not in dom_seen:
+            dom_seen.add(u)
+            dom_pages.append(u)
+    for u in dom_pages[:CAP_DOM]:
+        e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
     for ep in param_eps:
         u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
         tag = f"{ep['host']}{ep['path']}"

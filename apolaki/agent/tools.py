@@ -62,6 +62,7 @@ TOOL_PERMISSIONS = {
     "run_jwt": PermissionLevel.ACTIVE,
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
+    "run_dom_audit": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
     "run_csrf": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
@@ -254,6 +255,12 @@ CLAUDE_TOOLS = [
          "url": {"type": "string"},
          "params": {"type": "array", "items": {"type": "string"}, "description": "Parameters to test (default: all in the URL)"}},
          "required": ["url"]}},
+    {"name": "run_dom_audit",
+     "description": ("ACTIVE: Dynamic client-side DOM audit in a real headless browser. Injects unique canaries into "
+                     "DOM sources (location.hash / query params) and CONFIRMS DOM-based prototype pollution, DOM XSS, "
+                     "DOM open redirect, and client-side template injection (CSTI) by observing the actual sink firing. "
+                     "Turns the leads static JS review can only flag into confirmed findings. Pass an HTML page URL."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_ffuf",
      "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
      "input_schema": {"type": "object", "properties": {
@@ -1067,6 +1074,81 @@ class ToolRegistry:
             return findings
         return findings
 
+    async def _run_dom_audit(self, inp: dict) -> ToolResult:
+        """Dynamic client-side confirmation: drive a headless browser to CONFIRM
+        DOM prototype pollution, DOM XSS, DOM open redirect, and CSTI (the classes
+        static js_review can only flag as leads). Each check keys on a unique
+        canary, so a hit is proof. Best-effort — skips cleanly with no browser."""
+        import dom_tool as dom
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("dom_audit", url, False, "", [], "SCOPE BLOCK")
+        chrome = _chrome_path()
+        if not chrome:
+            return ToolResult("dom_audit", url, True, "no headless browser — DOM audit skipped", [])
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return ToolResult("dom_audit", url, True, "playwright unavailable — DOM audit skipped", [])
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        findings, seen_cls = [], set()
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True, executable_path=chrome,
+                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                try:
+                    for probe in dom.build_probes(url):
+                        if probe["class"] in seen_cls:      # one confirmation per class is enough
+                            continue
+                        ctx = await browser.new_context(ignore_https_errors=True)
+                        if self.session_headers:
+                            hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                            if hdrs:
+                                await ctx.set_extra_http_headers(hdrs)
+                        page = await ctx.new_page()
+                        fired, navs = {"msg": None}, []
+
+                        async def on_dialog(d):
+                            fired["msg"] = d.message
+                            try:
+                                await d.dismiss()
+                            except Exception:
+                                pass
+                        page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
+                        page.on("framenavigated", lambda fr: navs.append(fr.url))
+                        try:
+                            await page.goto(probe["nav"], wait_until="load", timeout=8000)
+                            await page.wait_for_timeout(350)
+                        except Exception:
+                            pass
+                        pp_value, body = None, ""
+                        try:
+                            pp_value = await page.evaluate("window.Object.prototype[" + repr(dom.PP_KEY) + "]")
+                        except Exception:
+                            pass
+                        try:
+                            body = await page.evaluate("document.documentElement.innerText")
+                        except Exception:
+                            pass
+                        f = dom.build_finding({**probe, "base": url}, pp_value=pp_value,
+                                              nav_targets=navs, dialog_msg=fired["msg"], body=body)
+                        if f:
+                            findings.append(f)
+                            seen_cls.add(probe["class"])
+                        try:
+                            await ctx.close()
+                        except Exception:
+                            pass
+                    await browser.close()
+                except Exception:
+                    pass
+        except Exception as ex:
+            return ToolResult("dom_audit", url, True, f"DOM audit error: {type(ex).__name__}", findings)
+        if self.mission_id and findings:
+            await self._http(url, "GET", capture=True)
+        return ToolResult("dom_audit", url, True, f"{len(findings)} DOM issue(s) confirmed", findings)
+
     async def _run_js_review(self, inp: dict) -> ToolResult:
         import codereview as cr
         sources = []
@@ -1106,6 +1188,11 @@ class ToolRegistry:
                 vulns = dep.assess_component(comp)
                 if vulns:
                     findings.append(dep.vulnerable_component_finding(comp, vulns))
+            # known client-side gadget libraries (e.g. deparam -> prototype pollution)
+            for g in dep.gadget_findings(label):
+                if (g["title"], g["target"]) not in seen_comp:
+                    seen_comp.add((g["title"], g["target"]))
+                    findings.append(g)
 
         # resolve + seed in-scope endpoints into the surface
         src_host = next((urlparse(l).netloc for l, _ in sources if l.startswith("http")), "")
