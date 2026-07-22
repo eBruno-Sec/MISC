@@ -52,6 +52,12 @@ import re as _re
 _XML_SINK = _re.compile(
     r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|ews|services|b2b|stock|stockcheck)(?:/|$|\?)"
     r"|\.xml(?:$|\?)", _re.I)
+# Login-style endpoints worth a POST/JSON body auth-bypass SQLi probe.
+_LOGIN_SINK = _re.compile(r"(?:log[-_]?in|sign[-_]?in|authenticate|authentication)(?:/|$|\?)", _re.I)
+# Well-known login paths, probed directly per host so a critical auth-bypass SQLi
+# is tested even when the JS crawler doesn't happen to fire the login XHR.
+_LOGIN_PATHS = ("/rest/user/login", "/api/login", "/api/auth/login", "/login",
+                "/api/authenticate", "/auth/login", "/user/login", "/api/sessions")
 
 
 def _host(u: str) -> str:
@@ -82,7 +88,7 @@ def estimate(mode: str, roots: list) -> dict:
     roots = [r for r in (roots or []) if r]
     n = max(1, len(roots))
     passive = 6 * n
-    active = (4 * n) if mode in ("active", "full") else 0
+    active = (5 * n) if mode in ("active", "full") else 0   # incl. JS-aware katana crawl
     intrusive = 15 if mode == "full" else 0
     return {"passive_steps": passive, "active_steps": active,
             "intrusive_steps": intrusive, "ai_calls": 0}
@@ -95,6 +101,12 @@ def next_batch(state: dict) -> list:
     done = state.get("done") or set()
     recon = state.get("recon") or {}
     urls = state.get("urls") or []
+    # host -> base URL (scheme+port). Lets the planner probe a non-standard target
+    # (e.g. a local app on http://host:42000) instead of assuming https on 443.
+    bases = state.get("bases") or {}
+
+    def _b(h):
+        return bases.get(h) or f"https://{h}"
 
     def fresh(steps):
         # dedup against `done` AND within this freshly built batch (a step's key can
@@ -128,14 +140,19 @@ def next_batch(state: dict) -> list:
     targets = sorted(set(roots) | set(subs))
     if targets:
         # key on target count so a later recon cycle (more subdomains) re-runs httpx
-        b.append(_step("run_httpx", {"targets": targets}, f"run_httpx:{len(targets)}"))
+        b.append(_step("run_httpx", {"targets": targets, "bases": bases}, f"run_httpx:{len(targets)}"))
     b.append(_step("check_takeover", {}, "check_takeover"))
     # http_probe each in-scope host root once (extracts links + params → surface)
     host_roots = []
     for h in sorted(set(roots) | set(subs) | set(url_hosts)):
         host_roots.append(h)
     for h in host_roots[:CAP_HOSTS]:
-        b.append(_step("http_probe", {"url": f"https://{h}"}, f"http_probe:{h}"))
+        b.append(_step("http_probe", {"url": _b(h)}, f"http_probe:{h}"))
+    # JS-aware crawl of each in-scope root — essential for SPAs/APIs (e.g. Angular
+    # apps) whose real surface, endpoints and params live in JS/XHR, not static
+    # HTML that http_probe can parse. ACTIVE, so passive mode skips it via _allowed.
+    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]:
+        b.append(_step("run_katana", {"url": _b(h)}, f"run_katana:{h}"))
     b = fresh(b)
     if b:
         return b
@@ -157,7 +174,7 @@ def next_batch(state: dict) -> list:
             d.append(_step("run_graphql", {"url": u}, f"run_graphql:{_host(u)}"))
     # always try graphql discovery once per live host root
     for h in (set(roots) | set(subs)):
-        d.append(_step("run_graphql", {"url": f"https://{h}/graphql"}, f"run_graphql:{h}"))
+        d.append(_step("run_graphql", {"url": _b(h) + "/graphql"}, f"run_graphql:{h}"))
     if js_urls:
         d.append(_step("run_js_review", {"urls": js_urls[:CAP_JS]}, "run_js_review"))
     # http_probe parameterized/product pages so their POST forms (method + body
@@ -165,7 +182,7 @@ def next_batch(state: dict) -> list:
     # what lets run_xxe reach a POST XML body sink like the stock-check form.
     inv_d = surface_mod.build_inventory(urls)
     for ep in [e for e in inv_d if e.get("parameterized")][:CAP_ENDPOINTS]:
-        u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
+        u = ep.get("example") or (_b(ep['host']) + ep['path'])
         d.append(_step("http_probe", {"url": u}, f"http_probe:{ep['host']}{ep['path']}"))
     d = fresh(d)
     if d:
@@ -179,8 +196,8 @@ def next_batch(state: dict) -> list:
     # DOM audit (headless browser, client-side confirmation) — bounded because it
     # is slow: the live-host roots + a few HTML pages, skipping static assets.
     dom_pages, dom_seen = [], set()
-    for u in [f"https://{h}" for h in host_bases] + [
-            e.get("example") or f"https://{e['host']}{e['path']}" for e in param_eps]:
+    for u in [_b(h) for h in host_bases] + [
+            e.get("example") or (_b(e['host']) + e['path']) for e in param_eps]:
         low = u.split("?")[0].lower()
         if any(low.endswith(ext) for ext in (".js", ".css", ".png", ".jpg", ".svg", ".woff", ".ttf", ".gif", ".mp4")):
             continue
@@ -190,7 +207,7 @@ def next_batch(state: dict) -> list:
     for u in dom_pages[:CAP_DOM]:
         e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
     for ep in param_eps:
-        u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
+        u = ep.get("example") or (_b(ep['host']) + ep['path'])
         tag = f"{ep['host']}{ep['path']}"
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
@@ -214,12 +231,33 @@ def next_batch(state: dict) -> list:
                                              "fields": fm.get("fields", [])}, f"run_xxe:{act}"))
     xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
     for ep in xml_eps:
-        u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
+        u = ep.get("example") or (_b(ep['host']) + ep['path'])
         if u not in xxe_seen:
             e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
+    # auth-bypass SQLi on login-style endpoints (POST/JSON body — query probes can't
+    # reach it). Prefer captured POST forms; also probe discovered login-ish paths.
+    auth_seen = set()
+    for fm in (state.get("recon", {}).get("forms") or []):
+        act = fm.get("action")
+        if act and _LOGIN_SINK.search(_path(act)) and act not in auth_seen:
+            auth_seen.add(act)
+            e_steps.append(_step("run_auth_sqli", {"url": act, "fields": fm.get("fields", [])},
+                                 f"run_auth_sqli:{act}"))
+    for ep in inv:
+        base = (ep.get("example") or (_b(ep['host']) + ep['path'])).split("?")[0]
+        if _LOGIN_SINK.search(_path(base)) and base not in auth_seen:
+            auth_seen.add(base)
+            e_steps.append(_step("run_auth_sqli", {"url": base}, f"run_auth_sqli:{base}"))
+    # plus a curated set of well-known login paths per in-scope host root
+    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]:
+        for lp in _LOGIN_PATHS:
+            u = _b(h) + lp
+            if u not in auth_seen:
+                auth_seen.add(u)
+                e_steps.append(_step("run_auth_sqli", {"url": u}, f"run_auth_sqli:{h}{lp}"))
     for h in host_bases:
-        e_steps.append(_step("run_content_discovery", {"base_url": f"https://{h}"}, f"run_content_discovery:{h}"))
-        e_steps.append(_step("run_exposure", {"base_url": f"https://{h}"}, f"run_exposure:{h}"))
+        e_steps.append(_step("run_content_discovery", {"base_url": _b(h)}, f"run_content_discovery:{h}"))
+        e_steps.append(_step("run_exposure", {"base_url": _b(h)}, f"run_exposure:{h}"))
     e_steps = fresh(e_steps)
     if e_steps:
         return e_steps
@@ -228,7 +266,7 @@ def next_batch(state: dict) -> list:
     f_steps = []
     for h in sorted(set(roots) | set(subs)):
         f_steps.append(_step("run_nuclei",
-                             {"target": f"https://{h}", "tags": "tech,misconfig,exposed-panels,takeovers"},
+                             {"target": _b(h), "tags": "tech,misconfig,exposed-panels,takeovers"},
                              f"run_nuclei:{h}"))
     f_steps = fresh(f_steps)
     if f_steps:

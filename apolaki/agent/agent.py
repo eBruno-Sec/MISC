@@ -69,7 +69,7 @@ PHASE_OF = {
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
     "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",
     "run_ssrf": "probe", "run_deserialization": "probe", "run_exposure": "probe",
-    "run_xxe": "probe", "run_sqli": "probe", "run_cmdi": "probe",
+    "run_xxe": "probe", "run_sqli": "probe", "run_auth_sqli": "probe", "run_cmdi": "probe",
     "run_dalfox": "probe", "run_sqlmap": "probe",
     "generate_playbook": "guidance", "store_finding": "report",
 }
@@ -79,7 +79,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # is driving (deterministic / low_ai). These native probes only emit CONFIRMED
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
-    "run_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_dom_audit", "run_xxe", "run_deserialization",
+    "run_sqli", "run_auth_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_dom_audit", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -458,7 +458,8 @@ class BBHAgent:
                     self._plan_steps = steps
                     return
                 state = {"mode": self.mode, "roots": roots, "done": done,
-                         "recon": self.tools.recon, "urls": self.tools.urls}
+                         "recon": self.tools.recon, "urls": self.tools.urls,
+                         "bases": self.scope.base_map()}
                 batch = planner.next_batch(state)
                 if not batch:
                     break
@@ -599,9 +600,15 @@ class BBHAgent:
             "in-scope assets.")
 
     def _system(self) -> str:
+        # Surface any non-default target base (explicit scheme/port, e.g. a local app
+        # on http://host:42000) so the model probes it instead of assuming https:443.
+        nonstd = [u for u in self.scope.base_urls()
+                  if not (u.startswith("https://") and u.count(":") == 1)]
+        seed = ("\n\nTARGET BASE URLS — probe these EXACT scheme+port (do NOT assume https on 443):\n"
+                + "\n".join(f"- {u}" for u in sorted(nonstd))) if nonstd else ""
         return (SYSTEM_PROMPT + MODE_NOTES.get(self.mode, "") + self._recon_note()
                 + (self.memory_note or "")
-                + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}")
+                + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}" + seed)
 
     # ── ReAct loop guards (dedup + no-progress + budget) ─────────
     def _surface_size(self) -> int:
