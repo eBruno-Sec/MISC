@@ -63,7 +63,7 @@ PHASE_OF = {
     "run_asn": "recon", "run_github_recon": "recon",
     "run_httpx": "enum", "http_probe": "enum", "run_whatweb": "enum", "run_fingerprint": "enum",
     "run_katana": "enum", "fetch_openapi": "enum", "check_takeover": "enum",
-    "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe", "run_js_review": "enum",
+    "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe", "run_dom_audit": "probe", "run_js_review": "enum",
     "run_csrf": "enum", "run_oauth": "enum",
     "run_nmap": "scan", "run_nuclei": "scan", "run_zap": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
@@ -79,7 +79,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # is driving (deterministic / low_ai). These native probes only emit CONFIRMED
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
-    "run_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_xxe", "run_deserialization",
+    "run_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_dom_audit", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
