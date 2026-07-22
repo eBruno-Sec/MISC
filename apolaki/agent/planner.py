@@ -60,6 +60,13 @@ def _host(u: str) -> str:
         return ""
 
 
+def _path(u: str) -> str:
+    try:
+        return urlparse(u).path or "/"
+    except Exception:
+        return ""
+
+
 def _allowed(tool: str, mode: str) -> bool:
     tiers = _ALLOWED.get(mode, _ALLOWED["active"])
     return TOOL_PERMISSIONS.get(tool, PermissionLevel.ACTIVE) in tiers
@@ -152,6 +159,13 @@ def next_batch(state: dict) -> list:
         d.append(_step("run_graphql", {"url": f"https://{h}/graphql"}, f"run_graphql:{h}"))
     if js_urls:
         d.append(_step("run_js_review", {"urls": js_urls[:CAP_JS]}, "run_js_review"))
+    # http_probe parameterized/product pages so their POST forms (method + body
+    # fields) are captured into recon["forms"] BEFORE phase-E probes run — that is
+    # what lets run_xxe reach a POST XML body sink like the stock-check form.
+    inv_d = surface_mod.build_inventory(urls)
+    for ep in [e for e in inv_d if e.get("parameterized")][:CAP_ENDPOINTS]:
+        u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
+        d.append(_step("http_probe", {"url": u}, f"http_probe:{ep['host']}{ep['path']}"))
     d = fresh(d)
     if d:
         return d
@@ -173,13 +187,22 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_ssrf", {"url": u}, f"run_ssrf:{tag}"))
         if any(p in _CMD_PARAM for p in params_l):
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
-    # XML/SOAP body sinks (POST XML) — probe for XXE. These are path-driven, not
-    # query-param-driven, so they come from the whole inventory, not param_eps.
-    # The surface inventory flags them (body_sink); fall back to the local pattern.
+    # XXE — POST XML body sinks. Prefer real POST forms captured during enrich
+    # (their action + body field names let run_xxe build a schema-shaped XML body,
+    # e.g. the stock-check <productId>/<storeId> form); fall back to path-matched
+    # inventory endpoints. Both are path-driven, not query-param-driven.
+    xxe_seen = set()
+    for fm in (state.get("recon", {}).get("forms") or []):
+        act = fm.get("action")
+        if act and _XML_SINK.search(_path(act)) and act not in xxe_seen:
+            xxe_seen.add(act)
+            e_steps.append(_step("run_xxe", {"url": act, "method": "POST",
+                                             "fields": fm.get("fields", [])}, f"run_xxe:{act}"))
     xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
     for ep in xml_eps:
         u = ep.get("example") or f"https://{ep['host']}{ep['path']}"
-        e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
+        if u not in xxe_seen:
+            e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
     for h in host_bases:
         e_steps.append(_step("run_content_discovery", {"base_url": f"https://{h}"}, f"run_content_discovery:{h}"))
         e_steps.append(_step("run_exposure", {"base_url": f"https://{h}"}, f"run_exposure:{h}"))

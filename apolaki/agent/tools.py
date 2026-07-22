@@ -730,6 +730,20 @@ class ToolRegistry:
             elif l.startswith("/"):
                 abs_links.append(f"{base.scheme}://{base.netloc}{l}")
         self._add_urls([url] + abs_links)
+        # capture POST forms (action + method + body field names) so the planner
+        # can reach POST-body sinks (e.g. the XML stock-check form → run_xxe).
+        try:
+            import csrf_tool as _csrf
+            forms = self.recon.setdefault("forms", [])
+            seen_actions = {f.get("action") for f in forms}
+            for fm in _csrf.parse_forms(r["body"], r["final_url"] or url):
+                act = fm.get("action")
+                if (fm.get("method") == "POST" and act and act not in seen_actions
+                        and self.scope.validate(act)[0]):
+                    forms.append({"action": act, "method": "POST", "fields": fm.get("inputs", [])})
+                    seen_actions.add(act)
+        except Exception:
+            pass
         # feed guidance's http-header rules (first probe wins as the app root)
         if not self.recon.get("http"):
             self.recon["http"] = {"ok": True, "headers": r["headers"],
@@ -1694,6 +1708,15 @@ class ToolRegistry:
         import xxe_tool as xxe
         url = inp["url"]
         sample = inp.get("xml", "")
+        # Build a schema-shaped XML body from the captured form fields (e.g. the
+        # stock-check <productId>/<storeId> form) so the entity lands in a field the
+        # server actually parses — the missing link that stopped run_xxe reaching
+        # the POST sink. build_inband_xml injects the DOCTYPE + entity into it.
+        if not sample and inp.get("fields"):
+            inner = "".join(f"<{re.sub(r'[^A-Za-z0-9_.-]', '', str(fld))}>1</{re.sub(r'[^A-Za-z0-9_.-]', '', str(fld))}>"
+                            for fld in inp["fields"] if str(fld).strip())
+            if inner:
+                sample = f"<data>{inner}</data>"
         ctype = inp.get("content_type", "application/xml")
         headers = {"User-Agent": _UA, "Content-Type": ctype, **(self.session_headers or {})}
         findings = []

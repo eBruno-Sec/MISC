@@ -1581,6 +1581,40 @@ def test_build_inventory_drops_artifacts():
     assert len(inv) == 2
 
 
+def test_xxe_post_form_wiring_end_to_end():
+    import planner, xss_tool  # noqa: F401
+    import xxe_tool as xxe
+    import csrf_tool as csrf
+    # 1) a POST XML form is parsed (method + body field names)
+    html = ('<form id=stockCheckForm action="/catalog/product/stock" method=POST>'
+            '<input name=productId><input name=storeId></form>')
+    forms = csrf.parse_forms(html, "https://ginandjuice.shop/catalog/product?productId=1")
+    assert forms[0]["method"] == "POST" and forms[0]["inputs"] == ["productId", "storeId"]
+    # 2) the deterministic planner routes that form to run_xxe as a POST with fields
+    state = {"mode": "full", "done": set(), "roots": ["ginandjuice.shop"], "subs": [],
+             "urls": ["https://ginandjuice.shop/catalog?category=1"],
+             "recon": {"live_hosts": [{"url": "https://ginandjuice.shop"}], "subdomains": [],
+                       "forms": [{"action": "https://ginandjuice.shop/catalog/product/stock",
+                                  "method": "POST", "fields": ["productId", "storeId"]}]}}
+    xxe_step = None
+    for _ in range(15):
+        batch = planner.next_batch(state)
+        if not batch:
+            break
+        for s in batch:
+            if s["tool"] == "run_xxe" and s["input"].get("method") == "POST":
+                xxe_step = s
+            state["done"].add(s["key"])
+        if xxe_step:
+            break
+    assert xxe_step and xxe_step["input"]["fields"] == ["productId", "storeId"]
+    # 3) run_xxe builds a schema-shaped body and injects the external entity into a field
+    sample = "<data>" + "".join(f"<{f}>1</{f}>" for f in ["productId", "storeId"]) + "</data>"
+    payload = xxe.build_inband_xml("file:///etc/passwd", sample)
+    assert "<!DOCTYPE" in payload and "SYSTEM \"file:///etc/passwd\"" in payload
+    assert "<productId>&xxe;</productId>" in payload
+
+
 # ── access-check false positive (public page must not flag) ──────
 def test_access_verdict_public_page_not_flagged():
     # anonymous 200 with content, no roles, non-protected URL -> NO anomaly
