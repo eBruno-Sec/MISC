@@ -301,11 +301,12 @@ class BBHAgent:
             yield {"type": "finding", "finding": fin}
 
         # Auto-store confirmed findings from the native confirmatory probes when NO
-        # model is driving (deterministic / low_ai). Without this the probes confirm
-        # e.g. a SQLi and it is silently dropped — a deterministic scan would report
-        # zero findings. In agentic mode the model stores them, so we don't here
-        # (avoids duplicates). Deduped by fingerprint.
-        if (not result.error and self.strategy in ("deterministic", "low_ai")
+        # model is driving (deterministic / low_ai, OR agentic that DEGRADED to a
+        # deterministic fallback after an AI failure). Without this the probes confirm
+        # e.g. a SQLi and it is silently dropped — the scan would report zero findings.
+        # In a live agentic run the model stores them, so we don't here (avoids
+        # duplicates). Deduped by fingerprint.
+        if (not result.error and (self.strategy in ("deterministic", "low_ai") or self.ai_degraded)
                 and tool_name in _AUTO_STORE_TOOLS):
             async for ev in self._auto_store(result):
                 yield ev
@@ -423,10 +424,30 @@ class BBHAgent:
             async for ev in self._run_low_ai(objective, session_id):
                 yield ev
         else:
+            # Agentic (ReAct). The credential pre-check above cannot see a RUNTIME
+            # provider failure (e.g. a 429 free-tier quota hit on the first model
+            # call), which would otherwise fail the whole run with zero findings.
+            # Catch it and degrade to full deterministic coverage so the scan still
+            # produces results (directive: stay useful when AI is rate-limited).
             gen = self._run_openrouter(objective, session_id) if self.provider == "openrouter" \
                 else self._run_anthropic(objective, session_id)
-            async for event in gen:
-                yield event
+            try:
+                async for event in gen:
+                    yield event
+            except Exception as ex:
+                low = str(ex).lower()
+                ai_err = any(k in low for k in ("429", "quota", "rate limit", "rate-limit",
+                                                "timeout", "timed out", "401", "unauthorized",
+                                                "authentication", "insufficient"))
+                if not (ai_err or not self.findings):
+                    raise
+                self.ai_degraded = True
+                self.ai_note = (f"Agentic AI unavailable ({type(ex).__name__}) — completed with "
+                                "deterministic coverage.")
+                yield {"type": "info", "content": "AI rate-limited/unavailable — falling back to "
+                       "deterministic coverage for this run."}
+                async for ev in self._run_deterministic(session_id):
+                    yield ev
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev

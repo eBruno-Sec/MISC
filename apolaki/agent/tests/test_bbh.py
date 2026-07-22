@@ -2204,6 +2204,37 @@ def test_agent_strategy_budget_defaults():
     assert mk("low_ai", max_ai_calls=5).max_ai_calls == 5   # explicit override
 
 
+def test_agentic_degrades_to_deterministic_on_quota():
+    # A runtime 429 (free-tier quota) on the first model call must NOT fail the run
+    # with zero findings — it degrades to full deterministic coverage.
+    import agent as agent_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["x.com"], [], "P")
+    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="agentic", mission_id=None)
+    a.provider = "openrouter"
+    a._ai_usable = lambda: True                         # pass the credential pre-check
+
+    async def boom(o, sid):
+        raise RuntimeError("Provider quota reached (HTTP 429) — free-tier daily cap")
+        yield {}                                        # noqa — makes this an async generator
+
+    ran = {"det": False}
+
+    async def det(sid):
+        ran["det"] = True
+        yield {"type": "info", "content": "deterministic fallback ran"}
+
+    a._run_openrouter = boom
+    a._run_deterministic = det
+
+    async def go():
+        return [ev async for ev in a.run("obj", "s")]
+
+    evs = asyncio.new_event_loop().run_until_complete(go())
+    assert ran["det"] is True and a.ai_degraded is True
+    assert any("deterministic coverage" in (e.get("content", "")) for e in evs)
+    assert "429" in a.ai_note or "quota" in a.ai_note.lower() or "unavailable" in a.ai_note.lower()
+
+
 class _PlanTools:
     """Tool stand-in for a deterministic run: no network, records executed tools."""
     def __init__(self):
