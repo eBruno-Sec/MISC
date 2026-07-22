@@ -1,7 +1,8 @@
 """
-Report generation: HackerOne/Bugcrowd Markdown (original), a dark-themed
-standalone HTML report (APOLLO-style, every field HTML-escaped), plus CSV and
-JSON export. All deterministic; no network.
+Report generation: HackerOne/Bugcrowd Markdown (original), a light-default
+standalone HTML report (client-ready, ink-safe print, one-click dark toggle,
+every field HTML-escaped), plus CSV and native JSON data package. All
+deterministic; no network.
 """
 import csv
 import html as _html
@@ -72,8 +73,12 @@ def _leads_md(leads: list) -> str:
 
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
-                     ai_summary: str = None, execution: dict = None, leads: list = None) -> str:
+                     ai_summary: str = None, execution: dict = None, leads: list = None,
+                     delta: dict = None, tool_ledger: dict = None) -> str:
     now = _now()
+    findings = _with_capec(findings)
+    delta_block = "\n".join(_delta_lines(delta, findings))
+    ledger_block = "\n".join(_ledger_md(tool_ledger))
     status_banner = _status_note(status)          # only failed/stopped/interrupted
     exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
     banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
@@ -91,6 +96,8 @@ def generate_report(program: str, findings: list, scope: dict,
             + ai_block
             + "No confirmed vulnerabilities were recorded" + tail + "\n"
             + leads_md
+            + (("\n" + delta_block) if delta_block else "")
+            + (("\n" + ledger_block) if ledger_block else "")
         )
 
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
@@ -132,6 +139,8 @@ def generate_report(program: str, findings: list, scope: dict,
             f"**CVSS:** {f.get('cvss_score', 'N/A')}{(' ' + f.get('cvss_vector', '')) if f.get('cvss_vector') else ''}",
             f"**CWE:** {f.get('cwe', 'N/A')}",
         ]
+        if f.get("capec"):
+            lines.append(f"**CAPEC:** {f['capec']}")
         if f.get("owasp"):
             lines.append(f"**OWASP:** {f['owasp']}")
         _bi = business_impact(f)
@@ -157,10 +166,14 @@ def generate_report(program: str, findings: list, scope: dict,
         lines.append("")
     if leads_md:
         lines.append(leads_md)
+    if delta_block:
+        lines += ["", delta_block]
+    if ledger_block:
+        lines += ["", ledger_block]
     return "\n".join(lines)
 
 
-# ── HTML (dark-themed standalone, all fields escaped) ────────────
+# ── HTML (light-default standalone, dark toggle, all fields escaped) ──
 # ── engagement / risk helpers ────────────────────────────────────
 _ENGAGEMENT = {"passive": "Passive Reconnaissance", "active": "Active Assessment",
                "full": "Full Penetration Test"}
@@ -239,6 +252,51 @@ _CWE_FAMILY = {
     "cwe-352": "csrf", "cwe-942": "cors", "cwe-200": "exposure", "cwe-527": "git_exposure",
 }
 
+# CWE -> CAPEC attack pattern (MITRE). Only well-established 1:1 mappings are
+# listed; an unmapped CWE simply gets no CAPEC rather than a guessed one
+# (truth-first — same discipline as business_impact()).
+_CWE_CAPEC = {
+    "cwe-89": "CAPEC-66: SQL Injection",
+    "cwe-79": "CAPEC-63: Cross-Site Scripting (XSS)",
+    "cwe-78": "CAPEC-88: OS Command Injection",
+    "cwe-22": "CAPEC-126: Path Traversal",
+    "cwe-611": "CAPEC-201: XML External Entity (XXE) Injection",
+    "cwe-918": "CAPEC-664: Server-Side Request Forgery",
+    "cwe-352": "CAPEC-62: Cross-Site Request Forgery",
+    "cwe-601": "CAPEC-194: Fake the Source of Data (Open Redirect)",
+    "cwe-113": "CAPEC-34: HTTP Response Splitting",
+    "cwe-94": "CAPEC-242: Code Injection",
+    "cwe-1336": "CAPEC-242: Code Injection (Server-Side Template Injection)",
+    "cwe-502": "CAPEC-586: Object Injection",
+    "cwe-200": "CAPEC-116: Excavation (Information Exposure)",
+    "cwe-285": "CAPEC-1: Accessing Functionality Not Properly Constrained by ACLs",
+    "cwe-639": "CAPEC-180: Exploiting Incorrectly Configured Access Control",
+    "cwe-284": "CAPEC-180: Exploiting Incorrectly Configured Access Control",
+}
+
+
+def capec_for(finding: dict):
+    """CAPEC attack pattern for a finding — an explicit `capec` field wins, else a
+    known CWE->CAPEC mapping, else None (never invented)."""
+    existing = str(finding.get("capec") or "").strip()
+    if existing:
+        return existing
+    cwe = str(finding.get("cwe") or "").strip().lower()
+    return _CWE_CAPEC.get(cwe)
+
+
+def _with_capec(findings: list) -> list:
+    """Return finding copies with `capec` filled where derivable — used at render/
+    export time so CWE-tagged findings carry an attack-pattern id without mutating
+    the stored records or touching the scan path."""
+    out = []
+    for f in findings or []:
+        cap = capec_for(f)
+        if cap and not f.get("capec"):
+            f = {**f, "capec": cap}
+        out.append(f)
+    return out
+
 
 def business_impact(finding: dict):
     """(plain-English meaning, business consequence) for a finding, or None when we
@@ -267,6 +325,67 @@ def risk_score(findings: list) -> dict:
     else:
         label, color = ("Informational" if findings else "No Confirmed Risk"), SEV_COLORS["info"]
     return {"score": score, "label": label, "color": color}
+
+
+# ── Since-Last-Scan (historical delta) — truth-first, never calls "fixed" ──
+def _delta_lines(delta: dict, findings: list) -> list:
+    """Markdown lines for the 'Since Last Scan' section from a memory diff.
+    A finding present last run but absent now is 'Not Re-confirmed' — NEVER
+    'fixed'/'resolved' — and requires manual verification before closure."""
+    if not delta or not delta.get("has_prior"):
+        return []
+    fd = delta.get("findings") or {}
+    new_f = fd.get("added") or []
+    not_reconf = fd.get("removed") or []
+    lines = ["## Since Last Scan", "",
+             "_Compared with the most recent prior mission on this target (cross-session "
+             "memory, keyed by scope). Absence from this run is NOT proof of a fix._", ""]
+    if not findings and not_reconf:
+        lines += [f"> **0 vulnerabilities were confirmed in this run. However, {len(not_reconf)} "
+                  f"previously confirmed finding{'s' if len(not_reconf) != 1 else ''} "
+                  f"{'were' if len(not_reconf) != 1 else 'was'} not re-confirmed and require verification "
+                  f"before closure.**", ""]
+    def _sec(title, items, render):
+        if not items:
+            return []
+        return [f"**{title} ({len(items)}):**", ""] + [render(x) for x in items] + [""]
+    lines += _sec("New Findings", new_f, lambda f: f"- {f.get('title','finding')} — `{f.get('target','')}`")
+    lines += _sec("Not Re-confirmed (verify — not necessarily fixed)", not_reconf,
+                  lambda f: f"- {f.get('title','finding')} — `{f.get('target','')}` _(prior "
+                            f"{(f.get('severity') or 'info')}; confirm status manually)_")
+    for kind, label in (("subdomains", "New Subdomains"), ("endpoints", "New Endpoints"),
+                        ("tech", "New Technology")):
+        added = (delta.get(kind) or {}).get("added") or []
+        lines += _sec(label, added, lambda v: f"- `{v}`")
+    return lines
+
+
+def _zap_status_text(status: str) -> str:
+    return {"executed": "ZAP Executed", "not_configured": "ZAP Skipped Cleanly — Not Configured",
+            "failed": "ZAP Failed", "not_invoked": "ZAP Not Invoked"}.get(
+        (status or "not_invoked"), "ZAP Not Invoked")
+
+
+def _ledger_md(ledger: dict) -> list:
+    """Markdown 'Methodology & Tool Ledger' — what ran, what was skipped and why,
+    ZAP status, auth posture, AI usage. Satisfies the depth/coverage bar."""
+    if not ledger:
+        return []
+    lines = ["## Methodology & Tool Ledger", ""]
+    auth = "Authenticated (operator headers supplied)" if ledger.get("authenticated") else "Unauthenticated"
+    strat = (ledger.get("strategy") or "").replace("_", "-") or "n/a"
+    lines += [f"- **Execution strategy:** {strat}",
+              f"- **AI calls used:** {ledger.get('ai_calls', 0)}",
+              f"- **Authentication:** {auth}",
+              f"- **ZAP (DAST):** {_zap_status_text(ledger.get('zap_status'))}", ""]
+    tools = ledger.get("tools") or []
+    if tools:
+        lines += ["| Tool | Status | Calls | Findings | Note |", "|---|---|---|---|---|"]
+        for t in tools:
+            lines.append(f"| {t.get('tool','')} | {t.get('status','')} | {t.get('calls',0)} "
+                         f"| {t.get('findings',0)} | {(t.get('note') or '').replace('|','/')} |")
+        lines.append("")
+    return lines
 
 
 def _exec_summary_text(program, findings, leads, execution, counts) -> list:
@@ -298,9 +417,11 @@ def _exec_summary_text(program, findings, leads, execution, counts) -> list:
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
-                         attack_surface: dict = None, playbook: list = None, mode: str = None) -> str:
+                         attack_surface: dict = None, playbook: list = None, mode: str = None,
+                         delta: dict = None, tool_ledger: dict = None, report_id: str = None) -> str:
     e = _html.escape
     leads = leads or []
+    findings = _with_capec(findings)
     counts = _counts(findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
     rk = risk_score(findings)
@@ -356,6 +477,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             <span>Target: <code>{e(str(f.get('target','')))}</code></span>
             <span>CVSS: {e(str(cvss)) if cvss else 'N/A'}</span>
             <span>CWE: {e(str(f.get('cwe','N/A')))}</span>
+            {f"<span>CAPEC: {e(str(f.get('capec')))}</span>" if f.get('capec') else ''}
             {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
             <span class="tag-conf">CONFIRMED</span>
           </div>
@@ -413,6 +535,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
             curls = "".join(f"<pre class='ev'>{e(str(c.get('cmd') if isinstance(c, dict) else c))}</pre>"
                             for c in (p.get("curl_steps") or [])[:2])
             pays = ", ".join(e(str(x)) for x in (p.get("payloads") or [])[:4])
+            vuln_if = "".join(f"<li>{e(str(s))}</li>" for s in (p.get("vulnerable_if") or [])[:5])
+            safe_if = "".join(f"<li>{e(str(s))}</li>" for s in (p.get("safe_if") or [])[:5])
+            fp = p.get("false_positive_check") or ""
+            tmpl = p.get("evidence_template") or ""
             sev = (p.get("severity") or "info").lower()
             blocks.append(
                 f"<details class='pb'><summary><span class='sev' style='--c:{SEV_COLORS.get(sev,'#6a8a9a')}'>"
@@ -422,10 +548,15 @@ def generate_html_report(program: str, findings: list, scope: dict,
                 + (f"<h4>How to test</h4><ol>{how}</ol>" if how else "")
                 + (f"<h4>Payloads</h4><p><code>{pays}</code></p>" if pays else "")
                 + (f"<h4>cURL</h4>{curls}" if curls else "")
+                + (f"<h4>Vulnerable if</h4><ul class='vuln'>{vuln_if}</ul>" if vuln_if else "")
+                + (f"<h4>Safe / inconclusive if</h4><ul class='safe'>{safe_if}</ul>" if safe_if else "")
+                + (f"<h4>False-positive check</h4><p class='sub'>{e(str(fp))}</p>" if fp else "")
+                + (f"<h4>Evidence to capture</h4><pre class='ev'>{e(str(tmpl))}</pre>" if tmpl else "")
                 + "</details>")
         pb_html = ("<h2 id='playbook'>Manual Testing Playbook</h2>"
-                   "<p class='sub'>Per-surface guidance (what to test, how, payloads, cURL) for manual "
-                   "verification and deeper exploitation.</p>" + "".join(blocks))
+                   "<p class='sub'>Per-surface PoC walkthroughs — what to test, how, payloads, cURL, how to "
+                   "READ the result (vulnerable vs safe), a false-positive check, and an evidence template. "
+                   "These are manual test recommendations, not confirmed findings.</p>" + "".join(blocks))
 
     # appendix: tools + severity definitions
     tools_used = sorted({str(p.get("tool")) for p in []})  # reserved
@@ -437,6 +568,71 @@ def generate_html_report(program: str, findings: list, scope: dict,
                                    ("info", "Observation with no direct security impact.")))
     appendix = ("<h2 id='appendix'>Appendix — Severity Definitions</h2>"
                 f"<table class='tbl'><tr><th>Level</th><th>Meaning</th></tr>{sevdefs}</table>")
+
+    # methodology & tool ledger (tools run / skipped + why, ZAP status, auth, AI)
+    method_html = ""
+    if tool_ledger:
+        zs = tool_ledger.get("zap_status")
+        zcls = {"executed": "#1f9d6b", "failed": "#ff3d6b",
+                "not_configured": "#c98a2b"}.get(zs, "#6a8a9a")
+        auth = ("Authenticated (operator headers supplied)" if tool_ledger.get("authenticated")
+                else "Unauthenticated")
+        strat = e((tool_ledger.get("strategy") or "n/a").replace("_", "-"))
+        rows = ""
+        for t in (tool_ledger.get("tools") or []):
+            st = (t.get("status") or "").lower()
+            scol = {"executed": "#1f9d6b", "failed": "#ff3d6b",
+                    "skipped": "#c98a2b"}.get(st, "#6a8a9a")
+            rows += (f"<tr><td><code>{e(str(t.get('tool','')))}</code></td>"
+                     f"<td><span class='sev' style='--c:{scol}'>{e(st.upper() or 'N/A')}</span></td>"
+                     f"<td>{e(str(t.get('calls',0)))}</td><td>{e(str(t.get('findings',0)))}</td>"
+                     f"<td>{e(str(t.get('note') or ''))}</td></tr>")
+        tbl = (f"<table class='tbl'><tr><th>Tool</th><th>Status</th><th>Calls</th><th>Findings</th>"
+               f"<th>Note</th></tr>{rows}</table>") if rows else ""
+        method_html = (
+            "<h2 id='methodology'>Methodology &amp; Tool Ledger</h2>"
+            "<div class='cov-grid'>"
+            f"<div class='cov'><span>{e(strat)}</span><label>Strategy</label></div>"
+            f"<div class='cov'><span>{e(str(tool_ledger.get('ai_calls', 0)))}</span><label>AI Calls</label></div>"
+            f"<div class='cov'><span style='color:{zcls}'>{e(_zap_status_text(zs).split(' ')[1] if _zap_status_text(zs).count(' ')>=1 else 'ZAP')}</span><label>ZAP</label></div>"
+            "</div>"
+            f"<p class='sub'><b>ZAP (DAST):</b> <span style='color:{zcls}'>{e(_zap_status_text(zs))}</span> · "
+            f"<b>Auth:</b> {e(auth)}</p>" + tbl)
+
+    # since last scan (historical delta — never says "fixed")
+    delta_html = ""
+    if delta and delta.get("has_prior"):
+        fd = delta.get("findings") or {}
+        new_f = fd.get("added") or []
+        not_reconf = fd.get("removed") or []
+        parts = ["<h2 id='history'>Since Last Scan</h2>",
+                 "<p class='sub'>Compared with the most recent prior mission on this target "
+                 "(cross-session memory, keyed by scope). Absence from this run is <strong>not</strong> "
+                 "proof of a fix.</p>"]
+        if not findings and not_reconf:
+            parts.append(
+                "<div class='statusbar'>0 vulnerabilities were confirmed in this run. However, "
+                f"{len(not_reconf)} previously confirmed finding"
+                f"{'s' if len(not_reconf) != 1 else ''} "
+                f"{'were' if len(not_reconf) != 1 else 'was'} not re-confirmed and require verification "
+                "before closure.</div>")
+        if new_f:
+            items = "".join(f"<li>{e(str(f.get('title','finding')))} — <code>{e(str(f.get('target','')))}</code></li>"
+                            for f in new_f)
+            parts.append(f"<h4>New Findings ({len(new_f)})</h4><ul>{items}</ul>")
+        if not_reconf:
+            items = "".join(f"<li>{e(str(f.get('title','finding')))} — <code>{e(str(f.get('target','')))}</code> "
+                            f"<span class='sub'>(prior {e(str(f.get('severity') or 'info'))}; confirm manually)</span></li>"
+                            for f in not_reconf)
+            parts.append("<h4>Not Re-confirmed <span class='sub'>(verify — not necessarily fixed)</span></h4>"
+                         f"<ul>{items}</ul>")
+        for kind, label in (("subdomains", "New Subdomains"), ("endpoints", "New Endpoints"),
+                            ("tech", "New Technology")):
+            added = (delta.get(kind) or {}).get("added") or []
+            if added:
+                items = "".join(f"<li><code>{e(str(v))}</code></li>" for v in added[:40])
+                parts.append(f"<h4>{label} ({len(added)})</h4><ul>{items}</ul>")
+        delta_html = "".join(parts)
 
     # header meta / banners
     scope_str = e(", ".join(scope.get("in_scope", [])))
@@ -462,8 +658,12 @@ def generate_html_report(program: str, findings: list, scope: dict,
         toc_items.append(("leads", "Unconfirmed Leads"))
     if rem_html:
         toc_items.append(("remediation", "Priority Remediation"))
+    if delta_html:
+        toc_items.append(("history", "Since Last Scan"))
     if pb_html:
         toc_items.append(("playbook", "Manual Testing Playbook"))
+    if method_html:
+        toc_items.append(("methodology", "Methodology & Tool Ledger"))
     toc_items.append(("appendix", "Appendix"))
     toc = "".join(f"<li><a href='#{i}'>{lbl}</a></li>" for i, lbl in toc_items)
 
@@ -478,7 +678,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
 <style>
-:root{{--bg:#0a0e14;--surface:#111823;--surface2:#0d141d;--border:#1e2c3a;--text:#c8d6e0;--dim:#7d93a6;--bright:#f0f6fb;--accent:#38bdf8}}
+/* Light by default — client-ready / ink-safe. Dark is a one-click toggle
+   (data-theme="dark"); print always forces light regardless of the toggle. */
+:root{{--bg:#f5f7fa;--surface:#ffffff;--surface2:#eef2f7;--border:#d4dce4;--text:#1b2733;--dim:#5b6b7a;--bright:#0b1520;--accent:#0a58ca}}
+:root[data-theme="dark"]{{--bg:#0a0e14;--surface:#111823;--surface2:#0d141d;--border:#1e2c3a;--text:#c8d6e0;--dim:#7d93a6;--bright:#f0f6fb;--accent:#38bdf8}}
 *{{box-sizing:border-box}}
 body{{margin:0;background:var(--bg);color:var(--text);line-height:1.6;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}}
@@ -542,19 +745,25 @@ table.tbl th,table.tbl td{{border:1px solid var(--border);padding:.45rem .6rem;t
 table.tbl th{{color:var(--dim);text-transform:uppercase;font-size:.64rem;letter-spacing:.06em;background:var(--surface2)}}
 details.pb{{border:1px solid var(--border);border-radius:6px;background:var(--surface);margin:.5rem 0;padding:.4rem .8rem}}
 details.pb summary{{cursor:pointer;font-weight:600;color:var(--bright)}}
+ul.vuln li{{color:#c0392b}}ul.safe li{{color:#1f9d6b}}
+:root[data-theme="dark"] ul.vuln li{{color:#ff6b8a}}:root[data-theme="dark"] ul.safe li{{color:#4fd1a5}}
 .statusbar{{background:rgba(231,148,87,.14);border:1px solid #e79457;color:#e79457;padding:.6rem .8rem;border-radius:5px;font-size:.8rem;margin:.6rem 0}}
 .execbar{{background:var(--surface);border:1px solid var(--border);color:var(--dim);padding:.45rem .8rem;border-radius:5px;font-size:.76rem;margin:.6rem 0}}
 footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid var(--border);padding-top:1rem}}
 .pdfbtn{{position:fixed;top:1rem;right:1rem;background:var(--accent);color:#001;border:none;
   font-size:.8rem;font-weight:700;padding:.5rem .9rem;cursor:pointer;border-radius:5px;z-index:10}}
 @media print{{
-  :root{{--bg:#fff;--surface:#fff;--surface2:#f5f7fa;--border:#c3ccd6;--text:#14181d;--dim:#55606b;--bright:#000;--accent:#0a58ca}}
+  /* force light ink-safe output even if the dark toggle is active */
+  :root,:root[data-theme="dark"]{{--bg:#fff;--surface:#fff;--surface2:#f5f7fa;--border:#c3ccd6;--text:#14181d;--dim:#55606b;--bright:#000;--accent:#0a58ca}}
   body{{background:#fff}}.wrap{{max-width:100%;padding:0}}
   .cover,.posture,.toc,.finding,.summary{{break-inside:avoid}}
   .gauge::before{{background:#fff}}
-  .pdfbtn,.noprint{{display:none!important}}
+  .pdfbtn,.themebtn,.noprint{{display:none!important}}
 }}
+.themebtn{{position:fixed;top:1rem;right:7.4rem;background:var(--surface);color:var(--text);
+  border:1px solid var(--border);font-size:.8rem;padding:.5rem .8rem;cursor:pointer;border-radius:5px;z-index:10}}
 </style></head><body>
+<button class="themebtn noprint" onclick="var r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'':'dark';this.textContent=r.dataset.theme==='dark'?'☀ Light':'🌙 Dark';">🌙 Dark</button>
 <button class="pdfbtn noprint" onclick="window.print()">Save as PDF</button>
 <div class="wrap">
 <div class="cover">
@@ -564,6 +773,8 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   <div class="cmeta">
     <span>Target: <b>{scope_str or e(program)}</b></span>
     <span>Engagement: <b>{e(engagement)}</b></span>
+    <span>Scan mode: <b>{e((mode or 'n/a').title())}</b></span>
+    <span>Report ID: <b>{e(report_id or '—')}</b></span>
     <span>Date: <b>{e(_now())}</b></span>
     <span>Confirmed findings: <b>{len(findings)}</b></span>
     <span>Unconfirmed leads: <b>{len(leads)}</b></span>
@@ -594,7 +805,9 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {chain_html}
 {leads_html}
 {rem_html}
+{delta_html}
 {pb_html}
+{method_html}
 {appendix}
 <footer>Generated by Apolaki · deterministic, truth-first reporting. Confirmed findings carry reproducible
 evidence; unconfirmed leads are advisory and must be verified before submission. Authorized security research only.</footer>
@@ -602,31 +815,60 @@ evidence; unconfirmed leads are advisory and must be verified before submission.
 
 
 # ── CSV / JSON export ────────────────────────────────────────────
-_CSV_FIELDS = ["title", "severity", "target", "cvss_score", "cwe", "owasp", "impact", "description"]
+_CSV_FIELDS = ["title", "severity", "target", "cvss_score", "cwe", "capec", "owasp", "impact", "description"]
 
 
 def findings_csv(findings: list) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
     w.writeheader()
-    for f in sorted(findings, key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)):
+    for f in sorted(_with_capec(findings), key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)):
         w.writerow({k: f.get(k, "") for k in _CSV_FIELDS})
     return buf.getvalue()
 
 
+DATA_PACKAGE_VERSION = "1.1"
+
+
 def findings_json(program: str, findings: list, scope: dict,
-                  coverage: dict = None, chains: list = None, leads: list = None) -> str:
+                  coverage: dict = None, chains: list = None, leads: list = None,
+                  config: dict = None, attack_surface: dict = None, playbook: list = None,
+                  tool_ledger: dict = None, delta: dict = None, execution: dict = None,
+                  report_id: str = None) -> str:
+    """Native JSON data package. The original keys (program, generated, scope, counts,
+    lead_counts, coverage, chains, findings, leads) are always present and unchanged;
+    the richer sections below are additive so existing consumers never break."""
     leads = leads or []
-    return json.dumps({
+    findings = _with_capec(findings)
+    pkg = {
+        # ── report metadata ──
+        "report_id": report_id or "",
         "program": program,
         "generated": _now(),
+        "generator": {"name": "Apolaki", "data_package_version": DATA_PACKAGE_VERSION},
+        # ── exact scan configuration ──
+        "config": config or {},
+        "execution": execution or {},
         "scope": scope,
+        # ── risk calculation (confirmed findings only) ──
+        "risk": risk_score(findings),
         "counts": _counts(findings),
         "lead_counts": _counts(leads),
+        # ── coverage / attack surface / methodology ──
         "coverage": coverage or {},
+        "attack_surface": attack_surface or {},
+        "tool_ledger": tool_ledger or {},
+        # ── results ──
         "chains": chains or [],
         "findings": findings,
         # Unconfirmed candidate/static signals — never confirmed vulnerabilities.
         # Consumers must treat these as advisory until manually verified.
         "leads": leads,
-    }, indent=2, default=str)
+        # ── manual playbooks (recommendations, not findings) ──
+        "playbooks": playbook or [],
+        # ── prior-scan delta (never treat 'not re-confirmed' as fixed) ──
+        "since_last_scan": delta or {},
+        # ── export generation metadata ──
+        "export": {"generated_at": _now(), "format": "json", "version": DATA_PACKAGE_VERSION},
+    }
+    return json.dumps(pkg, indent=2, default=str)

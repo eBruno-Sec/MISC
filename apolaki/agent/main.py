@@ -466,12 +466,85 @@ def _coverage(session_id: str) -> dict:
             "findings": len(db.get_findings(session_id))}
 
 
+def _tool_ledger(session_id: str) -> dict:
+    """Per-tool execution ledger (executed / skipped / failed + why) plus ZAP status,
+    auth posture, strategy and AI-call count — for the report Methodology section.
+    Derived deterministically from the persisted event log; no scan re-run."""
+    m = db.get_mission(session_id)
+    ctx = (m or {}).get("context", {}) or {}
+    ex = ctx.get("execution", {}) or {}
+    agg = {}
+    for l in db.get_logs(session_id, limit=4000):
+        t = l.get("tool")
+        if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error", "scope_block"):
+            continue
+        a = agg.setdefault(t, {"calls": 0, "findings": 0, "note": "", "error": ""})
+        typ = l.get("type")
+        if typ == "tool_call":
+            a["calls"] += 1
+        elif typ == "tool_result":
+            a["findings"] += int(l.get("count") or 0)
+            out = str(l.get("output") or "")
+            if out and not a["note"]:
+                a["note"] = out[:140]
+        else:  # tool_error / scope_block
+            a["error"] = str(l.get("error") or "")[:140]
+    tools = []
+    for t, a in sorted(agg.items()):
+        low = (a["note"] + " " + a["error"]).lower()
+        if a["error"]:
+            status, note = "failed", a["error"]
+        elif any(k in low for k in ("not configured", "skipped", "skip cleanly", "disabled")):
+            status, note = "skipped", a["note"]
+        else:
+            status, note = "executed", a["note"]
+        tools.append({"tool": t, "status": status, "calls": a["calls"],
+                      "findings": a["findings"], "note": note})
+    z = agg.get("run_zap")
+    if not z:
+        zap = "not_invoked"
+    elif z["error"]:
+        zap = "failed"
+    elif "not configured" in z["note"].lower():
+        zap = "not_configured"
+    else:
+        zap = "executed"
+    return {"tools": tools, "zap_status": zap,
+            "authenticated": bool(ctx.get("authenticated")),
+            "strategy": ex.get("strategy") or ctx.get("strategy") or "",
+            "ai_calls": ex.get("ai_calls", 0)}
+
+
+def _delta(session_id: str) -> dict:
+    """'Since last scan' diff for the report — current surface vs the most recent
+    prior mission on the same target (same source as /memory/{id}/diff). Best-effort;
+    {} when unavailable so the report never breaks on a cold target."""
+    try:
+        m = db.get_mission(session_id)
+        if not m:
+            return {}
+        recon, urls, findings = _graph_inputs(session_id)
+        curr = memory_mod.snapshot(recon, urls, findings)
+        prior = db.get_prior_snapshot(memory_mod.target_key(m["scope"]), before_mission=session_id)
+        return memory_mod.diff(prior, curr)
+    except Exception:
+        return {}
+
+
+def _scan_config(m) -> dict:
+    ctx = (m.get("context", {}) or {})
+    return {"mode": m.get("mode"), "strategy": ctx.get("strategy"),
+            "recon_cycles": ctx.get("recon_cycles"), "max_ai_calls": ctx.get("max_ai_calls"),
+            "authenticated": bool(ctx.get("authenticated"))}
+
+
 @app.get("/report/{session_id}")
 async def get_report(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
-                                    execution=_execution(m), leads=_leads(m))
+                                    execution=_execution(m), leads=_leads(m),
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
 
 
@@ -480,7 +553,8 @@ async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
-                                    execution=_execution(m), leads=_leads(m))
+                                    execution=_execution(m), leads=_leads(m),
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
     fname = f"bbh-report-{session_id}.md"
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -493,7 +567,8 @@ async def get_report_html(session_id: str, download: bool = False):
         m["program"], findings, scope, coverage, chains,
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
-        mode=m.get("mode"))
+        mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+        report_id=session_id)
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
@@ -508,7 +583,11 @@ async def get_report_csv(session_id: str):
 async def get_report_json(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
     return PlainTextResponse(
-        report_mod.findings_json(m["program"], findings, scope, coverage, chains, leads=_leads(m)),
+        report_mod.findings_json(
+            m["program"], findings, scope, coverage, chains, leads=_leads(m),
+            config=_scan_config(m), attack_surface=_attack_surface(session_id),
+            playbook=m["context"].get("playbook", []), tool_ledger=_tool_ledger(session_id),
+            delta=_delta(session_id), execution=_execution(m), report_id=session_id),
         media_type="application/json")
 
 
