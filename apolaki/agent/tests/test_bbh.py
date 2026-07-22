@@ -2076,7 +2076,7 @@ def test_report_includes_ai_summary():
     md = report.generate_report("P", [], {"in_scope": ["x.com"]}, ai_summary="Nothing confirmed. Top leads: check IDOR.")
     assert "Executive Summary" in md and "Top leads" in md
     html = report.generate_html_report("P", [], {"in_scope": ["x.com"]}, ai_summary="Exec line here.")
-    assert "Executive Summary" in html and "aisum" in html
+    assert "Executive Summary" in html and "Exec line here." in html and "class=\"summary\"" in html
 
 
 def test_estimate_endpoint():

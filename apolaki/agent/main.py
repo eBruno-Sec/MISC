@@ -437,6 +437,24 @@ def _leads(m) -> list:
     return (m.get("context", {}) or {}).get("leads", [])
 
 
+def _attack_surface(session_id: str) -> dict:
+    """Attack-surface metrics for the report (works live or archived, via the same
+    recon/urls source the graph uses)."""
+    recon, urls, _ = _graph_inputs(session_id)
+    inv = surface_mod.build_inventory(urls or [])
+    params = set()
+    for ep in inv:
+        params.update(ep.get("params") or [])
+    return {
+        "subdomains": len(recon.get("subdomains") or []),
+        "live_hosts": len(recon.get("live_hosts") or []),
+        "endpoints": len(inv),
+        "parameterized": sum(1 for ep in inv if ep.get("parameterized")),
+        "params": len(params),
+        "body_sinks": sum(1 for ep in inv if ep.get("body_sink")),
+    }
+
+
 def _coverage(session_id: str) -> dict:
     logs = db.get_logs(session_id, limit=2000)
     tools_run = {}
@@ -471,9 +489,11 @@ async def get_report_md(session_id: str):
 @app.get("/report/{session_id}/html")
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
-    html = report_mod.generate_html_report(m["program"], findings, scope, coverage, chains,
-                                           status=m["status"], ai_summary=_ai_summary(m),
-                                           execution=_execution(m), leads=_leads(m))
+    html = report_mod.generate_html_report(
+        m["program"], findings, scope, coverage, chains,
+        status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
+        attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
+        mode=m.get("mode"))
     headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
