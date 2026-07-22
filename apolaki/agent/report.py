@@ -134,6 +134,10 @@ def generate_report(program: str, findings: list, scope: dict,
         ]
         if f.get("owasp"):
             lines.append(f"**OWASP:** {f['owasp']}")
+        _bi = business_impact(f)
+        if _bi:
+            lines += ["", "**Why This Matters (plain English)**", "",
+                      f"_What it is:_ {_bi[0]}", "", f"_If left unpatched:_ {_bi[1]}", ""]
         lines += ["", "**Steps to Reproduce**", ""]
         for j, step in enumerate(f.get("reproduction_steps", []), 1):
             lines.append(f"{j}. {step}")
@@ -161,6 +165,90 @@ def generate_report(program: str, findings: list, scope: dict,
 _ENGAGEMENT = {"passive": "Passive Reconnaissance", "active": "Active Assessment",
                "full": "Full Penetration Test"}
 _SEV_WEIGHT = {"critical": 40, "high": 25, "medium": 10, "low": 3, "informational": 1, "info": 1}
+
+# ── plain-English business impact, keyed by vuln family (CWE as fallback) ──
+# "means" = what the technical finding actually is, in words a non-technical
+# stakeholder understands. "risk" = the concrete business consequence if it is
+# not fixed. Deterministic (no AI) so every report carries it.
+_BIZ = {
+    "sqli": ("Your site builds database queries by pasting in text from the web address without keeping the "
+             "attacker's input separate from the query's instructions, so a crafted value rewrites the query.",
+             "An attacker can read or change your whole database — customer records, passwords, orders — and can "
+             "sometimes take over the server. This is one of the most damaging and heavily-regulated breach types "
+             "(data-protection fines, mandatory breach disclosure, loss of customer trust)."),
+    "xss": ("Text from the visitor is echoed back into the page without being neutralised, so an attacker can make "
+            "your site run their JavaScript in your customers' browsers.",
+            "Attackers can hijack logged-in customer or admin sessions, steal data shown on the page, submit actions "
+            "as the victim, or deface the site — all from a link that points at your real domain."),
+    "crlf": ("A value from the web address is copied straight into the hidden control part of the response (its "
+             "headers) without being cleaned, so an attacker can smuggle their own instructions in there.",
+             "An attacker can poison shared caches so OTHER visitors are served a malicious page, plant or steal "
+             "login cookies, or bounce your customers to a fake look-alike site — all while the address bar still "
+             "shows your genuine domain. Leads to phishing that looks legitimate, account takeover, and brand damage."),
+    "xxe": ("An endpoint that accepts XML will follow references inside that XML out to other files and systems.",
+            "An attacker can read sensitive files off your server (config, credentials) and reach internal systems "
+            "that are not meant to be exposed to the internet — a common first step toward a deeper breach."),
+    "ssrf": ("A feature that fetches a URL can be pointed at addresses the attacker chooses, including your own "
+             "internal network.",
+             "An attacker can reach internal-only services and cloud metadata (which often hands out cloud "
+             "credentials), pivoting from your public site into your private infrastructure."),
+    "cmdi": ("Input is passed to the server's operating system as a command without being separated from it.",
+             "An attacker can run their own commands on your server — effectively full control of that machine, "
+             "including your data and anything it can reach."),
+    "path_traversal": ("A file/path parameter can be tricked into stepping outside its intended folder.",
+                       "An attacker can read files they should never see (configuration, credentials, source code), "
+                       "which frequently unlocks a larger compromise."),
+    "idor": ("The app trusts an ID in the request to decide what to show, without checking the requester is allowed "
+             "to see it, so changing the ID reaches someone else's data.",
+             "One customer can view or change another customer's records (orders, profiles, documents). This is a "
+             "direct privacy breach and a top cause of reportable data-protection incidents."),
+    "bfla": ("A privileged action or admin function does not properly check the caller's role.",
+             "A normal or unauthenticated user can perform actions reserved for staff/admins — changing data, "
+             "escalating privileges, or reaching administrative functions."),
+    "vulnerable_component": ("Your site ships a third-party library with publicly-documented security flaws (CVEs).",
+                             "Attackers scan for exactly these known-vulnerable versions and reuse off-the-shelf "
+                             "exploits. Even if not yet abused here, it lowers the bar for an attack and is a common "
+                             "audit/compliance finding. Fix is usually a version upgrade."),
+    "open_redirect": ("A redirect parameter will forward visitors to any address, including attacker sites.",
+                      "Attackers use YOUR trusted domain in links that quietly send victims to phishing or malware "
+                      "pages, making their scam far more convincing and damaging your reputation."),
+    "ssti": ("User input is rendered by the server's template engine as code rather than plain text.",
+             "Typically leads to running attacker code on the server — often full server compromise."),
+    "deserialization": ("The app rebuilds objects from attacker-supplied serialized data without validating it.",
+                        "Frequently leads to running attacker code on the server — a critical, full-compromise class."),
+    "takeover": ("A subdomain points at a third-party service that is no longer claimed, so an attacker can claim it.",
+                 "An attacker can host their own content on YOUR subdomain — used for convincing phishing, cookie "
+                 "theft, and bypassing trust in your brand."),
+    "csrf": ("A state-changing action can be triggered from another site without the user intending it.",
+             "An attacker can make a logged-in customer or admin perform actions unknowingly (change email, transfer, "
+             "delete), abusing their session."),
+    "cors": ("The site tells browsers to let other websites read its responses.",
+             "Malicious sites can read data belonging to your logged-in users, leaking private information."),
+    "exposure": ("Sensitive files or source are reachable directly over the web.",
+                 "Anyone can download configuration, secrets, or source code — often handing attackers the keys to a "
+                 "deeper breach."),
+    "git_exposure": ("Your source-control folder is downloadable over the web.",
+                     "Attackers can reconstruct your source code and often extract secrets/credentials from history."),
+}
+# CWE -> family, so a finding with a CWE but no recognised family still gets text.
+_CWE_FAMILY = {
+    "cwe-89": "sqli", "cwe-79": "xss", "cwe-113": "crlf", "cwe-611": "xxe", "cwe-918": "ssrf",
+    "cwe-78": "cmdi", "cwe-22": "path_traversal", "cwe-639": "idor", "cwe-284": "idor",
+    "cwe-285": "bfla", "cwe-1104": "vulnerable_component", "cwe-1035": "vulnerable_component",
+    "cwe-601": "open_redirect", "cwe-1336": "ssti", "cwe-94": "ssti", "cwe-502": "deserialization",
+    "cwe-352": "csrf", "cwe-942": "cors", "cwe-200": "exposure", "cwe-527": "git_exposure",
+}
+
+
+def business_impact(finding: dict):
+    """(plain-English meaning, business consequence) for a finding, or None when we
+    have no mapping (better to omit than to invent). Family first, then CWE."""
+    fam = str(finding.get("family") or "").strip().lower()
+    if fam in _BIZ:
+        return _BIZ[fam]
+    cwe = str(finding.get("cwe") or "").strip().lower()
+    fam2 = _CWE_FAMILY.get(cwe)
+    return _BIZ.get(fam2) if fam2 else None
 
 
 def risk_score(findings: list) -> dict:
@@ -255,6 +343,12 @@ def generate_html_report(program: str, findings: list, scope: dict,
         notes = f"<p class='notes'>Triage: {e(str(f.get('analyst_notes','')))}</p>" if f.get("analyst_notes") else ""
         rem = f"<h4>Remediation</h4><p>{e(str(f.get('remediation','')))}</p>" if f.get("remediation") else ""
         cvss = f.get("cvss") or f.get("cvss_score")
+        bi = business_impact(f)
+        biz_html = ""
+        if bi:
+            biz_html = (f"<div class='biz'><h4>Why This Matters (plain English)</h4>"
+                        f"<p><b>What it is:</b> {e(bi[0])}</p>"
+                        f"<p><b>If left unpatched:</b> {e(bi[1])}</p></div>")
         cards.append(f"""
         <article class="finding" style="--c:{color}">
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
@@ -265,7 +359,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
             <span class="tag-conf">CONFIRMED</span>
           </div>
-          <p>{e(str(f.get('description','')))}</p>
+          {biz_html}
+          <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           {f"<h4>Impact</h4><p>{e(str(f.get('impact','')))}</p>" if f.get('impact') else ''}
           {f"<h4>Steps to Reproduce</h4><ol>{steps}</ol>" if steps else ''}
           {ev}{rem}{notes}
@@ -436,6 +531,8 @@ a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}
 .sev{{border:1px solid var(--c);color:var(--c);border-radius:3px;font-size:.6rem;padding:.15rem .5rem;letter-spacing:.08em;font-weight:700;font-family:'JetBrains Mono',monospace}}
 .meta{{display:flex;gap:.5rem 1rem;flex-wrap:wrap;font-size:.72rem;color:var(--dim);margin:.5rem 0}}
 .tag-conf{{color:#1f9d6b;border:1px solid #1f9d6b;border-radius:3px;padding:0 .4rem;font-size:.62rem;letter-spacing:.06em}}
+.biz{{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:6px;padding:.5rem .9rem;margin:.7rem 0}}.biz p{{margin:.35rem 0;font-size:.86rem}}.biz b{{color:var(--bright)}}
 code{{color:var(--accent);word-break:break-all}}
 .ev{{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:.7rem;overflow:auto;font-size:.74rem;white-space:pre-wrap;word-break:break-word}}
 .notes{{color:var(--dim);font-style:italic;font-size:.78rem;border-top:1px dashed var(--border);padding-top:.5rem}}

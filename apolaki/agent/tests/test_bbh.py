@@ -1243,6 +1243,18 @@ def test_report_markdown_csv_json_and_print_css():
     assert "LEADS: 1" in html and "Unconfirmed Leads" in html    # separate lead summary chip + table
 
 
+def test_report_business_impact_plain_english():
+    # Every mapped finding class carries a non-technical "why this matters" block.
+    crlf = report.business_impact({"family": "crlf", "cwe": "CWE-113"})
+    assert crlf and "phishing" in crlf[1].lower() and "header" not in crlf[0].lower()[:20]
+    assert report.business_impact({"cwe": "CWE-89"})           # CWE-only fallback works (SQLi)
+    assert report.business_impact({"family": "unknown", "cwe": "CWE-99999"}) is None   # no invention
+    html = report.generate_html_report(
+        "P", [{"title": "CRLF on category", "severity": "medium", "family": "crlf",
+               "cwe": "CWE-113", "evidence": "marker surfaced"}], {"in_scope": ["x"]})
+    assert "Why This Matters" in html and "If left unpatched" in html
+
+
 def test_rescan_parent_linkage_surfaces_in_list():
     d = tempfile.mkdtemp()
     db.init(os.path.join(d, "t.db"))
