@@ -174,7 +174,10 @@ details{margin-top:.5rem}summary{cursor:pointer;color:var(--accent);font-size:.8
 .phase.active{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
 .phase.done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
 #termOut{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.9rem 1rem;
-  font-family:var(--mono);font-size:.8rem}
+  font-family:var(--mono);font-size:.8rem;
+  /* fixed-height internal scroll panel — the feed scrolls in here, not the page,
+     so auto-scroll (scrollFeed) and the pause-on-scroll-up logic actually work */
+  max-height:min(62vh,640px);overflow-y:auto;overscroll-behavior:contain}
 .ev{display:flex;gap:.75rem;padding:.28rem 0;align-items:flex-start;line-height:1.6}
 .ev-tag{min-width:88px;font-size:.6rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;text-align:center;
   padding:.16rem .35rem;border-radius:6px;flex-shrink:0;margin-top:.1rem;border:1px solid var(--border2);color:var(--text-dim)}
@@ -1344,11 +1347,17 @@ async function loadArchive(){
   try{const d=await(await fetch(`${API}/missions`)).json();
     const ms=d.missions||[];
     document.getElementById("archiveList").innerHTML=ms.length?
-      `<div class="table-wrap"><table><tr><th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Leads</th><th>Created</th><th></th></tr>${ms.map(m=>{
+      `<div class="arch-toolbar" style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem">
+         <button type="button" class="btn ghost sm link-danger" id="delSelBtn" onclick="delSelectedMissions()" disabled>Delete selected</button>
+         <span class="muted" id="selCount" style="font-size:.76rem">0 selected</span></div>
+       <div class="table-wrap"><table><tr>
+         <th style="width:1.6rem"><input type="checkbox" id="selAll" title="Select all" onclick="toggleAllMissions(this.checked)"></th>
+         <th>Program</th><th>Mode</th><th>Status</th><th>Findings</th><th>Leads</th><th>Created</th><th></th></tr>${ms.map(m=>{
         const c=m.counts||{}, tot=Object.values(c).reduce((a,b)=>a+b,0);
         const child=m.parent_id?` <span class="muted" title="cloned from ${esc(m.parent_id)}">↳ child</span>`:"";
         const leads=m.leads||0;
-        return `<tr><td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
+        return `<tr><td><input type="checkbox" class="msel" value="${m.id}" onclick="updateMissionSel()"></td>
+          <td>${esc(m.program)}${child}</td><td>${esc(m.mode)}</td><td>${esc(m.status)}</td>
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
           <td>${leads?`<span class="lead-chip" title="unconfirmed candidate/static signals — verify before reporting">${leads}</span>`:`<span class="muted">0</span>`}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
@@ -1358,6 +1367,22 @@ async function loadArchive(){
       }).join("")}</table></div>`
       :emptyState("No saved missions","Completed and in-progress missions are stored here — load or rescan any of them.");
   }catch(e){}
+}
+function _selectedMissionIds(){return [...document.querySelectorAll(".msel:checked")].map(x=>x.value);}
+function updateMissionSel(){
+  const ids=_selectedMissionIds(), btn=document.getElementById("delSelBtn"), cnt=document.getElementById("selCount");
+  if(btn)btn.disabled=ids.length===0;
+  if(cnt)cnt.textContent=`${ids.length} selected`;
+  const all=document.getElementById("selAll"), boxes=document.querySelectorAll(".msel");
+  if(all)all.checked=boxes.length>0&&ids.length===boxes.length;
+}
+function toggleAllMissions(on){document.querySelectorAll(".msel").forEach(x=>x.checked=on);updateMissionSel();}
+async function delSelectedMissions(){
+  const ids=_selectedMissionIds();
+  if(!ids.length)return;
+  if(!confirm(`Delete ${ids.length} saved mission${ids.length===1?"":"s"} and their findings/evidence? This cannot be undone.`))return;
+  await Promise.all(ids.map(id=>fetch(`${API}/missions/${id}`,{method:"DELETE"}).catch(()=>{})));
+  loadArchive();
 }
 async function loadMission(id,program){
   try{const d=await(await fetch(`${API}/missions/${id}`)).json();
@@ -1458,7 +1483,8 @@ renderHelp();
    they resolve even if this script is ever loaded as a module or bundled (an
    inline onclick can only see the global scope). Belt-and-suspenders. */
 Object.assign(window,{topoClick,topoSelectId,topoAction,loadMission,rescan,delMission,switchTab,
-  showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate});
+  showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
+  delSelectedMissions,toggleAllMissions,updateMissionSel});
 
 /* land on the Launch view */
 showView("launch");

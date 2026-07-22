@@ -25,8 +25,38 @@ class PermissionLevel(Enum):
 
 @dataclass
 class ScopeEntry:
-    value: str
+    value: str            # bare host (used for scope matching — always port/scheme-free)
     asset_type: str
+    base: Optional[str] = None   # explicit scheme://host:port when the operator gave one
+
+
+def _split_scope_entry(d: str):
+    """(bare_host, base_url|None) from a scope entry that may carry a scheme and/or
+    port. The bare host drives scope-matching (always port/scheme-free); the base
+    carries scheme+port for probing when the operator gave a non-default one, e.g. a
+    local app on http://host.docker.internal:42000. Plain hosts and wildcards default
+    to https on the standard port and record no explicit base."""
+    d = (d or "").strip().lower()
+    if not d:
+        return "", None
+    if d.startswith("*"):
+        return d, None                       # wildcard — no single base URL
+    scheme = ""
+    if "://" in d:
+        p = urlparse(d)
+        scheme, netloc = p.scheme, p.netloc
+    else:
+        netloc = d.split("/")[0]
+    host = netloc.split(":")[0]
+    port = netloc.split(":")[1] if ":" in netloc else ""
+    if not scheme and not port:
+        return host, None                    # plain host -> default https, no explicit base
+    if not scheme:                           # host:port with no scheme -> infer
+        scheme = "https" if port == "443" else "http"
+    if scheme == "https" and port in ("", "443"):
+        return host, None                    # default https:443 needs no explicit base
+    base = f"{scheme}://{host}" + (f":{port}" if port else "")
+    return host, base
 
 
 class ScopeEngine:
@@ -38,13 +68,13 @@ class ScopeEngine:
     def load_manual(self, in_scope: list, out_of_scope: list, program_name: str = "Program") -> None:
         self.program_name = program_name
         for d in in_scope:
-            d = d.strip().lower()
-            if d:
-                self.in_scope.append(ScopeEntry(d, "wildcard" if d.startswith("*") else "domain"))
+            host, base = _split_scope_entry(d)
+            if host:
+                self.in_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain", base))
         for d in out_of_scope:
-            d = d.strip().lower()
-            if d:
-                self.out_of_scope.append(ScopeEntry(d, "wildcard" if d.startswith("*") else "domain"))
+            host, _ = _split_scope_entry(d)
+            if host:
+                self.out_of_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain"))
 
     def validate(self, target: str) -> tuple:
         host = self._extract_host(target)
@@ -83,13 +113,20 @@ class ScopeEngine:
         }
 
     def base_urls(self) -> list:
-        """https:// base URLs for concrete (non-wildcard) in-scope hosts."""
+        """Base URLs for concrete (non-wildcard) in-scope hosts — the operator's
+        explicit scheme+port when given, else default https."""
         out = []
         for e in self.in_scope:
             if e.asset_type == "wildcard":
                 continue
-            out.append(f"https://{e.value}")
+            out.append(e.base or f"https://{e.value}")
         return out
+
+    def base_map(self) -> dict:
+        """host -> base URL (scheme+port) for concrete in-scope hosts, so the planner
+        probes a non-standard port/scheme instead of assuming https on 443."""
+        return {e.value: (e.base or f"https://{e.value}")
+                for e in self.in_scope if e.asset_type != "wildcard"}
 
 
 # ── Multi-format scope-file parsing (adapted from OLYMPUS) ────────

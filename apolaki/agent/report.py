@@ -136,9 +136,10 @@ def generate_report(program: str, findings: list, scope: dict,
             "**Summary**", "", f.get("description", ""), "",
             f"**Severity:** {sev}",
             f"**Target:** `{f.get('target', '')}`",
-            f"**CVSS:** {f.get('cvss_score', 'N/A')}{(' ' + f.get('cvss_vector', '')) if f.get('cvss_vector') else ''}",
-            f"**CWE:** {f.get('cwe', 'N/A')}",
         ]
+        _cv = estimated_cvss(f)
+        _cvss_line = (f"{_cv[0]}{' (est.)' if _cv[2] else ''}" + (f" {_cv[1]}" if _cv[1] else "")) if _cv else "N/A"
+        lines += [f"**CVSS:** {_cvss_line}", f"**CWE:** {f.get('cwe', 'N/A')}"]
         if f.get("capec"):
             lines.append(f"**CAPEC:** {f['capec']}")
         if f.get("owasp"):
@@ -148,15 +149,20 @@ def generate_report(program: str, findings: list, scope: dict,
             lines += ["", "**Why This Matters (plain English)**", "",
                       f"_What it is:_ {_bi[0]}", "", f"_If left unpatched:_ {_bi[1]}", ""]
         lines += ["", "**Steps to Reproduce**", ""]
-        for j, step in enumerate(f.get("reproduction_steps", []), 1):
+        _rsteps = f.get("reproduction_steps") or ["Send the reproduction command below.",
+                                                  "Confirm the response matches the evidence.",
+                                                  "Compare with a benign baseline."]
+        for j, step in enumerate(_rsteps, 1):
             lines.append(f"{j}. {step}")
-        lines += ["", "**Impact**", "", f.get("impact", ""), ""]
-        if f.get("remediation"):
-            lines += ["**Remediation**", "", f["remediation"], ""]
+        _curl = finding_curl(f)
+        if _curl:
+            lines += ["", "**Reproduction (copy-paste)**", "", "```bash", _curl, "```", ""]
+        _impact = str(f.get("impact") or "").strip() or (_bi[1] if _bi else
+                  "Impact depends on how the affected input is used downstream; verify reachability.")
+        lines += ["", "**Impact**", "", _impact, ""]
+        lines += ["**Remediation**", "", remediation_line(f), ""]
         if f.get("evidence"):
             lines += ["**Supporting Material**", "", "```", str(f["evidence"]), "```", ""]
-        if f.get("analyst_notes"):
-            lines += [f"> _Triage: {f['analyst_notes']}_", ""]
         lines += ["---", ""]
 
     if chains:
@@ -304,6 +310,174 @@ def _with_capec(findings: list) -> list:
     return out
 
 
+def _family_of(finding: dict) -> str:
+    fam = str(finding.get("family") or "").strip().lower()
+    if fam:
+        return fam
+    return _CWE_FAMILY.get(str(finding.get("cwe") or "").strip().lower(), "")
+
+
+# ── deterministic remediation per vuln family (real fixes, not "see detail") ──
+_FAMILY_FIX = {
+    "sqli": "Use parameterised queries / prepared statements — never concatenate input into SQL. "
+            "Add least-privilege DB accounts and allowlist any dynamic column/sort names.",
+    "xss": "Context-encode every output (HTML/attribute/JS/URL), use an auto-escaping template engine, "
+           "and add a strict Content-Security-Policy.",
+    "crlf": "Strip or reject CR/LF (%0d/%0a) in any value written to a response header; use the framework's "
+            "header API instead of manual string concatenation.",
+    "xxe": "Disable external entities and DOCTYPE processing in the XML parser (secure-processing / "
+           "disallow-doctype-decl).",
+    "ssrf": "Allowlist destination hosts and schemes, resolve-and-pin the IP, and block link-local/cloud-metadata "
+            "ranges (169.254.169.254, 127.0.0.0/8, RFC1918).",
+    "cmdi": "Do not invoke a shell — use native APIs. If unavoidable, pass arguments as an array (no shell string) "
+            "and validate every value against an allowlist.",
+    "path_traversal": "Canonicalise and confine file paths to a base directory (reject ../ and absolute paths); "
+                      "serve files by an allowlisted id, not a user-supplied path.",
+    "idor": "Enforce per-object authorization on every request (verify the caller may access that id); use "
+            "unguessable ids as defence-in-depth.",
+    "bfla": "Enforce role/function authorization server-side on every privileged action; deny by default.",
+    "vulnerable_component": "Upgrade or remove the affected component (here: retire end-of-life AngularJS 1.x). "
+                            "Adopt SCA and a regular dependency-patching cadence.",
+    "open_redirect": "Validate redirect targets against an allowlist of internal paths; never redirect to a "
+                     "user-supplied absolute URL, and strip //, /\\ and scheme tricks.",
+    "ssti": "Never render user input as a template; pass it as data to a sandboxed, auto-escaping engine.",
+    "deserialization": "Do not deserialise untrusted data; use a data-only format (JSON) with a strict schema, "
+                       "or signed/allowlisted types.",
+    "takeover": "Remove the dangling DNS record or reclaim the third-party resource; monitor for unclaimed CNAMEs.",
+    "csrf": "Require a per-session anti-CSRF token on state-changing requests and set SameSite=Lax/Strict cookies.",
+    "cors": "Do not reflect arbitrary Origins with credentials; allowlist trusted origins only.",
+    "exposure": "Remove the exposed file from the web root and rotate any leaked secrets; block dotfiles/backups "
+                "at the web server.",
+    "git_exposure": "Block access to .git/ at the web server and rotate every secret found in the repo history.",
+}
+
+
+def remediation_line(finding: dict) -> str:
+    """A real, concise fix for a finding — explicit field first, then the family map,
+    then the remediation CATALOG, else a safe generic (never 'see finding detail')."""
+    if str(finding.get("remediation") or "").strip():
+        return finding["remediation"].strip()
+    fix = _FAMILY_FIX.get(_family_of(finding))
+    if fix:
+        return fix
+    try:
+        import remediation as _rem
+        txt = _rem.remediation_text(finding)
+        if txt:
+            return txt
+    except Exception:
+        pass
+    return "Validate and neutralise the untrusted input at this sink, and add a regression test."
+
+
+# ── estimated CVSS v3.1 per family (clearly labelled 'estimated' in the report) ──
+# base-class estimates, NOT authoritative scoring — they orient triage; a real
+# assessor should refine per exploitability. Kept deterministic (no invention beyond
+# the documented class baseline).
+_FAMILY_CVSS = {
+    "sqli": (9.8, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    "cmdi": (9.8, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    "ssti": (9.8, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    "deserialization": (9.8, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    "ssrf": (8.6, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"),
+    "xxe": (8.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:L"),
+    "bfla": (8.1, "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"),
+    "path_traversal": (7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"),
+    "exposure": (7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"),
+    "git_exposure": (7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"),
+    "vulnerable_component": (7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"),
+    "takeover": (8.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N"),
+    "idor": (6.5, "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"),
+    "csrf": (6.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N"),
+    "xss": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+    "crlf": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+    "cors": (5.4, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"),
+    "open_redirect": (4.7, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N"),
+}
+
+
+def estimated_cvss(finding: dict):
+    """(score, vector, is_estimated) for a finding. An explicit score/vector on the
+    finding wins (is_estimated False); otherwise a family baseline (is_estimated True);
+    else None so the report shows nothing rather than a fake number."""
+    sc = finding.get("cvss_score") or finding.get("cvss")
+    vec = finding.get("cvss_vector")
+    if sc:
+        return (str(sc), str(vec or ""), False)
+    base = _FAMILY_CVSS.get(_family_of(finding))
+    if base:
+        return (f"{base[0]}", base[1], True)
+    return None
+
+
+# ── AI-summary hygiene: no leaked Markdown / broken fragments in HTML ──
+def clean_ai_text(text: str) -> list:
+    """Turn an AI wrap-up (which may contain Markdown) into clean paragraph strings:
+    strip **bold**/`code`/#/> markers, drop empty or obviously-truncated fragments."""
+    import re as _re
+    out = []
+    for raw in (text or "").splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        s = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)      # **bold** -> bold
+        s = _re.sub(r"`([^`]+)`", r"\1", s)           # `code` -> code
+        s = s.lstrip("#> ").replace("**", "").replace("`", "").strip("*_ ")
+        if len(s) < 3 or s in {"are)", "/ properly sanitized"}:
+            continue
+        out.append(s)
+    return out
+
+
+def finding_curl(finding: dict) -> str:
+    """A copy-paste reproduction command for a confirmed finding, from a captured
+    request if present, else derived from the target URL (and method/body)."""
+    if str(finding.get("curl") or "").strip():
+        return finding["curl"].strip()
+    target = str(finding.get("target") or finding.get("surface") or "").strip()
+    if not target:
+        return ""
+    method = str(finding.get("method") or "GET").upper()
+    body = finding.get("request_body") or finding.get("body")
+    if method == "GET" and not body:
+        return f"curl -i -sS -k --path-as-is '{target}'"
+    parts = [f"curl -i -sS -k -X {method}"]
+    if body:
+        parts.append("-H 'Content-Type: application/json'")
+        parts.append(f"--data '{body}'")
+    parts.append(f"'{target}'")
+    return " ".join(parts)
+
+
+def group_findings(findings: list) -> list:
+    """Collapse duplicate findings that share a root cause (same family + affected
+    parameter, or same title) into ONE representative carrying an `instances` list of
+    every affected target. Preserves order by first occurrence. Distinct issues stay
+    separate. This kills the '5 identical open-redirect cards' problem while keeping
+    every raw instance for the appendix."""
+    groups, order = {}, []
+    for f in findings:
+        fam = _family_of(f) or (f.get("title") or "").strip().lower()[:40]
+        param = ""
+        title = f.get("title") or ""
+        m = title.rsplit(" in '", 1)
+        if len(m) == 2 and m[1].endswith("'"):
+            param = m[1][:-1]
+        elif " on '" in title:
+            param = title.rsplit(" on '", 1)[-1].rstrip("'")
+        key = f"{fam}|{param}"
+        if key not in groups:
+            rep = dict(f)
+            rep["instances"] = []
+            groups[key] = rep
+            order.append(key)
+        g = groups[key]
+        tgt = f.get("target") or f.get("surface") or ""
+        if tgt and tgt not in g["instances"]:
+            g["instances"].append(tgt)
+    return [groups[k] for k in order]
+
+
 def business_impact(finding: dict):
     """(plain-English meaning, business consequence) for a finding, or None when we
     have no mapping (better to omit than to invent). Family first, then CWE."""
@@ -330,7 +504,18 @@ def risk_score(findings: list) -> dict:
         label, color = "Low", SEV_COLORS["low"]
     else:
         label, color = ("Informational" if findings else "No Confirmed Risk"), SEV_COLORS["info"]
-    return {"score": score, "label": label, "color": color}
+    # Truth-first: the posture LABEL must not exceed the highest severity actually
+    # confirmed. Four High findings are serious, but calling them "Critical" when no
+    # Critical was confirmed reads as drama — cap the label at the top real severity.
+    _RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    _LBL = {4: ("Critical", SEV_COLORS["critical"]), 3: ("High", SEV_COLORS["high"]),
+            2: ("Medium", SEV_COLORS["medium"]), 1: ("Low", SEV_COLORS["low"])}
+    top = max((_RANK.get((f.get("severity") or "info").lower(), 0) for f in findings), default=0)
+    if top and _RANK.get(label.lower(), 0) > top:
+        label, color = _LBL[top]
+    return {"score": score, "label": label, "color": color,
+            "note": "Score = weighted sum of confirmed findings (critical 40 / high 25 / medium 10 / "
+                    "low 3), capped at 100; label capped at the highest confirmed severity."}
 
 
 # ── Since-Last-Scan (historical delta) — truth-first, never calls "fixed" ──
@@ -367,8 +552,11 @@ def _delta_lines(delta: dict, findings: list) -> list:
 
 
 def _zap_status_text(status: str) -> str:
-    return {"executed": "ZAP Executed", "not_configured": "ZAP Skipped Cleanly — Not Configured",
-            "failed": "ZAP Failed", "not_invoked": "ZAP Not Invoked"}.get(
+    return {"executed": "ZAP Executed",
+            "not_configured": "ZAP Skipped Cleanly — Not Configured (ZAP_ADDR unset)",
+            "failed": "ZAP Failed — daemon unreachable at ZAP_ADDR",
+            "not_invoked": "ZAP Not Invoked — not in this scan plan (start the zap compose profile "
+                           "and set ZAP_ADDR to enable)"}.get(
         (status or "not_invoked"), "ZAP Not Invoked")
 
 
@@ -427,9 +615,13 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None) -> str:
     e = _html.escape
     leads = leads or []
-    findings = _with_capec(findings)
-    counts = _counts(findings)
+    raw_findings = _with_capec(findings)
+    # Group duplicate findings by root cause (family + parameter). Counts, the risk
+    # score and the cards all use the DISTINCT issues; every raw instance is kept on
+    # each group's `instances` and listed in the affected-instances appendix.
+    findings = group_findings(raw_findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
+    counts = _counts(findings)
     rk = risk_score(findings)
     engagement = _ENGAGEMENT.get((mode or "").lower(), "Security Assessment")
 
@@ -460,16 +652,39 @@ def generate_html_report(program: str, findings: list, scope: dict,
                        for k, v in coverage.items())
         cov_html = f"<h2 id='coverage'>Assessment Coverage</h2><div class='cov-grid'>{rows}</div>"
 
-    # confirmed findings — full proof density
+    # confirmed findings — full proof density (grouped by root cause)
     cards = []
     for i, f in enumerate(findings, 1):
         sev = (f.get("severity") or "informational").lower()
         color = SEV_COLORS.get(sev, "#6a8a9a")
-        steps = "".join(f"<li>{e(str(s))}</li>" for s in (f.get("reproduction_steps") or []))
+        # impact + steps always render (no blank HIGH card); fall back to family text.
+        fam = _family_of(f)
+        impact = str(f.get("impact") or "").strip() or (business_impact(f)[1] if business_impact(f) else
+                 "See technical detail; impact depends on how the affected input is used downstream.")
+        rsteps = f.get("reproduction_steps") or []
+        if not rsteps:
+            rsteps = ["Send the request shown in the reproduction command below.",
+                      "Observe the confirming response in the evidence block.",
+                      "Compare against a benign baseline to rule out a false positive."]
+        steps = "".join(f"<li>{e(str(s))}</li>" for s in rsteps)
         ev = f"<h4>Evidence</h4><pre class='ev'>{e(str(f.get('evidence','')))}</pre>" if f.get("evidence") else ""
-        notes = f"<p class='notes'>Triage: {e(str(f.get('analyst_notes','')))}</p>" if f.get("analyst_notes") else ""
-        rem = f"<h4>Remediation</h4><p>{e(str(f.get('remediation','')))}</p>" if f.get("remediation") else ""
-        cvss = f.get("cvss") or f.get("cvss_score")
+        # canonical classification: the finding's own CWE wins; only show the triage
+        # note when it does NOT contradict it (kills the CWE-1104-vs-CWE-79 mismatch).
+        note_txt = str(f.get("analyst_notes") or "")
+        cwe = str(f.get("cwe") or "")
+        if cwe and note_txt and ("cwe-" in note_txt.lower()) and (cwe.lower() not in note_txt.lower()):
+            note_txt = ""
+        notes = f"<p class='notes'>Triage: {e(note_txt)}</p>" if note_txt.strip() else ""
+        curl = finding_curl(f)
+        curl_html = (f"<h4>Reproduction (copy-paste)</h4><pre class='ev'>{e(curl)}</pre>" if curl else "")
+        cv = estimated_cvss(f)
+        cvss_disp = f"{cv[0]}{' (est.)' if cv[2] else ''}" if cv else "N/A"
+        cvss_vec = f"<span>Vector: <code>{e(cv[1])}</code></span>" if (cv and cv[1]) else ""
+        rem = f"<h4>Remediation</h4><p>{e(remediation_line(f))}</p>"
+        inst = [x for x in (f.get("instances") or []) if x and x != f.get("target")]
+        inst_html = ("<h4>Affected instances (" + str(len(inst) + 1) + ")</h4><ul>"
+                     + "".join(f"<li><code>{e(str(x))}</code></li>" for x in [f.get('target')] + inst)
+                     + "</ul>") if inst else ""
         bi = business_impact(f)
         biz_html = ""
         if bi:
@@ -481,29 +696,30 @@ def generate_html_report(program: str, findings: list, scope: dict,
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
           <div class="meta">
             <span>Target: <code>{e(str(f.get('target','')))}</code></span>
-            <span>CVSS: {e(str(cvss)) if cvss else 'N/A'}</span>
-            <span>CWE: {e(str(f.get('cwe','N/A')))}</span>
+            <span>CVSS: {e(cvss_disp)}</span>
+            <span>CWE: {e(cwe or 'N/A')}</span>
             {f"<span>CAPEC: {e(str(f.get('capec')))}</span>" if f.get('capec') else ''}
             {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
+            {cvss_vec}
             <span class="tag-conf">CONFIRMED</span>
           </div>
           {biz_html}
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
-          {f"<h4>Impact</h4><p>{e(str(f.get('impact','')))}</p>" if f.get('impact') else ''}
-          {f"<h4>Steps to Reproduce</h4><ol>{steps}</ol>" if steps else ''}
-          {ev}{rem}{notes}
+          <h4>Impact</h4><p>{e(impact)}</p>
+          <h4>Steps to Reproduce</h4><ol>{steps}</ol>
+          {curl_html}{ev}{inst_html}{rem}{notes}
         </article>""")
     findings_html = "".join(cards) if cards else (
         "<p class='sub'>No vulnerability was confirmed with reproducible evidence during this engagement. "
         "See Unconfirmed Leads below for signals that need manual verification.</p>")
 
-    # priority remediation table (confirmed, severity-ordered)
+    # priority remediation table (confirmed, severity-ordered, real fixes)
     rem_html = ""
     if findings:
         rrows = "".join(
             f"<tr><td>{i}</td><td><span class='sev' style='--c:{SEV_COLORS.get((f.get('severity') or 'info').lower(),'#6a8a9a')}'>"
             f"{e((f.get('severity') or 'info').upper())}</span></td><td>{e(str(f.get('title','')))}</td>"
-            f"<td>{e(str(f.get('remediation') or 'See finding detail.'))}</td></tr>"
+            f"<td>{e(remediation_line(f))}</td></tr>"
             for i, f in enumerate(findings, 1))
         rem_html = ("<h2 id='remediation'>Priority Remediation</h2>"
                     "<table class='tbl'><tr><th>#</th><th>Severity</th><th>Finding</th><th>Fix</th></tr>"
@@ -646,8 +862,12 @@ def generate_html_report(program: str, findings: list, scope: dict,
     status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
     _en = _exec_note(execution)
     exec_html = (f'<div class="execbar">{e(_en.replace("**",""))}</div>' if _en else "")
-    if (ai_summary or "").strip():
-        summ_paras = "".join(f"<p>{e(pp.strip())}</p>" for pp in ai_summary.strip().split("\n") if pp.strip())
+    cleaned_ai = clean_ai_text(ai_summary) if (ai_summary or "").strip() else []
+    if cleaned_ai:
+        # AI text is Markdown-stripped and fragment-filtered so no literal **bold**
+        # or broken lines reach the HTML; fall back to the deterministic summary if
+        # nothing survives validation.
+        summ_paras = "".join(f"<p>{e(x)}</p>" for x in cleaned_ai)
     else:
         summ_paras = "".join(f"<p>{e(x)}</p>" for x in _exec_summary_text(program, findings, leads, execution, counts))
 

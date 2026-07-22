@@ -69,7 +69,7 @@ PHASE_OF = {
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
     "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",
     "run_ssrf": "probe", "run_deserialization": "probe", "run_exposure": "probe",
-    "run_xxe": "probe", "run_sqli": "probe", "run_cmdi": "probe",
+    "run_xxe": "probe", "run_sqli": "probe", "run_auth_sqli": "probe", "run_cmdi": "probe",
     "run_dalfox": "probe", "run_sqlmap": "probe",
     "generate_playbook": "guidance", "store_finding": "report",
 }
@@ -79,7 +79,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # is driving (deterministic / low_ai). These native probes only emit CONFIRMED
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
-    "run_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_dom_audit", "run_xxe", "run_deserialization",
+    "run_sqli", "run_auth_sqli", "run_cmdi", "run_ssrf", "run_xss", "run_dom_audit", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -301,11 +301,12 @@ class BBHAgent:
             yield {"type": "finding", "finding": fin}
 
         # Auto-store confirmed findings from the native confirmatory probes when NO
-        # model is driving (deterministic / low_ai). Without this the probes confirm
-        # e.g. a SQLi and it is silently dropped — a deterministic scan would report
-        # zero findings. In agentic mode the model stores them, so we don't here
-        # (avoids duplicates). Deduped by fingerprint.
-        if (not result.error and self.strategy in ("deterministic", "low_ai")
+        # model is driving (deterministic / low_ai, OR agentic that DEGRADED to a
+        # deterministic fallback after an AI failure). Without this the probes confirm
+        # e.g. a SQLi and it is silently dropped — the scan would report zero findings.
+        # In a live agentic run the model stores them, so we don't here (avoids
+        # duplicates). Deduped by fingerprint.
+        if (not result.error and (self.strategy in ("deterministic", "low_ai") or self.ai_degraded)
                 and tool_name in _AUTO_STORE_TOOLS):
             async for ev in self._auto_store(result):
                 yield ev
@@ -423,10 +424,30 @@ class BBHAgent:
             async for ev in self._run_low_ai(objective, session_id):
                 yield ev
         else:
+            # Agentic (ReAct). The credential pre-check above cannot see a RUNTIME
+            # provider failure (e.g. a 429 free-tier quota hit on the first model
+            # call), which would otherwise fail the whole run with zero findings.
+            # Catch it and degrade to full deterministic coverage so the scan still
+            # produces results (directive: stay useful when AI is rate-limited).
             gen = self._run_openrouter(objective, session_id) if self.provider == "openrouter" \
                 else self._run_anthropic(objective, session_id)
-            async for event in gen:
-                yield event
+            try:
+                async for event in gen:
+                    yield event
+            except Exception as ex:
+                low = str(ex).lower()
+                ai_err = any(k in low for k in ("429", "quota", "rate limit", "rate-limit",
+                                                "timeout", "timed out", "401", "unauthorized",
+                                                "authentication", "insufficient"))
+                if not (ai_err or not self.findings):
+                    raise
+                self.ai_degraded = True
+                self.ai_note = (f"Agentic AI unavailable ({type(ex).__name__}) — completed with "
+                                "deterministic coverage.")
+                yield {"type": "info", "content": "AI rate-limited/unavailable — falling back to "
+                       "deterministic coverage for this run."}
+                async for ev in self._run_deterministic(session_id):
+                    yield ev
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev
@@ -458,7 +479,8 @@ class BBHAgent:
                     self._plan_steps = steps
                     return
                 state = {"mode": self.mode, "roots": roots, "done": done,
-                         "recon": self.tools.recon, "urls": self.tools.urls}
+                         "recon": self.tools.recon, "urls": self.tools.urls,
+                         "bases": self.scope.base_map()}
                 batch = planner.next_batch(state)
                 if not batch:
                     break
@@ -599,9 +621,15 @@ class BBHAgent:
             "in-scope assets.")
 
     def _system(self) -> str:
+        # Surface any non-default target base (explicit scheme/port, e.g. a local app
+        # on http://host:42000) so the model probes it instead of assuming https:443.
+        nonstd = [u for u in self.scope.base_urls()
+                  if not (u.startswith("https://") and u.count(":") == 1)]
+        seed = ("\n\nTARGET BASE URLS — probe these EXACT scheme+port (do NOT assume https on 443):\n"
+                + "\n".join(f"- {u}" for u in sorted(nonstd))) if nonstd else ""
         return (SYSTEM_PROMPT + MODE_NOTES.get(self.mode, "") + self._recon_note()
                 + (self.memory_note or "")
-                + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}")
+                + f"\n\nSCOPE:\n{json.dumps(self.scope.to_dict(), indent=2)}" + seed)
 
     # ── ReAct loop guards (dedup + no-progress + budget) ─────────
     def _surface_size(self) -> int:

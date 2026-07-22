@@ -1171,6 +1171,33 @@ def test_sqli_findings_shape():
     assert tf["severity"] == "critical" and "time-blind" in tf["tags"]
 
 
+def test_auth_bypass_sqli_oracle_and_planner_seeding():
+    # login-path detection (drives run_auth_sqli seeding)
+    assert sqli.looks_like_login("/rest/user/login") and sqli.looks_like_login("/api/authenticate")
+    assert not sqli.looks_like_login("/rest/products/search")
+    # confirms ONLY when the injection produces a token the benign baseline lacked
+    base = '{"error":"Invalid email or password."}'
+    inj = '{"authentication":{"token":"eyJ0eXAiOiJKV1Qi.abc","umail":"admin@juice-sh.op"}}'
+    assert sqli.auth_bypass_confirmed(401, base, 200, inj)          # token appears -> bypass
+    assert not sqli.auth_bypass_confirmed(200, inj, 200, inj)       # token already in baseline -> no FP
+    assert not sqli.auth_bypass_confirmed(200, base, 200, base)     # nothing changed -> no FP
+    fnd = sqli.auth_bypass_finding("https://t/rest/user/login", "email", "' OR 1=1--", "token issued")
+    assert fnd["severity"] == "critical" and fnd["cwe"] == "CWE-89" and "auth-bypass" in fnd["tags"]
+    # planner seeds run_auth_sqli for a discovered login endpoint in full mode
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/rest/user/login", "https://t.com/rest/products/search?q=x"]}
+    tools = set()
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+    assert "run_auth_sqli" in tools, "planner did not seed body auth-SQLi on the login endpoint"
+
+
 # ── cmdi_tool: computed-output / time / OOB command injection ────
 def test_cmdi_output_hit_only_on_execution_not_echo():
     # the payload contains the arithmetic, NOT the product -> echoing it back is safe
@@ -1399,6 +1426,47 @@ def test_json_data_package_enriched_and_backward_compatible():
     assert j["config"]["mode"] == "full" and j["attack_surface"]["endpoints"] == 12
     assert j["tool_ledger"]["zap_status"] == "not_configured" and j["playbooks"][0]["title"] == "XSS"
     assert j["since_last_scan"]["has_prior"] is True and j["export"]["format"] == "json"
+
+
+def test_report_content_discipline_grouping_cvss_remediation_curl():
+    # Root-cause grouping, estimated CVSS, real remediation, per-finding cURL,
+    # AI-summary Markdown cleanup, and risk-label sanity — the ChatGPT patch set.
+    findings = [
+        {"title": "SQL injection (error-recovery) in 'category'", "severity": "high",
+         "target": "https://t/catalog?category=", "cwe": "CWE-89", "family": "sqli",
+         "description": "quote breaks the query", "evidence": "200->500->200",
+         "analyst_notes": "METIS classification: CWE-614 / A05"},          # contradictory CWE
+        {"title": "Open redirect on 'returnUrl'", "severity": "low", "family": "open_redirect",
+         "target": "https://t/a?returnUrl=x", "cwe": "CWE-601", "description": "offsite"},
+        {"title": "Open redirect on 'returnUrl'", "severity": "low", "family": "open_redirect",
+         "target": "https://t/b?returnUrl=y", "cwe": "CWE-601", "description": "offsite"},
+    ]
+    scope = {"in_scope": ["t.com"]}
+    # grouping collapses the 2 open redirects into one representative with instances
+    grouped = report.group_findings(findings)
+    assert len(grouped) == 2 and len(grouped[1]["instances"]) == 2
+    # estimated CVSS is labelled, explicit score is not
+    assert report.estimated_cvss({"family": "sqli"})[2] is True
+    assert report.estimated_cvss({"cvss_score": "9.1"})[2] is False
+    assert report.estimated_cvss({"family": "nope"}) is None
+    # remediation is a real fix, never the old placeholder
+    assert "parameterised" in report.remediation_line({"family": "sqli"}).lower()
+    assert "allowlist" in report.remediation_line({"family": "open_redirect"}).lower()
+    # per-finding curl
+    assert report.finding_curl({"target": "https://t/x?a=1"}).startswith("curl -i -sS -k")
+    # AI Markdown / broken fragments stripped
+    cleaned = report.clean_ai_text("**Executive summary**\nReal line.\nare)\n`x`")
+    assert "Executive summary" in cleaned and "Real line." in cleaned
+    assert not any("**" in c or c == "are)" for c in cleaned)
+    # risk label capped at highest confirmed severity (no Critical without a critical)
+    rk = report.risk_score([{"severity": "high"}] * 4)
+    assert rk["label"] == "High" and rk["score"] == 100 and "capped" in rk["note"]
+    html = report.generate_html_report("P", findings, scope, mode="full",
+                                       ai_summary="**Executive summary**\nSQLi confirmed.")
+    assert "Affected instances (2)" in html and "(est.)" in html
+    assert "Reproduction (copy-paste)" in html and "See finding detail" not in html
+    assert "CWE-614" not in html          # contradictory triage CWE suppressed
+    assert "**Executive summary**" not in html
 
 
 def test_report_capec_from_cwe_and_no_invention():
@@ -2136,6 +2204,37 @@ def test_agent_strategy_budget_defaults():
     assert mk("low_ai", max_ai_calls=5).max_ai_calls == 5   # explicit override
 
 
+def test_agentic_degrades_to_deterministic_on_quota():
+    # A runtime 429 (free-tier quota) on the first model call must NOT fail the run
+    # with zero findings — it degrades to full deterministic coverage.
+    import agent as agent_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["x.com"], [], "P")
+    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="agentic", mission_id=None)
+    a.provider = "openrouter"
+    a._ai_usable = lambda: True                         # pass the credential pre-check
+
+    async def boom(o, sid):
+        raise RuntimeError("Provider quota reached (HTTP 429) — free-tier daily cap")
+        yield {}                                        # noqa — makes this an async generator
+
+    ran = {"det": False}
+
+    async def det(sid):
+        ran["det"] = True
+        yield {"type": "info", "content": "deterministic fallback ran"}
+
+    a._run_openrouter = boom
+    a._run_deterministic = det
+
+    async def go():
+        return [ev async for ev in a.run("obj", "s")]
+
+    evs = asyncio.new_event_loop().run_until_complete(go())
+    assert ran["det"] is True and a.ai_degraded is True
+    assert any("deterministic coverage" in (e.get("content", "")) for e in evs)
+    assert "429" in a.ai_note or "quota" in a.ai_note.lower() or "unavailable" in a.ai_note.lower()
+
+
 class _PlanTools:
     """Tool stand-in for a deterministic run: no network, records executed tools."""
     def __init__(self):
@@ -2279,6 +2378,49 @@ def test_planner_full_mode_covers_lfi_and_cmdi():
             state["done"].add(s["key"]); tools.add(s["tool"])
     assert "run_web_probes" in tools, "LFI/traversal probe missing from deterministic plan"
     assert "run_cmdi" in tools, "command-injection probe missing for cmd-ish params"
+
+
+def test_scope_nonstandard_port_and_scheme():
+    from scope import ScopeEngine, _split_scope_entry
+    # host:port and full URLs split into (bare host for matching, explicit base)
+    assert _split_scope_entry("host.docker.internal:42000") == (
+        "host.docker.internal", "http://host.docker.internal:42000")
+    assert _split_scope_entry("http://app.local:8000") == ("app.local", "http://app.local:8000")
+    # plain host and default https carry NO explicit base (unchanged behavior)
+    assert _split_scope_entry("example.com") == ("example.com", None)
+    assert _split_scope_entry("https://example.com") == ("example.com", None)
+    assert _split_scope_entry("*.example.com") == ("*.example.com", None)
+    s = ScopeEngine(); s.load_manual(["host.docker.internal:42000"], [], "JS")
+    # matching is still port/scheme-free, so a :42000 URL is in scope
+    assert s.validate("http://host.docker.internal:42000/rest/user/login")[0] is True
+    assert s.to_dict()["in_scope"] == ["host.docker.internal"]          # bare host stored
+    assert s.base_urls() == ["http://host.docker.internal:42000"]        # base carries scheme+port
+    assert s.base_map() == {"host.docker.internal": "http://host.docker.internal:42000"}
+
+
+def test_planner_honors_base_map_for_nonstandard_target():
+    import planner
+    bases = {"host.docker.internal": "http://host.docker.internal:42000"}
+    state = {"mode": "full", "roots": ["host.docker.internal"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": []}, "urls": [], "bases": bases}
+    # phase B seeds http_probe + run_httpx against the explicit base, never https:443
+    seen_urls, httpx_bases = [], None
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"])
+            inp = s["input"]
+            if s["tool"] == "run_httpx":
+                httpx_bases = inp.get("bases")
+            for v in inp.values():
+                if isinstance(v, str) and v.startswith("http"):
+                    seen_urls.append(v)
+    assert httpx_bases == bases                                   # run_httpx receives the base map
+    assert any(u.startswith("http://host.docker.internal:42000") for u in seen_urls)
+    assert not any(u.startswith("https://host.docker.internal") for u in seen_urls), \
+        "planner must not fall back to https:443 when an explicit base is set"
 
 
 def test_report_execution_note():

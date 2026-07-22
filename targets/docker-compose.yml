@@ -31,6 +31,24 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:42001:80"
+    environment:
+      # DVWA needs a database; point it at the mariadb service below.
+      - DB_SERVER=dvwa-db
+      - DB_DATABASE=dvwa
+      - DB_USER=dvwa
+      - DB_PASSWORD=p@ssw0rd
+    depends_on:
+      - dvwa-db
+
+  dvwa-db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=dvwa
+      - MYSQL_DATABASE=dvwa
+      - MYSQL_USER=dvwa
+      - MYSQL_PASSWORD=p@ssw0rd
+    # not published to the host — only DVWA (same compose network) reaches it
 
   vampi:
     image: erev0s/vampi:latest

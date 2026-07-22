@@ -76,6 +76,7 @@ TOOL_PERMISSIONS = {
     "run_exposure": PermissionLevel.INTRUSIVE,
     "run_xxe": PermissionLevel.INTRUSIVE,
     "run_sqli": PermissionLevel.INTRUSIVE,
+    "run_auth_sqli": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
@@ -359,6 +360,17 @@ CLAUDE_TOOLS = [
          "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/item?id=1"},
          "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"},
          "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
+         "required": ["url"]}},
+    {"name": "run_auth_sqli",
+     "description": ("INTRUSIVE: Auth-bypass SQL injection on a login endpoint via the POST/JSON request BODY "
+                     "(e.g. a JSON {email,password} login) — the class query-string SQLi probes cannot reach. "
+                     "Baselines with a benign credential, injects OR-based payloads into each credential field, and "
+                     "confirms a real bypass (a session/JWT token or 401->200 flip) or a DBMS error. Non-destructive: "
+                     "only submits login attempts."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Login endpoint, e.g. https://t/rest/user/login"},
+         "fields": {"type": "array", "items": {"type": "string"},
+                    "description": "Body field names (default: email/username + password)"}},
          "required": ["url"]}},
     {"name": "run_cmdi",
      "description": ("INTRUSIVE: OS command-injection test on a parameterized URL. Three baseline-confirmed oracles: "
@@ -657,12 +669,15 @@ class ToolRegistry:
     # ── ACTIVE ───────────────────────────────────────────────────
     async def _run_httpx(self, inp: dict) -> ToolResult:
         targets = inp["targets"]
+        # host -> explicit base URL (scheme+port) for non-standard targets. When a
+        # target has one, probe that exact URL so a local app on e.g. :42000 is found.
+        bases = inp.get("bases") or {}
         ports = inp.get("ports", "80,443,8080,8443,3000,8000,9000")
         tmp = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
                 for t in targets[:400]:
-                    f.write(t + "\n")
+                    f.write((bases.get(t) or t) + "\n")
                 tmp = f.name
             out, err = await self._cmd(
                 ["httpx", "-l", tmp, "-ports", ports, "-status-code", "-title",
@@ -688,7 +703,7 @@ class ToolRegistry:
         # never reports "0 live" for a host that http_probe can reach.
         note = ""
         if not hosts:
-            hosts = await self._httpx_fallback(targets)
+            hosts = await self._httpx_fallback(targets, bases)
             if missing and hosts:
                 note = " (via direct probe; httpx binary absent)"
         self.recon["live_hosts"].extend(hosts)
@@ -697,12 +712,13 @@ class ToolRegistry:
             return ToolResult("httpx", "", False, "", [], "httpx not installed and no target answered a direct probe")
         return ToolResult("httpx", f"{len(targets)} probed", True, f"{len(hosts)} live hosts{note}", hosts)
 
-    async def _httpx_fallback(self, targets: list) -> list:
+    async def _httpx_fallback(self, targets: list, bases: dict = None) -> list:
         """Detect liveness with a direct GET when the httpx binary is missing or
         found nothing. Bounded, scheme-normalised, scope already validated."""
+        bases = bases or {}
         hosts = []
         for t in targets[:25]:
-            base = t if "://" in t else None
+            base = bases.get(t) or (t if "://" in t else None)
             candidates = [base] if base else [f"https://{t}", f"http://{t}"]
             for url in candidates:
                 r = await self._http(url, "GET", capture=False)
@@ -887,9 +903,21 @@ class ToolRegistry:
 
     async def _run_katana(self, inp: dict) -> ToolResult:
         url = inp["url"]
-        out, err = await self._cmd(["katana", "-u", url, "-silent", "-jc", "-d", "2"], timeout=180)
+        # Headless + automatic-form-fill so a JS SPA (Angular/React) actually renders
+        # and fires its XHRs — that is what surfaces API endpoints like the product
+        # search (?q=) and login that a static crawl never triggers. -jc parses JS
+        # for more endpoints. Falls back gracefully if headless Chromium is absent.
+        out, err = await self._cmd(
+            ["katana", "-u", url, "-silent", "-jc", "-headless", "-no-sandbox", "-aff", "-d", "2"],
+            timeout=240)
         if err.startswith("__MISSING__"):
             return ToolResult("katana", url, False, "", [], "katana not installed (use http_probe / run_wayback instead)")
+        # If headless produced nothing (no browser in this image), retry a plain crawl
+        # so we still capture the static surface instead of returning empty.
+        if not out.strip():
+            out, err = await self._cmd(["katana", "-u", url, "-silent", "-jc", "-d", "2"], timeout=180)
+            if err.startswith("__MISSING__"):
+                return ToolResult("katana", url, False, "", [], "katana not installed (use http_probe / run_wayback instead)")
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
@@ -1920,6 +1948,48 @@ class ToolRegistry:
             await self._http(ev[0], "GET", capture=True)
         return ToolResult("sqli", url, True,
                           f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
+
+    async def _run_auth_sqli(self, inp: dict) -> ToolResult:
+        """POST/JSON body auth-bypass SQLi on a login-style endpoint — the injection
+        class that query-string probes never reach (e.g. a JSON {email,password}
+        login). Baseline with a benign credential, then inject SQLi into each
+        credential field and confirm a real bypass (token/200 issued) or a SQL error.
+        Non-destructive: it only submits login attempts, never changes state."""
+        import json as _json
+        import sqli_tool as sqli
+        url = inp["url"]
+        fields = [f for f in (inp.get("fields") or []) if isinstance(f, str)]
+        cred_fields = [f for f in fields if any(h in f.lower() for h in sqli.LOGIN_FIELD_HINTS)] or ["email", "username"]
+        pw_field = next((f for f in fields if "pass" in f.lower()), "password")
+        headers = {"Content-Type": "application/json"}
+        findings, ev = [], []
+        for field in cred_fields[:2]:
+            benign = "bbh_" + os.urandom(4).hex() + "@test.invalid"
+            base_body = _json.dumps({field: benign, pw_field: "bbh_" + os.urandom(3).hex()})
+            rb = await self._http(url, "POST", headers, base_body, capture=False)
+            if rb.get("error") or not rb.get("status"):
+                continue
+            for payload in sqli.AUTH_BYPASS_PAYLOADS:
+                inj_body = _json.dumps({field: payload, pw_field: "x"})
+                ri = await self._http(url, "POST", headers, inj_body, capture=False)
+                if ri.get("error"):
+                    continue
+                hits = sqli.error_signatures(rb.get("body", ""), ri.get("body", ""))
+                if hits:
+                    f = sqli.error_finding(url, field, payload, hits)
+                    await self._http(url, "POST", headers, inj_body, capture=True)
+                    findings.append(f); ev.append(inj_body); break
+                conf = sqli.auth_bypass_confirmed(rb.get("status", 0), rb.get("body", ""),
+                                                  ri.get("status", 0), ri.get("body", ""))
+                if conf:
+                    findings.append(sqli.auth_bypass_finding(url, field, payload, conf["signal"]))
+                    await self._http(url, "POST", headers, inj_body, capture=True)
+                    ev.append(inj_body); break
+            if findings:
+                break
+        summary = ("auth-bypass SQLi CONFIRMED on the login body" if findings
+                   else "no body auth-bypass SQLi on this endpoint")
+        return ToolResult("auth_sqli", url, True, summary, findings)
 
     async def _run_cmdi(self, inp: dict) -> ToolResult:
         import time
