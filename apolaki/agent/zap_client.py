@@ -26,6 +26,22 @@ def configured() -> bool:
     return bool(ZAP_ADDR)
 
 
+async def health(timeout: int = 6) -> dict:
+    """Live ZAP status for the UI: is a daemon configured, and is it actually
+    reachable right now? Returns {configured, running, version, addr, error}.
+    Never raises — a down/absent daemon simply reports running=False."""
+    addr = ZAP_ADDR
+    if not addr:
+        return {"configured": False, "running": False, "version": "", "addr": "", "error": ""}
+    try:
+        ver = await ZapClient(timeout=timeout).version()
+        return {"configured": True, "running": bool(ver), "version": ver or "",
+                "addr": addr, "error": "" if ver else "no version returned"}
+    except Exception as e:
+        return {"configured": True, "running": False, "version": "", "addr": addr,
+                "error": f"{type(e).__name__}: {e}"}
+
+
 def risk_to_severity(risk: str) -> str:
     return _RISK_TO_SEV.get((risk or "").strip().lower(), "informational")
 
@@ -129,6 +145,27 @@ class ZapClient:
         vary by ZAP version."""
         await self._call("ascan", "action", "setOptionTargetParamsInjectable", Integer=injectable)
         await self._call("ascan", "action", "setOptionTargetParamsEnabledRPC", Integer=rpc)
+
+    async def set_scan_rate(self, delay_ms: int = 0, threads_per_host: int = None):
+        """Slow/polite the active scanner — a delay between requests and a
+        per-host thread cap keep a 'safe active' scan gentle on the target.
+        Best-effort; option names vary by ZAP version."""
+        try:
+            await self._call("ascan", "action", "setOptionDelayInMs", Integer=delay_ms)
+        except Exception:
+            pass
+        if threads_per_host is not None:
+            try:
+                await self._call("ascan", "action", "setOptionThreadPerHost", Integer=threads_per_host)
+            except Exception:
+                pass
+
+    async def pscan_remaining(self) -> int:
+        """Records still queued for passive scanning (0 = passive scan drained)."""
+        try:
+            return int((await self._call("pscan", "view", "recordsToScan")).get("recordsToScan", 0))
+        except Exception:
+            return 0
 
     async def add_scan_header(self, name: str = "X-Scanner", value: str = "Apolaki-ZAP-authorized"):
         """Tag every ZAP request with an identifying header (AddZAPHeader.js idea)

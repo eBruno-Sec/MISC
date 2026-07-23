@@ -176,6 +176,14 @@ def generate_report(program: str, findings: list, scope: dict,
         lines += ["", delta_block]
     if ledger_block:
         lines += ["", ledger_block]
+    # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
+    import report_integrity as _ri
+    _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
+    lines += ["", "## Report Integrity", "",
+              ("> ✓ **Consistent** — " if _integ["ok"] else "> ⚠ **Contradictions found** — ")
+              + _ri.summary_line(_integ)]
+    for _i in _integ["issues"]:
+        lines.append(f"> - `{_i['check']}` — {_i['detail']}")
     return "\n".join(lines)
 
 
@@ -553,11 +561,22 @@ def _delta_lines(delta: dict, findings: list) -> list:
 
 def _zap_status_text(status: str) -> str:
     return {"executed": "ZAP Executed",
-            "not_configured": "ZAP Skipped Cleanly — Not Configured (ZAP_ADDR unset)",
-            "failed": "ZAP Failed — daemon unreachable at ZAP_ADDR",
-            "not_invoked": "ZAP Not Invoked — not in this scan plan (start the zap compose profile "
-                           "and set ZAP_ADDR to enable)"}.get(
-        (status or "not_invoked"), "ZAP Not Invoked")
+            "executed_passive": "ZAP Executed — Passive Only (spider + passive scan, no active scan)",
+            "executed_safe_active": "ZAP Executed — Safe Active (rate-limited, scope-guarded active scan)",
+            "executed_thorough_active": "ZAP Executed — Thorough Active (deeper active scan, scope-guarded)",
+            "not_configured": "Skipped — ZAP not configured (the zap service is unavailable / ZAP_ADDR unset)",
+            "user_disabled": "Skipped — ZAP disabled by user (enable ZAP in scan setup to run the DAST pass)",
+            "unavailable": "Skipped — ZAP enabled but unavailable (daemon not running); scan continued without it",
+            "failed": "ZAP Failed — daemon error during the scan",
+            "not_invoked": "ZAP Not Invoked — enabled but not scheduled for this run"}.get(
+        (status or "not_configured"), "Skipped — ZAP not configured")
+
+
+def _zap_badge(status: str) -> str:
+    """Short one-word badge for the methodology metric card (robust to wording)."""
+    return {"executed": "Run", "executed_passive": "Pass", "executed_safe_active": "Safe",
+            "executed_thorough_active": "Deep", "not_configured": "Off", "user_disabled": "Off",
+            "unavailable": "N/A", "failed": "Fail", "not_invoked": "Skip"}.get(status or "not_configured", "Off")
 
 
 def _ledger_md(ledger: dict) -> list:
@@ -795,8 +814,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
     method_html = ""
     if tool_ledger:
         zs = tool_ledger.get("zap_status")
-        zcls = {"executed": "#1f9d6b", "failed": "#ff3d6b",
-                "not_configured": "#c98a2b"}.get(zs, "#6a8a9a")
+        zcls = ("#1f9d6b" if (zs or "").startswith("executed")          # any executed_* → green
+                else {"failed": "#ff3d6b", "not_configured": "#c98a2b",
+                      "user_disabled": "#c98a2b", "unavailable": "#c98a2b"}.get(zs, "#6a8a9a"))
         auth = ("Authenticated (operator headers supplied)" if tool_ledger.get("authenticated")
                 else "Unauthenticated")
         strat = e((tool_ledger.get("strategy") or "n/a").replace("_", "-"))
@@ -816,10 +836,28 @@ def generate_html_report(program: str, findings: list, scope: dict,
             "<div class='cov-grid'>"
             f"<div class='cov'><span>{e(strat)}</span><label>Strategy</label></div>"
             f"<div class='cov'><span>{e(str(tool_ledger.get('ai_calls', 0)))}</span><label>AI Calls</label></div>"
-            f"<div class='cov'><span style='color:{zcls}'>{e(_zap_status_text(zs).split(' ')[1] if _zap_status_text(zs).count(' ')>=1 else 'ZAP')}</span><label>ZAP</label></div>"
+            f"<div class='cov'><span style='color:{zcls}'>{e(_zap_badge(zs))}</span><label>ZAP</label></div>"
             "</div>"
             f"<p class='sub'><b>ZAP (DAST):</b> <span style='color:{zcls}'>{e(_zap_status_text(zs))}</span> · "
             f"<b>Auth:</b> {e(auth)}</p>" + tbl)
+
+    # report integrity — a visible self-check that headline metrics agree with the
+    # findings beneath them (Apolaki's guardrail against the self-contradicting
+    # reports other tools ship). Green when clean; a warning box lists any conflict.
+    import report_integrity as _ri
+    integ = _ri.check_report_consistency(findings, leads, rk, counts, attack_surface, tool_ledger)
+    _clean = not integ["issues"]
+    _ic = "#1f9d6b" if integ["ok"] else "#c0392b"
+    integrity_html = (
+        "<h2 id='integrity'>Report Integrity</h2>"
+        f"<p class='sub'>An automated cross-check that the headline metrics, risk score and "
+        f"confirmed/unconfirmed statuses do not contradict each other. {integ['checks_run']} checks run.</p>"
+        f"<div class='biz' style='border-left-color:{_ic}'>"
+        f"<p><b style='color:{_ic}'>{'✓ Consistent' if _clean else '⚠ '+str(len([i for i in integ['issues'] if i['level']=='error']))+' contradiction(s)'}</b> — "
+        f"{e(_ri.summary_line(integ))}</p>" +
+        ("" if _clean else "<ul>" + "".join(
+            f"<li><code>{e(i['check'])}</code> — {e(i['detail'])}</li>" for i in integ["issues"]) + "</ul>") +
+        "</div>")
 
     # since last scan (historical delta — never says "fixed")
     delta_html = ""
@@ -890,6 +928,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
         toc_items.append(("playbook", "Manual Testing Playbook"))
     if method_html:
         toc_items.append(("methodology", "Methodology & Tool Ledger"))
+    toc_items.append(("integrity", "Report Integrity"))
     toc_items.append(("appendix", "Appendix"))
     toc = "".join(f"<li><a href='#{i}'>{lbl}</a></li>" for i, lbl in toc_items)
 
@@ -1034,6 +1073,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {delta_html}
 {pb_html}
 {method_html}
+{integrity_html}
 {appendix}
 <footer>Generated by Apolaki · deterministic, truth-first reporting. Confirmed findings carry reproducible
 evidence; unconfirmed leads are advisory and must be verified before submission. Authorized security research only.</footer>
@@ -1097,4 +1137,9 @@ def findings_json(program: str, findings: list, scope: dict,
         # ── export generation metadata ──
         "export": {"generated_at": _now(), "format": "json", "version": DATA_PACKAGE_VERSION},
     }
+    # ── metric-consistency guarantee: a self-check that headline metrics agree with
+    # the findings beneath them (no "Confirmed: 0 / 14 confirmed" style contradiction).
+    import report_integrity as _ri
+    pkg["integrity"] = _ri.check_report_consistency(
+        findings, leads, pkg["risk"], pkg["counts"], attack_surface, tool_ledger)
     return json.dumps(pkg, indent=2, default=str)

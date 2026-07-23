@@ -47,6 +47,14 @@ class EngageRequest(BaseModel):
     recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
     strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: adaptive)
     max_ai_calls: Optional[int] = None  # override the per-strategy AI-call budget
+    # OWASP ZAP DAST — opt-in from the scan setup UI. enable_zap OFF (default) means
+    # ZAP never runs (report: "user disabled"); nothing else changes. When ON, ZAP
+    # runs in Full mode with zap_policy. require_zap makes it mandatory: an
+    # unavailable ZAP BLOCKS the scan with an actionable error instead of silently
+    # downgrading to no-ZAP.
+    enable_zap: bool = False
+    zap_policy: str = "safe_active"   # passive | safe_active | thorough_active
+    require_zap: bool = False
 
 
 class EstimateRequest(BaseModel):
@@ -195,6 +203,24 @@ async def config():
             "xss_confirm": tools_mod.xss_confirm_status()}
 
 
+@app.get("/zap/status")
+async def zap_status():
+    """Live ZAP DAST availability for the scan-setup UI, so a user can see 'ZAP
+    Ready / Not Running / Misconfigured' before starting — no Docker guesswork.
+    Never returns the ZAP API key."""
+    import zap_client
+    h = await zap_client.health()
+    if not h["configured"]:
+        state, label = "not_configured", "ZAP Not Configured"
+    elif h["running"]:
+        state, label = "ready", f"ZAP Ready (v{h['version']})"
+    else:
+        state, label = "not_running", "ZAP Not Running"
+    return {"state": state, "label": label, "configured": h["configured"],
+            "running": h["running"], "version": h["version"], "addr": h["addr"],
+            "policies": ["passive", "safe_active", "thorough_active"], "error": h["error"]}
+
+
 # ── native OOB collaborator: inbound interaction sink + correlation ──
 # include_in_schema=False: this one path answers 7 methods, which otherwise makes
 # FastAPI emit a duplicate-operation-id warning at startup. It's an internal sink,
@@ -235,6 +261,24 @@ async def engage(req: EngageRequest):
     if not req.in_scope:
         raise HTTPException(422, "At least one in-scope target is required.")
 
+    # ZAP configuration + preflight. require_zap implies enable_zap.
+    if req.zap_policy not in ("passive", "safe_active", "thorough_active"):
+        raise HTTPException(422, "zap_policy must be passive | safe_active | thorough_active")
+    enable_zap = bool(req.enable_zap or req.require_zap)
+    if enable_zap and req.mode != "full":
+        raise HTTPException(422, "ZAP (DAST) only runs in Full mode. Select Full mode, or turn off Enable ZAP.")
+    if req.require_zap:
+        # fail closed — a required-but-unavailable ZAP blocks the scan with an
+        # actionable error rather than silently downgrading to no-ZAP.
+        import zap_client
+        h = await zap_client.health(timeout=8)
+        if not h["configured"]:
+            raise HTTPException(422, "ZAP required but not configured (ZAP_ADDR is unset). Start the zap "
+                                     "service (it is on by default) or set ZAP_ADDR.")
+        if not h["running"]:
+            raise HTTPException(503, f"ZAP required but the daemon at {h['addr']} is unavailable "
+                                     f"({h['error']}). Start/repair the zap service, then retry.")
+
     session_id = uuid.uuid4().hex[:8]
     scope = ScopeEngine()
     scope.load_manual(req.in_scope, req.out_of_scope, req.program_name)
@@ -262,7 +306,8 @@ async def engage(req: EngageRequest):
     recon_cycles = max(1, min(int(req.recon_cycles or 1), 3))
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
                      auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles,
-                     strategy=strategy, max_ai_calls=req.max_ai_calls)
+                     strategy=strategy, max_ai_calls=req.max_ai_calls,
+                     enable_zap=enable_zap, zap_policy=req.zap_policy)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
@@ -278,7 +323,8 @@ async def engage(req: EngageRequest):
     context = {"auto_approve": req.auto_approve,
                "authenticated": bool(session_headers), "auth_note": auth_note,
                "recon_cycles": recon_cycles, "warm_start": warm_start,
-               "strategy": strategy, "max_ai_calls": agent.max_ai_calls}
+               "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
+               "enable_zap": enable_zap, "zap_policy": req.zap_policy}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
@@ -500,15 +546,34 @@ def _tool_ledger(session_id: str) -> dict:
             status, note = "executed", a["note"]
         tools.append({"tool": t, "status": status, "calls": a["calls"],
                       "findings": a["findings"], "note": note})
+    # ZAP status is reported honestly: if no ZAP daemon is configured (ZAP_ADDR unset)
+    # the report says "Skipped — not configured", NOT "Not Invoked" — the latter is
+    # reserved for the case where ZAP IS configured but the scan mode/plan didn't run
+    # it (e.g. a non-Full mode). This removes the ambiguous "Not Invoked" that looked
+    # like ZAP was available but silently skipped.
+    try:
+        import zap_client
+        _zap_configured = zap_client.configured()
+    except Exception:
+        _zap_configured = False
+    _zap_enabled = bool(ctx.get("enable_zap"))
     z = agg.get("run_zap")
-    if not z:
-        zap = "not_invoked"
+    if not _zap_configured:
+        zap = "not_configured"                # ZAP_ADDR unset — nothing to run
+    elif not _zap_enabled:
+        zap = "user_disabled"                 # available but the user did not enable it
+    elif not z:
+        zap = "not_invoked"                   # enabled but never scheduled (e.g. no live host)
     elif z["error"]:
         zap = "failed"
     elif "not configured" in z["note"].lower():
         zap = "not_configured"
     else:
-        zap = "executed"
+        # executed — reflect the policy the note recorded (policy=<p>; ...)
+        note = z.get("note", "")
+        pol = note.split("policy=", 1)[1].split(";", 1)[0].strip() if "policy=" in note else ""
+        zap = {"passive": "executed_passive", "safe_active": "executed_safe_active",
+               "thorough_active": "executed_thorough_active"}.get(pol, "executed")
     return {"tools": tools, "zap_status": zap,
             "authenticated": bool(ctx.get("authenticated")),
             "strategy": ex.get("strategy") or ctx.get("strategy") or "",

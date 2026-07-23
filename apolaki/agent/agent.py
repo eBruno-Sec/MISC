@@ -11,6 +11,17 @@ from tools import ToolRegistry, TOOL_PERMISSIONS
 
 APPROVAL_TIMEOUT = int(os.getenv("BBH_APPROVAL_TIMEOUT", "0"))  # 0 = wait forever
 
+
+def _zap_configured() -> bool:
+    """True when a ZAP daemon is configured (ZAP_ADDR set), so the deterministic
+    planner schedules a real DAST pass in Full mode. Read fresh (env can change);
+    best-effort so a missing/partial zap_client never breaks planning."""
+    try:
+        import zap_client
+        return zap_client.configured()
+    except Exception:
+        return False
+
 DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 DEFAULT_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
@@ -148,11 +159,19 @@ class BBHAgent:
 
     def __init__(self, scope: ScopeEngine, tools: ToolRegistry, stop_event: asyncio.Event,
                  mode: str = "active", auto_approve: bool = False, mission_id: str = None,
-                 recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None):
+                 recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
+                 enable_zap: bool = False, zap_policy: str = "safe_active"):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
+        # ZAP DAST is opt-in per scan: it runs only when the user enabled it (and
+        # only in Full mode via the planner's INTRUSIVE gate). Policy chooses
+        # passive / safe-active / thorough-active. Stored on the tool registry so
+        # _run_zap can read the policy without threading it through every call.
+        self.enable_zap = bool(enable_zap)
+        self.zap_policy = zap_policy if zap_policy in ("passive", "safe_active", "thorough_active") else "safe_active"
+        self.tools.zap_policy = self.zap_policy
         self.mode = mode if mode in ("passive", "active", "full") else "active"
         self.auto_approve = auto_approve
         self.mission_id = mission_id
@@ -304,13 +323,15 @@ class BBHAgent:
             yield {"type": "finding", "finding": fin}
 
         # Auto-store confirmed findings from the native confirmatory probes when NO
-        # model is driving (deterministic / low_ai, OR agentic that DEGRADED to a
-        # deterministic fallback after an AI failure). Without this the probes confirm
-        # e.g. a SQLi and it is silently dropped — the scan would report zero findings.
-        # In a live agentic run the model stores them, so we don't here (avoids
-        # duplicates). Deduped by fingerprint.
-        if (not result.error and (self.strategy in ("deterministic", "low_ai") or self.ai_degraded)
-                and tool_name in _AUTO_STORE_TOOLS):
+        # model is driving: deterministic / low_ai, agentic that DEGRADED after an AI
+        # failure, OR the deterministic COVERAGE FLOOR of an agentic run (_in_floor) —
+        # the floor's probes run without the model, so without this their confirmed
+        # findings would be silently dropped (QUAL-1: floor ran 23 tools but reported
+        # zero findings). In the model-driven ReAct phase the model stores them, so we
+        # don't here (avoids duplicates). Deduped by fingerprint.
+        if (not result.error and tool_name in _AUTO_STORE_TOOLS
+                and (self.strategy in ("deterministic", "low_ai") or self.ai_degraded
+                     or getattr(self, "_in_floor", False))):
             async for ev in self._auto_store(result):
                 yield ev
 
@@ -427,11 +448,27 @@ class BBHAgent:
             async for ev in self._run_low_ai(objective, session_id):
                 yield ev
         else:
-            # Agentic (ReAct). The credential pre-check above cannot see a RUNTIME
-            # provider failure (e.g. a 429 free-tier quota hit on the first model
-            # call), which would otherwise fail the whole run with zero findings.
-            # Catch it and degrade to full deterministic coverage so the scan still
-            # produces results (directive: stay useful when AI is rate-limited).
+            # QUAL-1: an agentic run must never fall below deterministic coverage.
+            # Previously the ReAct loop ran alone, so a model that decided "analysis
+            # complete" after a couple of calls could silently under-scan (observed:
+            # 2 tools / 0 findings where deterministic found 6 on the same target).
+            # Run the deterministic plan as a COVERAGE FLOOR first, then let the ReAct
+            # loop augment on the already-mapped surface — AI adds, never replaces.
+            yield {"type": "info", "content": "Agentic: establishing a deterministic coverage floor, "
+                   "then the AI augments on the mapped surface."}
+            # mark the floor so _run_tool auto-stores its confirmed findings (no model
+            # is driving during the floor); the ReAct phase below stores its own.
+            self._in_floor = True
+            try:
+                async for ev in self._execute_plan(session_id):
+                    yield ev
+            finally:
+                self._in_floor = False
+            floor_steps = getattr(self, "_plan_steps", 0)
+            # ReAct augmentation. A RUNTIME provider failure (e.g. a 429 free-tier
+            # quota hit) can't be seen by the credential pre-check; since the floor
+            # already produced full coverage, catch it and finalize gracefully
+            # instead of failing the run.
             gen = self._run_openrouter(objective, session_id) if self.provider == "openrouter" \
                 else self._run_anthropic(objective, session_id)
             try:
@@ -442,15 +479,14 @@ class BBHAgent:
                 ai_err = any(k in low for k in ("429", "quota", "rate limit", "rate-limit",
                                                 "timeout", "timed out", "401", "unauthorized",
                                                 "authentication", "insufficient"))
-                if not (ai_err or not self.findings):
-                    raise
                 self.ai_degraded = True
-                self.ai_note = (f"Agentic AI unavailable ({type(ex).__name__}) — completed with "
-                                "deterministic coverage.")
-                yield {"type": "info", "content": "AI rate-limited/unavailable — falling back to "
-                       "deterministic coverage for this run."}
-                async for ev in self._run_deterministic(session_id):
-                    yield ev
+                self.ai_note = (f"Agentic AI unavailable ({type(ex).__name__}) — deterministic "
+                                f"coverage floor completed ({floor_steps} step(s)).")
+                yield {"type": "info", "content": ("AI rate-limited/unavailable" if ai_err
+                       else f"AI augmentation error ({type(ex).__name__})") +
+                       " — the deterministic coverage floor already completed for this run."}
+                yield {"type": "complete", "content": f"Agentic run completed on the deterministic "
+                       f"coverage floor ({floor_steps} step(s)). See Playbooks and the report."}
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev
@@ -483,7 +519,12 @@ class BBHAgent:
                     return
                 state = {"mode": self.mode, "roots": roots, "done": done,
                          "recon": self.tools.recon, "urls": self.tools.urls,
-                         "bases": self.scope.base_map()}
+                         "bases": self.scope.base_map(),
+                         # ZAP runs only when the user enabled it for this scan (and
+                         # a daemon is configured); the planner's INTRUSIVE gate keeps
+                         # it to Full mode. Policy rides along to the run_zap step.
+                         "zap": self.enable_zap and _zap_configured(),
+                         "zap_policy": self.zap_policy}
                 batch = planner.next_batch(state)
                 if not batch:
                     break
