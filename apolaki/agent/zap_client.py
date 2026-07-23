@@ -160,6 +160,33 @@ class ZapClient:
             except Exception:
                 pass
 
+    async def set_hosts_per_scan(self, hosts: int = 2):
+        """Parallel hosts per active scan — part of the SPEED dial (higher = faster).
+        Best-effort; option name varies by ZAP version."""
+        try:
+            await self._call("ascan", "action", "setOptionHostPerScan", Integer=hosts)
+        except Exception:
+            pass
+
+    async def set_attack_strength(self, strength: str = "MEDIUM", threshold: str = None):
+        """AGGRESSION dial — how hard the active scanner hits each parameter.
+        Sets attack strength (LOW/MEDIUM/HIGH/INSANE) and optional alert threshold
+        (OFF/LOW/MEDIUM/HIGH) across every plugin category (0..5) of the default
+        scan policy. Demon = HIGH strength + LOW threshold (throw everything, flag
+        anything). Best-effort — silently skips categories a ZAP version rejects."""
+        for cat in range(6):
+            try:
+                await self._call("ascan", "action", "setPolicyAttackStrength",
+                                 id=cat, attackStrength=strength)
+            except Exception:
+                pass
+            if threshold:
+                try:
+                    await self._call("ascan", "action", "setPolicyAlertThreshold",
+                                     id=cat, alertThreshold=threshold)
+                except Exception:
+                    pass
+
     async def pscan_remaining(self) -> int:
         """Records still queued for passive scanning (0 = passive scan drained)."""
         try:

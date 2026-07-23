@@ -2538,12 +2538,26 @@ class ToolRegistry:
                     return 100 if (await zap.pscan_remaining()) == 0 else 0
                 await zap.wait_int(_pscan_done, cap=90, stop_event=self.stop_event)
             else:
-                # active scan. Identify our traffic + widen input vectors
-                # (POST/JSON/headers/cookie) so API bodies get fuzzed. safe_active
-                # rate-limits (delay + thread cap) to stay polite; thorough goes full.
-                setups = [zap.add_scan_header(), zap.set_injectable()]
-                if policy == "safe_active":
-                    setups.append(zap.set_scan_rate(delay_ms=200, threads_per_host=2))
+                # active scan — two INDEPENDENT dials:
+                #  SPEED = request pacing (delay + threads + parallel hosts): turtle
+                #    is slow/polite for fragile/production targets; fast maximises
+                #    throughput. This is about network manners, not attack depth.
+                #  AGGRESSION = ZAP attack strength per parameter: low is gentle,
+                #    demon throws every payload (HIGH strength) and flags anything
+                #    (LOW alert threshold). This is about how HARD it attacks, not
+                #    how fast. e.g. turtle+demon = slow on the wire, brutal per param.
+                speed = (inp.get("speed") or getattr(self, "zap_speed", "normal"))
+                aggr = (inp.get("aggression") or getattr(self, "zap_aggression", "normal"))
+                _SPEED = {"turtle": (1200, 1, 1, 900), "normal": (200, 2, 2, None),
+                          "fast": (0, 6, 6, 900)}
+                _AGGR = {"low": ("LOW", "HIGH"), "normal": ("MEDIUM", None),
+                         "demon": ("HIGH", "LOW")}
+                delay_ms, threads, hosts, cap_override = _SPEED.get(speed, _SPEED["normal"])
+                strength, threshold = _AGGR.get(aggr, _AGGR["normal"])
+                setups = [zap.add_scan_header(), zap.set_injectable(),
+                          zap.set_scan_rate(delay_ms=delay_ms, threads_per_host=threads),
+                          zap.set_hosts_per_scan(hosts),
+                          zap.set_attack_strength(strength, threshold)]
                 oast = inp.get("oast_service") or os.getenv("ZAP_OAST_SERVICE", "")
                 if oast:
                     setups.append(zap.set_oast_service(oast))
@@ -2554,7 +2568,7 @@ class ToolRegistry:
                         pass
                 asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
                 if asid is not None:
-                    cap = int(inp.get("scan_seconds", 300 if policy == "safe_active" else 600))
+                    cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
                     await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
             raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
         except Exception as e:
@@ -2564,12 +2578,18 @@ class ToolRegistry:
         findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
         self.recon.setdefault("zap", []).extend(findings)
         # the note starts with a policy token so the report/ledger can render the
-        # exact state ("ZAP Executed — Passive Only / Safe Active / Thorough Active").
+        # exact state ("ZAP Executed — Passive Only / Safe Active / Thorough Active");
+        # speed is included for the methodology (turtle / normal / demon pacing).
         _plabel = {"passive": "passive", "safe_active": "safe-active",
                    "thorough_active": "thorough-active"}[policy]
+        if policy == "passive":
+            _dials = "speed=n/a; aggression=n/a"
+        else:
+            _dials = (f"speed={inp.get('speed') or getattr(self, 'zap_speed', 'normal')}; "
+                      f"aggression={inp.get('aggression') or getattr(self, 'zap_aggression', 'normal')}")
         return ToolResult("zap", url, True,
-                          f"policy={policy}; {len(findings)} ZAP alert(s) [{_plabel}] (from {len(raw)} raw)",
-                          findings)
+                          f"policy={policy}; {_dials}; {len(findings)} ZAP alert(s) "
+                          f"[{_plabel}] (from {len(raw)} raw)", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
