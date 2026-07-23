@@ -130,6 +130,8 @@ def next_batch(state: dict) -> list:
     zap_on = bool(state.get("zap"))
     # heavyweight nmap NSE vuln scan — opt-in; INTRUSIVE gate keeps it to Full mode.
     nmap_vuln_on = bool(state.get("nmap_vuln"))
+    # heavy nuclei (full vuln template set) — opt-in, Full mode only.
+    nuclei_heavy_on = bool(state.get("nuclei_heavy")) and mode == "full"
     # host -> base URL (scheme+port). Lets the planner probe a non-standard target
     # (e.g. a local app on http://host:42000) instead of assuming https on 443.
     bases = state.get("bases") or {}
@@ -417,6 +419,14 @@ def next_batch(state: dict) -> list:
         nv_steps = fresh(nv_steps)
         if nv_steps:
             return nv_steps
+
+    # ── phase F4: heavy nuclei — full vuln template set (opt-in), truth-first leads ──
+    if nuclei_heavy_on:
+        hn_steps = [_step("run_nuclei", {"target": _b(h), "heavy": True}, f"run_nuclei:heavy:{h}")
+                    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]]
+        hn_steps = fresh(hn_steps)
+        if hn_steps:
+            return hn_steps
 
     # ── phase G: deterministic playbook (always, even passive) ──
     if "generate_playbook" not in done:
