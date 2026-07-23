@@ -128,6 +128,8 @@ def next_batch(state: dict) -> list:
     # True when a ZAP daemon is configured (ZAP_ADDR set). When so, Full mode runs a
     # real DAST pass — ZAP is no longer left to the agentic model's discretion.
     zap_on = bool(state.get("zap"))
+    # heavyweight nmap NSE vuln scan — opt-in; INTRUSIVE gate keeps it to Full mode.
+    nmap_vuln_on = bool(state.get("nmap_vuln"))
     # host -> base URL (scheme+port). Lets the planner probe a non-standard target
     # (e.g. a local app on http://host:42000) instead of assuming https on 443.
     bases = state.get("bases") or {}
@@ -404,6 +406,17 @@ def next_batch(state: dict) -> list:
         z_steps = fresh(z_steps)
         if z_steps:
             return z_steps
+
+    # ── phase F3: heavyweight nmap NSE vuln scan (opt-in) ──
+    # The full `vuln` NSE category (minus DoS) on the primary in-scope host roots.
+    # run_nmap_vuln is INTRUSIVE (fresh()/_allowed() gates it to Full) and slow, so
+    # it runs late and is capped. Results are truth-first advisory leads.
+    if nmap_vuln_on:
+        nv_steps = [_step("run_nmap_vuln", {"target": h}, f"run_nmap_vuln:{h}")
+                    for h in sorted(set(roots) | set(subs))[:CAP_ZAP]]
+        nv_steps = fresh(nv_steps)
+        if nv_steps:
+            return nv_steps
 
     # ── phase G: deterministic playbook (always, even passive) ──
     if "generate_playbook" not in done:

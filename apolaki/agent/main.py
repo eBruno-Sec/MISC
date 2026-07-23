@@ -61,6 +61,9 @@ class EngageRequest(BaseModel):
     zap_speed: str = "normal"         # turtle (slow/polite) | normal | fast
     zap_aggression: str = "normal"    # low | normal | demon (max attack strength)
     require_zap: bool = False
+    # Heavyweight nmap NSE vulnerability scan (full `vuln` category minus DoS) on
+    # in-scope hosts. Opt-in; runs in Full mode only. Results are advisory leads.
+    enable_nmap_vuln: bool = False
 
 
 class EstimateRequest(BaseModel):
@@ -277,6 +280,9 @@ async def engage(req: EngageRequest):
     enable_zap = bool(req.enable_zap or req.require_zap)
     if enable_zap and req.mode != "full":
         raise HTTPException(422, "ZAP (DAST) only runs in Full mode. Select Full mode, or turn off Enable ZAP.")
+    if req.enable_nmap_vuln and req.mode != "full":
+        raise HTTPException(422, "The nmap NSE vuln scan is intrusive and only runs in Full mode. "
+                                 "Select Full mode, or turn off the NSE vuln scan.")
     if req.require_zap:
         # fail closed — a required-but-unavailable ZAP blocks the scan with an
         # actionable error rather than silently downgrading to no-ZAP.
@@ -318,7 +324,8 @@ async def engage(req: EngageRequest):
                      auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles,
                      strategy=strategy, max_ai_calls=req.max_ai_calls,
                      enable_zap=enable_zap, zap_policy=req.zap_policy,
-                     zap_speed=req.zap_speed, zap_aggression=req.zap_aggression)
+                     zap_speed=req.zap_speed, zap_aggression=req.zap_aggression,
+                     enable_nmap_vuln=req.enable_nmap_vuln)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
