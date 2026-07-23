@@ -160,7 +160,8 @@ class BBHAgent:
     def __init__(self, scope: ScopeEngine, tools: ToolRegistry, stop_event: asyncio.Event,
                  mode: str = "active", auto_approve: bool = False, mission_id: str = None,
                  recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
-                 enable_zap: bool = False, zap_policy: str = "safe_active"):
+                 enable_zap: bool = False, zap_policy: str = "safe_active",
+                 zap_speed: str = "normal", zap_aggression: str = "normal"):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
@@ -171,7 +172,11 @@ class BBHAgent:
         # _run_zap can read the policy without threading it through every call.
         self.enable_zap = bool(enable_zap)
         self.zap_policy = zap_policy if zap_policy in ("passive", "safe_active", "thorough_active") else "safe_active"
+        self.zap_speed = zap_speed if zap_speed in ("turtle", "normal", "fast") else "normal"
+        self.zap_aggression = zap_aggression if zap_aggression in ("low", "normal", "demon") else "normal"
         self.tools.zap_policy = self.zap_policy
+        self.tools.zap_speed = self.zap_speed
+        self.tools.zap_aggression = self.zap_aggression
         self.mode = mode if mode in ("passive", "active", "full") else "active"
         self.auto_approve = auto_approve
         self.mission_id = mission_id
@@ -524,7 +529,8 @@ class BBHAgent:
                          # a daemon is configured); the planner's INTRUSIVE gate keeps
                          # it to Full mode. Policy rides along to the run_zap step.
                          "zap": self.enable_zap and _zap_configured(),
-                         "zap_policy": self.zap_policy}
+                         "zap_policy": self.zap_policy,
+                         "zap_speed": self.zap_speed, "zap_aggression": self.zap_aggression}
                 batch = planner.next_batch(state)
                 if not batch:
                     break

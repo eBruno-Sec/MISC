@@ -359,10 +359,25 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
               <div class="field"><label>Policy</label>
                 <select id="zapPolicy">
                   <option value="passive">Passive only — spider + passive scan (no active scan)</option>
-                  <option value="safe_active" selected>Safe active — rate-limited, scope-guarded active scan</option>
+                  <option value="safe_active" selected>Safe active — scope-guarded active scan</option>
                   <option value="thorough_active">Thorough active — deeper active scan (still scope-guarded)</option>
                 </select>
               </div>
+              <div class="field"><label>Speed <span class="muted">(request pacing)</span></label>
+                <select id="zapSpeed">
+                  <option value="turtle">🐢 Turtle — slow &amp; polite (long delay, 1 thread) — fragile/prod targets</option>
+                  <option value="normal" selected>Normal — balanced pacing</option>
+                  <option value="fast">⚡ Fast — max throughput (no delay, many threads)</option>
+                </select>
+              </div>
+              <div class="field"><label>Aggression <span class="muted">(attack strength)</span></label>
+                <select id="zapAggression">
+                  <option value="low">Low — gentle, fewer payloads / false positives</option>
+                  <option value="normal" selected>Normal — ZAP default attack strength</option>
+                  <option value="demon">😈 Demon — max attack strength, flag everything (authorized targets only)</option>
+                </select>
+              </div>
+              <div class="hint" style="margin-top:-.2rem">Speed and Aggression are independent: 🐢+😈 = slow on the wire but throws every payload at each parameter.</div>
               <label class="chk"><input type="checkbox" id="requireZap"> <strong>Require ZAP</strong> — if unavailable, stop the scan with an actionable error (never silently skip)</label>
             </div>
             <div class="hint" style="margin-top:.5rem">Status: <span id="zapStatusPill" style="font-size:.72rem;padding:.1rem .5rem;border-radius:3px;border:1px solid var(--border)">checking…</span> <button type="button" class="btn ghost sm" onclick="refreshZapStatus()">Recheck</button></div>
@@ -797,6 +812,8 @@ async function startHunt(){
     parent_id:pendingParent||null,recon_cycles:cycles,strategy:strategy,
     enable_zap:document.getElementById("enableZap").checked,
     zap_policy:document.getElementById("zapPolicy").value,
+    zap_speed:document.getElementById("zapSpeed").value,
+    zap_aggression:document.getElementById("zapAggression").value,
     require_zap:document.getElementById("requireZap").checked};
   const rb=document.getElementById("reconBanner");
   if(cycles>1){rb.style.display="inline-flex";rb.textContent=`Iterative recon: up to ${cycles} cycles — refining from discovered assets each pass.`;}

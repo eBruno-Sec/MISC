@@ -2829,6 +2829,31 @@ def test_planner_schedules_zap_in_full_mode_only_when_configured():
     assert scheduled("passive", True) is False, "run_zap must not run in passive mode"
 
 
+def test_planner_carries_zap_policy_speed_and_aggression_to_step():
+    # The two INDEPENDENT ZAP dials — speed (pacing) and aggression (attack
+    # strength) — plus the policy must ride the state into the run_zap step input,
+    # so _run_zap can apply them. Orthogonal: turtle speed + demon aggression is a
+    # valid combo (slow on the wire, brutal per parameter).
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/"], "zap": True,
+             "zap_policy": "thorough_active", "zap_speed": "turtle", "zap_aggression": "demon"}
+    zstep = None
+    for _ in range(60):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"])
+            if s["tool"] == "run_zap":
+                zstep = s
+    assert zstep is not None, "run_zap not scheduled"
+    assert zstep["input"]["policy"] == "thorough_active"
+    assert zstep["input"]["speed"] == "turtle"
+    assert zstep["input"]["aggression"] == "demon"
+
+
 def test_planner_corrects_stale_scheme_in_inventory_example_url():
     # Regression (found live on an authenticated DVWA scan): a parameterized
     # endpoint's inventory `example` field carries the RAW scheme it was

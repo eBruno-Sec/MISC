@@ -397,8 +397,10 @@ def next_batch(state: dict) -> list:
     # agentic model's discretion.
     if zap_on:
         _zpol = state.get("zap_policy", "safe_active")
-        z_steps = [_step("run_zap", {"url": _b(h), "policy": _zpol}, f"run_zap:{h}")
-                   for h in host_bases[:CAP_ZAP]]
+        _zsp = state.get("zap_speed", "normal")
+        _zag = state.get("zap_aggression", "normal")
+        z_steps = [_step("run_zap", {"url": _b(h), "policy": _zpol, "speed": _zsp, "aggression": _zag},
+                         f"run_zap:{h}") for h in host_bases[:CAP_ZAP]]
         z_steps = fresh(z_steps)
         if z_steps:
             return z_steps

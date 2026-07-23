@@ -54,6 +54,12 @@ class EngageRequest(BaseModel):
     # downgrading to no-ZAP.
     enable_zap: bool = False
     zap_policy: str = "safe_active"   # passive | safe_active | thorough_active
+    # Two INDEPENDENT dials: speed = request pacing (how fast/polite); aggression =
+    # ZAP attack strength (how hard it hits each parameter). Orthogonal — e.g. a
+    # turtle-speed + demon-aggression scan is slow on the network but throws every
+    # payload at each param.
+    zap_speed: str = "normal"         # turtle (slow/polite) | normal | fast
+    zap_aggression: str = "normal"    # low | normal | demon (max attack strength)
     require_zap: bool = False
 
 
@@ -264,6 +270,10 @@ async def engage(req: EngageRequest):
     # ZAP configuration + preflight. require_zap implies enable_zap.
     if req.zap_policy not in ("passive", "safe_active", "thorough_active"):
         raise HTTPException(422, "zap_policy must be passive | safe_active | thorough_active")
+    if req.zap_speed not in ("turtle", "normal", "fast"):
+        raise HTTPException(422, "zap_speed must be turtle | normal | fast")
+    if req.zap_aggression not in ("low", "normal", "demon"):
+        raise HTTPException(422, "zap_aggression must be low | normal | demon")
     enable_zap = bool(req.enable_zap or req.require_zap)
     if enable_zap and req.mode != "full":
         raise HTTPException(422, "ZAP (DAST) only runs in Full mode. Select Full mode, or turn off Enable ZAP.")
@@ -307,7 +317,8 @@ async def engage(req: EngageRequest):
     agent = BBHAgent(scope, tools, stop_event, mode=req.mode,
                      auto_approve=req.auto_approve, mission_id=session_id, recon_cycles=recon_cycles,
                      strategy=strategy, max_ai_calls=req.max_ai_calls,
-                     enable_zap=enable_zap, zap_policy=req.zap_policy)
+                     enable_zap=enable_zap, zap_policy=req.zap_policy,
+                     zap_speed=req.zap_speed, zap_aggression=req.zap_aggression)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
@@ -324,7 +335,8 @@ async def engage(req: EngageRequest):
                "authenticated": bool(session_headers), "auth_note": auth_note,
                "recon_cycles": recon_cycles, "warm_start": warm_start,
                "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
-               "enable_zap": enable_zap, "zap_policy": req.zap_policy}
+               "enable_zap": enable_zap, "zap_policy": req.zap_policy,
+               "zap_speed": req.zap_speed, "zap_aggression": req.zap_aggression}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
