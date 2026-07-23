@@ -162,7 +162,7 @@ class BBHAgent:
                  recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
                  enable_zap: bool = False, zap_policy: str = "safe_active",
                  zap_speed: str = "normal", zap_aggression: str = "normal",
-                 enable_nmap_vuln: bool = False):
+                 enable_nmap_vuln: bool = False, enable_nuclei_heavy: bool = False):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
@@ -180,6 +180,8 @@ class BBHAgent:
         self.tools.zap_aggression = self.zap_aggression
         # heavyweight nmap NSE vuln scan — opt-in, Full-mode only (INTRUSIVE gate)
         self.enable_nmap_vuln = bool(enable_nmap_vuln)
+        # heavy nuclei (full vuln template set) — opt-in, Full mode only
+        self.enable_nuclei_heavy = bool(enable_nuclei_heavy)
         self.mode = mode if mode in ("passive", "active", "full") else "active"
         self.auto_approve = auto_approve
         self.mission_id = mission_id
@@ -534,7 +536,8 @@ class BBHAgent:
                          "zap": self.enable_zap and _zap_configured(),
                          "zap_policy": self.zap_policy,
                          "zap_speed": self.zap_speed, "zap_aggression": self.zap_aggression,
-                         "nmap_vuln": self.enable_nmap_vuln}
+                         "nmap_vuln": self.enable_nmap_vuln,
+                         "nuclei_heavy": self.enable_nuclei_heavy}
                 batch = planner.next_batch(state)
                 if not batch:
                     break

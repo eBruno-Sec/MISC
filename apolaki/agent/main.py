@@ -64,6 +64,9 @@ class EngageRequest(BaseModel):
     # Heavyweight nmap NSE vulnerability scan (full `vuln` category minus DoS) on
     # in-scope hosts. Opt-in; runs in Full mode only. Results are advisory leads.
     enable_nmap_vuln: bool = False
+    # Heavy nuclei mode — the full vulnerability template set (CVEs/network/misconfig/
+    # exposures/default-creds/SSL). Opt-in, Full mode only; results are advisory leads.
+    enable_nuclei_heavy: bool = False
 
 
 class EstimateRequest(BaseModel):
@@ -283,6 +286,9 @@ async def engage(req: EngageRequest):
     if req.enable_nmap_vuln and req.mode != "full":
         raise HTTPException(422, "The nmap NSE vuln scan is intrusive and only runs in Full mode. "
                                  "Select Full mode, or turn off the NSE vuln scan.")
+    if req.enable_nuclei_heavy and req.mode != "full":
+        raise HTTPException(422, "Heavy nuclei (full vuln template set) is intrusive and only runs in "
+                                 "Full mode. Select Full mode, or turn off heavy nuclei.")
     if req.require_zap:
         # fail closed — a required-but-unavailable ZAP blocks the scan with an
         # actionable error rather than silently downgrading to no-ZAP.
@@ -325,7 +331,7 @@ async def engage(req: EngageRequest):
                      strategy=strategy, max_ai_calls=req.max_ai_calls,
                      enable_zap=enable_zap, zap_policy=req.zap_policy,
                      zap_speed=req.zap_speed, zap_aggression=req.zap_aggression,
-                     enable_nmap_vuln=req.enable_nmap_vuln)
+                     enable_nmap_vuln=req.enable_nmap_vuln, enable_nuclei_heavy=req.enable_nuclei_heavy)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,

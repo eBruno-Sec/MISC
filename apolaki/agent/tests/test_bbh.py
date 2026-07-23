@@ -2870,6 +2870,43 @@ def test_nmap_nse_vuln_parser_is_truth_first_and_planner_gates_to_full():
     assert scheduled("passive", True) is False
 
 
+def test_heavy_nuclei_is_opt_in_full_only_and_truth_first():
+    # Heavy nuclei (full vuln template set) is opt-in and Full-mode only, scheduled
+    # as a distinct run_nuclei step with heavy=True. Its findings are truth-first
+    # LEADS (candidate confidence), unlike the default safe-tag nuclei run.
+    import planner
+
+    def heavy_step(mode, on):
+        state = {"mode": mode, "roots": ["t.com"], "done": set(),
+                 "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+                 "urls": ["https://t.com/"], "nuclei_heavy": on}
+        step = None
+        for _ in range(60):
+            b = planner.next_batch(state)
+            if not b:
+                break
+            for s in b:
+                state["done"].add(s["key"])
+                if s["tool"] == "run_nuclei" and s["input"].get("heavy"):
+                    step = s
+        return step
+
+    s = heavy_step("full", True)
+    assert s is not None and s["input"]["heavy"] is True
+    assert heavy_step("full", False) is None          # opt-in
+    assert heavy_step("active", True) is None          # Full-mode only
+    assert heavy_step("passive", True) is None
+
+    # truth-first: a heavy-nuclei finding carries candidate confidence, so _is_confirmed
+    # routes it to leads (the default safe-tag nuclei run stays confirmed-by-tool).
+    import agent as agent_mod
+    a = agent_mod.BBHAgent(scope_mod.ScopeEngine(), _StubTools(), asyncio.Event(),
+                           strategy="deterministic", mission_id=None)
+    heavy_fin = {"template": "CVE-2021-1234", "severity": "high", "confidence": "candidate"}
+    assert a._is_confirmed("run_nuclei", heavy_fin) is False           # -> lead
+    assert a._is_confirmed("run_nuclei", {"template": "misconfig"}) is True   # safe tag -> confirmed
+
+
 def test_planner_carries_zap_policy_speed_and_aggression_to_step():
     # The two INDEPENDENT ZAP dials — speed (pacing) and aggression (attack
     # strength) — plus the policy must ride the state into the run_zap step input,

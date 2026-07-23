@@ -979,11 +979,21 @@ class ToolRegistry:
 
     async def _run_nuclei(self, inp: dict) -> ToolResult:
         target = inp["target"]
-        tags = inp.get("tags", "tech,misconfig,exposed-panels")
+        # HEAVY mode = the full vulnerability template set (CVEs, network vulns,
+        # misconfig, exposures, default creds, weak SSL, takeovers). Much broader and
+        # slower than the default safe tags. Because heavy templates include
+        # version/behaviour-based CVE matches that are not exploit-confirmed, heavy
+        # results are TRUTH-FIRST advisory LEADS (candidate confidence) — the default
+        # safe-tag run stays confirmed (its misconfig/exposure matches are reliable).
+        heavy = bool(inp.get("heavy"))
+        default_tags = ("cve,network,misconfiguration,exposure,default-login,exposed-panels,ssl,takeover"
+                        if heavy else "tech,misconfig,exposed-panels")
+        tags = inp.get("tags", default_tags)
         severity = inp.get("severity", "low,medium,high,critical")
+        timeout = int(inp.get("timeout", 900 if heavy else 360))
         out, err = await self._cmd(
             ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
-             "-silent", "-json", "-no-interactsh"], timeout=360)
+             "-silent", "-json", "-no-interactsh"], timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("nuclei", target, False, "", [], "nuclei not installed")
         findings = []
@@ -998,11 +1008,15 @@ class ToolRegistry:
                        "description": d.get("info", {}).get("description"),
                        "cvss": d.get("info", {}).get("classification", {}).get("cvss-score"),
                        "info": d.get("info", {}), "matched-at": d.get("matched-at")}
+                if heavy:
+                    rec["confidence"] = "candidate"   # heavy templates -> truth-first leads
+                    rec["family"] = "nuclei_heavy"
                 findings.append(rec)
                 self.recon["nuclei"].append(rec)
             except Exception:
                 pass
-        return ToolResult("nuclei", target, True, f"{len(findings)} findings", findings)
+        label = "heavy: full vuln template set -> leads" if heavy else "safe tags"
+        return ToolResult("nuclei", target, True, f"{len(findings)} findings [{label}]", findings)
 
     async def _fetch_openapi(self, inp: dict) -> ToolResult:
         url = inp["url"]
