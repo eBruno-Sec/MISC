@@ -76,7 +76,7 @@ PHASE_OF = {
     "run_katana": "enum", "fetch_openapi": "enum", "check_takeover": "enum",
     "run_graphql": "enum", "run_jwt": "enum", "run_xss": "probe", "run_dom_audit": "probe", "run_js_review": "enum",
     "run_csrf": "enum", "run_oauth": "enum",
-    "run_nmap": "scan", "run_nuclei": "scan", "run_zap": "scan",
+    "run_nmap": "scan", "run_nmap_vuln": "scan", "run_nuclei": "scan", "run_zap": "scan",
     "run_content_discovery": "probe", "run_ffuf": "probe", "run_web_probes": "probe",
     "run_injection_probes": "probe", "run_bfla": "probe", "run_race": "probe",
     "run_ssrf": "probe", "run_deserialization": "probe", "run_exposure": "probe",
@@ -97,7 +97,7 @@ _AUTO_STORE_TOOLS = {
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
-    "run_content_discovery", "run_ffuf",
+    "run_content_discovery", "run_ffuf", "run_nmap_vuln",
 }
 # Confirmatory tools that emit no per-finding confidence grade — their results are
 # confirmed by construction (a template/active-scan/fingerprint match). Everything
@@ -161,7 +161,8 @@ class BBHAgent:
                  mode: str = "active", auto_approve: bool = False, mission_id: str = None,
                  recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
                  enable_zap: bool = False, zap_policy: str = "safe_active",
-                 zap_speed: str = "normal", zap_aggression: str = "normal"):
+                 zap_speed: str = "normal", zap_aggression: str = "normal",
+                 enable_nmap_vuln: bool = False):
         self.scope = scope
         self.tools = tools
         self.stop_event = stop_event
@@ -177,6 +178,8 @@ class BBHAgent:
         self.tools.zap_policy = self.zap_policy
         self.tools.zap_speed = self.zap_speed
         self.tools.zap_aggression = self.zap_aggression
+        # heavyweight nmap NSE vuln scan — opt-in, Full-mode only (INTRUSIVE gate)
+        self.enable_nmap_vuln = bool(enable_nmap_vuln)
         self.mode = mode if mode in ("passive", "active", "full") else "active"
         self.auto_approve = auto_approve
         self.mission_id = mission_id
@@ -530,7 +533,8 @@ class BBHAgent:
                          # it to Full mode. Policy rides along to the run_zap step.
                          "zap": self.enable_zap and _zap_configured(),
                          "zap_policy": self.zap_policy,
-                         "zap_speed": self.zap_speed, "zap_aggression": self.zap_aggression}
+                         "zap_speed": self.zap_speed, "zap_aggression": self.zap_aggression,
+                         "nmap_vuln": self.enable_nmap_vuln}
                 batch = planner.next_batch(state)
                 if not batch:
                     break

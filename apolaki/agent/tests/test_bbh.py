@@ -2829,6 +2829,47 @@ def test_planner_schedules_zap_in_full_mode_only_when_configured():
     assert scheduled("passive", True) is False, "run_zap must not run in passive mode"
 
 
+def test_nmap_nse_vuln_parser_is_truth_first_and_planner_gates_to_full():
+    # NSE 'vuln' output → truth-first advisory LEADS: a VULNERABLE state is a
+    # high-severity CANDIDATE (never auto-confirmed), LIKELY VULNERABLE is medium,
+    # and an explicit NOT VULNERABLE is dropped entirely (no finding).
+    import nmap_nse
+    xml = ("<nmaprun><host><ports>"
+           "<port protocol='tcp' portid='443'><state state='open'/><service name='https'/>"
+           "<script id='http-vuln-cve2011-3192' output='VULNERABLE:\nState: VULNERABLE\nIDs: CVE:CVE-2011-3192'/>"
+           "<script id='ssl-enum-ciphers' output='weak ciphers\nState: LIKELY VULNERABLE'/>"
+           "<script id='http-csrf' output='none found\nState: NOT VULNERABLE'/>"
+           "</port></ports></host></nmaprun>")
+    leads = nmap_nse.parse_nse_vuln(xml, "host.docker.internal")
+    assert len(leads) == 2                                    # NOT VULNERABLE dropped
+    assert leads[0]["severity"] == "high" and "CVE-2011-3192" in leads[0]["cve"]
+    assert leads[1]["severity"] == "medium"
+    assert all(l["confidence"] == "candidate" and l["family"] == "nse_vuln" for l in leads)
+    assert nmap_nse.severity_for("State: NOT VULNERABLE") == ""     # cleared → nothing
+
+    # planner: the heavyweight NSE scan is INTRUSIVE — runs only in Full mode, only
+    # when the user enabled it.
+    import planner
+
+    def scheduled(mode, on):
+        state = {"mode": mode, "roots": ["t.com"], "done": set(),
+                 "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+                 "urls": ["https://t.com/"], "nmap_vuln": on}
+        tools = set()
+        for _ in range(60):
+            b = planner.next_batch(state)
+            if not b:
+                break
+            for s in b:
+                state["done"].add(s["key"]); tools.add(s["tool"])
+        return "run_nmap_vuln" in tools
+
+    assert scheduled("full", True) is True
+    assert scheduled("full", False) is False
+    assert scheduled("active", True) is False   # INTRUSIVE → not in active
+    assert scheduled("passive", True) is False
+
+
 def test_planner_carries_zap_policy_speed_and_aggression_to_step():
     # The two INDEPENDENT ZAP dials — speed (pacing) and aggression (attack
     # strength) — plus the policy must ride the state into the run_zap step input,

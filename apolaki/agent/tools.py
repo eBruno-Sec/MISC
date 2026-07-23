@@ -53,6 +53,7 @@ TOOL_PERMISSIONS = {
     "run_whatweb": PermissionLevel.ACTIVE,
     "run_fingerprint": PermissionLevel.ACTIVE,
     "run_nmap": PermissionLevel.ACTIVE,
+    "run_nmap_vuln": PermissionLevel.INTRUSIVE,
     "run_nuclei": PermissionLevel.ACTIVE,
     "http_probe": PermissionLevel.ACTIVE,
     "fetch_openapi": PermissionLevel.ACTIVE,
@@ -210,6 +211,14 @@ CLAUDE_TOOLS = [
      "description": "ACTIVE: Port scan + service/version detection.",
      "input_schema": {"type": "object", "properties": {
          "target": {"type": "string"}, "flags": {"type": "string", "default": "-sT -sV --top-ports 1000 -T3"}},
+         "required": ["target"]}},
+    {"name": "run_nmap_vuln",
+     "description": ("INTRUSIVE: Heavyweight nmap NSE vulnerability scan — the full `vuln` script category "
+                     "minus DoS, with -sV service/version detection. The script set is hard-coded (no --script "
+                     "injection). Network-vuln signals are version/behaviour-based, so every hit is a truth-first "
+                     "advisory LEAD, never a confirmed finding. Slow; run on primary in-scope hosts in Full mode."),
+     "input_schema": {"type": "object", "properties": {
+         "target": {"type": "string", "description": "Host or IP to NSE-vuln-scan"}},
          "required": ["target"]}},
     {"name": "run_nuclei",
      "description": ("ACTIVE/INTRUSIVE: Template vuln scanner. Safe tags: tech,misconfig,exposed-panels,takeovers. "
@@ -943,6 +952,30 @@ class ToolRegistry:
         except Exception:
             pass
         return ToolResult("nmap", target, True, f"{len(ports)} open ports", ports)
+
+    async def _run_nmap_vuln(self, inp: dict) -> ToolResult:
+        """Heavyweight nmap NSE vulnerability scan — the full `vuln` script category
+        minus DoS (never crash the target), with service/version detection to drive
+        the scripts. The script selection is HARD-CODED (not taken from free-form
+        flags) so `--script` can never be operator-injected. Results are version/
+        behaviour-based network-vuln signals, so every hit is a truth-first advisory
+        LEAD (candidate confidence), never a confirmed finding. INTRUSIVE + slow."""
+        import nmap_nse
+        target = inp["target"]
+        if not self.scope.validate(target)[0]:
+            return ToolResult("nmap_vuln", target, False, "", [], f"SCOPE BLOCK: {target} not in scope")
+        # `vuln and not dos` = every vulnerability-category script except denial-of-
+        # service ones; --script-timeout caps any single slow script.
+        cmd = ["nmap", "-sV", "--script", "vuln and not dos", "--script-timeout", "120s",
+               "-oX", "-", target]
+        out, err = await self._cmd(cmd, timeout=int(inp.get("timeout", 900)))
+        if err.startswith("__MISSING__"):
+            return ToolResult("nmap_vuln", target, False, "", [], "nmap not installed")
+        findings = nmap_nse.parse_nse_vuln(out, target)
+        self.recon.setdefault("nmap_vuln", []).extend(findings)
+        return ToolResult("nmap_vuln", target, True,
+                          f"{len(findings)} NSE vuln lead(s) [heavyweight vuln category, DoS excluded]",
+                          findings)
 
     async def _run_nuclei(self, inp: dict) -> ToolResult:
         target = inp["target"]
