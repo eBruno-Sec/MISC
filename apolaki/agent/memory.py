@@ -40,14 +40,39 @@ def _root(host: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
-def target_key(scope) -> str:
-    """Stable per-program key from the in-scope registrable domains.
+def _port(v: str) -> str:
+    """Non-default port from a scope entry / base URL, or '' (80/443 = default)."""
+    v = (v or "").strip().lower()
+    netloc = urlparse(v).netloc if "://" in v else v.split("/")[0]
+    if ":" in netloc:
+        p = netloc.rsplit(":", 1)[1]
+        if p.isdigit() and p not in ("80", "443"):
+            return p
+    return ""
 
-    Independent of mission id, ordering, wildcards, scheme or port, so two
-    missions on the same program map to the same memory bucket."""
-    ins = scope.get("in_scope") if isinstance(scope, dict) else scope
-    roots = sorted({_root(_host(x)) for x in (ins or []) if _host(x)})
-    return "|".join(roots) or "unknown"
+
+def _root_port(v: str) -> str:
+    """Registrable root plus a non-default :port, so different apps on the SAME host
+    but different ports (e.g. a local lab on :42000 / :42001 / :42002) map to
+    DISTINCT memory buckets instead of colliding."""
+    root = _root(_host(v))
+    port = _port(v)
+    return f"{root}:{port}" if (root and port) else root
+
+
+def target_key(scope) -> str:
+    """Stable per-program key from the in-scope registrable domains — now port-aware.
+
+    Prefers the scope's base URLs (which carry scheme+port) so two apps on the same
+    host but different ports don't share a memory bucket; falls back to in_scope.
+    Independent of mission id, ordering, wildcards and scheme; still groups
+    subdomains of the same registrable domain."""
+    if isinstance(scope, dict):
+        ins = scope.get("bases") or scope.get("in_scope")
+    else:
+        ins = scope
+    keys = sorted({_root_port(x) for x in (ins or []) if _host(x)})
+    return "|".join(keys) or "unknown"
 
 
 def finding_fp(f: dict) -> str:

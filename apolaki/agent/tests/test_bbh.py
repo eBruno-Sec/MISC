@@ -41,6 +41,10 @@ import xxe_tool as xxe
 import github_recon as ghr
 import sqli_tool as sqli
 import cmdi_tool as cmdi
+import nosqli_tool as nosqli
+import upload_tool as upload
+import cache_tool as cachet
+import llm_tool as llm
 import graph_model
 import memory as memory_mod
 
@@ -216,6 +220,69 @@ def test_sensitive_path_requires_real_body():
     assert hit and hit["severity"] == "high"
     # catch-all baseline suppresses even a matching-looking path
     assert ws.classify_sensitive_path_hit("/backup.zip", 200, "x" * 200, baseline_body="x" * 200) is None
+
+
+def test_credentials_dump_endpoint_flagged_critical_no_fp():
+    # An unauthenticated debug endpoint dumping user records with passwords (VAMPI's
+    # /users/v1/_debug) is a CRITICAL exposure — regardless of the path.
+    dump = ('{"users":[{"admin":false,"email":"m1@x.com","password":"pass1","username":"n1"},'
+            '{"admin":true,"email":"m2@x.com","password":"pass2","username":"n2"}]}')
+    hit = ws.classify_sensitive_path_hit("/users/v1/_debug", 200, dump, "application/json", "")
+    assert hit and hit["severity"] == "critical" and "credentials" in hit["title"].lower()
+    # body-validated exposure is CONFIRMED (evidence-backed) -> a real finding, not a lead;
+    # the generic "endpoint reachable" fallback stays a candidate (lead)
+    assert hit.get("confidence") == "confirmed" and hit.get("evidence")
+    generic = ws.classify_sensitive_path_hit("/console", 200, '{"ok":1,"note":"hello"}', "application/json", "")
+    assert generic and generic.get("confidence") == "candidate"
+    # false-positive guards: a single value, or an HTML login form, must NOT be critical
+    one = ws.classify_sensitive_path_hit("/x", 200, '{"password":"x"}', "application/json", "")
+    assert not (one and one["severity"] == "critical")
+    form = '<html><body><form><input type=password name=password></form></body></html>'
+    fh = ws.classify_sensitive_path_hit("/login", 200, form, "text/html", "")
+    assert not (fh and fh["severity"] == "critical")
+
+
+def test_katana_authenticated_crawl_passes_headers_not_headless():
+    # An authenticated scan must crawl with the operator's auth headers so the
+    # post-login surface is discovered. katana's headless browser drops custom
+    # headers, so an authed crawl goes non-headless with -H; an anon crawl stays
+    # headless for JS SPAs.
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.local"], [], "P")
+
+    def run_with(session_headers):
+        t = ToolRegistry(eng, mission_id=None, session_headers=session_headers)
+        captured = {}
+        async def fake_cmd(args, timeout=0):
+            captured["args"] = args
+            return ("http://host.local/vulnerabilities/sqli/\n", "")
+        t._cmd = fake_cmd
+        asyncio.new_event_loop().run_until_complete(t._run_katana({"url": "http://host.local"}))
+        return captured["args"]
+
+    authed = run_with({"Cookie": "PHPSESSID=abc; security=low"})
+    assert "-H" in authed and any("Cookie:" in a for a in authed)   # auth header passed
+    assert "-headless" not in authed                                 # non-headless for authed crawl
+    anon = run_with({})
+    assert "-headless" in anon and "-H" not in anon                  # headless + no headers when anon
+    assert "-cos" in authed and "-cos" in anon                       # logout excluded from the crawl
+
+
+def test_surface_never_ingests_session_killing_urls():
+    # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
+    # silently kills coverage — such URLs must never enter the surface.
+    from tools import ToolRegistry, _SESSION_KILL_RE
+    for kill in ["http://t/logout.php", "http://t/user/logout", "http://t/sign-out",
+                 "http://t/app?action=logout", "http://t/logoff"]:
+        from urllib.parse import urlparse
+        p = urlparse(kill)
+        assert _SESSION_KILL_RE.search(p.path + ("?" + p.query if p.query else "")), kill
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t.com"], [], "P")
+    t = ToolRegistry(eng, mission_id=None)
+    t._add_urls(["https://t.com/dashboard", "https://t.com/logout.php",
+                 "https://t.com/account/signout", "https://t.com/catalog?id=1"])
+    assert "https://t.com/dashboard" in t.urls and "https://t.com/catalog?id=1" in t.urls
+    assert not any("logout" in u or "signout" in u for u in t.urls)   # both dropped
 
 
 # ── guidance: rule engine over a recon context ───────────────────
@@ -1198,6 +1265,212 @@ def test_auth_bypass_sqli_oracle_and_planner_seeding():
     assert "run_auth_sqli" in tools, "planner did not seed body auth-SQLi on the login endpoint"
 
 
+def test_nosqli_oracles_and_planner_seeding():
+    # error signature detection (driver leaks a stack trace on a malformed operator)
+    hits = nosqli.error_signatures("", "MongoError: unknown operator: $foo")
+    assert hits and hits[0]["store"] == "MongoDB"
+    assert nosqli.error_signatures("MongoError: x", "MongoError: x") == []   # already in baseline -> no FP
+    # boolean oracle: operator broadens the match back to baseline shape, while a
+    # plain non-matching-value control on the same param does NOT
+    baseline = '[{"id":1},{"id":2},{"id":3}]'
+    operator_resp = baseline
+    control_resp = "[]"
+    assert nosqli.analyze_boolean(baseline, operator_resp, control_resp)
+    assert not nosqli.analyze_boolean(baseline, control_resp, control_resp)   # both empty -> no signal
+    # set_operator_param must REPLACE the original key (xt.set_param can only
+    # replace an EXISTING key's value, never inject a new key name — using it for
+    # `id[$ne]` on a URL whose real key is `id` is a silent no-op that reuses the
+    # baseline and guarantees a false positive; this is a regression test for that
+    # exact bug, reproduced live against ginandjuice.shop's /catalog/product).
+    op_url = nosqli.set_operator_param("https://t.com/catalog/product?productId=1", "productId", "[$ne]", "x")
+    assert "productId=1" not in op_url and "%5B%24ne%5D" in op_url
+    miss_url = nosqli.missing_param_url("https://t.com/catalog/product?productId=1", "productId")
+    assert "productId" not in miss_url
+    # regression: a framework that treats `param[$op]` as an unrecognised/absent
+    # parameter (operator response ≈ missing-param response) must NEVER be flagged,
+    # even though the operator "looks like" it diverges from a plain-value control —
+    # this is the exact false-positive shape hit live on ginandjuice's productId.
+    real_baseline = "<html>" + "full product detail page content " * 50 + "</html>"
+    fp_control = '"Invalid product ID"'
+    fp_missing = '"Missing parameter: productId"'
+    fp_operator = fp_missing   # framework treats productId[$ne] as unrecognised -> same as missing
+    assert not nosqli.analyze_boolean(real_baseline, fp_operator, fp_control, fp_missing), \
+        "must suppress when the operator response matches the missing-param shape, not a real broadened match"
+    # the true-positive case (operator genuinely broadens the match, and is NOT the
+    # missing-param shape) must still fire
+    assert nosqli.analyze_boolean(baseline, operator_resp, control_resp,
+                                  missing_body="totally different missing-param response")
+    # regression: a REAL $ne bypass typically BROADENS the result set (returns
+    # more rows), not a byte-identical response — raw text similarity under-scores
+    # this as "dissimilar"; the oracle must instead detect that the baseline's
+    # real row content is CONTAINED in the (longer) operator response and ABSENT
+    # from the garbage-value control.
+    single_row_baseline = '[{"id": 1, "name": "apple"}]'
+    broadened_operator = '[{"id": 1, "name": "apple"}, {"id": 2, "name": "banana"}, {"id": 3, "name": "cherry"}]'
+    empty_control = "[]"
+    assert nosqli.analyze_boolean(single_row_baseline, broadened_operator, empty_control, "[]"), \
+        "must confirm a genuinely broadened $ne-style result set, not just a byte-identical response"
+    # a control that ALSO broadens the same way (e.g. the endpoint isn't filtering
+    # at all) proves nothing about the OPERATOR specifically -> must not confirm
+    assert not nosqli.analyze_boolean(single_row_baseline, broadened_operator, broadened_operator, "[]")
+    bf = nosqli.boolean_finding("https://t/x?id=1", "id", "$ne (broaden)")
+    assert bf["severity"] == "high" and bf["cwe"] == "CWE-943" and "nosqli" in bf["tags"]
+    # auth-bypass oracle mirrors sqli_tool's discipline: confirms only on a token
+    # appearing where the baseline had none, or a rejected status flipping to 200
+    base = '{"error":"Invalid credentials"}'
+    inj = '{"authentication":{"token":"eyJ0eXAiOiJKV1Qi.abc"}}'
+    assert nosqli.auth_bypass_confirmed(401, base, 200, inj)
+    assert not nosqli.auth_bypass_confirmed(200, inj, 200, inj)      # token already present -> no FP
+    assert not nosqli.auth_bypass_confirmed(200, base, 200, base)    # nothing changed -> no FP
+    fnd = nosqli.auth_bypass_finding("https://t/api/login", "username", {"$ne": None}, "token issued")
+    assert fnd["severity"] == "critical" and fnd["cwe"] == "CWE-943" and "auth-bypass" in fnd["tags"]
+    # planner seeds run_nosqli on parameterized endpoints and run_form_nosqli on
+    # discovered login endpoints, alongside their SQLi counterparts
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/rest/user/login", "https://t.com/search?q=x"]}
+    tools = set()
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+    assert "run_nosqli" in tools, "planner did not seed query-param NoSQLi on the parameterized endpoint"
+    assert "run_form_nosqli" in tools, "planner did not seed body NoSQLi on the login endpoint"
+
+
+def test_upload_bypass_detection_and_no_false_bypass_without_filter():
+    # form discovery finds the file input and skips a non-upload form
+    html = ('<form action="/upload" method="POST" enctype="multipart/form-data">'
+            '<input type="text" name="description"><input type="file" name="avatar">'
+            '<input type="submit"></form>'
+            '<form action="/search" method="GET"><input type="text" name="q"></form>')
+    forms = upload.find_upload_forms(html, "https://t.com/profile")
+    assert len(forms) == 1
+    assert forms[0]["file_field"] == "avatar" and forms[0]["action"] == "https://t.com/upload"
+    assert forms[0]["other_fields"] == ["description"]
+    # verdict: a rejection keyword or 4xx -> rejected; a 2xx/success signal -> accepted
+    assert upload.verdict(0, "", 400, '{"error":"invalid file type"}') == "rejected"
+    assert upload.verdict(0, "", 200, '{"success":true,"url":"/uploads/shell.php.jpg"}') == "accepted"
+    assert upload.extract_url('{"url":"/uploads/x.jpg"}') == "/uploads/x.jpg"
+    # CONFIRMED bypass finding only when control REJECTED and a disguised extension
+    # was ACCEPTED — this is the real, provable filter-bypass class
+    bf = upload.bypass_finding("avatar", "shell.php.jpg", "php", "/uploads/shell.php.jpg")
+    assert bf["severity"] == "critical" and bf["cwe"] == "CWE-434" and bf["confidence"] == "confirmed"
+    # when the CONTROL itself is accepted, that is "no filter" — a lead, never an
+    # invented bypass (nothing was actually defeated)
+    lead = upload.no_restriction_lead("avatar")
+    assert lead["confidence"] == "candidate" and lead["severity"] != "critical"
+    names = upload.bypass_filenames("shell")
+    assert any(f.endswith(".php.jpg") for f, _ in names) and any(";.jpg" in f for f, _ in names)
+    # planner self-discovers upload forms on the same bounded page set as form_cmdi
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/profile"]}
+    tools = set()
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+    assert "run_upload_test" in tools, "planner did not seed upload-form discovery on the page"
+
+
+def test_cache_poisoning_confirmed_only_on_persisted_reflection():
+    canary = cachet.canary_value("tok1")
+    assert canary.startswith("bbh-cachepoison-")
+    # cacheable detection
+    assert cachet.is_cacheable({"Cache-Control": "public, max-age=3600"})
+    assert cachet.is_cacheable({"X-Cache": "HIT"})
+    assert not cachet.is_cacheable({"Cache-Control": "no-store, private"})
+    # reflection detection (body or headers)
+    assert cachet.reflects(canary, f"<link rel=canonical href='https://{canary}/x'>", {})
+    assert cachet.reflects("x", "", {"Location": "https://x/redir"})
+    assert not cachet.reflects(canary, "nothing here", {})
+    # CONFIRMED shape vs LEAD shape — persistence is what separates them
+    cf = cachet.poison_confirmed_finding("https://t/?bbh_cb=1", "X-Forwarded-Host", canary)
+    assert cf["confidence"] == "confirmed" and cf["severity"] == "high" and cf["cwe"] == "CWE-444"
+    ld = cachet.unkeyed_header_lead("https://t/?bbh_cb=1", "X-Forwarded-Host", canary)
+    assert ld["confidence"] == "candidate"
+    # planner seeds one cache-poison probe per live host root
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/"]}
+    tools = set()
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+    assert "run_cache_poison" in tools, "planner did not seed cache-poisoning probe on the live host root"
+
+
+def test_llm_prompt_injection_narrow_detection_and_confirmed_oracle():
+    # narrow path detection — never fires on an unrelated endpoint
+    assert llm.looks_like_chat_endpoint("https://t.com/api/chat")
+    assert llm.looks_like_chat_endpoint("/assistant/message")
+    assert llm.looks_like_chat_endpoint("/api/copilot")
+    assert not llm.looks_like_chat_endpoint("/catalog/product")
+    assert not llm.looks_like_chat_endpoint("/checkout")
+    # canary probe + confirmation oracle: only the EXACT marker counts
+    probe = llm.canary_probe("abc123")
+    assert "APOLAKI-LLM-CANARY-abc123" in probe
+    assert llm.canary_confirmed("Sure! APOLAKI-LLM-CANARY-abc123", "abc123")
+    assert not llm.canary_confirmed("I can't comply with that.", "abc123")
+    assert not llm.canary_confirmed("APOLAKI-LLM-CANARY-different", "abc123")   # wrong token -> no FP
+    # system-prompt-leak heuristic is a LEAD only, never confirmed
+    assert llm.looks_like_system_leak("You are a helpful assistant. My instructions say...")
+    assert not llm.looks_like_system_leak("The weather today is sunny and 75 degrees.")
+    cf = llm.injection_confirmed_finding("https://t/chat", "abc123", "... APOLAKI-LLM-CANARY-abc123 ...")
+    assert cf["severity"] == "critical" and cf["cwe"] == "CWE-1427" and cf["confidence"] == "confirmed"
+    assert cf["owasp"].startswith("LLM01")
+    ld = llm.system_leak_lead("https://t/chat", "You are a helpful assistant...")
+    assert ld["confidence"] == "candidate"
+    # planner seeds run_llm_probe ONLY for a URL matching the chat-path heuristic
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+             "urls": ["https://t.com/api/chat", "https://t.com/catalog/product"]}
+    tools, targets = set(), []
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+            if s["tool"] == "run_llm_probe":
+                targets.append(s["input"]["url"])
+    assert "run_llm_probe" in tools and targets == ["https://t.com/api/chat"], \
+        "planner must seed run_llm_probe ONLY for the chat-shaped URL, not the unrelated product page"
+
+
+def test_planner_routes_captured_post_forms_to_form_cmdi():
+    # A captured POST form (e.g. a DVWA exec form) must be routed to body command
+    # injection — the class query-string cmdi never reaches.
+    import planner
+    state = {"mode": "full", "roots": ["t.com"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}],
+                       "forms": [{"action": "https://t.com/vulnerabilities/exec/", "method": "POST",
+                                  "fields": ["ip", "Submit"]}]},
+             "urls": ["https://t.com/vulnerabilities/exec/"]}
+    tools, form_targets = set(), []
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"]); tools.add(s["tool"])
+            if s["tool"] == "run_form_cmdi":
+                form_targets.append(s["input"].get("url"))
+    assert "run_form_cmdi" in tools and "https://t.com/vulnerabilities/exec/" in form_targets
+
+
 # ── cmdi_tool: computed-output / time / OOB command injection ────
 def test_cmdi_output_hit_only_on_execution_not_echo():
     # the payload contains the arithmetic, NOT the product -> echoing it back is safe
@@ -1683,6 +1956,17 @@ def test_memory_target_key_stable_across_wildcards_and_order():
     # two distinct roots sort deterministically
     c = memory_mod.target_key({"in_scope": ["b.com", "a.com"]})
     assert c == "a.com|b.com"
+    # port-awareness: different apps on the SAME host but different non-default ports
+    # get DISTINCT memory buckets (regression for the cross-target contamination where
+    # a VAMPI scan warm-started Juice Shop's endpoints). Bases carry scheme+port.
+    k0 = memory_mod.target_key({"in_scope": ["host.docker.internal"], "bases": ["http://host.docker.internal:42000"]})
+    k1 = memory_mod.target_key({"in_scope": ["host.docker.internal"], "bases": ["http://host.docker.internal:42001"]})
+    k2 = memory_mod.target_key({"in_scope": ["host.docker.internal"], "bases": ["http://host.docker.internal:42002"]})
+    assert k0 == "docker.internal:42000" and k1 == "docker.internal:42001" and k2 == "docker.internal:42002"
+    assert len({k0, k1, k2}) == 3                      # all distinct — no collision
+    # default ports (80/443) and plain domains still group (no spurious port suffix)
+    assert memory_mod.target_key({"in_scope": ["x.com"], "bases": ["https://x.com"]}) == "x.com"
+    assert memory_mod.target_key({"bases": ["https://x.com:443"]}) == "x.com"
 
 
 def test_memory_finding_fp_ignores_severity_and_wording():
@@ -2401,8 +2685,12 @@ def test_scope_nonstandard_port_and_scheme():
 def test_planner_honors_base_map_for_nonstandard_target():
     import planner
     bases = {"host.docker.internal": "http://host.docker.internal:42000"}
+    # discovered hosts (from the surface / crawl) carry a :port; the base map is keyed
+    # by bare host, so _b must strip the port to resolve the real scheme+port base
+    # instead of falling back to https:// on a plaintext port. Seed a ported URL.
     state = {"mode": "full", "roots": ["host.docker.internal"], "done": set(),
-             "recon": {"subdomains": [], "live_hosts": []}, "urls": [], "bases": bases}
+             "recon": {"subdomains": [], "live_hosts": []},
+             "urls": ["http://host.docker.internal:42000/users/v1"], "bases": bases}
     # phase B seeds http_probe + run_httpx against the explicit base, never https:443
     seen_urls, httpx_bases = [], None
     for _ in range(40):
@@ -2421,6 +2709,48 @@ def test_planner_honors_base_map_for_nonstandard_target():
     assert any(u.startswith("http://host.docker.internal:42000") for u in seen_urls)
     assert not any(u.startswith("https://host.docker.internal") for u in seen_urls), \
         "planner must not fall back to https:443 when an explicit base is set"
+
+
+def test_planner_corrects_stale_scheme_in_inventory_example_url():
+    # Regression (found live on an authenticated DVWA scan): a parameterized
+    # endpoint's inventory `example` field carries the RAW scheme it was
+    # discovered/crawled with — `ep.get("example") or _b(...)` only falls back to
+    # the corrected base when `example` is entirely ABSENT, which is rare (an
+    # inventory entry built from real URLs almost always has one). A stale/wrong
+    # scheme (e.g. https:// left over from before the non-standard http base was
+    # known) then makes every per-param probe (run_sqli/run_xss/run_cmdi/
+    # run_nosqli/...) fail outright with an SSL error on a plaintext-only port.
+    # The planner must rebuild `example`'s scheme+host against the known base
+    # while preserving its path+query (the query carries the actual test params).
+    import planner
+    bases = {"host.docker.internal": "http://host.docker.internal:42001"}
+    state = {"mode": "full", "roots": ["host.docker.internal"], "done": set(),
+             "recon": {"subdomains": [], "live_hosts": [{"url": "http://host.docker.internal:42001"}]},
+             # the discovered URL carries a stale https:// (wrong scheme+port)
+             "urls": ["https://host.docker.internal:42001/vulnerabilities/sqli/?id=1"],
+             "bases": bases}
+    all_urls, param_probe_urls = [], []
+    for _ in range(40):
+        b = planner.next_batch(state)
+        if not b:
+            break
+        for s in b:
+            state["done"].add(s["key"])
+            u = s["input"].get("url")
+            if not u:
+                continue
+            all_urls.append(u)
+            # run_sqli/injection_probes/web_probes only ever target the
+            # parameterized endpoint itself (http_probe also legitimately hits
+            # the bare host root and the plain page path with no query)
+            if s["tool"] in ("run_sqli", "run_web_probes", "run_injection_probes"):
+                param_probe_urls.append(u)
+    assert all_urls, "expected at least one probe to be seeded"
+    assert all(u.startswith("http://host.docker.internal:42001") for u in all_urls), \
+        f"stale https:// scheme leaked through into a probe target: {all_urls}"
+    assert param_probe_urls, "expected at least one param-targeted probe (run_sqli/web_probes/injection_probes)"
+    assert all("id=1" in u for u in param_probe_urls), \
+        f"the query string (test params) must be preserved on param-targeted probes: {param_probe_urls}"
 
 
 def test_report_execution_note():
