@@ -102,6 +102,10 @@ class ScopeEngine:
             "program": self.program_name,
             "in_scope": [e.value for e in self.in_scope],
             "out_of_scope": [e.value for e in self.out_of_scope],
+            # base URLs carry scheme+port for concrete hosts; consumers like the
+            # cross-session memory key use these so apps on the same host but
+            # different ports don't collide. Additive — in_scope stays bare hosts.
+            "bases": self.base_urls(),
         }
 
     def to_rules(self) -> dict:

@@ -77,6 +77,12 @@ TOOL_PERMISSIONS = {
     "run_xxe": PermissionLevel.INTRUSIVE,
     "run_sqli": PermissionLevel.INTRUSIVE,
     "run_auth_sqli": PermissionLevel.INTRUSIVE,
+    "run_form_cmdi": PermissionLevel.INTRUSIVE,
+    "run_nosqli": PermissionLevel.INTRUSIVE,
+    "run_form_nosqli": PermissionLevel.INTRUSIVE,
+    "run_upload_test": PermissionLevel.INTRUSIVE,
+    "run_cache_poison": PermissionLevel.INTRUSIVE,
+    "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
@@ -84,6 +90,16 @@ TOOL_PERMISSIONS = {
 }
 
 _UA = "Mozilla/5.0 (compatible; Apolaki/2.0; +authorized-testing)"
+# Session-destroying endpoints. Crawling or probing these on an AUTHENTICATED scan
+# logs the scanner out and silently kills all subsequent authenticated coverage, so
+# they never enter the surface.
+_SESSION_KILL_RE = re.compile(
+    r"(?:^|/)(?:logout|log-?out|signout|sign-?out|log_?off|deauth|disconnect)(?:[./?]|$)"
+    r"|[?&](?:action|do|op|mode)=(?:logout|signout|log-?out)", re.I)
+# Recursive/duplicated leak paths (e.g. /_debug/_debug/_debug from an endpoint that
+# accepts any trailing path). These are pure noise that floods the surface — reject
+# any URL where a leak segment repeats, so neither a crawl nor warm-start reseeds them.
+_RECURSIVE_LEAK_RE = re.compile(r"(?:/(?:_?debug|dump|export)\b).*(?:/(?:_?debug|dump|export)\b)", re.I)
 
 
 def _chrome_path():
@@ -372,6 +388,70 @@ CLAUDE_TOOLS = [
          "fields": {"type": "array", "items": {"type": "string"},
                     "description": "Body field names (default: email/username + password)"}},
          "required": ["url"]}},
+    {"name": "run_form_cmdi",
+     "description": ("INTRUSIVE: OS command injection on a captured HTML FORM via its POST body (e.g. a DVWA-style "
+                     "exec form POSTing `ip`) — the body-parameter class query-string cmdi cannot reach. Baselines the "
+                     "form, injects computed-output + time payloads into each field, reuses the cmdi oracles (an echoed "
+                     "payload cannot false-positive)."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "A form action URL, or a page URL whose forms will be discovered"},
+         "fields": {"type": "array", "items": {"type": "string"},
+                    "description": "Optional form field names; if omitted the page is fetched and its forms parsed"}},
+         "required": ["url"]}},
+    {"name": "run_nosqli",
+     "description": ("INTRUSIVE: NoSQL (MongoDB-style) operator-injection test on a parameterized URL. Appends an "
+                     "operator suffix to the param NAME (id[$ne]=, id[$regex]=) and compares against a plain "
+                     "non-matching-value control — an operator response that broadens back to baseline-shaped output "
+                     "confirms the parameter reaches a NoSQL query unsanitised. Also checks for driver error "
+                     "signatures (MongoDB/Mongoose/CouchDB/Redis/Elasticsearch). Read-only payloads."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/item?id=1"},
+         "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"}},
+         "required": ["url"]}},
+    {"name": "run_llm_probe",
+     "description": ("INTRUSIVE: LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires against "
+                     "a URL that already looks like a chat/AI endpoint (path hints: chat, assistant, copilot, "
+                     "bot, llm, conversation) — never spams every endpoint. Sends a benign instruction-override "
+                     "probe asking the model to emit a unique marker; CONFIRMED only on exact marker compliance. "
+                     "A separate system-prompt-leak probe is heuristic-only and always reported as a lead."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Chat/AI endpoint URL, e.g. https://t/api/chat"},
+         "field_candidates": {"type": "array", "items": {"type": "string"},
+                              "description": "Optional JSON body field names to try (default: message/prompt/query/text/input)"}},
+         "required": ["url"]}},
+    {"name": "run_cache_poison",
+     "description": ("INTRUSIVE: Web cache-poisoning / unkeyed-header test (X-Forwarded-Host/Scheme/Proto, "
+                     "X-Host, X-Original-URL, X-Rewrite-URL). Uses its own cache-buster query param so it never "
+                     "touches a real visitor's cached response. CONFIRMED only when a SUBSEQUENT unpoisoned "
+                     "request to the same URL still receives the injected canary — proof the cache stored and "
+                     "served poisoned content. Single-shot: stops at the first confirmed/reflected header, never "
+                     "repeats poisoning against the same endpoint."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Page URL to test, e.g. https://t/"}},
+         "required": ["url"]}},
+    {"name": "run_upload_test",
+     "description": ("INTRUSIVE: File-upload extension-filter bypass test (CWE-434). Non-destructive — every "
+                     "payload is a small inert canary, never functional shell code. Sends a plainly-blocked "
+                     "control (.exe) first; if rejected (proving a filter exists), tries disguised-extension "
+                     "bypass filenames (double extension, case variation, semicolon) with an image magic-byte "
+                     "prefix. CONFIRMED only when the control was rejected AND a bypass variant was accepted."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "A page URL whose upload form will be discovered, or the form action URL"},
+         "field": {"type": "string", "description": "Optional file input field name (if omitted, discovered from the page)"},
+         "other_fields": {"type": "array", "items": {"type": "string"}, "description": "Optional other form field names"},
+         "action": {"type": "string", "description": "Optional explicit form action URL"}},
+         "required": ["url"]}},
+    {"name": "run_form_nosqli",
+     "description": ("INTRUSIVE: NoSQL auth-bypass on a login endpoint via the POST/JSON request BODY — the canonical "
+                     "MongoDB login bypass, replacing a credential value with an operator object like {\"$ne\": null} "
+                     "instead of a string. Baselines with a benign credential, injects operator objects into each "
+                     "credential field, confirms a real bypass (a session/JWT token or 401->200 flip). "
+                     "Non-destructive: only submits login attempts."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Login endpoint, e.g. https://t/api/login"},
+         "fields": {"type": "array", "items": {"type": "string"},
+                    "description": "Body field names (default: email/username + password)"}},
+         "required": ["url"]}},
     {"name": "run_cmdi",
      "description": ("INTRUSIVE: OS command-injection test on a parameterized URL. Three baseline-confirmed oracles: "
                      "computed-output (echo of an arithmetic product across ; | & backtick $() separators — an echoed "
@@ -491,8 +571,15 @@ class ToolRegistry:
 
     def _add_urls(self, urls) -> None:
         for u in urls:
-            if (u and u not in self.urls and surface_mod.clean_url(u)
-                    and self.scope.validate(u)[0]):
+            if not u or u in self.urls:
+                continue
+            # never let a session-destroying endpoint into the surface (self-logout)
+            p = urlparse(u)
+            if _SESSION_KILL_RE.search((p.path or "") + ("?" + p.query if p.query else "")):
+                continue
+            if _RECURSIVE_LEAK_RE.search(p.path or ""):        # recursive _debug/_debug junk
+                continue
+            if surface_mod.clean_url(u) and self.scope.validate(u)[0]:
                 self.urls.append(u)
 
     async def _http(self, url: str, method: str = "GET", headers: dict = None,
@@ -903,25 +990,38 @@ class ToolRegistry:
 
     async def _run_katana(self, inp: dict) -> ToolResult:
         url = inp["url"]
-        # Headless + automatic-form-fill so a JS SPA (Angular/React) actually renders
-        # and fires its XHRs — that is what surfaces API endpoints like the product
-        # search (?q=) and login that a static crawl never triggers. -jc parses JS
-        # for more endpoints. Falls back gracefully if headless Chromium is absent.
-        out, err = await self._cmd(
-            ["katana", "-u", url, "-silent", "-jc", "-headless", "-no-sandbox", "-aff", "-d", "2"],
-            timeout=240)
+        _MISSING = "katana not installed (use http_probe / run_wayback instead)"
+        # Pass the operator's auth headers (e.g. a session Cookie) so the crawl reaches
+        # the POST-LOGIN surface. NOTE: katana's headless browser does NOT reliably
+        # carry custom headers, but the plain HTTP crawler DOES — so for an
+        # authenticated scan we crawl non-headless with -H; for an anonymous scan we
+        # use headless + form-fill so JS SPAs render and fire their XHRs.
+        auth_h = []
+        for k, v in (self.session_headers or {}).items():
+            if str(v).strip():
+                auth_h += ["-H", f"{k}: {v}"]
+        # never crawl a logout/session-kill URL — on an authed scan it would end the session
+        no_logout = ["-cos", "logout|log-?out|signout|sign-?out|logoff|deauth"]
+        if auth_h:
+            cmd = ["katana", "-u", url, "-silent", "-jc", "-d", "2"] + no_logout + auth_h  # authenticated crawl
+            out, err = await self._cmd(cmd, timeout=200)
+        else:
+            out, err = await self._cmd(
+                ["katana", "-u", url, "-silent", "-jc", "-headless", "-no-sandbox", "-aff", "-d", "2"] + no_logout,
+                timeout=240)
         if err.startswith("__MISSING__"):
-            return ToolResult("katana", url, False, "", [], "katana not installed (use http_probe / run_wayback instead)")
-        # If headless produced nothing (no browser in this image), retry a plain crawl
-        # so we still capture the static surface instead of returning empty.
+            return ToolResult("katana", url, False, "", [], _MISSING)
+        # Nothing crawled (no headless browser, or an empty pass): retry a plain crawl
+        # (carrying auth headers if we have them) so we still capture the surface.
         if not out.strip():
-            out, err = await self._cmd(["katana", "-u", url, "-silent", "-jc", "-d", "2"], timeout=180)
+            out, err = await self._cmd(["katana", "-u", url, "-silent", "-jc", "-d", "2"] + no_logout + auth_h, timeout=180)
             if err.startswith("__MISSING__"):
-                return ToolResult("katana", url, False, "", [], "katana not installed (use http_probe / run_wayback instead)")
+                return ToolResult("katana", url, False, "", [], _MISSING)
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
-        return ToolResult("katana", url, True, f"{len(urls)} crawled URLs", [{"url": u} for u in urls[:50]])
+        note = " (authenticated)" if auth_h else ""
+        return ToolResult("katana", url, True, f"{len(urls)} crawled URLs{note}", [{"url": u} for u in urls[:50]])
 
     async def _gql_post(self, c, endpoint: str, payload):
         """POST a GraphQL query/batch; return parsed JSON or None."""
@@ -1365,8 +1465,7 @@ class ToolRegistry:
         hits, findings = [], []
         sem = asyncio.Semaphore(12)
 
-        async def probe(word):
-            url = ws.normalize_discovered_url(base_url, word)
+        async def probe_url(url):
             if not self.scope.validate(url)[0]:
                 return
             async with sem:
@@ -1380,7 +1479,33 @@ class ToolRegistry:
             if hit and hit["severity"] not in ("info",):
                 findings.append({**hit, "url": url, "target": url})
 
-        await asyncio.gather(*[probe(w) for w in words])
+        async def probe(word):
+            await probe_url(ws.normalize_discovered_url(base_url, word))
+
+        # API-first apps hide leaky endpoints UNDER discovered route directories
+        # (e.g. /users/v1/_debug) that host-root discovery never reaches. Probe a
+        # small curated info-leak suffix set beneath each discovered directory prefix.
+        origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
+        _LEAK_SUFFIXES = ("_debug", "debug", "dump", "admin", ".json")
+        # a path that already contains a leak suffix must NOT become a prefix — else an
+        # endpoint that accepts any trailing path (a permissive _debug) recursively
+        # explodes into _debug/_debug/_debug/... and floods the whole surface.
+        _leaky = ("_debug", "/debug", "/dump", "/export", "/admin/", "config")
+        # discovered route directories ...
+        prefixes = set()
+        for u in self.urls:
+            d = urlparse(u).path.rsplit("/", 1)[0]
+            dl = d.lower()
+            if (d and d not in ("", "/") and ".." not in d and len(d) < 80
+                    and not any(s in dl for s in _leaky)):
+                prefixes.add(d)
+        # ... plus ubiquitous API base paths, so a leaky endpoint on an API-first app
+        # whose routes aren't crawlable (e.g. a JSON API) is still reached.
+        prefixes.update(("/api", "/api/v1", "/api/v2", "/v1", "/v2", "/rest",
+                         "/admin", "/internal", "/management", "/users/v1", "/user/v1", "/books/v1"))
+        route_urls = [f"{origin}{d}/{suf}" for d in sorted(prefixes)[:12] for suf in _LEAK_SUFFIXES]
+
+        await asyncio.gather(*([probe(w) for w in words] + [probe_url(u) for u in route_urls]))
         for h in hits:
             self.recon["dir_bust"].setdefault(base_url, []).append(h)
         self._add_urls([h["url"] for h in hits if 200 <= (h["status"] or 0) < 400])
@@ -1991,6 +2116,117 @@ class ToolRegistry:
                    else "no body auth-bypass SQLi on this endpoint")
         return ToolResult("auth_sqli", url, True, summary, findings)
 
+    async def _run_nosqli(self, inp: dict) -> ToolResult:
+        """NoSQL (MongoDB-style) operator injection on a parameterized URL. Appends
+        an operator suffix to the param NAME (id[$ne]=..., id[$regex]=...) and
+        compares against a plain non-matching-value control — an operator that
+        broadens the match back to baseline-shaped output, while the control does
+        not, confirms the parameter reaches a NoSQL query unsanitised. Also checks
+        for a driver error signature. Read-only payloads."""
+        import httpx
+        import nosqli_tool as ns
+        url = inp["url"]
+        # bounded to 4 params — each param costs up to ~7 remote round-trips across
+        # the error + boolean stages, and this runs alongside sqli/cmdi/xss/etc. on
+        # the same endpoint, so keeping this tight matters for scan wall-clock time.
+        params = (inp.get("params") or xt.params_of(url))[:4]
+        if not params:
+            return ToolResult("nosqli", url, True, "No query parameters to test", [])
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, ev = [], []
+
+        async def get(c, target):
+            if not self.scope.validate(target)[0]:
+                return None
+            try:
+                return await c.get(target)
+            except Exception:
+                return None
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=15) as c:
+            base_r = await get(c, url)
+            base_body = base_r.text if base_r is not None else ""
+            for p in params:
+                confirmed = False
+                # 1) error-based: an operator payload that a naive concatenation breaks.
+                # set_operator_param REMOVES the original p=... pair and adds p[$op]=...
+                # — xt.set_param cannot inject a new key, only replace an existing one,
+                # so using it here would silently no-op and re-request the baseline.
+                for suffix in ns.OPERATOR_SUFFIXES:
+                    probe_url = ns.set_operator_param(url, p, suffix, "bbh_nosqli_probe")
+                    r = await get(c, probe_url)
+                    if r is None:
+                        continue
+                    hits = ns.error_signatures(base_body, r.text)
+                    if hits:
+                        findings.append(ns.error_finding(url, p, suffix, hits))
+                        ev.append(probe_url); confirmed = True
+                        break
+                if confirmed:
+                    continue
+                # 2) boolean-based: operator broadens the match vs a plain non-matching
+                # value control on the SAME (non-operator) param name. The "missing
+                # param" false-positive baseline is fetched LAZILY, only when we
+                # actually reach this stage (skipped whenever error-based confirms).
+                miss_r = await get(c, ns.missing_param_url(url, p))
+                miss_body = miss_r.text if miss_r is not None else None
+                ctl_url = xt.set_param(url, p, "bbh_nosqli_" + os.urandom(3).hex())
+                ctl_r = await get(c, ctl_url)
+                ctl_body = ctl_r.text if ctl_r is not None else ""
+                for pair in ns.boolean_probe_pairs(p):
+                    op_url = ns.set_operator_param(url, p, pair["suffix"], pair["value"])
+                    op_r = await get(c, op_url)
+                    if op_r is None:
+                        continue
+                    if ns.analyze_boolean(base_body, op_r.text, ctl_body, miss_body):
+                        findings.append(ns.boolean_finding(url, p, pair["ctx"]))
+                        ev.append(op_url); confirmed = True
+                        break
+                if confirmed:
+                    continue
+
+        if self.mission_id and ev:
+            await self._http(ev[0], "GET", capture=True)
+        return ToolResult("nosqli", url, True,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed NoSQL injection", findings)
+
+    async def _run_form_nosqli(self, inp: dict) -> ToolResult:
+        """POST/JSON body NoSQL auth-bypass on a login-style endpoint — the canonical
+        MongoDB login bypass ({"$ne": null} in place of a credential string), the
+        class query-string probes never reach. Baselines with a benign credential,
+        injects operator objects into each credential field, confirms a real bypass
+        (token/200 issued). Non-destructive: only submits login attempts."""
+        import json as _json
+        import nosqli_tool as ns
+        url = inp["url"]
+        fields = [f for f in (inp.get("fields") or []) if isinstance(f, str)]
+        cred_fields = [f for f in fields if any(h in f.lower() for h in ns.LOGIN_FIELD_HINTS)] or ["email", "username"]
+        pw_field = next((f for f in fields if "pass" in f.lower()), "password")
+        headers = {"Content-Type": "application/json"}
+        findings = []
+        for field in cred_fields[:2]:
+            benign = "bbh_" + os.urandom(4).hex() + "@test.invalid"
+            base_body = _json.dumps({field: benign, pw_field: "bbh_" + os.urandom(3).hex()})
+            rb = await self._http(url, "POST", headers, base_body, capture=False)
+            if rb.get("error") or not rb.get("status"):
+                continue
+            for operator in ns.AUTH_BYPASS_OPERATORS:
+                inj_body = _json.dumps({field: operator, pw_field: operator})
+                ri = await self._http(url, "POST", headers, inj_body, capture=False)
+                if ri.get("error"):
+                    continue
+                conf = ns.auth_bypass_confirmed(rb.get("status", 0), rb.get("body", ""),
+                                                ri.get("status", 0), ri.get("body", ""))
+                if conf:
+                    findings.append(ns.auth_bypass_finding(url, field, operator, conf["signal"]))
+                    await self._http(url, "POST", headers, inj_body, capture=True)
+                    break
+            if findings:
+                break
+        summary = ("auth-bypass NoSQLi CONFIRMED on the login body" if findings
+                   else "no body auth-bypass NoSQLi on this endpoint")
+        return ToolResult("form_nosqli", url, True, summary, findings)
+
     async def _run_cmdi(self, inp: dict) -> ToolResult:
         import time
         import httpx
@@ -2064,6 +2300,194 @@ class ToolRegistry:
             await self._http(ev[0], "GET", capture=True)
         return ToolResult("cmdi", url, True,
                           f"tested {len(params)} param(s), {len(findings)} confirmed command injection", findings)
+
+    async def _run_form_cmdi(self, inp: dict) -> ToolResult:
+        """POST/form-body OS command injection on a captured HTML form — the body-
+        parameter class query-string cmdi never reaches (e.g. a DVWA-style exec form
+        POSTing `ip`). Baselines the form, injects computed-output + time payloads into
+        each field, and reuses the cmdi oracles (an echoed payload cannot false-positive)."""
+        import time
+        import cmdi_tool as cmdi
+        import csrf_tool as csrf
+        from urllib.parse import urlencode
+        url = inp["url"]
+        _SKIP = {"submit", "btn", "button", "send", "login", "user_token", "csrf",
+                 "csrf_token", "_token", "authenticity_token"}
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        # Forms to test: caller-supplied fields (a pre-captured form) OR self-discover
+        # by fetching the page and parsing its forms — so this works whether or not the
+        # form was captured earlier.
+        forms = []
+        if inp.get("fields"):
+            forms.append((url, [f for f in inp["fields"] if isinstance(f, str) and f]))
+        else:
+            r0 = await self._http(url, "GET", capture=False)
+            if not r0.get("error"):
+                for fm in csrf.parse_forms(r0.get("body", ""), r0.get("final_url") or url):
+                    if (fm.get("method") or "").upper() == "POST" or fm.get("inputs"):
+                        forms.append((fm.get("action") or url, fm.get("inputs", [])))
+        findings = []
+        for action, all_fields in forms:
+            if not self.scope.validate(action)[0]:
+                continue
+            fields = [f for f in all_fields if f and f.lower() not in _SKIP]
+            if not fields:
+                continue
+
+            def body(field, val):
+                return urlencode({k: (val if k == field else "1") for k in all_fields})
+
+            rb = await self._http(action, "POST", headers, body(fields[0], "127.0.0.1"), capture=False)
+            base_body = rb.get("body", "")
+            done = False
+            # Output oracle only (fast, no sleeps). This runs across many self-fetched
+            # pages, so the 5s time-based oracle would make a remote scan crawl; the
+            # computed-output oracle (an echoed payload cannot false-positive) catches
+            # the common reflected case. Blind form cmdi stays the query-param tool's job.
+            for field in fields[:6]:
+                for item in cmdi.output_payloads("127.0.0.1"):
+                    r = await self._http(action, "POST", headers, body(field, item["payload"]), capture=False)
+                    if r.get("error"):
+                        continue
+                    hit = cmdi.analyze_output(base_body, r.get("body", ""))
+                    if hit:
+                        f = cmdi.output_finding(action, field, item["payload"], hit); f["target"] = action
+                        await self._http(action, "POST", headers, body(field, item["payload"]), capture=True)
+                        findings.append(f); done = True; break
+                if done:
+                    break
+        summary = (f"command injection CONFIRMED in the form body ({findings[0]['target']})" if findings
+                   else "no body command injection in the page's forms")
+        return ToolResult("form_cmdi", url, True, summary, findings)
+
+    async def _run_upload_test(self, inp: dict) -> ToolResult:
+        """File-upload extension-filter bypass test (CWE-434). Non-destructive: every
+        payload is a small inert canary, never functional shell code. Sends a
+        plainly-blocked control (.exe) first — if it is rejected (proving a filter
+        exists), tries a bounded set of disguised-extension bypass filenames
+        (double extension, case variation, semicolon) with an image magic-byte
+        prefix. CONFIRMED only when the control was rejected AND a bypass variant
+        was accepted; if the control itself is accepted, that is a separate
+        no-filter-observed lead, never invented as a confirmed bypass."""
+        import os as _os
+        import upload_tool as up
+        url = inp["url"]
+        file_field = inp.get("field")
+        other_fields = inp.get("other_fields") or []
+        action = inp.get("action") or url
+        if not file_field:
+            r0 = await self._http(url, "GET", capture=False)
+            if r0.get("error"):
+                return ToolResult("upload_test", url, True, "Could not fetch page for form discovery", [])
+            forms = up.find_upload_forms(r0.get("body", ""), r0.get("final_url") or url)
+            if not forms:
+                return ToolResult("upload_test", url, True, "No file-upload form found", [])
+            fm = forms[0]
+            action, file_field, other_fields = fm["action"], fm["file_field"], fm["other_fields"]
+        if not self.scope.validate(action)[0]:
+            return ToolResult("upload_test", url, False, "", [], f"SCOPE BLOCK: {action} not in scope")
+
+        token = _os.urandom(4).hex()
+        canary = up.CANARY_BODY_TPL.format(token=token)
+
+        # 1) control: a plainly-blocked extension, benign content
+        ch, cb = up.multipart_body(file_field, f"apolaki_control_{token}.{up.BLOCKED_CONTROL_EXT}",
+                                   canary, other_fields, content_type="application/octet-stream")
+        cr = await self._http(action, "POST", ch, cb, capture=False)
+        control_verdict = up.verdict(0, "", cr.get("status", 0), cr.get("body", ""))
+
+        findings = []
+        if control_verdict == "accepted":
+            # nothing to bypass — no filter was observed at all
+            findings.append(up.no_restriction_lead(file_field))
+        else:
+            for filename, ext in up.bypass_filenames("apolaki_" + token):
+                bh, bb = up.multipart_body(file_field, filename, "GIF89a " + canary, other_fields,
+                                           content_type="image/gif")
+                br = await self._http(action, "POST", bh, bb, capture=False)
+                v = up.verdict(cr.get("status", 0), cr.get("body", ""), br.get("status", 0), br.get("body", ""))
+                if v == "accepted":
+                    upload_url = up.extract_url(br.get("body", ""))
+                    findings.append(up.bypass_finding(file_field, filename, ext, upload_url))
+                    await self._http(action, "POST", bh, bb, capture=True)
+                    break
+        summary = (f"upload filter BYPASSED ({findings[0]['title'][:50]})" if findings and findings[0]["severity"] == "critical"
+                   else ("no restriction observed on upload endpoint" if findings else "upload filter held; no bypass"))
+        return ToolResult("upload_test", action, True, summary, findings)
+
+    async def _run_cache_poison(self, inp: dict) -> ToolResult:
+        """Web cache-poisoning / unkeyed-header test (CWE-444-adjacent). Owns its own
+        cache entry via a per-run cache-buster query param — never touches a real
+        visitor's cached response. Single-shot: stops at the first CONFIRMED header
+        and never repeats poisoning against the same endpoint. CONFIRMED only when a
+        SUBSEQUENT unpoisoned request to the same cache-buster URL still receives the
+        injected canary — proof the cache actually stored and served it."""
+        import os as _os
+        import cache_tool as ct
+        url = inp["url"].rstrip("/") or inp["url"]
+        sep = "&" if "?" in url else "?"
+        cb = _os.urandom(4).hex()
+        target = f"{url}{sep}bbh_cb={cb}"
+        headers_to_try = [h for h in ct.POISON_HEADERS if h.lower() not in
+                          {k.lower() for k in (self.session_headers or {})}][:len(ct.POISON_HEADERS)]
+        findings = []
+        for header in headers_to_try:
+            canary = ct.canary_value(_os.urandom(3).hex())
+            poisoned = await self._http(target, "GET", {header: canary}, capture=False)
+            if poisoned.get("error"):
+                continue
+            if not ct.reflects(canary, poisoned.get("body", ""), poisoned.get("headers", {})):
+                continue
+            if not ct.is_cacheable(poisoned.get("headers", {})):
+                findings.append(ct.unkeyed_header_lead(target, header, canary))
+                break
+            # confirmatory re-request: SAME cache-buster URL, NO poison header
+            clean = await self._http(target, "GET", {}, capture=False)
+            if not clean.get("error") and ct.reflects(canary, clean.get("body", ""), clean.get("headers", {})):
+                findings.append(ct.poison_confirmed_finding(target, header, canary))
+                await self._http(target, "GET", {header: canary}, capture=True)
+                break
+            findings.append(ct.unkeyed_header_lead(target, header, canary))
+            break
+        summary = (f"cache poisoning CONFIRMED via {findings[0]['tags'][1]}" if findings and findings[0]["confidence"] == "confirmed"
+                   else ("unkeyed header reflected (unconfirmed persistence)" if findings else "no unkeyed-header reflection observed"))
+        return ToolResult("cache_poison", target, True, summary, findings)
+
+    async def _run_llm_probe(self, inp: dict) -> ToolResult:
+        """LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires
+        against a URL that already looks like a chat/AI endpoint — never spams every
+        endpoint. Sends a benign instruction-override probe asking the model to
+        emit a unique marker; CONFIRMED only on exact marker compliance (a marker
+        has zero legitimate reason to appear in any real response). A separate
+        system-prompt-leak probe is heuristic-only and always stays a lead."""
+        import json as _json
+        import os as _os
+        import llm_tool as lt
+        url = inp["url"]
+        if not lt.looks_like_chat_endpoint(url):
+            return ToolResult("llm_probe", url, True, "URL does not look like a chat/AI endpoint — skipped", [])
+        token = _os.urandom(4).hex()
+        headers = {"Content-Type": "application/json"}
+        field_candidates = inp.get("field_candidates") or ["message", "prompt", "query", "text", "input"]
+        findings = []
+        canary_text = lt.canary_probe(token)
+        for field in field_candidates:
+            body = _json.dumps({field: canary_text})
+            r = await self._http(url, "POST", headers, body, capture=False)
+            if r.get("error"):
+                continue
+            if lt.canary_confirmed(r.get("body", ""), token):
+                findings.append(lt.injection_confirmed_finding(url, token, r.get("body", "")))
+                await self._http(url, "POST", headers, body, capture=True)
+                break
+        if not findings and field_candidates:
+            body = _json.dumps({field_candidates[0]: lt.system_prompt_probe()})
+            r = await self._http(url, "POST", headers, body, capture=False)
+            if not r.get("error") and lt.looks_like_system_leak(r.get("body", "")):
+                findings.append(lt.system_leak_lead(url, r.get("body", "")))
+        summary = ("prompt injection CONFIRMED (instruction override)" if findings and findings[0]["confidence"] == "confirmed"
+                   else ("possible system-prompt disclosure (lead)" if findings else "no prompt-injection signal observed"))
+        return ToolResult("llm_probe", url, True, summary, findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:
         import zap_client as zc

@@ -20,7 +20,7 @@ so this module never bypasses scope or the approval gate — it only chooses ord
 """
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import surface as surface_mod
 from scope import PermissionLevel
@@ -36,6 +36,8 @@ _ALLOWED = {
 # caps keep every run bounded + terminating
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
 CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
+CAP_FORM_PAGES = 10     # non-parameterized pages we fetch for form discovery (bounded:
+                        # each is a remote round-trip, so keep the amplification small)
 CAP_JS = 40             # js urls handed to js_review
 CAP_DOM = 6             # HTML pages handed to the (slow) headless DOM audit
 
@@ -52,8 +54,29 @@ import re as _re
 _XML_SINK = _re.compile(
     r"/(?:soap|xml|wsdl|rss|feed|xmlrpc|import|export|ews|services|b2b|stock|stockcheck)(?:/|$|\?)"
     r"|\.xml(?:$|\?)", _re.I)
+# Static assets + docs that never carry injectable forms/params — excluded from the
+# bounded form/page injection budget so it is not wasted on README translations,
+# licenses, images or bundles (which is what starves the real vuln pages).
+_STATIC_EXT = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+               ".woff", ".woff2", ".ttf", ".eot", ".map", ".mp4", ".webm", ".pdf", ".zip",
+               ".gz", ".tar", ".md", ".markdown", ".rst", ".txt", ".sh", ".yml", ".yaml",
+               ".log", ".lock")
+_STATIC_NAME = _re.compile(r"/(?:readme|license|licence|changelog|contributing|authors|"
+                           r"copying|notice|code_of_conduct)(?:[.\-][a-z0-9]+)*/?$", _re.I)
+
+
+def _is_static(u: str) -> bool:
+    low = (u or "").lower().rstrip("/")
+    return low.endswith(_STATIC_EXT) or bool(_STATIC_NAME.search(low))
+
+
 # Login-style endpoints worth a POST/JSON body auth-bypass SQLi probe.
 _LOGIN_SINK = _re.compile(r"(?:log[-_]?in|sign[-_]?in|authenticate|authentication)(?:/|$|\?)", _re.I)
+# chat/AI-assistant endpoints worth a prompt-injection probe — narrow on purpose so
+# it never fires against an unrelated endpoint that merely contains "chat" in a path.
+_CHAT_SINK = _re.compile(
+    r"/(?:chat(?:bot)?|assistant|copilot|ai[-_]?(?:assistant|chat|bot)|virtual[-_]?assistant|"
+    r"support[-_]?bot|llm|conversation|messages?)(?:[/?]|$)", _re.I)
 # Well-known login paths, probed directly per host so a critical auth-bypass SQLi
 # is tested even when the JS crawler doesn't happen to fire the login XHR.
 _LOGIN_PATHS = ("/rest/user/login", "/api/login", "/api/auth/login", "/login",
@@ -106,7 +129,28 @@ def next_batch(state: dict) -> list:
     bases = state.get("bases") or {}
 
     def _b(h):
-        return bases.get(h) or f"https://{h}"
+        # The base map is keyed by BARE host, but discovered hosts (from the surface
+        # inventory / crawl) often carry a :port. Strip it for the lookup so a
+        # non-standard target (e.g. an IP or host on :42002) resolves to its real
+        # scheme+port base instead of falling back to https:// on a plaintext port.
+        if not h:
+            return f"https://{h}"
+        return bases.get(h) or bases.get(h.split(":")[0]) or f"https://{h}"
+
+    def _b_url(u):
+        # Rebuild a discovered URL (e.g. an inventory entry's `example`, which
+        # carries the RAW scheme it was crawled/discovered with) against the
+        # scope's KNOWN base for its host, preserving path+query. A discovered
+        # URL can carry a stale/wrong scheme (e.g. left over from before a
+        # non-standard-port base was known), which fails outright on a
+        # plaintext-only port — `ep.get("example") or _b(...)` does NOT catch
+        # this, since the fallback only fires when `example` is entirely absent,
+        # which is rare (inventory entries almost always have one).
+        if not u:
+            return u
+        p = urlparse(u)
+        base = urlparse(_b(p.netloc))
+        return urlunparse((base.scheme, base.netloc, p.path, p.params, p.query, p.fragment))
 
     def fresh(steps):
         # dedup against `done` AND within this freshly built batch (a step's key can
@@ -166,12 +210,19 @@ def next_batch(state: dict) -> list:
     # ── phase D: enrich (openapi / graphql / js) ──
     d = []
     js_urls = [u for u in urls if u.split("?")[0].lower().endswith(".js")]
+    openapi_seen, graphql_seen = set(), set()
     for u in urls:
         low = u.lower()
-        if any(k in low for k in ("swagger", "openapi", "api-docs", "/v2/api-docs", "openapi.json")):
-            d.append(_step("fetch_openapi", {"url": u}, f"fetch_openapi:{u}"))
-        if "graphql" in low:
-            d.append(_step("run_graphql", {"url": u}, f"run_graphql:{_host(u)}"))
+        # normalize to the scope's known base — a discovered URL can carry a stale/
+        # wrong scheme (e.g. https:// left over from before a non-standard-port
+        # base was known), which fails outright on a plaintext-only port.
+        nu = _b(_host(u)) + _path(u)
+        if any(k in low for k in ("swagger", "openapi", "api-docs", "/v2/api-docs", "openapi.json")) and nu not in openapi_seen:
+            openapi_seen.add(nu)
+            d.append(_step("fetch_openapi", {"url": nu}, f"fetch_openapi:{nu}"))
+        if "graphql" in low and nu not in graphql_seen:
+            graphql_seen.add(nu)
+            d.append(_step("run_graphql", {"url": nu}, f"run_graphql:{_host(u)}"))
     # always try graphql discovery once per live host root
     for h in (set(roots) | set(subs)):
         d.append(_step("run_graphql", {"url": _b(h) + "/graphql"}, f"run_graphql:{h}"))
@@ -182,8 +233,23 @@ def next_batch(state: dict) -> list:
     # what lets run_xxe reach a POST XML body sink like the stock-check form.
     inv_d = surface_mod.build_inventory(urls)
     for ep in [e for e in inv_d if e.get("parameterized")][:CAP_ENDPOINTS]:
-        u = ep.get("example") or (_b(ep['host']) + ep['path'])
+        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         d.append(_step("http_probe", {"url": u}, f"http_probe:{ep['host']}{ep['path']}"))
+    # Also http_probe a bounded sample of discovered non-asset HTML pages so their
+    # forms are captured too — a form on a plain page (e.g. a DVWA exec/upload form)
+    # is otherwise never fetched, so body-injection probes never see it.
+    page_urls, seen_pg = [], set()
+    for u in urls:
+        raw = u.split("?")[0]
+        if _is_static(raw):
+            continue
+        pg = _b(_host(u)) + _path(u)            # normalize to the scope's real base
+        if pg in seen_pg:
+            continue
+        seen_pg.add(pg)
+        page_urls.append(pg)
+    for u in page_urls[:CAP_FORM_PAGES]:
+        d.append(_step("http_probe", {"url": u}, f"http_probe:page:{_host(u)}{_path(u)}"))
     d = fresh(d)
     if d:
         return d
@@ -197,7 +263,7 @@ def next_batch(state: dict) -> list:
     # is slow: the live-host roots + a few HTML pages, skipping static assets.
     dom_pages, dom_seen = [], set()
     for u in [_b(h) for h in host_bases] + [
-            e.get("example") or (_b(e['host']) + e['path']) for e in param_eps]:
+            _b_url(e.get("example")) or (_b(e['host']) + e['path']) for e in param_eps]:
         low = u.split("?")[0].lower()
         if any(low.endswith(ext) for ext in (".js", ".css", ".png", ".jpg", ".svg", ".woff", ".ttf", ".gif", ".mp4")):
             continue
@@ -207,11 +273,12 @@ def next_batch(state: dict) -> list:
     for u in dom_pages[:CAP_DOM]:
         e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
     for ep in param_eps:
-        u = ep.get("example") or (_b(ep['host']) + ep['path'])
+        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         tag = f"{ep['host']}{ep['path']}"
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
+        e_steps.append(_step("run_nosqli", {"url": u}, f"run_nosqli:{tag}"))
         e_steps.append(_step("run_injection_probes", {"url": u}, f"run_injection_probes:{tag}"))
         e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
         if any(p in _URLISH_PARAM for p in params_l):
@@ -231,23 +298,63 @@ def next_batch(state: dict) -> list:
                                              "fields": fm.get("fields", [])}, f"run_xxe:{act}"))
     xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
     for ep in xml_eps:
-        u = ep.get("example") or (_b(ep['host']) + ep['path'])
+        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         if u not in xxe_seen:
             e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
     # auth-bypass SQLi on login-style endpoints (POST/JSON body — query probes can't
     # reach it). Prefer captured POST forms; also probe discovered login-ish paths.
     auth_seen = set()
+    form_seen = set()
     for fm in (state.get("recon", {}).get("forms") or []):
         act = fm.get("action")
+        flds = fm.get("fields") or []
         if act and _LOGIN_SINK.search(_path(act)) and act not in auth_seen:
             auth_seen.add(act)
-            e_steps.append(_step("run_auth_sqli", {"url": act, "fields": fm.get("fields", [])},
+            e_steps.append(_step("run_auth_sqli", {"url": act, "fields": flds},
                                  f"run_auth_sqli:{act}"))
+            e_steps.append(_step("run_form_nosqli", {"url": act, "fields": flds},
+                                 f"run_form_nosqli:{act}"))
+        # POST/form-body command injection on every captured form (e.g. a DVWA-style
+        # exec form) — the body-parameter class query-string cmdi can't reach.
+        if act and flds and act not in form_seen:
+            form_seen.add(act)
+            e_steps.append(_step("run_form_cmdi", {"url": act, "fields": flds},
+                                 f"run_form_cmdi:{act}"))
+    # ...and self-discover forms on a bounded set of discovered non-asset pages, so a
+    # form on a plain page that http_probe never happened to fetch is still tested
+    # (run_form_cmdi fetches + parses the page's forms itself).
+    seen_page = set()
+    for u in urls:
+        raw = u.split("?")[0].split("#")[0]
+        if _is_static(raw):
+            continue
+        # normalize back to the scope's known base so a wrong-scheme/no-port junk URL
+        # (https://host/path with the app really on http://host:port) is corrected
+        pg = _b(_host(u)) + _path(u)
+        if pg in seen_page or pg in form_seen:
+            continue
+        seen_page.add(pg)
+        if len(seen_page) > CAP_FORM_PAGES:
+            break
+        e_steps.append(_step("run_form_cmdi", {"url": pg}, f"run_form_cmdi:page:{_host(pg)}{_path(pg)}"))
+        # same bounded page set: self-discover a file-upload form and test its
+        # extension filter (run_upload_test fetches + parses the page itself).
+        e_steps.append(_step("run_upload_test", {"url": pg}, f"run_upload_test:page:{_host(pg)}{_path(pg)}"))
+    # prompt-injection probe on any discovered URL that looks like a chat/AI
+    # endpoint — narrow path match, so this never fires on unrelated endpoints.
+    chat_seen = set()
+    for u in urls:
+        if _CHAT_SINK.search(_path(u)):
+            base = _b(_host(u)) + _path(u)      # normalize scheme+port to the known base
+            if base not in chat_seen:
+                chat_seen.add(base)
+                e_steps.append(_step("run_llm_probe", {"url": base}, f"run_llm_probe:{base}"))
     for ep in inv:
-        base = (ep.get("example") or (_b(ep['host']) + ep['path'])).split("?")[0]
+        base = (_b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])).split("?")[0]
         if _LOGIN_SINK.search(_path(base)) and base not in auth_seen:
             auth_seen.add(base)
             e_steps.append(_step("run_auth_sqli", {"url": base}, f"run_auth_sqli:{base}"))
+            e_steps.append(_step("run_form_nosqli", {"url": base}, f"run_form_nosqli:{base}"))
     # plus a curated set of well-known login paths per in-scope host root
     for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]:
         for lp in _LOGIN_PATHS:
@@ -255,9 +362,12 @@ def next_batch(state: dict) -> list:
             if u not in auth_seen:
                 auth_seen.add(u)
                 e_steps.append(_step("run_auth_sqli", {"url": u}, f"run_auth_sqli:{h}{lp}"))
+                e_steps.append(_step("run_form_nosqli", {"url": u}, f"run_form_nosqli:{h}{lp}"))
     for h in host_bases:
         e_steps.append(_step("run_content_discovery", {"base_url": _b(h)}, f"run_content_discovery:{h}"))
         e_steps.append(_step("run_exposure", {"base_url": _b(h)}, f"run_exposure:{h}"))
+        # site-level: one cache-poisoning probe per live host root (unkeyed headers)
+        e_steps.append(_step("run_cache_poison", {"url": _b(h)}, f"run_cache_poison:{h}"))
     e_steps = fresh(e_steps)
     if e_steps:
         return e_steps

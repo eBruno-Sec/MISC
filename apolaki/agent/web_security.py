@@ -509,13 +509,23 @@ _PROMETHEUS_METRICS_RE = re.compile(r"^# (HELP|TYPE) ", re.MULTILINE)
 _SECURITY_TXT_RE = re.compile(r"^Contact:", re.MULTILINE | re.IGNORECASE)
 _PHP_CONFIG_RE = re.compile(r"<\?php|define\s*\(|\$config\b", re.IGNORECASE)
 _GENERIC_HTML_RE = re.compile(r"<div id=[\"'](root|app|__next|___gatsby)[\"']", re.IGNORECASE)
+# A response leaking multiple credential/secret VALUES in a data structure — e.g. an
+# unauthenticated debug endpoint dumping user records with passwords. Matches a JSON
+# key/value like "password":"pass1"; requiring >=2 avoids a lone login form/doc.
+_CREDS_DUMP_RE = re.compile(
+    r'"(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|'
+    r'private[_-]?key|client[_-]?secret|session[_-]?token)"\s*:\s*"[^"]{1,}"', re.IGNORECASE)
 _DIR_LISTING_RE = re.compile(r"Index of /|<title>Index of", re.IGNORECASE)
 _ARCHIVE_CT_RE = re.compile(r"zip|x-tar|gzip|octet-stream|x-7z|x-rar", re.IGNORECASE)
 
 
-def _sensitive_hit(title, severity, cvss, description, remediation, evidence=""):
+def _sensitive_hit(title, severity, cvss, description, remediation, evidence="", confidence="confirmed"):
+    # A specific body-signature match (real .env content, a git ref, an actuator JSON,
+    # a credentials dump) IS evidence-backed confirmation, so it defaults to confirmed.
+    # The generic "endpoint reachable" fallback passes confidence="candidate" (a Lead).
     return {"title": title, "severity": severity, "cvss": cvss,
-            "description": description, "remediation": remediation, "evidence": evidence}
+            "description": description, "remediation": remediation, "evidence": evidence,
+            "confidence": confidence, "family": "exposure"}
 
 
 def classify_sensitive_path_hit(path: str, status_code: int, body: str,
@@ -613,10 +623,24 @@ def classify_sensitive_path_hit(path: str, status_code: int, body: str,
                 "Body/content-type matched a backup or directory-listing signature.")
         return None
 
+    # Credentials / secrets DUMP anywhere: a body leaking multiple secret VALUES
+    # (e.g. an unauthenticated /_debug returning users with passwords). Checked here
+    # so any path qualifies; >=2 matches keeps a single login form/doc from tripping it.
+    if not _GENERIC_HTML_RE.search(body):
+        n_creds = len(_CREDS_DUMP_RE.findall(body or ""))
+        if n_creds >= 2:
+            return _sensitive_hit("Sensitive data / credentials exposed", "critical", 9.1,
+                "The endpoint returned a data body leaking multiple credential/secret values "
+                "(e.g. user records with passwords) without authentication.",
+                "Remove or authenticate the endpoint; treat every exposed credential as compromised "
+                "and rotate it.",
+                f"Response body contained {n_creds} credential/secret value(s) in a data response.")
+
     if _GENERIC_HTML_RE.search(body):
         return None
     return _sensitive_hit(f"Endpoint reachable: {path}", "low", 3.1,
         f"{path} returned HTTP 200 with content that does not look like the site's generic page. "
         "Manual review recommended to determine sensitivity.",
         "Review whether this endpoint should be publicly reachable; restrict if not intended.",
-        "No specific sensitive-content signature matched; recorded as a low-confidence candidate.")
+        "No specific sensitive-content signature matched; recorded as a low-confidence candidate.",
+        confidence="candidate")   # unvalidated -> stays a Lead, never a confirmed finding
