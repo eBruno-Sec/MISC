@@ -23,9 +23,12 @@ services:
       # GitHub recon: YOUR OWN read-only PAT (no scopes needed), only to lift the
       # code-search rate limit. Empty = run_github_recon skips cleanly.
       - BBH_GITHUB_TOKEN=${BBH_GITHUB_TOKEN:-}
-      # OWASP ZAP DAST (optional). Empty ZAP_ADDR = run_zap skips cleanly.
-      # To enable: docker compose --profile zap up -d  (and keep ZAP_ADDR below)
-      - ZAP_ADDR=${ZAP_ADDR:-}
+      # OWASP ZAP DAST. The zap service below starts by default, so ZAP is AVAILABLE
+      # at deployment and the agent auto-detects it here (no manual ZAP_ADDR editing).
+      # ZAP is only USED when the user ticks "Enable ZAP" in the scan setup — so a
+      # default scan costs nothing extra. To run WITHOUT the ZAP container, disable
+      # the 'zap' service below (or `docker compose up -d --scale zap=0`).
+      - ZAP_ADDR=${ZAP_ADDR:-http://zap:8090}
       - ZAP_API_KEY=${ZAP_API_KEY:-bbh-zap}
       # OAST for blind/OOB vulns (SSRF/XXE/RCE). Empty = off. e.g. BOAST or Interactsh
       - ZAP_OAST_SERVICE=${ZAP_OAST_SERVICE:-}
@@ -39,11 +42,12 @@ services:
       - NET_RAW
       - NET_ADMIN
 
-  # Optional OWASP ZAP daemon for the run_zap tool. Does NOT start by default.
-  # Enable with:  ZAP_ADDR=http://zap:8090 docker compose --profile zap up -d
+  # OWASP ZAP daemon for the run_zap DAST tool. Starts by default so ZAP is
+  # available at deployment; the agent only USES it when a scan enables ZAP.
+  # To run a lighter stack without ZAP: `docker compose up -d --scale zap=0`
+  # (or comment out this service). ~1GB RAM, ~40s first-boot while add-ons load.
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
-    profiles: ["zap"]
     command: >
       zap.sh -daemon -host 0.0.0.0 -port 8090
       -config api.key=${ZAP_API_KEY:-bbh-zap}
@@ -51,6 +55,12 @@ services:
       -config api.addrs.addr.regex=true
     expose:
       - "8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/JSON/core/view/version/?apikey=${ZAP_API_KEY:-bbh-zap}"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
 volumes:
   nuclei_templates:

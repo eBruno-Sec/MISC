@@ -478,9 +478,20 @@ def test_zap_alert_to_finding_and_dedup():
     assert len(zap_client.dedup_alerts(dup)) == 2
 
 
-def test_zap_not_configured_by_default():
-    # ZAP_ADDR unset in the test env -> the tool must skip cleanly, never error
-    assert zap_client.configured() is False
+def test_zap_configured_reflects_addr_and_health_never_raises():
+    # ZAP is now available-by-default in deployment (ZAP_ADDR defaulted in compose),
+    # so configured() must simply reflect ZAP_ADDR rather than assume a fixed default.
+    # health() must never raise — an absent/unreachable daemon reports running=False.
+    orig = zap_client.ZAP_ADDR
+    try:
+        zap_client.ZAP_ADDR = ""
+        assert zap_client.configured() is False
+        h = asyncio.new_event_loop().run_until_complete(zap_client.health(timeout=1))
+        assert h["configured"] is False and h["running"] is False   # clean skip, no raise
+        zap_client.ZAP_ADDR = "http://zap:8090"
+        assert zap_client.configured() is True
+    finally:
+        zap_client.ZAP_ADDR = orig
 
 
 def test_zap_client_issues_expected_api_calls():
@@ -1667,7 +1678,9 @@ def test_report_since_last_scan_is_truth_first():
 def test_report_methodology_ledger_and_zap_status():
     # P0.5 / P0.10: methodology section carries the tool ledger + the three explicit
     # ZAP states, plus auth posture and AI-call count.
-    for zap, label in (("not_configured", "ZAP Skipped Cleanly"),
+    # not_configured now reads "Skipped — ZAP not configured" (clearer than the old
+    # "Not Invoked"); the other explicit states are unchanged.
+    for zap, label in (("not_configured", "ZAP not configured"),
                        ("executed", "ZAP Executed"), ("failed", "ZAP Failed")):
         led = _ledger_fixture(zap)
         html = report.generate_html_report("P", [], {"in_scope": ["x"]}, tool_ledger=led)
@@ -1740,6 +1753,49 @@ def test_report_content_discipline_grouping_cvss_remediation_curl():
     assert "Reproduction (copy-paste)" in html and "See finding detail" not in html
     assert "CWE-614" not in html          # contradictory triage CWE suppressed
     assert "**Executive summary**" not in html
+
+
+def test_report_integrity_validator_catches_metric_contradictions():
+    # Apolaki's guardrail: the report self-checks that headline metrics agree with the
+    # findings. Clean data passes; the exact contradiction classes a competing tool
+    # shipped on the same target are all caught.
+    import report_integrity as ri
+    # (1) clean, Apolaki-shaped data -> no issues, ok
+    findings = [{"title": "SQLi", "severity": "high", "confidence": "confirmed"},
+                {"title": "CRLF", "severity": "high", "confidence": "confirmed"}]
+    leads = [{"title": "eval sink", "severity": "high", "confidence": "candidate"}]
+    clean = ri.check_report_consistency(findings, leads, {"score": 50, "label": "High", "note": "formula"},
+                                        {"high": 2})
+    assert clean["ok"] and not clean["issues"] and clean["checks_run"] >= 6
+
+    # (2) a lead marked confirmed (the summary-vs-detail XSS conflict) -> caught
+    bad = ri.check_report_consistency(findings, [{"title": "XSS", "confidence": "confirmed"}],
+                                      {"score": 50, "label": "High"}, {"high": 2})
+    assert not bad["ok"] and any(i["check"] == "confirmed-status-conflict" for i in bad["issues"])
+
+    # (3) risk score not derivable from confirmed findings (leads leaked in) -> caught
+    inflated = ri.check_report_consistency(findings, leads, {"score": 97, "label": "Critical"}, {"high": 2})
+    checks = {i["check"] for i in inflated["issues"]}
+    assert "risk-score-source" in checks              # 97 != recompute(25+25=50)
+    assert "risk-label-exceeds-evidence" in checks    # Critical label but top sev is high
+
+    # (4) metric-vs-content: Known CVEs 0 while a CVE finding exists; Technologies 0
+    #     while a component finding exists; confirmed-exploits 0 while confirmed present
+    cve_f = [{"title": "angular@1.7.7 (CVE-2023-26117)", "severity": "high", "confidence": "confirmed",
+              "cve": "CVE-2023-26117", "family": "vulnerable_component"}]
+    mvc = ri.check_report_consistency(cve_f, [], {"score": 25, "label": "High", "note": "f"}, {"high": 1},
+                                      attack_surface={"known_cves": 0, "technologies_count": 0},
+                                      tool_ledger={"confirmed_exploits": 0})
+    caught = {i["check"] for i in mvc["issues"]}
+    for expect in ("cve-count-mismatch", "technology-count-mismatch", "confirmed-exploit-counter-mismatch"):
+        assert expect in caught, f"validator missed {expect}"
+
+    # (5) the JSON export always carries the integrity result
+    j = json.loads(report.findings_json("T", findings, {"in_scope": ["t"]}, leads=leads))
+    assert j["integrity"]["ok"] is True and j["integrity"]["checks_run"] >= 6
+    # ...and the HTML/MD render a Report Integrity section
+    assert "id='integrity'" in report.generate_html_report("T", findings, {"in_scope": ["t"]}, leads=leads)
+    assert "## Report Integrity" in report.generate_report("T", findings, {"in_scope": ["t"]}, leads=leads)
 
 
 def test_report_capec_from_cwe_and_no_invention():
@@ -2488,35 +2544,55 @@ def test_agent_strategy_budget_defaults():
     assert mk("low_ai", max_ai_calls=5).max_ai_calls == 5   # explicit override
 
 
-def test_agentic_degrades_to_deterministic_on_quota():
-    # A runtime 429 (free-tier quota) on the first model call must NOT fail the run
-    # with zero findings — it degrades to full deterministic coverage.
+def test_agentic_runs_deterministic_floor_then_augments():
+    # QUAL-1: an agentic run must ALWAYS run the deterministic coverage floor
+    # (_execute_plan) so the model deciding "done" early can never silently
+    # under-scan. This holds whether the AI augmentation succeeds OR fails at
+    # runtime (e.g. a free-tier 429).
     import agent as agent_mod
-    eng = scope_mod.ScopeEngine(); eng.load_manual(["x.com"], [], "P")
-    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="agentic", mission_id=None)
-    a.provider = "openrouter"
-    a._ai_usable = lambda: True                         # pass the credential pre-check
+
+    def _mk():
+        eng = scope_mod.ScopeEngine(); eng.load_manual(["x.com"], [], "P")
+        a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="agentic", mission_id=None)
+        a.provider = "openrouter"
+        a._ai_usable = lambda: True                     # pass the credential pre-check
+        state = {"floor": False}
+
+        async def floor(sid):
+            state["floor"] = True
+            a._plan_steps = 7
+            yield {"type": "info", "content": "deterministic floor ran"}
+
+        a._execute_plan = floor
+        return a, state
+
+    async def collect(a):
+        return [ev async for ev in a.run("obj", "s")]
+
+    # (1) AI augmentation SUCCEEDS — the floor must still have run first.
+    a1, s1 = _mk()
+
+    async def ok(o, sid):
+        yield {"type": "complete", "content": "Analysis complete."}
+
+    a1._run_openrouter = ok
+    evs1 = asyncio.new_event_loop().run_until_complete(collect(a1))
+    assert s1["floor"] is True, "deterministic floor must run even when agentic AI succeeds"
+
+    # (2) AI augmentation FAILS at runtime (429) — floor already ran, run finalizes
+    # gracefully (no crash, no zero-coverage failure).
+    a2, s2 = _mk()
 
     async def boom(o, sid):
         raise RuntimeError("Provider quota reached (HTTP 429) — free-tier daily cap")
         yield {}                                        # noqa — makes this an async generator
 
-    ran = {"det": False}
-
-    async def det(sid):
-        ran["det"] = True
-        yield {"type": "info", "content": "deterministic fallback ran"}
-
-    a._run_openrouter = boom
-    a._run_deterministic = det
-
-    async def go():
-        return [ev async for ev in a.run("obj", "s")]
-
-    evs = asyncio.new_event_loop().run_until_complete(go())
-    assert ran["det"] is True and a.ai_degraded is True
-    assert any("deterministic coverage" in (e.get("content", "")) for e in evs)
-    assert "429" in a.ai_note or "quota" in a.ai_note.lower() or "unavailable" in a.ai_note.lower()
+    a2._run_openrouter = boom
+    evs2 = asyncio.new_event_loop().run_until_complete(collect(a2))
+    assert s2["floor"] is True and a2.ai_degraded is True
+    assert any(e.get("type") == "complete" for e in evs2), "run must finalize after AI failure"
+    assert any("coverage floor" in e.get("content", "") for e in evs2)
+    assert "429" in a2.ai_note or "quota" in a2.ai_note.lower() or "unavailable" in a2.ai_note.lower()
 
 
 class _PlanTools:
@@ -2675,11 +2751,26 @@ def test_scope_nonstandard_port_and_scheme():
     assert _split_scope_entry("https://example.com") == ("example.com", None)
     assert _split_scope_entry("*.example.com") == ("*.example.com", None)
     s = ScopeEngine(); s.load_manual(["host.docker.internal:42000"], [], "JS")
-    # matching is still port/scheme-free, so a :42000 URL is in scope
+    # the pinned :42000 URL is in scope
     assert s.validate("http://host.docker.internal:42000/rest/user/login")[0] is True
     assert s.to_dict()["in_scope"] == ["host.docker.internal"]          # bare host stored
     assert s.base_urls() == ["http://host.docker.internal:42000"]        # base carries scheme+port
     assert s.base_map() == {"host.docker.internal": "http://host.docker.internal:42000"}
+    # SEC-1: an explicit scope port is ENFORCED against concrete request targets — a
+    # different port on the same in-scope host is blocked (closes the scope-escape /
+    # SSRF-to-own-control-plane demonstrated in the optest), including the default
+    # port when the operator pinned a non-default one.
+    assert s.validate("http://host.docker.internal:42001/x")[0] is False   # other service, same host
+    assert s.validate("http://host.docker.internal:8000/config")[0] is False  # would reach Apolaki's own API
+    assert s.validate("http://host.docker.internal/")[0] is False          # default :80, port not pinned
+    # ...but bare-host recon values (subdomains / DNS names, no scheme+port) stay
+    # host-level so domain recon under a port-pinned scope is not broken.
+    assert s.validate("host.docker.internal")[0] is True
+    assert s.validate("sub.host.docker.internal")[0] is True
+    # a bare-host / wildcard scope (the common bug-bounty case) still allows any port.
+    s3 = ScopeEngine(); s3.load_manual(["example.com", "*.example.com"], [], "Bare")
+    assert s3.validate("https://example.com:8080/x")[0] is True
+    assert s3.validate("http://api.example.com:3000/x")[0] is True
 
 
 def test_planner_honors_base_map_for_nonstandard_target():
@@ -2709,6 +2800,33 @@ def test_planner_honors_base_map_for_nonstandard_target():
     assert any(u.startswith("http://host.docker.internal:42000") for u in seen_urls)
     assert not any(u.startswith("https://host.docker.internal") for u in seen_urls), \
         "planner must not fall back to https:443 when an explicit base is set"
+
+
+def test_planner_schedules_zap_in_full_mode_only_when_configured():
+    # ZAP (DAST) must run deterministically in Full mode whenever a ZAP daemon is
+    # configured (state["zap"] True) — not left to the agentic model's discretion —
+    # and must NOT run in active/passive (run_zap is INTRUSIVE, gated to full) or
+    # when ZAP is unconfigured. run_zap seeds its context with discovered URLs
+    # (incl. katana's crawl), so katana feeds ZAP rather than replacing it.
+    import planner
+
+    def scheduled(mode, zap):
+        state = {"mode": mode, "roots": ["t.com"], "done": set(),
+                 "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}]},
+                 "urls": ["https://t.com/", "https://t.com/x?id=1"], "zap": zap}
+        tools = set()
+        for _ in range(60):
+            b = planner.next_batch(state)
+            if not b:
+                break
+            for s in b:
+                state["done"].add(s["key"]); tools.add(s["tool"])
+        return "run_zap" in tools
+
+    assert scheduled("full", True) is True, "Full + ZAP-configured must schedule run_zap"
+    assert scheduled("full", False) is False, "Full without ZAP configured must not schedule run_zap"
+    assert scheduled("active", True) is False, "run_zap is INTRUSIVE — must not run in active mode"
+    assert scheduled("passive", True) is False, "run_zap must not run in passive mode"
 
 
 def test_planner_corrects_stale_scheme_in_inventory_example_url():

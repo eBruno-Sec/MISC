@@ -2515,7 +2515,12 @@ class ToolRegistry:
                     await zap.access_url(s)
                 except Exception:
                     pass
-            # spider -> ajax spider (SPA) -> active scan, all scope-fenced
+            # policy: passive (spider + passive scan, NO active scan) | safe_active
+            # (rate-limited active scan) | thorough_active (deeper active scan).
+            policy = (inp.get("policy") or getattr(self, "zap_policy", "safe_active"))
+            if policy not in ("passive", "safe_active", "thorough_active"):
+                policy = "safe_active"
+            # spider -> ajax spider (SPA) — always run (feeds the passive scanner too)
             sid = await zap.spider(url, context=name)
             if sid is not None:
                 await zap.wait_int(lambda: zap.spider_status(sid),
@@ -2525,23 +2530,32 @@ class ToolRegistry:
                 await zap.wait_str(lambda: zap.ajax_status(), cap=120, stop_event=self.stop_event)
             except Exception:
                 pass
-            # tune the active scan: identify our traffic + widen input vectors
-            # (POST/JSON/headers/cookie) so API bodies get fuzzed. Best-effort.
-            setups = [zap.add_scan_header(), zap.set_injectable()]
-            # enable out-of-band detection (blind SSRF/XXE/RCE) if an OAST
-            # service is configured (env ZAP_OAST_SERVICE or the tool param).
-            oast = inp.get("oast_service") or os.getenv("ZAP_OAST_SERVICE", "")
-            if oast:
-                setups.append(zap.set_oast_service(oast))
-            for setup in setups:
-                try:
-                    await setup
-                except Exception:
-                    pass
-            asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
-            if asid is not None:
-                await zap.wait_int(lambda: zap.ascan_status(asid),
-                                   cap=int(inp.get("scan_seconds", 600)), stop_event=self.stop_event)
+            if policy == "passive":
+                # passive scanning runs automatically as ZAP processes the crawled
+                # traffic; drain its queue (remaining==0 -> "100% done"), then
+                # collect alerts. No active scan.
+                async def _pscan_done():
+                    return 100 if (await zap.pscan_remaining()) == 0 else 0
+                await zap.wait_int(_pscan_done, cap=90, stop_event=self.stop_event)
+            else:
+                # active scan. Identify our traffic + widen input vectors
+                # (POST/JSON/headers/cookie) so API bodies get fuzzed. safe_active
+                # rate-limits (delay + thread cap) to stay polite; thorough goes full.
+                setups = [zap.add_scan_header(), zap.set_injectable()]
+                if policy == "safe_active":
+                    setups.append(zap.set_scan_rate(delay_ms=200, threads_per_host=2))
+                oast = inp.get("oast_service") or os.getenv("ZAP_OAST_SERVICE", "")
+                if oast:
+                    setups.append(zap.set_oast_service(oast))
+                for setup in setups:
+                    try:
+                        await setup
+                    except Exception:
+                        pass
+                asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
+                if asid is not None:
+                    cap = int(inp.get("scan_seconds", 300 if policy == "safe_active" else 600))
+                    await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
             raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
         except Exception as e:
             return ToolResult("zap", url, False, "", [], f"ZAP scan error: {e}")
@@ -2549,8 +2563,13 @@ class ToolRegistry:
         findings = [zc.alert_to_finding(a) for a in raw]
         findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
         self.recon.setdefault("zap", []).extend(findings)
+        # the note starts with a policy token so the report/ledger can render the
+        # exact state ("ZAP Executed — Passive Only / Safe Active / Thorough Active").
+        _plabel = {"passive": "passive", "safe_active": "safe-active",
+                   "thorough_active": "thorough-active"}[policy]
         return ToolResult("zap", url, True,
-                          f"{len(findings)} ZAP alert(s) (from {len(raw)} raw)", findings)
+                          f"policy={policy}; {len(findings)} ZAP alert(s) [{_plabel}] (from {len(raw)} raw)",
+                          findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]

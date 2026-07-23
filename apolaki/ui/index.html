@@ -353,6 +353,22 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <button class="btn ghost sm" onclick="document.getElementById('scopeFile').click()">↑ Import scope file (H1 / Bugcrowd / Burp / text)</button>
           </div>
           <div class="block">
+            <h4>OWASP ZAP DAST <span class="muted">(Full mode)</span></h4>
+            <label class="chk"><input type="checkbox" id="enableZap" onchange="toggleZapOpts()"> <strong>Enable ZAP</strong> — add an OWASP ZAP DAST pass to a Full-mode scan</label>
+            <div id="zapOpts" style="display:none;margin-top:.6rem">
+              <div class="field"><label>Policy</label>
+                <select id="zapPolicy">
+                  <option value="passive">Passive only — spider + passive scan (no active scan)</option>
+                  <option value="safe_active" selected>Safe active — rate-limited, scope-guarded active scan</option>
+                  <option value="thorough_active">Thorough active — deeper active scan (still scope-guarded)</option>
+                </select>
+              </div>
+              <label class="chk"><input type="checkbox" id="requireZap"> <strong>Require ZAP</strong> — if unavailable, stop the scan with an actionable error (never silently skip)</label>
+            </div>
+            <div class="hint" style="margin-top:.5rem">Status: <span id="zapStatusPill" style="font-size:.72rem;padding:.1rem .5rem;border-radius:3px;border:1px solid var(--border)">checking…</span> <button type="button" class="btn ghost sm" onclick="refreshZapStatus()">Recheck</button></div>
+            <div class="hint">ZAP runs only in <strong>Full</strong> mode. Katana's crawl feeds ZAP's context. Alerts follow truth-first rules — advisory leads unless evidence-backed.</div>
+          </div>
+          <div class="block">
             <h4>Objective &amp; authentication <span class="muted">(optional)</span></h4>
             <div class="field"><label>Custom objective</label>
               <textarea id="objective" placeholder="Focus on authorization, exposed sensitive files, and API access control. Report only confirmed, reproducible vulnerabilities." style="min-height:64px"></textarea>
@@ -650,6 +666,24 @@ function setBudget(strategy,used,max){
 }
 // Pre-launch estimate: ask the backend how much this run will cost.
 let _estT=null;
+// ── OWASP ZAP DAST scan-setup controls ──
+function toggleZapOpts(){
+  const on=document.getElementById("enableZap").checked;
+  document.getElementById("zapOpts").style.display=on?"block":"none";
+  if(on)refreshZapStatus();
+}
+async function refreshZapStatus(){
+  const pill=document.getElementById("zapStatusPill"); if(!pill)return;
+  pill.textContent="checking…"; pill.style.color="var(--dim)"; pill.style.borderColor="var(--border)";
+  try{
+    const s=await(await fetch(`${API}/zap/status`)).json();
+    const col={ready:"#1f9d6b",not_running:"#c98a2b",not_configured:"#c0392b"}[s.state]||"var(--dim)";
+    pill.textContent=s.label||s.state; pill.style.color=col; pill.style.borderColor=col;
+    pill.title=s.state==="ready"?`ZAP daemon reachable at ${s.addr}`
+      :s.state==="not_running"?`ZAP configured (${s.addr}) but not reachable — start it: docker compose up -d`
+      :"No ZAP daemon configured (ZAP_ADDR unset).";
+  }catch(e){pill.textContent="status unavailable"; pill.style.color="var(--dim)";}
+}
 function refreshEstimate(){
   clearTimeout(_estT);
   _estT=setTimeout(async()=>{
@@ -677,6 +711,12 @@ const _PILL={complete:["s-done","Done"],failed:["s-err","Failed"],interrupted:["
   stopped:["s-stop","Stopped"],stopping:["s-stop","Stopping"],running:["s-run","Running"]};
 function setMissionPill(status){const m=_PILL[status]||["s-idle","Archived"];setStatus(m[0],m[1]);}
 function esc(s){if(typeof s!=="string")s=JSON.stringify(s)??"";return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+// Safe to embed inside a SINGLE-QUOTED JS string literal that itself sits inside a
+// double-quoted HTML attribute (e.g. onclick="fn('...')"). esc() alone does NOT escape
+// the single quote, so a value with a ' breaks out of the JS string and executes —
+// backslash-escape \ and ' at the JS level first, then HTML-escape &<>" for the
+// attribute. After the browser decodes the attribute, JS sees \' as a literal quote.
+function jsStr(s){return esc(String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'"));}
 function emptyState(t,s,action){return `<div class="empty"><h4>${esc(t)}</h4><p>${s}</p>${action||resumeAffordance()}</div>`;}
 // When there's no active session, every empty state offers a direct way back in:
 // resume the last-loaded mission (remembered in localStorage) or jump to Archive.
@@ -684,7 +724,7 @@ function lastMission(){try{return JSON.parse(localStorage.getItem("apolaki-last-
 function resumeAffordance(){
   if(sessionId)return "";
   const lm=lastMission();
-  const resume=lm?`<button type="button" class="btn sm" onclick='loadMission(${JSON.stringify(lm.id)},${JSON.stringify(lm.program)})'>Resume “${esc(lm.program)}”</button>`:"";
+  const resume=lm?`<button type="button" class="btn sm" onclick="loadMission('${jsStr(lm.id)}','${jsStr(lm.program)}')">Resume “${esc(lm.program)}”</button>`:"";
   return `<div class="empty-actions" style="margin-top:.8rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap">${resume}<button type="button" class="btn ghost sm" onclick="switchTab('archive')">Load from Archive</button></div>`;
 }
 function resumeLast(){const lm=lastMission();if(lm)loadMission(lm.id,lm.program);else switchTab("archive");}
@@ -754,7 +794,10 @@ async function startHunt(){
     objective:document.getElementById("objective").value.trim()||null,
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
     auth_headers:parseHeaders(document.getElementById("authHeaders").value),
-    parent_id:pendingParent||null,recon_cycles:cycles,strategy:strategy};
+    parent_id:pendingParent||null,recon_cycles:cycles,strategy:strategy,
+    enable_zap:document.getElementById("enableZap").checked,
+    zap_policy:document.getElementById("zapPolicy").value,
+    require_zap:document.getElementById("requireZap").checked};
   const rb=document.getElementById("reconBanner");
   if(cycles>1){rb.style.display="inline-flex";rb.textContent=`Iterative recon: up to ${cycles} cycles — refining from discovered assets each pass.`;}
   else rb.style.display="none";
@@ -1361,7 +1404,7 @@ async function loadArchive(){
           <td>${tot} ${c.critical?`<span class="sev-critical">${c.critical}C</span>`:""} ${c.high?`<span class="sev-high">${c.high}H</span>`:""}</td>
           <td>${leads?`<span class="lead-chip" title="unconfirmed candidate/static signals — verify before reporting">${leads}</span>`:`<span class="muted">0</span>`}</td>
           <td class="muted">${esc((m.created_at||"").slice(0,16).replace("T"," "))}</td>
-          <td style="white-space:nowrap"><button type="button" class="btn ghost sm" onclick="loadMission('${m.id}','${esc(m.program)}')">Load</button>
+          <td style="white-space:nowrap"><button type="button" class="btn ghost sm" onclick="loadMission('${jsStr(m.id)}','${jsStr(m.program)}')">Load</button>
               <button type="button" class="btn ghost sm" onclick="rescan('${m.id}')">Rescan</button>
               <button type="button" class="btn ghost sm link-danger" onclick="delMission('${m.id}')">Delete</button></td></tr>`;
       }).join("")}</table></div>`
@@ -1489,6 +1532,7 @@ Object.assign(window,{topoClick,topoSelectId,topoAction,loadMission,rescan,delMi
 /* land on the Launch view */
 showView("launch");
 refreshEstimate();
+refreshZapStatus();
 </script>
 </body>
 </html>

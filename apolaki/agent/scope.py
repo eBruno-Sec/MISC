@@ -25,9 +25,10 @@ class PermissionLevel(Enum):
 
 @dataclass
 class ScopeEntry:
-    value: str            # bare host (used for scope matching — always port/scheme-free)
+    value: str            # bare host (used for host-level scope matching)
     asset_type: str
     base: Optional[str] = None   # explicit scheme://host:port when the operator gave one
+    port: str = ""        # explicit non-default port the operator pinned ("" = any port)
 
 
 def _split_scope_entry(d: str):
@@ -70,28 +71,64 @@ class ScopeEngine:
         for d in in_scope:
             host, base = _split_scope_entry(d)
             if host:
-                self.in_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain", base))
+                # capture the explicit port (if the operator pinned one) so validate()
+                # can enforce it against concrete request targets — see SEC-1.
+                port = ""
+                if base and ":" in urlparse(base).netloc:
+                    port = urlparse(base).netloc.rsplit(":", 1)[1]
+                self.in_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain", base, port))
         for d in out_of_scope:
             host, _ = _split_scope_entry(d)
             if host:
                 self.out_of_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain"))
 
     def validate(self, target: str) -> tuple:
-        host = self._extract_host(target)
+        host, port, is_request = self._parse_target(target)
         if not host:
             return False, "Invalid target"
         for entry in self.out_of_scope:
             if self._matches(host, entry.value):
                 return False, f"{host} is explicitly out of scope"
+        host_in_scope = False
         for entry in self.in_scope:
             if self._matches(host, entry.value):
-                return True, f"In scope via {entry.value}"
+                host_in_scope = True
+                # SEC-1: when the operator pinned an explicit port, enforce it — but
+                # only against a concrete REQUEST target (a URL / host:port an HTTP
+                # tool will actually hit). A bare hostname (subdomain / DNS recon,
+                # is_request=False) stays host-level so domain recon isn't broken.
+                if entry.port and is_request and port != entry.port:
+                    continue
+                suffix = f":{entry.port}" if entry.port else ""
+                return True, f"In scope via {entry.value}{suffix}"
+        if host_in_scope:
+            return False, (f"{host}:{port or '?'} not in scope "
+                           "(host is in scope, but the operator pinned a different port)")
         return False, f"{host} not in scope"
 
     def _extract_host(self, target: str) -> str:
         if "://" in target:
             return urlparse(target).netloc.split(":")[0].lower()
         return target.split(":")[0].split("/")[0].lower()
+
+    def _parse_target(self, target: str) -> tuple:
+        """(host, effective_port, is_request). is_request is True when the target
+        carries a scheme or an explicit port — i.e. a concrete HTTP endpoint whose
+        port can be enforced. A bare hostname (no scheme, no port) is a recon host:
+        is_request=False, so port pinning never blocks domain-level recon."""
+        t = (target or "").strip()
+        has_scheme = "://" in t
+        netloc = urlparse(t).netloc if has_scheme else t.split("/")[0]
+        host = netloc.split(":")[0].lower()
+        explicit_port = netloc.rsplit(":", 1)[1] if ":" in netloc else ""
+        if explicit_port:
+            port = explicit_port
+        elif has_scheme:
+            scheme = urlparse(t).scheme
+            port = "443" if scheme == "https" else "80" if scheme == "http" else ""
+        else:
+            port = ""
+        return host, port, (has_scheme or bool(explicit_port))
 
     def _matches(self, host: str, pattern: str) -> bool:
         clean = pattern.lstrip("*.").lower()

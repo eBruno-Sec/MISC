@@ -40,6 +40,7 @@ CAP_FORM_PAGES = 10     # non-parameterized pages we fetch for form discovery (b
                         # each is a remote round-trip, so keep the amplification small)
 CAP_JS = 40             # js urls handed to js_review
 CAP_DOM = 6             # HTML pages handed to the (slow) headless DOM audit
+CAP_ZAP = 3             # primary host roots handed to the (very slow) ZAP DAST pass
 
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
@@ -124,6 +125,9 @@ def next_batch(state: dict) -> list:
     done = state.get("done") or set()
     recon = state.get("recon") or {}
     urls = state.get("urls") or []
+    # True when a ZAP daemon is configured (ZAP_ADDR set). When so, Full mode runs a
+    # real DAST pass — ZAP is no longer left to the agentic model's discretion.
+    zap_on = bool(state.get("zap"))
     # host -> base URL (scheme+port). Lets the planner probe a non-standard target
     # (e.g. a local app on http://host:42000) instead of assuming https on 443.
     bases = state.get("bases") or {}
@@ -381,6 +385,23 @@ def next_batch(state: dict) -> list:
     f_steps = fresh(f_steps)
     if f_steps:
         return f_steps
+
+    # ── phase F2: ZAP DAST (only when a ZAP daemon is configured) ──
+    # A full scope-fenced ZAP pass (spider + AJAX spider + active scan) on the
+    # primary in-scope host roots, seeded with the discovered surface (incl.
+    # katana's crawl — see _run_zap). run_zap is INTRUSIVE, so fresh()/_allowed()
+    # gates it to FULL mode only; here it is also gated on ZAP actually being
+    # configured. It runs LATE (after the fast tools) and is capped to CAP_ZAP
+    # roots because a ZAP active scan is very slow. This is what makes Full mode
+    # reliably run ZAP when configured + authorized, instead of leaving it to the
+    # agentic model's discretion.
+    if zap_on:
+        _zpol = state.get("zap_policy", "safe_active")
+        z_steps = [_step("run_zap", {"url": _b(h), "policy": _zpol}, f"run_zap:{h}")
+                   for h in host_bases[:CAP_ZAP]]
+        z_steps = fresh(z_steps)
+        if z_steps:
+            return z_steps
 
     # ── phase G: deterministic playbook (always, even passive) ──
     if "generate_playbook" not in done:
