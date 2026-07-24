@@ -916,18 +916,36 @@ class ToolRegistry:
             elif l.startswith("/"):
                 abs_links.append(f"{base.scheme}://{base.netloc}{l}")
         self._add_urls([url] + abs_links)
-        # capture POST forms (action + method + body field names) so the planner
-        # can reach POST-body sinks (e.g. the XML stock-check form → run_xxe).
+        # Forms feed the injection surface. POST forms are stored so the planner can
+        # reach POST-body sinks (e.g. the XML stock-check form → run_xxe). GET forms are
+        # turned into a parameterized URL with benign values so query-injection probes
+        # (run_sqli/run_sqlmap/run_xss/…) actually reach their inputs — otherwise a
+        # GET-form SQLi like DVWA's ?id= is never tested (it's not a plain href).
         try:
             import csrf_tool as _csrf
             forms = self.recon.setdefault("forms", [])
             seen_actions = {f.get("action") for f in forms}
+            synth_urls = []
             for fm in _csrf.parse_forms(r["body"], r["final_url"] or url):
                 act = fm.get("action")
-                if (fm.get("method") == "POST" and act and act not in seen_actions
-                        and self.scope.validate(act)[0]):
-                    forms.append({"action": act, "method": "POST", "fields": fm.get("inputs", [])})
-                    seen_actions.add(act)
+                method = (fm.get("method") or "GET").upper()
+                if not act or not self.scope.validate(act)[0]:
+                    continue
+                if method == "POST":
+                    if act not in seen_actions:
+                        forms.append({"action": act, "method": "POST", "fields": fm.get("inputs", [])})
+                        seen_actions.add(act)
+                else:
+                    names = [n for n in (fm.get("inputs") or []) if n]
+                    if names:
+                        base_act = act.split("#")[0]
+                        sep = "&" if "?" in base_act else "?"
+                        qs = "&".join(f"{_n}=1" for _n in names[:12])
+                        synth = f"{base_act}{sep}{qs}"
+                        if self.scope.validate(synth)[0]:
+                            synth_urls.append(synth)
+            if synth_urls:
+                self._add_urls(synth_urls)     # enter the surface as parameterized endpoints
         except Exception:
             pass
         # feed guidance's http-header rules (first probe wins as the app root)
