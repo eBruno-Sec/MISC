@@ -144,6 +144,9 @@ def generate_report(program: str, findings: list, scope: dict,
             lines.append(f"**CAPEC:** {f['capec']}")
         if f.get("owasp"):
             lines.append(f"**OWASP:** {f['owasp']}")
+        _prov = proof_provenance(f)
+        if _prov:
+            lines.append(f"**Tool & settings:** `{_prov}`")
         _bi = business_impact(f)
         if _bi:
             lines += ["", "**Why This Matters (plain English)**", "",
@@ -160,9 +163,13 @@ def generate_report(program: str, findings: list, scope: dict,
         _impact = str(f.get("impact") or "").strip() or (_bi[1] if _bi else
                   "Impact depends on how the affected input is used downstream; verify reachability.")
         lines += ["", "**Impact**", "", _impact, ""]
+        if str(f.get("false_positive_check") or "").strip():
+            lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
         lines += ["**Remediation**", "", remediation_line(f), ""]
         if f.get("evidence"):
             lines += ["**Supporting Material**", "", "```", str(f["evidence"]), "```", ""]
+        for _lbl, _txt in evidence_items(f):
+            lines += [f"**{_lbl}**", "", "```", _txt, "```", ""]
         lines += ["---", ""]
 
     if chains:
@@ -457,6 +464,37 @@ def finding_curl(finding: dict) -> str:
     return " ".join(parts)
 
 
+def proof_provenance(f: dict) -> str:
+    """One-line 'how this was proven': the tool and the exact settings/flags used.
+    Empty when the finding carries neither (e.g. a native probe with no tool tag)."""
+    tool = str(f.get("tool") or "").strip()
+    settings = str(f.get("settings") or "").strip()
+    if settings:
+        return settings if tool and tool in settings else (f"{tool}: {settings}" if tool else settings)
+    return tool
+
+
+def evidence_items(f: dict) -> list:
+    """Ordered (label, text) raw-proof artifacts a finding may carry beyond the main
+    `evidence` string — raw request/response, tool log, timing, header diff, baseline.
+    Only non-empty items are returned, each capped so a report never balloons."""
+    import json as _json
+    out = []
+    for label, key in (("Raw request", "request"), ("Request body", "request_body"),
+                       ("Raw response", "response"), ("Tool log", "log_tail"),
+                       ("Timing samples", "timing"), ("Header diff", "header_diff"),
+                       ("Baseline", "baseline")):
+        v = f.get(key)
+        if v is None:
+            continue
+        text = v if isinstance(v, str) else _json.dumps(v, indent=2, default=str)
+        text = text.strip()
+        if not text:
+            continue
+        out.append((label, text[:1800]))
+    return out
+
+
 def group_findings(findings: list) -> list:
     """Collapse duplicate findings that share a root cause (same family + affected
     parameter, or same title) into ONE representative carrying an `instances` list of
@@ -687,6 +725,12 @@ def generate_html_report(program: str, findings: list, scope: dict,
                       "Compare against a benign baseline to rule out a false positive."]
         steps = "".join(f"<li>{e(str(s))}</li>" for s in rsteps)
         ev = f"<h4>Evidence</h4><pre class='ev'>{e(str(f.get('evidence','')))}</pre>" if f.get("evidence") else ""
+        # raw proof artifacts (request/response/tool log/timing) — the hard proof
+        raw_html = "".join(f"<h4>{e(lbl)}</h4><pre class='ev'>{e(txt)}</pre>" for lbl, txt in evidence_items(f))
+        prov = proof_provenance(f)
+        prov_html = f"<span>Tool &amp; settings: <code>{e(prov)}</code></span>" if prov else ""
+        fpc = str(f.get("false_positive_check") or "").strip()
+        fpc_html = f"<h4>False-positive check</h4><p>{e(fpc)}</p>" if fpc else ""
         # canonical classification: the finding's own CWE wins; only show the triage
         # note when it does NOT contradict it (kills the CWE-1104-vs-CWE-79 mismatch).
         note_txt = str(f.get("analyst_notes") or "")
@@ -720,13 +764,14 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {f"<span>CAPEC: {e(str(f.get('capec')))}</span>" if f.get('capec') else ''}
             {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
             {cvss_vec}
+            {prov_html}
             <span class="tag-conf">CONFIRMED</span>
           </div>
           {biz_html}
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
-          {curl_html}{ev}{inst_html}{rem}{notes}
+          {curl_html}{ev}{raw_html}{fpc_html}{inst_html}{rem}{notes}
         </article>""")
     findings_html = "".join(cards) if cards else (
         "<p class='sub'>No vulnerability was confirmed with reproducible evidence during this engagement. "

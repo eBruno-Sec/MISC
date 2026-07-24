@@ -636,7 +636,11 @@ def _scan_config(m) -> dict:
     ctx = (m.get("context", {}) or {})
     return {"mode": m.get("mode"), "strategy": ctx.get("strategy"),
             "recon_cycles": ctx.get("recon_cycles"), "max_ai_calls": ctx.get("max_ai_calls"),
-            "authenticated": bool(ctx.get("authenticated"))}
+            "authenticated": bool(ctx.get("authenticated")),
+            # heavy-hitter provenance: the intensity dial + ZAP dials that actually ran
+            "intensity": ctx.get("intensity", "standard"),
+            "enable_zap": bool(ctx.get("enable_zap")), "zap_policy": ctx.get("zap_policy"),
+            "zap_speed": ctx.get("zap_speed"), "zap_aggression": ctx.get("zap_aggression")}
 
 
 @app.get("/report/{session_id}")
