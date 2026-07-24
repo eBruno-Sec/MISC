@@ -709,6 +709,12 @@ class ToolRegistry:
             f["timing"] = timing
         return f
 
+    def _ni(self, std: int, deep: int, insane: int) -> int:
+        """Intensity-scaled cap: the native probes widen their parameter/payload breadth
+        as intensity rises (standard keeps today's fast bounds; deep/insane dig wider)."""
+        return {"standard": std, "deep": deep, "insane": insane}.get(
+            getattr(self, "intensity", "standard"), std)
+
     # ── PASSIVE ──────────────────────────────────────────────────
     async def _run_subfinder(self, inp: dict) -> ToolResult:
         domain = inp["domain"]
@@ -1949,7 +1955,7 @@ class ToolRegistry:
         import ssrf_tool as ssrf
         url = inp["url"]
         params = inp.get("params") or ssrf.ssrf_params(url)
-        params = [p for p in params][:8]
+        params = [p for p in params][:self._ni(8, 12, 24)]
         if not params:
             return ToolResult("ssrf", url, True,
                               "No query parameters to test (SSRF needs a URL-ish parameter)", [])
@@ -2201,7 +2207,7 @@ class ToolRegistry:
         import sqli_tool as sqli
         from urllib.parse import parse_qsl
         url = inp["url"]
-        params = (inp.get("params") or xt.params_of(url))[:8]
+        params = (inp.get("params") or xt.params_of(url))[:self._ni(8, 16, 40)]
         if not params:
             return ToolResult("sqli", url, True, "No query parameters to test", [])
         seconds = max(3, min(int(inp.get("delay", 5)), 15))
@@ -2228,7 +2234,7 @@ class ToolRegistry:
                 orig = qvals.get(p, "1")
                 confirmed = False
                 # 1) error-based (DBMS error TEXT)
-                for probe in sqli.ERROR_PROBES[:3]:
+                for probe in sqli.ERROR_PROBES[:self._ni(3, 6, len(sqli.ERROR_PROBES))]:
                     r, _ = await get(c, xt.set_param(url, p, orig + probe))
                     if r is None:
                         continue
@@ -2342,7 +2348,7 @@ class ToolRegistry:
         # bounded to 4 params — each param costs up to ~7 remote round-trips across
         # the error + boolean stages, and this runs alongside sqli/cmdi/xss/etc. on
         # the same endpoint, so keeping this tight matters for scan wall-clock time.
-        params = (inp.get("params") or xt.params_of(url))[:4]
+        params = (inp.get("params") or xt.params_of(url))[:self._ni(4, 8, 16)]
         if not params:
             return ToolResult("nosqli", url, True, "No query parameters to test", [])
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
@@ -2449,7 +2455,7 @@ class ToolRegistry:
         import cmdi_tool as cmdi
         from urllib.parse import parse_qsl
         url = inp["url"]
-        params = (inp.get("params") or xt.params_of(url))[:8]
+        params = (inp.get("params") or xt.params_of(url))[:self._ni(8, 16, 32)]
         if not params:
             return ToolResult("cmdi", url, True, "No query parameters to test", [])
         seconds = max(3, min(int(inp.get("delay", 5)), 15))
