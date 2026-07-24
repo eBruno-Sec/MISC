@@ -45,7 +45,7 @@ class EngageRequest(BaseModel):
     login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
     parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
     recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
-    strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: adaptive)
+    strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: deterministic)
     max_ai_calls: Optional[int] = None  # override the per-strategy AI-call budget
     # OWASP ZAP DAST — opt-in from the scan setup UI. enable_zap OFF (default) means
     # ZAP never runs (report: "user disabled"); nothing else changes. When ON, ZAP
@@ -266,10 +266,13 @@ async def oob_hits(token: str):
 # ── mission lifecycle ────────────────────────────────────────────
 @app.post("/engage")
 async def engage(req: EngageRequest):
-    # Resolve the execution strategy. Default is adaptive: low_ai when AI is ready,
-    # else deterministic — so the platform still runs a scan without a key/quota.
+    # Resolve the execution strategy. DEFAULT IS DETERMINISTIC — the proof-first engine
+    # is peak for finding + confirming vulnerabilities (every confirmation is a
+    # deterministic oracle, never a model's opinion), and empirically AI strategy never
+    # moved the confirmed-finding count. AI (low_ai/agentic) is an opt-in ENHANCEMENT
+    # layer (narrative + business-logic reasoning) on top of the deterministic floor.
     st = ai_status()
-    strategy = req.strategy or ("low_ai" if st["ready"] else "deterministic")
+    strategy = req.strategy or "deterministic"
     if strategy not in ("manual", "deterministic", "low_ai", "agentic"):
         raise HTTPException(422, "strategy must be manual | deterministic | low_ai | agentic")
     # Credential preflight only for AI strategies — deterministic/manual need none.
@@ -385,7 +388,7 @@ async def estimate(req: EstimateRequest):
     so the UI can show 'this will use ~N AI calls' before Start."""
     import planner
     st = ai_status()
-    strategy = req.strategy or ("low_ai" if st["ready"] else "deterministic")
+    strategy = req.strategy or "deterministic"      # default deterministic (see engage)
     roots = sorted({(v or "").lower().lstrip("*.").split("/")[0] for v in (req.in_scope or []) if v})
     det = planner.estimate(req.mode, roots)
     ai_budget = {"manual": 0, "deterministic": 0, "low_ai": 2, "agentic": "≤40 (ReAct)"}.get(strategy, 0)
