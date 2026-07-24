@@ -1313,7 +1313,8 @@ class ToolRegistry:
                     idx = xt.breakout_index(rb.text, ctx)
                     if idx != -1:
                         ev_snip = xt._evidence_snippet(rb.text, idx, xt.BREAKOUTS[ctx])
-                        reflected.append((p, xt.reflection_finding(url, p, ctx, evidence=ev_snip)))
+                        reflected.append((p, self._attach_poc(
+                            xt.reflection_finding(url, p, ctx, evidence=ev_snip), bu, rb)))
                         break
 
         # 2) execution confirmation in a real browser (also catches DOM-only XSS)
@@ -1381,7 +1382,10 @@ class ToolRegistry:
                     except Exception:
                         pass
                     if fired["msg"] and xt.MARK in str(fired["msg"]):
-                        findings.append(xt.execution_finding(url, p, pl, where))
+                        findings.append(self._attach_poc(
+                            xt.execution_finding(url, p, pl, where), tu, None,
+                            timing=f"headless Chromium executed the payload — alert() fired carrying marker {xt.MARK!r} "
+                                   f"(load the URL in a browser to reproduce)"))
                         done.add((where, p))
                 await browser.close()
         except Exception:
@@ -1978,7 +1982,9 @@ class ToolRegistry:
                         continue
                     hit = ssrf.analyze_reflection(r["body"], payload)
                     if hit:
-                        findings.append(ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"]))
+                        findings.append(self._attach_poc(
+                            ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"]),
+                            r["target"], r))
                         evidence_targets.append(r["target"])
                         confirmed = True
                         break
@@ -1991,7 +1997,12 @@ class ToolRegistry:
                 cl = await probe(c, p, closed_pl, timeout=8)
                 sig = ssrf.analyze_blind(o, cl)
                 if sig:
-                    findings.append(ssrf.blind_finding(url, p, open_pl, closed_pl, sig))
+                    findings.append(self._attach_poc(
+                        ssrf.blind_finding(url, p, open_pl, closed_pl, sig),
+                        (o or {}).get("target") or ssrf.set_param(url, p, open_pl), o,
+                        timing=f"open port {open_port} responded differently than closed port {closed_port} "
+                               f"(open={(o or {}).get('elapsed', 0):.1f}s/{(o or {}).get('status')}, "
+                               f"closed={(cl or {}).get('elapsed', 0):.1f}s/{(cl or {}).get('status')})"))
                     if o and o.get("target"):
                         evidence_targets.append(o["target"])
                     continue
@@ -2006,8 +2017,12 @@ class ToolRegistry:
                         if inter:
                             break
                         await asyncio.sleep(0.5)
-                    findings.append(collab.oob_finding(url, p, purl, inter) if inter
-                                    else ssrf.oob_finding(url, p, purl))
+                    if inter:
+                        findings.append(self._attach_poc(
+                            collab.oob_finding(url, p, purl, inter), ssrf.set_param(url, p, purl), None,
+                            timing=f"out-of-band callback to {purl} fired from the target ({len(inter)} interaction(s))"))
+                    else:
+                        findings.append(ssrf.oob_finding(url, p, purl))
                     collab.clear(token)
                 elif oob_domain:                          # external collaborator (advisory)
                     token = os.urandom(4).hex()
@@ -2357,7 +2372,7 @@ class ToolRegistry:
                         continue
                     hits = ns.error_signatures(base_body, r.text)
                     if hits:
-                        findings.append(ns.error_finding(url, p, suffix, hits))
+                        findings.append(self._attach_poc(ns.error_finding(url, p, suffix, hits), probe_url, r))
                         ev.append(probe_url); confirmed = True
                         break
                 if confirmed:
@@ -2377,7 +2392,9 @@ class ToolRegistry:
                     if op_r is None:
                         continue
                     if ns.analyze_boolean(base_body, op_r.text, ctl_body, miss_body):
-                        findings.append(ns.boolean_finding(url, p, pair["ctx"]))
+                        findings.append(self._attach_poc(
+                            ns.boolean_finding(url, p, pair["ctx"]), op_url, op_r,
+                            timing=f"operator payload broadened the match vs control ({ctl_url})"))
                         ev.append(op_url); confirmed = True
                         break
                 if confirmed:
@@ -2464,8 +2481,9 @@ class ToolRegistry:
                         continue
                     hit = cmdi.analyze_output(base_body, r.text)
                     if hit:
-                        findings.append(cmdi.output_finding(url, p, item["payload"], hit))
-                        ev.append(xt.set_param(url, p, item["payload"])); confirmed = True
+                        _req = xt.set_param(url, p, item["payload"])
+                        findings.append(self._attach_poc(cmdi.output_finding(url, p, item["payload"], hit), _req, r))
+                        ev.append(_req); confirmed = True
                         break
                 if confirmed:
                     continue
@@ -2474,8 +2492,11 @@ class ToolRegistry:
                     _, ctl = await get(c, xt.set_param(url, p, item["control"]))
                     _, slp = await get(c, xt.set_param(url, p, item["payload"]))
                     if cmdi.analyze_time(ctl, slp, seconds):
-                        findings.append(cmdi.time_finding(url, p, item, ctl, slp, seconds))
-                        ev.append(xt.set_param(url, p, item["payload"])); confirmed = True
+                        _req = xt.set_param(url, p, item["payload"])
+                        findings.append(self._attach_poc(
+                            cmdi.time_finding(url, p, item, ctl, slp, seconds), _req, None,
+                            timing=f"control={ctl:.1f}s vs injected-sleep({seconds}s)={slp:.1f}s"))
+                        ev.append(_req); confirmed = True
                         break
                 if confirmed or not collab.enabled():
                     continue
@@ -2491,7 +2512,9 @@ class ToolRegistry:
                         break
                     await asyncio.sleep(0.5)
                 if inter:
-                    findings.append(cmdi.oob_finding(url, p, purl, inter))
+                    findings.append(self._attach_poc(
+                        cmdi.oob_finding(url, p, purl, inter), xt.set_param(url, p, payload), None,
+                        timing=f"out-of-band callback to {purl} fired from the target ({len(inter)} interaction(s))"))
                 collab.clear(token)
 
         if self.mission_id and ev:
