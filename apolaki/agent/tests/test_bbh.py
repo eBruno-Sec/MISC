@@ -550,6 +550,41 @@ def test_http_probe_turns_get_forms_into_parameterized_surface_urls():
     assert any(f.get("action", "").endswith("/login") for f in t.recon.get("forms", []))
 
 
+def test_attach_poc_puts_exact_request_response_on_finding_and_poc_export():
+    # PoC strength: a confirmed finding must carry the EXACT confirming request/response
+    # (native probes use private HTTP clients, so their proving exchange is otherwise
+    # lost). _attach_poc wires it onto the finding; the /poc export renders it.
+    from tools import ToolRegistry
+    import poc as poc_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+    t = ToolRegistry(eng, mission_id=None, session_headers={"Cookie": "s=1"})
+
+    class _Resp:
+        status_code = 500
+        text = "You have an error in your SQL syntax near ''"
+    f = t._attach_poc({"title": "SQLi in id", "severity": "high", "cwe": "CWE-89",
+                       "target": "http://t/item?id=1"},
+                      "http://t/item?id=1'", _Resp(), method="GET")
+    assert f["request"].startswith("GET http://t/item?id=1'")
+    assert "curl -i -sk 'http://t/item?id=1''" in f["curl"]
+    assert "authorized session" in f["curl"]                 # auth reminder when session set
+    assert "HTTP 500" in f["response"] and "SQL syntax" in f["response"]
+
+    # POST body + timing variants
+    inj = '{"email": "x\' OR 1=1--", "password": "x"}'
+    fp = t._attach_poc({"title": "auth bypass"}, "http://t/login", {"status": 200, "body": "token"},
+                       method="POST", body=inj)
+    assert fp["request"].startswith("POST http://t/login") and "OR 1=1" in fp["request"]
+    assert "HTTP 200" in fp["response"]
+    ft = t._attach_poc({"title": "time SQLi"}, "http://t/x?id=1;SLEEP(5)", None,
+                       timing="control=0.1s vs injected-SLEEP(5s)=5.2s")
+    assert "SLEEP(5s)=5.2s" in ft["timing"]
+
+    # the /poc export renders the attached request/response even with no DB exchange
+    md = poc_mod.finding_markdown(f, exchanges=[])
+    assert "curl -i -sk" in md and "Observed response" in md and "SQL syntax" in md
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.

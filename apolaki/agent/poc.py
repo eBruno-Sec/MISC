@@ -106,6 +106,22 @@ def finding_markdown(finding: dict, exchanges: list = None, redact: bool = True)
             if resp:
                 lines += [f"Observed response (HTTP {ex.get('status_code', '?')}):", "",
                           "```", str(resp)[:1500], "```", ""]
+    elif finding.get("request") or finding.get("curl"):
+        # native probes attach the EXACT confirming request/response onto the finding
+        # (their private HTTP clients bypass the DB exchange store) — render it as PoC.
+        if finding.get("curl"):
+            lines += ["1. Send the confirming request:", "", "```bash", str(finding["curl"]), "```", ""]
+        if finding.get("request"):
+            lines += ["<details><summary>Raw request</summary>", "",
+                      "```http", str(finding["request"]), "```", "</details>", ""]
+        if finding.get("response"):
+            lines += ["Observed response:", "", "```", str(finding["response"])[:1500], "```", ""]
+        if finding.get("timing"):
+            lines += [f"Timing proof: {finding['timing']}", ""]
+        for i, s in enumerate(steps, 1):
+            lines.append(f"{i}. {s}")
+        if steps:
+            lines.append("")
     elif steps:
         for i, s in enumerate(steps, 1):
             lines.append(f"{i}. {s}")
