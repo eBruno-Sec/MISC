@@ -853,6 +853,46 @@ def test_dataflow_chaining_is_directed_and_non_destructive():
     assert not any(c.get("kind") == "dataflow" for c in none)
 
 
+def test_ai_business_logic_hunter_is_additive_leads_only():
+    # AI enhancement layer: with an AI strategy, one end-of-scan pass turns the surface +
+    # findings into business-logic hypotheses parsed as candidate LEADS. Truth-first: leads
+    # only, never confirmed; a no-op in deterministic mode (AI never gates the engine).
+    import agent as agent_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+
+    async def fake_ai(system, user, max_tokens=800):
+        return ("/cart | negative quantity yields a refund | set quantity=-5 and check the total\n"
+                "/account?id | IDOR via sequential ids | iterate id and compare owners\n"
+                "garbage line without a pipe should be ignored")
+
+    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="low_ai", mission_id=None)
+    a.tools.urls = ["http://t/cart", "http://t/account?id=1"]
+    a.findings = [{"title": "SQL injection in id"}]
+    a._ai_usable = lambda: True
+    a._budget_left = lambda: True
+    a._ai_text = fake_ai
+    evs = []
+    async def run():
+        async for ev in a._ai_business_logic_leads("s"):
+            evs.append(ev)
+    asyncio.new_event_loop().run_until_complete(run())
+    assert len(a.leads) == 2                                     # 2 valid hypotheses; garbage dropped
+    assert all(l["confidence"] == "candidate" and l["family"] == "business_logic" for l in a.leads)
+    assert all("ai-hypothesis" in l["tags"] and l["cwe"] == "CWE-840" for l in a.leads)
+    assert any("negative quantity" in l["evidence"] for l in a.leads)
+
+    # deterministic strategy -> no-op (AI is opt-in, never the engine)
+    a2 = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="deterministic", mission_id=None)
+    a2.tools.urls = ["http://t/x?a=1"]
+    a2._ai_usable = lambda: True; a2._budget_left = lambda: True; a2._ai_text = fake_ai
+    out = []
+    async def run2():
+        async for ev in a2._ai_business_logic_leads("s"):
+            out.append(ev)
+    asyncio.new_event_loop().run_until_complete(run2())
+    assert out == [] and a2.leads == []
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.

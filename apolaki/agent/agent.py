@@ -462,6 +462,57 @@ class BBHAgent:
                 yield {"type": "info", "content": f"Lead promotion: {dropped} candidate lead(s) "
                        "browser-confirmed and promoted to findings."}
 
+    async def _ai_business_logic_leads(self, session_id: str):
+        """Additive AI enhancement layer: when an AI strategy is selected, run ONE bounded
+        end-of-scan pass over the surface + confirmed findings and propose BUSINESS-LOGIC
+        test hypotheses (workflow/step-skipping, price/quantity manipulation, IDOR/BOLA id
+        sequences, coupon/referral abuse, auth-flow gaps, mass-assignment, races) that the
+        deterministic probes can't reason about. Truth-first: these are candidate LEADS the
+        operator must verify — the model hunts and hypothesizes, it never confirms. No-op in
+        deterministic mode (AI is an opt-in enhancement, never the engine)."""
+        if self.strategy not in ("low_ai", "agentic") or not self._ai_usable() or not self._budget_left():
+            return
+        import surface as surface_mod
+        inv = surface_mod.build_inventory(getattr(self.tools, "urls", []) or [])[:40]
+        if not inv:
+            return
+        surf = "\n".join(f"- {e['host']}{e['path']}"
+                         + (f"  params={','.join(e.get('params') or [])}" if e.get("params") else "")
+                         for e in inv)
+        finds = "; ".join(f.get("title", "") for f in self.findings[:15]) or "none confirmed yet"
+        system = ("You are a senior web/API pentester. From the attack surface and confirmed findings, propose "
+                  "concrete BUSINESS-LOGIC test hypotheses a human should try that automated scanners miss — "
+                  "workflow/step-skipping, price/quantity/negative-value manipulation, IDOR/BOLA id sequences, "
+                  "coupon/referral/loyalty abuse, auth-flow and password-reset gaps, mass-assignment, race "
+                  "conditions. Output 3-8 lines, each EXACTLY: '<endpoint or flow> | <hypothesis> | <how to test>'. "
+                  "Hypotheses only — never claim anything is confirmed.")
+        user = f"Attack surface:\n{surf}\n\nConfirmed findings: {finds}"
+        try:
+            txt = await self._ai_text(system, user, max_tokens=650)
+        except Exception:
+            return
+        tgt0 = (getattr(self.tools, "recon", {}) or {}).get("target") or ""
+        n = 0
+        for raw in (txt or "").splitlines():
+            line = raw.strip().lstrip("-*0123456789.) ")
+            if line.count("|") < 1 or len(line) < 16:
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            where, hyp = parts[0][:80], (parts[1] if len(parts) > 1 else "")
+            how = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+            lead = {"severity": "info", "confidence": "candidate", "family": "business_logic",
+                    "tags": ["business-logic", "ai-hypothesis"], "cwe": "CWE-840",
+                    "target": where if where.startswith("http") else tgt0,
+                    "title": f"Business-logic hypothesis — {(hyp or where)[:90]}",
+                    "evidence": f"{where}: {hyp}".strip(": "),
+                    "reproduction_steps": [how] if how else [],
+                    "analyst_notes": "AI-proposed hunt lead (business logic) — verify manually; not a confirmed vulnerability."}
+            self.leads.append(lead)
+            yield {"type": "lead", "lead": lead}
+            n += 1
+            if n >= 8:
+                break
+
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:
         return bool(self.client) and self._has_key
@@ -622,6 +673,10 @@ class BBHAgent:
                 break
         # promotion pass: re-test high-signal candidate leads with a confirmatory oracle
         async for ev in self._promote_leads(session_id):
+            yield ev
+        # additive AI enhancement: business-logic hypotheses -> leads (no-op unless an AI
+        # strategy is selected and usable). The model hunts; deterministic oracles confirm.
+        async for ev in self._ai_business_logic_leads(session_id):
             yield ev
         self._plan_steps = steps
 
