@@ -83,6 +83,7 @@ TOOL_PERMISSIONS = {
     "run_form_nosqli": PermissionLevel.INTRUSIVE,
     "run_upload_test": PermissionLevel.INTRUSIVE,
     "run_stored_xss": PermissionLevel.INTRUSIVE,
+    "run_param_mine": PermissionLevel.INTRUSIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -212,6 +213,19 @@ def _parse_sqlmap_proof(out: str) -> dict:
         "types": types, "payloads": payloads,
         "evidence_text": "\n".join(ev_parts),
     }
+
+# High-value hidden-parameter names for run_param_mine (curated, not exhaustive; the
+# intensity dial widens how many are tested). Ordered by rough hit-likelihood.
+_PARAM_WORDS = [
+    "id", "page", "p", "q", "query", "search", "s", "keyword", "cat", "category", "filter",
+    "sort", "order", "limit", "offset", "start", "count", "user", "username", "uid", "user_id",
+    "account", "email", "name", "title", "product", "item", "pid", "sku", "code", "ref",
+    "token", "key", "api_key", "apikey", "auth", "session", "redirect", "redirect_uri", "url",
+    "uri", "next", "return", "returnurl", "callback", "continue", "dest", "destination", "file",
+    "filename", "path", "dir", "folder", "doc", "document", "view", "template", "tpl", "include",
+    "lang", "locale", "debug", "test", "admin", "preview", "mode", "action", "cmd", "exec",
+    "format", "type", "output", "json", "xml",
+]
 
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
@@ -471,6 +485,15 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "Form action URL that stores user input"},
          "fields": {"type": "array", "items": {"type": "string"}, "description": "Optional form field names"}},
+         "required": ["url"]}},
+    {"name": "run_param_mine",
+     "description": ("INTRUSIVE: active PARAMETER MINING — brute-force hidden query parameters on an endpoint so "
+                     "injection probes reach inputs the crawl never saw. A candidate that reflects its canary or "
+                     "changes the response vs a random-param baseline is a DISCOVERY (added to the surface; a "
+                     "candidate lead, not a vulnerability). Intensity widens the wordlist."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Endpoint/page to mine for hidden parameters"},
+         "words": {"type": "array", "items": {"type": "string"}, "description": "Optional extra param names"}},
          "required": ["url"]}},
     {"name": "run_nosqli",
      "description": ("INTRUSIVE: NoSQL (MongoDB-style) operator-injection test on a parameterized URL. Appends an "
@@ -1502,6 +1525,64 @@ class ToolRegistry:
         }, url, None, method="POST", body=body,
             timing=f"headless Chromium executed the stored payload on {hit['url']} (marker {marker})")
         return ToolResult("stored_xss", hit["url"], True, "STORED XSS CONFIRMED", [finding])
+
+    async def _run_param_mine(self, inp: dict) -> ToolResult:
+        """Active PARAMETER MINING: brute-force hidden query params so injection probes
+        reach inputs the crawl never saw. A candidate param that reflects its canary or
+        changes the response vs a random-param baseline is a DISCOVERY — added to the
+        surface (candidate lead, not a vuln). Intensity scales the wordlist. INTRUSIVE."""
+        import httpx
+        from urllib.parse import urlparse, urlencode, parse_qsl
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("param_mine", url, False, "", [], "out of scope")
+        words = list(dict.fromkeys(_PARAM_WORDS + [w for w in (inp.get("words") or []) if isinstance(w, str)]))
+        words = words[:self._ni(40, 80, len(words))]        # intensity widens the list
+        canary = "bbhpm" + os.urandom(4).hex()
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        base = url.split("#")[0]
+
+        def with_param(u, k, v):
+            p = urlparse(u); q = dict(parse_qsl(p.query, keep_blank_values=True)); q[k] = v
+            return f"{p.scheme}://{p.netloc}{p.path}?{urlencode(q)}"
+
+        discovered = []
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=12) as c:
+            rnd = "zz" + os.urandom(4).hex()                 # a param that certainly does not exist
+            try:
+                br = await c.get(with_param(base, rnd, canary))
+            except Exception:
+                return ToolResult("param_mine", url, True, "baseline request failed", [])
+            base_len, base_status, base_reflects = len(br.text), br.status_code, canary in br.text
+            for w in words:
+                tgt = with_param(base, w, canary)
+                if not self.scope.validate(tgt)[0]:
+                    continue
+                try:
+                    r = await c.get(tgt)
+                except Exception:
+                    continue
+                reflected = (canary in r.text) and not base_reflects
+                changed = (r.status_code != base_status) or (abs(len(r.text) - base_len) > max(64, base_len * 0.02))
+                if reflected or changed:
+                    discovered.append({"param": w, "reflected": reflected, "status": r.status_code,
+                                       "lendiff": abs(len(r.text) - base_len), "url": with_param(base, w, "1")})
+        if not discovered:
+            return ToolResult("param_mine", url, True, f"no hidden params (tested {len(words)})", [])
+        self._add_urls([d["url"] for d in discovered])       # feed the injection surface
+        findings = []
+        for d in discovered:
+            why = "value reflected in the response" if d["reflected"] else \
+                  f"changed the response (status {d['status']}, Δlen {d['lendiff']})"
+            findings.append({
+                "severity": "info", "confidence": "candidate", "family": "param_mine",
+                "tags": ["recon", "param-mining"], "cwe": "CWE-200" if d["reflected"] else "",
+                "target": d["url"], "title": f"Hidden parameter '{d['param']}' on {urlparse(base).path or base}",
+                "evidence": f"Undocumented parameter '{d['param']}' {why}. Added to the surface for injection testing"
+                            + (" (reflected → also XSS-worthy)." if d["reflected"] else "."),
+                "reproduction_steps": [f"GET {d['url']} and compare to a baseline with a random parameter name."]})
+        return ToolResult("param_mine", url, True,
+                          f"{len(discovered)} hidden param(s) discovered → surface", findings)
 
     async def _run_dom_audit(self, inp: dict) -> ToolResult:
         """Dynamic client-side confirmation: drive a headless browser to CONFIRM

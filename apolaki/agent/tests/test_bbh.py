@@ -753,6 +753,41 @@ def test_stored_xss_confirms_only_on_browser_execution():
     assert not r2.findings                                          # submitted but never executed
 
 
+def test_param_mine_discovers_hidden_params_and_feeds_surface():
+    # Active parameter mining: a param that reflects its canary (vs a random-param
+    # baseline) is a DISCOVERY -> candidate lead + added to the surface for injection
+    # probes. Params that don't change the response are not reported.
+    from tools import ToolRegistry
+    import httpx
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+    t = ToolRegistry(eng, mission_id=None, intensity="deep")
+
+    class _R:
+        def __init__(self, text, status=200): self.text = text; self.status_code = status
+    class _C:
+        async def __aenter__(s): return s
+        async def __aexit__(s, *a): return False
+        async def get(s, u):
+            import urllib.parse as up
+            q = dict(up.parse_qsl(up.urlparse(u).query))
+            keys = [k for k in q if str(q[k]).startswith("bbhpm")]
+            if keys and keys[0] == "id":        # only 'id' reflects its canary
+                return _R("hello " + q["id"])
+            return _R("hello baseline")         # every other param: unchanged, no canary
+
+    orig = httpx.AsyncClient; httpx.AsyncClient = lambda *a, **k: _C()
+    try:
+        r = asyncio.new_event_loop().run_until_complete(t._run_param_mine({"url": "http://t/search"}))
+    finally:
+        httpx.AsyncClient = orig
+
+    disc = [f for f in r.findings if f.get("family") == "param_mine" and "'id'" in f["title"]]
+    assert disc and disc[0]["confidence"] == "candidate"       # discovery = candidate lead
+    assert disc[0]["cwe"] == "CWE-200"                          # reflected -> info-disclosure class
+    assert any("search?id=1" in u for u in t.urls)             # fed into the injection surface
+    assert not any("'page'" in f["title"] for f in r.findings)  # unchanged params not reported
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
