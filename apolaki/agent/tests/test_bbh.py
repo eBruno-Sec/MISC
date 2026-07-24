@@ -642,6 +642,32 @@ def test_lead_promotion_browser_confirms_xss_candidates(monkeypatch):
     assert out == [] and len(a2.leads) == 1 and a2.findings == []
 
 
+def test_jwt_alg_confusion_and_kid_injection_are_truthful_leads():
+    # Deeper API lane: an asymmetric-alg JWT flags algorithm confusion (RS->HS) and a
+    # kid header flags kid injection. Both need the server to ACCEPT a forged token, so
+    # offline analysis emits them as candidate LEADS with exact repro — never confirmed.
+    import jwt_tool as jwt
+    import json as _j
+
+    def mk(header, payload):
+        h = jwt.b64url_encode(_j.dumps(header)); p = jwt.b64url_encode(_j.dumps(payload))
+        return f"{h}.{p}.sig"
+
+    res = jwt.analyze(mk({"alg": "RS256", "kid": "key-1"}, {"sub": "u", "role": "user"}))
+    titles = [f["title"] for f in res["findings"]]
+    algc = [f for f in res["findings"] if "algorithm confusion" in f["title"].lower()]
+    kidf = [f for f in res["findings"] if "kid" in f["title"].lower()]
+    assert algc and algc[0]["confidence"] == "candidate" and algc[0]["cwe"] == "CWE-347"
+    assert "public key" in algc[0]["reproduction_steps"][0].lower()
+    assert kidf and kidf[0]["confidence"] == "candidate"
+    assert kidf[0]["false_positive_check"]                       # honest: not auto-confirmed
+
+    # HS256 without kid -> no alg-confusion, no kid lead (no false positives)
+    res2 = jwt.analyze(mk({"alg": "HS256"}, {"sub": "u"}))
+    assert not any("algorithm confusion" in f["title"].lower() for f in res2["findings"])
+    assert not any("kid" in f["title"].lower() for f in res2["findings"])
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.

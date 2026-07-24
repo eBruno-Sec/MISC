@@ -178,6 +178,42 @@ def analyze(token: str, extra_secrets: list = None) -> dict:
             "reproduction_steps": ["Forge a token with the privilege claim set to admin/true"],
             "cwe": "CWE-347", "family": "jwt", "tags": ["jwt", "auth"]})
 
+    # Algorithm confusion (RS/ES/PS -> HS): a server that verifies with a generic
+    # verify(token, key) may accept an HS256 token signed with the PUBLIC key as the
+    # HMAC secret — forgery without the private key. Offline analysis can only flag it;
+    # confirmation needs the server to ACCEPT the forged token, so this is a LEAD.
+    _ASYM = {"rs256", "rs384", "rs512", "es256", "es384", "es512", "ps256", "ps384", "ps512"}
+    if alg in _ASYM:
+        findings.append({
+            "title": f"JWT uses {alg.upper()} — test algorithm confusion (RS→HS)", "severity": "high",
+            "target": "jwt", "confidence": "candidate", "family": "jwt", "tags": ["jwt", "auth"], "cwe": "CWE-347",
+            "description": ("The token is signed with an asymmetric algorithm. If the server verifies with a generic "
+                            "verify(token, key), it may accept an HS256 token signed with the PUBLIC key as the HMAC "
+                            "secret (algorithm confusion) — token forgery without the private key."),
+            "impact": "Forge arbitrary tokens (account takeover) using only the public key.",
+            "reproduction_steps": [
+                "Obtain the public key (JWKS at /.well-known/jwks.json or /jwks, or from the TLS certificate).",
+                "Forge a token: header {alg:HS256}, escalated payload, HMAC-signed using the PUBLIC KEY PEM as the secret.",
+                "Send it to an authenticated endpoint; acceptance CONFIRMS algorithm confusion."],
+            "false_positive_check": "Only vulnerable if the server ACCEPTS the HS256-forged token — until then this is a lead.",
+            "remediation": "Pin the expected algorithm server-side; never let the verifier choose HS* against an RSA/EC public key."})
+
+    kid = d["header"].get("kid")
+    if kid is not None:
+        findings.append({
+            "title": "JWT 'kid' header present — test kid injection / path traversal", "severity": "medium",
+            "target": "jwt", "confidence": "candidate", "family": "jwt", "tags": ["jwt", "auth"], "cwe": "CWE-347",
+            "description": (f"The header carries a key id (kid={kid!r}). If the server uses kid to LOAD the verification "
+                            "key from a file/DB/URL without sanitisation, it may be steered to an attacker-known key — "
+                            "path traversal to a predictable file, SQLi returning a chosen key, or an attacker-hosted JWKS."),
+            "impact": "Point verification at a key you control → forge valid tokens.",
+            "reproduction_steps": [
+                "Set kid to a path traversal to a predictable-content file (e.g. '../../dev/null') and HS256-sign with the matching (empty) secret.",
+                "Or inject SQL into kid so the key lookup returns a chosen value; or set kid to an attacker-hosted JWKS URL.",
+                "Send the forged token; acceptance CONFIRMS kid injection."],
+            "false_positive_check": "A kid header is normal; only a server that accepts a kid-steered forged token is vulnerable.",
+            "remediation": "Treat kid as an opaque allowlisted lookup key; never use it as a file path, URL, or SQL value."})
+
     exp = payload.get("exp")
     if isinstance(exp, (int, float)) and exp < time.time():
         findings.append({
