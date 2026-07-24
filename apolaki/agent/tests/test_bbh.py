@@ -606,6 +606,42 @@ def test_native_probes_scale_param_breadth_with_intensity():
     assert len(std) == 8 and len(ins) == 30
 
 
+def test_lead_promotion_browser_confirms_xss_candidates(monkeypatch):
+    # A candidate XSS lead (reflection/dalfox/js-review signal) is re-tested through the
+    # headless browser; a real alert() promotes it to a CONFIRMED finding and the now-
+    # redundant lead is dropped. Truth-first: no browser -> no promotion.
+    import agent as agent_mod, tools as tools_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+
+    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="deterministic", mission_id=None)
+    a.leads = [{"title": "Reflected XSS (html) in 'q'", "cwe": "CWE-79", "severity": "medium",
+                "target": "http://t/search?q=abc", "confidence": "candidate"}]
+    monkeypatch.setattr(tools_mod, "xss_confirm_status", lambda: True)
+    async def fake_exec(url, params):
+        return [{"title": "XSS executes in 'q'", "cwe": "CWE-79", "severity": "high",
+                 "target": url, "confidence": "confirmed", "evidence": "alert() fired"}]
+    a.tools._xss_execute = fake_exec
+    evs = []
+    async def run():
+        async for ev in a._promote_leads("x"):
+            evs.append(ev)
+    asyncio.new_event_loop().run_until_complete(run())
+    assert any(e.get("type") == "finding" for e in evs)
+    assert len(a.findings) == 1 and a.findings[0]["confidence"] == "confirmed"
+    assert a.leads == []                               # candidate dropped after promotion
+
+    # no browser -> nothing promoted (never promote on the signal alone)
+    a2 = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(), strategy="deterministic", mission_id=None)
+    a2.leads = [{"title": "XSS", "cwe": "CWE-79", "target": "http://t/s?q=1", "confidence": "candidate"}]
+    monkeypatch.setattr(tools_mod, "xss_confirm_status", lambda: False)
+    out = []
+    async def run2():
+        async for ev in a2._promote_leads("x"):
+            out.append(ev)
+    asyncio.new_event_loop().run_until_complete(run2())
+    assert out == [] and len(a2.leads) == 1 and a2.findings == []
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
