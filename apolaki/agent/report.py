@@ -173,9 +173,17 @@ def generate_report(program: str, findings: list, scope: dict,
         lines += ["---", ""]
 
     if chains:
-        lines += ["## Attack-Path Chains", ""]
+        lines += ["## Attack-Path Chains & Chaining Potential", "",
+                  "_Where the confirmed findings lead when combined. Items marked "
+                  "**(potential)** are a single confirmed bug's well-known escalation path — "
+                  "verify reachability before claiming the full chain._", ""]
         for c in chains:
-            lines += [f"- **{c.get('host')}** ({(c.get('severity') or '').upper()}): {c.get('narrative')}"]
+            tag = " **(potential)**" if c.get("kind") == "potential" else ""
+            lines.append(f"- **{c.get('host')}** ({(c.get('severity') or '').upper()}){tag}: "
+                         f"**{c.get('narrative')}**")
+            _cs = str(c.get("summary") or "").strip()
+            if _cs:
+                lines.append(f"    - {_cs}")
         lines.append("")
     if leads_md:
         lines.append(leads_md)
@@ -789,14 +797,23 @@ def generate_html_report(program: str, findings: list, scope: dict,
                     "<table class='tbl'><tr><th>#</th><th>Severity</th><th>Finding</th><th>Fix</th></tr>"
                     + rrows + "</table>")
 
-    # attack paths
+    # attack paths + chaining potential
     chain_html = ""
     if chains:
-        items = "".join(f"<li><b>{e(str(c.get('host')))}</b> "
-                        f"<span class='sev' style='--c:{SEV_COLORS.get((c.get('severity') or '').lower(),'#6a8a9a')}'>"
-                        f"{e(str((c.get('severity') or '').upper()))}</span> — {e(str(c.get('narrative')))}</li>"
-                        for c in chains)
-        chain_html = f"<h2 id='paths'>Attack-Path Chains</h2><ul class='chains'>{items}</ul>"
+        def _chain_li(c):
+            pot = " <span class='tag-conf' style='background:#6a5acd'>POTENTIAL</span>" if c.get("kind") == "potential" else ""
+            summ = str(c.get("summary") or "").strip()
+            summ_html = f"<div class='sub' style='margin:.2rem 0 0 .2rem'>{e(summ)}</div>" if summ else ""
+            return (f"<li><b>{e(str(c.get('host')))}</b> "
+                    f"<span class='sev' style='--c:{SEV_COLORS.get((c.get('severity') or '').lower(),'#6a8a9a')}'>"
+                    f"{e(str((c.get('severity') or '').upper()))}</span>{pot} — <b>{e(str(c.get('narrative')))}</b>"
+                    f"{summ_html}</li>")
+        items = "".join(_chain_li(c) for c in chains)
+        chain_html = ("<h2 id='paths'>Attack-Path Chains &amp; Chaining Potential</h2>"
+                      "<p class='sub'>Where the confirmed findings lead when combined. "
+                      "<b>POTENTIAL</b> marks a single confirmed bug's well-known escalation path — "
+                      "verify reachability before claiming the full chain.</p>"
+                      f"<ul class='chains'>{items}</ul>")
 
     # unconfirmed leads (Apolaki's honesty edge — kept distinct + labelled)
     leads_html = ""
