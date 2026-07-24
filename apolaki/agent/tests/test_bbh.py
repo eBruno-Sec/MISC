@@ -814,6 +814,20 @@ def test_anomaly_scan_flags_intuition_leads_never_confirmed():
     assert not r2.findings          # no version digit, clean body -> no anomaly noise
 
 
+def test_stored_xss_chains_to_worm_escalation():
+    # The new stored-XSS finding feeds the chaining engine with its OWN (stronger)
+    # escalation, distinct from reflected XSS — mass session theft / ATO / worm.
+    ch = triage.build_chains([{"id": "1", "severity": "high", "cwe": "CWE-79",
+                               "title": "Stored XSS (canary fired on /board)", "target": "https://h/board"}])
+    worm = [c for c in ch if "worm" in c.get("narrative", "").lower()]
+    assert worm and worm[0]["kind"] == "potential" and worm[0]["severity"] == "critical"
+    # a plain reflected XSS still gets the (milder) reflected escalation, not the worm one
+    ch2 = triage.build_chains([{"id": "2", "severity": "high", "cwe": "CWE-79",
+                                "title": "Reflected XSS in 'q'", "target": "https://h/s"}])
+    assert any("account takeover" in c.get("narrative", "").lower() for c in ch2)
+    assert not any("worm" in c.get("narrative", "").lower() for c in ch2)
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.

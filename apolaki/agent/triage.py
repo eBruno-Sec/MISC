@@ -84,6 +84,7 @@ _CLASS_RX = [
     ("xxe",  re.compile(r"xxe|xml external", re.I)),
     ("ssrf", re.compile(r"ssrf|server.side request", re.I)),
     ("proto", re.compile(r"prototype pollution", re.I)),
+    ("stored_xss", re.compile(r"stored xss|second.order xss", re.I)),
     ("xss",  re.compile(r"\bxss\b|cross.site.script|dom.based|dom xss", re.I)),
     ("crlf", re.compile(r"crlf|response splitting|header inj", re.I)),
     ("cache_poison", re.compile(r"cache poison|unkeyed", re.I)),
@@ -116,6 +117,10 @@ _ESCALATIONS = {
     "xss": ("XSS → session/token theft → account takeover",
             "Running script in a victim's authenticated session lets an attacker exfiltrate session cookies/tokens or "
             "ride the session to perform privileged actions, leading to account takeover.", "high"),
+    "stored_xss": ("Stored XSS → mass session/token theft → account takeover → worm propagation",
+                   "A stored XSS payload executes in EVERY visitor's authenticated session — harvesting session "
+                   "cookies/tokens at scale, enabling account takeover, and (self-propagating) worm-like spread across "
+                   "users without any per-victim interaction.", "critical"),
     "ssti": ("CSTI/SSTI → template evaluation → RCE or DOM XSS",
              "Template injection evaluates attacker input: server-side it commonly escalates to remote code execution; "
              "client-side it becomes DOM XSS and session theft.", "high"),
