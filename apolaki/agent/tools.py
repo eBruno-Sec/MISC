@@ -64,6 +64,7 @@ TOOL_PERMISSIONS = {
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
+    "run_anomaly_scan": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
     "run_csrf": PermissionLevel.ACTIVE,
     "run_ffuf": PermissionLevel.INTRUSIVE,
@@ -213,6 +214,26 @@ def _parse_sqlmap_proof(out: str) -> dict:
         "types": types, "payloads": payloads,
         "evidence_text": "\n".join(ev_parts),
     }
+
+# Anomaly signatures for run_anomaly_scan — verbose errors, stack traces, debug output,
+# and internal-path disclosure that a skilled tester would notice and chase. These are
+# advisory HUNT LEADS, never confirmations.
+_ANOMALY_RX = [
+    ("a stack trace / verbose error",
+     re.compile(r"Traceback \(most recent call|\bat [\w.$]+\([\w.]+\.(?:java|kt|scala):\d+\)|"
+                r"System\.\w+Exception|Fatal error:|Uncaught \w+Error|\bon line \d+\b|"
+                r"\.(?:php|rb|py|java|aspx?):\d+\b|ORA-\d{5}|SQLSTATE\[", re.I)),
+    ("debug / dev output",
+     re.compile(r"var_dump\(|print_r\(|phpinfo\(\)|\bwerkzeug\b|Whoops\\|DEBUG = True|"
+                r"django\.core|\bstack trace\b|__debug__", re.I)),
+    ("internal path / host disclosure",
+     re.compile(r"[A-Za-z]:\\\\(?:inetpub|xampp|wamp|www|Users)\\|/var/www/|/home/[\w.-]+/|"
+                r"/usr/local/(?:www|apache)|/opt/\w+/", re.I)),
+]
+# Response headers that leak stack/version/debug info (Server/X-Powered-By only when they
+# carry a version digit; the always-interesting ones are handled unconditionally).
+_LEAK_HEADERS = ("x-powered-by", "server", "x-aspnet-version", "x-aspnetmvc-version",
+                 "x-debug", "x-runtime", "x-generator")
 
 # High-value hidden-parameter names for run_param_mine (curated, not exhaustive; the
 # intensity dial widens how many are tested). Ordered by rough hit-likelihood.
@@ -486,6 +507,12 @@ CLAUDE_TOOLS = [
          "url": {"type": "string", "description": "Form action URL that stores user input"},
          "fields": {"type": "array", "items": {"type": "string"}, "description": "Optional form field names"}},
          "required": ["url"]}},
+    {"name": "run_anomaly_scan",
+     "description": ("ACTIVE: anomaly hunting ('intuition' leads). Fetches a page and flags verbose errors / stack "
+                     "traces / internal-path disclosure / debug + version-leak headers as advisory 'dig here' LEADS "
+                     "(candidate, never confirmed). Great on error pages and app roots."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Page/endpoint to inspect for anomalies"}}, "required": ["url"]}},
     {"name": "run_param_mine",
      "description": ("INTRUSIVE: active PARAMETER MINING — brute-force hidden query parameters on an endpoint so "
                      "injection probes reach inputs the crawl never saw. A candidate that reflects its canary or "
@@ -1525,6 +1552,45 @@ class ToolRegistry:
         }, url, None, method="POST", body=body,
             timing=f"headless Chromium executed the stored payload on {hit['url']} (marker {marker})")
         return ToolResult("stored_xss", hit["url"], True, "STORED XSS CONFIRMED", [finding])
+
+    async def _run_anomaly_scan(self, inp: dict) -> ToolResult:
+        """Anomaly hunting ('intuition' leads): fetch a page and flag verbose errors /
+        stack traces / internal-path disclosure / debug + version-leak headers as
+        advisory LEADS to chase. Truth-first: these are candidate 'dig here' signals,
+        never confirmed vulnerabilities. ACTIVE (a single GET + analysis)."""
+        import re as _re
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("anomaly", url, False, "", [], "out of scope")
+        r = await self._http(url, "GET", capture=True)
+        if r.get("error"):
+            return ToolResult("anomaly", url, True, r["error"], [])
+        body = r.get("body", "") or ""
+        headers = {str(k).lower(): v for k, v in (r.get("headers") or {}).items()}
+        findings = []
+        for label, rx in _ANOMALY_RX:
+            m = rx.search(body)
+            if m:
+                snip = body[max(0, m.start() - 25):m.start() + 70].replace("\n", " ")
+                findings.append(self._anom_lead(url, label, f"Response shows {label}: …{snip}…"))
+        hints = []
+        for h in _LEAK_HEADERS:
+            if h in headers:
+                v = str(headers[h])
+                if h in ("x-debug", "x-runtime", "x-aspnet-version", "x-aspnetmvc-version", "x-generator") \
+                        or _re.search(r"\d", v):
+                    hints.append(f"{h}: {v}")
+        if hints:
+            findings.append(self._anom_lead(url, "version/debug headers",
+                                            "Headers leak stack/version info: " + "; ".join(hints[:5])))
+        return ToolResult("anomaly", url, True, f"{len(findings)} anomaly lead(s)", findings)
+
+    def _anom_lead(self, url: str, label: str, evidence: str) -> dict:
+        return {"severity": "info", "confidence": "candidate", "family": "anomaly",
+                "tags": ["anomaly", "intuition"], "cwe": "CWE-200", "target": url,
+                "title": f"Anomaly — {label}", "evidence": evidence,
+                "reproduction_steps": [f"Request {url} and inspect the response for {label}."],
+                "analyst_notes": "Advisory hunt lead — dig here; not a confirmed vulnerability."}
 
     async def _run_param_mine(self, inp: dict) -> ToolResult:
         """Active PARAMETER MINING: brute-force hidden query params so injection probes

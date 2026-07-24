@@ -83,7 +83,7 @@ PHASE_OF = {
     "run_xxe": "probe", "run_sqli": "probe", "run_auth_sqli": "probe", "run_cmdi": "probe",
     "run_form_cmdi": "probe", "run_nosqli": "probe", "run_form_nosqli": "probe", "run_upload_test": "probe",
     "run_cache_poison": "probe", "run_llm_probe": "probe", "run_stored_xss": "probe",
-    "run_param_mine": "scan", "run_dalfox": "probe", "run_sqlmap": "probe",
+    "run_param_mine": "scan", "run_anomaly_scan": "scan", "run_dalfox": "probe", "run_sqlmap": "probe",
     "generate_playbook": "guidance", "store_finding": "report",
 }
 PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
@@ -97,7 +97,7 @@ _AUTO_STORE_TOOLS = {
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
-    "run_content_discovery", "run_ffuf", "run_nmap_vuln", "run_param_mine",
+    "run_content_discovery", "run_ffuf", "run_nmap_vuln", "run_param_mine", "run_anomaly_scan",
 }
 # Confirmatory tools that emit no per-finding confidence grade — their results are
 # confirmed by construction (a template/active-scan/fingerprint match). Everything
