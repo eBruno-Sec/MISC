@@ -41,6 +41,9 @@ CAP_FORM_PAGES = 10     # non-parameterized pages we fetch for form discovery (b
 CAP_JS = 40             # js urls handed to js_review
 CAP_DOM = 6             # HTML pages handed to the (slow) headless DOM audit
 CAP_ZAP = 3             # primary host roots handed to the (very slow) ZAP DAST pass
+CAP_SQLMAP = 8          # deep-intensity heavy-sqlmap targets (most injection-prone params;
+                        # insane runs the full fan-out). Keeps a deep scan completable —
+                        # sqlmap on every endpoint is what makes deep run for hours.
 
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
@@ -282,16 +285,30 @@ def next_batch(state: dict) -> list:
             dom_pages.append(u)
     for u in dom_pages[:CAP_DOM]:
         e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
+    # heavy sqlmap is expensive; at deep, target only the most injection-prone endpoints
+    # (bounded by CAP_SQLMAP) so the scan completes — insane runs the full fan-out.
+    _SQLI_PRONE = ("id", "cat", "category", "search", "q", "query", "filter", "sort",
+                   "order", "page", "name", "user", "product", "item", "pid", "uid", "num")
+    def _sqli_score(ep):
+        pl = [str(p).lower() for p in (ep.get("params") or [])]
+        return sum(1 for p in pl if any(h in p for h in _SQLI_PRONE)) + (1 if pl else 0)
+    if intensity == "insane":
+        sqlmap_eps = {f"{e['host']}{e['path']}" for e in param_eps}
+    elif intensity == "deep":
+        sqlmap_eps = {f"{e['host']}{e['path']}"
+                      for e in sorted(param_eps, key=_sqli_score, reverse=True)[:CAP_SQLMAP]}
+    else:
+        sqlmap_eps = set()
     for ep in param_eps:
         u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         tag = f"{ep['host']}{ep['path']}"
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
-        # deep/insane: follow the native SQLi probe with a heavy sqlmap pass on the same
-        # endpoint so the full injection audit fires in deterministic scans too (not just
-        # under AI). run_sqlmap is INTRUSIVE -> the _allowed() gate keeps it to Full mode.
-        if intensity in ("deep", "insane"):
+        # follow the native SQLi probe with a heavy sqlmap pass on the same endpoint so the
+        # full injection audit fires in deterministic scans too (not just under AI). Bounded
+        # to the most injection-prone endpoints at deep. INTRUSIVE -> _allowed() gates to Full.
+        if tag in sqlmap_eps:
             e_steps.append(_step("run_sqlmap", {"url": u, "intensity": intensity},
                                  f"run_sqlmap:{tag}"))
         e_steps.append(_step("run_nosqli", {"url": u}, f"run_nosqli:{tag}"))

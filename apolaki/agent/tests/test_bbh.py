@@ -326,13 +326,15 @@ def test_sqlmap_intensity_scales_flags_and_shapes_truthful_finding():
     assert capd["args"][capd["args"].index("--level") + 1] == "3"
     assert capd["args"][capd["args"].index("--risk") + 1] == "2"
     assert "--technique" in capd["args"] and "BEUSTQ" in capd["args"]
-    assert capd["timeout"] > cap["timeout"]        # heavier runs get a longer budget
 
     capi, ri = run("insane", _SQLMAP_VULN_OUT)
     assert capi["args"][capi["args"].index("--level") + 1] == "5"
     assert capi["args"][capi["args"].index("--risk") + 1] == "3"
     assert "--dbs" in capi["args"]                 # read-only proof enumeration
     assert "--dump" not in capi["args"]            # never steals data
+    # deep's per-endpoint budget is bounded (it's capped by count, not time) while insane
+    # gets the longest budget for its full-fan-out, exhaustive run.
+    assert capi["timeout"] > capd["timeout"] == cap["timeout"]
 
     # confirmed hit -> a real finding that survives auto-store + counts as confirmed
     f = ri.findings[0]
@@ -516,6 +518,25 @@ def test_planner_routes_heavy_sqlmap_on_deep_intensity_full_only():
     assert sqlmap_step("full", "insane")["input"]["intensity"] == "insane"
     assert sqlmap_step("full", "standard") is None      # standard uses native run_sqli only
     assert sqlmap_step("active", "deep") is None         # INTRUSIVE -> Full mode only
+
+    # deep BOUNDS the sqlmap fan-out (CAP_SQLMAP most injection-prone endpoints) so a deep
+    # scan completes; insane runs it on every parameterized endpoint.
+    def sqlmap_count(intensity, n):
+        state = {"mode": "full", "roots": ["t.com"], "done": set(),
+                 "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}], "forms": []},
+                 "urls": [f"https://t.com/p{i}?id={i}&x=1" for i in range(n)],
+                 "intensity": intensity, "bases": {"t.com": "https://t.com"}}
+        c = 0
+        for _ in range(300):
+            b = planner.next_batch(state)
+            if not b:
+                break
+            for st in b:
+                state["done"].add(st["key"])
+                c += (st["tool"] == "run_sqlmap")
+        return c
+    assert sqlmap_count("deep", 20) == planner.CAP_SQLMAP
+    assert sqlmap_count("insane", 20) == 20
 
 
 def test_http_probe_turns_get_forms_into_parameterized_surface_urls():

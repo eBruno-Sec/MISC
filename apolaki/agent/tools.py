@@ -2856,7 +2856,7 @@ class ToolRegistry:
         # techniques + read-only proof enumeration (names the DBs/user the injection
         # exposes — no writes, no data dumps). Timeout grows so heavy runs finish.
         level, risk, timeout = {
-            "standard": (1, 1, 420), "deep": (3, 2, 900), "insane": (5, 3, 1800),
+            "standard": (1, 1, 420), "deep": (3, 2, 420), "insane": (5, 3, 1800),
         }.get(intensity, (1, 1, 420))
         cmd = ["sqlmap", "-u", url, "--batch", "--level", str(level), "--risk", str(risk),
                "--flush-session", "--random-agent"]
