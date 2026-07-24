@@ -353,6 +353,10 @@ def next_batch(state: dict) -> list:
             form_seen.add(act)
             e_steps.append(_step("run_form_cmdi", {"url": act, "fields": flds},
                                  f"run_form_cmdi:{act}"))
+            # second-order / STORED XSS: submit an executing canary, then browser-confirm
+            # it fires on a display page (writes a canary -> INTRUSIVE, Full mode only).
+            e_steps.append(_step("run_stored_xss", {"url": act, "fields": flds},
+                                 f"run_stored_xss:{act}"))
     # ...and self-discover forms on a bounded set of discovered non-asset pages, so a
     # form on a plain page that http_probe never happened to fetch is still tested
     # (run_form_cmdi fetches + parses the page's forms itself).

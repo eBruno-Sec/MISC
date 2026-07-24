@@ -82,6 +82,7 @@ TOOL_PERMISSIONS = {
     "run_nosqli": PermissionLevel.INTRUSIVE,
     "run_form_nosqli": PermissionLevel.INTRUSIVE,
     "run_upload_test": PermissionLevel.INTRUSIVE,
+    "run_stored_xss": PermissionLevel.INTRUSIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -461,6 +462,15 @@ CLAUDE_TOOLS = [
          "url": {"type": "string", "description": "A form action URL, or a page URL whose forms will be discovered"},
          "fields": {"type": "array", "items": {"type": "string"},
                     "description": "Optional form field names; if omitted the page is fetched and its forms parsed"}},
+         "required": ["url"]}},
+    {"name": "run_stored_xss",
+     "description": ("INTRUSIVE: SECOND-ORDER / STORED XSS. Submits a unique executing canary into a form, then "
+                     "browser-loads display pages and confirms the payload EXECUTES somewhere it was not directly "
+                     "reflected (alert with a unique marker = proof). Persists a canary to the target — Full mode, "
+                     "authorized testing only. Confirmed by real browser execution, never reflection."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Form action URL that stores user input"},
+         "fields": {"type": "array", "items": {"type": "string"}, "description": "Optional form field names"}},
          "required": ["url"]}},
     {"name": "run_nosqli",
      "description": ("INTRUSIVE: NoSQL (MongoDB-style) operator-injection test on a parameterized URL. Appends an "
@@ -1397,6 +1407,101 @@ class ToolRegistry:
         except Exception:
             return findings
         return findings
+
+    async def _browser_dialog_scan(self, urls: list, marker: str, per: float = 6.0) -> dict:
+        """Load each URL in headless Chromium and return {"url":...} if a JS dialog
+        carrying `marker` fires — proof that a STORED payload executed on that page.
+        Best-effort: returns {} with no browser or if nothing fires."""
+        chrome = _chrome_path()
+        if not chrome:
+            return {}
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return {}
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        hit = {}
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True, executable_path=chrome,
+                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                ctx = await browser.new_context(ignore_https_errors=True)
+                if self.session_headers:
+                    hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hdrs:
+                        await ctx.set_extra_http_headers(hdrs)
+                page = await ctx.new_page()
+                fired = {"msg": None}
+
+                async def on_dialog(d):
+                    fired["msg"] = d.message
+                    try:
+                        await d.dismiss()
+                    except Exception:
+                        pass
+                page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
+                for u in urls:
+                    if not self.scope.validate(u)[0]:
+                        continue
+                    fired["msg"] = None
+                    try:
+                        await page.goto(u, wait_until="load", timeout=int(per * 1000))
+                        await page.wait_for_timeout(350)
+                    except Exception:
+                        pass
+                    if fired["msg"] and marker in str(fired["msg"]):
+                        hit = {"url": u, "msg": str(fired["msg"])}
+                        break
+                await browser.close()
+        except Exception:
+            return hit
+        return hit
+
+    async def _run_stored_xss(self, inp: dict) -> ToolResult:
+        """Second-order / STORED XSS: submit a unique EXECUTING canary into a form, then
+        browser-load display pages and confirm it executes somewhere it wasn't directly
+        reflected. Truth-first: confirmed only on real browser execution. INTRUSIVE — it
+        persists a canary payload to the target, so it runs in Full mode only."""
+        from urllib.parse import urlencode, urlparse
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("stored_xss", url, False, "", [], "out of scope")
+        fields = [f for f in (inp.get("fields") or []) if isinstance(f, str)] or \
+                 ["comment", "message", "body", "content", "text", "name"]
+        marker = "bbhso" + os.urandom(5).hex()
+        payload = f'"><svg onload=alert(\'{marker}\')>'
+        body = urlencode({f: payload for f in fields[:8]})
+        # 1) submit the canary
+        r = await self._http(url, "POST", {"Content-Type": "application/x-www-form-urlencoded"},
+                             body=body, capture=True)
+        if r.get("error"):
+            return ToolResult("stored_xss", url, True, f"canary submit failed: {r['error']}", [])
+        # 2) browser-load the form page + a bounded sample of same-host HTML pages
+        host = urlparse(url).netloc
+        cand, seen = [url], {url}
+        for u in self.urls:
+            if len(cand) >= 9:
+                break
+            if urlparse(u).netloc == host and u not in seen and not any(
+                    u.lower().split("?")[0].endswith(x)
+                    for x in (".js", ".css", ".png", ".jpg", ".svg", ".gif", ".woff", ".ico")):
+                cand.append(u); seen.add(u)
+        hit = await self._browser_dialog_scan(cand, marker)
+        if not hit:
+            return ToolResult("stored_xss", url, True,
+                              "canary submitted; no stored execution observed", [])
+        finding = self._attach_poc({
+            "severity": "high", "cwe": "CWE-79", "target": hit["url"],
+            "title": f"Stored XSS (canary from {urlparse(url).path or url} fired on {urlparse(hit['url']).path or hit['url']})",
+            "confidence": "confirmed", "family": "stored_xss", "tags": ["xss", "stored", "second-order"],
+            "evidence": f"A payload submitted to {url} EXECUTED in a browser on {hit['url']} (alert fired with marker {marker}).",
+            "impact": ("Stored XSS runs in every visitor's authenticated session — session/token theft, account "
+                       "takeover, and worm-like propagation across users."),
+            "false_positive_check": "Confirmed by real browser execution of the STORED payload on a display page, not by reflection.",
+        }, url, None, method="POST", body=body,
+            timing=f"headless Chromium executed the stored payload on {hit['url']} (marker {marker})")
+        return ToolResult("stored_xss", hit["url"], True, "STORED XSS CONFIRMED", [finding])
 
     async def _run_dom_audit(self, inp: dict) -> ToolResult:
         """Dynamic client-side confirmation: drive a headless browser to CONFIRM
