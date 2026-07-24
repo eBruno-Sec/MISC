@@ -348,6 +348,47 @@ def test_sqlmap_intensity_scales_flags_and_shapes_truthful_finding():
     assert rc.findings and not rc.findings[0].get("severity")
 
 
+def test_intensity_scales_katana_subfinder_nuclei():
+    # The dial widens discovery: katana crawls deeper (+jsluice/known-files),
+    # subfinder queries all sources, nuclei auto-promotes to the full template set
+    # (as leads) at deep/insane. Pure breadth — nuclei's confirmed-safe run only
+    # becomes leads when it broadens, so truth-first holds.
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.local"], [], "P")
+
+    def cap_cmd(intensity, tool, inp, out="http://host.local/x\n"):
+        t = ToolRegistry(eng, mission_id=None, intensity=intensity)
+        cap = {}
+        async def fake_cmd(args, timeout=0):
+            cap["args"] = args
+            return (out, "")
+        t._cmd = fake_cmd
+        r = asyncio.new_event_loop().run_until_complete(getattr(t, tool)(inp))
+        return cap["args"], r
+
+    # katana depth scales; deep/insane add jsluice + known-files
+    a_std, _ = cap_cmd("standard", "_run_katana", {"url": "http://host.local"})
+    assert a_std[a_std.index("-d") + 1] == "2" and "-jsl" not in a_std
+    a_deep, _ = cap_cmd("deep", "_run_katana", {"url": "http://host.local"})
+    assert a_deep[a_deep.index("-d") + 1] == "3" and "-jsl" in a_deep and "-kf" in a_deep
+    a_ins, _ = cap_cmd("insane", "_run_katana", {"url": "http://host.local"})
+    assert a_ins[a_ins.index("-d") + 1] == "5"
+
+    # subfinder: -all only at deep/insane
+    s_std, _ = cap_cmd("standard", "_run_subfinder", {"domain": "host.local"}, out="")
+    s_deep, _ = cap_cmd("deep", "_run_subfinder", {"domain": "host.local"}, out="")
+    assert "-all" not in s_std and "-all" in s_deep
+
+    # nuclei: deep/insane auto-promote to the full template set, and those become leads
+    n_std, r_std = cap_cmd("standard", "_run_nuclei", {"target": "http://host.local"},
+                           out='{"template-id":"x","info":{"name":"n","severity":"low"},"matched-at":"http://host.local"}\n')
+    assert "cve" not in n_std[n_std.index("-tags") + 1]
+    n_deep, r_deep = cap_cmd("deep", "_run_nuclei", {"target": "http://host.local"},
+                             out='{"template-id":"x","info":{"name":"n","severity":"low"},"matched-at":"http://host.local"}\n')
+    assert "cve" in n_deep[n_deep.index("-tags") + 1]
+    assert r_deep.findings and r_deep.findings[0].get("confidence") == "candidate"   # broad -> lead
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
