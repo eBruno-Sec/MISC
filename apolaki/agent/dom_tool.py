@@ -52,28 +52,34 @@ def build_probes(url: str) -> list:
     """Bounded set of DOM probes for one page. Each item:
     {"class", "nav" (URL to load), "src" (source), "expect"}."""
     probes = []
+    # the page's OWN query params — the reflected ones most likely to reach a template or
+    # a client-side redirect sink (e.g. /catalog?category, /blog?search). Testing these —
+    # not just a fixed name list — is what catches CSTI on app-specific params like category.
+    own_params = [k for k, _ in parse_qsl(urlparse(url).query, keep_blank_values=True) if k]
+    csti_params = list(dict.fromkeys(own_params + list(TEMPLATE_PARAMS)))
+    redir_params = list(dict.fromkeys(own_params + list(REDIRECT_PARAMS)))
+    # ── CSTI first (highest value): reflected template expression into own + common params ──
+    for pn in csti_params:
+        probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
     # ── prototype pollution: hash (deparam/hash routers) + query ──
     for src, nav in (("hash", _set_fragment(url, f"__proto__[{PP_KEY}]={MARK}")),
                      ("query", _add_query(url, f"__proto__[{PP_KEY}]", MARK)),
                      ("hash", _set_fragment(url, f"constructor[prototype][{PP_KEY}]={MARK}"))):
         probes.append({"class": "proto", "nav": nav, "src": src})
-    # ── DOM open redirect: hash + redirect-ish params ──
+    # ── DOM open redirect: hash + redirect-ish + own params ──
     probes.append({"class": "redirect", "nav": _set_fragment(url, f"https://{EVIL}/"), "src": "hash"})
-    for pn in REDIRECT_PARAMS:
+    for pn in redir_params:
         probes.append({"class": "redirect", "nav": _add_query(url, pn, f"https://{EVIL}/"), "src": pn})
     # ── DOM XSS: hash execution (covers hashchange/render sinks) ──
     for pl in EXEC_PAYLOADS:
         probes.append({"class": "xss", "nav": _set_fragment(url, pl), "src": "hash"})
-    # ── CSTI: reflected template expression ──
-    for pn in TEMPLATE_PARAMS:
-        probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
-    # de-dup by nav URL, keep order, cap so the browser pass stays bounded
+    # de-dup by nav URL, keep order (CSTI-on-own-params prioritised), cap for a bounded pass
     seen, out = set(), []
     for p in probes:
         if p["nav"] not in seen:
             seen.add(p["nav"])
             out.append(p)
-    return out[:16]
+    return out[:24]
 
 
 # ── interpret one probe's browser result ─────────────────────────
