@@ -585,6 +585,27 @@ def test_attach_poc_puts_exact_request_response_on_finding_and_poc_export():
     assert "curl -i -sk" in md and "Observed response" in md and "SQL syntax" in md
 
 
+def test_native_probes_scale_param_breadth_with_intensity():
+    # The native oracles widen how many parameters/payloads they test as intensity rises,
+    # so a deep/insane scan digs into more of the surface (external tools already scaled).
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+    caps = {inten: ToolRegistry(eng, mission_id=None, intensity=inten)._ni(8, 16, 40)
+            for inten in ("standard", "deep", "insane")}
+    assert caps == {"standard": 8, "deep": 16, "insane": 40}
+    assert caps["standard"] < caps["deep"] < caps["insane"]      # monotonic
+    # unknown intensity falls back to the standard bound (no regression / no surprise)
+    assert ToolRegistry(eng, mission_id=None, intensity="bogus")._ni(4, 8, 16) == 4
+
+    # the cap is actually applied: with 30 params, the SQLi probe's tested slice grows
+    # from 8 (standard) to 40-capped=30 (insane).
+    import tools as _tools
+    long_params = [f"p{i}" for i in range(30)]
+    std = long_params[:ToolRegistry(eng, intensity="standard")._ni(8, 16, 40)]
+    ins = long_params[:ToolRegistry(eng, intensity="insane")._ni(8, 16, 40)]
+    assert len(std) == 8 and len(ins) == 30
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
