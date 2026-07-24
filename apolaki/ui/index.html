@@ -384,6 +384,17 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <div class="hint">ZAP runs only in <strong>Full</strong> mode. Katana's crawl feeds ZAP's context. Alerts follow truth-first rules — advisory leads unless evidence-backed.</div>
           </div>
           <div class="block">
+            <h4>Scan intensity <span class="muted">(how hard we hit each target)</span></h4>
+            <div class="field"><label>Intensity</label>
+              <select id="intensity">
+                <option value="standard" selected>Standard — fast, high-value (default)</option>
+                <option value="deep">Deep — thorough validation (Full mode, slower)</option>
+                <option value="insane">Insane — maximum coverage (Full mode, can run for hours)</option>
+              </select>
+              <div class="hint">Independent of <strong>mode</strong> (which controls <em>what's allowed</em>). Intensity controls <em>how deep</em> each heavy tool digs — e.g. sqlmap <code class="inline">L1R1 → L3R2 → L5R3</code>. <strong>Deep/Insane require Full mode.</strong> Truth-first is unchanged: heavier settings find more <em>candidates</em>, never more <em>confirmations</em>.</div>
+            </div>
+          </div>
+          <div class="block">
             <h4>Vulnerability scanners <span class="muted">(Full mode)</span></h4>
             <label class="chk"><input type="checkbox" id="enableNmapVuln"> <strong>nmap NSE vuln scan</strong> — full <code class="inline">vuln</code> category (DoS excluded): known-CVE services, weak TLS, config weaknesses</label>
             <label class="chk" style="margin-top:.5rem"><input type="checkbox" id="enableNucleiHeavy"> <strong>Heavy nuclei</strong> — full vulnerability template set (CVEs, network, misconfig, exposures, default creds, SSL)</label>
@@ -822,7 +833,8 @@ async function startHunt(){
     zap_aggression:document.getElementById("zapAggression").value,
     require_zap:document.getElementById("requireZap").checked,
     enable_nmap_vuln:document.getElementById("enableNmapVuln").checked,
-    enable_nuclei_heavy:document.getElementById("enableNucleiHeavy").checked};
+    enable_nuclei_heavy:document.getElementById("enableNucleiHeavy").checked,
+    intensity:document.getElementById("intensity").value};
   const rb=document.getElementById("reconBanner");
   if(cycles>1){rb.style.display="inline-flex";rb.textContent=`Iterative recon: up to ${cycles} cycles — refining from discovered assets each pass.`;}
   else rb.style.display="none";

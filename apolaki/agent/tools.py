@@ -157,6 +157,61 @@ def xss_confirm_status():
     (not yet probed)."""
     return _XSS_CONFIRM_OK
 
+
+def _parse_sqlmap_proof(out: str) -> dict:
+    """Extract the injection proof from a sqlmap run so a confirmed SQLi carries
+    real evidence (parameter, place, techniques, payloads, back-end DBMS) instead
+    of an opaque log tail. Pure/text-only so it is unit-testable.
+
+    sqlmap prints a block like:
+        Parameter: id (GET)
+            Type: boolean-based blind
+            Title: AND boolean-based blind - WHERE or HAVING clause
+            Payload: id=1 AND 1234=1234
+            Type: time-based blind
+            ...
+        back-end DBMS: MySQL >= 5.0
+    """
+    text = out or ""
+    param = place = dbms = ""
+    types: list = []
+    payloads: list = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if s.startswith("Parameter:") and not param:
+            body = s.split("Parameter:", 1)[1].strip()
+            param = body                         # e.g. "id (GET)"
+            if "(" in body and body.endswith(")"):
+                place = body[body.rfind("(") + 1:-1].strip()
+        elif s.startswith("Type:"):
+            t = s.split("Type:", 1)[1].strip()
+            if t and t not in types:
+                types.append(t)
+        elif s.startswith("Payload:"):
+            p = s.split("Payload:", 1)[1].strip()
+            if p and p not in payloads:
+                payloads.append(p)
+        elif s.lower().startswith("back-end dbms:") and not dbms:
+            dbms = s.split(":", 1)[1].strip()
+    ev_parts = []
+    if param:
+        ev_parts.append(f"Injectable parameter: {param}")
+    if types:
+        ev_parts.append("Techniques confirmed: " + "; ".join(types))
+    if payloads:
+        ev_parts.append("Proof payload(s): " + " | ".join(payloads[:4]))
+    if dbms:
+        ev_parts.append(f"Back-end DBMS: {dbms}")
+    if not ev_parts:
+        # sqlmap said vulnerable but we couldn't parse the block — keep a tail so the
+        # finding is never proofless (it must carry evidence to count as confirmed).
+        ev_parts.append("sqlmap reported the target injectable; see log tail:\n" + text[-600:])
+    return {
+        "parameter": param, "place": place, "dbms": dbms,
+        "types": types, "payloads": payloads,
+        "evidence_text": "\n".join(ev_parts),
+    }
+
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
     {"name": "run_subfinder",
@@ -487,9 +542,12 @@ CLAUDE_TOOLS = [
      "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_sqlmap",
-     "description": "INTRUSIVE: SQL-injection confirmation on a URL (requires sqlmap; skips gracefully if unavailable).",
+     "description": ("INTRUSIVE: SQL-injection confirmation on a URL (requires sqlmap; skips gracefully if "
+                     "unavailable). Confirmed hits carry parsed proof (parameter, techniques, payloads, DBMS). "
+                     "intensity scales depth: standard L1R1 / deep L3R2+all-techniques / insane L5R3+read-only enumeration."),
      "input_schema": {"type": "object", "properties": {
-         "url": {"type": "string"}, "data": {"type": "string", "default": ""}}, "required": ["url"]}},
+         "url": {"type": "string"}, "data": {"type": "string", "default": ""},
+         "intensity": {"type": "string", "enum": ["standard", "deep", "insane"]}}, "required": ["url"]}},
     {"name": "generate_playbook",
      "description": ("PASSIVE: Run the rule-based test-guidance engine over everything discovered so far and return a "
                      "per-surface test playbook (what/how/payloads/confidence/tools/cURL/WSTG refs). Advisory only — "
@@ -510,10 +568,16 @@ CLAUDE_TOOLS = [
 
 class ToolRegistry:
     def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False,
-                 session_headers: dict = None):
+                 session_headers: dict = None, intensity: str = "standard"):
         self.scope = scope
         self.mission_id = mission_id
         self.lab_mode = lab_mode
+        # Intensity dial (orthogonal to mode's permission gate): how HARD each heavy
+        # tool hits an in-scope target. standard = today's light/fast flags (default,
+        # no regression); deep = thorough; insane = maximum coverage (hours OK).
+        # Truth-first is unchanged — heavier flags surface more candidates, but the
+        # confirmation logic is identical, so leads stay leads.
+        self.intensity = (intensity or "standard").lower()
         # Authenticated scanning: headers (Cookie/Authorization) shared with every
         # HTTP request the tools make, so scans reach the post-login surface.
         self.session_headers = session_headers or {}
@@ -2654,16 +2718,67 @@ class ToolRegistry:
     async def _run_sqlmap(self, inp: dict) -> ToolResult:
         url = inp["url"]
         data = inp.get("data", "")
-        cmd = ["sqlmap", "-u", url, "--batch", "--level", "1", "--risk", "1", "--flush-session"]
+        intensity = (inp.get("intensity") or getattr(self, "intensity", "standard")).lower()
+        # Intensity scales sqlmap from a shallow poke to a full injection audit.
+        # standard L1R1 (fast); deep L3R2 + all techniques; insane L5R3 + all
+        # techniques + read-only proof enumeration (names the DBs/user the injection
+        # exposes — no writes, no data dumps). Timeout grows so heavy runs finish.
+        level, risk, timeout = {
+            "standard": (1, 1, 420), "deep": (3, 2, 900), "insane": (5, 3, 1800),
+        }.get(intensity, (1, 1, 420))
+        cmd = ["sqlmap", "-u", url, "--batch", "--level", str(level), "--risk", str(risk),
+               "--flush-session", "--random-agent"]
+        # Authenticated scanning: carry the mission's session so sqlmap reaches the
+        # post-login surface (otherwise DVWA-style auth'd SQLi can never be confirmed).
+        _hdrs = self.session_headers or {}
+        _cookie = _hdrs.get("Cookie") or _hdrs.get("cookie")
+        if _cookie:
+            cmd += ["--cookie", _cookie]
+        for _hk, _hv in _hdrs.items():
+            if _hk.lower() == "cookie" or not str(_hv).strip():
+                continue
+            cmd += ["-H", f"{_hk}: {_hv}"]               # e.g. Authorization: Bearer ...
+        if intensity in ("deep", "insane"):
+            cmd += ["--technique", "BEUSTQ"]              # boolean/error/union/stacked/time/inline
+        if intensity == "insane":
+            # read-only proof: what the injection actually exposes. No --dump (no data theft).
+            cmd += ["--threads", "4", "--current-user", "--current-db", "--is-dba", "--dbs"]
         if data:
             cmd += ["--data", data]
-        out, err = await self._cmd(cmd, timeout=420)
+        settings = " ".join(cmd[3:])                       # everything after `sqlmap -u <url>`
+        out, err = await self._cmd(cmd, timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("sqlmap", url, False, "", [], "sqlmap not installed")
         vuln = "is vulnerable" in out or "sqlmap identified" in out
-        return ToolResult("sqlmap", url, True,
-                          "SQLi indicated" if vuln else "No SQLi confirmed",
-                          [{"vulnerable": vuln, "log_tail": out[-800:]}])
+        if not vuln:
+            # No confirmation → NOT a finding (truth-first). Severity-less data item so
+            # _auto_store drops it; the log tail stays for the operator/model to inspect.
+            return ToolResult("sqlmap", url, True, f"No SQLi confirmed [{intensity}]",
+                              [{"vulnerable": False, "log_tail": out[-800:], "settings": settings}])
+        # Confirmed → shape a proper finding with PARSED proof so it survives auto-store
+        # (previously the severity-less {vulnerable,log_tail} shape was silently dropped
+        # in deterministic/floor mode — sqlmap could confirm and the finding never landed).
+        proof = _parse_sqlmap_proof(out)
+        param = proof.get("parameter") or "a parameter"
+        finding = {
+            "severity": "high", "cwe": "CWE-89", "target": url,
+            "title": f"SQL injection in {param}",
+            "confidence": "confirmed", "tool": "sqlmap", "settings": f"sqlmap {settings}",
+            "evidence": proof["evidence_text"],
+            "request": (f"{url}" + (f"  --data {data}" if data else "")),
+            "reproduction_steps": [
+                f"Run: sqlmap -u '{url}'" + (f" --data '{data}'" if data else "")
+                + f" --batch --level {level} --risk {risk}"
+                + (" --technique BEUSTQ" if intensity != "standard" else ""),
+                "sqlmap re-confirms the injection point and back-end DBMS shown in the evidence.",
+            ],
+            "false_positive_check": ("sqlmap validates each payload against a baseline before reporting; "
+                                     "the named technique + DBMS fingerprint is the proof, not a single reflected string."),
+            "impact": ("An attacker can read (and potentially modify) database contents through this parameter, "
+                       "exposing credentials, tokens, and other users' data."),
+            "log_tail": out[-1200:],
+        }
+        return ToolResult("sqlmap", url, True, f"SQLi CONFIRMED in {param} [{intensity}]", [finding])
 
     # ── PASSIVE advisory: playbook + storage ─────────────────────
     async def _generate_playbook(self, inp: dict) -> ToolResult:

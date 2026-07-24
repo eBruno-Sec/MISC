@@ -268,6 +268,86 @@ def test_katana_authenticated_crawl_passes_headers_not_headless():
     assert "-cos" in authed and "-cos" in anon                       # logout excluded from the crawl
 
 
+_SQLMAP_VULN_OUT = """\
+sqlmap identified the following injection point(s) with a total of 46 HTTP(s) requests:
+---
+Parameter: id (GET)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: id=1 AND 1234=1234
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: id=1 AND SLEEP(5)
+---
+back-end DBMS: MySQL >= 5.0.12
+"""
+
+_SQLMAP_CLEAN_OUT = "all tested parameters do not appear to be injectable.\n"
+
+
+def test_sqlmap_proof_parser_extracts_param_techniques_dbms():
+    from tools import _parse_sqlmap_proof
+    p = _parse_sqlmap_proof(_SQLMAP_VULN_OUT)
+    assert p["parameter"].startswith("id")
+    assert p["place"] == "GET"
+    assert "MySQL" in p["dbms"]
+    assert any("boolean-based" in t for t in p["types"])
+    assert any("time-based" in t for t in p["types"])
+    assert "AND SLEEP(5)" in p["evidence_text"]
+    # a proofless vuln (unparseable) still yields non-empty evidence (never a proofless "confirmed")
+    assert _parse_sqlmap_proof("is vulnerable")["evidence_text"].strip()
+
+
+def test_sqlmap_intensity_scales_flags_and_shapes_truthful_finding():
+    # The intensity dial turns sqlmap from a shallow poke (L1R1) into a full audit
+    # (L5R3 + all techniques + read-only enumeration). A CONFIRMED hit is shaped into
+    # a proper finding (severity/confidence/evidence) so it survives auto-store; a
+    # clean run yields a severity-less item that auto-store drops (truth-first).
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.local"], [], "P")
+
+    def run(intensity, out):
+        t = ToolRegistry(eng, mission_id=None, intensity=intensity)
+        cap = {}
+        async def fake_cmd(args, timeout=0):
+            cap["args"] = args; cap["timeout"] = timeout
+            return (out, "")
+        t._cmd = fake_cmd
+        r = asyncio.new_event_loop().run_until_complete(
+            t._run_sqlmap({"url": "http://host.local/item?id=1"}))
+        return cap, r
+
+    cap, r = run("standard", _SQLMAP_VULN_OUT)
+    assert "--level" in cap["args"] and cap["args"][cap["args"].index("--level") + 1] == "1"
+    assert cap["args"][cap["args"].index("--risk") + 1] == "1"
+    assert "--technique" not in cap["args"]        # standard stays light
+
+    capd, _ = run("deep", _SQLMAP_VULN_OUT)
+    assert capd["args"][capd["args"].index("--level") + 1] == "3"
+    assert capd["args"][capd["args"].index("--risk") + 1] == "2"
+    assert "--technique" in capd["args"] and "BEUSTQ" in capd["args"]
+    assert capd["timeout"] > cap["timeout"]        # heavier runs get a longer budget
+
+    capi, ri = run("insane", _SQLMAP_VULN_OUT)
+    assert capi["args"][capi["args"].index("--level") + 1] == "5"
+    assert capi["args"][capi["args"].index("--risk") + 1] == "3"
+    assert "--dbs" in capi["args"]                 # read-only proof enumeration
+    assert "--dump" not in capi["args"]            # never steals data
+
+    # confirmed hit -> a real finding that survives auto-store + counts as confirmed
+    f = ri.findings[0]
+    assert f["severity"] == "high" and f["cwe"] == "CWE-89"
+    assert f["confidence"] == "confirmed" and f["evidence"].strip()
+    import agent as agent_mod
+    a = agent_mod.BBHAgent(eng, _StubTools(), asyncio.Event(),
+                           strategy="deterministic", mission_id=None)
+    assert a._is_confirmed("run_sqlmap", f) is True
+
+    # clean run -> severity-less item; auto-store drops it (not a finding)
+    _, rc = run("standard", _SQLMAP_CLEAN_OUT)
+    assert rc.findings and not rc.findings[0].get("severity")
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
