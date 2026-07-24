@@ -723,6 +723,36 @@ def test_proof_findings_autostore_in_agentic_and_model_store_dedups():
     assert "deduped" in r.output.lower()
 
 
+def test_stored_xss_confirms_only_on_browser_execution():
+    # Second-order/stored XSS: a canary submitted to one form, then EXECUTED by the
+    # browser on a display page = confirmed (with PoC = the submit request). No execution
+    # -> no finding (truth-first; a stored payload that never runs is not a vuln).
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+    t = ToolRegistry(eng, mission_id=None, lab_mode=True)
+    t.urls = ["http://t/board", "http://t/board?p=2"]
+    async def fake_http(url, method="GET", headers=None, body=None, **kw):
+        return {"status": 200, "headers": {}, "body": "ok", "final_url": url, "error": ""}
+    t._http = fake_http
+
+    async def scan_hit(urls, marker, per=6.0):
+        return {"url": "http://t/board", "msg": f"alert:{marker}"}
+    t._browser_dialog_scan = scan_hit
+    r = asyncio.new_event_loop().run_until_complete(
+        t._run_stored_xss({"url": "http://t/comment", "fields": ["comment"]}))
+    assert r.findings and r.findings[0]["confidence"] == "confirmed"
+    assert r.findings[0]["cwe"] == "CWE-79" and "second-order" in r.findings[0]["tags"]
+    assert r.findings[0].get("request", "").startswith("POST")     # PoC = the submit request
+    assert "target" in r.findings[0] and r.findings[0]["target"] == "http://t/board"
+
+    async def scan_miss(urls, marker, per=6.0):
+        return {}
+    t._browser_dialog_scan = scan_miss
+    r2 = asyncio.new_event_loop().run_until_complete(
+        t._run_stored_xss({"url": "http://t/comment", "fields": ["comment"]}))
+    assert not r2.findings                                          # submitted but never executed
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
