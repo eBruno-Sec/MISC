@@ -426,6 +426,39 @@ def test_intensity_feeds_oast_to_nuclei_and_dalfox(monkeypatch):
     assert "-b" in d_blind and "http://oob.example" in d_blind
 
 
+def test_report_renders_tool_settings_and_raw_proof():
+    # Heavy proof: a confirmed finding's provenance (tool + exact flags), false-positive
+    # check, and raw request/response/tool-log must survive into every rendered format,
+    # not just the internal JSON — otherwise the tool proves it and the report loses it.
+    import report as report_mod
+    f = {
+        "title": "SQL injection in id (GET)", "severity": "high", "cwe": "CWE-89",
+        "target": "http://t/item?id=1", "confidence": "confirmed",
+        "tool": "sqlmap", "settings": "sqlmap --level 5 --risk 3 --technique BEUSTQ",
+        "evidence": "Injectable parameter: id (GET); Back-end DBMS: MySQL",
+        "request": "GET /item?id=1 HTTP/1.1\nHost: t",
+        "response": "HTTP/1.1 500 Internal Server Error\nMySQL error near ''",
+        "false_positive_check": "sqlmap validates each payload against a baseline before reporting.",
+    }
+    scope = {"in_scope": ["t"], "out_of_scope": []}
+
+    prov = report_mod.proof_provenance(f)
+    assert "sqlmap" in prov and "--level 5" in prov
+    items = dict(report_mod.evidence_items(f))
+    assert "Raw request" in items and "Raw response" in items
+
+    md = report_mod.generate_report("P", [f], scope)
+    assert "Tool & settings" in md and "--technique BEUSTQ" in md
+    assert "False-positive check" in md and "Raw response" in md
+    assert "MySQL error" in md                      # raw response body reached the report
+
+    html = report_mod.generate_html_report("P", [f], scope)
+    assert "Tool &amp; settings" in html and "Raw response" in html
+    assert "False-positive check" in html
+    # raw response is HTML-escaped, not injected as markup
+    assert "MySQL error near" in html
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
