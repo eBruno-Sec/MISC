@@ -471,7 +471,8 @@ X-Requested-With: </textarea>
     <section class="panel" id="p-topology">
       <div class="view-head"><h3 class="sec">Surface topology</h3>
         <span class="muted" id="topoLegend"></span>
-        <button class="btn ghost sm" style="margin-left:auto" onclick="loadTopology()">Refresh</button></div>
+        <button class="btn ghost sm" id="topoReset" style="margin-left:auto;display:none" onclick="topoReset()">↺ Reset layout</button>
+        <button class="btn ghost sm" onclick="loadTopology()">Refresh</button></div>
       <div class="topo-grid">
         <div id="topoWrap"><div class="empty"><h4>No map yet</h4><p>Run recon, then refresh to map domain → hosts → endpoints. Nodes with findings are ringed; click any node to trace what it connects to.</p></div></div>
         <aside id="topoPanel" class="topo-panel"><div class="muted">Click a node to see what it relates to — its endpoints, technologies, and any findings.</div></aside>
@@ -1258,83 +1259,120 @@ async function loadTopology(){
 // Normalize a URL to host+path (drop scheme/query/trailing slash) so lead targets
 // can be matched against topology endpoint nodes for the "verify next" overlay.
 function _normTarget(u){try{const x=new URL(u);return (x.host+x.pathname).replace(/\/+$/,"").toLowerCase();}catch(e){return "";}}
+// Interactive draggable topology: root → hosts → ALL endpoints inside a framed,
+// scrollable canvas. Nodes are draggable (pointer); a click without a drag traces the
+// node; Reset restores the computed layout. topoOrig = original positions, topoLive =
+// current (dragged) positions, preserved across selection re-renders within a graph.
+let topoOrig={}, topoLive={}, topoMeta=null, topoDrag=null, topoMoved=false;
 function renderTopology(){
-  const wrap=document.getElementById("topoWrap"), legend=document.getElementById("topoLegend");
+  const wrap=document.getElementById("topoWrap"), legend=document.getElementById("topoLegend"),
+        resetBtn=document.getElementById("topoReset");
   if(!topoGraph||!(topoGraph.nodes||[]).length){
-    wrap.innerHTML=emptyState("No map yet","Run recon, then refresh to map domain → hosts → endpoints. Nodes become clickable once discovered.");
-    if(legend)legend.textContent=""; return;}
+    wrap.innerHTML=emptyState("No map yet","Run recon, then refresh to map domain → hosts → endpoints. Nodes become draggable once discovered.");
+    if(legend)legend.textContent=""; if(resetBtn)resetBtn.style.display="none"; return;}
   const nodes=topoGraph.nodes, edges=topoGraph.edges||[];
   const byId={}; nodes.forEach(n=>byId[n.id]=n);
-  // adjacency for click-to-trace highlighting
   topoAdj={}; edges.forEach(e=>{(topoAdj[e.source]=topoAdj[e.source]||[]).push(e.target);
     (topoAdj[e.target]=topoAdj[e.target]||[]).push(e.source);});
-  // group: host -> endpoints, host -> tech, node -> findings
   const hosts=nodes.filter(n=>n.kind==="host").map(n=>n.id).sort();
-  const epByHost={}, techByHost={}, findByNode={};
+  const epByHost={}, findByNode={};
   edges.forEach(e=>{
     if(e.rel==="serves")(epByHost[e.source]=epByHost[e.source]||[]).push(e.target);
-    if(e.rel==="runs")(techByHost[e.source]=techByHost[e.source]||[]).push(e.target);
     if(e.rel==="found")(findByNode[e.source]=findByNode[e.source]||[]).push(byId[e.target]);
   });
+  const leadTargets=new Set((leads||[]).map(l=>_normTarget(l.target)).filter(Boolean));
+  // ── compute ORIGINAL positions for ALL nodes (root, hosts, every endpoint) ──
+  const maxLeaves=Math.max(1,...hosts.map(h=>(epByHost[h]||[]).length));
+  const W=Math.max(760,hosts.length*210), H=210+maxLeaves*26;
+  const ROOT="__root__", orig={}, nodeList=[], edgeList=[];
+  orig[ROOT]={x:W/2,y:46};
+  nodeList.push({id:ROOT,kind:"root",label:document.getElementById("programName").value||"target"});
+  topoNodes=[];
+  hosts.forEach((hid,i)=>{
+    const hx=(i+0.5)*(W/hosts.length), hy=150;
+    orig[hid]={x:hx,y:hy};
+    const hf=findByNode[hid]||[];
+    nodeList.push({id:hid,kind:"host",label:byId[hid].label,sev:_worstSev(hf)});
+    edgeList.push({a:ROOT,b:hid}); topoNodes.push({id:hid,kind:"host",label:byId[hid].label});
+    (epByHost[hid]||[]).forEach((eid,j)=>{
+      const ep=byId[eid]; orig[eid]={x:hx,y:hy+42+j*26};
+      const ef=findByNode[eid]||[], eSev=_worstSev(ef);
+      const isLead=!eSev&&leadTargets.has(_normTarget(ep.example||ep.url||""));
+      nodeList.push({id:eid,kind:"endpoint",label:String(ep.label).slice(0,30),sev:eSev,lead:isLead});
+      edgeList.push({a:hid,b:eid});
+      topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||byId[hid].label});
+    });
+  });
+  topoOrig=orig;
+  // keep dragged positions when the graph is unchanged; otherwise lay out fresh
+  const sameSet=Object.keys(topoLive).length && Object.keys(orig).every(id=>topoLive[id]);
+  if(!sameSet) topoLive=JSON.parse(JSON.stringify(orig));
+  topoMeta={byId,findByNode,nodeList,edgeList,ROOT,W,H,hosts};
+  // ── framed canvas + host chips + hint ──
+  const chips=hosts.map(hid=>{const hf=findByNode[hid]||[],hs=_worstSev(hf);
+    return `<button type="button" class="topo-chip${topoSelected===hid?' sel':''}" data-topo-select="${esc(hid)}"><span class="topo-dot" style="background:${hs?SEV_HEX[hs]:'var(--ok)'}"></span>${esc(byId[hid].label)}</button>`;}).join("");
+  wrap.innerHTML=`<div class="muted" style="margin-bottom:.4rem"><b>Drag</b> any node to rearrange · <b>click</b> a node or host chip to trace its connections · <b>Reset layout</b> restores positions.</div>`
+    +(chips?`<div class="topo-chiprow">${chips}</div>`:"")
+    +`<div id="topoCanvas" style="border:1px solid var(--border);border-radius:9px;overflow:auto;max-height:62vh;padding:8px;position:relative;background:rgba(127,127,127,.035)"></div>`;
+  if(resetBtn)resetBtn.style.display="";
+  _topoDraw();
+  const st=topoGraph.stats||{}, nLeads=(leads||[]).length;
+  if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`
+    +(nLeads?` · ${nLeads} leads (dashed = verify next)`:"");
+  renderTopoPanel();
+}
+// Build the SVG from topoLive positions and (re)bind drag. Called on first render,
+// selection change, and reset — NOT during a drag (which mutates the DOM directly).
+function _topoDraw(){
+  const box=document.getElementById("topoCanvas"); if(!box||!topoMeta)return;
+  const {byId,findByNode,nodeList,edgeList,ROOT,W,H}=topoMeta, P=topoLive;
   const cs=getComputedStyle(document.documentElement);
   const cRoot=cs.getPropertyValue("--accent").trim()||"#7aa2ff", cHost=cs.getPropertyValue("--purple").trim()||"#b6a0e6",
         cLeaf=cs.getPropertyValue("--ok").trim()||"#5bd1a0", cLine=cs.getPropertyValue("--border2").trim()||"#3a4658",
         cText=cs.getPropertyValue("--text").trim()||"#d8dee9", cBright=cs.getPropertyValue("--text-bright").trim()||"#f3f6fb",
         cWarn=cs.getPropertyValue("--warn").trim()||"#f0b866";
-  // Endpoints with an unconfirmed lead get a dashed amber ring ("verify next").
-  // Confirmed-finding rings always take precedence over the lead overlay.
-  const leadTargets=new Set((leads||[]).map(l=>_normTarget(l.target)).filter(Boolean));
-  const maxLeaves=Math.max(1,...hosts.map(h=>(epByHost[h]||[]).length));
-  const W=Math.max(720,hosts.length*160), H=150+Math.min(maxLeaves,10)*22+110;
-  topoNodes=[];
-  // which ids are "lit" given the current selection (selected + its neighbours)
   const lit=topoSelected?new Set([topoSelected,...(topoAdj[topoSelected]||[])]):null;
-  const dim=id=>lit&&!lit.has(id)?' opacity="0.16"':"";
-  let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">`;
-  const rootX=W/2, rootY=38;
-  svg+=`<circle cx="${rootX}" cy="${rootY}" r="8" fill="${cRoot}"/><text x="${rootX+12}" y="${rootY+4}" fill="${cBright}">${esc(document.getElementById("programName").value||"target")}</text>`;
-  hosts.forEach((hid,i)=>{
-    const host=byId[hid].label, hx=(i+0.5)*(W/hosts.length), hy=132;
-    const hFinds=findByNode[hid]||[], hSev=_worstSev(hFinds);
-    const hIdx=topoNodes.push({id:hid,kind:"host",label:host})-1;
-    svg+=`<path d="M${rootX} ${rootY} C ${rootX} 92, ${hx} 82, ${hx} ${hy}" stroke="${cLine}" fill="none"${dim(hid)}/>`;
-    const ring=hSev?`<circle cx="${hx}" cy="${hy}" r="10" fill="none" stroke="${SEV_HEX[hSev]||cHost}" stroke-width="2"/>`:"";
-    svg+=`<g class="topo-node" data-idx="${hIdx}" data-topo-select="${esc(hid)}" style="cursor:pointer"${dim(hid)}><title>${esc(host)} — click to trace</title>`+
-         ring+`<circle cx="${hx}" cy="${hy}" r="6" fill="${cHost}"/><text x="${hx+12}" y="${hy+3}" fill="${cText}">${esc(host)}</text></g>`;
-    (epByHost[hid]||[]).slice(0,10).forEach((eid,j)=>{
-      const ep=byId[eid], py=hy+30+j*22;
-      const eFinds=findByNode[eid]||[], eSev=_worstSev(eFinds);
-      const eIdx=topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||host})-1;
-      svg+=`<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${py}" stroke="${cLine}"${dim(eid)}/>`;
-      const eColor=eSev?SEV_HEX[eSev]:cLeaf, r=eSev?4.5:3;
-      const isLead=!eSev&&leadTargets.has(_normTarget(ep.example||ep.url||""));
-      const leadRing=isLead?`<circle cx="${hx}" cy="${py}" r="8" fill="none" stroke="${cWarn}" stroke-width="1.5" stroke-dasharray="2 2"/>`:"";
-      svg+=`<g class="topo-node" data-idx="${eIdx}" data-topo-select="${esc(eid)}" style="cursor:pointer"${dim(eid)}><title>${esc(ep.label)}${eSev?" — "+eSev+" finding":isLead?" — unconfirmed lead, verify next":""} — click to trace</title>`+
-           leadRing+`<circle cx="${hx}" cy="${py}" r="${r}" fill="${eColor}"/><text x="${hx+8}" y="${py+3}">${esc(String(ep.label).slice(0,26))}</text></g>`;
-    });
-    const more=(epByHost[hid]||[]).length-10;
-    if(more>0)svg+=`<text x="${hx+8}" y="${hy+30+10*22+3}" fill="${cText}" opacity=".6">+${more} more…</text>`;
-  });
+  let svg=`<svg id="topoSvg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:none;touch-action:none">`;
+  edgeList.forEach(({a,b})=>{const pa=P[a],pb=P[b]; if(!pa||!pb)return;
+    const op=lit&&!(lit.has(a)&&lit.has(b))?0.08:0.5;
+    svg+=`<line class="tedge" data-a="${esc(a)}" data-b="${esc(b)}" x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="${cLine}" opacity="${op}"/>`;});
+  nodeList.forEach(n=>{const p=P[n.id]; if(!p)return;
+    const op=lit&&!lit.has(n.id)?0.16:1;
+    let inner="";
+    if(n.kind==="root"){inner=`<circle r="8" fill="${cRoot}"/><text x="13" y="4" fill="${cBright}" font-weight="600">${esc(n.label)}</text>`;}
+    else if(n.kind==="host"){const ring=n.sev?`<circle r="10" fill="none" stroke="${SEV_HEX[n.sev]||cHost}" stroke-width="2"/>`:"";
+      inner=ring+`<circle r="6" fill="${cHost}"/><text x="12" y="3" fill="${cText}">${esc(n.label)}</text>`;}
+    else{const col=n.sev?SEV_HEX[n.sev]:cLeaf, r=n.sev?4.5:3;
+      const lr=n.lead?`<circle r="8" fill="none" stroke="${cWarn}" stroke-width="1.5" stroke-dasharray="2 2"/>`:"";
+      inner=lr+`<circle r="${r}" fill="${col}"/><text x="9" y="3" fill="${cText}">${esc(n.label)}</text>`;}
+    const tip=n.kind==="root"?"":` — ${n.sev?n.sev+" finding":n.lead?"unconfirmed lead":"drag to move, click to trace"}`;
+    svg+=`<g class="tnode" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})" style="cursor:grab;opacity:${op}"><title>${esc(n.label)}${tip}</title>${inner}</g>`;});
   svg+=`</svg>`;
-  // Guaranteed-clickable HTML host chips (SVG events proved unreliable in some
-  // browsers; buttons are not). Clicking a chip traces that host in the panel.
-  const chips=hosts.map(hid=>{
-    const hf=findByNode[hid]||[], hs=_worstSev(hf);
-    return `<button type="button" class="topo-chip${topoSelected===hid?' sel':''}" data-topo-select="${esc(hid)}">`+
-           `<span class="topo-dot" style="background:${hs?SEV_HEX[hs]:'var(--ok)'}"></span>${esc(byId[hid].label)}</button>`;
-  }).join("");
-  wrap.innerHTML=`<div class="muted" style="margin-bottom:.4rem">Pick a host below (or click a node in the map) to trace its endpoints, tech, and findings.</div>`+
-    (chips?`<div class="topo-chiprow">${chips}</div>`:"")+
-    `<div class="table-wrap" style="padding:.5rem">${svg}</div>`;
-  // Click handling is DELEGATED (see initTopoDelegation) on the #topoWrap
-  // container, which survives every innerHTML re-render — more robust than
-  // per-node or inline handlers, which proved flaky across browsers.
-  const st=topoGraph.stats||{};
-  const nLeads=(leads||[]).length;
-  if(legend)legend.textContent=`${st.hosts||0} hosts · ${st.endpoints||0} endpoints · ${st.findings||0} findings`
-    +(nLeads?` · ${nLeads} leads (dashed = verify next)`:"");
-  renderTopoPanel();
+  box.innerHTML=svg;
+  _topoBindDrag();
 }
+function _clientToSvg(svg,cx,cy){const r=svg.getBoundingClientRect(), vb=svg.viewBox.baseVal;
+  return {x:vb.x+(cx-r.left)*(vb.width/(r.width||1)), y:vb.y+(cy-r.top)*(vb.height/(r.height||1))};}
+function _topoBindDrag(){
+  const svg=document.getElementById("topoSvg"); if(!svg)return;
+  svg.onpointerdown=e=>{const g=e.target.closest(".tnode"); if(!g)return;
+    const id=g.dataset.id, p=topoLive[id]; if(!p)return;
+    const pt=_clientToSvg(svg,e.clientX,e.clientY);
+    topoDrag={id,g,ox:pt.x-p.x,oy:pt.y-p.y}; topoMoved=false;
+    try{g.setPointerCapture(e.pointerId);}catch(_){} g.style.cursor="grabbing"; e.preventDefault();};
+  svg.onpointermove=e=>{if(!topoDrag)return;
+    const pt=_clientToSvg(svg,e.clientX,e.clientY), nx=pt.x-topoDrag.ox, ny=pt.y-topoDrag.oy, p=topoLive[topoDrag.id];
+    if(Math.abs(nx-p.x)>2||Math.abs(ny-p.y)>2)topoMoved=true;
+    p.x=nx; p.y=ny; topoDrag.g.setAttribute("transform",`translate(${nx},${ny})`);
+    svg.querySelectorAll("line.tedge").forEach(l=>{
+      if(l.dataset.a===topoDrag.id){l.setAttribute("x1",nx);l.setAttribute("y1",ny);}
+      if(l.dataset.b===topoDrag.id){l.setAttribute("x2",nx);l.setAttribute("y2",ny);}});};
+  const end=()=>{if(!topoDrag)return; const id=topoDrag.id, moved=topoMoved;
+    topoDrag.g.style.cursor="grab"; topoDrag=null;
+    if(!moved&&id!=="__root__")topoSelectId(id);};   // click without drag = trace
+  svg.onpointerup=end; svg.onpointercancel=end;
+}
+function topoReset(){topoLive=JSON.parse(JSON.stringify(topoOrig)); _topoDraw();}
 // Select a topology node BY ID (works for any node, incl. endpoints not drawn in
 // the capped SVG). This is the single source of truth for selection.
 function topoSelectId(id){if(!id)return;topoSelected=(topoSelected===id)?null:id;renderTopology();}
@@ -1574,7 +1612,7 @@ renderHelp();
 /* Expose handlers referenced by inline SVG/HTML onclick attributes on window, so
    they resolve even if this script is ever loaded as a module or bundled (an
    inline onclick can only see the global scope). Belt-and-suspenders. */
-Object.assign(window,{topoClick,topoSelectId,topoAction,loadMission,rescan,delMission,switchTab,
+Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel});
 
