@@ -1062,9 +1062,20 @@ class ToolRegistry:
         # insane throws more concurrency at it; heavy runs get a longer budget.
         conc = "50" if getattr(self, "intensity", "standard") == "insane" else "25"
         timeout = int(inp.get("timeout", 900 if heavy else 360))
-        out, err = await self._cmd(
-            ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
-             "-c", conc, "-silent", "-json", "-no-interactsh"], timeout=timeout)
+        # OOB/interactsh: standard keeps it OFF (faster, no external dependency), but
+        # deep/insane turn it ON so nuclei's BLIND templates (blind SSRF/RCE, log4j,
+        # SSTI callbacks) can actually confirm out-of-band. A self-hosted interactsh
+        # server (INTERACTSH_SERVER) is used when set; otherwise nuclei's default.
+        oob = getattr(self, "intensity", "standard") in ("deep", "insane")
+        ncmd = ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
+                "-c", conc, "-silent", "-json"]
+        if not oob:
+            ncmd.append("-no-interactsh")
+        else:
+            _iserver = os.getenv("INTERACTSH_SERVER", "").strip()
+            if _iserver:
+                ncmd += ["-iserver", _iserver]
+        out, err = await self._cmd(ncmd, timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("nuclei", target, False, "", [], "nuclei not installed")
         findings = []
@@ -1086,7 +1097,7 @@ class ToolRegistry:
                 self.recon["nuclei"].append(rec)
             except Exception:
                 pass
-        label = "heavy: full vuln template set -> leads" if heavy else "safe tags"
+        label = ("heavy: full vuln template set -> leads" if heavy else "safe tags") + (" +OOB" if oob else "")
         return ToolResult("nuclei", target, True, f"{len(findings)} findings [{label}]", findings)
 
     async def _fetch_openapi(self, inp: dict) -> ToolResult:
@@ -2722,7 +2733,23 @@ class ToolRegistry:
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
-        out, err = await self._cmd(["dalfox", "url", url, "--silence", "--format", "json"], timeout=240)
+        intensity = getattr(self, "intensity", "standard")
+        cmd = ["dalfox", "url", url, "--silence", "--format", "json"]
+        # deep/insane: hunt DOM XSS harder (deep DOM sink walk + DOM param mining).
+        if intensity in ("deep", "insane"):
+            cmd += ["--deep-domxss", "--mining-dom"]
+        # Blind XSS: when the operator published a native collaborator (BBH_OOB_BASE),
+        # feed dalfox a blind callback so a stored/blind XSS that fires later still
+        # proves itself out-of-band. No base configured -> no blind (never a dead flag).
+        import collaborator as _collab
+        if intensity in ("deep", "insane") and _collab.enabled():
+            cmd += ["-b", _collab.base()]
+        # Authenticated scanning: carry the session so dalfox reaches the post-login DOM.
+        for _k, _v in (self.session_headers or {}).items():
+            if str(_v).strip():
+                cmd += ["-H", f"{_k}: {_v}"]
+        timeout = {"standard": 240, "deep": 480, "insane": 720}.get(intensity, 240)
+        out, err = await self._cmd(cmd, timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("dalfox", url, False, "", [], "dalfox not installed")
         findings = []

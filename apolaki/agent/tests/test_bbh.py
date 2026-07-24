@@ -389,6 +389,43 @@ def test_intensity_scales_katana_subfinder_nuclei():
     assert r_deep.findings and r_deep.findings[0].get("confidence") == "candidate"   # broad -> lead
 
 
+def test_intensity_feeds_oast_to_nuclei_and_dalfox(monkeypatch):
+    # Blind-vuln proof: standard keeps nuclei OOB OFF (fast, no external dep); deep/insane
+    # turn interactsh ON so blind templates confirm out-of-band. dalfox gains deep DOM-XSS
+    # + DOM mining at deep/insane, a blind callback only when a native collaborator is
+    # published, and always carries the session for authenticated DOM coverage.
+    from tools import ToolRegistry
+    import collaborator as collab_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.local"], [], "P")
+
+    def cap(intensity, tool, inp, headers=None):
+        t = ToolRegistry(eng, mission_id=None, intensity=intensity, session_headers=headers or {})
+        c = {}
+        async def fake_cmd(args, timeout=0):
+            c["args"] = args
+            return ("", "")
+        t._cmd = fake_cmd
+        asyncio.new_event_loop().run_until_complete(getattr(t, tool)(inp))
+        return c["args"]
+
+    # nuclei: -no-interactsh only at standard
+    assert "-no-interactsh" in cap("standard", "_run_nuclei", {"target": "http://host.local"})
+    assert "-no-interactsh" not in cap("deep", "_run_nuclei", {"target": "http://host.local"})
+
+    # dalfox: deep flags gated by intensity; auth header always carried
+    d_std = cap("standard", "_run_dalfox", {"url": "http://host.local"}, headers={"Cookie": "s=1"})
+    assert "--deep-domxss" not in d_std and any("Cookie: s=1" in a for a in d_std)
+    d_deep = cap("deep", "_run_dalfox", {"url": "http://host.local"})
+    assert "--deep-domxss" in d_deep and "--mining-dom" in d_deep
+
+    # blind callback only when a native collaborator base is published
+    monkeypatch.setattr(collab_mod, "base", lambda: "")
+    assert "-b" not in cap("insane", "_run_dalfox", {"url": "http://host.local"})
+    monkeypatch.setattr(collab_mod, "base", lambda: "http://oob.example")
+    d_blind = cap("insane", "_run_dalfox", {"url": "http://host.local"})
+    assert "-b" in d_blind and "http://oob.example" in d_blind
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
