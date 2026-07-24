@@ -67,6 +67,11 @@ class EngageRequest(BaseModel):
     # Heavy nuclei mode — the full vulnerability template set (CVEs/network/misconfig/
     # exposures/default-creds/SSL). Opt-in, Full mode only; results are advisory leads.
     enable_nuclei_heavy: bool = False
+    # Intensity dial — how HARD each heavy tool hits an in-scope target (orthogonal to
+    # `mode`, which is the permission gate). standard = today's light/fast flags (default,
+    # no regression); deep = thorough; insane = maximum coverage (can run for hours).
+    # Truth-first is unchanged: heavier flags surface more candidates, not more confirmations.
+    intensity: str = "standard"       # standard | deep | insane
 
 
 class EstimateRequest(BaseModel):
@@ -289,6 +294,11 @@ async def engage(req: EngageRequest):
     if req.enable_nuclei_heavy and req.mode != "full":
         raise HTTPException(422, "Heavy nuclei (full vuln template set) is intrusive and only runs in "
                                  "Full mode. Select Full mode, or turn off heavy nuclei.")
+    if req.intensity not in ("standard", "deep", "insane"):
+        raise HTTPException(422, "intensity must be standard | deep | insane")
+    if req.intensity in ("deep", "insane") and req.mode != "full":
+        raise HTTPException(422, f"intensity '{req.intensity}' turns the intrusive tools up to heavy settings "
+                                 "and only runs in Full mode. Select Full mode, or use standard intensity.")
     if req.require_zap:
         # fail closed — a required-but-unavailable ZAP blocks the scan with an
         # actionable error rather than silently downgrading to no-ZAP.
@@ -321,7 +331,7 @@ async def engage(req: EngageRequest):
             auth_note = res.get("note", "")
 
     tools = ToolRegistry(scope, mission_id=session_id, lab_mode=(req.mode == "full"),
-                         session_headers=session_headers)
+                         session_headers=session_headers, intensity=req.intensity)
     stop_event = asyncio.Event()
     # A fresh agent + stop_event per mission — rescans clone config into a NEW
     # session and never reuse a prior mission's in-memory objects.
@@ -349,7 +359,8 @@ async def engage(req: EngageRequest):
                "recon_cycles": recon_cycles, "warm_start": warm_start,
                "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
                "enable_zap": enable_zap, "zap_policy": req.zap_policy,
-               "zap_speed": req.zap_speed, "zap_aggression": req.zap_aggression}
+               "zap_speed": req.zap_speed, "zap_aggression": req.zap_aggression,
+               "intensity": req.intensity}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
