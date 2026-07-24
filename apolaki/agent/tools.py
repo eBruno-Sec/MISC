@@ -1426,6 +1426,7 @@ class ToolRegistry:
                     hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
                     if hdrs:
                         await ctx.set_extra_http_headers(hdrs)
+                await self._ctx_add_cookies(ctx)      # load authed pages logged-in
                 page = await ctx.new_page()
                 fired = {"msg": None}
 
@@ -1458,6 +1459,37 @@ class ToolRegistry:
             return findings
         return findings
 
+    async def _ctx_add_cookies(self, ctx) -> None:
+        """Set the mission's session cookies on a Playwright context so the headless
+        browser loads AUTHENTICATED pages logged-in. set_extra_http_headers can't reliably
+        carry Cookie; add_cookies is the correct API. Domain = the first in-scope host.
+        Without this, browser-confirmed XSS (reflected/stored/DOM) never fires on an
+        authenticated target because the page loads logged-out. Best-effort."""
+        ck = (self.session_headers or {}).get("Cookie") or (self.session_headers or {}).get("cookie")
+        if not ck:
+            return
+        host = ""
+        try:
+            for e in self.scope.in_scope:
+                host = (getattr(e, "value", "") or "").lstrip("*.").split("/")[0].split(":")[0]
+                if host:
+                    break
+        except Exception:
+            return
+        if not host:
+            return
+        cookies = []
+        for part in str(ck).split(";"):
+            if "=" in part:
+                n, v = part.strip().split("=", 1)
+                if n.strip():
+                    cookies.append({"name": n.strip(), "value": v.strip(), "domain": host, "path": "/"})
+        if cookies:
+            try:
+                await ctx.add_cookies(cookies)
+            except Exception:
+                pass
+
     async def _browser_dialog_scan(self, urls: list, marker: str, per: float = 6.0) -> dict:
         """Load each URL in headless Chromium and return {"url":...} if a JS dialog
         carrying `marker` fires — proof that a STORED payload executed on that page.
@@ -1481,11 +1513,15 @@ class ToolRegistry:
                     hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
                     if hdrs:
                         await ctx.set_extra_http_headers(hdrs)
+                await self._ctx_add_cookies(ctx)      # load authed pages logged-in
                 page = await ctx.new_page()
-                fired = {"msg": None}
+                # capture ALL dialog messages, not just the last — a page with several
+                # stored payloads (e.g. a guestbook) fires many alerts, and our marker may
+                # not be the final one. Match if ANY fired dialog carries the marker.
+                fired = {"msgs": []}
 
                 async def on_dialog(d):
-                    fired["msg"] = d.message
+                    fired["msgs"].append(d.message)
                     try:
                         await d.dismiss()
                     except Exception:
@@ -1494,14 +1530,15 @@ class ToolRegistry:
                 for u in urls:
                     if not self.scope.validate(u)[0]:
                         continue
-                    fired["msg"] = None
+                    fired["msgs"].clear()
                     try:
                         await page.goto(u, wait_until="load", timeout=int(per * 1000))
-                        await page.wait_for_timeout(350)
+                        await page.wait_for_timeout(450)
                     except Exception:
                         pass
-                    if fired["msg"] and marker in str(fired["msg"]):
-                        hit = {"url": u, "msg": str(fired["msg"])}
+                    match = next((m for m in fired["msgs"] if marker in str(m)), None)
+                    if match is not None:
+                        hit = {"url": u, "msg": str(match)}
                         break
                 await browser.close()
         except Exception:
@@ -1682,6 +1719,7 @@ class ToolRegistry:
                             hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
                             if hdrs:
                                 await ctx.set_extra_http_headers(hdrs)
+                        await self._ctx_add_cookies(ctx)      # load authed pages logged-in
                         page = await ctx.new_page()
                         fired, navs = {"msg": None}, []
 

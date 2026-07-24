@@ -893,6 +893,32 @@ def test_ai_business_logic_hunter_is_additive_leads_only():
     assert out == [] and a2.leads == []
 
 
+def test_ctx_add_cookies_carries_session_into_the_browser():
+    # Browser-confirmed XSS (reflected/stored/DOM) must load AUTHENTICATED pages logged-in.
+    # set_extra_http_headers can't carry Cookie; _ctx_add_cookies uses the proper cookie API
+    # with the in-scope host as the domain. Without it, authed pages load logged-out and
+    # nothing fires (the exact bug the optest caught on DVWA stored XSS).
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.docker.internal:42001"], [], "P")
+    t = ToolRegistry(eng, mission_id=None, session_headers={"Cookie": "PHPSESSID=abc; security=low"})
+
+    captured = {}
+    class _Ctx:
+        async def add_cookies(self, cookies): captured["c"] = cookies
+    asyncio.new_event_loop().run_until_complete(t._ctx_add_cookies(_Ctx()))
+    by = {c["name"]: c for c in captured.get("c", [])}
+    assert by["PHPSESSID"]["value"] == "abc" and by["PHPSESSID"]["domain"] == "host.docker.internal"
+    assert by["PHPSESSID"]["path"] == "/" and "security" in by
+
+    # no cookie -> no-op (unauthenticated scans unaffected)
+    t2 = ToolRegistry(eng, mission_id=None, session_headers={})
+    seen = {}
+    class _Ctx2:
+        async def add_cookies(self, cookies): seen["c"] = cookies
+    asyncio.new_event_loop().run_until_complete(t2._ctx_add_cookies(_Ctx2()))
+    assert "c" not in seen
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
