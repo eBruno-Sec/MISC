@@ -400,6 +400,57 @@ class BBHAgent:
                 self.leads.append(f)
                 yield {"type": "lead", "lead": f}
 
+    async def _promote_leads(self, session_id: str):
+        """Convert candidate leads to CONFIRMED findings by re-testing them with a
+        confirmatory oracle they didn't already get. Currently: XSS-class candidate
+        leads (reflection/dalfox/js-review signals) are replayed through the headless
+        browser executor — a lead that now fires alert() becomes a browser-confirmed
+        finding (with PoC). Truth-first: promotion requires real execution, never the
+        signal alone; nothing is promoted when no browser is available."""
+        import tools as _t
+        from urllib.parse import urlparse, parse_qs
+        if not self.leads or _t.xss_confirm_status() is False:
+            return
+        # one representative parameterized target per path among XSS-class leads
+        targets = {}
+        for lead in self.leads:
+            cwe, ttl = str(lead.get("cwe") or ""), str(lead.get("title") or "").lower()
+            if not ("79" in cwe or "xss" in ttl or "cross-site script" in ttl):
+                continue
+            tgt = str(lead.get("target") or "")
+            if tgt and "?" in tgt and self.scope.validate(tgt)[0]:
+                targets.setdefault(urlparse(tgt).path, tgt)
+        if not targets:
+            return
+        promoted_paths = set()
+        for tgt in list(targets.values())[:15]:          # bounded browser sweep
+            if self.stop_event.is_set():
+                break
+            params = list(parse_qs(urlparse(tgt).query).keys())
+            if not params:
+                continue
+            try:
+                confs = await self.tools._xss_execute(tgt, params)
+            except Exception:
+                confs = []
+            for f in confs:
+                f.setdefault("found_by", "promoted from candidate lead (browser-confirmed)")
+                if self.mission_id:
+                    f["id"] = db.add_finding(self.mission_id, f)
+                self.findings.append(f)
+                promoted_paths.add(urlparse(str(f.get("target") or tgt)).path)
+                yield {"type": "finding", "finding": f}
+        # drop the now-redundant XSS-class leads on any promoted path
+        if promoted_paths:
+            before = len(self.leads)
+            self.leads = [l for l in self.leads if not (
+                ("79" in str(l.get("cwe") or "") or "xss" in str(l.get("title") or "").lower())
+                and urlparse(str(l.get("target") or "")).path in promoted_paths)]
+            dropped = before - len(self.leads)
+            if dropped:
+                yield {"type": "info", "content": f"Lead promotion: {dropped} candidate lead(s) "
+                       "browser-confirmed and promoted to findings."}
+
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:
         return bool(self.client) and self._has_key
@@ -558,6 +609,9 @@ class BBHAgent:
                 yield {"type": "info", "content": f"Recon cycle {cyc} found no new in-scope assets — "
                        "stopping early."}
                 break
+        # promotion pass: re-test high-signal candidate leads with a confirmatory oracle
+        async for ev in self._promote_leads(session_id):
+            yield ev
         self._plan_steps = steps
 
     async def _run_deterministic(self, session_id: str):
