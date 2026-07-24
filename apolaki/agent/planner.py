@@ -285,6 +285,15 @@ def next_batch(state: dict) -> list:
             dom_pages.append(u)
     for u in dom_pages[:CAP_DOM]:
         e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
+    # active parameter mining (deep/insane): brute-force hidden params on host roots + key
+    # pages so injection probes reach inputs the crawl never saw. Discovered params are
+    # added to the surface and picked up by the iterative planner on a later batch.
+    if intensity in ("deep", "insane"):
+        pm_targets = list(dict.fromkeys(
+            [_b(h) for h in host_bases]
+            + [(_b_url(e.get("example")) or (_b(e['host']) + e['path'])) for e in param_eps]))[:CAP_SQLMAP]
+        for u in pm_targets:
+            e_steps.append(_step("run_param_mine", {"url": u}, f"run_param_mine:{u}"))
     # heavy sqlmap is expensive; at deep, target only the most injection-prone endpoints
     # (bounded by CAP_SQLMAP) so the scan completes — insane runs the full fan-out.
     _SQLI_PRONE = ("id", "cat", "category", "search", "q", "query", "filter", "sort",
