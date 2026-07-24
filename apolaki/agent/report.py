@@ -178,7 +178,8 @@ def generate_report(program: str, findings: list, scope: dict,
                   "**(potential)** are a single confirmed bug's well-known escalation path — "
                   "verify reachability before claiming the full chain._", ""]
         for c in chains:
-            tag = " **(potential)**" if c.get("kind") == "potential" else ""
+            tag = (" **(potential)**" if c.get("kind") == "potential"
+                   else " **[data-flow]**" if c.get("kind") == "dataflow" else "")
             lines.append(f"- **{c.get('host')}** ({(c.get('severity') or '').upper()}){tag}: "
                          f"**{c.get('narrative')}**")
             _cs = str(c.get("summary") or "").strip()
@@ -801,7 +802,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
     chain_html = ""
     if chains:
         def _chain_li(c):
-            pot = " <span class='tag-conf' style='background:#6a5acd'>POTENTIAL</span>" if c.get("kind") == "potential" else ""
+            _k = c.get("kind")
+            pot = (" <span class='tag-conf' style='background:#6a5acd'>POTENTIAL</span>" if _k == "potential"
+                   else " <span class='tag-conf' style='background:#c0563a'>DATA-FLOW</span>" if _k == "dataflow" else "")
             summ = str(c.get("summary") or "").strip()
             summ_html = f"<div class='sub' style='margin:.2rem 0 0 .2rem'>{e(summ)}</div>" if summ else ""
             return (f"<li><b>{e(str(c.get('host')))}</b> "

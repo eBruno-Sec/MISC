@@ -224,18 +224,79 @@ def _generic_host_chains(findings: list, max_chains: int = 6) -> list:
     return chains
 
 
+# DATA-FLOW chaining: a "producer" vuln yields data that a downstream step consumes.
+# producer class -> (the data it yields, its severity when chained).
+_PRODUCES = {
+    "sqli": "database contents (password hashes, session tokens, other users' rows)",
+    "rce": "arbitrary server-side data, files, and command output",
+    "xxe": "local files and application secrets",
+    "exposure": "leaked secrets/config (keys, credentials, tokens)",
+}
+# consumer classes that USE stolen credentials/tokens/secrets to complete takeover.
+_CONSUMERS = ("idor", "oauth", "stored_xss", "xss", "ssrf")
+
+
+def _dataflow_chains(findings: list, max_chains: int = 6) -> list:
+    """Directed producer -> data -> consumer chains grounded in CONFIRMED findings: a
+    data-yielding bug (SQLi/RCE/XXE/exposure) feeds a downstream step (auth/IDOR/OAuth/...)
+    to complete takeover. Truth-first AND non-destructive: this PROVES and names the data
+    path deterministically — it never auto-executes the exploitation (extracting and
+    reusing real credentials is destructive and authorization-gated)."""
+    by_host: dict = {}
+    for f in findings:
+        by_host.setdefault(_host_of(f), []).append(f)
+    chains: list = []
+    for host, group in by_host.items():
+        cls: dict = {}
+        for f in group:
+            c = _vuln_class(f)
+            if c:
+                cls.setdefault(c, []).append(f)
+        for pc, data in _PRODUCES.items():
+            if pc not in cls:
+                continue
+            sink = next((c for c in _CONSUMERS if c in cls), None)
+            links = [cls[pc][0]] + ([cls[sink][0]] if sink else [])
+            short = data.split("(")[0].strip()
+            name = (f"{pc.upper()} → exfiltrate {short} → "
+                    + (f"feed the confirmed {sink.upper()} flow → account takeover" if sink
+                       else "authenticate as another user → account takeover"))
+            chains.append({
+                "host": host, "severity": "critical" if pc in ("rce", "sqli") else "high",
+                "kind": "dataflow", "name": name, "narrative": name,
+                "summary": (f"Data-flow: the confirmed {pc.upper()} yields {data}; that data flows into "
+                            + (f"the confirmed {sink.upper()} on the same host to complete takeover. "
+                               if sink else "the application's authentication to impersonate users. ")
+                            + "Apolaki proves this path from confirmed findings; it does NOT auto-execute the "
+                              "exploitation (extracting and reusing real data is destructive and requires explicit "
+                              "authorization)."),
+                "impact": f"End-to-end account/data compromise via the {pc.upper()} data path.",
+                "finding_ids": [f.get("id") for f in links if f.get("id")],
+            })
+            if len(chains) >= max_chains:
+                return chains
+    return chains
+
+
 def build_chains(findings: list, max_chains: int = 8) -> list:
     """Synthesize attack-path chains from confirmed findings.
 
-    Deterministic and truth-first: TYPED escalation rules (SQLi->ATO, XXE->SSRF,
-    prototype-pollution->DOM XSS, CRLF->cache poisoning, open-redirect->OAuth, ...)
-    first, then a generic same-host fallback. Combos are real chains; single-class
-    escalations are labeled `kind: "potential"`. Every link references a confirmed
-    finding — chaining says where proven bugs lead, it never invents a confirmation.
+    Deterministic and truth-first: DIRECTED data-flow chains (producer->data->consumer)
+    first, then TYPED escalation rules (SQLi->ATO, XXE->SSRF, prototype-pollution->DOM XSS,
+    ...), then a generic same-host fallback. Combos/data-flow are real chains; single-class
+    escalations are labeled `kind: "potential"`. Every link references a confirmed finding —
+    chaining says where proven bugs lead, it never invents a confirmation or auto-executes
+    destructive exploitation.
     """
     out: list = []
     seen = set()
-    # generic multi-finding host chains first (a host with >=2 real findings)
+    # directed data-flow chains first (most specific: a real producer->consumer path)
+    for c in _dataflow_chains(findings, max_chains):
+        key = (c["host"], c.get("name") or c["narrative"])
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+    # generic multi-finding host chains next (a host with >=2 real findings)
     for c in _generic_host_chains(findings, max_chains):
         key = (c["host"], c["narrative"])
         if key not in seen:
