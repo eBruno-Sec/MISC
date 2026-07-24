@@ -537,7 +537,10 @@ class BBHAgent:
                          "zap_policy": self.zap_policy,
                          "zap_speed": self.zap_speed, "zap_aggression": self.zap_aggression,
                          "nmap_vuln": self.enable_nmap_vuln,
-                         "nuclei_heavy": self.enable_nuclei_heavy}
+                         "nuclei_heavy": self.enable_nuclei_heavy,
+                         # intensity dial (on the tool registry) rides to the planner so
+                         # deep/insane can schedule the heavy sqlmap pass alongside run_sqli.
+                         "intensity": getattr(self.tools, "intensity", "standard")}
                 batch = planner.next_batch(state)
                 if not batch:
                     break

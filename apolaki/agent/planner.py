@@ -132,6 +132,8 @@ def next_batch(state: dict) -> list:
     nmap_vuln_on = bool(state.get("nmap_vuln"))
     # heavy nuclei (full vuln template set) — opt-in, Full mode only.
     nuclei_heavy_on = bool(state.get("nuclei_heavy")) and mode == "full"
+    # intensity dial — deep/insane adds the heavy sqlmap pass to the injection sweep.
+    intensity = str(state.get("intensity", "standard")).lower()
     # host -> base URL (scheme+port). Lets the planner probe a non-standard target
     # (e.g. a local app on http://host:42000) instead of assuming https on 443.
     bases = state.get("bases") or {}
@@ -286,6 +288,12 @@ def next_batch(state: dict) -> list:
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
+        # deep/insane: follow the native SQLi probe with a heavy sqlmap pass on the same
+        # endpoint so the full injection audit fires in deterministic scans too (not just
+        # under AI). run_sqlmap is INTRUSIVE -> the _allowed() gate keeps it to Full mode.
+        if intensity in ("deep", "insane"):
+            e_steps.append(_step("run_sqlmap", {"url": u, "intensity": intensity},
+                                 f"run_sqlmap:{tag}"))
         e_steps.append(_step("run_nosqli", {"url": u}, f"run_nosqli:{tag}"))
         e_steps.append(_step("run_injection_probes", {"url": u}, f"run_injection_probes:{tag}"))
         e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
