@@ -288,8 +288,12 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
 <body>
 
 <header>
-  <div class="logo">e<span>Bruno</span>-Sec</div>
-  <div class="logo-sub">Apolaki</div>
+  <div class="logo-home" onclick="showView('launch')" role="button" tabindex="0"
+       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showView('launch')}"
+       title="Apolaki — back to Launch" style="display:flex;align-items:baseline;gap:.4rem;cursor:pointer">
+    <div class="logo">e<span>Bruno</span>-Sec</div>
+    <div class="logo-sub">Apolaki</div>
+  </div>
   <div class="provider-badge pb-openrouter" id="providerBadge">loading…</div>
   <div class="spacer"></div>
   <div class="hint-auth">Authorized testing only</div>
@@ -301,6 +305,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn active" data-view="launch" onclick="showView('launch')">Launch</button>
   <button class="navbtn" data-view="run" onclick="showView('run')">Live Run</button>
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
+  <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -632,8 +637,9 @@ const VIEWS={
   launch:   [["launch","Configure"]],
   run:      [["feed","Activity feed"]],
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
+  reports:  [["report","Report & export"]],
   playbooks:[["playbooks","Playbooks"]],
-  tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["report","Report & export"],["archive","Archive"]],
+  tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
 };
 const PANEL_VIEW={};
