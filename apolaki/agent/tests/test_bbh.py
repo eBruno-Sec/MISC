@@ -1417,20 +1417,25 @@ def test_codereview_client_side_classes_named():
 
 def test_dom_audit_probes_and_confirmation():
     import dom_tool as dom
-    probes = dom.build_probes("https://ginandjuice.shop/blog")
+    # CSTI/redirect probes now also target the page's OWN params (e.g. category), not just
+    # a fixed name list — so a page's app-specific reflected params get template-tested.
+    probes = dom.build_probes("https://ginandjuice.shop/catalog?category=Gifts")
     classes = {p["class"] for p in probes}
     assert {"proto", "redirect", "xss", "csti"} <= classes
-    assert all(p["nav"] for p in probes) and len(probes) <= 16
+    assert all(p["nav"] for p in probes) and len(probes) <= 24
+    assert any(p["class"] == "csti" and p["src"] == "category" for p in probes)   # own-param CSTI
     # each confirmation keys on the unique canary — no false positives
     assert dom.confirmed_proto(dom.MARK) and not dom.confirmed_proto("other")
     assert dom.confirmed_redirect([f"https://{dom.EVIL}/"]) and not dom.confirmed_redirect(["https://safe/"])
     assert dom.confirmed_xss(dom.MARK) and not dom.confirmed_xss(None)
     assert dom.confirmed_csti("x 49" + dom.MARK) and not dom.confirmed_csti("{{7*7}}" + dom.MARK)
-    # builder emits a CONFIRMED, evidence-backed finding
-    f = dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=dom.MARK)
+    # builder emits a CONFIRMED, evidence-backed finding (pick a proto probe explicitly —
+    # probe order is not guaranteed since CSTI-on-own-params is now emitted first)
+    proto_probe = next(p for p in probes if p["class"] == "proto")
+    f = dom.build_finding({**proto_probe, "base": "https://t/blog"}, pp_value=dom.MARK)
     assert f["confidence"] == "confirmed" and f["family"] == "prototype_pollution" and f["evidence"]
     # a probe whose result does NOT prove the class yields nothing
-    assert dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=None) is None
+    assert dom.build_finding({**proto_probe, "base": "https://t/blog"}, pp_value=None) is None
 
 
 def test_sca_deparam_gadget_is_a_lead():

