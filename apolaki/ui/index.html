@@ -332,9 +332,9 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             </div>
             <div class="field"><label>AI usage</label>
               <select id="strategy" onchange="refreshEstimate()">
-                <option value="low_ai" selected>Low-AI — deterministic scan + AI wrap-up (recommended)</option>
-                <option value="deterministic">Deterministic — rule-based, no AI at all</option>
-                <option value="agentic">Agentic — full ReAct loop (many AI calls)</option>
+                <option value="deterministic" selected>Deterministic — proof-first, no AI (recommended · peak for detection)</option>
+                <option value="low_ai">Low-AI — deterministic scan + AI executive summary</option>
+                <option value="agentic">Agentic — deterministic floor + AI business-logic hunt (many AI calls)</option>
                 <option value="manual">Manual — no automated run, you drive the tools</option>
               </select>
               <div class="hint" id="estimateHint">A deterministic planner sequences the tools; AI is used only where it adds value.</div>
