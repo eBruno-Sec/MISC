@@ -294,6 +294,14 @@ def next_batch(state: dict) -> list:
             + [(_b_url(e.get("example")) or (_b(e['host']) + e['path'])) for e in param_eps]))[:CAP_SQLMAP]
         for u in pm_targets:
             e_steps.append(_step("run_param_mine", {"url": u}, f"run_param_mine:{u}"))
+    # anomaly hunting (intuition leads) on app roots + key endpoints — a cheap active GET
+    # + analysis flagging verbose errors / stack traces / debug + version-leak headers as
+    # advisory 'dig here' leads (candidate, never confirmed).
+    anom_targets = list(dict.fromkeys(
+        [_b(h) for h in host_bases]
+        + [(_b_url(e.get("example")) or (_b(e['host']) + e['path'])) for e in param_eps[:8]]))[:12]
+    for u in anom_targets:
+        e_steps.append(_step("run_anomaly_scan", {"url": u}, f"run_anomaly_scan:{u}"))
     # heavy sqlmap is expensive; at deep, target only the most injection-prone endpoints
     # (bounded by CAP_SQLMAP) so the scan completes — insane runs the full fan-out.
     _SQLI_PRONE = ("id", "cat", "category", "search", "q", "query", "filter", "sort",

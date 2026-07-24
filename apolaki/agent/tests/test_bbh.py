@@ -788,6 +788,32 @@ def test_param_mine_discovers_hidden_params_and_feeds_surface():
     assert not any("'page'" in f["title"] for f in r.findings)  # unchanged params not reported
 
 
+def test_anomaly_scan_flags_intuition_leads_never_confirmed():
+    # Codified 'intuition': verbose errors / stack traces / path disclosure / version
+    # headers become advisory candidate LEADS to chase — never confirmed vulnerabilities.
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+    t = ToolRegistry(eng, mission_id=None)
+
+    async def leaky(url, method="GET", **kw):
+        return {"status": 500, "headers": {"X-Powered-By": "PHP/5.6.40", "Server": "Apache"},
+                "body": "Fatal error: Uncaught Error in /var/www/html/app.php on line 42",
+                "final_url": url, "error": ""}
+    t._http = leaky
+    r = asyncio.new_event_loop().run_until_complete(t._run_anomaly_scan({"url": "http://t/x"}))
+    assert len(r.findings) >= 2
+    assert all(f["confidence"] == "candidate" for f in r.findings)      # leads, never confirmed
+    assert any("stack trace" in f["title"] for f in r.findings)
+    assert any("version/debug headers" in f["title"] for f in r.findings)
+
+    async def clean(url, method="GET", **kw):
+        return {"status": 200, "headers": {"Server": "nginx"},
+                "body": "<html>welcome</html>", "final_url": url, "error": ""}
+    t._http = clean
+    r2 = asyncio.new_event_loop().run_until_complete(t._run_anomaly_scan({"url": "http://t/y"}))
+    assert not r2.findings          # no version digit, clean body -> no anomaly noise
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
