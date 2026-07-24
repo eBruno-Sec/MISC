@@ -2934,6 +2934,15 @@ class ToolRegistry:
 
     async def _store_finding(self, inp: dict) -> ToolResult:
         if self.mission_id:
+            # Dedup against what auto-store already recorded (shared fingerprint set from
+            # the agent). A proof-based finding auto-store already landed must not be
+            # written again by the model's store_finding — keeps AI additive, not doubling.
+            fps = getattr(self, "_stored_fps", None)
+            if fps is not None:
+                import memory as _mem
+                if _mem.finding_fp(inp) in fps:
+                    return ToolResult("store_finding", inp.get("target", ""), True,
+                                      "Finding already recorded (deduped)", [inp])
             fid = db.add_finding(self.mission_id, dict(inp))
             inp["id"] = fid
             # attach any evidence captured for this target

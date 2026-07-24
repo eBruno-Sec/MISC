@@ -199,6 +199,12 @@ class BBHAgent:
         self.findings: list = []
         self.leads: list = []           # unconfirmed candidate/static signals (not report findings)
         self._stored_fps: set = set()   # fingerprints already stored (auto-store dedup)
+        # share the dedup set with the tool registry so the model's store_finding tool
+        # deduplicates against what auto-store already recorded (AI stays additive).
+        try:
+            self.tools._stored_fps = self._stored_fps
+        except Exception:
+            pass
         self.current_phase = "init"
         self._recon_passes = 0   # counts entries into the recon phase (cycle labels)
 
@@ -328,20 +334,25 @@ class BBHAgent:
                    "count": len(result.findings)}
 
         if tool_name == "store_finding" and not result.error:
+            # A model-authored finding (agentic). Dedup by fingerprint against what
+            # auto-store already recorded so the AI layer is purely ADDITIVE — it can
+            # add business-logic findings but never double-count a proof-based one that
+            # auto-store already landed (tools._store_finding skips the DB write for a dup).
+            import memory as memory_mod
             fin = result.findings[0] if result.findings else dict(tool_input)
-            self.findings.append(fin)
-            yield {"type": "finding", "finding": fin}
+            fp = memory_mod.finding_fp(fin)
+            if fp not in self._stored_fps:
+                self._stored_fps.add(fp)
+                self.findings.append(fin)
+                yield {"type": "finding", "finding": fin}
 
-        # Auto-store confirmed findings from the native confirmatory probes when NO
-        # model is driving: deterministic / low_ai, agentic that DEGRADED after an AI
-        # failure, OR the deterministic COVERAGE FLOOR of an agentic run (_in_floor) —
-        # the floor's probes run without the model, so without this their confirmed
-        # findings would be silently dropped (QUAL-1: floor ran 23 tools but reported
-        # zero findings). In the model-driven ReAct phase the model stores them, so we
-        # don't here (avoids duplicates). Deduped by fingerprint.
-        if (not result.error and tool_name in _AUTO_STORE_TOOLS
-                and (self.strategy in ("deterministic", "low_ai") or self.ai_degraded
-                     or getattr(self, "_in_floor", False))):
+        # ALWAYS auto-store confirmed findings from the proof-based probes — regardless of
+        # strategy. Confirmation is a deterministic oracle (proof), never the model's
+        # opinion, so these MUST land even in agentic mode: relying on the model to store
+        # them made agentic silently UNDERCOUNT (a run confirmed a SQLi + 19 leads but the
+        # report showed neither because the model never called store_finding). The model's
+        # own store_finding stays additive and is deduped against the same fingerprint set.
+        if not result.error and tool_name in _AUTO_STORE_TOOLS:
             async for ev in self._auto_store(result):
                 yield ev
 

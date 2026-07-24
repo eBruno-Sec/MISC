@@ -689,6 +689,40 @@ def test_jwt_alg_confusion_and_kid_injection_are_truthful_leads():
     assert not any("kid" in f["title"].lower() for f in res2["findings"])
 
 
+def test_proof_findings_autostore_in_agentic_and_model_store_dedups():
+    # AI is additive, never subtractive: a proof-based tool finding auto-stores even in
+    # AGENTIC mode (the model no longer has to remember it), and the model's store_finding
+    # deduplicates against the SAME fingerprint set so it never double-counts.
+    import agent as agent_mod
+    from tools import ToolResult, ToolRegistry
+    import memory as memory_mod
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["t"], [], "P")
+
+    class _Tools:
+        def __init__(self):
+            self.recon = {}; self.urls = []; self._stored_fps = None
+        async def execute(self, name, inp, sid):
+            return ToolResult("sqlmap", inp.get("url", ""), True, "SQLi confirmed",
+                [{"severity": "high", "cwe": "CWE-89", "target": "http://t/x?id=1",
+                  "confidence": "confirmed", "evidence": "proof", "title": "SQL injection in id"}])
+
+    a = agent_mod.BBHAgent(eng, _Tools(), asyncio.Event(), strategy="agentic",
+                           auto_approve=True, mission_id=None)
+    async def run():
+        async for _ in a._run_tool("run_sqlmap", {"url": "http://t/x?id=1"}, "s"):
+            pass
+    asyncio.new_event_loop().run_until_complete(run())
+    # the confirmed SQLi landed under AGENTIC without the model calling store_finding
+    assert len(a.findings) == 1 and a.findings[0]["cwe"] == "CWE-89"
+    assert a.tools._stored_fps is a._stored_fps and a._stored_fps     # dedup set shared + registered
+
+    # a model store_finding for the SAME vuln is deduped (skips the DB write) -> no double
+    t = ToolRegistry(eng, mission_id="m"); t._stored_fps = a._stored_fps
+    r = asyncio.new_event_loop().run_until_complete(
+        t._store_finding({"cwe": "CWE-89", "target": "http://t/x?id=1", "title": "dup", "severity": "high"}))
+    assert "deduped" in r.output.lower()
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
