@@ -681,6 +681,34 @@ class ToolRegistry:
                 finding_id=finding_id)
         return resp
 
+    def _attach_poc(self, f: dict, req_url: str, resp=None, method: str = "GET",
+                    body: str = None, timing: str = None) -> dict:
+        """Attach the EXACT confirming request/response to a finding so its PoC shows the
+        real injecting request, not a reconstruction. The native probes use private HTTP
+        clients (for raw-request control), so without this their proving exchange is lost.
+        `resp` may be an httpx.Response, a dict (status/body), or None. Rendered by the
+        report's raw-proof blocks (request/response/timing) + the /poc export."""
+        req = f"{method.upper()} {req_url}"
+        if body:
+            req += f"\n\n{body}"
+        f["request"] = req
+        curl = "curl -i -sk " + ("-X " + method.upper() + " " if method.upper() != "GET" else "") + f"'{req_url}'"
+        if body:
+            curl += f" --data '{body}'"
+        if self.session_headers:
+            curl += "   # add your authorized session (Cookie/Authorization) to reproduce"
+        f["curl"] = curl
+        if resp is not None:
+            status = getattr(resp, "status_code", None)
+            text = getattr(resp, "text", None)
+            if status is None and isinstance(resp, dict):
+                status, text = resp.get("status"), resp.get("body")
+            if status is not None:
+                f["response"] = f"HTTP {status}\n" + str(text or "")[:1500]
+        if timing:
+            f["timing"] = timing
+        return f
+
     # ── PASSIVE ──────────────────────────────────────────────────
     async def _run_subfinder(self, inp: dict) -> ToolResult:
         domain = inp["domain"]
@@ -2191,8 +2219,9 @@ class ToolRegistry:
                         continue
                     hits = sqli.error_signatures(base_body, r.text)
                     if hits:
-                        findings.append(sqli.error_finding(url, p, probe, hits))
-                        ev.append(xt.set_param(url, p, orig + probe)); confirmed = True
+                        _req = xt.set_param(url, p, orig + probe)
+                        findings.append(self._attach_poc(sqli.error_finding(url, p, probe, hits), _req, r))
+                        ev.append(_req); confirmed = True
                         break
                 # 1b) quote-break / doubled-quote-recovery (status differential — fires
                 #     when a 500 leaks no SQL text, as on ginandjuice's category filter)
@@ -2201,9 +2230,10 @@ class ToolRegistry:
                     r_dq, _ = await get(c, xt.set_param(url, p, orig + "''"))
                     if r_sq is not None and r_dq is not None and sqli.quote_break_recovers(
                             base_status, r_sq.status_code, r_dq.status_code):
-                        findings.append(sqli.quote_recovery_finding(
-                            url, p, base_status, r_sq.status_code, r_dq.status_code))
-                        ev.append(xt.set_param(url, p, orig + "'")); confirmed = True
+                        _req = xt.set_param(url, p, orig + "'")
+                        findings.append(self._attach_poc(sqli.quote_recovery_finding(
+                            url, p, base_status, r_sq.status_code, r_dq.status_code), _req, r_sq))
+                        ev.append(_req); confirmed = True
                 if confirmed:
                     continue
                 # 2) boolean-based blind
@@ -2213,8 +2243,12 @@ class ToolRegistry:
                     if rt is None or rf is None:
                         continue
                     if sqli.analyze_boolean(base_body, rt.text, rf.text):
-                        findings.append(sqli.boolean_finding(url, p, pair))
-                        ev.append(xt.set_param(url, p, pair["false"])); confirmed = True
+                        _req = xt.set_param(url, p, pair["false"])
+                        _tv = xt.set_param(url, p, pair["true"])
+                        findings.append(self._attach_poc(
+                            sqli.boolean_finding(url, p, pair), _req, rf,
+                            timing=f"TRUE payload ({_tv}) tracked the baseline; FALSE payload ({_req}) diverged"))
+                        ev.append(_req); confirmed = True
                         break
                 if confirmed:
                     continue
@@ -2223,8 +2257,11 @@ class ToolRegistry:
                     _, ctl = await get(c, xt.set_param(url, p, item["control"]))
                     _, slp = await get(c, xt.set_param(url, p, item["payload"]))
                     if sqli.analyze_time(ctl, slp, seconds):
-                        findings.append(sqli.time_finding(url, p, item, ctl, slp, seconds))
-                        ev.append(xt.set_param(url, p, item["payload"]))
+                        _req = xt.set_param(url, p, item["payload"])
+                        findings.append(self._attach_poc(
+                            sqli.time_finding(url, p, item, ctl, slp, seconds), _req, None,
+                            timing=f"control={ctl:.1f}s vs injected-SLEEP({seconds}s)={slp:.1f}s"))
+                        ev.append(_req)
                         break
 
         if self.mission_id and ev:
@@ -2259,13 +2296,16 @@ class ToolRegistry:
                     continue
                 hits = sqli.error_signatures(rb.get("body", ""), ri.get("body", ""))
                 if hits:
-                    f = sqli.error_finding(url, field, payload, hits)
+                    f = self._attach_poc(sqli.error_finding(url, field, payload, hits),
+                                         url, ri, method="POST", body=inj_body)
                     await self._http(url, "POST", headers, inj_body, capture=True)
                     findings.append(f); ev.append(inj_body); break
                 conf = sqli.auth_bypass_confirmed(rb.get("status", 0), rb.get("body", ""),
                                                   ri.get("status", 0), ri.get("body", ""))
                 if conf:
-                    findings.append(sqli.auth_bypass_finding(url, field, payload, conf["signal"]))
+                    findings.append(self._attach_poc(
+                        sqli.auth_bypass_finding(url, field, payload, conf["signal"]),
+                        url, ri, method="POST", body=inj_body))
                     await self._http(url, "POST", headers, inj_body, capture=True)
                     ev.append(inj_body); break
             if findings:
