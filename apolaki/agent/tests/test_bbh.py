@@ -467,9 +467,10 @@ def test_typed_chaining_escalations_and_combos_truthful():
     # Truth-first: chains are built only from confirmed findings, never inventing one.
     single = [{"id": "1", "title": "SQL injection in id", "severity": "high", "target": "https://h/a"}]
     ch = triage.build_chains(single)
-    sqli_chain = [c for c in ch if "account takeover" in c.get("narrative", "").lower()]
-    assert sqli_chain and sqli_chain[0]["kind"] == "potential"          # single -> potential
-    assert "database" in sqli_chain[0]["summary"].lower()
+    # a lone SQLi now yields a directed data-flow chain AND a labeled potential escalation
+    assert any(c.get("kind") == "dataflow" for c in ch)
+    esc = [c for c in ch if c.get("kind") == "potential" and "account takeover" in c.get("narrative", "").lower()]
+    assert esc and "database" in esc[0]["summary"].lower()             # single class -> potential escalation
 
     # prototype pollution + DOM XSS on one host -> a real combo chain
     combo = [
@@ -826,6 +827,30 @@ def test_stored_xss_chains_to_worm_escalation():
                                 "title": "Reflected XSS in 'q'", "target": "https://h/s"}])
     assert any("account takeover" in c.get("narrative", "").lower() for c in ch2)
     assert not any("worm" in c.get("narrative", "").lower() for c in ch2)
+
+
+def test_dataflow_chaining_is_directed_and_non_destructive():
+    # Directed producer->data->consumer chaining: a confirmed SQLi + a confirmed IDOR on
+    # one host compose a data-flow chain (SQLi exfiltrates creds -> IDOR -> ATO). It PROVES
+    # the path from confirmed findings; it never auto-executes destructive exploitation.
+    ch = triage.build_chains([
+        {"id": "1", "title": "SQL injection in id", "severity": "high", "cwe": "CWE-89", "target": "https://h/cat"},
+        {"id": "2", "title": "IDOR on /account", "severity": "high", "cwe": "CWE-639", "target": "https://h/account"},
+    ])
+    df = [c for c in ch if c.get("kind") == "dataflow"]
+    assert df, "expected a directed data-flow chain"
+    assert df[0]["severity"] == "critical"
+    assert set(df[0]["finding_ids"]) == {"1", "2"}          # links both confirmed findings
+    assert "IDOR" in df[0]["narrative"]                     # names the concrete downstream sink
+    assert "does NOT auto-execute" in df[0]["summary"]      # non-destructive guardrail stated
+
+    # a producer with no consumer still yields a data-flow chain (SQLi -> auth -> ATO)
+    solo = triage.build_chains([{"id": "3", "title": "SQL injection", "severity": "high",
+                                 "cwe": "CWE-89", "target": "https://h/x"}])
+    assert any(c.get("kind") == "dataflow" for c in solo)
+    # a lone info finding with no producer class -> no data-flow chain (no false paths)
+    none = triage.build_chains([{"id": "9", "title": "Verbose banner", "severity": "info", "target": "https://z/"}])
+    assert not any(c.get("kind") == "dataflow" for c in none)
 
 
 def test_surface_never_ingests_session_killing_urls():
