@@ -459,6 +459,36 @@ def test_report_renders_tool_settings_and_raw_proof():
     assert "MySQL error near" in html
 
 
+def test_typed_chaining_escalations_and_combos_truthful():
+    # Chaining says where CONFIRMED bugs lead. A single high-impact class yields a
+    # labeled POTENTIAL escalation; two classes on one host compose a real chain.
+    # Truth-first: chains are built only from confirmed findings, never inventing one.
+    single = [{"id": "1", "title": "SQL injection in id", "severity": "high", "target": "https://h/a"}]
+    ch = triage.build_chains(single)
+    sqli_chain = [c for c in ch if "account takeover" in c.get("narrative", "").lower()]
+    assert sqli_chain and sqli_chain[0]["kind"] == "potential"          # single -> potential
+    assert "database" in sqli_chain[0]["summary"].lower()
+
+    # prototype pollution + DOM XSS on one host -> a real combo chain
+    combo = [
+        {"id": "1", "title": "Prototype pollution via __proto__", "severity": "high", "target": "https://h/x"},
+        {"id": "2", "title": "DOM-based XSS sink", "severity": "high", "target": "https://h/y"},
+    ]
+    cc = triage.build_chains(combo)
+    proto = [c for c in cc if "gadget" in c.get("narrative", "").lower()]
+    assert proto and proto[0]["kind"] == "chain"                        # two classes -> chain
+    assert set(proto[0]["finding_ids"]) == {"1", "2"}
+
+    # empty / single-finding host with no escalation class -> no bogus chain
+    assert triage.build_chains([{"id": "9", "title": "Verbose banner", "severity": "info", "target": "https://z/"}]) == []
+
+    # renders in the report with the POTENTIAL label (chains built by the pipeline)
+    md = report.generate_report("P", single, {"in_scope": ["h"]}, chains=triage.build_chains(single))
+    assert "Chaining Potential" in md and "(potential)" in md
+    html = report.generate_html_report("P", combo, {"in_scope": ["h"]}, chains=triage.build_chains(combo))
+    assert "Chaining Potential" in html and "POTENTIAL" in html
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
