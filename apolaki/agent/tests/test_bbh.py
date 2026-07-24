@@ -489,6 +489,35 @@ def test_typed_chaining_escalations_and_combos_truthful():
     assert "Chaining Potential" in html and "POTENTIAL" in html
 
 
+def test_planner_routes_heavy_sqlmap_on_deep_intensity_full_only():
+    # The heavy sqlmap pass must actually FIRE in deterministic scans, not just under AI.
+    # It follows the native run_sqli on parameterized endpoints, but only at deep/insane
+    # intensity (sqlmap is expensive) and only in Full mode (INTRUSIVE gate).
+    import planner
+
+    def sqlmap_step(mode, intensity):
+        state = {"mode": mode, "roots": ["t.com"], "done": set(),
+                 "recon": {"subdomains": [], "live_hosts": [{"url": "https://t.com"}], "forms": []},
+                 "urls": ["https://t.com/item?id=1"], "intensity": intensity,
+                 "bases": {"t.com": "https://t.com"}}
+        step = None
+        for _ in range(80):
+            b = planner.next_batch(state)
+            if not b:
+                break
+            for s in b:
+                state["done"].add(s["key"])
+                if s["tool"] == "run_sqlmap":
+                    step = s
+        return step
+
+    s = sqlmap_step("full", "deep")
+    assert s is not None and s["input"]["intensity"] == "deep"
+    assert sqlmap_step("full", "insane")["input"]["intensity"] == "insane"
+    assert sqlmap_step("full", "standard") is None      # standard uses native run_sqli only
+    assert sqlmap_step("active", "deep") is None         # INTRUSIVE -> Full mode only
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
