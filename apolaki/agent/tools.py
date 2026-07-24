@@ -684,7 +684,10 @@ class ToolRegistry:
     # ── PASSIVE ──────────────────────────────────────────────────
     async def _run_subfinder(self, inp: dict) -> ToolResult:
         domain = inp["domain"]
-        out, err = await self._cmd(["subfinder", "-d", domain, "-silent", "-json"], timeout=120)
+        # deep/insane: query ALL sources (-all) for a wider subdomain surface (slower).
+        allsrc = ["-all"] if getattr(self, "intensity", "standard") in ("deep", "insane") else []
+        out, err = await self._cmd(["subfinder", "-d", domain, "-silent", "-json"] + allsrc,
+                                   timeout=240 if allsrc else 120)
         if err.startswith("__MISSING__"):
             return ToolResult("subfinder", domain, False, "", [], "subfinder not installed")
         subs = []
@@ -1049,15 +1052,19 @@ class ToolRegistry:
         # version/behaviour-based CVE matches that are not exploit-confirmed, heavy
         # results are TRUTH-FIRST advisory LEADS (candidate confidence) — the default
         # safe-tag run stays confirmed (its misconfig/exposure matches are reliable).
-        heavy = bool(inp.get("heavy"))
+        # deep/insane intensity auto-promotes nuclei to the full template set (as leads),
+        # so "maximum coverage" needs no separate toggle — the explicit heavy flag still works.
+        heavy = bool(inp.get("heavy")) or getattr(self, "intensity", "standard") in ("deep", "insane")
         default_tags = ("cve,network,misconfiguration,exposure,default-login,exposed-panels,ssl,takeover"
                         if heavy else "tech,misconfig,exposed-panels")
         tags = inp.get("tags", default_tags)
         severity = inp.get("severity", "low,medium,high,critical")
+        # insane throws more concurrency at it; heavy runs get a longer budget.
+        conc = "50" if getattr(self, "intensity", "standard") == "insane" else "25"
         timeout = int(inp.get("timeout", 900 if heavy else 360))
         out, err = await self._cmd(
             ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
-             "-silent", "-json", "-no-interactsh"], timeout=timeout)
+             "-c", conc, "-silent", "-json", "-no-interactsh"], timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("nuclei", target, False, "", [], "nuclei not installed")
         findings = []
@@ -1113,25 +1120,36 @@ class ToolRegistry:
                 auth_h += ["-H", f"{k}: {v}"]
         # never crawl a logout/session-kill URL — on an authed scan it would end the session
         no_logout = ["-cos", "logout|log-?out|signout|sign-?out|logoff|deauth"]
+        # Intensity scales the crawl: deeper (-d), and at deep/insane also extract
+        # endpoints from JS with jsluice (-jsl) and pull known files (-kf all:
+        # robots.txt/sitemap.xml). More depth = a wider surface for every downstream
+        # probe. Timeouts grow so deep crawls finish. Pure discovery — truth-first neutral.
+        intensity = getattr(self, "intensity", "standard")
+        depth = {"standard": 2, "deep": 3, "insane": 5}.get(intensity, 2)
+        deep_flags = (["-jsl", "-kf", "all"] if intensity in ("deep", "insane") else [])
+        t_base = {"standard": 200, "deep": 420, "insane": 720}.get(intensity, 200)
+        crawl = ["-silent", "-jc", "-d", str(depth)] + deep_flags
         if auth_h:
-            cmd = ["katana", "-u", url, "-silent", "-jc", "-d", "2"] + no_logout + auth_h  # authenticated crawl
-            out, err = await self._cmd(cmd, timeout=200)
+            cmd = ["katana", "-u", url] + crawl + no_logout + auth_h  # authenticated crawl
+            out, err = await self._cmd(cmd, timeout=t_base)
         else:
             out, err = await self._cmd(
-                ["katana", "-u", url, "-silent", "-jc", "-headless", "-no-sandbox", "-aff", "-d", "2"] + no_logout,
-                timeout=240)
+                ["katana", "-u", url] + crawl + ["-headless", "-no-sandbox", "-aff"] + no_logout,
+                timeout=t_base + 40)
         if err.startswith("__MISSING__"):
             return ToolResult("katana", url, False, "", [], _MISSING)
         # Nothing crawled (no headless browser, or an empty pass): retry a plain crawl
         # (carrying auth headers if we have them) so we still capture the surface.
         if not out.strip():
-            out, err = await self._cmd(["katana", "-u", url, "-silent", "-jc", "-d", "2"] + no_logout + auth_h, timeout=180)
+            out, err = await self._cmd(["katana", "-u", url] + crawl + no_logout + auth_h, timeout=max(120, t_base - 20))
             if err.startswith("__MISSING__"):
                 return ToolResult("katana", url, False, "", [], _MISSING)
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
         note = " (authenticated)" if auth_h else ""
+        if intensity != "standard":
+            note += f" [{intensity}: depth {depth}]"
         return ToolResult("katana", url, True, f"{len(urls)} crawled URLs{note}", [{"url": u} for u in urls[:50]])
 
     async def _gql_post(self, c, endpoint: str, payload):
