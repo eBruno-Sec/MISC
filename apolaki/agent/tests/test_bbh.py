@@ -518,6 +518,38 @@ def test_planner_routes_heavy_sqlmap_on_deep_intensity_full_only():
     assert sqlmap_step("active", "deep") is None         # INTRUSIVE -> Full mode only
 
 
+def test_http_probe_turns_get_forms_into_parameterized_surface_urls():
+    # A GET form (e.g. DVWA's ?id= SQLi form) is not a plain href, so without this the
+    # injection probes never reach it. http_probe must synthesize a parameterized URL
+    # from the form's inputs so run_sqli/run_sqlmap/run_xss can test the params.
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine(); eng.load_manual(["host.local"], [], "P")
+    t = ToolRegistry(eng, mission_id=None)
+    body = ('<html><body>'
+            '<form action="#" method="GET">'
+            '<input type="text" name="id"><input type="submit" name="Submit" value="Submit"></form>'
+            '<form action="/login" method="POST"><input name="user"><input name="pass"></form>'
+            '</body></html>')
+
+    async def fake_http(url, method="GET", **kw):
+        return {"status": 200, "headers": {"Content-Type": "text/html"},
+                "body": body, "final_url": "http://host.local/vulnerabilities/sqli/", "error": ""}
+    t._http = fake_http
+    asyncio.new_event_loop().run_until_complete(
+        t._http_probe({"url": "http://host.local/vulnerabilities/sqli/"}))
+
+    # the GET form became a parameterized URL carrying both inputs
+    synth = [u for u in t.urls if "/vulnerabilities/sqli/" in u and "id=1" in u]
+    assert synth, f"GET form not synthesized into a param URL; urls={t.urls}"
+    assert "Submit=1" in synth[0]                       # submit input included (DVWA needs it)
+    import surface as surface_mod
+    inv = surface_mod.build_inventory(t.urls)
+    sqli_ep = [e for e in inv if "/vulnerabilities/sqli/" in e["path"] and e["parameterized"]]
+    assert sqli_ep and "id" in sqli_ep[0]["params"]     # now a parameterized endpoint probes will hit
+    # the POST form is still captured as a body-sink form (unchanged behavior)
+    assert any(f.get("action", "").endswith("/login") for f in t.recon.get("forms", []))
+
+
 def test_surface_never_ingests_session_killing_urls():
     # Crawling/probing a logout endpoint on an authed scan logs the scanner out and
     # silently kills coverage — such URLs must never enter the surface.
