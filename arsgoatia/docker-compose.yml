@@ -1,0 +1,164 @@
+# ArsGoatia local development stack.
+#
+# Profiles (spec §34):
+#   (default/core) postgres, temporal, temporal-ui, minio, api, workers, web
+#   lab            OWASP Juice Shop target (bound to loopback)
+#   observability  OTel collector
+#
+# Bring-up for the vertical slice:  docker compose --profile lab up --build -d
+# Host ports avoid the repo's 3000/8000: api 8080, web 3100, temporal-ui 8088,
+# minio 9100/9101, postgres 5433.
+
+x-python-build: &python-build
+  context: .
+  dockerfile: apps/_base/Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arsgoatia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arsgoatia}
+      POSTGRES_DB: ${POSTGRES_DB:-arsgoatia}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arsgoatia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  temporal:
+    image: temporalio/auto-setup:1.24
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-arsgoatia}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-arsgoatia}
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./infrastructure/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:2.30.1
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8088
+    ports:
+      - "8088:8080"
+    depends_on:
+      - temporal
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-arsgoatia-evidence} &&
+      mc version enable local/${S3_BUCKET:-arsgoatia-evidence} &&
+      echo 'evidence bucket ready';
+      "
+    restart: "no"
+
+  api:
+    build: *python-build
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  worker-control:
+    build: *python-build
+    command: ["python", "-m", "apps.worker_control.worker"]
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  worker-web:
+    build: *python-build
+    command: ["python", "-m", "apps.worker_web.worker"]
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3100:80"
+    depends_on:
+      - api
+
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    profiles: ["lab"]
+    restart: unless-stopped
+    # Bound to loopback on the host; workers reach it in-network as juice-shop:3000.
+    ports:
+      - "127.0.0.1:42000:3000"
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    profiles: ["observability"]
+    restart: unless-stopped
+    expose:
+      - "4317"
+
+volumes:
+  postgres_data:
+  minio_data:

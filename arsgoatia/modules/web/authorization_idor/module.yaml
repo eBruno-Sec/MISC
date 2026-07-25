@@ -1,0 +1,49 @@
+module:
+  id: web.authorization.idor
+  version: 1.0.0
+  domain: web
+  execution_mode: dynamic
+  description: >
+    Object-level authorization (IDOR/BOLA) module. Establishes two standard-user
+    identities, issues a differential request for one identity's object using the
+    other identity's session, and confirms cross-user object access with a
+    positive and a negative control. Read-only by default (R2); mutation is
+    conditional and disabled under production-default policy.
+
+requires:
+  asset_kinds: [web_application, api]
+  contexts:
+    - identity_count_min: 2
+      session_types: [browser, api]
+      privilege_labels: [standard_user]
+  capabilities: []
+  observations: []
+
+consumes:
+  - endpoints
+  - object_identifiers
+  - sessions
+  - authorization_matrix
+
+produces:
+  observations: [cross_user_response_difference]
+  hypotheses: [authorization.object_level]
+  candidate_findings: [authorization.object_level]
+  capabilities: [read_foreign_object, modify_foreign_object]
+
+safety:
+  default_risk_class: R2
+  mutation: conditional
+  destructive: false
+  production_default: read_only
+  max_requests: 500
+  default_rps: 2
+  approval_class: normal
+
+validation:
+  evidence_profile: authorization_differential
+
+runtime:
+  task_queue: api-testing
+  timeout_seconds: 1800
+  retry_policy: bounded
