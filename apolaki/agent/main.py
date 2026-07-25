@@ -568,10 +568,24 @@ def _tool_ledger(session_id: str) -> dict:
         if typ == "tool_call":
             a["calls"] += 1
         elif typ == "tool_result":
-            a["findings"] += int(l.get("count") or 0)
+            cnt = int(l.get("count") or 0)
             out = str(l.get("output") or "")
-            if out and not a["note"]:
-                a["note"] = out[:140]
+            # A no-confirmation pass that still returned a data-carrier (e.g. sqlmap's
+            # log-tail record) must not inflate the findings count — otherwise the ledger
+            # reads "9 findings / No SQLi confirmed". Mirrors the scan-time count fix so a
+            # report rendered from older logs is consistent too.
+            if cnt and re.search(r"no\b[\w\s/]*\bconfirmed|\b0\s+confirmed", out, re.I):
+                cnt = 0
+            a["findings"] += cnt
+            # Prefer the note from a call that actually produced findings, so the ledger
+            # reflects the CONFIRMING call — not an earlier 0-result call on another
+            # endpoint (the bug that made run_sqli/run_xxe read "0 confirmed" next to a
+            # confirmed finding). A hit-call note locks; benign notes only fill a blank.
+            if out:
+                if cnt > 0:
+                    a["note"], a["_locked"] = out[:140], True
+                elif not a["note"] and not a.get("_locked"):
+                    a["note"] = out[:140]
         else:  # tool_error / scope_block
             a["error"] = str(l.get("error") or "")[:140]
     tools = []

@@ -316,18 +316,18 @@ def next_batch(state: dict) -> list:
                       for e in sorted(param_eps, key=_sqli_score, reverse=True)[:CAP_SQLMAP]}
     else:
         sqlmap_eps = set()
+    # Per-endpoint NATIVE injection probes first (fast, self-confirming with a deterministic
+    # oracle). The heavy sqlmap pass is DEFERRED (collected here, appended after XXE below) so
+    # a slow deep/insane sqlmap can never STARVE the native confirmations — the earlier failure
+    # mode where sqlmap on endpoint #2 blocked run_sqli/run_xxe on every later endpoint. A
+    # single run now surfaces the confirmations fast, and sqlmap corroborates afterwards.
+    sqlmap_steps = []
     for ep in param_eps:
         u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         tag = f"{ep['host']}{ep['path']}"
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
-        # follow the native SQLi probe with a heavy sqlmap pass on the same endpoint so the
-        # full injection audit fires in deterministic scans too (not just under AI). Bounded
-        # to the most injection-prone endpoints at deep. INTRUSIVE -> _allowed() gates to Full.
-        if tag in sqlmap_eps:
-            e_steps.append(_step("run_sqlmap", {"url": u, "intensity": intensity},
-                                 f"run_sqlmap:{tag}"))
         e_steps.append(_step("run_nosqli", {"url": u}, f"run_nosqli:{tag}"))
         e_steps.append(_step("run_injection_probes", {"url": u}, f"run_injection_probes:{tag}"))
         e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
@@ -335,10 +335,15 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_ssrf", {"url": u}, f"run_ssrf:{tag}"))
         if any(p in _CMD_PARAM for p in params_l):
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
-    # XXE — POST XML body sinks. Prefer real POST forms captured during enrich
-    # (their action + body field names let run_xxe build a schema-shaped XML body,
-    # e.g. the stock-check <productId>/<storeId> form); fall back to path-matched
-    # inventory endpoints. Both are path-driven, not query-param-driven.
+        # heavy sqlmap on the same endpoint — bounded to injection-prone endpoints at deep,
+        # full fan-out at insane. INTRUSIVE -> _allowed() gates to Full. Deferred to the end.
+        if tag in sqlmap_eps:
+            sqlmap_steps.append(_step("run_sqlmap", {"url": u, "intensity": intensity},
+                                      f"run_sqlmap:{tag}"))
+    # XXE — POST XML body sinks (fast native timing/OOB oracle), BEFORE the heavy sqlmap pass.
+    # Prefer real POST forms captured during enrich (their action + body field names let
+    # run_xxe build a schema-shaped XML body, e.g. the stock-check <productId>/<storeId>
+    # form); fall back to path-matched / body-sink inventory endpoints. Path-driven.
     xxe_seen = set()
     for fm in (state.get("recon", {}).get("forms") or []):
         act = fm.get("action")
@@ -351,6 +356,9 @@ def next_batch(state: dict) -> list:
         u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         if u not in xxe_seen:
             e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
+    # heavy sqlmap corroboration LAST — the slowest injection tool, so it never blocks the
+    # native SQLi/XXE/DOM confirmations that make the report complete.
+    e_steps.extend(sqlmap_steps)
     # auth-bypass SQLi on login-style endpoints (POST/JSON body — query probes can't
     # reach it). Prefer captured POST forms; also probe discovered login-ish paths.
     auth_seen = set()
@@ -422,6 +430,62 @@ def next_batch(state: dict) -> list:
         e_steps.append(_step("run_exposure", {"base_url": _b(h)}, f"run_exposure:{h}"))
         # site-level: one cache-poisoning probe per live host root (unkeyed headers)
         e_steps.append(_step("run_cache_poison", {"url": _b(h)}, f"run_cache_poison:{h}"))
+    # ── expanded class coverage (deterministic): schedule the auth / API / logic tools
+    # the planner previously left to the AI layer, so ONE Full run also exercises CSRF,
+    # BFLA/BOLA, race + rate-limit, insecure deserialization, dalfox XSS confirmation,
+    # OAuth abuse, JWT weaknesses and ffuf content discovery. Bounded; the INTRUSIVE
+    # ones are gated to Full mode by fresh()/_allowed(). They run after the fast native
+    # probes + sqlmap, so they never starve the confirmations that complete the report.
+    for ep in param_eps:
+        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        tag = f"{ep['host']}{ep['path']}"
+        e_steps.append(_step("run_deserialization", {"url": u}, f"run_deserialization:{tag}"))
+        # object/function-level authz sweep — SAFE methods only (never DELETE).
+        e_steps.append(_step("run_bfla", {"url": u, "allow_delete": False}, f"run_bfla:{tag}"))
+    # dalfox — external XSS engine for stronger reflected-XSS confirmation; heavy, so
+    # bound to the most injection-prone endpoints at deep, full fan-out at insane.
+    dalfox_eps = (sorted(param_eps, key=_sqli_score, reverse=True)[:CAP_SQLMAP]
+                  if intensity in ("deep", "insane") else param_eps[:3])
+    for ep in dalfox_eps:
+        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        e_steps.append(_step("run_dalfox", {"url": u}, f"run_dalfox:{ep['host']}{ep['path']}"))
+    # CSRF token check + race/rate-limit on state-changing POST forms.
+    sc_seen = set()
+    for fm in (state.get("recon", {}).get("forms") or []):
+        act = fm.get("action")
+        if act and str(fm.get("method", "GET")).upper() == "POST" and act not in sc_seen:
+            sc_seen.add(act)
+            body = "&".join(f"{f}=1" for f in (fm.get("fields") or []) if f)
+            e_steps.append(_step("run_csrf", {"url": act}, f"run_csrf:{act}"))
+            e_steps.append(_step("run_race", {"url": act, "method": "POST", "body": body},
+                                 f"run_race:{act}"))
+    # OAuth abuse on the standard OAuth surface per host + any discovered oauth/authorize path.
+    oauth_seen = set()
+    for h in host_bases:
+        for pth in ("/oauth/authorize", "/authorize", "/.well-known/oauth-authorization-server"):
+            ou = _b(h) + pth
+            if ou not in oauth_seen:
+                oauth_seen.add(ou)
+                e_steps.append(_step("run_oauth", {"url": ou}, f"run_oauth:{h}{pth}"))
+    for u in urls:
+        if _re.search(r"(?:oauth|/authorize|openid|/sso)", _path(u), _re.I):
+            base = _b(_host(u)) + _path(u)
+            if base not in oauth_seen:
+                oauth_seen.add(base)
+                e_steps.append(_step("run_oauth", {"url": base}, f"run_oauth:{base}"))
+    # JWT weakness analysis (alg-confusion / weak-secret / kid) — only when the scan
+    # carries a bearer/JWT token (authed runs); harmless no-op on unauth scans.
+    import json as _json
+    _blob = (_json.dumps(state.get("auth_headers") or {})
+             + _json.dumps(state.get("recon", {}).get("cookies") or {}))
+    _jm = _re.search(r"(eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)", _blob)
+    if _jm:
+        e_steps.append(_step("run_jwt", {"token": _jm.group(1)}, "run_jwt"))
+    # ffuf content/dir discovery on host roots (complements run_content_discovery); heavy,
+    # so deep/insane only.
+    if intensity in ("deep", "insane"):
+        for h in host_bases[:CAP_HOSTS]:
+            e_steps.append(_step("run_ffuf", {"url": _b(h) + "/FUZZ"}, f"run_ffuf:{h}"))
     e_steps = fresh(e_steps)
     if e_steps:
         return e_steps
