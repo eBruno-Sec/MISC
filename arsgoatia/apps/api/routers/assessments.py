@@ -211,6 +211,64 @@ async def resume(assessment_id: str, _: str = Depends(get_tenant_id)) -> dict:
     return {"status": "resume_signaled"}
 
 
+@router.get("/{assessment_id}/assets")
+async def list_assets(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    assets = await repo.list_assets(session, assessment_id)
+    return [
+        {
+            "id": str(a.id),
+            "asset_type": a.asset_type,
+            "canonical_name": a.canonical_name,
+            "scope_status": a.scope_status,
+            "assertion_state": a.assertion_state,
+        }
+        for a in assets
+    ]
+
+
+@router.get("/{assessment_id}/endpoints")
+async def list_endpoints(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    endpoints = await repo.list_endpoints(session, assessment_id)
+    return [
+        {
+            "id": str(e.id),
+            "method": e.method,
+            "host": e.host,
+            "path_template": e.path_template,
+            "auth_schemes": e.auth_schemes,
+        }
+        for e in endpoints
+    ]
+
+
+@router.get("/{assessment_id}/evidence")
+async def list_evidence(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    evidence = await repo.list_evidence(session, assessment_id)
+    return [
+        {
+            "id": str(e.id),
+            "evidence_type": e.evidence_type,
+            "object_uri": e.object_uri,
+            "sha256": e.sha256,
+            "size_bytes": e.size_bytes,
+            "redaction_state": e.redaction_state,
+        }
+        for e in evidence
+    ]
+
+
 @router.get("/{assessment_id}")
 async def get_one(
     assessment_id: str,

@@ -273,6 +273,119 @@ class Outbox(Base):
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+# --------------------------------------------------------------------------- #
+# Knowledge: assets, services, endpoints (M2 recon), evidence (immutable)
+# --------------------------------------------------------------------------- #
+class Asset(Base):
+    __tablename__ = "asset"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("assessment.id"), nullable=False, index=True
+    )
+    asset_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    canonical_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    identifiers: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    environment_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    scope_status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    assertion_state: Mapped[str] = mapped_column(String(20), nullable=False, default="observed")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    first_seen_at: Mapped[datetime] = _created_at()
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Service(Base):
+    __tablename__ = "service"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    asset_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("asset.id"), nullable=False, index=True
+    )
+    protocol: Mapped[str] = mapped_column(String(40), nullable=False)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transport: Mapped[str] = mapped_column(String(20), nullable=False, default="tcp")
+    product: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Endpoint(Base):
+    __tablename__ = "endpoint"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    asset_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("asset.id"), nullable=False, index=True
+    )
+    service_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    protocol: Mapped[str] = mapped_column(String(20), nullable=False, default="https")
+    method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    host: Mapped[str] = mapped_column(String(300), nullable=False)
+    path_template: Mapped[str] = mapped_column(String(1000), nullable=False)
+    parameters: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    auth_schemes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    content_types: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    source_locations: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    reachability_contexts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Evidence(Base):
+    """Immutable, append-only (§16). Corrections create derivative rows."""
+
+    __tablename__ = "evidence"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("assessment.id"), nullable=False, index=True
+    )
+    evidence_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    object_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    captured_at: Mapped[datetime] = _created_at()
+    captured_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_execution_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    redaction_state: Mapped[str] = mapped_column(String(20), nullable=False, default="redacted")
+    sensitivity: Mapped[str] = mapped_column(String(20), nullable=False, default="confidential")
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+
+
+# Which migration owns each table's DDL (so each migration creates only its own).
+_MIGRATION_TABLES: dict[str, list[str]] = {
+    "0001": [
+        "tenant",
+        "app_user",
+        "team",
+        "assessment",
+        "assessment_revision",
+        "authorization_record",
+        "scope_definition",
+        "scope_target",
+        "policy",
+        "policy_revision",
+        "workflow_record",
+        "module_definition",
+        "audit_event",
+        "outbox",
+    ],
+    "0002": ["asset", "service", "endpoint", "evidence"],
+}
+
+
+def tables_for_migration(tag: str) -> list[str]:
+    return list(_MIGRATION_TABLES.get(tag, []))
+
+
 # Tables carrying tenant_id that get row-level security enabled by the migration.
 def tenant_scoped_tables() -> list[str]:
     scoped = []

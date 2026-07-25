@@ -43,7 +43,8 @@ def test_immutable_tables_classified():
 
 
 def test_append_only_tables_classified():
-    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {"audit_event", "outbox"}
+    # evidence joins audit_event + outbox as append-only in M2 (§16).
+    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {"audit_event", "outbox", "evidence"}
 
 
 def test_tenant_scoping_excludes_root_tables():

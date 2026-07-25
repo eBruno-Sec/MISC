@@ -43,7 +43,7 @@ def test_migration_iterates_declared_classifications():
         "authorization_record",
         "policy_revision",
     }
-    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {"audit_event", "outbox"}
+    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {"audit_event", "outbox", "evidence"}
     scoped = set(tenant_scoped_tables())
     assert {"assessment", "authorization_record", "audit_event", "outbox"} <= scoped
     assert "tenant" not in scoped

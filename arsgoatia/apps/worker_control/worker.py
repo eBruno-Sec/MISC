@@ -1,9 +1,7 @@
 """Control-plane Temporal worker.
 
-Runs the root AssessmentWorkflow, its child workflows, and the control + AI
-activities (queues: workflow-control, ai-analysis). M0 scaffold: connect to
-Temporal and idle so the service is verifiable; M1 registers the workflows and
-activities and replaces the idle loop with Worker.run().
+Runs the root AssessmentWorkflow (queue: workflow-control). Child workflows and
+control/AI activities are added on this worker as later milestones land.
 """
 
 from __future__ import annotations
@@ -18,26 +16,28 @@ log = logging.getLogger("worker-control")
 CONTROL_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE_CONTROL", "workflow-control")
 
 
-async def main() -> None:
+async def _connect():
     from temporalio.client import Client
 
     address = os.getenv("TEMPORAL_ADDRESS", "temporal:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
-
-    # Retry connect until Temporal is reachable (compose starts services in
-    # parallel; the frontend may not be listening yet).
     while True:
         try:
-            await Client.connect(address, namespace=namespace)
-            break
+            return await Client.connect(address, namespace=namespace)
         except Exception as exc:  # noqa: BLE001 - connectivity retry
             log.warning("temporal not ready (%s); retrying in 3s", exc)
             await asyncio.sleep(3)
 
-    log.info("worker-control connected to %s (queues: %s, ai-analysis)", address, CONTROL_QUEUE)
-    log.info("no workflows registered yet (M0 scaffold); idling")
-    while True:
-        await asyncio.sleep(3600)
+
+async def main() -> None:
+    from temporalio.worker import Worker
+
+    from temporal.workflows.assessment import AssessmentWorkflow
+
+    client = await _connect()
+    worker = Worker(client, task_queue=CONTROL_QUEUE, workflows=[AssessmentWorkflow])
+    log.info("worker-control running (queue: %s, workflow: AssessmentWorkflow)", CONTROL_QUEUE)
+    await worker.run()
 
 
 if __name__ == "__main__":

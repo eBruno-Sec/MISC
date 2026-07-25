@@ -20,11 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domain.models import (
     Assessment,
     AssessmentRevision,
+    Asset,
     AuthorizationRecord,
+    Endpoint,
+    Evidence,
     Policy,
     PolicyRevision,
     ScopeDefinition,
     ScopeTarget,
+    Service,
 )
 
 
@@ -224,3 +228,152 @@ async def set_workflow_handle(
         assessment.temporal_workflow_id = workflow_id
         assessment.temporal_run_id = run_id
     await session.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Recon persistence (M2)
+# --------------------------------------------------------------------------- #
+async def get_scope_targets(session: AsyncSession, assessment_id: str) -> list[dict]:
+    """Return the current scope targets for an assessment as firewall-ready dicts."""
+    scope_id = (
+        await session.execute(
+            select(ScopeDefinition.id)
+            .where(ScopeDefinition.assessment_id == assessment_id)
+            .order_by(ScopeDefinition.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if scope_id is None:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(ScopeTarget).where(ScopeTarget.scope_definition_id == scope_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {"value": r.value, "disposition": r.disposition, "constraints": r.constraints}
+        for r in rows
+    ]
+
+
+async def list_assets(session: AsyncSession, assessment_id: str) -> list[Asset]:
+    return list(
+        (
+            await session.execute(select(Asset).where(Asset.assessment_id == assessment_id))
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def list_endpoints(session: AsyncSession, assessment_id: str) -> list[Endpoint]:
+    asset_ids = [a.id for a in await list_assets(session, assessment_id)]
+    if not asset_ids:
+        return []
+    return list(
+        (await session.execute(select(Endpoint).where(Endpoint.asset_id.in_(asset_ids))))
+        .scalars()
+        .all()
+    )
+
+
+async def list_evidence(session: AsyncSession, assessment_id: str) -> list[Evidence]:
+    return list(
+        (
+            await session.execute(select(Evidence).where(Evidence.assessment_id == assessment_id))
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def create_asset(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    asset_type: str,
+    canonical_name: str,
+    scope_status: str = "in_scope",
+    identifiers: dict | None = None,
+    evidence_refs: list | None = None,
+) -> Asset:
+    row = Asset(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        asset_type=asset_type,
+        canonical_name=canonical_name,
+        scope_status=scope_status,
+        identifiers=identifiers or {},
+        assertion_state="observed",
+        evidence_refs=evidence_refs or [],
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_service(
+    session: AsyncSession, *, tenant_id: str, asset_id: str, protocol: str, port: int | None
+) -> Service:
+    row = Service(
+        tenant_id=tenant_id, asset_id=asset_id, protocol=protocol, port=port, state="open"
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_endpoint(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    asset_id: str,
+    host: str,
+    path_template: str,
+    method: str | None,
+    protocol: str = "https",
+    service_id: str | None = None,
+    auth_schemes: list | None = None,
+    evidence_refs: list | None = None,
+) -> Endpoint:
+    row = Endpoint(
+        tenant_id=tenant_id,
+        asset_id=asset_id,
+        service_id=service_id,
+        host=host,
+        path_template=path_template,
+        method=method,
+        protocol=protocol,
+        auth_schemes=auth_schemes or [],
+        evidence_refs=evidence_refs or [],
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_evidence(session: AsyncSession, *, tenant_id: str, fields: dict) -> Evidence:
+    """Persist an Evidence row from an EvidenceStore.put() result."""
+    row = Evidence(
+        id=fields["id"],
+        tenant_id=tenant_id,
+        assessment_id=fields["assessment_id"],
+        evidence_type=fields["evidence_type"],
+        object_uri=fields["object_uri"],
+        sha256=fields["sha256"],
+        size_bytes=fields["size_bytes"],
+        media_type=fields["media_type"],
+        captured_by=fields["captured_by"],
+        source_execution_id=fields.get("source_execution_id"),
+        redaction_state=fields.get("redaction_state", "redacted"),
+        sensitivity=fields.get("sensitivity", "confidential"),
+        meta=fields.get("metadata", {}),
+    )
+    session.add(row)
+    await session.flush()
+    return row

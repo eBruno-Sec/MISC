@@ -12,9 +12,11 @@ transition happens in run(), and every branch is on recorded state.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from domain.lifecycle import AssessmentLifecycle, LifecycleState
@@ -48,15 +50,31 @@ class AssessmentWorkflow:
         self._cancelled = False
         self._approvals: dict[str, bool] = {}
         self._pending_approval: str | None = None
+        self._recon_summary: dict[str, Any] | None = None
 
     @workflow.run
     async def run(self, params: dict[str, Any]) -> dict[str, Any]:
         require_approval = bool(params.get("require_validation_approval", False))
+        run_recon = bool(params.get("run_recon", True))
 
         for phase in _SLICE_PHASES:
             await self._gate()
             if self._cancelled or self._emergency:
                 break
+
+            # Safe HTTP recon runs on the target-egress worker (safe-recon queue),
+            # never in the workflow. It is scope-fenced and read-only (R1).
+            if phase is LifecycleState.RECON_RUNNING and run_recon:
+                self._recon_summary = await workflow.execute_activity(
+                    "safe_http_recon",
+                    {
+                        "assessment_id": params.get("assessment_id"),
+                        "tenant_id": params.get("tenant_id"),
+                    },
+                    task_queue="safe-recon",
+                    start_to_close_timeout=timedelta(seconds=180),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
 
             # The validation phase is where the slice's high-risk action lives;
             # gate it behind an action-bound approval when policy demands one.
@@ -77,6 +95,7 @@ class AssessmentWorkflow:
         return {
             "assessment_id": params.get("assessment_id"),
             "final_state": self._life.state.value,
+            "recon": self._recon_summary,
         }
 
     # -- gates ----------------------------------------------------------- #

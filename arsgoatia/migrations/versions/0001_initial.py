@@ -18,6 +18,7 @@ from domain.models import (
     WRITE_IMMUTABLE,
     Base,
     tables_by_write_policy,
+    tables_for_migration,
     tenant_scoped_tables,
 )
 
@@ -26,13 +27,17 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+_OWN = set(tables_for_migration("0001"))
+
 
 def upgrade() -> None:
     bind = op.get_bind()
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
 
-    # Tables come straight from the ORM so models are the single source of truth.
-    Base.metadata.create_all(bind=bind)
+    # Create only this migration's tables from the ORM (single source of truth).
+    Base.metadata.create_all(
+        bind=bind, tables=[Base.metadata.tables[name] for name in sorted(_OWN)]
+    )
 
     # Generic block: reject UPDATE/DELETE on immutable and append-only tables.
     op.execute(
@@ -48,6 +53,8 @@ def upgrade() -> None:
 
     # Write-once (revisions, verified records): no UPDATE, no DELETE.
     for tbl in tables_by_write_policy(WRITE_IMMUTABLE):
+        if tbl not in _OWN:
+            continue
         op.execute(
             f"CREATE TRIGGER {tbl}_immutable BEFORE UPDATE OR DELETE ON {tbl} "
             f"FOR EACH ROW EXECUTE FUNCTION arsgoatia_block_mutation('immutable')"
@@ -55,7 +62,7 @@ def upgrade() -> None:
 
     # Append-only (audit): no UPDATE, no DELETE.
     for tbl in tables_by_write_policy(WRITE_APPEND_ONLY):
-        if tbl == "outbox":
+        if tbl == "outbox" or tbl not in _OWN:
             continue
         op.execute(
             f"CREATE TRIGGER {tbl}_append_only BEFORE UPDATE OR DELETE ON {tbl} "
@@ -92,6 +99,8 @@ def upgrade() -> None:
     # Per-tenant row-level security. FORCE so the table owner (the app role) is
     # also subject to isolation. Reads/writes must set app.current_tenant.
     for tbl in tenant_scoped_tables():
+        if tbl not in _OWN:
+            continue
         op.execute(f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {tbl} FORCE ROW LEVEL SECURITY")
         op.execute(
@@ -106,4 +115,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS arsgoatia_outbox_guard() CASCADE")
     op.execute("DROP FUNCTION IF EXISTS arsgoatia_block_mutation() CASCADE")
-    Base.metadata.drop_all(bind=op.get_bind())
+    Base.metadata.drop_all(
+        bind=op.get_bind(), tables=[Base.metadata.tables[name] for name in sorted(_OWN)]
+    )

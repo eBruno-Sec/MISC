@@ -98,8 +98,10 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
 - **M0** Contracts & scaffold — schemas, compose, CI. *(done)*
 - **M1** Control plane — Postgres schema, RLS, immutability, outbox/audit,
   lifecycle state machine, AssessmentWorkflow skeleton, create/authorize/
-  compile-scope/pause/resume API. *(current)*
-- **M2** Recon & evidence.
+  compile-scope/pause/resume API. *(done)*
+- **M2** Recon & evidence — scope firewall + target guard (ported), safe HTTP
+  recon activity, content-addressed MinIO evidence store, asset/service/endpoint/
+  evidence tables, timeline read API. *(current)*
 - **M3** Policy, envelope, identities.
 - **M4** IDOR module, validation, capability.
 - **M5** Planner, chain, AI gateway.
