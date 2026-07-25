@@ -191,12 +191,18 @@ async def start(
     return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
 
 
-async def _signal(assessment_id: str, signal_name: str) -> None:
+async def _signal(assessment_id: str, signal_name: str, *args) -> None:
     from temporal_common.client import get_temporal_client
 
     client = await get_temporal_client()
     handle = client.get_workflow_handle(f"assessment-{assessment_id}")
-    await handle.signal(signal_name)
+    await handle.signal(signal_name, *args)
+
+
+class ProvideApproval(BaseModel):
+    action_id: str
+    granted: bool
+    resolver: str | None = None
 
 
 @router.post("/{assessment_id}/pause")
@@ -209,6 +215,71 @@ async def pause(assessment_id: str, _: str = Depends(get_tenant_id)) -> dict:
 async def resume(assessment_id: str, _: str = Depends(get_tenant_id)) -> dict:
     await _signal(assessment_id, "resume")
     return {"status": "resume_signaled"}
+
+
+@router.post("/{assessment_id}/approvals")
+async def provide_approval(
+    assessment_id: str, body: ProvideApproval, _: str = Depends(get_tenant_id)
+) -> dict:
+    # Action-bound: the workflow keys the approval on the exact action_id.
+    await _signal(assessment_id, "provide_approval", body.action_id, body.granted)
+    return {"status": "approval_signaled", "action_id": body.action_id, "granted": body.granted}
+
+
+@router.get("/{assessment_id}/findings")
+async def list_findings(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    from sqlalchemy import select
+
+    from domain.models import Finding
+
+    rows = (
+        (await session.execute(select(Finding).where(Finding.assessment_id == assessment_id)))
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": str(f.id),
+            "internal_class": f.internal_class,
+            "title": f.title,
+            "validation_state": f.validation_state,
+            "severity_label": f.severity_label,
+            "evidence_profile": f.evidence_profile,
+            "capability_refs": f.capability_refs,
+        }
+        for f in rows
+    ]
+
+
+@router.get("/{assessment_id}/capabilities")
+async def list_capabilities(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    from sqlalchemy import select
+
+    from domain.models import Capability
+
+    rows = (
+        (await session.execute(select(Capability).where(Capability.assessment_id == assessment_id)))
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": str(c.id),
+            "capability_type": c.capability_type,
+            "label": c.label,
+            "validation_state": c.validation_state,
+            "origin_finding_id": str(c.origin_finding_id) if c.origin_finding_id else None,
+        }
+        for c in rows
+    ]
 
 
 @router.get("/{assessment_id}/assets")

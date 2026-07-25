@@ -36,15 +36,16 @@ async def main() -> None:
 
     from temporal.workflows.activities.identity_activities import establish_identities
     from temporal.workflows.activities.recon_activities import safe_http_recon
+    from temporal.workflows.activities.validation_activities import run_idor_validation
 
     client = await _connect()
-    # One worker per task queue, run concurrently. Later milestones add the
-    # module/validation/report activities on their queues here.
+    # One worker per task queue, run concurrently.
     workers = [
         Worker(client, task_queue="safe-recon", activities=[safe_http_recon]),
         Worker(client, task_queue="api-testing", activities=[establish_identities]),
+        Worker(client, task_queue="high-risk-validation", activities=[run_idor_validation]),
     ]
-    log.info("worker-web running (queues: safe-recon, api-testing)")
+    log.info("worker-web running (queues: safe-recon, api-testing, high-risk-validation)")
     await asyncio.gather(*(w.run() for w in workers))
 
 

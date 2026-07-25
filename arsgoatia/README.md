@@ -104,8 +104,10 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
   evidence tables, timeline read API. *(done)*
 - **M3** Policy, envelope, identities — layered policy engine, signed action
   envelope + approval binding, SSRF/rebinding checks, dev secret store, identity
-  bootstrap activity, identity/credential/session/context tables. *(current)*
-- **M4** IDOR module, validation, capability.
+  bootstrap activity, identity/credential/session/context tables. *(done)*
+- **M4** IDOR module, validation, capability — module + tool SDK, deterministic
+  IDOR confirmation, validation activity, capability engine, finding +
+  read_foreign_object capability, reasoning/finding tables, approvals API. *(current)*
 - **M5** Planner, chain, AI gateway.
 - **M6** Reporting, e2e, replay.
 

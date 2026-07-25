@@ -482,3 +482,194 @@ async def create_access_context(
     session.add(row)
     await session.flush()
     return row
+
+
+# --------------------------------------------------------------------------- #
+# Reasoning / findings / capabilities (M4)
+# --------------------------------------------------------------------------- #
+async def create_observation(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    observation_type: str,
+    subject_type: str,
+    summary: str,
+    structured_data: dict,
+    confidence: float = 0.7,
+    evidence_refs: list | None = None,
+) -> "Observation":
+    from domain.models import Observation
+
+    row = Observation(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        observation_type=observation_type,
+        subject_type=subject_type,
+        assertion_state="observed",
+        confidence=confidence,
+        summary=summary,
+        structured_data=structured_data,
+        evidence_refs=evidence_refs or [],
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_hypothesis(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    hypothesis_class: str,
+    summary: str,
+    rationale: str,
+    supporting_observation_refs: list | None = None,
+    confidence: float = 0.6,
+) -> "Hypothesis":
+    from domain.models import Hypothesis
+
+    row = Hypothesis(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        hypothesis_class=hypothesis_class,
+        summary=summary,
+        rationale=rationale,
+        supporting_observation_refs=supporting_observation_refs or [],
+        confidence=confidence,
+        state="validating",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_finding(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    internal_class: str,
+    title: str,
+    summary: str,
+    technical_description: str,
+    evidence_profile: str,
+    severity_label: str = "high",
+    evidence_refs: list | None = None,
+    affected_endpoint_ids: list | None = None,
+    affected_identity_ids: list | None = None,
+) -> "Finding":
+    from domain.models import Finding
+
+    row = Finding(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        internal_class=internal_class,
+        title=title,
+        summary=summary,
+        technical_description=technical_description,
+        validation_state="candidate",
+        severity_label=severity_label,
+        evidence_profile=evidence_profile,
+        evidence_refs=evidence_refs or [],
+        affected_endpoint_ids=affected_endpoint_ids or [],
+        affected_identity_ids=affected_identity_ids or [],
+        confidence=0.6,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def confirm_finding(
+    session: AsyncSession, *, finding_id: str, capability_refs: list | None = None
+) -> None:
+    from datetime import datetime, timezone
+
+    from domain.models import Finding
+
+    finding = await session.get(Finding, finding_id)
+    if finding is not None:
+        finding.validation_state = "confirmed"
+        finding.confidence = 0.95
+        finding.validated_at = datetime.now(timezone.utc)
+        if capability_refs:
+            finding.capability_refs = capability_refs
+    await session.flush()
+
+
+async def create_capability(
+    session: AsyncSession, *, tenant_id: str, assessment_id: str, cap: dict
+) -> "Capability":
+    from domain.models import Capability
+
+    row = Capability(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        capability_type=cap["capability_type"],
+        label=cap.get("label"),
+        subject_identity_id=cap.get("subject_identity_id"),
+        target_asset_id=cap.get("target_asset_id"),
+        access_context_id=cap["access_context_id"],
+        privilege=cap.get("privilege"),
+        validation_state=cap.get("validation_state", "proven"),
+        confidence=cap.get("confidence", 0.9),
+        origin_finding_id=cap.get("origin_finding_id"),
+        evidence_refs=cap.get("evidence_refs", []),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def record_tool_execution(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    tool_id: str,
+    exit_state: str,
+    raw_output_evidence_ref: str | None,
+    warnings: list | None = None,
+) -> "ToolExecution":
+    from domain.models import ToolExecution
+
+    row = ToolExecution(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        tool_id=tool_id,
+        exit_state=exit_state,
+        raw_output_evidence_ref=raw_output_evidence_ref,
+        warnings=warnings or [],
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def record_approval(
+    session: AsyncSession, *, tenant_id: str, assessment_id: str, binding: dict, status: str
+) -> "Approval":
+    from datetime import datetime, timezone
+
+    from domain.models import Approval
+
+    row = Approval(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        action_id=binding["action_id"],
+        action_class=binding["action_class"],
+        target_ids=binding.get("target_ids", []),
+        context_id=binding["context_id"],
+        assessment_revision=binding["assessment_revision"],
+        policy_revision=binding["policy_revision"],
+        enforced_limits_hash=binding["enforced_limits_hash"],
+        status=status,
+        resolved_by=binding.get("resolved_by"),
+        resolved_at=datetime.now(timezone.utc),
+        expires_at=binding["expires_at"],
+    )
+    session.add(row)
+    await session.flush()
+    return row

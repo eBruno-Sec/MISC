@@ -33,18 +33,30 @@ def test_all_m1_tables_present():
 
 
 def test_immutable_tables_classified():
+    # Write-once tables: assessment/policy revisions, verified authorization,
+    # scope, and proven capabilities (M4).
     assert set(tables_by_write_policy(WRITE_IMMUTABLE)) == {
         "assessment_revision",
         "authorization_record",
         "scope_definition",
         "scope_target",
         "policy_revision",
+        "capability",
     }
 
 
 def test_append_only_tables_classified():
-    # evidence joins audit_event + outbox as append-only in M2 (§16).
-    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {"audit_event", "outbox", "evidence"}
+    # audit + outbox (M1), evidence (M2), and the M4 reasoning/execution log.
+    assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {
+        "audit_event",
+        "outbox",
+        "evidence",
+        "observation",
+        "action_proposal",
+        "approval",
+        "action_execution",
+        "tool_execution",
+    }
 
 
 def test_tenant_scoping_excludes_root_tables():

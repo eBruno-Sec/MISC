@@ -445,6 +445,170 @@ class Secret(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+# --------------------------------------------------------------------------- #
+# Reasoning, validation, findings, capabilities (M4)
+# --------------------------------------------------------------------------- #
+class Observation(Base):
+    __tablename__ = "observation"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    observation_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    subject_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    subject_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    assertion_state: Mapped[str] = mapped_column(String(20), nullable=False, default="observed")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    structured_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    source_tool_execution_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Hypothesis(Base):
+    __tablename__ = "hypothesis"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hypothesis_class: Mapped[str] = mapped_column(String(80), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    supporting_observation_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    contradicting_observation_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    target_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    required_context_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed")
+
+
+class ValidationPlan(Base):
+    __tablename__ = "validation_plan"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hypothesis_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    strategy: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    expected_evidence: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    failure_evidence: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    cleanup_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+
+
+class ActionProposal(Base):
+    __tablename__ = "action_proposal"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    module_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    estimated_risk_class: Mapped[str] = mapped_column(String(4), nullable=False, default="R1")
+    estimated_cost_requests: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+
+class Approval(Base):
+    """Append-only. Each row is a final, action-bound decision (§13.6)."""
+
+    __tablename__ = "approval"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    action_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    action_class: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    assessment_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    enforced_limits_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    mutation_allowance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cleanup_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # granted | denied
+    resolved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ActionExecution(Base):
+    __tablename__ = "action_execution"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    action_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    envelope: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    approval_ref: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    exit_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    started_at: Mapped[datetime] = _created_at()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ToolExecution(Base):
+    __tablename__ = "tool_execution"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    tool_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    tool_version: Mapped[str] = mapped_column(String(40), nullable=False, default="1.0.0")
+    parser_version: Mapped[str] = mapped_column(String(40), nullable=False, default="1.0.0")
+    exit_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    raw_output_evidence_ref: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    warnings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Finding(Base):
+    __tablename__ = "finding"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    internal_class: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    technical_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    affected_asset_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    affected_endpoint_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    affected_identity_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    validation_state: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    severity_label: Mapped[str] = mapped_column(String(20), nullable=False, default="informational")
+    evidence_profile: Mapped[str] = mapped_column(String(60), nullable=False, default="")
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    capability_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    cleanup_state: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")
+    discovered_at: Mapped[datetime] = _created_at()
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Capability(Base):
+    """Immutable (§18). A proven capability is written once, backed by evidence."""
+
+    __tablename__ = "capability"
+    __arsgoatia_write__ = WRITE_IMMUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    capability_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    subject_identity_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_asset_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    access_context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    privilege: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    validation_state: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    origin_finding_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    valid_from: Mapped[datetime] = _created_at()
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 # Which migration owns each table's DDL (so each migration creates only its own).
 _MIGRATION_TABLES: dict[str, list[str]] = {
     "0001": [
@@ -465,6 +629,17 @@ _MIGRATION_TABLES: dict[str, list[str]] = {
     ],
     "0002": ["asset", "service", "endpoint", "evidence"],
     "0003": ["identity", "credential_reference", "session", "access_context", "secret"],
+    "0004": [
+        "observation",
+        "hypothesis",
+        "validation_plan",
+        "action_proposal",
+        "approval",
+        "action_execution",
+        "tool_execution",
+        "finding",
+        "capability",
+    ],
 }
 
 

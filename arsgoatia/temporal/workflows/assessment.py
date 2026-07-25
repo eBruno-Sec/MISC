@@ -51,39 +51,77 @@ class AssessmentWorkflow:
         self._approvals: dict[str, bool] = {}
         self._pending_approval: str | None = None
         self._recon_summary: dict[str, Any] | None = None
+        self._identities: dict[str, Any] | None = None
+        self._validation_summary: dict[str, Any] | None = None
 
     @workflow.run
     async def run(self, params: dict[str, Any]) -> dict[str, Any]:
-        require_approval = bool(params.get("require_validation_approval", False))
+        require_approval = bool(params.get("require_validation_approval", True))
         run_recon = bool(params.get("run_recon", True))
+        run_validation = bool(params.get("run_validation", True))
+        assessment_id = params.get("assessment_id")
+        tenant_id = params.get("tenant_id")
+        action_id = str(params.get("validation_action_id", "idor-validation"))
 
         for phase in _SLICE_PHASES:
             await self._gate()
             if self._cancelled or self._emergency:
                 break
 
-            # Safe HTTP recon runs on the target-egress worker (safe-recon queue),
-            # never in the workflow. It is scope-fenced and read-only (R1).
+            # Safe HTTP recon (R1) on the target-egress worker — never in the workflow.
             if phase is LifecycleState.RECON_RUNNING and run_recon:
                 self._recon_summary = await workflow.execute_activity(
                     "safe_http_recon",
-                    {
-                        "assessment_id": params.get("assessment_id"),
-                        "tenant_id": params.get("tenant_id"),
-                    },
+                    {"assessment_id": assessment_id, "tenant_id": tenant_id},
                     task_queue="safe-recon",
                     start_to_close_timeout=timedelta(seconds=180),
                     retry_policy=RetryPolicy(maximum_attempts=2),
                 )
 
-            # The validation phase is where the slice's high-risk action lives;
-            # gate it behind an action-bound approval when policy demands one.
-            if phase is LifecycleState.VALIDATION_RUNNING and require_approval:
-                action_id = params.get("validation_action_id", "validation-action")
-                granted = await self._await_approval(str(action_id))
-                if not granted:
-                    self._life.state = LifecycleState.FAILED_RECOVERABLE
-                    break
+            # Establish the two standard-user identities the IDOR module requires.
+            if phase is LifecycleState.ANALYSIS_RUNNING and run_validation:
+                base_url = (self._recon_summary or {}).get("base_url") or params.get("base_url")
+                self._identities = await workflow.execute_activity(
+                    "establish_identities",
+                    {
+                        "assessment_id": assessment_id,
+                        "tenant_id": tenant_id,
+                        "base_url": base_url,
+                        "target_asset_id": params.get("target_asset_id"),
+                    },
+                    task_queue="api-testing",
+                    start_to_close_timeout=timedelta(seconds=120),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+
+            # The validation phase runs the R2 differential behind an action-bound
+            # approval (policy returns require_approval under lab-safe).
+            if phase is LifecycleState.VALIDATION_RUNNING and run_validation:
+                granted = True
+                if require_approval:
+                    granted = await self._await_approval(action_id)
+                    if not granted:
+                        self._life.state = LifecycleState.FAILED_RECOVERABLE
+                        break
+                idents = (self._identities or {}).get("identities", [])
+                base_url = (self._recon_summary or {}).get("base_url") or params.get("base_url")
+                self._validation_summary = await workflow.execute_activity(
+                    "run_idor_validation",
+                    {
+                        "assessment_id": assessment_id,
+                        "tenant_id": tenant_id,
+                        "base_url": base_url,
+                        "target_asset_id": params.get("target_asset_id"),
+                        "identities": idents,
+                        "assessment_revision": params.get("assessment_revision", 1),
+                        "policy_revision": params.get("policy_revision", 1),
+                        "action_id": action_id,
+                        "approval_granted": granted,
+                    },
+                    task_queue="high-risk-validation",
+                    start_to_close_timeout=timedelta(seconds=180),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
 
             self._life.transition_to(phase)
 
@@ -93,9 +131,10 @@ class AssessmentWorkflow:
             self._life.state = LifecycleState.CANCELLED
 
         return {
-            "assessment_id": params.get("assessment_id"),
+            "assessment_id": assessment_id,
             "final_state": self._life.state.value,
             "recon": self._recon_summary,
+            "validation": self._validation_summary,
         }
 
     # -- gates ----------------------------------------------------------- #
