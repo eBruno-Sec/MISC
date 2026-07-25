@@ -340,6 +340,25 @@ async def list_evidence(
     ]
 
 
+@router.get("/{assessment_id}/reports")
+async def list_reports(
+    assessment_id: str,
+    _: str = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    rows = await repo.list_reports(session, assessment_id)
+    return [
+        {
+            "id": str(r.id),
+            "report_type": r.report_type,
+            "object_uri": r.object_uri,
+            "sha256": r.sha256,
+            "media_type": r.media_type,
+        }
+        for r in rows
+    ]
+
+
 @router.get("/{assessment_id}")
 async def get_one(
     assessment_id: str,

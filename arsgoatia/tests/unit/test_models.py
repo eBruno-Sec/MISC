@@ -59,6 +59,7 @@ def test_append_only_tables_classified():
         "tool_execution",
         "capability_transition",
         "attack_chain_step",
+        "report",
     }
 
 

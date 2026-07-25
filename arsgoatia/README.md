@@ -7,8 +7,10 @@ model**, **durable orchestration** (Temporal), an **immutable evidence store**,
 and **cross-domain attack chaining** — every action policy-checked, scope-fenced,
 and signed.
 
-> Status: **building the first vertical slice** (spec Phases 0–4). This is not the
-> whole platform; see [Scope](#scope) and [Milestones](#milestones).
+> Status: **first vertical slice complete** (spec Phases 0–4) — all M0–M6
+> milestones landed, 111 unit/contract/security tests green, Temporal replay +
+> lab e2e wired in CI. This is the slice, not the whole platform; see
+> [Scope](#scope) and [Milestones](#milestones).
 
 ## What it does (the slice)
 
@@ -111,8 +113,11 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
 - **M5** Planner, chain, AI gateway — proposal-only AI gateway (redaction,
   structured validation, budget, fallback), versioned deterministic planner,
   attack-chain engine + non-CVSS severity, chain step from the produced
-  capability, chain/transition tables. *(current)*
-- **M6** Reporting, e2e, replay.
+  capability, chain/transition tables. *(done)*
+- **M6** Reporting, e2e, replay — atomic-finding + attack-chain HTML reports
+  (escaped, CSP nonce, redacted reproduction), JSON + SARIF 2.1.0 exports, report
+  activity + table, Temporal replay/determinism tests, full lab e2e test, CI
+  replay + e2e jobs. *(done)*
 
 ## Authorized use only
 

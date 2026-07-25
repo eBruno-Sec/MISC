@@ -760,3 +760,67 @@ async def attach_chain_step(session: AsyncSession, *, attack_chain_id: str, step
     if chain is not None:
         chain.step_ids = list(chain.step_ids) + [step_id]
     await session.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Reports (M6)
+# --------------------------------------------------------------------------- #
+async def create_report(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    report_type: str,
+    object_uri: str,
+    sha256: str,
+    media_type: str = "text/html",
+):
+    from domain.models import Report
+
+    row = Report(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        report_type=report_type,
+        object_uri=object_uri,
+        sha256=sha256,
+        media_type=media_type,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_reports(session: AsyncSession, assessment_id: str) -> list:
+    from domain.models import Report
+
+    return list(
+        (await session.execute(select(Report).where(Report.assessment_id == assessment_id)))
+        .scalars()
+        .all()
+    )
+
+
+async def list_attack_chains(session: AsyncSession, assessment_id: str) -> list:
+    from domain.models import AttackChain
+
+    return list(
+        (await session.execute(select(AttackChain).where(AttackChain.assessment_id == assessment_id)))
+        .scalars()
+        .all()
+    )
+
+
+async def list_chain_steps(session: AsyncSession, attack_chain_id: str) -> list:
+    from domain.models import AttackChainStep
+
+    return list(
+        (
+            await session.execute(
+                select(AttackChainStep)
+                .where(AttackChainStep.attack_chain_id == attack_chain_id)
+                .order_by(AttackChainStep.sequence_number)
+            )
+        )
+        .scalars()
+        .all()
+    )

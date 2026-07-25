@@ -609,6 +609,21 @@ class Capability(Base):
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Report(Base):
+    """Immutable report artifact (M6). Content stored in object storage."""
+
+    __tablename__ = "report"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    report_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    object_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(80), nullable=False, default="text/html")
+    created_at: Mapped[datetime] = _created_at()
+
+
 # --------------------------------------------------------------------------- #
 # Attack chains + capability transitions (M5)
 # --------------------------------------------------------------------------- #
@@ -696,6 +711,7 @@ _MIGRATION_TABLES: dict[str, list[str]] = {
         "capability",
     ],
     "0005": ["capability_transition", "attack_chain", "attack_chain_step"],
+    "0006": ["report"],
 }
 
 

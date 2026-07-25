@@ -54,6 +54,7 @@ class AssessmentWorkflow:
         self._identities: dict[str, Any] | None = None
         self._validation_summary: dict[str, Any] | None = None
         self._chain_summary: dict[str, Any] | None = None
+        self._report_summary: dict[str, Any] | None = None
 
     @workflow.run
     async def run(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +143,16 @@ class AssessmentWorkflow:
                     retry_policy=RetryPolicy(maximum_attempts=2),
                 )
 
+            # Generate atomic-finding + attack-chain reports (HTML/JSON/SARIF).
+            if phase is LifecycleState.REPORTING and run_validation:
+                self._report_summary = await workflow.execute_activity(
+                    "generate_reports",
+                    {"assessment_id": assessment_id, "tenant_id": tenant_id},
+                    task_queue="report-generation",
+                    start_to_close_timeout=timedelta(seconds=120),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+
             self._life.transition_to(phase)
 
         if self._emergency:
@@ -155,6 +166,7 @@ class AssessmentWorkflow:
             "recon": self._recon_summary,
             "validation": self._validation_summary,
             "chain": self._chain_summary,
+            "reports": self._report_summary,
         }
 
     # -- gates ----------------------------------------------------------- #
