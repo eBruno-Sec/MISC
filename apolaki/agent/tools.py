@@ -2139,12 +2139,22 @@ class ToolRegistry:
                         cl = await c.get(probe.url, follow_redirects=False)
                         v = ws.analyze_crlf(dict(cl.headers), cl.status_code)
                         if v:
-                            findings.append({"title": f"CRLF / response-header injection on '{probe.parameter}'",
-                                             "severity": v["severity"].lower(), "target": probe.url,
-                                             "description": v["detail"],
-                                             "evidence": f"marker header '{ws.CRLF_MARKER}' surfaced in the response",
-                                             "confidence": "confirmed", "cwe": "CWE-113",
-                                             "family": "crlf", "tags": ["crlf", "response-splitting"]})
+                            _crlf = {"title": f"CRLF / response-header injection on '{probe.parameter}'",
+                                     "severity": v["severity"].lower(), "target": probe.url,
+                                     "description": v["detail"],
+                                     "evidence": f"the injected marker '{ws.CRLF_MARKER}' surfaced as a distinct RESPONSE HEADER",
+                                     "impact": ("Attacker-controlled response headers enable web cache poisoning (serving a "
+                                                "malicious page to other visitors), Set-Cookie injection/fixation, and "
+                                                "redirect/phishing under the trusted domain."),
+                                     "confidence": "confirmed", "cwe": "CWE-113",
+                                     "family": "crlf", "tags": ["crlf", "response-splitting"],
+                                     "reproduction_steps": [
+                                         f"Send the request below (an encoded CR/LF + marker header injected into '{probe.parameter}').",
+                                         f"Read the RESPONSE headers (curl -i) and confirm a distinct '{ws.CRLF_MARKER}' header is present.",
+                                         "Repeat without the CR/LF payload and confirm the header disappears (rules out reflection)."],
+                                     "false_positive_check": (f"The '{ws.CRLF_MARKER}' value appears as a real, separate response HEADER "
+                                                              "(not in the body), so the injected CR/LF actually split the header stream.")}
+                            findings.append(self._attach_poc(_crlf, probe.url, cl))
                             break
                     except Exception:
                         pass

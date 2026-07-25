@@ -713,109 +713,135 @@ def _rule_caa(recon: dict) -> Iterable[dict]:
         )
 
 
+def _discovered_param_eps(recon: dict) -> list:
+    """(endpoint-without-query, [param names]) actually discovered on the target, from the
+    crawled URLs — so a playbook can point its example curl at a REAL param+endpoint (e.g.
+    /catalog?category=) instead of a generic /?id= placeholder that reproduces nothing."""
+    from urllib.parse import urlparse, parse_qsl
+    out, seen = [], set()
+    for u in (recon.get("urls") or []):
+        try:
+            pr = urlparse(u)
+            params = [k for k, _ in parse_qsl(pr.query, keep_blank_values=True) if k]
+        except Exception:
+            continue
+        if params:
+            key = f"{pr.scheme}://{pr.netloc}{pr.path}"
+            if key not in seen:
+                seen.add(key)
+                out.append((key, params))
+    return out
+
+
 def _param_finding(base: str, cls: str, title: str, category: str, wstg: str, severity: str,
                    confidence: int, what: str, how_extra: list[str], ref_keys: list[str],
-                   tags: list[str], tools: list[str]) -> dict:
+                   tags: list[str], tools: list[str], real_eps: list = None) -> dict:
+    # Prefer a REAL discovered endpoint+param for this class (its example curl then actually
+    # hits the app), matching by the class's known param names; else fall back to the generic
+    # placeholder surface (and say so). This is what makes the playbook reproduce the finding.
     p = PARAMS.get(cls, ["id"])[0]
-    example = f"{base}/?{p}={{payload}}"
-    steps = [
-        f"Discover real parameters on {base} with cURL: fetch pages and grep for name=/href query strings "
-        f"(e.g. curl -sS -k {base} | grep -oE '[?&][a-z_]+=' ).",
-        f"Common {cls.upper()} parameter names to look for: {', '.join(PARAMS.get(cls, [])[:8])}.",
+    pbase = f"{base}/?{p}"
+    real = False
+    if real_eps:
+        pset = {x.lower() for x in PARAMS.get(cls, [])}
+        pick = next(((ep, pr) for ep, params in real_eps for pr in params if pr.lower() in pset), None)
+        if not pick:
+            pick = next(((ep, params[0]) for ep, params in real_eps if params), None)
+        if pick:
+            ep, p = pick
+            pbase = f"{ep}?{p}"
+            real = True
+    example = f"{pbase}={{payload}}"
+    steps = ([f"Target the discovered parameter '{p}' at {pbase}=  (a real endpoint on this target)."]
+             if real else
+             [f"Discover real parameters on {base} with cURL: fetch pages and grep for name=/href query strings "
+              f"(e.g. curl -sS -k {base} | grep -oE '[?&][a-z_]+=' ).",
+              f"Common {cls.upper()} parameter names to look for: {', '.join(PARAMS.get(cls, [])[:8])}."]) + [
         *how_extra,
         "If a filter/WAF blocks the basic payload, apply the bypass techniques below.",
         "Escalate only a confirmed, reproducible case into a PoC with clear impact.",
     ]
     first = PAYLOADS.get(cls, [""])[0]
     curl = [
-        {"desc": "Baseline (record normal response length/timing)", "cmd": f"curl -sS -k -o /dev/null -w 'len=%{{size_download}} time=%{{time_total}}s\\n' {_sq(base + '/?' + p + '=1')}"},
-        {"desc": f"Probe with a {cls.upper()} marker", "cmd": f"curl -sS -k {_sq(base + '/?' + p + '=' + first)}"},
-    ] + _adv_curl(base, p, cls)
-    # cURL handles the request-crafting, so drop generic "Burp Suite" here; keep
-    # specialist tools cURL can't replace (Collaborator/OAST, a browser, sqlmap).
+        {"desc": "Baseline (record normal response length/timing)", "cmd": f"curl -sS -k -o /dev/null -w 'len=%{{size_download}} time=%{{time_total}}s\\n' {_sq(pbase + '=1')}"},
+        {"desc": f"Probe with a {cls.upper()} marker", "cmd": f"curl -sS -k {_sq(pbase + '=' + first)}"},
+    ] + _adv_curl(pbase.rsplit('/?', 1)[0] if '/?' in pbase else pbase.split('?')[0], p, cls)
     tools = [t for t in tools if "burp suite" not in t.lower()]
     return _finding(
         key=f"param-{cls}", title=title, category=category, wstg=wstg, severity=severity,
         confidence=confidence, surface=example,
-        evidence=f"Live application at {base}; parameter-driven {cls.upper()} surface (apply to real params).",
+        evidence=(f"Discovered parameter '{p}' on this target — the example commands hit the real endpoint."
+                  if real else f"Live application at {base}; parameter-driven {cls.upper()} surface (apply to real params)."),
         what=what, how=steps, payloads=PAYLOADS.get(cls, []), bypass=BYPASS.get(cls, []), tools=tools,
         curl_steps=curl, ref_keys=ref_keys, tags=tags,
     )
 
 
+_PARAM_PLAYBOOKS = [
+    ("sqli", "SQL injection surface (query parameters)", "Injection", "WSTG-INPV-05", "HIGH", 45,
+     "User-controllable parameters may reach a SQL query. Test for error-based, boolean, UNION, and time-based SQLi.",
+     ["Send a single quote and look for SQL errors or a 500.",
+      "Try boolean pairs (AND '1'='1 vs AND '1'='2) and compare responses.",
+      "If blind, use a time-based payload (SLEEP/pg_sleep/WAITFOR) and confirm the delay.",
+      "Confirm with sqlmap in manual/confirm mode before reporting."],
+     ["sqli"], ["sqli", "injection"], ["Burp Suite", "sqlmap (manual)", "curl"]),
+    ("xss", "Reflected XSS surface (search/query params)", "Injection", "WSTG-INPV-01", "MEDIUM", 45,
+     "Parameters reflected into HTML/JS without encoding lead to reflected or DOM XSS.",
+     ["Inject a unique marker and find where it reflects (HTML body, attribute, script, URL).",
+      "Break out of the context, then confirm script execution in a real browser."],
+     ["xss"], ["xss", "injection"], ["Burp Suite", "browser", "curl"]),
+    ("redirect", "Open redirect surface", "Client-Side", "WSTG-CLNT-04", "LOW", 40,
+     "Redirect parameters that accept external URLs enable phishing and can chain into SSRF/OAuth token theft.",
+     ["Set the redirect param to an external domain and follow the response.",
+      "Try bypasses: //evil, /\\evil, https:evil, whitelisted-host.evil."],
+     ["redirect"], ["redirect"], ["Burp Suite", "curl"]),
+    ("ssrf", "SSRF surface (url/callback params)", "Injection", "WSTG-INPV-19", "HIGH", 40,
+     "Parameters that fetch a URL server-side may be coerced to hit internal services or cloud metadata.",
+     ["Point the param at a Burp Collaborator / OAST host and watch for a callback.",
+      "If callbacks arrive, target 169.254.169.254 metadata and internal ranges."],
+     ["ssrf"], ["ssrf", "injection"], ["Burp Collaborator", "interactsh", "curl"]),
+    ("lfi", "Path traversal / LFI surface (file/path params)", "Injection", "WSTG-ATHZ-01", "HIGH", 38,
+     "Parameters that reference files may allow traversal to read arbitrary files or include remote content.",
+     ["Request a known file via traversal (../../../../etc/passwd).",
+      "Try encoding and null-byte/php filter variants if the naive payload is filtered."],
+     ["lfi"], ["lfi", "traversal"], ["Burp Suite", "curl"]),
+    ("cmdi", "OS command injection surface (cmd/host/ip params)", "Injection", "WSTG-INPV-12", "HIGH", 36,
+     "Parameters passed to a shell (ping, nslookup, converters, exporters) may allow OS command execution.",
+     ["Append a shell metacharacter (; | & `$()`) plus a benign command like id, or ping your Collaborator.",
+      "Look for command output in the response, or an out-of-band DNS/HTTP callback (blind).",
+      "If neither, confirm with a timing payload (sleep 5) and measure the delay."],
+     ["cmdi"], ["cmdi", "injection"], ["Burp Collaborator", "curl"]),
+    ("ssti", "Server-side / client-side template injection surface", "Injection", "WSTG-INPV-18", "HIGH", 36,
+     "Input rendered into a template (server engines like Jinja2/Twig/Freemarker, or client-side AngularJS) can execute expressions -> RCE (server) or DOM XSS (client).",
+     ["Inject the polyglot {{7*7}} / ${7*7} / #{7*7} and look for 49 in the response.",
+      "Identify the engine from which syntax evaluates, then use the matching sandbox-escape.",
+      "For AngularJS/client-side, treat a rendered 49 as CSTI -> in-browser JS execution (DOM XSS)."],
+     ["ssti"], ["ssti", "injection"], ["tplmap (manual)", "Burp Suite", "curl"]),
+    ("crlf", "CRLF / HTTP response-header injection surface", "Injection", "WSTG-INPV-16", "MEDIUM", 35,
+     "Parameters written into a response header (Set-Cookie, Location, custom headers) without stripping "
+     "CR/LF let an attacker inject headers or split the response — cache poisoning, cookie/redirect injection.",
+     ["Append an encoded CRLF and a marker header (%0d%0aX-Injected: bbhcrlf) to a reflected param.",
+      "Inspect the RESPONSE headers (curl -i) for your injected header or a split Set-Cookie.",
+      "Params that feed redirects/cookies/language are the usual sinks — confirm the header actually appears."],
+     ["crlf"], ["crlf", "injection"], ["curl -i", "Burp Suite"]),
+]
+# Always emit these two (worth testing on any parameter); the rest are emitted only when the
+# target actually has a param matching that class — no filler "cmdi surface" for a site with
+# no cmd/host/ip parameter.
+_CORE_PARAM_CLS = {"sqli", "xss"}
+
+
 def _rule_param_injections(recon: dict) -> Iterable[dict]:
-    bases = _base_urls(recon)[:6]
-    for base in bases:
-        yield _param_finding(
-            base, "sqli", "SQL injection surface (query parameters)", "Injection", "WSTG-INPV-05",
-            "HIGH", 45,
-            "User-controllable parameters may reach a SQL query. Test for error-based, boolean, UNION, and time-based SQLi.",
-            ["Send a single quote and look for SQL errors or a 500.",
-             "Try boolean pairs (AND '1'='1 vs AND '1'='2) and compare responses.",
-             "If blind, use a time-based payload (SLEEP/pg_sleep/WAITFOR) and confirm the delay.",
-             "Confirm with sqlmap in manual/confirm mode before reporting."],
-            ["sqli"], ["sqli", "injection"], ["Burp Suite", "sqlmap (manual)", "curl"],
-        )
-        yield _param_finding(
-            base, "xss", "Reflected XSS surface (search/query params)", "Injection", "WSTG-INPV-01",
-            "MEDIUM", 45,
-            "Parameters reflected into HTML/JS without encoding lead to reflected or DOM XSS.",
-            ["Inject a unique marker and find where it reflects (HTML body, attribute, script, URL).",
-             "Break out of the context, then confirm script execution in a real browser."],
-            ["xss"], ["xss", "injection"], ["Burp Suite", "browser", "curl"],
-        )
-        yield _param_finding(
-            base, "redirect", "Open redirect surface", "Client-Side", "WSTG-CLNT-04",
-            "LOW", 40,
-            "Redirect parameters that accept external URLs enable phishing and can chain into SSRF/OAuth token theft.",
-            ["Set the redirect param to an external domain and follow the response.",
-             "Try bypasses: //evil, /\\evil, https:evil, whitelisted-host.evil."],
-            ["redirect"], ["redirect"], ["Burp Suite", "curl"],
-        )
-        yield _param_finding(
-            base, "ssrf", "SSRF surface (url/callback params)", "Injection", "WSTG-INPV-19",
-            "HIGH", 40,
-            "Parameters that fetch a URL server-side may be coerced to hit internal services or cloud metadata.",
-            ["Point the param at a Burp Collaborator / OAST host and watch for a callback.",
-             "If callbacks arrive, target 169.254.169.254 metadata and internal ranges."],
-            ["ssrf"], ["ssrf", "injection"], ["Burp Collaborator", "interactsh", "curl"],
-        )
-        yield _param_finding(
-            base, "lfi", "Path traversal / LFI surface (file/path params)", "Injection", "WSTG-ATHZ-01",
-            "HIGH", 38,
-            "Parameters that reference files may allow traversal to read arbitrary files or include remote content.",
-            ["Request a known file via traversal (../../../../etc/passwd).",
-             "Try encoding and null-byte/php filter variants if the naive payload is filtered."],
-            ["lfi"], ["lfi", "traversal"], ["Burp Suite", "curl"],
-        )
-        yield _param_finding(
-            base, "cmdi", "OS command injection surface (cmd/host/ip params)", "Injection", "WSTG-INPV-12",
-            "HIGH", 36,
-            "Parameters passed to a shell (ping, nslookup, converters, exporters) may allow OS command execution.",
-            ["Append a shell metacharacter (; | & `$()`) plus a benign command like id, or ping your Collaborator.",
-             "Look for command output in the response, or an out-of-band DNS/HTTP callback (blind).",
-             "If neither, confirm with a timing payload (sleep 5) and measure the delay."],
-            ["cmdi"], ["cmdi", "injection"], ["Burp Collaborator", "curl"],
-        )
-        yield _param_finding(
-            base, "ssti", "Server-side / client-side template injection surface", "Injection", "WSTG-INPV-18",
-            "HIGH", 36,
-            "Input rendered into a template (server engines like Jinja2/Twig/Freemarker, or client-side AngularJS) can execute expressions → RCE or XSS.",
-            ["Inject the polyglot {{7*7}} / ${7*7} / #{7*7} and look for 49 in the response.",
-             "Identify the engine from which syntax evaluates, then use the matching sandbox-escape.",
-             "For AngularJS/client-side, treat a rendered 49 as CSTI → in-browser JS execution."],
-            ["ssti"], ["ssti", "injection"], ["tplmap (manual)", "Burp Suite", "curl"],
-        )
-        yield _param_finding(
-            base, "crlf", "CRLF / HTTP response-header injection surface", "Injection", "WSTG-INPV-16",
-            "MEDIUM", 35,
-            "Parameters written into a response header (Set-Cookie, Location, custom headers) without stripping "
-            "CR/LF let an attacker inject headers or split the response — cache poisoning, cookie/redirect injection.",
-            ["Append an encoded CRLF and a marker header (%0d%0aX-Injected: bbhcrlf) to a reflected param.",
-             "Inspect the RESPONSE headers (curl -i) for your injected header or a split Set-Cookie.",
-             "Params that feed redirects/cookies/language are the usual sinks — confirm the header actually appears."],
-            ["crlf"], ["crlf", "injection"], ["curl -i", "Burp Suite"],
-        )
+    real_eps = _discovered_param_eps(recon)
+    real_params = {pr.lower() for _ep, params in real_eps for pr in params}
+    for base in _base_urls(recon)[:6]:
+        for (cls, title, cat, wstg, sev, conf, what, how_extra, refk, tags, tools) in _PARAM_PLAYBOOKS:
+            has_real = bool(real_params & {x.lower() for x in PARAMS.get(cls, [])})
+            if not (has_real or cls in _CORE_PARAM_CLS):
+                continue      # skip filler classes the target has no matching parameter for
+            yield _param_finding(base, cls, title, cat, wstg, sev, conf, what, how_extra,
+                                 refk, tags, tools, real_eps=real_eps)
+        break                 # one representative base is enough (real_eps already spans hosts)
 
 
 def _rule_paths(recon: dict) -> Iterable[dict]:
