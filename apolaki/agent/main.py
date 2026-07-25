@@ -588,6 +588,11 @@ def _tool_ledger(session_id: str) -> dict:
                     a["note"] = out[:140]
         else:  # tool_error / scope_block
             a["error"] = str(l.get("error") or "")[:140]
+    # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
+    # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
+    _sqli_confirmed = any(
+        str(f.get("family") or "").lower() == "sqli" or "cwe-89" in str(f.get("cwe") or "").lower()
+        for f in db.get_findings(session_id))
     tools = []
     for t, a in sorted(agg.items()):
         low = (a["note"] + " " + a["error"]).lower()
@@ -597,6 +602,14 @@ def _tool_ledger(session_id: str) -> dict:
             status, note = "skipped", a["note"]
         else:
             status, note = "executed", a["note"]
+        # sqlmap is corroboration here — the native SQLi oracle + UNION enrichment do the
+        # confirming. Reword its "No SQLi confirmed" so the ledger never reads contradictory
+        # next to a confirmed SQLi finding.
+        if t == "run_sqlmap" and re.search(r"no sqli confirmed|\b0 confirmed|not confirmed", note, re.I):
+            note = ("sqlmap did not independently confirm; the native SQLi oracle + UNION "
+                    "enrichment confirmed the injection and extracted DB metadata"
+                    if _sqli_confirmed else
+                    "sqlmap found no injection on the tested endpoints")
         tools.append({"tool": t, "status": status, "calls": a["calls"],
                       "findings": a["findings"], "note": note})
     # ZAP status is reported honestly: if no ZAP daemon is configured (ZAP_ADDR unset)
