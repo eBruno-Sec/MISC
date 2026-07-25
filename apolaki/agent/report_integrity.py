@@ -177,7 +177,10 @@ def summary_line(result: dict) -> str:
     warns = [i for i in result.get("issues", []) if i.get("level") == "warn"]
     n = result.get("checks_run", 0)
     if not errs and not warns:
-        return f"Consistent — {n} automated consistency checks passed; no metric or status contradictions."
+        # No leading "Consistent —": both call sites (HTML + Markdown) already render a
+        # "Consistent" / "Contradictions found" status label before this line, so
+        # prefixing it here produced the doubled "Consistent — Consistent —".
+        return f"{n} automated consistency checks passed; no metric or status contradictions."
     parts = []
     if errs:
         parts.append(f"{len(errs)} contradiction{'s' if len(errs) != 1 else ''}")

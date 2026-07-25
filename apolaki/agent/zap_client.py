@@ -119,6 +119,17 @@ class ZapClient:
     async def access_url(self, url: str):
         return await self._call("core", "action", "accessUrl", url=url, followRedirects="true")
 
+    async def stop_all(self):
+        """Stop + remove any running/queued spider & active scans so a NEW mission does
+        not inherit an earlier (or killed) mission's still-running load — the shared
+        single ZAP daemon otherwise bogs down and its API read-times-out (DEF-2)."""
+        for comp in ("spider", "ascan", "ajaxSpider"):
+            for act in ("stopAllScans", "removeAllScans"):
+                try:
+                    await self._call(comp, "action", act)
+                except Exception:
+                    pass
+
     async def spider(self, url: str, context: str = None) -> str:
         return (await self._call("spider", "action", "scan", url=url,
                                  contextName=context, recurse="true")).get("scan")

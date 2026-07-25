@@ -3267,6 +3267,10 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult("zap", url, False, "", [], f"ZAP daemon unreachable at ZAP_ADDR: {e}")
 
+        # DEF-2 guard: clear any orphaned scans from an earlier/killed mission so this
+        # run starts against a fresh, responsive daemon (a still-running prior scan
+        # otherwise overloads the shared ZAP and its API read-times-out).
+        await zap.stop_all()
         name = f"bbh-{self.mission_id or 'x'}-{os.urandom(2).hex()}"
         try:
             ctx_id = await zap.new_context(name)

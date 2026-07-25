@@ -1223,6 +1223,12 @@ async def restore(payload: dict):
 @app.on_event("startup")
 async def startup():
     db.init()
+    # DEF-3: reconcile orphaned missions. Any run still marked in-flight belongs to a
+    # process that has since exited (a prior crash/restart), so nothing in memory drives
+    # it — mark it interrupted so the archive never shows a phantom "running" scan.
+    for _m in db.list_missions(limit=500):
+        if _m.get("status") in ("running", "stopping", "awaiting_approval"):
+            db.update_mission(_m["id"], status="interrupted")
     st = ai_status()   # secret-free; never prints the key
     if not st["ready"]:
         print(f"[WARN] AI provider '{st['provider']}' has no credentials — {st['hint']}")
