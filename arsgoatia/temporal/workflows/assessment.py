@@ -1,0 +1,140 @@
+"""Root AssessmentWorkflow (§10.3).
+
+Durable orchestrator for one assessment. Holds only compact state (lifecycle,
+flags, pending approvals) — never raw artifacts or secrets — so history stays
+small and deterministic. All IO/AI/tool work happens in activities (added in
+M2+). This M1 skeleton wires the lifecycle, the pause/resume gate, the
+action-bound approval gate, and emergency stop.
+
+Determinism note: signal handlers only mutate flags/dicts; every lifecycle
+transition happens in run(), and every branch is on recorded state.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from temporalio import workflow
+
+with workflow.unsafe.imports_passed_through():
+    from domain.lifecycle import AssessmentLifecycle, LifecycleState
+
+# Phases the slice drives, in order. Each is gated by pause/emergency; M2+ wires
+# the child workflow / activity that does the real work behind each phase.
+_SLICE_PHASES: list[LifecycleState] = [
+    LifecycleState.AUTHORIZATION_PENDING,
+    LifecycleState.AUTHORIZATION_VALIDATED,
+    LifecycleState.SCOPE_COMPILED,
+    LifecycleState.READY,
+    LifecycleState.PRE_RECON_RUNNING,
+    LifecycleState.RECON_RUNNING,
+    LifecycleState.ATTACK_SURFACE_READY,
+    LifecycleState.ANALYSIS_RUNNING,
+    LifecycleState.VALIDATION_RUNNING,
+    LifecycleState.CHAIN_EXPANSION,
+    LifecycleState.IMPACT_VALIDATION,
+    LifecycleState.REPORTING,
+    LifecycleState.REVIEW,
+    LifecycleState.COMPLETED,
+]
+
+
+@workflow.defn
+class AssessmentWorkflow:
+    def __init__(self) -> None:
+        self._life = AssessmentLifecycle()
+        self._paused = False
+        self._emergency = False
+        self._cancelled = False
+        self._approvals: dict[str, bool] = {}
+        self._pending_approval: str | None = None
+
+    @workflow.run
+    async def run(self, params: dict[str, Any]) -> dict[str, Any]:
+        require_approval = bool(params.get("require_validation_approval", False))
+
+        for phase in _SLICE_PHASES:
+            await self._gate()
+            if self._cancelled or self._emergency:
+                break
+
+            # The validation phase is where the slice's high-risk action lives;
+            # gate it behind an action-bound approval when policy demands one.
+            if phase is LifecycleState.VALIDATION_RUNNING and require_approval:
+                action_id = params.get("validation_action_id", "validation-action")
+                granted = await self._await_approval(str(action_id))
+                if not granted:
+                    self._life.state = LifecycleState.FAILED_RECOVERABLE
+                    break
+
+            self._life.transition_to(phase)
+
+        if self._emergency:
+            self._life.confirm_emergency_stopped()
+        elif self._cancelled:
+            self._life.state = LifecycleState.CANCELLED
+
+        return {
+            "assessment_id": params.get("assessment_id"),
+            "final_state": self._life.state.value,
+        }
+
+    # -- gates ----------------------------------------------------------- #
+    async def _gate(self) -> None:
+        """Block while paused; the §8.3 pause primitive. Emergency/cancel break
+        the wait so run() can unwind."""
+        await workflow.wait_condition(
+            lambda: (not self._paused) or self._emergency or self._cancelled
+        )
+        if self._paused and not (self._emergency or self._cancelled):
+            # Reflect PAUSED in queryable state while blocked.
+            pass
+
+    async def _await_approval(self, action_id: str) -> bool:
+        """Action-bound HITL gate (§13.6). Idempotent: first ProvideApproval wins."""
+        self._pending_approval = action_id
+        self._life.require_approval()
+        await workflow.wait_condition(
+            lambda: action_id in self._approvals or self._emergency or self._cancelled
+        )
+        self._pending_approval = None
+        if action_id in self._approvals:
+            self._life.clear_approval()
+        return self._approvals.get(action_id, False)
+
+    # -- signals (§10.7) ------------------------------------------------- #
+    @workflow.signal
+    def pause(self) -> None:
+        self._paused = True
+
+    @workflow.signal
+    def resume(self) -> None:
+        self._paused = False
+
+    @workflow.signal
+    def emergency_stop(self) -> None:
+        self._emergency = True
+
+    @workflow.signal
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @workflow.signal
+    def provide_approval(self, action_id: str, granted: bool) -> None:
+        # First decision wins; duplicate signals (which arrive as their own
+        # events on replay) are ignored.
+        if action_id not in self._approvals:
+            self._approvals[action_id] = granted
+
+    # -- queries --------------------------------------------------------- #
+    @workflow.query
+    def get_state(self) -> dict[str, Any]:
+        display = self._life.state.value
+        if self._paused and not self._life.is_terminal():
+            display = LifecycleState.PAUSED.value
+        return {
+            "lifecycle_state": display,
+            "paused": self._paused,
+            "emergency": self._emergency,
+            "pending_approval": self._pending_approval,
+        }

@@ -95,8 +95,10 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
 
 ## Milestones
 
-- **M0** Contracts & scaffold — schemas, compose, CI. *(current)*
-- **M1** Control plane — Postgres schema, RLS, immutability, AssessmentWorkflow.
+- **M0** Contracts & scaffold — schemas, compose, CI. *(done)*
+- **M1** Control plane — Postgres schema, RLS, immutability, outbox/audit,
+  lifecycle state machine, AssessmentWorkflow skeleton, create/authorize/
+  compile-scope/pause/resume API. *(current)*
 - **M2** Recon & evidence.
 - **M3** Policy, envelope, identities.
 - **M4** IDOR module, validation, capability.

@@ -11,7 +11,11 @@ import os
 
 from fastapi import FastAPI
 
+from .routers import assessments, tenants
+
 app = FastAPI(title="ArsGoatia API", version="0.1.0")
+app.include_router(tenants.router)
+app.include_router(assessments.router)
 
 
 @app.get("/healthz")

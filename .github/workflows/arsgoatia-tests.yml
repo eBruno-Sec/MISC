@@ -18,10 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      # Contract/unit/policy/replay tests. The heavier runtime deps (temporalio,
-      # sqlalchemy, boto3, fastapi) are added to this install as the milestones
-      # that need them land; today's suite is the schema + module contracts.
+      # Unit/contract/security tests import the schemas + ORM models + pure
+      # control-plane logic. The remaining runtime deps (temporalio, psycopg,
+      # boto3, fastapi) enter this install as the milestones that need them land;
+      # the workflow/API code is import-light and covered by the e2e job later.
       - name: Install test deps
-        run: python -m pip install --upgrade pip "pydantic>=2.6" "pyyaml>=6.0" "jsonschema>=4.21" pytest
+        run: python -m pip install --upgrade pip "pydantic>=2.6" "pydantic-settings>=2.2" "pyyaml>=6.0" "jsonschema>=4.21" "sqlalchemy>=2.0" pytest
       - name: Run tests
         run: python -m pytest tests/ -q
