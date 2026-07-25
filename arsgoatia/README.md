@@ -101,8 +101,10 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
   compile-scope/pause/resume API. *(done)*
 - **M2** Recon & evidence — scope firewall + target guard (ported), safe HTTP
   recon activity, content-addressed MinIO evidence store, asset/service/endpoint/
-  evidence tables, timeline read API. *(current)*
-- **M3** Policy, envelope, identities.
+  evidence tables, timeline read API. *(done)*
+- **M3** Policy, envelope, identities — layered policy engine, signed action
+  envelope + approval binding, SSRF/rebinding checks, dev secret store, identity
+  bootstrap activity, identity/credential/session/context tables. *(current)*
 - **M4** IDOR module, validation, capability.
 - **M5** Planner, chain, AI gateway.
 - **M6** Reporting, e2e, replay.

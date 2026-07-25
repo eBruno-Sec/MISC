@@ -360,6 +360,91 @@ class Evidence(Base):
     meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
 
 
+# --------------------------------------------------------------------------- #
+# Identity / access (M3). Secrets live only in the secret table, addressed by uri.
+# --------------------------------------------------------------------------- #
+class Identity(Base):
+    __tablename__ = "identity"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("assessment.id"), nullable=False, index=True
+    )
+    identity_type: Mapped[str] = mapped_column(String(40), nullable=False, default="human_user")
+    principal: Mapped[str] = mapped_column(String(320), nullable=False)
+    authority: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    tenant_or_domain: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    privilege_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="observed")
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class CredentialReference(Base):
+    """Raw material lives in the secret store; only a uri + fingerprint here."""
+
+    __tablename__ = "credential_reference"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    identity_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    credential_type: Mapped[str] = mapped_column(String(40), nullable=False, default="jwt")
+    secret_uri: Mapped[str] = mapped_column(String(300), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="discovered")
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class Session(Base):
+    __tablename__ = "session"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    identity_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_asset_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    credential_reference_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    session_type: Mapped[str] = mapped_column(String(20), nullable=False, default="api")
+    privilege_label: Mapped[str] = mapped_column(String(80), nullable=False, default="standard_user")
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    established_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class AccessContext(Base):
+    __tablename__ = "access_context"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    origin_asset_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    identity_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    credential_reference_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    privilege_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    reachable_asset_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+
+
+class Secret(Base):
+    """Dev-only local secret store (ADR 0003). Raw material never enters the
+    canonical graph, prompts, or Temporal history — only a secret_uri + sha256
+    fingerprint are referenced elsewhere. Not a knowledge entity."""
+
+    __tablename__ = "secret"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
 # Which migration owns each table's DDL (so each migration creates only its own).
 _MIGRATION_TABLES: dict[str, list[str]] = {
     "0001": [
@@ -379,6 +464,7 @@ _MIGRATION_TABLES: dict[str, list[str]] = {
         "outbox",
     ],
     "0002": ["asset", "service", "endpoint", "evidence"],
+    "0003": ["identity", "credential_reference", "session", "access_context", "secret"],
 }
 
 

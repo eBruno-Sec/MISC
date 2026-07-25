@@ -18,17 +18,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.models import (
+    AccessContext,
     Assessment,
     AssessmentRevision,
     Asset,
     AuthorizationRecord,
+    CredentialReference,
     Endpoint,
     Evidence,
+    Identity,
     Policy,
     PolicyRevision,
     ScopeDefinition,
     ScopeTarget,
     Service,
+    Session,
 )
 
 
@@ -373,6 +377,107 @@ async def create_evidence(session: AsyncSession, *, tenant_id: str, fields: dict
         redaction_state=fields.get("redaction_state", "redacted"),
         sensitivity=fields.get("sensitivity", "confidential"),
         meta=fields.get("metadata", {}),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+# --------------------------------------------------------------------------- #
+# Identity / access (M3)
+# --------------------------------------------------------------------------- #
+async def create_identity(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    principal: str,
+    privilege_label: str = "standard_user",
+    identity_type: str = "human_user",
+    authority: str = "",
+) -> Identity:
+    row = Identity(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        identity_type=identity_type,
+        principal=principal,
+        authority=authority,
+        privilege_label=privilege_label,
+        state="validated",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_credential_reference(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    identity_id: str,
+    secret_uri: str,
+    fingerprint: str,
+    credential_type: str = "jwt",
+) -> CredentialReference:
+    row = CredentialReference(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        identity_id=identity_id,
+        credential_type=credential_type,
+        secret_uri=secret_uri,
+        fingerprint=fingerprint,
+        state="verified",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_session(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    identity_id: str,
+    target_asset_id: str | None,
+    credential_reference_id: str,
+    session_type: str = "api",
+    privilege_label: str = "standard_user",
+) -> Session:
+    row = Session(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        identity_id=identity_id,
+        target_asset_id=target_asset_id,
+        credential_reference_id=credential_reference_id,
+        session_type=session_type,
+        privilege_label=privilege_label,
+        state="active",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_access_context(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    identity_id: str,
+    session_id: str,
+    credential_reference_ids: list[str],
+    privilege_label: str = "standard_user",
+) -> AccessContext:
+    row = AccessContext(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        identity_id=identity_id,
+        session_id=session_id,
+        credential_reference_ids=credential_reference_ids,
+        privilege_label=privilege_label,
+        state="active",
     )
     session.add(row)
     await session.flush()

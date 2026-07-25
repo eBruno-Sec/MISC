@@ -30,16 +30,22 @@ async def _connect():
 
 
 async def main() -> None:
+    import asyncio
+
     from temporalio.worker import Worker
 
+    from temporal.workflows.activities.identity_activities import establish_identities
     from temporal.workflows.activities.recon_activities import safe_http_recon
 
     client = await _connect()
-    # One worker per task queue. As activities for the other queues land, add
-    # their workers here and run them concurrently.
-    recon_worker = Worker(client, task_queue="safe-recon", activities=[safe_http_recon])
-    log.info("worker-web running (queue: safe-recon, activity: safe_http_recon)")
-    await recon_worker.run()
+    # One worker per task queue, run concurrently. Later milestones add the
+    # module/validation/report activities on their queues here.
+    workers = [
+        Worker(client, task_queue="safe-recon", activities=[safe_http_recon]),
+        Worker(client, task_queue="api-testing", activities=[establish_identities]),
+    ]
+    log.info("worker-web running (queues: safe-recon, api-testing)")
+    await asyncio.gather(*(w.run() for w in workers))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ redirect re-checks, and rebinding/resolution-drift rejection (§13.4 steps 3-8).
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -134,3 +135,40 @@ def _parse_target(target: str) -> tuple[str, str, bool]:
 def _matches(host: str, pattern: str) -> bool:
     clean = pattern.lstrip("*.").lower()
     return host == clean or host.endswith("." + clean)
+
+
+# --------------------------------------------------------------------------- #
+# Resolved-address SSRF checks (§13.4 steps 4-6). The executor resolves the
+# destination, then calls these on the resolved IP before connecting — catching
+# DNS rebinding to internal ranges and cloud metadata even for an in-scope host.
+# --------------------------------------------------------------------------- #
+def classify_ip(ip: str) -> str:
+    """Classify a resolved IP for egress policy."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return "invalid"
+    if addr.is_loopback:
+        return "loopback"
+    if addr.is_link_local:
+        return "link_local"  # 169.254.0.0/16 — includes the cloud metadata IP
+    if addr.is_multicast:
+        return "multicast"
+    if addr.is_reserved or addr.is_unspecified:
+        return "reserved"
+    if addr.is_private:
+        return "private"
+    return "public"
+
+
+def is_ssrf_blocked(ip: str, *, allow_private: bool = False) -> bool:
+    """True if the resolved IP must be blocked. Loopback/link-local/multicast/
+    reserved/invalid are ALWAYS blocked (so 169.254.169.254 is denied even in a
+    lab). Private (RFC1918) is blocked unless allow_private — lab targets like a
+    dockerized juice-shop legitimately resolve to a private bridge address."""
+    kind = classify_ip(ip)
+    if kind in {"loopback", "link_local", "multicast", "reserved", "invalid"}:
+        return True
+    if kind == "private":
+        return not allow_private
+    return False
