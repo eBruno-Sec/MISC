@@ -578,6 +578,13 @@ def group_findings(findings: list) -> list:
         tgt = f.get("target") or f.get("surface") or ""
         if tgt and tgt not in g["instances"]:
             g["instances"].append(tgt)
+        # carry the strongest browser PoC from ANY instance onto the representative, so
+        # dedup never discards a screenshot / DOM snippet that a sibling captured (the
+        # first instance in a group may lack the screenshot a later one has).
+        if not g.get("screenshot") and f.get("screenshot"):
+            g["screenshot"] = f["screenshot"]
+        if not g.get("dom_snippet") and f.get("dom_snippet"):
+            g["dom_snippet"] = f["dom_snippet"]
     return [groups[k] for k in order]
 
 
