@@ -150,6 +150,18 @@ def check_report_consistency(findings: list, leads: list, risk: dict = None,
         add("error", "confirmed-exploit-counter-mismatch",
             f"Confirmed-exploits counter is 0 but {len(findings)} confirmed finding(s) are reported.")
 
+    # 8) Tool-ledger vs its own findings: a tool row that reports findings > 0 must not
+    #    carry a note claiming "0 confirmed" / "No X confirmed". This is the exact
+    #    contradiction the user flagged — run_sqli/run_xxe reading "0 confirmed" beside a
+    #    confirmed finding because the ledger kept an earlier 0-result call's note.
+    checks += 1
+    _zero_re = re.compile(r"(?:\bno\b[\w\s/]*\bconfirmed\b|\b0\s+confirmed\b)", re.I)
+    for t in ((tool_ledger or {}).get("tools") or []):
+        if int(t.get("findings") or 0) > 0 and _zero_re.search(str(t.get("note") or "")):
+            add("error", "ledger-note-contradiction",
+                f"Tool '{t.get('tool')}' reports {t.get('findings')} finding(s) but its note says "
+                f"\"{t.get('note')}\" — the ledger note contradicts the tool's own findings.")
+
     return {"ok": not any(i["level"] == "error" for i in issues),
             "checks_run": checks, "issues": issues}
 

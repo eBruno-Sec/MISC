@@ -330,8 +330,15 @@ class BBHAgent:
             etype = "scope_block" if "SCOPE BLOCK" in result.error else "tool_error"
             yield {"type": etype, "tool": tool_name, "error": result.error}
         else:
+            # Count real results only: some tools (e.g. run_sqlmap on a no-confirmation
+            # pass) return a severity-less data-carrier {"vulnerable": False, log_tail...}
+            # purely to preserve the tool log. It is explicitly NOT a finding, so it must
+            # not inflate the ledger's findings count (that produced the "9 findings /
+            # No SQLi confirmed" contradiction the integrity check now guards against).
+            _real = sum(1 for f in result.findings
+                        if not (isinstance(f, dict) and f.get("vulnerable") is False))
             yield {"type": "tool_result", "tool": tool_name, "output": result.output,
-                   "count": len(result.findings)}
+                   "count": _real}
 
         if tool_name == "store_finding" and not result.error:
             # A model-authored finding (agentic). Dedup by fingerprint against what

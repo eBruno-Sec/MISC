@@ -277,6 +277,11 @@ _BIZ = {
                             "On its own it corrupts client-side logic; chained with a suitable sink it becomes DOM "
                             "XSS — attacker script running in your customers' browsers (session theft, account "
                             "takeover)."),
+    "csti": ("The page's client-side template engine (AngularJS) evaluates attacker text from a link as code in "
+             "the visitor's browser — it runs JavaScript, it does NOT run code on your server.",
+             "From a crafted link on your real domain, an attacker's script runs in a victim's browser: stealing "
+             "session cookies, taking over the account, capturing typed data, or driving convincing phishing. "
+             "Impact is client-side (the same class as XSS); the server itself is not compromised by this bug."),
 }
 # CWE -> family, so a finding with a CWE but no recognised family still gets text.
 _CWE_FAMILY = {
@@ -365,6 +370,9 @@ _FAMILY_FIX = {
     "open_redirect": "Validate redirect targets against an allowlist of internal paths; never redirect to a "
                      "user-supplied absolute URL, and strip //, /\\ and scheme tricks.",
     "ssti": "Never render user input as a template; pass it as data to a sandboxed, auto-escaping engine.",
+    "csti": "Never place untrusted input where a client-side template engine will evaluate it. Bind user data as "
+            "text (Angular {{ }} interpolation of a scope value / ng-bind), not by concatenating it into the "
+            "template; upgrade off the end-of-life AngularJS 1.x sandbox and add a strict Content-Security-Policy.",
     "deserialization": "Do not deserialise untrusted data; use a data-only format (JSON) with a strict schema, "
                        "or signed/allowlisted types.",
     "takeover": "Remove the dangling DNS record or reclaim the third-party resource; monitor for unclaimed CNAMEs.",
@@ -394,6 +402,45 @@ def remediation_line(finding: dict) -> str:
     return "Validate and neutralise the untrusted input at this sink, and add a regression test."
 
 
+# ── per-family "Validation After Fix" (how to prove the fix worked + a regression test) ──
+_FAMILY_VALIDATION = {
+    "sqli": "Re-send the confirming payloads (single quote, then the UNION metadata request). PASS = a normal 200 "
+            "with the ordinary result set, no DB error, and no version/user/schema echoed back. Add an automated "
+            "test that asserts the parameter is bound (parameterised) and that a quote yields no SQL error.",
+    "xxe": "Re-send the external-entity XML body against the endpoint. PASS = the parser rejects the DOCTYPE/entity "
+           "(fast error, no outbound fetch) and the baseline-vs-payload timing delta collapses to ~0s. Add a test "
+           "posting a SYSTEM-entity body and asserting it is refused.",
+    "csti": "Reload the crafted URL in a browser after the fix. PASS = the DOM shows the literal text {{7*7}} (or the "
+            "value bound as inert text), NOT 49. Add an end-to-end (Playwright/Cypress) test asserting the marker is "
+            "not evaluated for that parameter.",
+    "crlf": "Replay the request with encoded CR/LF (%0d%0a) in the parameter. PASS = the injected header/line does "
+            "NOT appear in the response headers. Add a test asserting CR/LF are stripped or rejected before any "
+            "header write.",
+    "prototype_pollution": "Reload the crafted URL and read Object.prototype in the console. PASS = the injected "
+                           "marker property is absent (undefined). Add a browser test asserting the gadget no longer "
+                           "writes to the prototype.",
+    "open_redirect": "Reload the crafted URL in a browser. PASS = the browser stays on-site (or shows a blocked-"
+                     "redirect notice) instead of navigating to the attacker host. Add a test asserting only "
+                     "allowlisted internal targets are honoured.",
+    "vulnerable_component": "After upgrading/removing the library, re-fingerprint the page. PASS = the vulnerable "
+                            "version string is gone and SCA reports no known CVEs for the shipped version. Add the "
+                            "version assertion to CI.",
+    "xss": "Replay the payload and load the page in a browser. PASS = the payload renders as inert text and no "
+           "script/alert executes. Add a test asserting the output is context-encoded at this sink.",
+}
+
+
+def validation_line(finding: dict) -> str:
+    """How to PROVE the fix worked, plus the regression test to keep it fixed. Explicit
+    field first, then the family map, else a safe generic tied to the reproduction."""
+    v = str(finding.get("validation") or finding.get("regression_test") or "").strip()
+    if v:
+        return v
+    return _FAMILY_VALIDATION.get(_family_of(finding),
+                                  "Re-run the exact reproduction above and confirm the confirming condition no "
+                                  "longer occurs; then add an automated regression test for this input at this sink.")
+
+
 # ── estimated CVSS v3.1 per family (clearly labelled 'estimated' in the report) ──
 # base-class estimates, NOT authoritative scoring — they orient triage; a real
 # assessor should refine per exploitability. Kept deterministic (no invention beyond
@@ -414,6 +461,7 @@ _FAMILY_CVSS = {
     "idor": (6.5, "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"),
     "csrf": (6.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N"),
     "xss": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+    "csti": (8.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"),
     "crlf": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
     "cors": (5.4, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"),
     "open_redirect": (4.7, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N"),
@@ -747,12 +795,26 @@ def generate_html_report(program: str, findings: list, scope: dict,
         if cwe and note_txt and ("cwe-" in note_txt.lower()) and (cwe.lower() not in note_txt.lower()):
             note_txt = ""
         notes = f"<p class='notes'>Triage: {e(note_txt)}</p>" if note_txt.strip() else ""
+        # browser-confirmed bugs (DOM/CSTI/proto/redirect/XSS): the PROOF is the headless
+        # browser evidence, NOT curl. Demote curl to a supplemental page-load request so it
+        # is never mistaken for the reproduction of client-side execution.
+        _ev_txt = str(f.get("evidence", ""))
+        dom_confirmed = ("dom" in (f.get("tags") or [])) or ("Chromium" in _ev_txt) or ("rendered" in _ev_txt.lower())
         curl = finding_curl(f)
-        curl_html = (f"<h4>Reproduction (copy-paste)</h4><pre class='ev'>{e(curl)}</pre>" if curl else "")
+        if not curl:
+            curl_html = ""
+        elif dom_confirmed:
+            curl_html = (f"<h4>Supplemental request (page load only — not the proof)</h4>"
+                         f"<pre class='ev'>{e(curl)}</pre>"
+                         f"<p class='sub'>This bug is confirmed in a real headless browser (see Evidence above); "
+                         f"curl only fetches the page and cannot demonstrate client-side execution.</p>")
+        else:
+            curl_html = f"<h4>Reproduction (copy-paste)</h4><pre class='ev'>{e(curl)}</pre>"
         cv = estimated_cvss(f)
         cvss_disp = f"{cv[0]}{' (est.)' if cv[2] else ''}" if cv else "N/A"
         cvss_vec = f"<span>Vector: <code>{e(cv[1])}</code></span>" if (cv and cv[1]) else ""
         rem = f"<h4>Remediation</h4><p>{e(remediation_line(f))}</p>"
+        val = f"<h4>Validation After Fix (regression test)</h4><p>{e(validation_line(f))}</p>"
         inst = [x for x in (f.get("instances") or []) if x and x != f.get("target")]
         inst_html = ("<h4>Affected instances (" + str(len(inst) + 1) + ")</h4><ul>"
                      + "".join(f"<li><code>{e(str(x))}</code></li>" for x in [f.get('target')] + inst)
@@ -780,7 +842,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
-          {curl_html}{ev}{raw_html}{fpc_html}{inst_html}{rem}{notes}
+          {curl_html}{ev}{raw_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")
     findings_html = "".join(cards) if cards else (
         "<p class='sub'>No vulnerability was confirmed with reproducible evidence during this engagement. "
@@ -1004,7 +1066,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
     if leads:
         peek += f'<span class="chip lead" title="unconfirmed — verify before reporting">LEADS: {len(leads)}</span>'
 
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+    _doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
 <style>
@@ -1143,6 +1205,10 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 <footer>Generated by Apolaki · deterministic, truth-first reporting. Confirmed findings carry reproducible
 evidence; unconfirmed leads are advisory and must be verified before submission. Authorized security research only.</footer>
 </div></body></html>"""
+    # UTF-8 safety: encode EVERY non-ASCII glyph as a numeric HTML entity so arrows,
+    # dashes, checks and icons render correctly no matter how the byte stream is served
+    # or opened — this is what kills the "â†'/â€"/Â·" mojibake once and for all.
+    return _doc.encode("ascii", "xmlcharrefreplace").decode("ascii")
 
 
 # ── CSV / JSON export ────────────────────────────────────────────

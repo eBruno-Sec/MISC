@@ -137,12 +137,23 @@ def xss_finding(url, nav, src):
 
 
 def csti_finding(url, nav, src):
-    return _base(url, f"Client-side template injection (CSTI, via {src})", "high",
-                 (f"Input in '{src}' is rendered by a client-side template engine (e.g. AngularJS): the "
-                  "expression {{7*7}} evaluated to 49, so attacker expressions run in the browser."),
-                 f"Loaded {nav} → the DOM rendered \"49{MARK}\" (the template evaluated 7*7).",
-                 "ssti", "CWE-1336", ["csti", "ssti", "dom"],
-                 [f"Load {nav}", "Observe 49 rendered in place of {{7*7}} (expression evaluated)"])
+    f = _base(url, f"Client-side template injection (CSTI, via {src})", "high",
+              (f"Input in '{src}' is evaluated by the page's CLIENT-SIDE template engine (AngularJS) in the "
+               "victim's browser: the expression {{7*7}} rendered as 49. This is client-side code execution "
+               "(an AngularJS sandbox escape to JavaScript) — NOT server-side template injection, and it does "
+               "NOT give server RCE or server compromise."),
+              (f"Headless Chromium loaded {nav}; after the AngularJS digest the rendered DOM contained "
+               f"\"49{MARK}\" — the expression 7*7 was evaluated in-browser (browser-confirmed, not reflection)."),
+              "csti", "CWE-79", ["csti", "dom-xss", "client-side"],
+              [f"Open {nav} in a browser running the AngularJS app",
+               "Let the AngularJS digest cycle run",
+               "Observe 49 rendered in place of {{7*7}} in the live DOM — the expression executed client-side"])
+    f["capec"] = "CAPEC-588: DOM-Based Cross-Site Scripting"
+    f["impact"] = ("Attacker-controlled AngularJS expressions execute as JavaScript in the victim's browser "
+                   "(client-side code execution / DOM XSS). Realistic impact: session-cookie theft, account "
+                   "takeover, keylogging of form input, and convincing phishing served from the trusted domain. "
+                   "This does not compromise the server itself.")
+    return f
 
 
 def build_finding(probe: dict, *, pp_value=None, nav_targets=None, dialog_msg=None, body=None):

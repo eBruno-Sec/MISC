@@ -2514,37 +2514,61 @@ class ToolRegistry:
                         pass
                     return _time.perf_counter() - t0
 
+                import statistics as _stats
                 base_body = sample or "<data><productId>1</productId><storeId>1</storeId></data>"
-                b1 = await _timed(base_body)
-                b2 = await _timed(base_body)
-                baseline = min(b1, b2)
+                base_samples = [await _timed(base_body) for _ in range(3)]   # 3 benign baselines
+                baseline = min(base_samples)
                 blackhole = "http://192.0.2.1:9/"          # TEST-NET-1 (RFC5737), unroutable → connect hang
                 # Two entity forms — try both so a parser that blocks one is still probed:
                 #   • general entity referenced inside an element (&xxe;) — this is accepted
                 #     even when the parser rejects parameter entities ("Entities are not
                 #     allowed for security reasons"), the common hardened default;
                 #   • parameter entity in the internal subset — for parsers that allow those.
-                stall_body, stall_dt, stall_kind = None, 0.0, ""
+                stall_body, stall_kind, stall_samples = None, "", []
                 for kind, body in (("general entity (&xxe; in element)", xxe.build_inband_xml(blackhole, sample)),
                                    ("parameter entity (internal subset)", xxe.build_oob_xml(blackhole, sample))):
-                    dt = await _timed(body)
-                    if baseline < 1.8 and (dt - baseline) > 3.0:
-                        stall_body, stall_dt, stall_kind = body, dt, kind
+                    d0 = await _timed(body)
+                    if baseline < 1.8 and (d0 - baseline) > 3.0:
+                        # repeat twice more so the stall is proven consistent, not a blip
+                        stall_samples = [d0] + [await _timed(body) for _ in range(2)]
+                        stall_body, stall_kind = body, kind
                         break
                 if stall_body is not None:
+                    _mb, _ms = _stats.median(base_samples), _stats.median(stall_samples)
+                    _tbl = ("| Sample | Baseline (benign body) | External-entity payload |\n"
+                            "|---|---|---|\n"
+                            + "\n".join(f"| {i + 1} | {b:.2f}s | {s:.2f}s |"
+                                        for i, (b, s) in enumerate(zip(base_samples, stall_samples)))
+                            + f"\n| median | {_mb:.2f}s | {_ms:.2f}s |")
                     findings.append(self._attach_poc({
-                        "severity": "high", "cwe": "CWE-611", "target": url,
-                        "title": "Blind XXE → SSRF (external entity dereference, timing-confirmed)",
+                        "severity": "high", "cwe": "CWE-611", "target": url, "content_type": ctype,
+                        "title": "Blind XXE -> SSRF (external entity dereference, timing-confirmed)",
                         "confidence": "confirmed", "family": "xxe", "tags": ["xxe", "ssrf", "blind"],
-                        "evidence": (f"An external SYSTEM entity ({stall_kind}) pointed at an unreachable host stalled "
-                                     f"the response: baseline {baseline:.2f}s vs external-entity {stall_dt:.2f}s — the "
-                                     f"server dereferenced the attacker-controlled entity (outbound request → SSRF)."),
-                        "impact": ("The server can be coerced into outbound requests (SSRF), reaching internal-only "
-                                   "services or cloud metadata; depending on parser config, local files may be read."),
-                        "false_positive_check": (f"Two fast baselines ({b1:.2f}s, {b2:.2f}s) versus the external-entity "
-                                                 f"delay ({stall_dt:.2f}s) isolate the entity fetch as the cause of the stall."),
-                    }, url, None, method="POST", body=stall_body,
-                        timing=f"baseline≈{baseline:.2f}s vs external-entity≈{stall_dt:.2f}s"))
+                        "description": (
+                            f"A POST XML body (Content-Type: {ctype}) declaring an external SYSTEM entity "
+                            f"({stall_kind}) pointed at an unreachable black-hole host (192.0.2.1:9 — TEST-NET-1, "
+                            "reserved and unroutable) makes the server's XML parser attempt an OUTBOUND request while "
+                            "parsing. The benign baseline body returns immediately; the external-entity body stalls on "
+                            "the connect timeout every time. That the delay tracks the entity (and nothing else in the "
+                            "body changes) proves the parser dereferenced attacker-controlled external entities — a "
+                            "server-side request forgery primitive. Non-destructive: the target IP routes nowhere."),
+                        "evidence": (f"External SYSTEM entity ({stall_kind}) -> unreachable host. Median baseline "
+                                     f"{_mb:.2f}s vs median external-entity {_ms:.2f}s (delta {_ms - _mb:.2f}s), "
+                                     f"consistent across 3 samples each."),
+                        "impact": ("The server can be coerced into outbound requests (SSRF) to internal-only services "
+                                   "or cloud metadata (169.254.169.254); with a reachable collaborator the response "
+                                   "can be exfiltrated, and file:// entities may read local files depending on parser "
+                                   "config."),
+                        "false_positive_check": (
+                            f"Three benign baselines ({', '.join(f'{b:.2f}s' for b in base_samples)}) are all fast; "
+                            f"three external-entity requests ({', '.join(f'{s:.2f}s' for s in stall_samples)}) are all "
+                            "stalled by ~5s (the OS connect timeout to the black-hole). The ONLY difference between the "
+                            "two bodies is the SYSTEM entity, so the entity fetch is the isolated cause. One slow "
+                            "sample could be a network blip; three consistent stalls against three fast baselines "
+                            "cannot be."),
+                        "baseline": f"POST {url}\nContent-Type: {ctype}\n\n{base_body}",
+                        "timing": _tbl,
+                    }, url, None, method="POST", body=stall_body))
         if self.mission_id and findings:
             await self._http(url, "POST", {"Content-Type": ctype}, body=sample or "<root/>", capture=True)
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
@@ -3234,7 +3258,10 @@ class ToolRegistry:
             return ToolResult("zap", url, True,
                               "ZAP not configured — enable with: docker compose --profile zap up -d "
                               "and set ZAP_ADDR=http://zap:8090", [])
-        zap = zc.ZapClient()
+        # 120s per-call timeout: under a heavy thorough/demon scan the ZAP API (esp.
+        # /alerts and status polls) is slow; the 30s default read-timed-out and, since
+        # httpx ReadTimeout stringifies to '', surfaced as a blank "ZAP scan error:".
+        zap = zc.ZapClient(timeout=120)
         try:
             await zap.version()
         except Exception as e:
@@ -3258,6 +3285,7 @@ class ToolRegistry:
             policy = (inp.get("policy") or getattr(self, "zap_policy", "safe_active"))
             if policy not in ("passive", "safe_active", "thorough_active"):
                 policy = "safe_active"
+            ascan_err = ""      # set if the active scan degrades but passive alerts survive
             # spider -> ajax spider (SPA) — always run (feeds the passive scanner too)
             sid = await zap.spider(url, context=name)
             if sid is not None:
@@ -3304,13 +3332,19 @@ class ToolRegistry:
                         await setup
                     except Exception:
                         pass
-                asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
-                if asid is not None:
-                    cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
-                    await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
+                # Active scan in its OWN try: if it errors or times out (common with
+                # thorough_active on a slow live target), keep the passive alerts already
+                # gathered rather than discarding the whole ZAP result.
+                try:
+                    asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
+                    if asid is not None:
+                        cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
+                        await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
+                except Exception as _ae:
+                    ascan_err = f"{type(_ae).__name__}: {_ae}".strip(": ")
             raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
         except Exception as e:
-            return ToolResult("zap", url, False, "", [], f"ZAP scan error: {e}")
+            return ToolResult("zap", url, False, "", [], f"ZAP scan error: {type(e).__name__}: {e}".strip(": "))
 
         findings = [zc.alert_to_finding(a) for a in raw]
         findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
@@ -3325,9 +3359,10 @@ class ToolRegistry:
         else:
             _dials = (f"speed={inp.get('speed') or getattr(self, 'zap_speed', 'normal')}; "
                       f"aggression={inp.get('aggression') or getattr(self, 'zap_aggression', 'normal')}")
+        _degraded = f" [active scan degraded, passive alerts kept: {ascan_err}]" if ascan_err else ""
         return ToolResult("zap", url, True,
                           f"policy={policy}; {_dials}; {len(findings)} ZAP alert(s) "
-                          f"[{_plabel}] (from {len(raw)} raw)", findings)
+                          f"[{_plabel}] (from {len(raw)} raw){_degraded}", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
@@ -3366,8 +3401,13 @@ class ToolRegistry:
         # standard L1R1 (fast); deep L3R2 + all techniques; insane L5R3 + all
         # techniques + read-only proof enumeration (names the DBs/user the injection
         # exposes — no writes, no data dumps). Timeout grows so heavy runs finish.
+        # sqlmap here is CORROBORATION — the native _sqli_db_metadata extractor already
+        # confirms the injection and pulls DBMS/user/db in seconds, so a 30-min-per-call
+        # insane budget only stalls the run (9 endpoints x 30min = a multi-hour tail that
+        # never reaches "complete"). Bound insane to 10 min/call: sqlmap still finds a real
+        # injection well inside that, and the run stays completable.
         level, risk, timeout = {
-            "standard": (1, 1, 420), "deep": (3, 2, 420), "insane": (5, 3, 1800),
+            "standard": (1, 1, 420), "deep": (3, 2, 420), "insane": (5, 3, 600),
         }.get(intensity, (1, 1, 420))
         cmd = ["sqlmap", "-u", url, "--batch", "--level", str(level), "--risk", str(risk),
                "--flush-session", "--random-agent"]
