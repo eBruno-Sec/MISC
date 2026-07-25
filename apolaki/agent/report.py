@@ -784,6 +784,18 @@ def generate_html_report(program: str, findings: list, scope: dict,
         ev = f"<h4>Evidence</h4><pre class='ev'>{e(str(f.get('evidence','')))}</pre>" if f.get("evidence") else ""
         # raw proof artifacts (request/response/tool log/timing) — the hard proof
         raw_html = "".join(f"<h4>{e(lbl)}</h4><pre class='ev'>{e(txt)}</pre>" for lbl, txt in evidence_items(f))
+        # browser PoC: an embedded viewport screenshot (visual proof the bug fired in a
+        # real headless browser) + a DOM snippet around the confirmation marker. Present
+        # only on browser-confirmed findings (DOM audit); self-contained base64 data-URI.
+        poc_html = ""
+        _shot = str(f.get("screenshot") or "")
+        if _shot.startswith("data:image/"):
+            poc_html += ("<h4>Proof of concept (browser screenshot)</h4>"
+                         f"<img alt='browser proof-of-concept screenshot' src='{e(_shot)}' "
+                         "style='max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px'>")
+        if str(f.get("dom_snippet") or "").strip():
+            poc_html += ("<h4>DOM proof (rendered markup at the sink)</h4>"
+                         f"<pre class='ev'>{e(str(f.get('dom_snippet')))}</pre>")
         prov = proof_provenance(f)
         prov_html = f"<span>Tool &amp; settings: <code>{e(prov)}</code></span>" if prov else ""
         fpc = str(f.get("false_positive_check") or "").strip()
@@ -842,7 +854,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
-          {curl_html}{ev}{raw_html}{fpc_html}{inst_html}{rem}{val}{notes}
+          {curl_html}{ev}{raw_html}{poc_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")
     findings_html = "".join(cards) if cards else (
         "<p class='sub'>No vulnerability was confirmed with reproducible evidence during this engagement. "

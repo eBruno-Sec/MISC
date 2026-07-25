@@ -1761,6 +1761,26 @@ class ToolRegistry:
                         f = dom.build_finding({**probe, "base": url}, pp_value=pp_value,
                                               nav_targets=navs, dialog_msg=fired["msg"], body=body)
                         if f:
+                            # Capture a browser PoC for the report: a viewport screenshot
+                            # (visual proof the bug fired in a real browser) plus a DOM
+                            # snippet around the confirmation marker where one exists
+                            # (e.g. CSTI's evaluated "49<MARK>"). Best-effort, size-capped.
+                            try:
+                                import base64 as _b64
+                                _png = await page.screenshot(type="png", timeout=6000)
+                                _b = _b64.b64encode(_png).decode()
+                                if 0 < len(_b) <= 900000:          # ~675KB raw cap; keep report lean
+                                    f["screenshot"] = "data:image/png;base64," + _b
+                            except Exception:
+                                pass
+                            try:
+                                _snip = await page.evaluate(
+                                    "(m)=>{const h=document.documentElement.outerHTML;const i=h.indexOf(m);"
+                                    "return i<0?'':h.slice(Math.max(0,i-120),i+160);}", "49" + dom.MARK)
+                                if _snip:
+                                    f["dom_snippet"] = _snip
+                            except Exception:
+                                pass
                             findings.append(f)
                             seen_cls.add(probe["class"])
                         try:
