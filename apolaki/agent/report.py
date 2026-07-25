@@ -731,6 +731,36 @@ def _exec_summary_text(program, findings, leads, execution, counts) -> list:
     return [x for x in (line1, line2, line3) if x]
 
 
+_HARDENING_RX = __import__("re").compile(
+    r"content.security.policy|\bcsp\b|strict.transport|\bhsts\b|httponly|samesite|secure flag|"
+    r"x-frame|clickjack|x-content-type|referrer.policy|permissions.policy|"
+    r"\bspf\b|\bdmarc\b|\bcaa\b|dnssec|\bcors\b|cross-origin", __import__("re").I)
+
+
+def hardening_summary(leads: list) -> list:
+    """Consolidate the scattered response-header / cookie / DNS-email hardening LEADS
+    (often dozens of duplicate ZAP alerts like 'CSP Not Set') into one compact posture
+    list: (control, worst-severity, instance count). Truth-first — these are the same
+    advisory leads, summarised (not new confirmed findings), so the risk score is
+    unaffected. This is the one genuinely-missing presentation the market reports had."""
+    import re as _re
+    _rank = {"high": 3, "medium": 2, "low": 1, "info": 0, "informational": 0}
+    groups: dict = {}
+    for l in leads or []:
+        title = str(l.get("title") or "")
+        if not _HARDENING_RX.search(title):
+            continue
+        name = _re.sub(r"^\s*zap:\s*", "", title, flags=_re.I).strip()
+        name = _re.sub(r"\s*\(\d+\)\s*$", "", name)
+        g = groups.setdefault(name, {"sev": "info", "n": 0})
+        g["n"] += 1
+        sev = (l.get("severity") or "info").lower()
+        if _rank.get(sev, 0) > _rank.get(g["sev"], 0):
+            g["sev"] = sev
+    return sorted(([n, v["sev"], v["n"]] for n, v in groups.items()),
+                  key=lambda r: (-_rank.get(r[1], 0), -r[2]))
+
+
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
@@ -915,6 +945,21 @@ def generate_html_report(program: str, findings: list, scope: dict,
                       "<table class='tbl'><tr><th>Severity</th><th>Confidence</th><th>Lead</th><th>Target</th></tr>"
                       + rows + "</table>")
 
+    # Security Hardening Summary — consolidate the scattered header/cookie/DNS hardening
+    # leads (dozens of duplicate ZAP alerts) into one compact posture table.
+    hard_html = ""
+    _hard = hardening_summary(leads)
+    if _hard:
+        hbody = "".join(
+            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get(sev, '#6a8a9a')}'>{e(sev.upper())}</span></td>"
+            f"<td>{e(name)}</td><td>{n}</td></tr>" for name, sev, n in _hard)
+        hard_html = ("<h2 id='hardening'>Security Hardening Summary</h2>"
+                     "<p class='sub'>Response-header, cookie and DNS/email hardening gaps, consolidated and "
+                     "de-duplicated from the advisory leads. These are hardening improvements, <strong>not "
+                     "confirmed exploits</strong>, and do not affect the risk score.</p>"
+                     "<table class='tbl'><tr><th>Severity</th><th>Control / gap</th><th>Instances</th></tr>"
+                     + hbody + "</table>")
+
     # manual-testing playbook (Round Table strength — what/how/cURL per surface)
     pb_html = ""
     if playbook:
@@ -1068,6 +1113,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
         toc_items.append(("paths", "Attack-Path Chains"))
     if leads_html:
         toc_items.append(("leads", "Unconfirmed Leads"))
+    if hard_html:
+        toc_items.append(("hardening", "Security Hardening Summary"))
     if rem_html:
         toc_items.append(("remediation", "Priority Remediation"))
     if delta_html:
@@ -1217,6 +1264,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {findings_html}
 {chain_html}
 {leads_html}
+{hard_html}
 {rem_html}
 {delta_html}
 {pb_html}
