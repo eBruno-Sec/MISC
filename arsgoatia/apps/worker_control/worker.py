@@ -32,11 +32,17 @@ async def _connect():
 async def main() -> None:
     from temporalio.worker import Worker
 
+    from temporal.workflows.activities.chain_activities import create_chain_step
     from temporal.workflows.assessment import AssessmentWorkflow
 
     client = await _connect()
-    worker = Worker(client, task_queue=CONTROL_QUEUE, workflows=[AssessmentWorkflow])
-    log.info("worker-control running (queue: %s, workflow: AssessmentWorkflow)", CONTROL_QUEUE)
+    worker = Worker(
+        client,
+        task_queue=CONTROL_QUEUE,
+        workflows=[AssessmentWorkflow],
+        activities=[create_chain_step],
+    )
+    log.info("worker-control running (queue: %s, workflow + chain activity)", CONTROL_QUEUE)
     await worker.run()
 
 

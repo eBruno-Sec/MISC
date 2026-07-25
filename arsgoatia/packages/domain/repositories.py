@@ -673,3 +673,90 @@ async def record_approval(
     session.add(row)
     await session.flush()
     return row
+
+
+# --------------------------------------------------------------------------- #
+# Attack chains (M5)
+# --------------------------------------------------------------------------- #
+async def get_confirmed_findings(session: AsyncSession, assessment_id: str) -> list:
+    from domain.models import Finding
+
+    return list(
+        (
+            await session.execute(
+                select(Finding).where(
+                    Finding.assessment_id == assessment_id,
+                    Finding.validation_state == "confirmed",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def get_capability(session: AsyncSession, capability_id: str):
+    from domain.models import Capability
+
+    return await session.get(Capability, capability_id)
+
+
+async def create_attack_chain(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    assessment_id: str,
+    title: str,
+    objective: str,
+    starting_context_id: str,
+    chain_severity: str,
+    chain_scoring_rationale: dict,
+    final_capability_ids: list,
+    evidence_refs: list | None = None,
+):
+    from domain.models import AttackChain
+
+    row = AttackChain(
+        tenant_id=tenant_id,
+        assessment_id=assessment_id,
+        title=title,
+        objective=objective,
+        starting_context_id=starting_context_id,
+        state="partially_validated",
+        chain_severity=chain_severity,
+        chain_scoring_rationale=chain_scoring_rationale,
+        final_capability_ids=final_capability_ids,
+        evidence_refs=evidence_refs or [],
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_attack_chain_step(session: AsyncSession, *, tenant_id: str, step: dict):
+    from domain.models import AttackChainStep
+
+    row = AttackChainStep(tenant_id=tenant_id, **step)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_capability_transition(
+    session: AsyncSession, *, tenant_id: str, assessment_id: str, transition: dict
+):
+    from domain.models import CapabilityTransition
+
+    row = CapabilityTransition(tenant_id=tenant_id, assessment_id=assessment_id, **transition)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def attach_chain_step(session: AsyncSession, *, attack_chain_id: str, step_id: str) -> None:
+    from domain.models import AttackChain
+
+    chain = await session.get(AttackChain, attack_chain_id)
+    if chain is not None:
+        chain.step_ids = list(chain.step_ids) + [step_id]
+    await session.flush()

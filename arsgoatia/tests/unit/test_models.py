@@ -46,7 +46,8 @@ def test_immutable_tables_classified():
 
 
 def test_append_only_tables_classified():
-    # audit + outbox (M1), evidence (M2), and the M4 reasoning/execution log.
+    # audit + outbox (M1), evidence (M2), M4 reasoning/execution log, and M5
+    # chain steps + capability transitions.
     assert set(tables_by_write_policy(WRITE_APPEND_ONLY)) == {
         "audit_event",
         "outbox",
@@ -56,6 +57,8 @@ def test_append_only_tables_classified():
         "approval",
         "action_execution",
         "tool_execution",
+        "capability_transition",
+        "attack_chain_step",
     }
 
 

@@ -107,8 +107,11 @@ future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
   bootstrap activity, identity/credential/session/context tables. *(done)*
 - **M4** IDOR module, validation, capability — module + tool SDK, deterministic
   IDOR confirmation, validation activity, capability engine, finding +
-  read_foreign_object capability, reasoning/finding tables, approvals API. *(current)*
-- **M5** Planner, chain, AI gateway.
+  read_foreign_object capability, reasoning/finding tables, approvals API. *(done)*
+- **M5** Planner, chain, AI gateway — proposal-only AI gateway (redaction,
+  structured validation, budget, fallback), versioned deterministic planner,
+  attack-chain engine + non-CVSS severity, chain step from the produced
+  capability, chain/transition tables. *(current)*
 - **M6** Reporting, e2e, replay.
 
 ## Authorized use only

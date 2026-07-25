@@ -53,6 +53,7 @@ class AssessmentWorkflow:
         self._recon_summary: dict[str, Any] | None = None
         self._identities: dict[str, Any] | None = None
         self._validation_summary: dict[str, Any] | None = None
+        self._chain_summary: dict[str, Any] | None = None
 
     @workflow.run
     async def run(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +124,24 @@ class AssessmentWorkflow:
                     retry_policy=RetryPolicy(maximum_attempts=1),
                 )
 
+            # Build the first attack-chain step from the produced capability.
+            if (
+                phase is LifecycleState.CHAIN_EXPANSION
+                and run_validation
+                and (self._validation_summary or {}).get("confirmed")
+            ):
+                self._chain_summary = await workflow.execute_activity(
+                    "create_chain_step",
+                    {
+                        "assessment_id": assessment_id,
+                        "tenant_id": tenant_id,
+                        "validation": self._validation_summary,
+                    },
+                    task_queue="workflow-control",
+                    start_to_close_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+
             self._life.transition_to(phase)
 
         if self._emergency:
@@ -135,6 +154,7 @@ class AssessmentWorkflow:
             "final_state": self._life.state.value,
             "recon": self._recon_summary,
             "validation": self._validation_summary,
+            "chain": self._chain_summary,
         }
 
     # -- gates ----------------------------------------------------------- #

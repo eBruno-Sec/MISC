@@ -609,6 +609,61 @@ class Capability(Base):
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+# --------------------------------------------------------------------------- #
+# Attack chains + capability transitions (M5)
+# --------------------------------------------------------------------------- #
+class CapabilityTransition(Base):
+    __tablename__ = "capability_transition"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    source_context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    prerequisite_capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    action_execution_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    finding_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resulting_capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    resulting_context_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    validation_state: Mapped[str] = mapped_column(String(20), nullable=False, default="validated")
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class AttackChain(Base):
+    __tablename__ = "attack_chain"
+    __arsgoatia_write__ = WRITE_MUTABLE
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    objective: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    starting_context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    final_capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="candidate")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    business_impact: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    chain_severity: Mapped[str] = mapped_column(String(20), nullable=False, default="informational")
+    chain_scoring_rationale: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    step_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class AttackChainStep(Base):
+    __tablename__ = "attack_chain_step"
+    __arsgoatia_write__ = WRITE_APPEND_ONLY
+    id: Mapped[str] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    attack_chain_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    prerequisite_capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    source_context_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    action_execution_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    finding_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resulting_capability_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    resulting_context_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    validation_state: Mapped[str] = mapped_column(String(20), nullable=False, default="validated")
+
+
 # Which migration owns each table's DDL (so each migration creates only its own).
 _MIGRATION_TABLES: dict[str, list[str]] = {
     "0001": [
@@ -640,6 +695,7 @@ _MIGRATION_TABLES: dict[str, list[str]] = {
         "finding",
         "capability",
     ],
+    "0005": ["capability_transition", "attack_chain", "attack_chain_step"],
 }
 
 
