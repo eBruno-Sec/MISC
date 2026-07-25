@@ -96,7 +96,23 @@ _CLASS_RX = [
 ]
 
 
+# the finding's OWN family is authoritative — trust it before fuzzy text matching, so a
+# client-side CSTI whose description says "does NOT give server RCE" is never misread as an
+# RCE producer (which fabricated a "confirmed RCE" data-flow chain). Text regex is only the
+# fallback for findings that carry no family.
+_FAMILY_CLASS = {
+    "sqli": "sqli", "xss": "xss", "stored_xss": "stored_xss", "csti": "ssti", "ssti": "ssti",
+    "xxe": "xxe", "ssrf": "ssrf", "prototype_pollution": "proto", "crlf": "crlf",
+    "open_redirect": "open_redirect", "oauth": "oauth", "idor": "idor", "bfla": "idor",
+    "cmdi": "rce", "deserialization": "rce", "cache_poison": "cache_poison",
+    "exposure": "exposure", "git_exposure": "exposure", "vulnerable_component": "",
+}
+
+
 def _vuln_class(f: dict) -> str:
+    fam = str(f.get("family") or "").strip().lower()
+    if fam in _FAMILY_CLASS:
+        return _FAMILY_CLASS[fam]
     hay = " ".join(str(f.get(k, "")) for k in ("title", "description", "category", "family", "cwe")).lower()
     for slug, rx in _CLASS_RX:
         if rx.search(hay):
@@ -121,9 +137,10 @@ _ESCALATIONS = {
                    "A stored XSS payload executes in EVERY visitor's authenticated session — harvesting session "
                    "cookies/tokens at scale, enabling account takeover, and (self-propagating) worm-like spread across "
                    "users without any per-victim interaction.", "critical"),
-    "ssti": ("CSTI/SSTI → template evaluation → RCE or DOM XSS",
-             "Template injection evaluates attacker input: server-side it commonly escalates to remote code execution; "
-             "client-side it becomes DOM XSS and session theft.", "high"),
+    "ssti": ("Client-side template injection → in-browser expression evaluation → DOM XSS → session theft / account takeover",
+             "The confirmed CSTI evaluates attacker input in the victim's browser (AngularJS), running JavaScript as "
+             "the victim: session/cookie theft, account takeover, and phishing on the trusted domain. Impact is "
+             "client-side (the server is not compromised by this bug).", "high"),
     "xxe": ("XXE → local file disclosure → SSRF → internal reachability",
             "XML external entity processing can read local files (app config/secrets, /etc/passwd) and coerce the server "
             "into internal requests (SSRF), reaching services not exposed externally.", "high"),

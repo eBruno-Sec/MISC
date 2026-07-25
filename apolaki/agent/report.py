@@ -579,10 +579,12 @@ def group_findings(findings: list) -> list:
         if tgt and tgt not in g["instances"]:
             g["instances"].append(tgt)
         # carry the strongest browser PoC from ANY instance onto the representative, so
-        # dedup never discards a screenshot / DOM snippet that a sibling captured (the
-        # first instance in a group may lack the screenshot a later one has).
-        if not g.get("screenshot") and f.get("screenshot"):
-            g["screenshot"] = f["screenshot"]
+        # dedup never discards a screenshot / DOM snippet that a sibling captured. Prefer the
+        # LARGEST screenshot: a blank/near-white page compresses to a few KB, so the biggest
+        # base64 is the one with real page content (never let a blank-first instance win).
+        _sh = f.get("screenshot") or ""
+        if _sh and len(_sh) > len(g.get("screenshot") or ""):
+            g["screenshot"] = _sh
         if not g.get("dom_snippet") and f.get("dom_snippet"):
             g["dom_snippet"] = f["dom_snippet"]
     return [groups[k] for k in order]
@@ -1255,7 +1257,11 @@ def findings_json(program: str, findings: list, scope: dict,
     lead_counts, coverage, chains, findings, leads) are always present and unchanged;
     the richer sections below are additive so existing consumers never break."""
     leads = leads or []
-    findings = _with_capec(findings)
+    # Dedupe to the SAME grouped findings the HTML renders (each carries an `instances`
+    # list of every affected target), so the JSON headline count matches the HTML's — no
+    # more "JSON says 13 confirmed / HTML says 7". Counts, risk and integrity all derive
+    # from the grouped set here too.
+    findings = group_findings(_with_capec(findings))
     pkg = {
         # ── report metadata ──
         "report_id": report_id or "",
