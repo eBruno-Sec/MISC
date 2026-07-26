@@ -98,6 +98,8 @@ _AUTO_STORE_TOOLS = {
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
     "run_content_discovery", "run_ffuf", "run_nmap_vuln", "run_param_mine", "run_anomaly_scan",
+    # investigative + exploitation tools (their confirmed findings must persist too)
+    "run_dir_harvest", "confirm_idor", "run_metadata", "run_sourcemap", "test_numeric_abuse",
 }
 # Confirmatory tools that emit no per-finding confidence grade — their results are
 # confirmed by construction (a template/active-scan/fingerprint match). Everything
