@@ -1155,12 +1155,17 @@ def generate_html_report(program: str, findings: list, scope: dict,
                 g["targets"].append(t)
         _uniq = [{**v["l"], "_n": max(1, len(v["targets"])), "_first": (v["targets"][0] if v["targets"] else v["l"].get("target", ""))}
                  for v in _lg.values()]
-        rows = "".join(
-            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get((l.get('severity') or 'info').lower(),'#6a8a9a')}'>"
-            f"{e((l.get('severity') or 'info').upper())}</span></td><td>{e(l.get('confidence','candidate'))}</td>"
-            f"<td>{e(l.get('title',''))}{(' <span class=\"muted\">x'+str(l['_n'])+'</span>') if l['_n']>1 else ''}</td>"
-            f"<td><code>{e(l['_first'])}</code>{(' <span class=\"muted\">+'+str(l['_n']-1)+' more</span>') if l['_n']>1 else ''}</td></tr>"
-            for l in sorted(_uniq, key=lambda x: SEV_ORDER.get((x.get('severity') or 'info').lower(), 5)))
+        def _lead_row(l):
+            n = l.get("_n", 1)
+            cnt = (" <span class='muted'>x" + str(n) + "</span>") if n > 1 else ""
+            more = (" <span class='muted'>+" + str(n - 1) + " more</span>") if n > 1 else ""
+            col = SEV_COLORS.get((l.get("severity") or "info").lower(), "#6a8a9a")
+            return ("<tr><td><span class='sev' style='--c:" + col + "'>"
+                    + e((l.get("severity") or "info").upper()) + "</span></td><td>"
+                    + e(l.get("confidence", "candidate")) + "</td><td>"
+                    + e(l.get("title", "")) + cnt + "</td><td><code>"
+                    + e(l["_first"]) + "</code>" + more + "</td></tr>")
+        rows = "".join(_lead_row(l) for l in sorted(_uniq, key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)))
         leads_html = (f"<h2 id='leads'>Unconfirmed Leads ({len(_uniq)})</h2><p class='sub'>Signals worth manual verification — "
                       "<strong>NOT confirmed vulnerabilities</strong> and NOT counted in the risk score. "
                       "Confirm before reporting to a program.</p>"
