@@ -823,7 +823,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
-                         delta: dict = None, tool_ledger: dict = None, report_id: str = None) -> str:
+                         delta: dict = None, tool_ledger: dict = None, report_id: str = None,
+                         security_headers: list = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -919,6 +920,22 @@ def generate_html_report(program: str, findings: list, scope: dict,
             f"<span class='distbar'><i style='width:{int(100 * v / _tot)}%;background:{SEV_COLORS[_bcol[k]]}'></i></span>"
             f"<span class='distn'>{v}</span></div>" for k, v in _buckets.items())
         cvss_html = f"<h2 id='cvss'>CVSS Score Distribution</h2><div class='dist' style='max-width:none'>{_rows}</div>"
+
+    # Security Headers Coverage — absorbed from the reference reports. Factual: which
+    # protective response headers were seen across probed hosts (present vs missing).
+    sechdr_html = ""
+    if security_headers:
+        rows = ""
+        for h in security_headers:
+            pct = int(100 * h.get("present", 0) / max(1, h.get("total", 1)))
+            col = SEV_COLORS["low"] if pct >= 80 else SEV_COLORS["medium"] if pct >= 40 else SEV_COLORS["high"]
+            rows += (f"<div class='distrow'><span class='distlabel'>{e(h.get('header', ''))}</span>"
+                     f"<span class='distbar'><i style='width:{pct}%;background:{col}'></i></span>"
+                     f"<span class='distn'>{h.get('present', 0)}/{h.get('total', 0)}</span></div>")
+        sechdr_html = ("<h2 id='secheaders'>Security Headers Coverage</h2>"
+                       "<p class='sub'>Protective response headers observed across probed hosts. Low coverage on "
+                       "CSP / HSTS / X-Frame-Options / X-Content-Type-Options is a hardening gap.</p>"
+                       f"<div class='dist' style='max-width:none'>{rows}</div>")
 
     # confirmed findings — full proof density (grouped by root cause)
     cards = []
@@ -1377,6 +1394,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {roe_html}
 {surf_html}
 {cov_html}
+{sechdr_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}

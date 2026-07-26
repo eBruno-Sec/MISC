@@ -713,6 +713,30 @@ async def get_report_md(session_id: str):
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
+def _sec_headers(session_id: str) -> list:
+    """Aggregate protective-header coverage across probed responses (present per header
+    vs total responses seen). Data for the report's Security Headers Coverage section."""
+    KEYS = ["content-security-policy", "strict-transport-security", "x-frame-options",
+            "x-content-type-options", "referrer-policy", "permissions-policy"]
+    NICE = {"content-security-policy": "Content-Security-Policy", "strict-transport-security": "Strict-Transport-Security",
+            "x-frame-options": "X-Frame-Options", "x-content-type-options": "X-Content-Type-Options",
+            "referrer-policy": "Referrer-Policy", "permissions-policy": "Permissions-Policy"}
+    ex = db.get_exchanges(session_id) or []
+    total, present = 0, {k: 0 for k in KEYS}
+    for e in ex:
+        h = e.get("response_headers") or {}
+        if not isinstance(h, dict):
+            continue
+        total += 1
+        low = {k.lower() for k in h.keys()}
+        for k in KEYS:
+            if k in low:
+                present[k] += 1
+    if not total:
+        return []
+    return [{"header": NICE[k], "present": present[k], "total": total} for k in KEYS]
+
+
 @app.get("/report/{session_id}/html")
 async def get_report_html(session_id: str, download: bool = False):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
@@ -721,7 +745,7 @@ async def get_report_html(session_id: str, download: bool = False):
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-        report_id=session_id)
+        report_id=session_id, security_headers=_sec_headers(session_id))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
