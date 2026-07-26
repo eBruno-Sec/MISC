@@ -888,6 +888,27 @@ def _finalize_mission(session_id: str) -> None:
     _ensure_playbook(session_id)
     _record_execution(session_id)
     _record_memory(session_id)
+    _record_intel(session_id)
+
+
+def _record_intel(session_id: str) -> None:
+    """At mission end: snapshot the harvested Target Intelligence (redacted) into the mission
+    context so the report/UI can surface what the target itself leaked. Best-effort — never
+    breaks the run teardown."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        store = getattr(sessions[session_id]["tools"], "intel", None)
+        if store is None:
+            return
+        ctx = dict(m["context"])
+        ctx["intel"] = store.to_dict(redact_secrets=True)
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
 
 
 def _sanitize_error(e: Exception) -> str:

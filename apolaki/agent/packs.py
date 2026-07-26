@@ -66,6 +66,22 @@ PACKS = {
         "assert": {},
         "produces": [],
     },
+    "harvested_object_read": {
+        "id": "harvested_object_read",
+        "class": "idor",
+        "summary": "Read an object using an id DERIVED from the target (harvested), not hardcoded — "
+                   "step 1 surfaces the object collection (auto-harvesting ids), step 2 reads one by "
+                   "its harvested id. Demonstrates the harvest->fixture->access loop generally.",
+        "inputs_required": ["collection_url", "object_url_prefix"],
+        "steps": [
+            # step 1: read the collection — the transport auto-harvests object-ids into intel
+            {"do": "http_read", "url": "{collection_url}"},
+            # step 2: read a single object using a HARVESTED id (fixture_source=harvest)
+            {"do": "http_read", "url": "{object_url_prefix}{harvest_object_id_first}"},
+        ],
+        "assert": {"field": "status", "equals": 200},
+        "produces": [],
+    },
 }
 
 

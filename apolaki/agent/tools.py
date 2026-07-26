@@ -112,6 +112,7 @@ TOOL_PERMISSIONS = {
     "browser_navigate": PermissionLevel.ACTIVE,    # declarative headless-browser drive + client-state capture
     "test_numeric_abuse": PermissionLevel.INTRUSIVE,  # business-logic numeric boundary probing (gated, never finalizes)
     "mission_state": PermissionLevel.PASSIVE,      # read acquired identities/capabilities/chaining hints
+    "mission_intel": PermissionLevel.PASSIVE,      # read harvested target-intelligence candidates (fixtures)
     "run_workflow": PermissionLevel.INTRUSIVE,     # execute a declarative technique-pack workflow (gated)
     "list_workflows": PermissionLevel.PASSIVE,     # list reusable technique packs + required inputs
     "benchmark_lab": PermissionLevel.ACTIVE,       # score coverage vs a known lab's completion oracle (separate module)
@@ -788,6 +789,12 @@ CLAUDE_TOOLS = [
                      "(database_read, foreign_object_read, admin_session, password_hash_obtained, …), objects seen, "
                      "extracted variables, and chaining hints. Use it to plan the next step and chain capabilities."),
      "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "mission_intel",
+     "description": ("PASSIVE: read the Target Intelligence harvested from the target's own surface so far — "
+                     "candidates it leaked (emails, usernames, object-ids, routes, external URLs, decoded blobs, "
+                     "hints). Consume these as FIXTURES (a user-id to enumerate, a hidden route to hit, a decoded "
+                     "hint) instead of guessing — the general OSINT/source-review loop. Secrets are redacted."),
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_workflow",
      "description": ("INTRUSIVE: execute a declarative technique-pack workflow. workflow = {id, requires:[capability:X], "
                      "inputs:{var:val}, steps:[{do:http_read|http_request|confirm_idor|enumerate_ids|acquire_session|"
@@ -837,6 +844,13 @@ class ToolRegistry:
         import investigation as _inv
         self.state = _inv.InvestigationState()
         self._Capability = _inv.Capability
+        # Target-intelligence store: every scoped fetch harvests candidates (emails, users,
+        # object-ids, routes, external URLs, encoded blobs, hints) into here so exploitation
+        # techniques can consume them as run-time FIXTURES (fixture_source=harvest). Secrets
+        # are redacted when this is serialized for the model / report / disk.
+        import intel as _intel
+        self.intel = _intel.IntelStore()
+        self._intel_mod = _intel
         # set by the agent so long ZAP polls can honor a user stop
         self.stop_event = None
         # Shared recon accumulator consumed by guidance + surface.
@@ -1241,7 +1255,37 @@ class ToolRegistry:
             if body is not None:
                 content = body if isinstance(body, (bytes, str)) else json.dumps(body)
             r = await c.request(method, url, content=content if isinstance(content, (bytes, str)) else None)
+            self._harvest_response(url, r)
             return r, time.perf_counter() - t0
+
+    def _harvest_body(self, source: str, headers, body) -> None:
+        """Route a fetched body into the target-intel store by content-type. Shared by the
+        investigative transport (_http_send) AND the deterministic fetch helper (_http), so a
+        plain deterministic scan fills the intel store too. Best-effort; never raises."""
+        try:
+            try:
+                ct = (headers.get("content-type") or "").lower()
+            except Exception:
+                ct = ""
+            body = (body or "")[:200000]
+            u = (source or "").split("?")[0]
+            material = {"source": source, "headers": headers}
+            if "json" in ct:
+                material["json"] = body
+            elif "javascript" in ct or "ecmascript" in ct or u.endswith(".js"):
+                material["js"] = body
+            else:
+                material["text"] = body
+            self._intel_mod.harvest(material, self.intel)
+        except Exception:
+            pass
+
+    def _harvest_response(self, url: str, r) -> None:
+        """Harvest an httpx Response (investigative-transport path)."""
+        try:
+            self._harvest_body(url, r.headers, r.text)
+        except Exception:
+            pass
 
     def _resolve_headers(self, inp: dict) -> dict:
         """Merge explicit headers with a named acquired session (inp['session'] → role).
@@ -1706,6 +1750,14 @@ class ToolRegistry:
         to plan the next move and to CHAIN confirmed capabilities into deeper attacks."""
         return ToolResult("mission_state", "", True, json.dumps(self.state.to_dict()), [])
 
+    async def _mission_intel(self, inp: dict) -> ToolResult:
+        """PASSIVE: return the Target Intelligence harvested from the target's own surface —
+        candidates it leaked (emails, usernames, object-ids, routes, external URLs, decoded
+        blobs, hints) that exploitation can consume as run-time FIXTURES. Derive a value from
+        the target instead of guessing; secrets are redacted before the model sees them."""
+        return ToolResult("mission_intel", "", True,
+                          json.dumps(self.intel.to_dict(redact_secrets=True)), [])
+
     async def _run_workflow(self, inp: dict) -> ToolResult:
         """INTRUSIVE: execute a declarative investigation workflow (technique pack) — ordered
         steps calling the scoped primitives, with safe {var} substitution, response extraction
@@ -1781,6 +1833,7 @@ class ToolRegistry:
                     text = ""
                 resp = {"status": r.status_code, "headers": dict(r.headers), "body": text,
                         "length": len(r.content), "final_url": str(r.url)}
+                self._harvest_body(resp["final_url"] or url, resp["headers"], text)
         except Exception as e:
             return {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0, "final_url": url}
 
@@ -2321,6 +2374,14 @@ class ToolRegistry:
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
+        try:                                    # crawled URLs are intel: routes + external urls
+            for _u in urls:
+                self.intel.add("url", _u, "katana")
+                _p = urlparse(_u).path
+                if _p and _p != "/":
+                    self.intel.add("route", _p, "katana")
+        except Exception:
+            pass
         note = " (authenticated)" if auth_h else ""
         if intensity != "standard":
             note += f" [{intensity}: depth {depth}]"

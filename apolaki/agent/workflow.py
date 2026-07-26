@@ -33,6 +33,26 @@ def _subst(obj, variables: dict):
     return obj
 
 
+def _seed_harvest(variables: dict, reg) -> None:
+    """Expose harvested Target Intelligence (intel.py) as workflow variables so techniques
+    consume TARGET-DERIVED fixtures instead of hardcoded answers:
+        harvest_<kind>        -> full candidate list
+        harvest_<kind>_first  -> first candidate (for {var} substitution into a URL/param)
+    Reserved `harvest_*` namespace, seeded with setdefault so explicit inputs and extracted
+    vars win — and so intel harvested by an earlier step becomes available to later steps."""
+    store = getattr(reg, "intel", None)
+    if store is None:
+        return
+    try:
+        cands = store.to_dict().get("candidates", {})
+    except Exception:
+        return
+    for kind, vals in cands.items():
+        if vals:
+            variables.setdefault("harvest_" + kind, vals)
+            variables.setdefault("harvest_" + kind + "_first", vals[0])
+
+
 def _jsonpath_lite(data, path: str):
     """Safe traversal for a dotted path like $.data[0].id — dicts/lists only, no eval."""
     cur = data
@@ -104,6 +124,7 @@ async def run(reg, wf: dict) -> dict:
         if req.startswith("capability:") and not reg.state.has(req.split(":", 1)[1]):
             return {"ran": False, "error": f"missing prerequisite {req}", "log": log}
     for i, step in enumerate((wf.get("steps") or [])[:20]):
+        _seed_harvest(variables, reg)   # target-derived fixtures, refreshed each step
         do = step.get("do")
         meth = _TOOLMAP.get(do)
         if not meth or not hasattr(reg, meth):
