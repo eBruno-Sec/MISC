@@ -937,6 +937,26 @@ def generate_html_report(program: str, findings: list, scope: dict,
                        "CSP / HSTS / X-Frame-Options / X-Content-Type-Options is a hardening gap.</p>"
                        f"<div class='dist' style='max-width:none'>{rows}</div>")
 
+    # CVE Intelligence — absorbed from the reference reports. Aggregates every CVE named in
+    # confirmed findings + leads (from dependency/vulnerable-component detection).
+    import re as _re2
+    _cve_map = {}
+    for _f in (findings + (leads or [])):
+        _blob = (str(_f.get("title", "")) + " " + str(_f.get("description", "")) + " " + str(_f.get("evidence", "")))
+        for _c in set(_re2.findall(r"CVE-\d{4}-\d{4,7}", _blob)):
+            _cve_map.setdefault(_c, {"where": _f.get("title", ""), "sev": (_f.get("severity") or "info")})
+    cve_html = ""
+    if _cve_map:
+        _rows = "".join(
+            f"<tr><td><code>{e(c)}</code></td><td>{e(v['where'][:70])}</td>"
+            f"<td><span class='sev' style='background:{SEV_COLORS.get(v['sev'].lower(), '#6a8a9a')}'>{e(v['sev'].upper())}</span></td></tr>"
+            for c, v in sorted(_cve_map.items()))
+        cve_html = ("<h2 id='cve'>CVE Intelligence</h2>"
+                    f"<p class='sub'>{len(_cve_map)} CVE(s) identified from vulnerable components and behaviour.</p>"
+                    "<table class='cve-tbl' style='width:100%;border-collapse:collapse;font-size:.85rem'>"
+                    "<tr style='text-align:left;color:var(--muted)'><th>CVE</th><th>Source finding</th><th>Severity</th></tr>"
+                    f"{_rows}</table>")
+
     # confirmed findings — full proof density (grouped by root cause)
     cards = []
     for i, f in enumerate(findings, 1):
@@ -1395,6 +1415,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {surf_html}
 {cov_html}
 {sechdr_html}
+{cve_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}
