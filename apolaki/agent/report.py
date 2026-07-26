@@ -462,10 +462,38 @@ _FAMILY_CVSS = {
     "csrf": (6.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N"),
     "xss": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
     "csti": (8.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"),
-    "crlf": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+    "crlf": (7.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N"),
+    "prototype_pollution": (7.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N"),
     "cors": (5.4, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"),
     "open_redirect": (4.7, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N"),
 }
+
+
+# Canonical OWASP Top-10 (2021) category per finding family. Authoritative at render so a
+# tool that mis-tagged (e.g. a vulnerable component as A03 Injection) is corrected centrally.
+_OWASP_BY_FAMILY = {
+    "sqli": "A03:2021 Injection", "xss": "A03:2021 Injection", "csti": "A03:2021 Injection",
+    "ssti": "A03:2021 Injection", "crlf": "A03:2021 Injection", "cmdi": "A03:2021 Injection",
+    "nosqli": "A03:2021 Injection", "code_injection": "A03:2021 Injection",
+    "idor": "A01:2021 Broken Access Control", "bola": "A01:2021 Broken Access Control",
+    "bfla": "A01:2021 Broken Access Control", "access_control": "A01:2021 Broken Access Control",
+    "broken_access": "A01:2021 Broken Access Control", "open_redirect": "A01:2021 Broken Access Control",
+    "csrf": "A01:2021 Broken Access Control", "traversal": "A01:2021 Broken Access Control",
+    "ssrf": "A10:2021 Server-Side Request Forgery", "xxe": "A05:2021 Security Misconfiguration",
+    "prototype_pollution": "A08:2021 Software and Data Integrity Failures",
+    "deserialization": "A08:2021 Software and Data Integrity Failures",
+    "vulnerable_component": "A06:2021 Vulnerable and Outdated Components",
+    "backup_exposure": "A05:2021 Security Misconfiguration", "git_exposure": "A05:2021 Security Misconfiguration",
+    "config_exposure": "A05:2021 Security Misconfiguration", "info_disclosure": "A05:2021 Security Misconfiguration",
+    "credential_exposure": "A07:2021 Identification and Authentication Failures",
+    "jwt": "A07:2021 Identification and Authentication Failures", "auth": "A07:2021 Identification and Authentication Failures",
+    "business_logic": "A04:2021 Insecure Design",
+}
+
+
+def _owasp_of(f: dict) -> str:
+    """Corrected OWASP category: canonical family map wins over a tool-supplied tag."""
+    return _OWASP_BY_FAMILY.get(_family_of(f), str(f.get("owasp") or ""))
 
 
 def estimated_cvss(finding: dict):
@@ -836,6 +864,11 @@ def generate_html_report(program: str, findings: list, scope: dict,
     counts = _counts(findings)
     rk = risk_score(findings)
     engagement = _ENGAGEMENT.get((mode or "").lower(), "Security Assessment")
+    # Metric consistency: the Assessment Coverage tile must report the same UNIQUE finding
+    # count as the headline, not the raw pre-grouping count (a CRLF on 2 endpoints is one
+    # finding, not two). This kills the "6 confirmed vs 7 findings" contradiction.
+    if isinstance(coverage, dict) and "findings" in coverage:
+        coverage = {**coverage, "findings": len(findings)}
 
     # severity distribution bars (confirmed only)
     total_conf = len(findings) or 1
@@ -1036,7 +1069,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             <span>CVSS: {e(cvss_disp)}</span>
             <span>CWE: {e(cwe or 'N/A')}</span>
             {f"<span>CAPEC: {e(str(f.get('capec')))}</span>" if f.get('capec') else ''}
-            {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
+            {f"<span>OWASP: {e(_owasp_of(f))}</span>" if _owasp_of(f) else ''}
             {cvss_vec}
             {prov_html}
             <span class="tag-conf">CONFIRMED</span>
@@ -1086,12 +1119,24 @@ def generate_html_report(program: str, findings: list, scope: dict,
     # unconfirmed leads (Apolaki's honesty edge — kept distinct + labelled)
     leads_html = ""
     if leads:
+        # Dedup: collapse repeated leads (same title) into ONE row with an instance count and
+        # the affected-endpoint total, so the list is not padded with "AngularJS ng-app x3".
+        _lg = {}
+        for l in leads:
+            k = (l.get("title", "").strip().lower(), (l.get("severity") or "info").lower())
+            g = _lg.setdefault(k, {"l": l, "targets": []})
+            t = l.get("target", "")
+            if t and t not in g["targets"]:
+                g["targets"].append(t)
+        _uniq = [{**v["l"], "_n": max(1, len(v["targets"])), "_first": (v["targets"][0] if v["targets"] else v["l"].get("target", ""))}
+                 for v in _lg.values()]
         rows = "".join(
             f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get((l.get('severity') or 'info').lower(),'#6a8a9a')}'>"
             f"{e((l.get('severity') or 'info').upper())}</span></td><td>{e(l.get('confidence','candidate'))}</td>"
-            f"<td>{e(l.get('title',''))}</td><td><code>{e(l.get('target',''))}</code></td></tr>"
-            for l in sorted(leads, key=lambda x: SEV_ORDER.get((x.get('severity') or 'info').lower(), 5)))
-        leads_html = ("<h2 id='leads'>Unconfirmed Leads</h2><p class='sub'>Signals worth manual verification — "
+            f"<td>{e(l.get('title',''))}{(' <span class=\"muted\">x'+str(l['_n'])+'</span>') if l['_n']>1 else ''}</td>"
+            f"<td><code>{e(l['_first'])}</code>{(' <span class=\"muted\">+'+str(l['_n']-1)+' more</span>') if l['_n']>1 else ''}</td></tr>"
+            for l in sorted(_uniq, key=lambda x: SEV_ORDER.get((x.get('severity') or 'info').lower(), 5)))
+        leads_html = (f"<h2 id='leads'>Unconfirmed Leads ({len(_uniq)})</h2><p class='sub'>Signals worth manual verification — "
                       "<strong>NOT confirmed vulnerabilities</strong> and NOT counted in the risk score. "
                       "Confirm before reporting to a program.</p>"
                       "<table class='tbl'><tr><th>Severity</th><th>Confidence</th><th>Lead</th><th>Target</th></tr>"
@@ -1406,6 +1451,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   <div>
     <div class="plabel" style="color:{rk['color']}">{e(rk['label'])}</div>
     <div class="sub">Confirmed-risk score — computed from confirmed findings only. Unconfirmed leads never inflate it.</div>
+    <div class="sub" style="margin-top:.25rem"><b>Methodology:</b> {e(rk['note'])}</div>
   </div>
   <div class="dist">{dist_rows}</div>
 </div>
