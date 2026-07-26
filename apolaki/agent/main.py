@@ -683,6 +683,24 @@ async def get_report(session_id: str):
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
 
 
+def _report_fname(m: dict, scope: dict, ext: str) -> str:
+    """Convention: target_config_YYYYMMDD@HHMMPST.ext (e.g. juiceshop_full-det_20260726@1440PST.html)."""
+    import re as _re
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        now = datetime.utcnow()
+    sc = scope if isinstance(scope, dict) else {}
+    ins = sc.get("in_scope") or []
+    tgt = (ins[0] if ins else (m.get("program") or "target"))
+    tgt = _re.sub(r"[^a-z0-9]+", "", tgt.split(":")[0].split(".")[0].lower()) or "target"
+    smap = {"deterministic": "det", "agentic": "agentic", "low_ai": "lowai", "manual": "man"}
+    cfg = f"{(m.get('mode') or 'scan')[:4]}-{smap.get(m.get('strategy'), (m.get('strategy') or 'det'))}"
+    return f"{tgt}_{cfg}_{now.strftime('%Y%m%d@%H%M')}PST.{ext}"
+
+
 @app.get("/report/{session_id}/md")
 async def get_report_md(session_id: str):
     m, findings, scope, coverage, chains = _report_bundle(session_id)
@@ -690,7 +708,7 @@ async def get_report_md(session_id: str):
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
                                     delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
-    fname = f"bbh-report-{session_id}.md"
+    fname = _report_fname(m, scope, "md")
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
@@ -704,7 +722,8 @@ async def get_report_html(session_id: str, download: bool = False):
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
         report_id=session_id)
-    headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
+    _fn = _report_fname(m, scope, "html")
+    headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
 
@@ -732,8 +751,9 @@ async def get_report_poc(session_id: str, redact: bool = True):
     findings = db.get_findings(session_id)
     ex_by_f = {f.get("id"): db.get_exchanges(session_id, f.get("id")) for f in findings}
     md = poc.mission_markdown(m["program"], findings, ex_by_f, redact=redact)
+    _fn = _report_fname(m, m.get("scope") or {}, "poc.md")
     return PlainTextResponse(md, media_type="text/markdown",
-                             headers={"Content-Disposition": f'attachment; filename="bbh-poc-{session_id}.md"'})
+                             headers={"Content-Disposition": f'attachment; filename="{_fn}"'})
 
 
 # ── cross-session memory: record + graph + diff ──────────────────

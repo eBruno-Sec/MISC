@@ -36,6 +36,7 @@ _ALLOWED = {
 # caps keep every run bounded + terminating
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
 CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
+CAP_REST = 30           # high-value NON-parameterized REST/sensitive endpoints we fetch
 CAP_FORM_PAGES = 10     # non-parameterized pages we fetch for form discovery (bounded:
                         # each is a remote round-trip, so keep the amplification small)
 CAP_JS = 40             # js urls handed to js_review
@@ -72,6 +73,16 @@ _STATIC_NAME = _re.compile(r"/(?:readme|license|licence|changelog|contributing|a
 def _is_static(u: str) -> bool:
     low = (u or "").lower().rstrip("/")
     return low.endswith(_STATIC_EXT) or bool(_STATIC_NAME.search(low))
+
+
+# High-value NON-parameterized endpoints worth a direct GET: REST/API resource trees
+# (the access-control surface) and standalone sensitive paths (info-exposure surface).
+# These carry no query string, so the parameterized-only probe filter skips them — yet
+# they are exactly where IDOR/BOLA and sensitive-file exposure live on a REST app.
+_INTERESTING_EP = _re.compile(
+    r"/(?:rest|api|graphql|b2b)/[A-Za-z0-9_{}.\-]"
+    r"|/(?:ftp|metrics|snippets|encryptionkeys|dataerasure|redirect|profile|support|"
+    r"swagger|\.git|\.env|backup|admin)(?:/|$)", _re.I)
 
 
 # Login-style endpoints worth a POST/JSON body auth-bypass SQLi probe.
@@ -183,6 +194,8 @@ def next_batch(state: dict) -> list:
     for root in roots:
         for tool in ("run_subfinder", "run_crtsh", "run_wayback", "run_dns", "run_asn", "run_github_recon"):
             a.append(_step(tool, {"domain": root}, f"{tool}:{root}"))
+        # offline, PASSIVE: operator-ready search-dork queries for the root (no scraping)
+        a.append(_step("run_dork_gen", {"target": root}, f"run_dork_gen:{root}"))
     a = fresh(a)
     if a:
         return a
@@ -241,6 +254,9 @@ def next_batch(state: dict) -> list:
         d.append(_step("run_graphql", {"url": _b(h) + "/graphql"}, f"run_graphql:{h}"))
     if js_urls:
         d.append(_step("run_js_review", {"urls": js_urls[:CAP_JS]}, "run_js_review"))
+        # ACTIVE: analyse each bundle's source map (hidden routes/APIs/secrets), bounded
+        for ju in js_urls[:8]:
+            d.append(_step("run_sourcemap", {"url": ju}, f"run_sourcemap:{ju}"))
     # http_probe parameterized/product pages so their POST forms (method + body
     # fields) are captured into recon["forms"] BEFORE phase-E probes run — that is
     # what lets run_xxe reach a POST XML body sink like the stock-check form.
@@ -263,6 +279,26 @@ def next_batch(state: dict) -> list:
         page_urls.append(pg)
     for u in page_urls[:CAP_FORM_PAGES]:
         d.append(_step("http_probe", {"url": u}, f"http_probe:page:{_host(u)}{_path(u)}"))
+    # http_probe high-value NON-parameterized REST/sensitive endpoints (basket, ftp,
+    # users, security-questions, 2fa, …). The parameterized filter above skips them, so
+    # without this the entire REST access-control + exposure surface is discovered but
+    # never fetched. A {id}/${id} placeholder left by JS mining is instantiated to 1 so
+    # the URL is concrete. GET only, scope-guarded at the wrapper, bounded by CAP_REST.
+    rest_urls, seen_rest = [], set()
+    for ep in inv_d:
+        if ep.get("parameterized"):
+            continue
+        path = ep.get("path") or ""
+        if not _INTERESTING_EP.search(path) or _is_static(path):
+            continue
+        real = path.replace("${id}", "1").replace("{id}", "1")
+        u = _b(ep["host"]) + real
+        if u in seen_rest:
+            continue
+        seen_rest.add(u)
+        rest_urls.append(u)
+    for u in rest_urls[:CAP_REST]:
+        d.append(_step("http_probe", {"url": u}, f"http_probe:rest:{_host(u)}{_path(u)}"))
     d = fresh(d)
     if d:
         return d
@@ -428,6 +464,7 @@ def next_batch(state: dict) -> list:
     for h in host_bases:
         e_steps.append(_step("run_content_discovery", {"base_url": _b(h)}, f"run_content_discovery:{h}"))
         e_steps.append(_step("run_exposure", {"base_url": _b(h)}, f"run_exposure:{h}"))
+        e_steps.append(_step("run_dir_harvest", {"base_url": _b(h)}, f"run_dir_harvest:{h}"))
         # site-level: one cache-poisoning probe per live host root (unkeyed headers)
         e_steps.append(_step("run_cache_poison", {"url": _b(h)}, f"run_cache_poison:{h}"))
     # ── expanded class coverage (deterministic): schedule the auth / API / logic tools

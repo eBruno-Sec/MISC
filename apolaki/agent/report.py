@@ -578,6 +578,19 @@ def group_findings(findings: list) -> list:
         tgt = f.get("target") or f.get("surface") or ""
         if tgt and tgt not in g["instances"]:
             g["instances"].append(tgt)
+        # The representative must reflect the STRONGEST proven finding in the group. When a
+        # merged sibling is more severe (e.g. a UNION data-extraction that outranks the
+        # error-based signal on the same parameter), promote its severity and proof fields
+        # onto the representative — a critical must never hide behind a high just because it
+        # was appended second. Accumulated instances / screenshots are preserved.
+        if (SEV_ORDER.get((f.get("severity") or "info").lower(), 9)
+                < SEV_ORDER.get((g.get("severity") or "info").lower(), 9)):
+            _tags = list(dict.fromkeys((g.get("tags") or []) + (f.get("tags") or [])))
+            for _k in ("severity", "title", "description", "evidence", "impact",
+                       "reproduction_steps", "cwe", "capec", "owasp", "extracted_tables"):
+                if f.get(_k) is not None:
+                    g[_k] = f[_k]
+            g["tags"] = _tags
         # carry the strongest browser PoC from ANY instance onto the representative, so
         # dedup never discards a screenshot / DOM snippet that a sibling captured. Prefer the
         # LARGEST screenshot: a blank/near-white page compresses to a few KB, so the biggest
@@ -628,6 +641,51 @@ def risk_score(findings: list) -> dict:
     return {"score": score, "label": label, "color": color,
             "note": "Score = weighted sum of confirmed findings (critical 40 / high 25 / medium 10 / "
                     "low 3), capped at 100; label capped at the highest confirmed severity."}
+
+
+def risk_signals(findings: list, leads: list, coverage: dict, attack_surface: dict,
+                 chains: list) -> list:
+    """Multi-axis risk SIGNALS for the executive view (absorbed from the reference
+    dashboards) — but truth-first: these are descriptive signals about the engagement,
+    NOT the risk score. The single confirmed-only score in risk_score() remains the
+    authoritative posture; a target with zero confirmed findings never reads 'critical'
+    here no matter how large its surface. Every signal states the factual basis it is
+    computed from, so nothing is a black box. Returns [{label,pct,basis}]."""
+    coverage = coverage or {}
+    attack_surface = attack_surface or {}
+    leads = leads or []
+    chains = chains or []
+
+    def _num(v):
+        # Surface/coverage metrics can be 'n/a', None, or a formatted string — coerce
+        # anything non-numeric to 0 so a descriptive placeholder never 500s the report.
+        try:
+            return int(float(str(v).strip()))
+        except (TypeError, ValueError):
+            return 0
+    endpoints = _num(attack_surface.get("endpoints", 0))
+    params = _num(attack_surface.get("params", 0))
+    parameterized = _num(attack_surface.get("parameterized", 0))
+    probed = _num(coverage.get("surface_urls", 0)) or endpoints
+    exposure = sum(1 for x in (findings + leads)
+                   if any(k in ((x.get("family") or "") + " " + " ".join(x.get("tags") or [])).lower()
+                          for k in ("exposure", "secret", "disclosure", "backup", "sensitive")))
+    conf_load = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in findings))
+    sig = [
+        {"label": "Confirmed vulnerability load", "pct": conf_load,
+         "basis": f"{len(findings)} confirmed finding(s), severity-weighted"},
+        {"label": "Attack surface", "pct": min(100, round(endpoints * 1.5 + params * 2)),
+         "basis": f"{endpoints} endpoint(s), {params} unique parameter(s) mapped"},
+        {"label": "Injectable surface", "pct": (round(100 * parameterized / endpoints) if endpoints else 0),
+         "basis": f"{parameterized} of {endpoints} endpoint(s) accept input (injection candidates)"},
+        {"label": "Information exposure", "pct": min(100, exposure * 20),
+         "basis": f"{exposure} exposure signal(s) — secrets / backups / disclosure"},
+        {"label": "Attack-chain potential", "pct": min(100, len(chains) * 34),
+         "basis": f"{len(chains)} multi-step attack path(s) identified"},
+        {"label": "Leads awaiting verification", "pct": min(100, len(leads) * 7),
+         "basis": f"{len(leads)} advisory lead(s) not yet confirmed"},
+    ]
+    return sig
 
 
 # ── Since-Last-Scan (historical delta) — truth-first, never calls "fixed" ──
@@ -804,6 +862,63 @@ def generate_html_report(program: str, findings: list, scope: dict,
         rows = "".join(f"<div class='cov'><span>{e(str(v))}</span><label>{e(k.replace('_',' '))}</label></div>"
                        for k, v in coverage.items())
         cov_html = f"<h2 id='coverage'>Assessment Coverage</h2><div class='cov-grid'>{rows}</div>"
+
+    # Risk Signals — multi-axis executive view absorbed from the reference dashboards,
+    # kept truth-first: descriptive signals only, the confirmed-only score stays the
+    # authoritative posture. Each bar shows the factual basis it was computed from.
+    signals_html = ""
+    _sig = risk_signals(findings, leads, coverage, attack_surface, chains or [])
+    if _sig:
+        def _sig_color(p):
+            return SEV_COLORS["high"] if p >= 70 else SEV_COLORS["medium"] if p >= 40 else "#00b8d4"
+        sig_rows = "".join(
+            f"<div class='distrow'><span class='distlabel'>{e(s['label'])}</span>"
+            f"<span class='distbar'><i style='width:{int(s['pct'])}%;background:{_sig_color(s['pct'])}'></i></span>"
+            f"<span class='distn'>{int(s['pct'])}</span></div>"
+            f"<div class='sub' style='margin:-4px 0 10px 0'>{e(s['basis'])}</div>"
+            for s in _sig)
+        signals_html = ("<h2 id='signals'>Risk Signals</h2>"
+                        "<p class='sub'>Descriptive, factual signals about this engagement. The confirmed-only "
+                        "score above stays authoritative &mdash; these signals never change it.</p>"
+                        f"<div class='dist' style='max-width:none'>{sig_rows}</div>")
+
+    # ── absorbed from the reference reports' client-facing polish: Rules of Engagement
+    #    block + CVSS score distribution (kept truth-first — buckets the CONFIRMED findings'
+    #    estimated CVSS, no inflation). ──
+    roe_html = (
+        "<h2 id='roe'>Rules of Engagement</h2><div class='cov-grid'>"
+        f"<div class='cov'><span>{e((mode or 'n/a').title())}</span><label>Assessment mode</label></div>"
+        "<div class='cov'><span>Authorized</span><label>Engagement basis</label></div>"
+        "<div class='cov'><span>Scope-enforced</span><label>Targeting</label></div>"
+        "<div class='cov'><span>Non-destructive</span><label>Impact policy</label></div>"
+        "<div class='cov'><span>CONFIDENTIAL</span><label>Classification</label></div></div>"
+        "<p class='sub'>Testing is limited to in-scope hosts, enforced at the tool wrapper. Intrusive actions are "
+        "gated by operator approval; no denial-of-service and no irreversible changes are performed. Authorized "
+        "security assessment only.</p>")
+    _buckets = {"Critical (9.0-10)": 0, "High (7.0-8.9)": 0, "Medium (4.0-6.9)": 0, "Low (0.1-3.9)": 0}
+    _bcol = {"Critical (9.0-10)": "critical", "High (7.0-8.9)": "high", "Medium (4.0-6.9)": "medium", "Low (0.1-3.9)": "low"}
+    for f in findings:
+        cv = estimated_cvss(f)
+        try:
+            s = float(cv[0]) if cv else 0.0
+        except (TypeError, ValueError):
+            s = 0.0
+        if s >= 9:
+            _buckets["Critical (9.0-10)"] += 1
+        elif s >= 7:
+            _buckets["High (7.0-8.9)"] += 1
+        elif s >= 4:
+            _buckets["Medium (4.0-6.9)"] += 1
+        elif s > 0:
+            _buckets["Low (0.1-3.9)"] += 1
+    cvss_html = ""
+    if any(_buckets.values()):
+        _tot = sum(_buckets.values()) or 1
+        _rows = "".join(
+            f"<div class='distrow'><span class='distlabel'>{k}</span>"
+            f"<span class='distbar'><i style='width:{int(100 * v / _tot)}%;background:{SEV_COLORS[_bcol[k]]}'></i></span>"
+            f"<span class='distn'>{v}</span></div>" for k, v in _buckets.items())
+        cvss_html = f"<h2 id='cvss'>CVSS Score Distribution</h2><div class='dist' style='max-width:none'>{_rows}</div>"
 
     # confirmed findings — full proof density (grouped by root cause)
     cards = []
@@ -1257,6 +1372,9 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   </div>
   <div class="dist">{dist_rows}</div>
 </div>
+{signals_html}
+{cvss_html}
+{roe_html}
 {surf_html}
 {cov_html}
 

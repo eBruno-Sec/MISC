@@ -210,6 +210,7 @@ details{margin-top:.5rem}summary{cursor:pointer;color:var(--accent);font-size:.8
 .pb-curl pre{border:none;border-radius:0;margin:0}
 .pb-curl.empty{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.6rem .7rem;flex-wrap:wrap}
 .pb-curl.empty span{font-size:.78rem;color:var(--text-dim)}
+.pb-run{padding:0 .7rem}.pb-run-r{font-size:.8rem;padding:.5rem 0}.pb-run-r.err{color:var(--sev-high)}
 .pb-obj{font-size:.86rem;margin-bottom:.5rem}
 .pb-sec ol,.pb-sec ul,.pb-adv ul{padding-left:1.2rem;font-size:.83rem}
 .pb-sec li,.pb-adv li{margin:.2rem 0}
@@ -1037,8 +1038,9 @@ function renderPlaybookCard(g,i){
     ? `<div class="pb-curl"><div class="pb-curl-head"><span>Recommended cURL</span><div class="pb-curl-actions">
          <button class="btn ghost sm" onclick="copyPlaybookCurl(${i})">Copy cURL</button>
          <button class="btn ghost sm" onclick="accessFromPlaybook(${i})">Access check</button>
-         <button class="btn primary sm" onclick="sendToCurl(${i})">Send to cURL Console →</button></div></div>
-       <pre class="code">${esc(cmd)}</pre></div>`
+         <button class="btn ghost sm" onclick="sendToCurl(${i})">Send to Console →</button>
+         <button class="btn primary sm" onclick="runPlaybookTest(${i})">▶ Run this test</button></div></div>
+       <pre class="code">${esc(cmd)}</pre><div id="pbRun${i}" class="pb-run"></div></div>`
     : `<div class="pb-curl empty"><span>No prebuilt cURL for this surface.</span>
          <button class="btn ghost sm" onclick="sendToCurl(${i})">Open in cURL Console →</button></div>`;
   const steps=(g.how_to_test||[]).map(h=>`<li>${esc(h)}</li>`).join("");
@@ -1059,6 +1061,26 @@ function renderPlaybookCard(g,i){
 }
 function copyPlaybookCurl(i){const g=pbData[i];const cmd=g&&g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd;
   if(cmd)copyText(cmd,"cURL copied to clipboard.");}
+/* One-click executable playbook: parse the recommended cURL and run it through the
+   SAME scope-guarded /curl endpoint the console uses, showing the response inline. */
+async function runPlaybookTest(i){
+  const g=pbData[i]; const out=document.getElementById("pbRun"+i); if(!g||!out)return;
+  const cmd=(g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd)||"";
+  const p=cmd?parseCurl(cmd):{method:"GET",url:g.surface||"",headers:{},body:""};
+  if(!p.url){out.innerHTML=`<div class="pb-run-r err">No runnable URL in this cURL.</div>`;return;}
+  if(!sessionId){out.innerHTML=`<div class="pb-run-r err">Start or load a mission first.</div>`;return;}
+  out.innerHTML=`<div class="pb-run-r">Running <code>${esc(p.method)} ${esc(p.url)}</code> …</div>`;
+  try{
+    const r=await fetch(`${API}/curl/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({method:p.method,url:p.url,headers:p.headers,body:p.body,follow_redirects:true})});
+    if(!r.ok){const t=await r.text();out.innerHTML=`<div class="pb-run-r err">${r.status} — ${esc(t.slice(0,200))}</div>`;return;}
+    const d=await r.json();const sc=d.status||0;
+    const col=sc>=200&&sc<300?"var(--sev-low)":sc>=400?"var(--sev-high)":"var(--text-dim)";
+    out.innerHTML=`<div class="pb-run-r"><b style="color:${col}">HTTP ${sc}</b>
+      <span class="muted">${(d.body||"").length} bytes</span>
+      <pre class="code" style="max-height:220px;overflow:auto;margin:.4rem 0 0">${esc((d.body||"").slice(0,1500))}</pre></div>`;
+  }catch(e){out.innerHTML=`<div class="pb-run-r err">${esc(e.message)}</div>`;}
+}
 
 /* ── cURL Console ergonomics (client-side only; same scope-guarded endpoint) ── */
 function buildCurl(m,u,h,b){
@@ -1603,8 +1625,115 @@ const HELP=[
    "Load a past mission to browse its findings/report — its original run is replayed into Live Run so you can inspect the tool calls and results too. Rescan copies its scope/mode/objective into the Launch form for a brand-new child mission (the original is never changed). Load / Rescan / Delete are keyboard-accessible buttons.",
    "Example: rescan last week's run after new subdomains appeared."],
 ];
+/* ── Field Manual: the beginner → godly training that turns anyone into an operator.
+   Rendered above the per-feature cards. Plain language first, then the pro move. ── */
+const TRAINING = `
+<div class="card" style="border-left:3px solid var(--accent,#00e5ff)">
+  <h4>Apolaki Field Manual &mdash; zero to operator</h4>
+  <div class="muted" style="font-size:.84rem;line-height:1.6">
+    Apolaki drives a full recon &rarr; scan &rarr; confirm &rarr; report pipeline against targets
+    <em>you are authorized to test</em>. You do not need to know the tools. You pick a scope and a mode;
+    Apolaki runs the playbook a senior pentester would, and only reports what it can <strong>prove</strong>.
+    Read the nine sections below once and you can run a real assessment today.
+  </div>
+</div>
+
+<div class="card"><h4>1 &middot; Your first mission in 60 seconds</h4>
+  <ol style="font-size:.85rem;line-height:1.7;margin:.2rem 0 0 1.1rem">
+    <li><strong>Launch</strong> tab &rarr; <strong>Program name</strong> = anything (e.g. "My first test").</li>
+    <li><strong>In-scope</strong> = the host you may test, one per line. Non-standard port? include it: <code class="inline">juice-shop:3000</code>.</li>
+    <li><strong>Mode</strong> = <strong>Active</strong> to start (safe scanning). <strong>AI usage</strong> = <strong>Deterministic</strong> (no key needed, best detection).</li>
+    <li>Click <strong>Start Hunt</strong>. Watch <strong>Live Run</strong> narrate every step.</li>
+    <li>When it finishes, open <strong>Findings</strong>, then <strong>Reports &rarr; Open HTML / PDF</strong>. That HTML is client-ready.</li>
+  </ol>
+</div>
+
+<div class="card"><h4>2 &middot; Pick the right mode (permission) and AI usage (brains)</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.82rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Mode</th><th>What runs</th><th>Use when</th></tr>
+    <tr><td><strong>Passive</strong></td><td>Recon + playbook only, no target attacks</td><td>You only want mapping / OSINT</td></tr>
+    <tr><td><strong>Active</strong></td><td>+ scanning &amp; probing (one approval gate)</td><td>Default for real testing</td></tr>
+    <tr><td><strong>Full</strong></td><td>+ deep intrusive probing (SQLi/XSS/IDOR/XXE/SSRF)</td><td>You want maximum confirmed findings</td></tr>
+  </table></div>
+  <div class="muted" style="font-size:.82rem;margin-top:.5rem;line-height:1.6">
+    <strong>AI usage:</strong> <em>Deterministic</em> = proof-first engines, no API key, peak detection (recommended).
+    <em>Low-AI</em> adds an AI executive summary. <em>Agentic</em> adds an AI business-logic hunt (needs a key, many calls).
+    <em>Manual</em> = you drive the tools yourself. <strong>Intensity</strong> (Standard/Deep/Insane) controls how hard each tool digs.
+  </div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--sev-high,#ff8c42)"><h4>3 &middot; The one rule that makes you trustworthy: truth-first</h4>
+  <div class="muted" style="font-size:.84rem;line-height:1.65">
+    Apolaki splits results into <strong>Confirmed Findings</strong> (actively proven &mdash; a real request/response, a fired
+    payload, a browser screenshot) and <strong>Leads</strong> (a signal that still needs a human to verify). The risk score is
+    computed from <em>confirmed only</em> &mdash; leads never inflate it. When you report, <strong>submit confirmed, verify leads first.</strong>
+    This is the difference between a pro and a scanner-spammer: never claim what you did not prove.
+  </div>
+</div>
+
+<div class="card"><h4>4 &middot; How to read a finding</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    Every confirmed finding gives you: <strong>Why this matters</strong> (plain English), <strong>Technical detail</strong>,
+    <strong>Evidence</strong> (the proof), a copy-paste <strong>Reproduction</strong> (cURL or a browser step),
+    <strong>CVSS / CWE / OWASP</strong>, <strong>Remediation</strong>, and a <strong>Validation-after-fix</strong> regression test.
+    To reproduce: copy the cURL block, run it, and compare to the evidence. If it matches, it is real.
+  </div>
+</div>
+
+<div class="card"><h4>5 &middot; Vulnerability field guide &mdash; what Apolaki does, and your next move</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.79rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Class</th><th>Apolaki confirms by&hellip;</th><th>Your escalation (godly move)</th></tr>
+    <tr><td><strong>SQL injection</strong></td><td>Error-signature + boolean-diff + time-blind, baseline-checked</td><td>Use the cURL Console to UNION-extract data; try <code class="inline">' OR 1=1--</code> at logins</td></tr>
+    <tr><td><strong>XSS (reflected/DOM)</strong></td><td>Context analysis + real headless-browser execution</td><td>Swap in an <code class="inline">&lt;iframe src=javascript:&gt;</code> payload; check stored sinks</td></tr>
+    <tr><td><strong>Access control (IDOR/BOLA/BFLA)</strong></td><td>Cross-role replay + side-channel oracle</td><td>Access Check tab: register two users, request A's object as B</td></tr>
+    <tr><td><strong>Auth / JWT</strong></td><td>alg:none forge, weak-secret crack, forged-admin live test</td><td>Replay a forged token in the Workbench</td></tr>
+    <tr><td><strong>SSRF / XXE</strong></td><td>Cloud-metadata reflect + native out-of-band callback</td><td>Point the payload at an internal service you know</td></tr>
+    <tr><td><strong>Exposure / secrets</strong></td><td>Signature-confirmed .git/.env/backup + JS secret mining</td><td>Fetch the leaked file with the cURL Console; rotate + report</td></tr>
+    <tr><td><strong>Open redirect / CSRF / CORS</strong></td><td>Real navigation / token-less form / origin-reflection checks</td><td>Chain into phishing or state-change PoC</td></tr>
+  </table></div>
+  <div class="muted" style="font-size:.8rem;margin-top:.45rem">Every class links to its OWASP WSTG + PortSwigger reference inside the <strong>Playbooks</strong> tab &mdash; that is your built-in tutor.</div>
+</div>
+
+<div class="card"><h4>6 &middot; The three manual tools (this is where you feel godly)</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    <strong>cURL Console</strong> &mdash; fire one scope-guarded request and read the raw response; prefilled from any finding.<br>
+    <strong>Workbench</strong> &mdash; Repeater (replay + tweak) and Intruder (fuzz one parameter, anomaly-ranked).<br>
+    <strong>Access Check</strong> &mdash; register roles and replay one request as each to expose IDOR/BOLA/BFLA.<br>
+    Every one is scope-guarded server-side: off-scope requests are refused, so you cannot wander out of bounds.
+  </div>
+</div>
+
+<div class="card"><h4>7 &middot; Deliver the report</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    <strong>Reports</strong> tab &rarr; <strong>Open HTML / PDF</strong> (print &rarr; Save as PDF) for the client deliverable, or export
+    Markdown / CSV / JSON / PoC-Markdown. The report carries an executive summary, <strong>Risk Signals</strong>, confirmed findings
+    with proof, attack-path chains, a manual testing playbook, the tool ledger, and a report-integrity block. Hand it over as-is.
+  </div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--accent,#00e5ff)"><h4>8 &middot; The beginner &rarr; godly ladder</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.8rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Level</th><th>You can&hellip;</th></tr>
+    <tr><td><strong>1 Recruit</strong></td><td>Run an Active deterministic scan and open the HTML report.</td></tr>
+    <tr><td><strong>2 Operator</strong></td><td>Read findings, reproduce one with the cURL Console, verify a lead.</td></tr>
+    <tr><td><strong>3 Hunter</strong></td><td>Run Full mode, use Access Check for IDOR, fuzz a param in the Workbench.</td></tr>
+    <tr><td><strong>4 Specialist</strong></td><td>Follow a Playbook to manually confirm SQLi/XSS/JWT the scanner only hinted at.</td></tr>
+    <tr><td><strong>5 Godly</strong></td><td>Chain findings into an attack path, write the client report, and know exactly why every claim is true.</td></tr>
+  </table></div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--sev-crit,#ff3860)"><h4>9 &middot; Rules of engagement</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    Test <strong>only</strong> targets you are authorized to test and that are inside your program's scope. Apolaki enforces scope at
+    the tool wrapper, redacts secrets at rest, and gates intrusive tools behind an approval &mdash; but the authorization is <em>yours</em>.
+    Never test assets outside the defined scope.
+  </div>
+</div>
+
+<div class="view-head" style="margin-top:1.2rem"><h3 class="sec">Feature reference</h3><span class="muted">every tab, in one line</span></div>
+`;
 function renderHelp(){
-  document.getElementById("helpList").innerHTML=HELP.map(([t,nontech,tech,ex])=>
+  document.getElementById("helpList").innerHTML = TRAINING + HELP.map(([t,nontech,tech,ex])=>
     `<div class="card"><h4>${esc(t)}</h4>
       <div style="font-size:.86rem;margin-bottom:.4rem">${nontech}</div>
       <div class="muted" style="font-size:.82rem;line-height:1.55"><strong>Details:</strong> ${tech}</div>

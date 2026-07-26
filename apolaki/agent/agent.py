@@ -130,6 +130,24 @@ RECOMMENDED METHODOLOGY:
 6. Targeted probing (INTRUSIVE): run_content_discovery for sensitive paths (body-validated), run_exposure for exposed .git/.env/backup/credential files (signature-confirmed, source-recoverable escalation), run_web_probes for traversal/IDOR, run_injection_probes for CORS/open-redirect/host-header/SSTI on parameterized URLs, run_bfla for broken function-level authorization (write methods / admin paths with a low-priv token) + side-channel BOLA, run_race on single-use actions (coupon/transfer/vote) for race conditions, run_ssrf on URL-taking parameters (fetch/redirect/proxy/image/webhook) for server-side request forgery (cloud-metadata reflection + internal port oracle), run_deserialization on requests carrying serialized blobs in params/cookies (PHP/Java/pickle/.NET/Ruby — corrupt-and-watch-for-parser-error confirmation), run_xxe on endpoints that accept XML (in-band file read + OOB blind confirmation via the native collaborator), run_sqli on parameterized URLs (error/boolean/time oracles, baseline-confirmed, native — no binary needed), run_nosqli on parameterized URLs for MongoDB-style operator injection (id[$ne]=/[$regex]= — boolean/error oracles), run_auth_sqli and run_form_nosqli on login-style POST/JSON bodies for auth-bypass (SQL OR-payloads / NoSQL operator objects — the class query-string probes can't reach), run_form_cmdi on captured forms for POST-body command injection, run_upload_test on pages with a file-upload form for extension-filter bypass (CWE-434, non-destructive canary payloads), run_cache_poison on live host roots for unkeyed-header cache poisoning (X-Forwarded-Host/Scheme, X-Original-URL — confirmed only when a clean re-request still receives the injected canary), run_llm_probe on any discovered URL that looks like a chat/AI endpoint for prompt injection (instruction-override probe with a unique marker — confirmed only on exact marker compliance), run_cmdi on params that feed OS commands (ping/host/filename/exec — computed-output + time + OOB oracles), run_xss on reflected parameters and pages with client-side sinks (browser-confirmed, catches DOM XSS).
 7. Correlate. Store every confirmed reportable vulnerability with store_finding.
 
+INVESTIGATIVE TESTING (you are an operator, not just a scanner runner):
+The canned scanners are your floor, not your ceiling. For access-control, authorization, auth/token, and business-logic classes the scanners cannot fully judge, DRIVE THE LOOP yourself with the request primitives:
+  - acquire_session{login_url, username/email, password, role} — log in ONCE and store a reusable session under a role name. Acquire TWO roles (e.g. a victim account and an attacker account you register) so you can test cross-user access. Then pass session="<role>" to the primitives below to act as that identity. (Single-credential auth only — never iterate passwords.)
+  - http_read{method:GET/HEAD/OPTIONS, url, headers} — send a scope-guarded read with custom headers (e.g. an Authorization token you acquired) and read the response.
+  - http_diff{a,b} — send two reads and get a DETERMINISTIC differential (status, length delta, body_similarity, distinct_objects). This is your CONFIRMATION ORACLE.
+  - http_request{method, url, headers, body} — a scope-guarded state-changing request (INTRUSIVE, gated). Use for write tests.
+  - confirm_idor{owned_url, target_url, headers} — the IDOR/BOLA ORACLE: pass your own object + another id + your session; it deterministically confirms (and stores) cross-object access. Prefer this over storing an IDOR by hand.
+  - enumerate_ids{url_template (with {id}), start, end, headers} — bounded object-id enumeration to find accessible objects at scale (then confirm ownership with confirm_idor).
+  - browser_navigate{url, steps:[{action:goto|click|fill|press|wait,...}], session} — drive a real headless browser for authenticated SPA flows and to capture client-side state (localStorage/sessionStorage tokens, XHR/fetch API calls, scripts, DOM). Declarative steps only, no arbitrary JS.
+  - test_numeric_abuse{url, param, body, session} — business-logic probe: does the server accept out-of-range numeric values (negative/zero/huge) for a quantity/price/amount field? Then verify the downstream effect (negative total etc.) with http_read. Never finalize a payment.
+LOOP: DISCOVER a suspicious endpoint/flow (object id in path, role/authz boundary, token, price/quantity, multi-step sequence) → HYPOTHESIZE one vuln class → TEST by crafting requests → COMPARE with http_diff or a control request → ADAPT (change one thing, retry, bounded) → CONFIRM only when the oracle is unambiguous → CHAIN a confirmed primitive (a token, an id, a leaked value) into the next hypothesis.
+ORACLE DISCIPLINE (truth-first, non-negotiable): never store_finding on a hunch. Confirm with EVIDENCE:
+  - IDOR/BOLA: acquire a session, http_read another object's id, and http_diff against your own object — confirmed only when both are 200 and distinct_objects is true (you read data that is not yours). Include the two requests + responses as evidence.
+  - Broken auth / token: forge/modify a token, http_read a protected endpoint with it — confirmed only when it authenticates (200 + your injected identity reflected).
+  - Business logic: establish the invariant (e.g. server total == sum of item prices), attempt a BOUNDED violation with http_request, and re-read state — confirmed only when the invariant provably broke. Do NOT finalize payments or perform destructive/irreversible actions; inspect the outgoing request and stop at that boundary, recording the manual step.
+GENERALIZE, never hardcode: discover identities/ids/values at runtime (enumerate /api/Users, read a source map, parse an error) — do not assume target-specific strings. The same loop works on any object endpoint, any REST API, any SPA.
+STOP when: evidence is inadequate (record it as a lead + the exact manual repro), impact would be unsafe/irreversible, approval is required, or budget is spent.
+
 HIGH-VALUE SIGNALS:
 - Subdomains pointing to unclaimed cloud resources (S3, GitHub Pages, Heroku, Fastly)
 - Admin panels with default or no credentials
@@ -876,9 +894,14 @@ class BBHAgent:
                 except json.JSONDecodeError:
                     tool_input = {}
                 sig = self._tool_sig(tc.function.name, tool_input)
-                # dedup: an identical earlier call is skipped (loop guard), except
-                # generate_playbook/store_finding which are legitimately repeatable.
-                if sig in called and tc.function.name not in ("generate_playbook", "store_finding"):
+                # dedup: an identical earlier scanner call is skipped (loop guard). The
+                # investigative primitives are EXEMPT — the same request legitimately runs
+                # again across a state change (before/after auth, mutation, role swap), so
+                # deduping them would break stateful retesting.
+                _repeatable = ("generate_playbook", "store_finding", "http_read", "http_request",
+                               "http_diff", "confirm_idor", "enumerate_ids", "acquire_session",
+                               "browser_navigate", "test_numeric_abuse")
+                if sig in called and tc.function.name not in _repeatable:
                     yield {"type": "info", "content": f"Skipped duplicate {tc.function.name} (loop guard)."}
                     messages.append({"role": "tool", "tool_call_id": tc.id,
                                      "content": json.dumps({"success": True,
@@ -892,12 +915,18 @@ class BBHAgent:
                     else:
                         yield ev
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
-            # no-progress guard: stop looping if surface stops growing
-            cur = self._surface_size()
+            # no-progress guard. PROGRESS IS MORE THAN NEW URLS: a real investigation makes
+            # progress by confirming findings, acquiring sessions/capabilities, or changing
+            # state — not only by discovering surface. Count all of them, so the loop is not
+            # killed mid-investigation just because it stopped finding new endpoints.
+            cur = (self._surface_size()
+                   + len(getattr(self, "_stored_fps", ()) or ())          # findings confirmed/stored
+                   + len(getattr(self.tools, "_sessions", {}) or {})       # identities acquired
+                   + int(getattr(self.tools, "_login_attempts", 0) or 0))  # auth/state actions taken
             stall = stall + 1 if cur <= last else 0
             last = cur
-            if stall >= 3:
-                async for ev in self._react_finish(session_id, "no new surface discovered"):
+            if stall >= 4:
+                async for ev in self._react_finish(session_id, "no further progress (surface, findings, or sessions)"):
                     yield ev
                 return
 

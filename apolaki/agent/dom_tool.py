@@ -88,7 +88,21 @@ def confirmed_proto(pp_value) -> bool:
 
 
 def confirmed_redirect(nav_targets) -> bool:
-    return any(EVIL in (t or "").lower() for t in (nav_targets or []))
+    # A real DOM open redirect NAVIGATES the top document to a URL whose HOST is
+    # the attacker host. A substring test on the raw nav URL is wrong and yields a
+    # false positive: our probe URL carries EVIL in its own fragment/query
+    # (e.g. http://target/#https://bbh-evil.example/), so the initial same-origin
+    # load — reported by page.on("framenavigated") — trivially "contains" EVIL even
+    # though the browser never left the target. Compare the parsed HOST instead, so
+    # only a genuine navigation whose host IS the attacker host confirms.
+    for t in (nav_targets or []):
+        try:
+            host = (urlparse((t or "").strip()).hostname or "").lower()
+        except ValueError:
+            continue
+        if host == EVIL or host.endswith("." + EVIL):
+            return True
+    return False
 
 
 def confirmed_xss(dialog_msg) -> bool:

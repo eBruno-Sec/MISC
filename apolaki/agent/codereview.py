@@ -142,6 +142,27 @@ def scan_comments(text: str) -> list:
 _FULL_URL = re.compile(r"https?://[^\s'\"<>()\\]{4,}")
 _PATH = re.compile(r"['\"](/[A-Za-z0-9_\-/.]{2,}(?:\?[^'\"]*)?)['\"]")
 _FETCH = re.compile(r"(?:fetch|axios(?:\.\w+)?|\.open)\s*\(\s*['\"]([^'\"]+)['\"]")
+# Modern SPA bundles write API routes as TEMPLATE LITERALS with ${...} interpolation:
+#   `${this.hostServer}/rest/basket/${e}`   this.hostServer+"/api/BasketItems"
+# _PATH only matches a single/double-quoted literal that is ENTIRELY a leading-slash
+# path, so every interpolated REST route (basket, ftp, Users, SecurityQuestions,
+# reviews, 2fa, …) is invisible and never gets probed — the single biggest attack-surface
+# gap on Angular/React targets. Match a known API subtree wherever it occurs (allowing
+# ${...} path segments), plus well-known standalone sensitive paths, and normalise the
+# interpolations to {id} so the endpoint seeds the access-control / exposure probes.
+_API_TREE = re.compile(
+    r"/(?:rest|api|graphql|socket\.io|b2b)(?:/(?:[A-Za-z0-9_\-.]+|\$\{[^}]*\}))+", re.I)
+_API_STD = re.compile(
+    r"/(?:ftp|metrics|snippets|encryptionkeys|redirect|support|profile|swagger|"
+    r"video|dataerasure|\.well-known)(?:/[A-Za-z0-9_\-.]*)?", re.I)
+
+
+def _norm_tmpl(p: str) -> str:
+    # ${expr} -> {id}; collapse a trailing partial segment left by an interpolation
+    # (e.g. /ftp/order_{id}.pdf stays, /ftp/order_ -> /ftp/) so it is fetchable.
+    p = re.sub(r"\$\{[^}]*\}", "{id}", p)
+    p = re.sub(r"/[A-Za-z0-9_\-.]*_$", "/", p)
+    return p
 
 
 def extract_endpoints(text: str) -> list:
@@ -154,7 +175,10 @@ def extract_endpoints(text: str) -> list:
         p = m.group(1)
         if "/api" in p or re.search(r"\.(json|php|aspx?|jsp|do|action)$", p) or p.count("/") >= 2:
             found.append(p)
-    return list(dict.fromkeys(found))[:200]
+    for rx in (_API_TREE, _API_STD):
+        for m in rx.finditer(text or ""):
+            found.append(_norm_tmpl(m.group(0)))
+    return list(dict.fromkeys(found))[:400]
 
 
 # ── High-entropy scan (TruffleHog-style, catches unformatted secrets) ──

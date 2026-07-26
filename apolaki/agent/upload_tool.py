@@ -177,3 +177,40 @@ def no_restriction_lead(field: str) -> dict:
                         "bypass — no filter was actually defeated because none was detected."),
         "field": field, "tags": ["upload", "cwe-434", "lead"],
     }
+
+
+# ── Native metadata extraction (fallback when exiftool is absent) ────────────────
+import re as _re
+
+
+def extract_metadata(data: bytes) -> dict:
+    """Dependency-free metadata extraction used when exiftool is not installed. Pulls the
+    XMP packet (images/PDF), the PDF info dictionary, and notes an EXIF GPS IFD. Returns a
+    flat {tag: value} dict. Best-effort and deterministic — exiftool is richer, but this
+    catches the common disclosures (author, device, software, XMP GPS, PDF producer)."""
+    if not data:
+        return {}
+    out = {}
+    text = data[:8_000_000].decode("latin-1", "replace")  # byte-preserving over binary
+    m = _re.search(r"<x:xmpmeta.*?</x:xmpmeta>", text, _re.S)
+    if m:
+        xmp = m.group(0)
+        for tag, rx in (
+            ("Creator", r"<dc:creator>.*?<rdf:li[^>]*>([^<]+)"),
+            ("CreatorTool", r'xmp:CreatorTool="([^"]+)"|<xmp:CreatorTool>([^<]+)'),
+            ("Make", r'tiff:Make="([^"]+)"|<tiff:Make>([^<]+)'),
+            ("Model", r'tiff:Model="([^"]+)"|<tiff:Model>([^<]+)'),
+            ("Software", r'tiff:Software="([^"]+)"'),
+            ("GPSLatitude", r'exif:GPSLatitude="([^"]+)"|<exif:GPSLatitude>([^<]+)'),
+            ("GPSLongitude", r'exif:GPSLongitude="([^"]+)"|<exif:GPSLongitude>([^<]+)'),
+        ):
+            mm = _re.search(rx, xmp)
+            if mm:
+                out[tag] = next((g for g in mm.groups() if g), "").strip()
+    for tag in ("Author", "Creator", "Producer", "Title", "CreationDate", "ModDate"):
+        mm = _re.search(r"/%s\s*\(([^)]{1,200})\)" % tag, text)
+        if mm:
+            out["PDF:" + tag] = mm.group(1).strip()
+    if data[:2] == b"\xff\xd8" and b"GPS" in data[:65536] and "GPSLatitude" not in out:
+        out["EXIF:GPS"] = "GPS IFD marker present (install exiftool for exact coordinates)"
+    return out
