@@ -190,7 +190,12 @@ def vulnerable_component_finding(component, vulns):
     """CONFIRMED 'vulnerable component' finding for a cve-eligible component with
     known vulns. Severity is the worst matched; evidence cites the served version."""
     order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-    sev = max((v["severity"] for v in vulns), key=lambda s: order.get(s, 0)) if vulns else "info"
+    worst = max((v["severity"] for v in vulns), key=lambda s: order.get(s, 0)) if vulns else "info"
+    # Truth-first: SCA is PRESENCE detection — the vulnerable version is confirmed, but
+    # exploitability (a reachable sink) is NOT. Cap at MEDIUM so an unverified-reachability
+    # component is never rated High/Critical (that is the scanner-inflation pattern). The
+    # underlying CVE severity is still stated in the description.
+    sev = "medium" if order.get(worst, 0) > order["medium"] else worst
     ids = [c for v in vulns for c in v["ids"]]
     lead = ids[0] if ids else ""
     extra = f", +{len(ids) - 1} more" if len(ids) > 1 else ""
@@ -200,7 +205,9 @@ def vulnerable_component_finding(component, vulns):
         "severity": sev, "target": component.get("location", ""),
         "description": (f"The target serves {comp} {ver} ({component['source']}), which has known "
                         f"vulnerabilities: {', '.join(ids)}. " + " ".join(v["summary"] for v in vulns)),
-        "impact": "Known-vulnerable dependency — exposure depends on how the app uses it; verify reachability.",
+        "impact": (f"Known-vulnerable dependency (upstream CVE severity: {worst}). Rated MEDIUM here because "
+                   "exploitability depends on a reachable sink, which was NOT confirmed in this test — verify "
+                   "reachability to escalate."),
         "evidence": f"{comp}@{ver} from {component['source']}: {component.get('evidence','')}"[:300],
         "reproduction_steps": [f"Load {component.get('location') or 'the served script'}",
                                f"Confirm the version banner/filename reports {comp} {ver}",

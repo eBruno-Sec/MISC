@@ -6,6 +6,7 @@ deterministic; no network.
 """
 import csv
 import html as _html
+import re
 import io
 import json
 from datetime import datetime, timezone
@@ -1049,6 +1050,14 @@ def generate_html_report(program: str, findings: list, scope: dict,
         cv = estimated_cvss(f)
         cvss_disp = f"{cv[0]}{' (est.)' if cv[2] else ''}" if cv else "N/A"
         cvss_vec = f"<span>Vector: <code>{e(cv[1])}</code></span>" if (cv and cv[1]) else ""
+        # CVSS-vs-evidence honesty: when a class-baseline CVSS assumes worst-case
+        # (Integrity/Availability impact) but the test only DEMONSTRATED read access, say so —
+        # never claim more impact than was proven.
+        _evl = str(f.get("evidence", "")).lower()
+        cvss_basis = ""
+        if cv and cv[2] and ("read-only" in _evl or "no data dumped" in _evl or "read access" in _evl):
+            cvss_basis = ("<span class='sub'>CVSS reflects the vulnerability class's full potential; the impact "
+                          "<b>demonstrated in this test was read-only</b> (write/RCE not attempted per rules of engagement).</span>")
         rem = f"<h4>Remediation</h4><p>{e(remediation_line(f))}</p>"
         val = f"<h4>Validation After Fix (regression test)</h4><p>{e(validation_line(f))}</p>"
         inst = [x for x in (f.get("instances") or []) if x and x != f.get("target")]
@@ -1074,6 +1083,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {prov_html}
             <span class="tag-conf">CONFIRMED</span>
           </div>
+          {cvss_basis}
           {biz_html}
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
@@ -1098,6 +1108,21 @@ def generate_html_report(program: str, findings: list, scope: dict,
 
     # attack paths + chaining potential
     chain_html = ""
+    if chains:
+        # Dedup near-identical chains (same root → same outcome) and drop malformed nodes
+        # (no narrative) so the section is not padded with duplicate SQLi paths or a raw dict.
+        _cseen, _cclean = set(), []
+        for _c in chains:
+            _nar = str(_c.get("narrative") or "").strip()
+            if not _nar:
+                continue
+            _parts = [p.strip().lower() for p in re.split(r"→|->", _nar) if p.strip()]
+            _key = (_parts[0] if _parts else _nar.lower(), _parts[-1] if _parts else "")
+            if _key in _cseen:
+                continue
+            _cseen.add(_key)
+            _cclean.append(_c)
+        chains = _cclean
     if chains:
         def _chain_li(c):
             _k = c.get("kind")

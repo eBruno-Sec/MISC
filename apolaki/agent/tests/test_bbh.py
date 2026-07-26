@@ -1835,7 +1835,10 @@ def test_sca_maps_exact_version_to_cve_with_guardrail():
     vulns = dep.assess_component(comp)
     assert vulns and any("CVE-2023-26117" in v["ids"] for v in vulns)
     f = dep.vulnerable_component_finding(comp, vulns)
-    assert f["confidence"] == "confirmed" and f["severity"] == "high" and f["evidence"]
+    # SCA presence findings are capped at MEDIUM (reachability unconfirmed = not High);
+    # the upstream CVE severity is stated in the impact text.
+    assert f["confidence"] == "confirmed" and f["severity"] == "medium" and f["evidence"]
+    assert "high" in f["impact"].lower()   # upstream CVE severity still surfaced
     # GUARDRAIL: no version, or LOW confidence -> never CVE-eligible, no vulns
     assert dep.assess_component(dep.make_component("jquery", "", "x", dep.LOW)) == []
     assert dep.assess_component(dep.make_component("angular", "1.7.7", "guess", dep.LOW)) == []
