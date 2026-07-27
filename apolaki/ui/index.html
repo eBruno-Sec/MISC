@@ -407,6 +407,13 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <div class="hint" style="margin-top:.4rem"><strong>Intrusive &amp; slow.</strong> Both produce truth-first advisory <strong>leads</strong> (version/behaviour/template-based — verify before reporting), never confirmed findings. The default fast scan already runs safe-tag nuclei.</div>
           </div>
           <div class="block">
+            <h4>Lab packs <span class="muted">(benchmark / training targets)</span></h4>
+            <label class="chk"><input type="checkbox" id="packJuiceShop" checked> <strong>OWASP Juice Shop Pack</strong> — target-specific solver pack, <strong>fingerprint-gated</strong> (only runs against a Juice Shop instance)</label>
+            <div class="hint" style="margin-top:.4rem">Isolated from the general detector — solves the lab's own challenges end-to-end to prove exploitation. <strong>No brute-force, no DoS.</strong> Same idea as Burp scan profiles / Nuclei tags: activate the pack for the target you're on.</div>
+            <button class="btn block" id="btnLabSolve" style="margin-top:.6rem" onclick="runLabPack('juiceshop')">▶ Solve OWASP Juice Shop now</button>
+            <div id="labResult" class="hint" style="margin-top:.5rem"></div>
+          </div>
+          <div class="block">
             <h4>Objective &amp; authentication <span class="muted">(optional)</span></h4>
             <div class="field"><label>Custom objective</label>
               <textarea id="objective" placeholder="Focus on authorization, exposed sensitive files, and API access control. Report only confirmed, reproducible vulnerabilities." style="min-height:64px"></textarea>
@@ -1461,6 +1468,17 @@ async function fetchReport(){
 function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/html`,"_blank");else alert("Start or load a mission first.");}
 function downloadHtml(){if(sessionId)window.open(`${API}/report/${sessionId}/html?download=1`,"_blank");else alert("Start or load a mission first.");}
 function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");else alert("Start or load a mission first.");}
+async function runLabPack(lab){
+  const btn=document.getElementById('btnLabSolve'), out=document.getElementById('labResult');
+  if(btn){btn.disabled=true;} if(out){out.textContent='Running '+lab+' lab pack — solving challenges…';}
+  try{
+    const r=await fetch(`${API}/lab/${lab}/solve`,{method:'POST'});
+    const d=await r.json();
+    if(d.error){ out.textContent='Error: '+d.error; }
+    else{ out.innerHTML='<strong>'+(d.lab||lab)+'</strong>: scoreboard '+d.before+' → <strong>'+d.after+'</strong> / '+d.total+' ('+d.percent+'%). Newly solved this run: '+((d.newly_solved||[]).length); }
+  }catch(e){ if(out){out.textContent='Error: '+e;} }
+  if(btn){btn.disabled=false;}
+}
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}

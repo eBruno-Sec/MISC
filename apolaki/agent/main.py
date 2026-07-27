@@ -715,6 +715,28 @@ async def get_report_md(session_id: str):
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
+# ── Lab Mode: activatable target-specific solver packs (fingerprint-gated, isolated from the
+# general detector). The lab target is fixed server-side — the UI cannot point it at an
+# arbitrary host, so a lab pack can never fire against a real engagement. ──
+_LAB_SOLVE_TARGETS = {"juiceshop": "http://juice-shop:3000"}
+
+
+@app.get("/lab/targets")
+async def lab_targets():
+    """List available lab solver packs for the UI (the activatable 'packs' taxonomy)."""
+    return {"labs": [{"id": k, "target": v} for k, v in _LAB_SOLVE_TARGETS.items()]}
+
+
+@app.post("/lab/{lab_id}/solve")
+async def lab_solve(lab_id: str):
+    """Run a lab-mode SOLVER pack against its fixed lab target; return the scoreboard delta."""
+    import labs
+    base = _LAB_SOLVE_TARGETS.get(lab_id)
+    if not base:
+        return {"error": "no solver pack for lab '%s'" % lab_id, "available": list(_LAB_SOLVE_TARGETS)}
+    return labs.solve(lab_id, base)
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
