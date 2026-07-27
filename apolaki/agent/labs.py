@@ -61,3 +61,12 @@ def benchmark(lab_id: str, base_url: str) -> dict:
     if not spec:
         return {"error": f"unknown lab '{lab_id}'", "available": list_labs()}
     return spec["completion"](base_url)
+
+
+def solve(lab_id: str, base_url: str) -> dict:
+    """Run a lab-mode SOLVER pack (target-specific, oracle-confirmed, isolated from the general
+    detector). Only lab targets have one — never invoked against a real engagement."""
+    if lab_id == "juiceshop":
+        import juiceshop_solvers
+        return juiceshop_solvers.solve(base_url)
+    return {"error": "no solver pack for lab '%s'" % lab_id, "available": ["juiceshop"]}
