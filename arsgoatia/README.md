@@ -89,6 +89,22 @@ docs/adr/    architecture decision records (deviations from the spec)
 tests/       unit, contract, replay, security, e2e
 ```
 
+## Deterministic reasoning layer (post-slice)
+
+Extending ArsGoatia toward the Deterministic Cyber Reasoning, Planning and
+Execution vision (structured reasoning decides, LLMs never in the control path).
+`packages/reasoning/` adds pure, replayable engines:
+
+- **Constraint solver** — fail-closed elimination of any action violating scope,
+  testing window, rate, data-handling, mutation, approval, or risk class.
+- **Attack graph + pathfinding** — GOAP-style best-first search over capability
+  states, ranked by strategy (shortest / highest-confidence / lowest-noise /
+  least-privilege / lowest-cost).
+
+Next candidates: truth-maintenance system, HTN/GOAP goal decomposition, Bayesian
+confidence, property/metamorphic testing engines, MCTS + multi-armed-bandit
+test-order learning.
+
 ## Scope
 
 The slice covers spec Phases 0–4. Phases 5–7 (network / cloud / Active Directory
