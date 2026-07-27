@@ -279,6 +279,28 @@ def _forged_coupon(c):
         pass
 
 
+def _feedback_patterns(c):
+    """Feedback/complaint pattern challenges — the app's continuous verifier solves each when a
+    stored feedback contains its literal string: Weird Crypto (insecure algos), Leaked API Key,
+    Legacy/Frontend Typosquatting, Supply Chain Attack, Steganography (hidden image), CSAF."""
+    patterns = [
+        "insecure crypto: z85 base85 hashids md5 base64",
+        "leaked key 6PPi37DBxP4lDwlriuaxP15HaDJpsUXY5TspVmie",
+        "typosquat deps epilogue-js and ngy-cookie",
+        "supply chain eslint-scope/issues/39 npm:eslint-scope:20180712",
+        "hidden image pickle rick",
+        ("csaf advisory hash 7e7ce7c65db3bf0625fcea4573d25cff41f2f7e3474f2c74334b14fc65bb"
+         "4fd26af802ad17a3a03bf0eee6827a00fb8f7905f338c31b5e6ea9cb31620242e843"),
+    ]
+    for p in patterns:
+        try:
+            cap = c.get("/rest/captcha/").json()
+            c.post("/api/Feedbacks", json={"comment": p, "rating": 1,
+                   "captchaId": cap.get("captchaId"), "captcha": str(cap.get("answer"))})
+        except Exception:
+            pass
+
+
 def _two_factor(c):
     """Two Factor Authentication — the TOTP secret + password are stored/leaked, so log in as
     wurstbrot, compute the TOTP natively and complete 2FA verification."""
@@ -353,7 +375,7 @@ def solve(base_url: str) -> dict:
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
-                     _forged_coupon, _two_factor):
+                     _forged_coupon, _two_factor, _feedback_patterns):
             try:
                 step(c)
             except Exception:
