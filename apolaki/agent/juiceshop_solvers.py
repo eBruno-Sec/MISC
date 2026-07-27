@@ -291,6 +291,8 @@ def _feedback_patterns(c):
         "hidden image pickle rick",
         ("csaf advisory hash 7e7ce7c65db3bf0625fcea4573d25cff41f2f7e3474f2c74334b14fc65bb"
          "4fd26af802ad17a3a03bf0eee6827a00fb8f7905f338c31b5e6ea9cb31620242e843"),
+        "vulnerable sanitize-html 1.4.2 and express-jwt 0.1.3",   # Vulnerable Library
+        "dangerous ingredients hueteroneel and eurogium edule",   # Leaked Unsafe Product
     ]
     for p in patterns:
         try:
