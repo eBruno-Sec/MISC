@@ -55,7 +55,7 @@ _HINT_KW = ("hint", "remember", "password", "secret", "security question", "favo
             "backup", "default cred", "todo", "fixme", "do not", "internal only")
 
 _USERKEYS = ("email", "mail")
-_NAMEKEYS = ("username", "user", "login", "name", "handle", "account")
+_NAMEKEYS = ("username", "user", "login", "handle", "account")  # NOT bare "name": pollutes with product/config names
 _IDKEYS = ("id", "_id", "uid", "userid", "orderid", "basketid", "productid")
 _COUPONKEYS = ("coupon", "voucher", "promo", "discount")
 _NUMKEYS = ("price", "amount", "quantity", "qty", "total", "balance", "points")

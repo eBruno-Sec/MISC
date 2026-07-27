@@ -75,7 +75,7 @@ def _leads_md(leads: list) -> str:
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
                      ai_summary: str = None, execution: dict = None, leads: list = None,
-                     delta: dict = None, tool_ledger: dict = None) -> str:
+                     delta: dict = None, tool_ledger: dict = None, intel: dict = None) -> str:
     now = _now()
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
@@ -193,6 +193,31 @@ def generate_report(program: str, findings: list, scope: dict,
         lines += ["", delta_block]
     if ledger_block:
         lines += ["", ledger_block]
+    # Target Intelligence — what the target itself leaked (harvested from its own surface),
+    # the raw material a general technique consumes as fixtures. Noisy 'encoded' bucket omitted.
+    if intel and (intel.get("candidates") or {}):
+        _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
+                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("hint", "Hints")]
+        _cand = intel.get("candidates", {})
+        _ilines = []
+        for _k, _lbl in _SHOW:
+            _vals = _cand.get(_k) or []
+            if not _vals:
+                continue
+            _shown = ", ".join("`" + str(v) + "`" for v in _vals[:12])
+            _more = len(_vals) - 12
+            if _more > 0:
+                _shown += " _(+" + str(_more) + " more)_"
+            _ilines.append("- **" + _lbl + "** (" + str(len(_vals)) + "): " + _shown)
+        if _ilines:
+            lines += ["", "## Target Intelligence", "",
+                      "_Candidates harvested from the target's own surface (DOM, JS, source maps, API "
+                      "responses) — the clues the target leaks, and the raw material a general technique "
+                      "consumes as run-time fixtures. Derived live from the target, not hardcoded. "
+                      "Secrets redacted._", ""]
+            lines += _ilines
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
@@ -853,7 +878,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
-                         security_headers: list = None) -> str:
+                         security_headers: list = None, intel: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -990,6 +1015,36 @@ def generate_html_report(program: str, findings: list, scope: dict,
                     "<table class='cve-tbl' style='width:100%;border-collapse:collapse;font-size:.85rem'>"
                     "<tr style='text-align:left;color:var(--muted)'><th>CVE</th><th>Source finding</th><th>Severity</th></tr>"
                     f"{_rows}</table>")
+
+    # Target Intelligence — what the target itself leaked, harvested from its own surface
+    # (DOM/JS/source-maps/API). The raw material a general technique consumes as fixtures
+    # (the OSINT / source-review loop). Noisy 'encoded' bucket is intentionally not shown.
+    intel_html = ""
+    if intel and (intel.get("candidates") or {}):
+        _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
+                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("hint", "Hints")]
+        _cand = intel.get("candidates", {})
+        _rows = ""
+        for _k, _label in _SHOW:
+            _vals = _cand.get(_k) or []
+            if not _vals:
+                continue
+            _sample = ", ".join(e(str(v)) for v in _vals[:12])
+            _more = len(_vals) - 12
+            _moretxt = (" <span class='sub'>(+" + str(_more) + " more)</span>") if _more > 0 else ""
+            _rows += ("<tr><td style='white-space:nowrap'><b>" + e(_label) + "</b></td>"
+                      "<td>" + str(len(_vals)) + "</td>"
+                      "<td style='font-family:monospace;font-size:.8rem'>" + _sample + _moretxt + "</td></tr>")
+        if _rows:
+            intel_html = ("<h2 id='intel'>Target Intelligence</h2>"
+                          "<p class='sub'>Candidates harvested from the target's own surface (DOM, JS, source maps, "
+                          "API responses) — the clues the target leaks, and the raw material a general technique "
+                          "consumes as run-time fixtures. Derived live from the target, not hardcoded. Secrets redacted.</p>"
+                          "<table style='width:100%;border-collapse:collapse;font-size:.85rem'>"
+                          "<tr style='text-align:left;color:var(--muted)'><th>Kind</th><th>Count</th><th>Sample</th></tr>"
+                          + _rows + "</table>")
 
     # confirmed findings — full proof density (grouped by root cause)
     cards = []
@@ -1492,6 +1547,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {cov_html}
 {sechdr_html}
 {cve_html}
+{intel_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}

@@ -679,7 +679,8 @@ async def get_report(session_id: str):
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
-                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    intel=m["context"].get("intel"))
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
 
 
@@ -707,7 +708,8 @@ async def get_report_md(session_id: str):
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
-                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    intel=m["context"].get("intel"))
     fname = _report_fname(m, scope, "md")
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -745,7 +747,8 @@ async def get_report_html(session_id: str, download: bool = False):
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-        report_id=session_id, security_headers=_sec_headers(session_id))
+        report_id=session_id, security_headers=_sec_headers(session_id),
+        intel=m["context"].get("intel"))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)

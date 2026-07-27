@@ -57,6 +57,15 @@ def test_harvest_json_walks_and_extracts_fields_and_embedded_hrefs():
     assert "/ftp/coupons_2013.md.bak" in s.get("route")   # href mined from a description string
 
 
+def test_generic_name_key_is_not_treated_as_username():
+    # a bare "name" (product/config name) must NOT pollute the username bucket
+    s = intel.IntelStore()
+    intel.harvest_json({"name": "Apple Juice Box", "username": "mc.safesearch"}, "api", s)
+    users = s.get("username")
+    assert "mc.safesearch" in users
+    assert "Apple Juice Box" not in users
+
+
 def test_harvest_js_extracts_spa_routes():
     s = intel.IntelStore()
     js = "const routes=[{path:'administration'},{path:'score-board'},{path:'accounting'}];"
