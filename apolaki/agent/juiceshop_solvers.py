@@ -159,6 +159,7 @@ def _beacon_visits(c):
         except Exception:
             pass
     c.get("/redirect?to=https://blockchain.info/address/1AbKfgvw9psQ41NbLi8kufDQTezwG8DRZm")  # Outdated Allowlist
+    c.get("/rest/user/whoami?callback=apolaki")   # Email Leak (JSONP whoami)
 
 
 def _uploads(c):
