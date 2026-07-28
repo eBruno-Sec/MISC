@@ -32,6 +32,17 @@ def _host_of(url: str) -> str:
         return ""
 
 
+def _dir_prefix(path: str) -> list:
+    """Directory-prefix path groups for an endpoint, DEEPEST first, so the graph forms a tree
+    instead of a host->every-endpoint starburst.
+      '/api/products/1'          -> ['/api/products/', '/api/']
+      '/.well-known/ai-plugin'   -> ['/.well-known/']
+      '/feed.xml'                -> []   (top-level: hangs directly off the host)
+    """
+    segs = [s for s in (path or "").split("/") if s != ""]
+    return ["/" + "/".join(segs[:i]) + "/" for i in range(len(segs) - 1, 0, -1)]
+
+
 def build_graph(recon: dict = None, urls: list = None, findings: list = None,
                 cap_endpoints: int = 400) -> dict:
     """Return {"nodes":[...], "edges":[...], "stats":{...}} — deterministic."""
@@ -90,10 +101,18 @@ def build_graph(recon: dict = None, urls: list = None, findings: list = None,
         node(hid, "host", host)
         node(f"domain:{_root(host)}", "domain", _root(host))
         edge(f"domain:{_root(host)}", hid, "has_host")
+        # chain the directory-prefix groups: host -> /api/ -> /api/products/ -> endpoint
+        # (host connects only to the first path-group level; endpoints hang off their parent group)
+        parent = hid
+        for g in reversed(_dir_prefix(e["path"])):
+            gid = f"pg:{host}{g}"
+            node(gid, "pathgroup", g, host=host)
+            edge(parent, gid, "contains")
+            parent = gid
         eid = f"ep:{host}{e['path']}"
         node(eid, "endpoint", e["path"], host=host, params=e.get("params") or [],
              example=e.get("example"))
-        edge(hid, eid, "serves")
+        edge(parent, eid, "serves")     # off the immediate path group (or host if top-level)
         ep_index[(host, e["path"])] = eid
 
     # ── findings, linked to their endpoint (else host) ──
@@ -113,6 +132,7 @@ def build_graph(recon: dict = None, urls: list = None, findings: list = None,
 
     stats = {"nodes": len(nodes), "edges": len(edges),
              "hosts": sum(1 for n in nodes.values() if n["kind"] == "host"),
+             "pathgroups": sum(1 for n in nodes.values() if n["kind"] == "pathgroup"),
              "endpoints": sum(1 for n in nodes.values() if n["kind"] == "endpoint"),
              "findings": sum(1 for n in nodes.values() if n["kind"] == "finding")}
     return {"nodes": list(nodes.values()), "edges": edges, "stats": stats}
@@ -130,9 +150,22 @@ def neighbors(graph: dict, node_id: str) -> list:
 
 
 def related_findings(graph: dict, node_id: str) -> list:
-    """Finding nodes reachable within 2 hops (endpoint->finding, host->ep->finding)."""
+    """Finding nodes anywhere in the subtree UNDER node_id — walk child edges downward
+    (host -> path groups -> endpoints -> findings), depth-agnostic, so the path-prefix tree
+    doesn't hide findings that now sit more than two hops below a host."""
     byid = {n["id"]: n for n in graph.get("nodes", [])}
-    reach = set(neighbors(graph, node_id))
-    for nb in list(reach):
-        reach |= set(neighbors(graph, nb))
-    return [byid[n] for n in reach if byid.get(n, {}).get("kind") == "finding"]
+    children: dict = {}
+    for e in graph.get("edges", []):
+        children.setdefault(e["source"], []).append(e["target"])
+    seen, stack, out = set(), [node_id], []
+    while stack:
+        cur = stack.pop()
+        for c in children.get(cur, []):
+            if c in seen:
+                continue
+            seen.add(c)
+            if byid.get(c, {}).get("kind") == "finding":
+                out.append(byid[c])
+            else:
+                stack.append(c)
+    return out

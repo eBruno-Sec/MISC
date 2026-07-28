@@ -2644,8 +2644,9 @@ def test_graph_neighbors_and_related_findings():
     g = graph_model.build_graph(_G_RECON, _G_URLS, _G_FINDINGS)
     hid = "host:api.example.com"
     nb = graph_model.neighbors(g, hid)
-    assert "tech:Django" in nb and any(x.startswith("ep:api.example.com") for x in nb)
-    rf = graph_model.related_findings(g, hid)          # host->endpoint->finding (2 hops)
+    # host now links to its first-level path GROUP (tree), plus its tech — not straight to every endpoint
+    assert "tech:Django" in nb and any(x.startswith(("pg:api.example.com", "ep:api.example.com")) for x in nb)
+    rf = graph_model.related_findings(g, hid)          # host -> groups -> endpoint -> finding (subtree)
     assert any("IDOR" in f["label"] for f in rf)
     # the www finding is NOT reachable from the api host
     assert not any("headers" in f["label"].lower() for f in rf)

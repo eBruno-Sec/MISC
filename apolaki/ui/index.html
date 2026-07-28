@@ -1461,28 +1461,33 @@ function renderTopology(){
     if(e.rel==="found")(findByNode[e.source]=findByNode[e.source]||[]).push(byId[e.target]);
   });
   const leadTargets=new Set((leads||[]).map(l=>_normTarget(l.target)).filter(Boolean));
-  // ── compute ORIGINAL positions for ALL nodes (root, hosts, every endpoint) ──
-  const maxLeaves=Math.max(1,...hosts.map(h=>(epByHost[h]||[]).length));
-  const W=Math.max(760,hosts.length*210), H=210+maxLeaves*26;
-  const ROOT="__root__", orig={}, nodeList=[], edgeList=[];
-  orig[ROOT]={x:W/2,y:46};
+  // ── compute ORIGINAL positions as a tidy PATH-PREFIX TREE ──
+  // host → /api/ → /api/products/ → endpoint (NOT a flat host→every-endpoint starburst).
+  // Follow the graph's own contains/serves edges; leaves get sequential slots, parents centre.
+  const ROOT="__root__";
+  const kids={}; const kpush=(p,c)=>{(kids[p]=kids[p]||[]).push(c);};
+  hosts.forEach(h=>kpush(ROOT,h));
+  edges.forEach(e=>{ if(e.rel==="contains"||e.rel==="serves") kpush(e.source,e.target); });
+  const LEAFW=58, LAYER=72, orig={}; let _slot=0;
+  (function place(id,depth){
+    const cs=kids[id]||[];
+    if(!cs.length){ orig[id]={x:(_slot++ +0.5)*LEAFW, y:44+depth*LAYER}; return orig[id].x; }
+    const xs=cs.map(c=>place(c,depth+1));
+    orig[id]={x:(xs[0]+xs[xs.length-1])/2, y:44+depth*LAYER}; return orig[id].x;
+  })(ROOT,0);
+  const W=Math.max(760,(_slot+1)*LEAFW), H=Math.max(240, 80+Math.max(0,...Object.values(orig).map(p=>p.y)));
+  const nodeList=[], edgeList=[]; topoNodes=[];
   nodeList.push({id:ROOT,kind:"root",label:document.getElementById("programName").value||"target"});
-  topoNodes=[];
-  hosts.forEach((hid,i)=>{
-    const hx=(i+0.5)*(W/hosts.length), hy=150;
-    orig[hid]={x:hx,y:hy};
-    const hf=findByNode[hid]||[];
-    nodeList.push({id:hid,kind:"host",label:byId[hid].label,sev:_worstSev(hf)});
-    edgeList.push({a:ROOT,b:hid}); topoNodes.push({id:hid,kind:"host",label:byId[hid].label});
-    (epByHost[hid]||[]).forEach((eid,j)=>{
-      const ep=byId[eid]; orig[eid]={x:hx,y:hy+42+j*26};
-      const ef=findByNode[eid]||[], eSev=_worstSev(ef);
-      const isLead=!eSev&&leadTargets.has(_normTarget(ep.example||ep.url||""));
-      nodeList.push({id:eid,kind:"endpoint",label:String(ep.label).slice(0,30),sev:eSev,lead:isLead});
-      edgeList.push({a:hid,b:eid});
-      topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||byId[hid].label});
-    });
+  Object.keys(orig).forEach(id=>{
+    if(id===ROOT) return;
+    const n=byId[id]; if(!n) return;
+    const f=findByNode[id]||[], sev=_worstSev(f);
+    nodeList.push({id,kind:n.kind,label:String(n.label).slice(0,32),sev,
+      lead: n.kind==="endpoint" && !sev && leadTargets.has(_normTarget(n.example||n.url||""))});
+    if(n.kind==="host"||n.kind==="endpoint")
+      topoNodes.push({id,kind:n.kind,label:n.label,url:n.example||"",host:n.host||""});
   });
+  Object.entries(kids).forEach(([p,cs])=>cs.forEach(c=>{ if(orig[p]&&orig[c]) edgeList.push({a:p,b:c}); }));
   topoOrig=orig;
   // keep dragged positions when the graph is unchanged; otherwise lay out fresh
   const sameSet=Object.keys(topoLive).length && Object.keys(orig).every(id=>topoLive[id]);
@@ -1522,6 +1527,7 @@ function _topoDraw(){
     if(n.kind==="root"){inner=`<circle r="8" fill="${cRoot}"/><text x="13" y="4" fill="${cBright}" font-weight="600">${esc(n.label)}</text>`;}
     else if(n.kind==="host"){const ring=n.sev?`<circle r="10" fill="none" stroke="${SEV_HEX[n.sev]||cHost}" stroke-width="2"/>`:"";
       inner=ring+`<circle r="6" fill="${cHost}"/><text x="12" y="3" fill="${cText}">${esc(n.label)}</text>`;}
+    else if(n.kind==="pathgroup"){inner=`<rect x="-4" y="-4" width="8" height="8" rx="2" fill="none" stroke="${cLine}" stroke-width="1.5"/><text x="10" y="3" fill="${cText}" opacity="0.8">${esc(n.label)}</text>`;}
     else{const col=n.sev?SEV_HEX[n.sev]:cLeaf, r=n.sev?4.5:3;
       const lr=n.lead?`<circle r="8" fill="none" stroke="${cWarn}" stroke-width="1.5" stroke-dasharray="2 2"/>`:"";
       inner=lr+`<circle r="${r}" fill="${col}"/><text x="9" y="3" fill="${cText}">${esc(n.label)}</text>`;}
