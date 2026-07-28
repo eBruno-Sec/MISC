@@ -241,6 +241,14 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
                      "sensitive_routes": len(out["sensitive_routes"]), "exposed": len(out["exposed"]),
                      "cloud": len(cloud), "wasm": len(wasm_out),
                      "graphql": bool(graphql and graphql.get("introspection"))}
+    # recon -> exploitation: turn the harvested routes into business-logic abuse hypotheses so the
+    # intel is actionable (workflows inferred -> concrete tests to run), not just a list.
+    try:
+        import bizlogic
+        out["logic"] = bizlogic.analyze(sorted(endpoints) + sorted(routes))
+        out["counts"]["logic_tests"] = out["logic"].get("test_count", 0)
+    except Exception:
+        out["logic"] = None
     return out
 
 

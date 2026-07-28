@@ -1806,6 +1806,15 @@ function renderHarvest(d){
     h+=`<h5>WebAssembly modules</h5>`;
     d.wasm.forEach(w=>{ h+=`<div class="cr-find" style="--fc:var(--accent)"><div class="cr-fhead"><span class="cr-loc">${esc(w.module)}</span><span class="cr-tech">${w.bytes||0} bytes</span></div><div class="cr-snip">${esc((w.strings||[]).slice(0,12).join('  ·  '))}</div></div>`; });
   }
+  if(d.logic&&(d.logic.detail||[]).length){
+    h+=`<h5>⚙ Business-logic tests to run — ${d.logic.test_count||0} hypotheses</h5>`;
+    h+=`<p class="cr-hint" style="margin:-.2rem 0 .6rem">Workflows inferred from the harvested routes → concrete abuse tests a scanner can't derive. Recon → actionable.</p>`;
+    (d.logic.detail||[]).forEach(w=>{
+      h+=`<div class="cr-find" style="--fc:var(--warn)"><div class="cr-fhead"><span class="cr-loc">${esc(w.workflow)}</span><span class="cr-tech">${(w.tests||[]).length} tests</span></div>`;
+      (w.tests||[]).slice(0,5).forEach(t=>{ h+=`<div class="cr-why"><b>${esc(t.kind)}:</b> ${esc(t.test)}</div>`; });
+      h+=`</div>`;
+    });
+  }
   const sr=d.source_review;
   if(sr&&sr.total){
     h+=`<h5>Static review of reconstructed source · ${sr.total} leads</h5>`;
