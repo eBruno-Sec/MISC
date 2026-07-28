@@ -1771,6 +1771,7 @@ function renderHarvest(d){
     <div class="cr-stat"><span class="v">${c.routes||0}</span><span class="k">Routes</span></div>
     <div class="cr-stat"><span class="v high">${c.sensitive_routes||0}</span><span class="k">Sensitive</span></div>
     <div class="cr-stat"><span class="v ${c.exposed?'crit':''}">${c.exposed||0}</span><span class="k">Exposed</span></div>
+    <div class="cr-stat"><span class="v ${c.cloud?'crit':''}">${c.cloud||0}</span><span class="k">Cloud</span></div>
     <div class="cr-stat"><span class="v">${(d.bundles||[]).length}</span><span class="k">JS bundles</span></div>
   </div>`;
   if((d.exposed||[]).length){
@@ -1788,6 +1789,22 @@ function renderHarvest(d){
   if((d.versions||[]).length){
     h+=`<h5>Leaked dependency versions</h5><div class="chips" style="margin-bottom:.9rem">`;
     d.versions.forEach(v=>{ h+=`<span class="chip">${esc(v)}</span>`; }); h+=`</div>`;
+  }
+  if((d.cloud||[]).length){
+    h+=`<h5 style="color:var(--danger)">☁ Cloud resources referenced in code</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.cloud.forEach(cc=>{ h+=`<span class="chip" style="border-color:var(--danger);color:var(--danger)">${esc(cc.provider)}: ${esc(cc.value)}</span>`; }); h+=`</div>`;
+  }
+  if(d.graphql&&d.graphql.introspection){
+    const g=d.graphql;
+    h+=`<h5 style="color:var(--warn)">GraphQL — introspection OPEN @ <code>${esc(g.endpoint)}</code></h5><div class="chips" style="margin-bottom:.9rem">`;
+    h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">${g.type_count||0} types</span>`;
+    (g.query_fields||[]).slice(0,16).forEach(f=>{ h+=`<span class="chip">query:${esc(f)}</span>`; });
+    (g.mutation_fields||[]).slice(0,16).forEach(f=>{ h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">mut:${esc(f)}</span>`; });
+    h+=`</div>`;
+  }
+  if((d.wasm||[]).length){
+    h+=`<h5>WebAssembly modules</h5>`;
+    d.wasm.forEach(w=>{ h+=`<div class="cr-find" style="--fc:var(--accent)"><div class="cr-fhead"><span class="cr-loc">${esc(w.module)}</span><span class="cr-tech">${w.bytes||0} bytes</span></div><div class="cr-snip">${esc((w.strings||[]).slice(0,12).join('  ·  '))}</div></div>`; });
   }
   const sr=d.source_review;
   if(sr&&sr.total){

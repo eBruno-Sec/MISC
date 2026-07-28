@@ -100,6 +100,32 @@ def _summarize(findings: list, exposed_git: bool, scanned: int) -> dict:
 _SENSITIVE_ROUTE = re.compile(r"(admin|account|manage|internal|debug|config|token|secret|"
                               r"privacy|order|wallet|dashboard|report|api-?key|backup)", re.I)
 
+# Cloud-resource markers mined from client code — hardcoded bucket names / tenants that a
+# black-box tester can then check for public access. (DNS-CNAME cloud detection is separate.)
+_CLOUD_RX = [
+    ("AWS S3", re.compile(r"([a-z0-9.-]{3,63})\.s3[.-](?:[a-z0-9-]+\.)?amazonaws\.com", re.I)),
+    ("AWS S3", re.compile(r"s3://([a-z0-9][a-z0-9.-]{2,62})", re.I)),
+    ("AWS key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("Firebase", re.compile(r"([a-z0-9-]+)\.firebase(?:io|app)\.com", re.I)),
+    ("Firebase", re.compile(r"([a-z0-9-]+)\.firebasestorage\.(?:app|googleapis\.com)", re.I)),
+    ("GCP storage", re.compile(r"storage\.googleapis\.com/([a-z0-9._-]+)", re.I)),
+    ("GCP appspot", re.compile(r"([a-z0-9-]+)\.appspot\.com", re.I)),
+    ("Azure blob", re.compile(r"([a-z0-9]{3,24})\.blob\.core\.windows\.net", re.I)),
+    ("Auth0", re.compile(r"([a-z0-9-]+)\.auth0\.com", re.I)),
+    ("Okta", re.compile(r"([a-z0-9-]+)\.okta(?:preview)?\.com", re.I)),
+    ("Supabase", re.compile(r"([a-z0-9-]+)\.supabase\.co", re.I)),
+    ("Cloudfront", re.compile(r"([a-z0-9]+)\.cloudfront\.net", re.I)),
+]
+
+
+def _cloud_markers(text: str) -> dict:
+    """Cloud resources referenced in code — {(provider,value): {...}} for dedup."""
+    out = {}
+    for provider, rx in _CLOUD_RX:
+        for m in rx.finditer(text or ""):
+            out[(provider, m.group(0))] = {"provider": provider, "value": m.group(0)[:120]}
+    return out
+
 
 def harvest(base_url: str, timeout: int = 15) -> dict:
     """BLACK-BOX code intelligence: curl the target, mine the served JS bundles + exposed vectors
@@ -126,6 +152,8 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
         return {"error": str(e), "target": base}
     scripts = re.findall(r'src=["\']([^"\']+\.js)["\']', html)
     endpoints, routes, versions, reconstructed = set(), set(), set(), []
+    cloud = _cloud_markers(html)
+    wasm_refs = set(re.findall(r'["\']([^"\']+\.wasm)["\']', html))
     for s in scripts:
         p = s if s.startswith("/") else "/" + s
         try:
@@ -136,6 +164,8 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
         endpoints |= set(re.findall(r'["\'](/(?:rest|api)/[A-Za-z0-9/_-]+)', js))
         routes |= set(re.findall(r'path:\s*["\']([A-Za-z0-9/_:-]+)["\']', js))
         versions |= set(re.findall(r'["\']([a-z0-9][a-z0-9.-]*@\d+\.\d+\.\d+)["\']', js))
+        cloud.update(_cloud_markers(js))
+        wasm_refs |= set(re.findall(r'["\']([^"\']+\.wasm)["\']', js))
         mm = re.search(r'sourceMappingURL=(\S+\.map)', js)
         if mm:
             try:
@@ -174,13 +204,43 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
             except Exception:
                 pass
         out["source_review"] = review(d)
+    # WebAssembly: pull referenced .wasm modules, lift printable strings (fn/import names, URLs)
+    wasm_out = []
+    for w in list(wasm_refs)[:5]:
+        try:
+            r = c.get(w if w.startswith("http") else "/" + w.lstrip("/"))
+            if r.status_code == 200 and r.content[:4] == b"\x00asm":
+                strs = re.findall(rb"[\x20-\x7e]{5,}", r.content)
+                wasm_out.append({"module": w, "bytes": len(r.content),
+                                 "strings": [s.decode("ascii", "ignore") for s in strs[:40]]})
+        except Exception:
+            pass
+    # GraphQL: probe common endpoints + introspect (reuse graphql_tool)
+    graphql = None
+    try:
+        import graphql_tool
+        for cand in graphql_tool.endpoint_candidates(base + "/graphql")[:6]:
+            try:
+                j = c.post(cand, json={"query": graphql_tool.INTROSPECTION_QUERY}).json()
+            except Exception:
+                continue
+            if graphql_tool.looks_like_graphql(j):
+                graphql = {"endpoint": cand, **graphql_tool.parse_schema(j)}
+                break
+    except Exception:
+        pass
     c.close()
     out["endpoints"] = sorted(endpoints)
     out["routes"] = sorted(routes)
     out["sensitive_routes"] = sorted(r for r in routes if _SENSITIVE_ROUTE.search(r))
     out["versions"] = sorted(versions)[:50]
+    out["cloud"] = list(cloud.values())
+    out["wasm"] = wasm_out
+    out["graphql"] = graphql
     out["counts"] = {"endpoints": len(endpoints), "routes": len(routes),
-                     "sensitive_routes": len(out["sensitive_routes"]), "exposed": len(out["exposed"])}
+                     "sensitive_routes": len(out["sensitive_routes"]), "exposed": len(out["exposed"]),
+                     "cloud": len(cloud), "wasm": len(wasm_out),
+                     "graphql": bool(graphql and graphql.get("introspection"))}
     return out
 
 
