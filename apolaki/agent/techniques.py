@@ -51,6 +51,10 @@ def _t(**kw) -> dict:
     #   "external" = supplied by operator / offline crack / world knowledge (not target-derived)
     #   "none"     = technique needs no fixture
     kw.setdefault("fixture_source", "harvest" if kw.get("needs_fixture") else "none")
+    # Taxonomy lenses — the same technique, filed under multiple frameworks (owasp already above).
+    kw.setdefault("wstg", None)    # OWASP WSTG test id (e.g. WSTG-SESS-10)
+    kw.setdefault("mitre", None)   # MITRE ATT&CK technique id (coarse fit for web; None where none fits)
+    kw.setdefault("refs", [])      # external reference URLs (WSTG / PortSwigger topic) — links, not copied prose
     return kw
 
 
@@ -257,6 +261,70 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        oracle="Decoded value is meaningful and unlocks a subsequent step.",
        maps_to={"juiceshop": ["Easter Egg", "Nested Easter Egg", "Weird Crypto"]}),
 
+    _t(id="weak_secret_forgery", vuln_class="crypto_authz", cwe="CWE-330", owasp="A02:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Forge a signed artifact (token/coupon/continue-code) whose secret is weak, known, or salt-less.",
+       detect="A signed value with a guessable scheme: default/known salt, no salt, short key, published algorithm.",
+       exploit="Reproduce the signing offline (e.g. hashids default salt, salt-less base85) to mint a valid artifact.",
+       oracle="Server accepts the forged artifact as authentic.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Imaginary Challenge", "Forged Coupon"]}),
+
+    _t(id="weak_2fa_bypass", vuln_class="broken_auth", cwe="CWE-308", owasp="A07:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Defeat 2FA using a leaked/guessable TOTP seed or a skippable second-factor step.",
+       detect="TOTP seed exposed in storage/source, or a 2FA step that can be bypassed.",
+       exploit="Compute the current TOTP from the seed (HMAC-SHA1) and complete the second factor.",
+       oracle="The second-factor step accepts the computed code and issues a full session.",
+       needs_fixture=["totp_seed"], fixture_source="harvest",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Two Factor Authentication"]}),
+
+    _t(id="business_logic_abuse", vuln_class="business_logic", cwe="CWE-840", owasp="A04:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Abuse an application-flow assumption (price/quantity/state/time) for unintended value.",
+       detect="A workflow trusts a client-controlled quantity, price, coupon, or step ordering.",
+       exploit="Submit out-of-policy values: negative quantity, unpaid upgrade, expired/greedy coupon.",
+       oracle="The transaction completes in a state the business policy should have forbidden.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Payback Time", "Deluxe Fraud", "Expired Coupon"]}),
+
+    _t(id="csrf", vuln_class="csrf", cwe="CWE-352", owasp="A01:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Cross-site request forgery: a state-changing request rides the victim's ambient credential.",
+       detect="A state-changing endpoint accepts requests with no anti-CSRF token / lax SameSite.",
+       exploit="Issue the request cross-origin using the victim's cookie, with no CSRF token.",
+       oracle="The state change is applied for a cross-origin request lacking a valid CSRF token.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["CSRF"]}),
+
+    _t(id="excessive_data_exposure", vuln_class="access_control", cwe="CWE-213", owasp="A01:2021",
+       permission=ACTIVE, transferable=True,
+       summary="API returns more than the client should see (field over-selection / default over-serialization).",
+       detect="A read endpoint reflects client-named fields, or serializes sensitive columns by default.",
+       exploit="Request a sensitive field explicitly (e.g. ?fields=password) or read the over-shared object.",
+       oracle="Response carries a field (hash, token, PII) outside the endpoint's intended contract.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Password Hash Leak"]}),
+
+    _t(id="jsonp_info_leak", vuln_class="sensitive_exposure", cwe="CWE-200", owasp="A01:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Sensitive data exfiltrated cross-origin via a JSONP callback parameter.",
+       detect="An endpoint wraps its JSON in an attacker-named callback function.",
+       exploit="Supply a callback param so the response becomes script-includable cross-origin.",
+       oracle="Response is returned as executable JSONP carrying the sensitive data.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Email Leak"]}),
+
+    _t(id="race_condition", vuln_class="business_logic", cwe="CWE-362", owasp="A04:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Concurrency race defeats a single-use / limit check (TOCTOU).",
+       detect="A guarded action whose check and commit are not atomic under parallel requests.",
+       exploit="Fire concurrent requests so several pass the check before the state updates.",
+       oracle="The limited action succeeds more times than the guard should allow.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Multiple Likes"]}),
+
     # --- lab-local: counts toward a CTF % but NOT claimed as transferable capability ---
     _t(id="find_hidden_route", vuln_class="misc", cwe="CWE-425", owasp="A01:2021",
        permission=PASSIVE, transferable=False,
@@ -340,3 +408,107 @@ def techniques_for_lab(lab_id: str) -> list[dict]:
         if lab_id in (t.get("maps_to") or {}):
             out.append(t)
     return out
+
+
+# --------------------------------------------------------------------------------------------
+# Backfill: mark techniques we ACTUALLY proved on Juice Shop this session (their oracle fired
+# against the live board) so validated_on stops under-reporting real capability. maps_to is
+# merged, never overwritten. This keeps the honesty metric honest in the *right* direction.
+# --------------------------------------------------------------------------------------------
+_JUICESHOP_PROVEN = {
+    "reflected_xss": ["Reflected XSS", "HTTP-Header XSS"],
+    "stored_xss": ["API-only XSS", "Server-side XSS Protection"],
+    "nosql_injection": ["NoSQL Manipulation", "NoSQL Exfiltration"],
+    "jwt_forge": ["Forged Signed JWT", "Unsigned JWT"],
+    "mass_assignment": ["Admin Registration"],
+    "open_redirect": ["Outdated Allowlist", "Allowlist Bypass"],
+    "weak_password_reset": ["Reset Jim's Password", "Reset Bender's Password",
+                            "Reset Bjoern's Password", "Reset Morty's Password",
+                            "Reset Uvogin's Password", "Bjoern's Favorite Pet"],
+    "bfla_privileged_action": ["Admin Section", "Product Tampering"],
+    "encoded_data_decode": ["Nested Easter Egg", "Premium Paywall"],
+}
+for _tid, _chs in _JUICESHOP_PROVEN.items():
+    _rec = TECHNIQUES.get(_tid)
+    if _rec:
+        if "juiceshop" not in _rec["validated_on"]:
+            _rec["validated_on"] = _rec["validated_on"] + ["juiceshop"]
+        _m = dict(_rec.get("maps_to") or {})
+        _m["juiceshop"] = sorted(set(_m.get("juiceshop", []) + _chs))
+        _rec["maps_to"] = _m
+
+# Taxonomy-lens codes (best-effort; high-confidence mappings only, None where no clean fit).
+_WSTG = {
+    "sqli_auth_bypass": "WSTG-INPV-05", "sqli_union_extract": "WSTG-INPV-05",
+    "nosql_injection": "WSTG-INPV-05", "reflected_xss": "WSTG-INPV-01",
+    "stored_xss": "WSTG-INPV-02", "dom_xss": "WSTG-CLNT-01", "ssti": "WSTG-INPV-18",
+    "xxe_file_ssrf": "WSTG-INPV-07", "jwt_forge": "WSTG-SESS-10", "ssrf": "WSTG-INPV-19",
+    "open_redirect": "WSTG-CLNT-04", "crlf_injection": "WSTG-INPV-16",
+    "idor_bola_read": "WSTG-ATHZ-04", "bfla_privileged_action": "WSTG-ATHZ-02",
+    "mass_assignment": "WSTG-ATHZ-04", "excessive_data_exposure": "WSTG-ATHZ-04",
+    "exposed_files_harvest": "WSTG-CONF-04", "security_misconfig_errors": "WSTG-ERRH-01",
+    "weak_password_reset": "WSTG-ATHN-09", "weak_2fa_bypass": "WSTG-ATHN-11",
+    "target_intel_harvest": "WSTG-INFO-05", "csrf": "WSTG-SESS-05",
+    "business_logic_abuse": "WSTG-BUSL-01", "race_condition": "WSTG-BUSL-09",
+    "weak_secret_forgery": "WSTG-CRYP-04", "encoded_data_decode": "WSTG-CRYP-04",
+    "jsonp_info_leak": "WSTG-CLNT-11", "csti": "WSTG-CLNT-13",
+}
+# MITRE ATT&CK is an adversary-TTP lens — deliberately coarse for web-app bugs; mapped only
+# where a technique genuinely corresponds, None elsewhere (honest gaps rather than forced fits).
+_MITRE = {
+    "sqli_auth_bypass": "T1190", "sqli_union_extract": "T1190", "nosql_injection": "T1190",
+    "xxe_file_ssrf": "T1190", "ssrf": "T1190", "ssti": "T1190", "insecure_deser": "T1190",
+    "jwt_forge": "T1550.001", "weak_2fa_bypass": "T1111", "weak_password_reset": "T1098",
+    "exposed_files_harvest": "T1083", "target_intel_harvest": "T1592",
+    "excessive_data_exposure": "T1213",
+}
+_WSTG_BASE = "https://owasp.org/www-project-web-security-testing-guide/stable/"
+for _tid, _rec in TECHNIQUES.items():
+    _rec["wstg"] = _WSTG.get(_tid)
+    _rec["mitre"] = _MITRE.get(_tid)
+    if _rec["wstg"] and not _rec.get("refs"):
+        _rec["refs"] = [_WSTG_BASE]
+
+
+# --------------------------------------------------------------------------------------------
+# Taxonomy lenses — the SAME technique registry, grouped by whichever framework you enable.
+# Adding techniques makes the tool smarter; switching a lens only changes the view.
+# --------------------------------------------------------------------------------------------
+_LENSES = [
+    ("owasp", "OWASP Top 10 (2021)", "owasp"),
+    ("wstg", "OWASP WSTG", "wstg"),
+    ("cwe", "CWE", "cwe"),
+    ("mitre", "MITRE ATT&CK", "mitre"),
+    ("class", "Vulnerability class", "vuln_class"),
+]
+_LENS_FIELD = {lid: field for lid, _lbl, field in _LENSES}
+
+
+def taxonomy_view(lens: str = "owasp") -> dict:
+    """Group the technique registry by a chosen taxonomy lens. proven = oracle-confirmed on a
+    lab; catalogued = known technique, not yet demonstrated (validated_on empty)."""
+    field = _LENS_FIELD.get(lens, "owasp")
+    groups: dict[str, list] = {}
+    for t in TECHNIQUES.values():
+        key = t.get(field) or "(unmapped)"
+        groups.setdefault(key, []).append({
+            "id": t["id"], "summary": t["summary"], "vuln_class": t["vuln_class"],
+            "cwe": t["cwe"], "owasp": t["owasp"], "wstg": t.get("wstg"), "mitre": t.get("mitre"),
+            "permission": t["permission"], "transferable": t["transferable"],
+            "generalized": is_generalized(t), "validated_on": t.get("validated_on", []),
+            "status": "proven" if t.get("validated_on") else "catalogued",
+            "maps_to": t.get("maps_to") or {}, "refs": t.get("refs", []),
+            "execution": t.get("execution", "auto"),
+        })
+    out = [{"key": k, "count": len(v),
+            "techniques": sorted(v, key=lambda x: (x["status"] != "proven", x["id"]))}
+           for k, v in groups.items()]
+    out.sort(key=lambda g: (g["key"] == "(unmapped)", g["key"]))
+    return {
+        "lens": lens, "lenses": [{"id": lid, "label": lbl} for lid, lbl, _f in _LENSES],
+        "groups": out,
+        "total": len(TECHNIQUES),
+        "proven": sum(1 for t in TECHNIQUES.values() if t.get("validated_on")),
+        "transferable": sum(1 for t in TECHNIQUES.values() if t["transferable"]),
+        "generalized": len(generalized()),
+    }

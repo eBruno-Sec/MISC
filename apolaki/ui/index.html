@@ -308,6 +308,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
   <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
+  <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -639,6 +640,46 @@ X-Requested-With: </textarea>
       <div id="conquestBody"><div class="empty"><h4>Loading the conquest…</h4><p>Reading the live board.</p></div></div>
     </section>
 
+    <style>
+    #p-taxonomy .tx-bar{display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:1rem 1.2rem;margin-bottom:1rem}
+    #p-taxonomy .tx-stat{display:flex;flex-direction:column}
+    #p-taxonomy .tx-stat .v{font-size:1.5rem;font-weight:800;color:var(--text-bright);font-variant-numeric:tabular-nums;line-height:1}
+    #p-taxonomy .tx-stat .v.acc{color:var(--accent)}
+    #p-taxonomy .tx-stat .k{font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:.25rem}
+    #p-taxonomy .tx-note{flex:1;min-width:230px;font-size:.76rem;color:var(--text-dim);line-height:1.55}
+    #p-taxonomy .tx-note b{color:var(--text)}
+    #p-taxonomy .tx-lenses{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.1rem}
+    #p-taxonomy .tx-lens{font-family:var(--sans);font-size:.76rem;font-weight:600;color:var(--text-dim);
+      background:var(--surface2);border:1px solid var(--border2);border-radius:999px;padding:.4rem .9rem;cursor:pointer;transition:.15s}
+    #p-taxonomy .tx-lens:hover{color:var(--text-bright);border-color:var(--accent)}
+    #p-taxonomy .tx-lens.active{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+    :root[data-theme="light"] #p-taxonomy .tx-lens.active{color:#fff}
+    #p-taxonomy .tx-group{margin-bottom:1.1rem}
+    #p-taxonomy .tx-ghead{display:flex;align-items:baseline;gap:.6rem;padding-bottom:.4rem;border-bottom:1.5px solid var(--border2);margin-bottom:.55rem}
+    #p-taxonomy .tx-gkey{font-family:var(--mono);font-weight:700;color:var(--text-bright);font-size:.9rem;letter-spacing:.01em}
+    #p-taxonomy .tx-gcount{margin-left:auto;font-size:.68rem;font-weight:700;color:var(--accent);background:var(--surface2);border:1px solid var(--border2);padding:.1rem .55rem;border-radius:999px}
+    #p-taxonomy .tx-tech{border:1px solid var(--border);border-left:3px solid var(--tc,var(--border2));background:var(--surface);
+      border-radius:var(--radius);padding:.7rem .85rem;margin-bottom:.5rem}
+    #p-taxonomy .tx-tname{font-weight:700;color:var(--text-bright);font-size:.9rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    #p-taxonomy .tx-sum{color:var(--text-dim);font-size:.8rem;margin:.25rem 0 .5rem;line-height:1.5;max-width:80ch}
+    #p-taxonomy .tx-tags{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
+    #p-taxonomy .tx-chip{font-family:var(--mono);font-size:.66rem;padding:.12rem .45rem;border-radius:5px;background:var(--surface2);border:1px solid var(--border2);color:var(--text-dim)}
+    #p-taxonomy .tx-badge{font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:.14rem .5rem;border-radius:999px;white-space:nowrap}
+    #p-taxonomy .tx-badge.proven{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
+    #p-taxonomy .tx-badge.catalogued{background:transparent;color:var(--text-dim);border:1px dashed var(--border2)}
+    #p-taxonomy .tx-badge.lablocal{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+    #p-taxonomy .tx-ev{margin-top:.45rem;font-size:.72rem;color:var(--text-dim)}
+    #p-taxonomy .tx-ev b{color:var(--text);font-weight:600}
+    </style>
+    <section class="panel" id="p-taxonomy">
+      <div class="view-head"><h3 class="sec">Technique Taxonomy</h3>
+        <span class="muted">The transferable techniques — one registry, switchable lenses. Techniques are the capability; the lens is just the view.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadTaxonomy()">Refresh</button>
+      </div>
+      <div id="taxonomyBody"><div class="empty"><h4>Loading the taxonomy…</h4></div></div>
+    </section>
+
   </div>
 </main>
 
@@ -697,6 +738,7 @@ const VIEWS={
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
   reports:  [["report","Report & export"]],
   conquest: [["conquest","Juice Shop Conquest"]],
+  taxonomy: [["taxonomy","Technique Taxonomy"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
@@ -723,6 +765,7 @@ function switchTab(name){
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
   if(name==="conquest")loadConquest();
+  if(name==="taxonomy")loadTaxonomy();
 }
 
 /* ── phase bar ── */
@@ -1596,6 +1639,49 @@ async function solveThenConquest(btn){
   loadConquest();
 }
 
+/* ── Technique Taxonomy: one registry, switchable lenses (OWASP / WSTG / CWE / MITRE / class) ── */
+let _txLens="owasp";
+function txLens(lens){ loadTaxonomy(lens); }
+function txHuman(id){ return id.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+async function loadTaxonomy(lens){
+  if(lens) _txLens=lens;
+  const el=document.getElementById("taxonomyBody");
+  el.innerHTML=`<div class="empty"><h4>Reading the registry…</h4></div>`;
+  try{
+    const d=await(await fetch(`${API}/techniques?lens=${encodeURIComponent(_txLens)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(d.error)}</p></div>`;return;}
+    el.innerHTML=renderTaxonomy(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderTaxonomy(d){
+  let h=`<div class="tx-bar">
+    <div class="tx-stat"><span class="v acc">${d.proven}</span><span class="k">Proven</span></div>
+    <div class="tx-stat"><span class="v">${d.total}</span><span class="k">Techniques</span></div>
+    <div class="tx-stat"><span class="v">${d.transferable}</span><span class="k">Transferable</span></div>
+    <div class="tx-stat"><span class="v">${d.generalized}</span><span class="k">Generalized ≥2 labs</span></div>
+    <div class="tx-note"><b>Proven</b> = oracle-confirmed on a lab. <b>Catalogued</b> = known, not yet demonstrated. <b>Generalized</b> needs ≥2 labs — everything's Juice-Shop-only for now, so <b>0</b> is the honest number until a 2nd corpus lands.</div>
+  </div>`;
+  h+=`<div class="tx-lenses">`+ (d.lenses||[]).map(l=>`<button class="tx-lens ${l.id===d.lens?"active":""}" onclick="txLens('${l.id}')">${esc(l.label)}</button>`).join("") +`</div>`;
+  (d.groups||[]).forEach(g=>{
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">${esc(g.key)}</span><span class="tx-gcount">${g.count}</span></div>`;
+    g.techniques.forEach(t=>{
+      const col = t.status==="proven" ? "var(--ok)" : (!t.transferable ? "var(--warn)" : "var(--border2)");
+      const badge = !t.transferable ? `<span class="tx-badge lablocal">lab-local</span>`
+                    : (t.status==="proven" ? `<span class="tx-badge proven">proven</span>` : `<span class="tx-badge catalogued">catalogued</span>`);
+      const tags = [["CWE",t.cwe],["OWASP",t.owasp],["WSTG",t.wstg],["ATT&CK",t.mitre]]
+        .filter(x=>x[1]).map(x=>`<span class="tx-chip">${esc(String(x[1]))}</span>`).join("");
+      const js = (t.maps_to&&t.maps_to.juiceshop&&t.maps_to.juiceshop.length)
+        ? `<div class="tx-ev">Proof on Juice Shop: <b>${t.maps_to.juiceshop.map(esc).join("</b>, <b>")}</b></div>` : "";
+      h+=`<div class="tx-tech" style="--tc:${col}">
+        <div class="tx-tname">${esc(txHuman(t.id))} ${badge}</div>
+        <div class="tx-sum">${esc(t.summary)}</div>
+        <div class="tx-tags">${tags}</div>${js}</div>`;
+    });
+    h+=`</div>`;
+  });
+  return h;
+}
+
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
@@ -1882,7 +1968,7 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle});
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens});
 
 /* land on the Launch view */
 showView("launch");

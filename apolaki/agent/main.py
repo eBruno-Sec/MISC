@@ -748,6 +748,17 @@ async def lab_conquest(lab_id: str):
     return labs.conquest(lab_id, base)
 
 
+@app.get("/techniques")
+async def techniques_taxonomy(lens: str = "owasp"):
+    """Technique registry grouped by a taxonomy lens (owasp/wstg/cwe/mitre/class). Switching the
+    lens only changes the view; the techniques themselves are the transferable capability."""
+    import techniques as T
+    try:
+        return T.taxonomy_view(lens)
+    except Exception as e:
+        return {"error": str(e), "lens": lens}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
