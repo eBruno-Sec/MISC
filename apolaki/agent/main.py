@@ -809,6 +809,23 @@ async def authz_matrix(req: AuthzMatrixRequest):
         return {"error": str(e)}
 
 
+@app.get("/bizlogic")
+async def biz_logic(url: str = ""):
+    """Business-Logic Graph: infer the target's workflows from its discovered routes (harvested
+    black-box) and generate the logic-abuse tests a scanner can't derive — replay/double-execute,
+    negative amount, skip a mandatory step, run steps out of order. Recon -> workflow understanding
+    -> concrete test hypotheses."""
+    import codeintel
+    import bizlogic
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        h = codeintel.harvest(u)
+        routes = (h.get("routes") or []) + (h.get("endpoints") or [])
+        return bizlogic.analyze(routes)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
