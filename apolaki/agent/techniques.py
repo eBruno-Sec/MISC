@@ -527,6 +527,8 @@ def taxonomy_view(lens: str = "owasp") -> dict:
             "status": "proven" if t.get("validated_on") else "catalogued",
             "maps_to": t.get("maps_to") or {}, "refs": t.get("refs", []),
             "execution": t.get("execution", "auto"),
+            # the in-app lesson — learn the method without leaving Apolaki
+            "detect": t.get("detect", ""), "exploit": t.get("exploit", ""), "oracle": t.get("oracle", ""),
         })
     out = [{"key": k, "count": len(v),
             "techniques": sorted(v, key=lambda x: (x["status"] != "proven", x["id"]))}

@@ -672,6 +672,14 @@ X-Requested-With: </textarea>
     #p-taxonomy .tx-badge.lablocal{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
     #p-taxonomy .tx-ev{margin-top:.45rem;font-size:.72rem;color:var(--text-dim)}
     #p-taxonomy .tx-ev b{color:var(--text);font-weight:600}
+    #p-taxonomy .tx-thead{display:flex;align-items:center;gap:.5rem;cursor:pointer}
+    #p-taxonomy .tx-thead:hover .tx-tname{color:var(--accent)}
+    #p-taxonomy .tx-caret{margin-left:auto;color:var(--text-dim);font-size:.66rem;transition:transform .15s;flex:none}
+    #p-taxonomy .tx-tech.open .tx-caret{transform:rotate(90deg)}
+    #p-taxonomy .tx-lesson{display:none;margin-top:.55rem;border-top:1px solid var(--border);padding-top:.55rem}
+    #p-taxonomy .tx-tech.open .tx-lesson{display:block}
+    #p-taxonomy .tx-step{font-size:.78rem;color:var(--text);margin:.3rem 0;line-height:1.55;max-width:82ch}
+    #p-taxonomy .tx-slabel{display:inline-block;font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);min-width:56px;margin-right:.5rem;font-weight:700;vertical-align:top}
     </style>
     <section class="panel" id="p-taxonomy">
       <div class="view-head"><h3 class="sec">Technique Taxonomy</h3>
@@ -1715,9 +1723,16 @@ function renderTaxonomy(d){
       const js = (t.maps_to&&t.maps_to.juiceshop&&t.maps_to.juiceshop.length)
         ? `<div class="tx-ev">Proof on Juice Shop: <b>${t.maps_to.juiceshop.map(esc).join("</b>, <b>")}</b></div>` : "";
       h+=`<div class="tx-tech" style="--tc:${col}">
-        <div class="tx-tname">${esc(txHuman(t.id))} ${badge}</div>
+        <div class="tx-thead" onclick="this.closest('.tx-tech').classList.toggle('open')">
+          <span class="tx-tname">${esc(txHuman(t.id))} ${badge}</span><span class="tx-caret" title="learn the method">▶</span>
+        </div>
         <div class="tx-sum">${esc(t.summary)}</div>
-        <div class="tx-tags">${tags}</div>${js}</div>`;
+        <div class="tx-tags">${tags}</div>${js}
+        <div class="tx-lesson">
+          <div class="tx-step"><span class="tx-slabel">Detect</span>${esc(t.detect||'—')}</div>
+          <div class="tx-step"><span class="tx-slabel">Exploit</span>${esc(t.exploit||'—')}</div>
+          <div class="tx-step"><span class="tx-slabel">Confirm</span>${esc(t.oracle||'—')}</div>
+        </div></div>`;
     });
     h+=`</div>`;
   });
