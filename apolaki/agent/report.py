@@ -742,6 +742,83 @@ def risk_signals(findings: list, leads: list, coverage: dict, attack_surface: di
     return sig
 
 
+# ── Coverage Engine: the honest INVERSE of coverage ─────────────────────────
+def coverage_gaps(mode=None, execution=None, tool_ledger=None, authenticated=None) -> list:
+    """Whole test areas that could NOT be exercised this run, each with the concrete reason — so a
+    reader knows the report's boundaries (absence of a finding in a gap area is NOT proof of safety).
+    Returns [[area, reason_tag, explanation], ...]. Deterministic."""
+    gaps = []
+    m = (mode or "").lower()
+    strat = ((execution or {}).get("strategy") or "").lower()
+    led = tool_ledger if isinstance(tool_ledger, dict) else {}
+    if authenticated is not True:
+        gaps.append(["Authenticated attack surface", "no credentials supplied",
+                     "Authenticated flows — role-based access, per-user objects (IDOR/BOLA) and admin "
+                     "functions (BFLA) behind login — were not exercised. Supply a test account to cover them."])
+    if m and m != "full":
+        gaps.append(["Intrusive / deep DAST", "not run in Full mode",
+                     "The intrusive active scanners (ZAP thorough-active, nmap NSE vuln scripts, the heavy "
+                     "nuclei template set) only run in Full mode; this assessment did not include them."])
+    if strat in ("deterministic", "manual", ""):
+        gaps.append(["AI business-logic hunt", "proof-first (no-AI) run",
+                     "The optional AI-driven business-logic reasoning pass was not performed. It is an "
+                     "enhancement layer on the deterministic floor, not a detector — no CONFIRMED finding "
+                     "is lost by skipping it."])
+    gaps.append(["Fully-rendered browser behaviour", "request-level coverage",
+                 "Issues that only surface in a real rendered browser (some DOM XSS, SPA client-side "
+                 "routing/state) are only partially covered by request-level testing."])
+    for t in (led.get("tools") or []):
+        if not isinstance(t, dict):
+            continue
+        st = str(t.get("status") or "").lower()
+        if st in ("error", "failed", "unavailable", "timeout", "skipped", "not-run"):
+            gaps.append([str(t.get("tool", "tool")), st,
+                         "This tool did not complete, so its coverage area may be incomplete."])
+    return gaps
+
+
+# ── Root-Cause inference: group findings by architectural weakness, not symptom ──
+_ROOT_CAUSE = {
+    "idor": "Broken object-level authorization", "bfla": "Broken function-level authorization",
+    "mass_assignment": "Broken object-level authorization", "access_control": "Broken authorization",
+    "sqli": "Unsafe handling of untrusted input (injection)", "nosqli": "Unsafe handling of untrusted input (injection)",
+    "cmdi": "Unsafe handling of untrusted input (injection)", "ssti": "Unsafe handling of untrusted input (injection)",
+    "xxe": "Unsafe handling of untrusted input (injection)", "crlf": "Unsafe handling of untrusted input (injection)",
+    "command_injection": "Unsafe handling of untrusted input (injection)",
+    "xss": "Output not neutralised before rendering (XSS)", "csti": "Output not neutralised before rendering (XSS)",
+    "weak_password_reset": "Broken authentication / session management",
+    "csrf": "Missing request-forgery protection", "open_redirect": "Unvalidated redirects & forwards",
+    "vulnerable_component": "Known-vulnerable dependencies",
+    "exposure": "Sensitive data / source exposure", "path_traversal": "Sensitive data / source exposure",
+    "ssrf": "Server trusts a user-supplied destination (SSRF)", "deserialization": "Unsafe deserialization",
+    "cors": "Overly-permissive cross-origin policy", "takeover": "Dangling / unclaimed infrastructure",
+    "business_logic": "Business-logic / design flaw", "misconfig": "Security misconfiguration",
+}
+
+
+def root_cause_groups(findings: list) -> list:
+    """Group confirmed findings by their ARCHITECTURAL root cause (e.g. 5 IDORs -> one 'Broken
+    object-level authorization' weakness with 5 manifestations) so remediation targets the cause,
+    not each symptom. Returns [{root_cause, count, worst, families, titles}], worst-first."""
+    rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4, "info": 4}
+    groups: dict = {}
+    for f in findings or []:
+        fam = (_family_of(f) or "").lower()
+        rc = _ROOT_CAUSE.get(fam) or "Other"
+        g = groups.setdefault(rc, {"root_cause": rc, "count": 0, "worst": "info",
+                                   "families": set(), "titles": []})
+        g["count"] += 1
+        g["families"].add(fam or "?")
+        g["titles"].append(f.get("title", "finding"))
+        sev = (f.get("severity") or "info").lower()
+        if rank.get(sev, 9) < rank.get(g["worst"], 9):
+            g["worst"] = sev
+    out = [{"root_cause": v["root_cause"], "count": v["count"], "worst": v["worst"],
+            "families": sorted(v["families"]), "titles": v["titles"]} for v in groups.values()]
+    out.sort(key=lambda g: (rank.get(g["worst"], 9), -g["count"]))
+    return out
+
+
 # ── Since-Last-Scan (historical delta) — truth-first, never calls "fixed" ──
 def _delta_lines(delta: dict, findings: list) -> list:
     """Markdown lines for the 'Since Last Scan' section from a memory diff.
@@ -1301,6 +1378,35 @@ def generate_html_report(program: str, findings: list, scope: dict,
     appendix = ("<h2 id='appendix'>Appendix — Severity Definitions</h2>"
                 f"<table class='tbl'><tr><th>Level</th><th>Meaning</th></tr>{sevdefs}</table>")
 
+    # root-cause summary — group confirmed findings by architectural weakness, not symptom
+    rootcause_html = ""
+    _rcg = root_cause_groups(findings)
+    if _rcg and len(findings) > 1:
+        rrows = "".join(
+            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get(g['worst'], '#6a8a9a')}'>{e(g['worst'].upper())}</span></td>"
+            f"<td><b>{e(g['root_cause'])}</b></td><td>{g['count']}</td>"
+            f"<td class='sub'>{e(', '.join(g['titles'][:4]))}{'…' if len(g['titles']) > 4 else ''}</td></tr>"
+            for g in _rcg)
+        rootcause_html = ("<h2 id='rootcause'>Root-Cause Summary</h2>"
+                          "<p class='sub'>The confirmed findings grouped by the underlying architectural weakness "
+                          "rather than the symptom — fix the cause and multiple findings close at once.</p>"
+                          "<table class='tbl'><tr><th>Severity</th><th>Root cause</th><th>Findings</th>"
+                          "<th>Manifestations</th></tr>" + rrows + "</table>")
+
+    # coverage & limitations — the honest inverse of coverage: what could NOT be tested, and why
+    gaps_html = ""
+    _auth = bool(tool_ledger and tool_ledger.get("authenticated"))
+    _gaps = coverage_gaps(mode, execution, tool_ledger, authenticated=_auth)
+    if _gaps:
+        grows = "".join(
+            f"<tr><td><b>{e(a)}</b></td><td class='sub'><code>{e(tag)}</code></td><td class='sub'>{e(exp)}</td></tr>"
+            for a, tag, exp in _gaps)
+        gaps_html = ("<h2 id='coverage-gaps'>Coverage &amp; Limitations</h2>"
+                     "<p class='sub'>What this assessment could <b>not</b> exercise, and why — so the boundaries are "
+                     "explicit. <b>Absence of a finding in these areas is not evidence of safety.</b></p>"
+                     "<table class='tbl'><tr><th>Area not covered</th><th>Reason</th><th>Detail</th></tr>"
+                     + grows + "</table>")
+
     # methodology & tool ledger (tools run / skipped + why, ZAP status, auth, AI)
     method_html = ""
     if tool_ledger:
@@ -1445,7 +1551,7 @@ body{{margin:0;background:var(--bg);color:var(--text);line-height:1.6;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}}
 code,pre,.mono{{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}}
 .wrap{{max-width:920px;margin:0 auto;padding:2rem 1.4rem}}
-h1{{color:var(--bright);font-size:1.7rem;margin:0}}
+h1{{color:var(--bright);font-size:2.15rem;font-weight:800;letter-spacing:-.015em;margin:0}}
 h2{{color:var(--bright);border-bottom:1px solid var(--border);padding-bottom:.4rem;margin-top:2.6rem;font-size:1.15rem}}
 h3{{color:var(--bright);margin:.2rem 0;font-size:1rem}}
 h4{{color:var(--dim);text-transform:uppercase;font-size:.68rem;letter-spacing:.1em;margin:1rem 0 .3rem}}
@@ -1482,7 +1588,7 @@ a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}
 .cov span{{display:block;font-size:1.5rem;color:var(--accent);font-weight:700;font-family:'JetBrains Mono',monospace}}
 .cov label{{font-size:.6rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}}
 .chips{{display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0}}
-.chip{{border:1px solid var(--c);color:var(--c);border-radius:3px;padding:.2rem .6rem;font-size:.7rem;letter-spacing:.06em;font-family:'JetBrains Mono',monospace}}
+.chip{{border:1px solid var(--c);color:var(--c);border-radius:3px;padding:.28rem .7rem;font-size:.73rem;font-weight:600;letter-spacing:.06em;font-family:'JetBrains Mono',monospace}}
 .chip.lead{{--c:#c98a2b;border-style:dashed}}
 .summary{{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
   border-radius:6px;padding:.9rem 1.2rem}}.summary p{{margin:.45rem 0}}
@@ -1564,6 +1670,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {sechdr_html}
 {cve_html}
 {intel_html}
+{rootcause_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}
@@ -1573,6 +1680,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {rem_html}
 {delta_html}
 {pb_html}
+{gaps_html}
 {method_html}
 {integrity_html}
 {appendix}
