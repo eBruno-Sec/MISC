@@ -787,6 +787,28 @@ async def code_intel(url: str = ""):
         return {"error": str(e), "target": url}
 
 
+class AuthzMatrixRequest(BaseModel):
+    base_url: str = ""
+    roles: list = []       # [{"role","rank":0|1|2,"headers"?,"tenant"?}]
+    requests: list = []    # [{"request"|"path","method"?,"owner"?}]
+
+
+@app.post("/authz/matrix")
+async def authz_matrix(req: AuthzMatrixRequest):
+    """Differential Authorization Engine: replay the given requests as EVERY role and return the
+    authorization matrix + detected gaps (missing-auth / BOLA-IDOR / BFLA / cross-tenant). The
+    differences between roles are the signal a single-user scan can't see. Read-only by default
+    (GET/HEAD/OPTIONS) so it is a safe recon differential."""
+    import authz
+    base = req.base_url or _LAB_SOLVE_TARGETS.get("juiceshop", "")
+    if not base:
+        return {"error": "base_url required (or a known lab target)"}
+    try:
+        return authz.run_matrix(base, req.roles, req.requests)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
