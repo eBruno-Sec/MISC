@@ -307,6 +307,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="run" onclick="showView('run')">Live Run</button>
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
+  <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -590,6 +591,54 @@ X-Requested-With: </textarea>
       <div id="helpList"></div>
     </section>
 
+    <style>
+    #p-conquest .cq-hero{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:1.2rem 1.3rem;margin-bottom:1.3rem}
+    #p-conquest .cq-num{font-size:3.4rem;font-weight:800;color:var(--accent);line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+    #p-conquest .cq-num span{font-size:1.05rem;color:var(--text-dim);font-weight:700;margin-left:.25rem}
+    #p-conquest .cq-meta{flex:1;min-width:220px}
+    #p-conquest .cq-pct{font-size:1.5rem;font-weight:800;color:var(--text-bright);margin-right:.5rem;font-variant-numeric:tabular-nums}
+    #p-conquest .cq-bar{height:10px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2);overflow:hidden;margin-top:.55rem}
+    #p-conquest .cq-bar>i{display:block;height:100%;width:0;border-radius:999px;
+      background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#fff));transition:width 1.1s cubic-bezier(.16,1,.3,1)}
+    #p-conquest .cq-troph{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.7rem;margin:.3rem 0 1.4rem}
+    #p-conquest .cq-troph .card{padding:.85rem .95rem}
+    #p-conquest .cq-troph .card p{color:var(--text-dim);font-size:.79rem;margin:.15rem 0 .6rem;line-height:1.45}
+    #p-conquest .cq-cat{margin-bottom:1.1rem}
+    #p-conquest .cq-cathead{display:flex;align-items:center;gap:.6rem;padding-bottom:.4rem;border-bottom:1.5px solid var(--border2);margin-bottom:.15rem}
+    #p-conquest .cq-catname{font-weight:700;color:var(--text-bright);font-size:.96rem}
+    #p-conquest .cq-row{border-bottom:1px solid var(--border)}
+    #p-conquest .cq-row:last-child{border-bottom:none}
+    #p-conquest .cq-rowtop{display:flex;align-items:baseline;gap:.65rem;padding:.55rem .2rem;cursor:pointer}
+    #p-conquest .cq-rowtop:hover .cq-name{color:var(--accent)}
+    #p-conquest .cq-tick{color:var(--accent);font-weight:800;flex:none}
+    #p-conquest .cq-name{font-weight:600;color:var(--text);flex:none}
+    #p-conquest .cq-tech{color:var(--text-dim);font-size:.77rem;font-family:var(--mono);flex:1;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #p-conquest .cq-stars{color:var(--warn);font-size:.72rem;letter-spacing:1px;flex:none;white-space:nowrap}
+    #p-conquest .cq-caret{flex:none;color:var(--text-dim);font-size:.7rem;transition:transform .15s}
+    #p-conquest .cq-row.open .cq-caret{transform:rotate(90deg)}
+    #p-conquest .cq-detail{display:none;padding:0 .2rem .7rem 1.5rem;color:var(--text);font-size:.83rem;line-height:1.55;max-width:70ch}
+    #p-conquest .cq-row.open .cq-detail{display:block}
+    #p-conquest .cq-detail .lbl{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);display:block;margin-bottom:.2rem}
+    #p-conquest .cq-rgroup{margin-bottom:.85rem}
+    #p-conquest .cq-rlabel{font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.4rem;display:flex;align-items:center;gap:.45rem}
+    #p-conquest .cq-dot{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none}
+    #p-conquest .cq-hint{color:var(--text-dim);font-size:.75rem;margin:.2rem 0 1rem}
+    @media(max-width:640px){
+      #p-conquest .cq-tech{flex-basis:100%;order:5;white-space:normal;margin-left:1.5rem}
+      #p-conquest .cq-rowtop{flex-wrap:wrap;gap:.3rem}
+    }
+    </style>
+    <section class="panel" id="p-conquest">
+      <div class="view-head"><h3 class="sec">Juice Shop Conquest</h3>
+        <span class="muted">Every solved challenge — live from the scoreboard — with the exploit and a full write-up. Click any row.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadConquest()">Refresh</button>
+        <button class="btn sm" onclick="solveThenConquest(this)">▶ Solve now</button>
+      </div>
+      <div id="conquestBody"><div class="empty"><h4>Loading the conquest…</h4><p>Reading the live board.</p></div></div>
+    </section>
+
   </div>
 </main>
 
@@ -647,6 +696,7 @@ const VIEWS={
   run:      [["feed","Activity feed"]],
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
   reports:  [["report","Report & export"]],
+  conquest: [["conquest","Juice Shop Conquest"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
@@ -672,6 +722,7 @@ function switchTab(name){
   if(name==="surface")loadSurface(); if(name==="playbooks")loadPlaybook();
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
+  if(name==="conquest")loadConquest();
 }
 
 /* ── phase bar ── */
@@ -1479,6 +1530,72 @@ async function runLabPack(lab){
   }catch(e){ if(out){out.textContent='Error: '+e;} }
   if(btn){btn.disabled=false;}
 }
+
+/* ── Conquest: in-app Juice Shop knowledge base (live board + technique write-ups) ── */
+const CQ_BUCKET={
+  dos:{label:"Won't run — denial of service (off by policy)",c:"var(--text-dim)"},
+  not_hosted:{label:"Not hosted in this build — needs an LLM key or a live chain",c:"var(--warn)"},
+  frontier:{label:"Still on the board — the open frontier",c:"var(--accent)"}
+};
+function cqStars(d){let s="";for(let i=0;i<(d||0);i++)s+="★";return s||"·";}
+function cqToggle(el){el.parentElement.classList.toggle("open");}
+async function loadConquest(){
+  const el=document.getElementById("conquestBody");
+  el.innerHTML=`<div class="empty"><h4>Reading the scoreboard…</h4><p>Merging the live board with the technique write-ups.</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/lab/juiceshop/conquest`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't read the board</h4><p>${esc(d.error)}</p><p class="muted">Is the Juice Shop lab target up?</p></div>`;return;}
+    el.innerHTML=renderConquest(d);
+    requestAnimationFrame(()=>{const b=document.getElementById("cqBar");if(b)b.style.width=(d.percent||0)+"%";});
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderConquest(d){
+  let h=`<div class="cq-hero">
+    <div class="cq-num">${d.solved}<span>/ ${d.total}</span></div>
+    <div class="cq-meta">
+      <span class="cq-pct">${d.percent}%</span><span class="muted">of the full scoreboard</span>
+      <div class="cq-bar"><i id="cqBar"></i></div>
+      <div class="muted" style="margin-top:.55rem;font-size:.8rem">${d.solved} of ${d.reachable} <b>reachable</b> = <b style="color:var(--accent)">${d.reachable_percent}%</b>. The rest need a DoS we won't run, an LLM chatbot, or a live chain this build doesn't host.</div>
+    </div></div>`;
+  if(d.signature&&d.signature.length){
+    h+=`<h5>Signature exploits</h5><div class="cq-troph">`;
+    d.signature.forEach(s=>{h+=`<div class="card" style="--c:var(--accent)"><h4>${esc(s.title)}</h4><p>${esc(s.blurb)}</p><code class="chip">${esc(s.tag)}</code></div>`;});
+    h+=`</div>`;
+  }
+  h+=`<h5>The conquest ledger · ${d.solved} solves</h5><div class="cq-hint">★ = difficulty (1–6). Click any row for the full write-up.</div>`;
+  (d.categories||[]).forEach(cat=>{
+    h+=`<div class="cq-cat"><div class="cq-cathead"><span class="cq-catname">${esc(cat.category)}</span><span class="pill" style="--c:var(--accent)">${cat.count}</span></div>`;
+    cat.items.forEach(it=>{
+      h+=`<div class="cq-row"><div class="cq-rowtop" onclick="cqToggle(this)">`+
+        `<span class="cq-tick">✓</span><span class="cq-name">${esc(it.name)}</span>`+
+        `<span class="cq-tech">${esc(it.technique||"")}</span>`+
+        `<span class="cq-stars" title="difficulty ${it.difficulty}/6">${cqStars(it.difficulty)}</span>`+
+        `<span class="cq-caret">▶</span></div>`+
+        `<div class="cq-detail"><span class="lbl">How it was solved</span>${esc(it.detail||it.technique||"—")}</div></div>`;
+    });
+    h+=`</div>`;
+  });
+  if(d.remaining&&d.remaining.length){
+    h+=`<h5>Not taken — ${d.remaining.length}, and why</h5>`;
+    ["dos","not_hosted","frontier"].forEach(b=>{
+      const items=d.remaining.filter(x=>x.bucket===b);if(!items.length)return;
+      const m=CQ_BUCKET[b];
+      h+=`<div class="cq-rgroup"><div class="cq-rlabel"><span class="cq-dot" style="background:${m.c}"></span>${m.label} <span class="muted">· ${items.length}</span></div><div class="chips">`;
+      items.forEach(x=>{const fr=b==='frontier';h+=`<span class="chip" style="${fr?'border-style:dashed;border-color:var(--accent);color:var(--accent)':''}">${esc(x.name)}</span>`;});
+      h+=`</div></div>`;
+    });
+  }
+  return h;
+}
+async function solveThenConquest(btn){
+  if(btn){btn.disabled=true;btn.textContent="Solving…";}
+  const el=document.getElementById("conquestBody");
+  el.insertAdjacentHTML("afterbegin",`<div class="cq-hint" id="cqSolving">Running the solver pack against the lab target — this takes ~30s…</div>`);
+  try{ await fetch(`${API}/lab/juiceshop/solve`,{method:'POST'}); }catch(e){}
+  if(btn){btn.disabled=false;btn.textContent="▶ Solve now";}
+  loadConquest();
+}
+
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
@@ -1764,7 +1881,8 @@ renderHelp();
    inline onclick can only see the global scope). Belt-and-suspenders. */
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
-  delSelectedMissions,toggleAllMissions,updateMissionSel});
+  delSelectedMissions,toggleAllMissions,updateMissionSel,
+  loadConquest,solveThenConquest,cqToggle});
 
 /* land on the Launch view */
 showView("launch");

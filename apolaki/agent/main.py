@@ -737,6 +737,17 @@ async def lab_solve(lab_id: str):
     return labs.solve(lab_id, base)
 
 
+@app.get("/lab/{lab_id}/conquest")
+async def lab_conquest(lab_id: str):
+    """Read-only knowledge base: the lab's solved challenges annotated with the technique and a full
+    write-up per solve, merged live with the scoreboard. Same fixed-target safety as /solve."""
+    import labs
+    base = _LAB_SOLVE_TARGETS.get(lab_id)
+    if not base:
+        return {"error": "no solver pack for lab '%s'" % lab_id, "available": list(_LAB_SOLVE_TARGETS)}
+    return labs.conquest(lab_id, base)
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""

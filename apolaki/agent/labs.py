@@ -70,3 +70,12 @@ def solve(lab_id: str, base_url: str) -> dict:
         import juiceshop_solvers
         return juiceshop_solvers.solve(base_url)
     return {"error": "no solver pack for lab '%s'" % lab_id, "available": ["juiceshop"]}
+
+
+def conquest(lab_id: str, base_url: str) -> dict:
+    """Read-only knowledge view: the lab's solved challenges annotated with the exact technique and
+    a full write-up per solve. No exploitation happens — it just narrates what the pack achieved."""
+    if lab_id == "juiceshop":
+        import juiceshop_solvers
+        return juiceshop_solvers.conquest(base_url)
+    return {"error": "no conquest view for lab '%s'" % lab_id, "available": ["juiceshop"]}

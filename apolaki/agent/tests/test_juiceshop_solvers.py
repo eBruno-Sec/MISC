@@ -18,8 +18,27 @@ def test_no_bruteforce_or_dos_in_pack():
     src = inspect.getsource(js)
     # single known values only — never iterate a password/answer LIST
     assert "for pw in" not in src and "wordlist" not in src.lower()
-    # never trigger the DoS challenges
-    assert "xxeDos" not in src and "Memory Bomb" not in src and "billion" not in src.lower()
+    # DoS challenges may be CATALOGUED as deliberately skipped, but must never be SOLVED:
+    # none of them may appear in the solve manifest, and none is actually exploited.
+    dos = {n for n, b in js._REMAINING_BUCKET.items() if b == "dos"}
+    assert dos, "expected the DoS challenges to be catalogued as deliberately skipped"
+    assert not (dos & set(js.SOLVE_MANIFEST)), "a DoS challenge must never be in the solve manifest"
+    assert "xxeDos" not in src and "billion" not in src.lower()
+
+
+def test_manifest_and_writeup_cover_the_same_challenges():
+    # every solved-challenge write-up has a matching one-line technique tag, and vice versa
+    assert set(js.SOLVE_DETAIL) == set(js.SOLVE_MANIFEST)
+    assert len(js.SOLVE_MANIFEST) >= 85            # ~89 challenges catalogued
+    assert all(js.SOLVE_MANIFEST.values())         # no blank technique tag
+    assert all(js.SOLVE_DETAIL.values())           # no blank write-up
+
+
+def test_conquest_graceful_and_dispatch():
+    r = js.conquest("http://127.0.0.1:1")          # unreachable → returns, never raises
+    assert isinstance(r, dict) and ("error" in r or r.get("lab") == "juiceshop")
+    assert callable(labs.conquest)
+    assert "error" in labs.conquest("nope", "http://x")
 
 
 def test_solve_graceful_on_unreachable_target():
