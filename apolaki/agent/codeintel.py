@@ -97,6 +97,93 @@ def _summarize(findings: list, exposed_git: bool, scanned: int) -> dict:
     }
 
 
+_SENSITIVE_ROUTE = re.compile(r"(admin|account|manage|internal|debug|config|token|secret|"
+                              r"privacy|order|wallet|dashboard|report|api-?key|backup)", re.I)
+
+
+def harvest(base_url: str, timeout: int = 15) -> dict:
+    """BLACK-BOX code intelligence: curl the target, mine the served JS bundles + exposed vectors
+    into ACTIONABLE intel — API endpoints, client routes (including unlinked/sensitive ones),
+    leaked versions, and any source the target leaks (source maps -> reconstructed source, which
+    then gets the static sink review). No source folder, nothing handed over: recon-phase pure
+    automation that feeds PoC / deeper testing / exploitation."""
+    try:
+        import httpx
+    except Exception:
+        return {"error": "httpx unavailable", "target": base_url}
+    base = base_url.rstrip("/")
+    out = {"target": base, "bundles": [], "endpoints": [], "routes": [], "sensitive_routes": [],
+           "versions": [], "exposed": [], "source_review": None, "notes": []}
+    try:
+        c = httpx.Client(base_url=base, timeout=timeout, follow_redirects=True,
+                         headers={"User-Agent": "apolaki-codeintel"})
+    except Exception as e:
+        return {"error": str(e), "target": base}
+    try:
+        html = c.get("/").text
+    except Exception as e:
+        c.close()
+        return {"error": str(e), "target": base}
+    scripts = re.findall(r'src=["\']([^"\']+\.js)["\']', html)
+    endpoints, routes, versions, reconstructed = set(), set(), set(), []
+    for s in scripts:
+        p = s if s.startswith("/") else "/" + s
+        try:
+            js = c.get(p).text
+        except Exception:
+            continue
+        out["bundles"].append(p)
+        endpoints |= set(re.findall(r'["\'](/(?:rest|api)/[A-Za-z0-9/_-]+)', js))
+        routes |= set(re.findall(r'path:\s*["\']([A-Za-z0-9/_:-]+)["\']', js))
+        versions |= set(re.findall(r'["\']([a-z0-9][a-z0-9.-]*@\d+\.\d+\.\d+)["\']', js))
+        mm = re.search(r'sourceMappingURL=(\S+\.map)', js)
+        if mm:
+            try:
+                import json as _json
+                url = mm.group(1)
+                mp = c.get(url if url.startswith("http") else "/" + url.lstrip("/"))
+                if mp.status_code == 200:
+                    smap = _json.loads(mp.text)
+                    for path, content in zip(smap.get("sources", []) or [],
+                                             smap.get("sourcesContent", []) or []):
+                        if content:
+                            reconstructed.append((path, content))
+                    out["notes"].append("source map on %s -> %d original sources reconstructed" % (p, len(reconstructed)))
+            except Exception:
+                pass
+    # exposed-source / sensitive-file vectors (validate, don't trust a bare 200 = SPA fallback)
+    for probe, label, ok in [("/.git/HEAD", "exposed .git repo", lambda t: t.startswith("ref:")),
+                             ("/.env", "exposed .env", lambda t: "=" in t and "<" not in t[:5]),
+                             ("/ftp", "browsable /ftp", lambda t: ("package" in t.lower() or "coupon" in t.lower())),
+                             ("/.svn/entries", "exposed .svn", lambda t: t[:2].isdigit())]:
+        try:
+            r = c.get(probe)
+            if r.status_code == 200 and ok(r.text):
+                out["exposed"].append({"path": probe, "label": label})
+        except Exception:
+            pass
+    # if the target leaked real source (via maps), run the static sink review on it
+    if reconstructed:
+        import tempfile
+        d = tempfile.mkdtemp()
+        for path, content in reconstructed[:3000]:
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", (path or "src").replace("/", "__"))[:120]
+            try:
+                with open(os.path.join(d, safe or "src.js"), "w", encoding="utf-8", errors="ignore") as f:
+                    f.write(content)
+            except Exception:
+                pass
+        out["source_review"] = review(d)
+    c.close()
+    out["endpoints"] = sorted(endpoints)
+    out["routes"] = sorted(routes)
+    out["sensitive_routes"] = sorted(r for r in routes if _SENSITIVE_ROUTE.search(r))
+    out["versions"] = sorted(versions)[:50]
+    out["counts"] = {"endpoints": len(endpoints), "routes": len(routes),
+                     "sensitive_routes": len(out["sensitive_routes"]), "exposed": len(out["exposed"])}
+    return out
+
+
 def review(root: str, max_hits: int = 500, max_file_bytes: int = 1_000_000) -> dict:
     """Statically review a source tree; return leads (file:line + why + dynamic-confirm hint)."""
     if not os.path.isdir(root):

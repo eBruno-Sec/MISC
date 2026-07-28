@@ -773,6 +773,20 @@ async def code_review(path: str = ""):
         return {"error": str(e), "findings": []}
 
 
+@app.get("/codeintel")
+async def code_intel(url: str = ""):
+    """Black-box Code Intelligence: curl a target and mine its served JS bundles + exposed vectors
+    into ACTIONABLE intel — API endpoints, client routes (incl. unlinked/sensitive ones), leaked
+    versions, browsable dirs, and any source the target leaks (source maps -> reconstructed source,
+    which then gets the static sink review). No source folder handed over: recon-phase automation."""
+    import codeintel
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        return codeintel.harvest(u)
+    except Exception as e:
+        return {"error": str(e), "target": url}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""

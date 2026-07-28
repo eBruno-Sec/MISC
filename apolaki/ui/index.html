@@ -718,14 +718,21 @@ X-Requested-With: </textarea>
     #p-codereview .cr-conf b{color:var(--ok)}
     </style>
     <section class="panel" id="p-codereview">
-      <div class="view-head"><h3 class="sec">Code Review</h3>
-        <span class="muted">Static Code Intelligence — find the sink in source, then confirm it live.</span></div>
-      <div class="cr-intro">Point it at a source tree — one the operator provides, or source the recon phase reconstructed from the target's own leaks (<b>source maps</b>, an exposed <b>.git</b>, backups). Each hit is a <b>lead</b>: file:line + why + the dynamic request that confirms it. Source finds the candidate; a live request proves it — that white-box → dynamic loop is the point.</div>
+      <div class="view-head"><h3 class="sec">Code Intelligence</h3>
+        <span class="muted">Black-box — curl the target, mine its code into actionable intel.</span></div>
+      <div class="cr-intro">Nothing handed over. Apolaki curls the target's served <b>JS bundles</b> and probes exposed vectors (<b>source maps</b>, <b>.git</b>, browsable dirs), then mines them into <b>actionable intel</b> — API endpoints, unlinked/sensitive routes, leaked versions — the recon that feeds PoC, deeper testing, and exploitation. If the target leaks real source (via source maps), it also runs the static sink review on it.</div>
       <div class="cr-run">
-        <input id="crPath" value="/labsrc/juiceshop" placeholder="/path/to/source (server-side path the agent can read)">
-        <button class="btn" onclick="runCodeReview()">▶ Review source</button>
+        <input id="crUrl" value="http://juice-shop:3000" placeholder="https://target (in-scope)">
+        <button class="btn" onclick="runHarvest()">▶ Harvest intel</button>
       </div>
-      <div id="codereviewBody"><div class="empty"><h4>Ready</h4><p>Enter a source path and hit Review.</p></div></div>
+      <div id="codereviewBody"><div class="empty"><h4>Ready</h4><p>Enter a target URL and hit Harvest.</p></div></div>
+      <details style="margin-top:1.1rem">
+        <summary style="cursor:pointer;color:var(--text-dim);font-size:.78rem">Advanced · white-box folder review (only if you already have the source on disk)</summary>
+        <div class="cr-run" style="margin-top:.6rem">
+          <input id="crPath" value="/labsrc/juiceshop" placeholder="/path/to/source the agent can read">
+          <button class="btn ghost" onclick="runCodeReview()">Review folder</button>
+        </div>
+      </details>
     </section>
 
   </div>
@@ -1740,7 +1747,51 @@ function renderTaxonomy(d){
 }
 
 /* ── Code Review: static Code Intelligence over a source tree ── */
-function loadCodeReview(){ /* review can be slow — wait for the user to hit Review */ }
+function loadCodeReview(){ runHarvest(); }   /* black-box harvest is fast — auto-run on open */
+async function runHarvest(){
+  const url=(document.getElementById("crUrl").value||"").trim();
+  const el=document.getElementById("codereviewBody");
+  el.innerHTML=`<div class="empty"><h4>Harvesting…</h4><p class="mono">curl ${esc(url)}</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/codeintel?url=${encodeURIComponent(url)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't reach target</h4><p>${esc(d.error)}</p></div>`;return;}
+    el.innerHTML=renderHarvest(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderHarvest(d){
+  const c=d.counts||{};
+  let h=`<div class="cr-bar">
+    <div class="cr-stat"><span class="v">${c.endpoints||0}</span><span class="k">Endpoints</span></div>
+    <div class="cr-stat"><span class="v">${c.routes||0}</span><span class="k">Routes</span></div>
+    <div class="cr-stat"><span class="v high">${c.sensitive_routes||0}</span><span class="k">Sensitive</span></div>
+    <div class="cr-stat"><span class="v ${c.exposed?'crit':''}">${c.exposed||0}</span><span class="k">Exposed</span></div>
+    <div class="cr-stat"><span class="v">${(d.bundles||[]).length}</span><span class="k">JS bundles</span></div>
+  </div>`;
+  if((d.exposed||[]).length){
+    h+=`<h5 style="color:var(--danger)">⚠ Exposed source / files</h5>`;
+    d.exposed.forEach(e=>{ h+=`<div class="cr-find" style="--fc:var(--danger)"><div class="cr-fhead"><span class="cr-sev critical">exposed</span><span class="cr-loc">${esc(e.path)}</span></div><div class="cr-why">${esc(e.label)} — pull it for secrets / source.</div></div>`; });
+  }
+  if((d.sensitive_routes||[]).length){
+    h+=`<h5>Unlinked / sensitive routes — attack surface</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.sensitive_routes.forEach(r=>{ h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">${esc(r)}</span>`; }); h+=`</div>`;
+  }
+  if((d.endpoints||[]).length){
+    h+=`<h5>API endpoints</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.endpoints.forEach(e=>{ h+=`<span class="chip">${esc(e)}</span>`; }); h+=`</div>`;
+  }
+  if((d.versions||[]).length){
+    h+=`<h5>Leaked dependency versions</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.versions.forEach(v=>{ h+=`<span class="chip">${esc(v)}</span>`; }); h+=`</div>`;
+  }
+  const sr=d.source_review;
+  if(sr&&sr.total){
+    h+=`<h5>Static review of reconstructed source · ${sr.total} leads</h5>`;
+    (sr.findings||[]).slice(0,25).forEach(f=>{ h+=`<div class="cr-find" style="--fc:var(--warn)"><div class="cr-fhead"><span class="cr-sev ${esc(f.severity)}">${esc(f.severity)}</span><span class="cr-loc">${esc(f.file)}:${f.line}</span><span class="cr-tech">${esc(f.technique)}</span></div><div class="cr-why">${esc(f.why)}</div></div>`; });
+  } else {
+    h+=`<p class="muted" style="font-size:.78rem;margin-top:.4rem">${(d.notes&&d.notes.length)?d.notes.map(esc).join(' · '):'No source maps served — no full-source reconstruction. The endpoints/routes above are the actionable intel.'}</p>`;
+  }
+  return h;
+}
 async function runCodeReview(){
   const path=(document.getElementById("crPath").value||"").trim();
   const el=document.getElementById("codereviewBody");
@@ -2064,7 +2115,7 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview});
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest});
 
 /* land on the Launch view */
 showView("launch");
