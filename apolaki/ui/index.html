@@ -309,6 +309,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
   <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
   <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
+  <button class="navbtn" data-view="codereview" onclick="showView('codereview')">Code Review</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -680,6 +681,45 @@ X-Requested-With: </textarea>
       <div id="taxonomyBody"><div class="empty"><h4>Loading the taxonomy…</h4></div></div>
     </section>
 
+    <style>
+    #p-codereview .cr-intro{font-size:.82rem;color:var(--text-dim);line-height:1.6;margin-bottom:1rem;max-width:80ch}
+    #p-codereview .cr-intro b{color:var(--text)}
+    #p-codereview .cr-run{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.1rem}
+    #p-codereview .cr-run input{flex:1;min-width:260px;font-family:var(--mono);font-size:.8rem;padding:.5rem .7rem;
+      background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text)}
+    #p-codereview .cr-bar{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:.9rem 1.2rem;margin-bottom:1rem}
+    #p-codereview .cr-stat .v{font-size:1.4rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+    #p-codereview .cr-stat .k{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:.2rem}
+    #p-codereview .cr-stat .v.crit{color:var(--danger)} #p-codereview .cr-stat .v.high{color:var(--warn)}
+    #p-codereview .cr-git{margin-left:auto;font-size:.75rem;font-weight:700;padding:.3rem .7rem;border-radius:999px}
+    #p-codereview .cr-git.yes{color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 12%,transparent)}
+    #p-codereview .cr-git.no{color:var(--text-dim);border:1px solid var(--border2)}
+    #p-codereview .cr-find{border:1px solid var(--border);border-left:3px solid var(--fc,var(--border2));background:var(--surface);
+      border-radius:var(--radius);padding:.6rem .8rem;margin-bottom:.45rem}
+    #p-codereview .cr-fhead{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    #p-codereview .cr-loc{font-family:var(--mono);font-size:.76rem;color:var(--text-bright);font-weight:600}
+    #p-codereview .cr-sev{font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .45rem;border-radius:999px}
+    #p-codereview .cr-sev.critical{background:color-mix(in srgb,var(--danger) 18%,transparent);color:var(--danger)}
+    #p-codereview .cr-sev.high{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+    #p-codereview .cr-sev.medium{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border2)}
+    #p-codereview .cr-tech{margin-left:auto;font-family:var(--mono);font-size:.66rem;color:var(--accent);background:var(--surface2);border:1px solid var(--border2);padding:.08rem .4rem;border-radius:5px}
+    #p-codereview .cr-snip{font-family:var(--mono);font-size:.72rem;color:var(--text-dim);margin:.35rem 0;white-space:pre-wrap;word-break:break-word;background:var(--surface2);padding:.35rem .5rem;border-radius:6px;overflow-x:auto}
+    #p-codereview .cr-why{font-size:.78rem;color:var(--text);margin-top:.15rem}
+    #p-codereview .cr-conf{font-size:.76rem;color:var(--text-dim);margin-top:.25rem}
+    #p-codereview .cr-conf b{color:var(--ok)}
+    </style>
+    <section class="panel" id="p-codereview">
+      <div class="view-head"><h3 class="sec">Code Review</h3>
+        <span class="muted">Static Code Intelligence — find the sink in source, then confirm it live.</span></div>
+      <div class="cr-intro">Point it at a source tree — one the operator provides, or source the recon phase reconstructed from the target's own leaks (<b>source maps</b>, an exposed <b>.git</b>, backups). Each hit is a <b>lead</b>: file:line + why + the dynamic request that confirms it. Source finds the candidate; a live request proves it — that white-box → dynamic loop is the point.</div>
+      <div class="cr-run">
+        <input id="crPath" value="/labsrc/juiceshop" placeholder="/path/to/source (server-side path the agent can read)">
+        <button class="btn" onclick="runCodeReview()">▶ Review source</button>
+      </div>
+      <div id="codereviewBody"><div class="empty"><h4>Ready</h4><p>Enter a source path and hit Review.</p></div></div>
+    </section>
+
   </div>
 </main>
 
@@ -739,6 +779,7 @@ const VIEWS={
   reports:  [["report","Report & export"]],
   conquest: [["conquest","Juice Shop Conquest"]],
   taxonomy: [["taxonomy","Technique Taxonomy"]],
+  codereview:[["codereview","Code Review"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
@@ -766,6 +807,7 @@ function switchTab(name){
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
   if(name==="conquest")loadConquest();
   if(name==="taxonomy")loadTaxonomy();
+  if(name==="codereview")loadCodeReview();
 }
 
 /* ── phase bar ── */
@@ -1682,6 +1724,45 @@ function renderTaxonomy(d){
   return h;
 }
 
+/* ── Code Review: static Code Intelligence over a source tree ── */
+function loadCodeReview(){ /* review can be slow — wait for the user to hit Review */ }
+async function runCodeReview(){
+  const path=(document.getElementById("crPath").value||"").trim();
+  const el=document.getElementById("codereviewBody");
+  el.innerHTML=`<div class="empty"><h4>Reviewing source…</h4><p class="mono">${esc(path)}</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/codereview?path=${encodeURIComponent(path)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't review</h4><p>${esc(d.error)}</p><p class="muted">Give a source path the agent container can read (a mounted repo, or reconstructed source).</p></div>`;return;}
+    el.innerHTML=renderCodeReview(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderCodeReview(d){
+  const sev=d.by_severity||{};
+  let h=`<div class="cr-bar">
+    <div class="cr-stat"><span class="v crit">${sev.critical||0}</span><span class="k">Critical</span></div>
+    <div class="cr-stat"><span class="v high">${sev.high||0}</span><span class="k">High</span></div>
+    <div class="cr-stat"><span class="v">${sev.medium||0}</span><span class="k">Medium</span></div>
+    <div class="cr-stat"><span class="v">${d.total||0}</span><span class="k">Leads</span></div>
+    <div class="cr-stat"><span class="v">${d.files_scanned||0}</span><span class="k">Files</span></div>
+    <span class="cr-git ${d.exposed_dot_git?'yes':'no'}">${d.exposed_dot_git?'⚠ .git exposed':'.git not exposed'}</span>
+  </div>`;
+  if(!(d.findings||[]).length){ h+=`<div class="empty"><h4>No leads</h4><p>Nothing matched in that tree.</p></div>`; return h; }
+  const col={critical:'var(--danger)',high:'var(--warn)',medium:'var(--border2)'};
+  (d.findings||[]).forEach(f=>{
+    h+=`<div class="cr-find" style="--fc:${col[f.severity]||'var(--border2)'}">
+      <div class="cr-fhead">
+        <span class="cr-sev ${esc(f.severity)}">${esc(f.severity)}</span>
+        <span class="cr-loc">${esc(f.file)}:${f.line}</span>
+        <span class="cr-tech" title="maps to a Taxonomy technique">${esc(f.technique)}</span>
+      </div>
+      <div class="cr-snip">${esc(f.snippet||'')}</div>
+      <div class="cr-why">${esc(f.why||'')}</div>
+      <div class="cr-conf"><b>Confirm:</b> ${esc(f.confirm||'')}</div>
+    </div>`;
+  });
+  return h;
+}
+
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
@@ -1968,7 +2049,7 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens});
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview});
 
 /* land on the Launch view */
 showView("launch");

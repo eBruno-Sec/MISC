@@ -759,6 +759,20 @@ async def techniques_taxonomy(lens: str = "owasp"):
         return {"error": str(e), "lens": lens}
 
 
+@app.get("/codereview")
+async def code_review(path: str = ""):
+    """Code Intelligence: static review of a source tree — a path the operator provides, or source
+    the recon phase reconstructed from the target's own leaks (source maps / exposed .git / backups).
+    Returns leads (file:line + why + the dynamic confirmation the scanner can fire), each mapped to a
+    technique in the Taxonomy. Source finds the candidate; a live request proves it."""
+    import codeintel
+    p = path or os.environ.get("CODEREVIEW_DEFAULT", "/labsrc/juiceshop")
+    try:
+        return codeintel.review(p)
+    except Exception as e:
+        return {"error": str(e), "findings": []}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
