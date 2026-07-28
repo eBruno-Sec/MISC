@@ -62,6 +62,33 @@ services:
       retries: 20
       start_period: 30s
 
+  # ── Benchmark / lab targets (public images, pulled on `up`; NOT real engagements) ──
+  # OWASP Juice Shop, reachable at http://juice-shop:3000 on the compose network — used by
+  # Lab Mode (the ▶ Solve button), the Conquest tab, and general-scan benchmarks. safetyMode
+  # is disabled so the full XSS/NoSQL challenge set is reachable. No source is vendored: this
+  # just runs the public image.
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    environment:
+      - 'NODE_CONFIG={"challenges":{"safetyMode":"disabled"}}'
+    ports:
+      - "127.0.0.1:42000:3000"
+    volumes:
+      - juiceshop_data:/juice-shop/data
+    restart: unless-stopped
+    mem_limit: 3g
+
+  # DVWA — a SECOND lab so techniques can be validated on >=2 labs (the "generalized" bar in
+  # the Taxonomy tab). One-time setup after `up`: open http://localhost:42080, click "Create
+  # Database", log in admin/password, set DVWA Security = low. Reachable at http://dvwa on the
+  # compose network.
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    ports:
+      - "127.0.0.1:42080:80"
+    restart: unless-stopped
+
 volumes:
   nuclei_templates:
   bbh_data:
+  juiceshop_data:
