@@ -325,6 +325,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["Multiple Likes"]}),
 
+    _t(id="command_injection", vuln_class="command_injection", cwe="CWE-78", owasp="A03:2021",
+       permission=INTRUSIVE, transferable=True,
+       summary="OS command injection: user input reaches a shell command unsanitized.",
+       detect="A parameter flows into a system/exec call; shell metacharacters change behavior.",
+       exploit="Append a command separator (; | && backtick) plus a benign probe (id/whoami).",
+       oracle="Response contains the injected command's output (e.g. uid= from id).",
+       validated_on=["dvwa"],
+       maps_to={"dvwa": ["Command Injection"]}),
+
     # --- lab-local: counts toward a CTF % but NOT claimed as transferable capability ---
     _t(id="find_hidden_route", vuln_class="misc", cwe="CWE-425", owasp="A01:2021",
        permission=PASSIVE, transferable=False,
@@ -437,10 +446,29 @@ for _tid, _chs in _JUICESHOP_PROVEN.items():
         _m["juiceshop"] = sorted(set(_m.get("juiceshop", []) + _chs))
         _rec["maps_to"] = _m
 
+# Second lab: techniques whose ORACLE also fired on DVWA (low security), proven live via direct
+# HTTP. Two independent labs => these flip to GENERALIZED — the honest transferability bar.
+_DVWA_PROVEN = {
+    "sqli_auth_bypass": ["SQL Injection"],
+    "sqli_union_extract": ["SQL Injection"],
+    "reflected_xss": ["XSS (Reflected)"],
+    "stored_xss": ["XSS (Stored)"],
+    "csrf": ["CSRF"],
+    "command_injection": ["Command Injection"],
+}
+for _tid, _chs in _DVWA_PROVEN.items():
+    _rec = TECHNIQUES.get(_tid)
+    if _rec:
+        if "dvwa" not in _rec["validated_on"]:
+            _rec["validated_on"] = _rec["validated_on"] + ["dvwa"]
+        _m = dict(_rec.get("maps_to") or {})
+        _m["dvwa"] = sorted(set(_m.get("dvwa", []) + _chs))
+        _rec["maps_to"] = _m
+
 # Taxonomy-lens codes (best-effort; high-confidence mappings only, None where no clean fit).
 _WSTG = {
     "sqli_auth_bypass": "WSTG-INPV-05", "sqli_union_extract": "WSTG-INPV-05",
-    "nosql_injection": "WSTG-INPV-05", "reflected_xss": "WSTG-INPV-01",
+    "nosql_injection": "WSTG-INPV-05", "command_injection": "WSTG-INPV-12", "reflected_xss": "WSTG-INPV-01",
     "stored_xss": "WSTG-INPV-02", "dom_xss": "WSTG-CLNT-01", "ssti": "WSTG-INPV-18",
     "xxe_file_ssrf": "WSTG-INPV-07", "jwt_forge": "WSTG-SESS-10", "ssrf": "WSTG-INPV-19",
     "open_redirect": "WSTG-CLNT-04", "crlf_injection": "WSTG-INPV-16",
@@ -456,7 +484,7 @@ _WSTG = {
 # MITRE ATT&CK is an adversary-TTP lens — deliberately coarse for web-app bugs; mapped only
 # where a technique genuinely corresponds, None elsewhere (honest gaps rather than forced fits).
 _MITRE = {
-    "sqli_auth_bypass": "T1190", "sqli_union_extract": "T1190", "nosql_injection": "T1190",
+    "sqli_auth_bypass": "T1190", "sqli_union_extract": "T1190", "nosql_injection": "T1190", "command_injection": "T1190",
     "xxe_file_ssrf": "T1190", "ssrf": "T1190", "ssti": "T1190", "insecure_deser": "T1190",
     "jwt_forge": "T1550.001", "weak_2fa_bypass": "T1111", "weak_password_reset": "T1098",
     "exposed_files_harvest": "T1083", "target_intel_harvest": "T1592",
