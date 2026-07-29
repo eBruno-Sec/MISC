@@ -852,6 +852,20 @@ async def list_packs():
             "technique_packs": sum(1 for p in packs if p["kind"] == "technique")}
 
 
+@app.get("/cdp")
+async def cdp_collect(url: str = ""):
+    """Headless-browser RUNTIME collection: service workers, runtime XHR/GraphQL endpoints, lazily
+    loaded JS chunks, storage keys and window config hints — the artifacts a curl never sees.
+    Needs the optional headless-chrome sidecar (env CDP_BROWSER_URL); with none configured it
+    returns a clearly-labelled empty result (nothing faked)."""
+    import cdp
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        return cdp.collect(u)
+    except Exception as e:
+        return {"error": str(e), "target": url}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
