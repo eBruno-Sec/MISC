@@ -793,6 +793,18 @@ _ROOT_CAUSE = {
     "ssrf": "Server trusts a user-supplied destination (SSRF)", "deserialization": "Unsafe deserialization",
     "cors": "Overly-permissive cross-origin policy", "takeover": "Dangling / unclaimed infrastructure",
     "business_logic": "Business-logic / design flaw", "misconfig": "Security misconfiguration",
+    # tool-emitted family aliases folded onto the same architectural causes (so groups MERGE, not split)
+    "bola": "Broken object-level authorization", "stored_xss": "Output not neutralised before rendering (XSS)",
+    "git_exposure": "Sensitive data / source exposure", "backup_exposure": "Sensitive data / source exposure",
+    "config_exposure": "Sensitive data / source exposure", "credential_exposure": "Sensitive data / source exposure",
+    "info_disclosure": "Sensitive data / source exposure",
+    "jwt": "Broken authentication / session management", "oauth": "Broken authentication / session management",
+    "prototype_pollution": "Unsafe handling of untrusted input (injection)",
+    "host_header": "Unsafe handling of untrusted input (injection)",
+    "llm_prompt_injection": "Unsafe handling of untrusted input (injection)",
+    "crypto": "Weak or misused cryptography", "race": "Business-logic / design flaw",
+    "cache_poisoning": "Security misconfiguration", "graphql": "Security misconfiguration",
+    "upload": "Unrestricted file upload",
 }
 
 
