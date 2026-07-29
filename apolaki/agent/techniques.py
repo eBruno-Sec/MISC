@@ -334,6 +334,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["dvwa"],
        maps_to={"dvwa": ["Command Injection"]}),
 
+    _t(id="path_traversal", vuln_class="path_traversal", cwe="CWE-22", owasp="A01:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Path traversal / local file inclusion: a path or filename parameter reads files outside its folder.",
+       detect="A parameter names a file/page that is read or included server-side.",
+       exploit="Supply ../ sequences (or an absolute path) to escape the intended directory.",
+       oracle="Response returns a file outside the app's document root (e.g. the contents of /etc/passwd).",
+       validated_on=["dvwa"],
+       maps_to={"dvwa": ["File Inclusion"], "juiceshop": ["Local File Read"]}),
+
     # --- lab-local: counts toward a CTF % but NOT claimed as transferable capability ---
     _t(id="find_hidden_route", vuln_class="misc", cwe="CWE-425", owasp="A01:2021",
        permission=PASSIVE, transferable=False,
