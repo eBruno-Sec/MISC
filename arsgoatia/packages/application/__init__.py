@@ -7,9 +7,17 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID, uuid4
+
+from packages.approval import (
+    ApprovalRegistry,
+    ApprovalRegistryError,
+    DuplicateApprovalError,
+    TwoPersonRuleError,
+)
+from packages.rate_limiter import BudgetDenialReason, BudgetLedger
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +215,8 @@ class ApproveActionCommand:
     tenant_id: UUID
     action_id: UUID
     approver: str
-    decision_digest: str
+    decision_digest: str = ""
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -531,6 +540,8 @@ def handle_propose_action(
     engagement_repo: EngagementRepository,
     action_repo: ActionRepository,
     bus: EventBus | None = None,
+    budget_ledger: BudgetLedger | None = None,
+    approval_registry: ApprovalRegistry | None = None,
 ) -> CommandResult:
     engagement = engagement_repo.get(cmd.tenant_id, cmd.engagement_id)
     if engagement is None:
@@ -551,8 +562,30 @@ def handle_propose_action(
             message="R5 actions are unsupported; no exception path exists",
         )
 
+    if budget_ledger is not None:
+        budget_result = budget_ledger.check(
+            cmd.tenant_id, cmd.engagement_id, requests_needed=1
+        )
+        if not budget_result.allowed:
+            reason = (
+                budget_result.denial_reason.value
+                if budget_result.denial_reason
+                else "budget_denied"
+            )
+            return CommandResult(
+                status=CommandStatus.POLICY_DENIED,
+                message=f"budget check denied: {reason}",
+                data={"denial_reason": reason},
+            )
+
     action_id = uuid4()
     now = _now()
+
+    # R2+ actions require an approval request before execution
+    requires_approval = cmd.risk_tier in {"R2", "R3", "R4"}
+    requires_two_person = cmd.risk_tier == "R4"
+    initial_state = "approval_required" if requires_approval else "proposed"
+
     action = {
         "id": action_id,
         "tenant_id": cmd.tenant_id,
@@ -561,7 +594,7 @@ def handle_propose_action(
         "target_locator": cmd.target_locator,
         "risk_tier": cmd.risk_tier,
         "mutation_class": cmd.mutation_class,
-        "state": "proposed",
+        "state": initial_state,
         "parameters": cmd.parameters,
         "access_context_ids": [str(u) for u in cmd.access_context_ids],
         "created_at": now,
@@ -569,6 +602,33 @@ def handle_propose_action(
     }
 
     action_repo.create(cmd.tenant_id, action)
+
+    if approval_registry is not None and requires_approval:
+        import hashlib, json
+        envelope_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {
+                    "action_id": str(action_id),
+                    "technique_id": cmd.technique_id,
+                    "target_locator": cmd.target_locator,
+                    "risk_tier": cmd.risk_tier,
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        try:
+            approval_registry.create_request(
+                tenant_id=cmd.tenant_id,
+                engagement_id=cmd.engagement_id,
+                action_id=action_id,
+                envelope_digest=envelope_digest,
+                risk_tier=cmd.risk_tier,
+                requestor_id=cmd.actor,
+                requires_two_person=requires_two_person,
+                expires_in=timedelta(hours=4),
+            )
+        except DuplicateApprovalError:
+            pass  # idempotent — approval request already exists
 
     _emit(
         bus,
@@ -584,11 +644,16 @@ def handle_propose_action(
                 "technique_id": cmd.technique_id,
                 "target": cmd.target_locator,
                 "risk_tier": cmd.risk_tier,
+                "requires_approval": requires_approval,
             },
         ),
     )
 
-    return CommandResult(status=CommandStatus.SUCCESS, resource_id=action_id)
+    return CommandResult(
+        status=CommandStatus.SUCCESS,
+        resource_id=action_id,
+        data={"requires_approval": requires_approval},
+    )
 
 
 def handle_approve_action(
@@ -596,6 +661,7 @@ def handle_approve_action(
     action_repo: ActionRepository,
     bus: EventBus | None = None,
     audit: AuditLog | None = None,
+    approval_registry: ApprovalRegistry | None = None,
 ) -> CommandResult:
     action = action_repo.get(cmd.tenant_id, cmd.action_id)
     if action is None:
@@ -611,6 +677,25 @@ def handle_approve_action(
         )
 
     now = _now()
+    binding_digest = cmd.decision_digest
+
+    if approval_registry is not None:
+        try:
+            decision = approval_registry.grant(
+                cmd.tenant_id, cmd.action_id, cmd.approver, reason=cmd.reason
+            )
+            binding_digest = decision.binding_digest
+        except TwoPersonRuleError as exc:
+            return CommandResult(
+                status=CommandStatus.POLICY_DENIED,
+                message=str(exc),
+            )
+        except ApprovalRegistryError as exc:
+            return CommandResult(
+                status=CommandStatus.REJECTED,
+                message=str(exc),
+            )
+
     action_repo.update_state(cmd.tenant_id, cmd.action_id, "approved")
 
     _emit(
@@ -623,7 +708,7 @@ def handle_approve_action(
             aggregate_id=cmd.action_id,
             occurred_at=now,
             actor=cmd.approver,
-            payload={"decision_digest": cmd.decision_digest},
+            payload={"decision_digest": binding_digest},
         ),
     )
 
@@ -637,6 +722,72 @@ def handle_approve_action(
             resource_type="action",
             resource_id=cmd.action_id,
             occurred_at=now,
+        ),
+    )
+
+    return CommandResult(
+        status=CommandStatus.SUCCESS,
+        resource_id=cmd.action_id,
+        data={"binding_digest": binding_digest},
+    )
+
+
+def handle_reject_action(
+    cmd: RejectActionCommand,
+    action_repo: ActionRepository,
+    bus: EventBus | None = None,
+    audit: AuditLog | None = None,
+    approval_registry: ApprovalRegistry | None = None,
+) -> CommandResult:
+    action = action_repo.get(cmd.tenant_id, cmd.action_id)
+    if action is None:
+        return CommandResult(
+            status=CommandStatus.NOT_FOUND, message="action not found"
+        )
+
+    rejectable = {"proposed", "approval_required"}
+    if action["state"] not in rejectable:
+        return CommandResult(
+            status=CommandStatus.CONFLICT,
+            message=f"cannot reject action in state {action['state']}",
+        )
+
+    if approval_registry is not None:
+        try:
+            approval_registry.deny(
+                cmd.tenant_id, cmd.action_id, cmd.approver, reason=cmd.reason
+            )
+        except ApprovalRegistryError as exc:
+            return CommandResult(status=CommandStatus.REJECTED, message=str(exc))
+
+    now = _now()
+    action_repo.update_state(cmd.tenant_id, cmd.action_id, "rejected")
+
+    _emit(
+        bus,
+        DomainEvent(
+            event_id=uuid4(),
+            event_type="action.rejected",
+            tenant_id=cmd.tenant_id,
+            aggregate_type="action",
+            aggregate_id=cmd.action_id,
+            occurred_at=now,
+            actor=cmd.approver,
+            payload={"reason": cmd.reason},
+        ),
+    )
+
+    _audit(
+        audit,
+        AuditEntry(
+            entry_id=uuid4(),
+            tenant_id=cmd.tenant_id,
+            actor=cmd.approver,
+            action="reject_action",
+            resource_type="action",
+            resource_id=cmd.action_id,
+            occurred_at=now,
+            details={"reason": cmd.reason},
         ),
     )
 

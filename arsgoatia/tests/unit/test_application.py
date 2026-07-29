@@ -18,6 +18,7 @@ from packages.application import (
     PauseEngagementCommand,
     ProposeActionCommand,
     RecordEvidenceCommand,
+    RejectActionCommand,
     ResumeEngagementCommand,
     StartEngagementCommand,
     handle_approve_action,
@@ -26,9 +27,12 @@ from packages.application import (
     handle_pause_engagement,
     handle_propose_action,
     handle_record_evidence,
+    handle_reject_action,
     handle_resume_engagement,
     handle_start_engagement,
 )
+from packages.approval import ApprovalRegistry
+from packages.rate_limiter import BudgetLedger, BudgetSpec
 
 
 def _now():
@@ -380,3 +384,166 @@ def test_action_repo_list_by_engagement():
     repo.create(tid, {"id": uuid4(), "engagement_id": uuid4(), "state": "proposed"})
     actions = repo.list_by_engagement(tid, eid)
     assert len(actions) == 2
+
+
+# --- Approval Registry integration ---
+
+
+def _make_action_repo_with_action(state="approval_required"):
+    repo = InMemoryActionRepo()
+    tid = uuid4()
+    eid = uuid4()
+    aid = uuid4()
+    repo.create(tid, {"id": aid, "engagement_id": eid, "state": state, "tenant_id": tid})
+    return repo, tid, eid, aid
+
+
+def test_propose_action_r2_creates_approval_request():
+    repo, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    approval_reg = ApprovalRegistry()
+    cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.authz.bola.differential",
+        target_locator="https://api.test/basket/1",
+        risk_tier="R2", mutation_class="none", actor="alice",
+    )
+    result = handle_propose_action(cmd, repo, action_repo, approval_registry=approval_reg)
+    assert result.status == CommandStatus.SUCCESS
+    assert result.data.get("requires_approval") is True
+    req = approval_reg.get_request_for_action(tid, result.resource_id)
+    assert req is not None
+    assert req.requestor_id == "alice"
+    assert req.risk_tier == "R2"
+
+
+def test_propose_action_r1_no_approval_needed():
+    repo, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    approval_reg = ApprovalRegistry()
+    cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.recon.passive",
+        target_locator="https://api.test",
+        risk_tier="R1", mutation_class="none", actor="alice",
+    )
+    result = handle_propose_action(cmd, repo, action_repo, approval_registry=approval_reg)
+    assert result.status == CommandStatus.SUCCESS
+    assert result.data.get("requires_approval") is False
+    assert approval_reg.get_request_for_action(tid, result.resource_id) is None
+
+
+def test_propose_action_budget_denied():
+    repo, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    ledger = BudgetLedger()
+    spec = BudgetSpec(max_requests=0, max_cost_usd=0.0, requests_per_second=1000.0, burst_capacity=0)
+    ledger.register(tid, eid, spec)
+    cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.authz.bola.differential",
+        target_locator="https://api.test",
+        risk_tier="R1", mutation_class="none", actor="planner",
+    )
+    result = handle_propose_action(cmd, repo, action_repo, budget_ledger=ledger)
+    assert result.status == CommandStatus.POLICY_DENIED
+    assert "requests_exceeded" in result.message or "budget" in result.message.lower()
+
+
+def test_approve_action_with_registry_enforces_two_person_rule():
+    repo_eng, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    approval_reg = ApprovalRegistry()
+    propose_cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.authz.bola.write",
+        target_locator="https://api.test",
+        risk_tier="R4", mutation_class="write", actor="alice",
+    )
+    propose_result = handle_propose_action(
+        propose_cmd, repo_eng, action_repo, approval_registry=approval_reg
+    )
+    assert propose_result.status == CommandStatus.SUCCESS
+    aid = propose_result.resource_id
+    # alice cannot approve her own R4 proposal
+    result = handle_approve_action(
+        ApproveActionCommand(tenant_id=tid, action_id=aid, approver="alice"),
+        action_repo,
+        approval_registry=approval_reg,
+    )
+    assert result.status == CommandStatus.POLICY_DENIED
+
+
+def test_approve_action_with_registry_different_approver_ok():
+    repo_eng, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    approval_reg = ApprovalRegistry()
+    propose_cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.authz.bola.write",
+        target_locator="https://api.test",
+        risk_tier="R2", mutation_class="write", actor="alice",
+    )
+    propose_result = handle_propose_action(
+        propose_cmd, repo_eng, action_repo, approval_registry=approval_reg
+    )
+    aid = propose_result.resource_id
+    result = handle_approve_action(
+        ApproveActionCommand(tenant_id=tid, action_id=aid, approver="bob", reason="approved"),
+        action_repo,
+        approval_registry=approval_reg,
+    )
+    assert result.status == CommandStatus.SUCCESS
+    assert result.data.get("binding_digest", "").startswith("sha256:")
+    assert approval_reg.is_approved(tid, aid)
+
+
+def test_reject_action():
+    action_repo, tid, eid, aid = _make_action_repo_with_action()
+    result = handle_reject_action(
+        RejectActionCommand(tenant_id=tid, action_id=aid, approver="bob", reason="too risky"),
+        action_repo,
+    )
+    assert result.status == CommandStatus.SUCCESS
+    assert action_repo.get(tid, aid)["state"] == "rejected"
+
+
+def test_reject_action_not_found():
+    action_repo = InMemoryActionRepo()
+    result = handle_reject_action(
+        RejectActionCommand(tenant_id=uuid4(), action_id=uuid4(), approver="bob", reason="r"),
+        action_repo,
+    )
+    assert result.status == CommandStatus.NOT_FOUND
+
+
+def test_reject_action_already_approved_fails():
+    action_repo, tid, eid, aid = _make_action_repo_with_action(state="approved")
+    result = handle_reject_action(
+        RejectActionCommand(tenant_id=tid, action_id=aid, approver="bob", reason="r"),
+        action_repo,
+    )
+    assert result.status == CommandStatus.CONFLICT
+
+
+def test_reject_action_with_registry_records_denial():
+    repo_eng, tid, eid = _make_repo_with_engagement("running")
+    action_repo = InMemoryActionRepo()
+    approval_reg = ApprovalRegistry()
+    propose_cmd = ProposeActionCommand(
+        tenant_id=tid, engagement_id=eid,
+        technique_id="web.authz.bola.write",
+        target_locator="https://api.test",
+        risk_tier="R2", mutation_class="write", actor="alice",
+    )
+    propose_result = handle_propose_action(
+        propose_cmd, repo_eng, action_repo, approval_registry=approval_reg
+    )
+    aid = propose_result.resource_id
+    result = handle_reject_action(
+        RejectActionCommand(tenant_id=tid, action_id=aid, approver="bob", reason="too risky"),
+        action_repo,
+        approval_registry=approval_reg,
+    )
+    assert result.status == CommandStatus.SUCCESS
+    assert not approval_reg.is_approved(tid, aid)
