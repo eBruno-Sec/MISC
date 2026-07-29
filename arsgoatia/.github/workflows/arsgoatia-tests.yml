@@ -34,13 +34,27 @@ jobs:
           python-version: "3.12"
       - run: |
           pip install pytest pytest-asyncio pytest-cov pydantic pydantic-settings \
-            sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi
+            sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi \
+            jsonschema
       - run: python -m pytest tests/unit -q --tb=short
+
+  contract:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install pytest pytest-asyncio pydantic pydantic-settings \
+            sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi \
+            jsonschema
+      - run: python -m pytest tests/contract tests/contracts -q --tb=short
 
   security:
     runs-on: ubuntu-latest
     needs: lint
-    if: false  # enable when tests/security/ has content
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,9 +65,36 @@ jobs:
             sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi
       - run: python -m pytest tests/security -q --tb=short
 
-  e2e:
+  replay:
     runs-on: ubuntu-latest
     needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install pytest pytest-asyncio pydantic pydantic-settings \
+            sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi
+      - run: python -m pytest tests/replay -q --tb=short
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [unit, contract, security]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install pytest pytest-asyncio pydantic pydantic-settings \
+            sqlalchemy asyncpg alembic httpx minio cryptography python-jose fastapi \
+            jsonschema
+      - run: python -m pytest tests/integration -q --tb=short
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: integration
     if: false  # enable when docker-compose lab profile is testable in CI
     steps:
       - uses: actions/checkout@v4
