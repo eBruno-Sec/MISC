@@ -497,3 +497,194 @@ class TestInvariant_IAMApprovalRequiresMFA:
             mfa_verified=True,
         )
         assert can_approve_high_risk(ctx_with_mfa)
+
+
+class TestInvariant_TwoPersonRule:
+    """§3 / §13.8: Two-person rule — R4 actions require a different approver."""
+
+    def test_requestor_cannot_approve_own_r4_request(self):
+        from packages.approval import ApprovalRegistry, TwoPersonRuleError
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid,
+            envelope_digest="sha256:abc", risk_tier="R4",
+            requestor_id="alice", requires_two_person=True,
+        )
+        with pytest.raises(TwoPersonRuleError):
+            reg.grant(tid, aid, "alice")
+
+    def test_different_approver_satisfies_two_person_rule(self):
+        from packages.approval import ApprovalRegistry, ApprovalState
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid,
+            envelope_digest="sha256:abc", risk_tier="R4",
+            requestor_id="alice", requires_two_person=True,
+        )
+        decision = reg.grant(tid, aid, "bob")
+        assert decision.state == ApprovalState.GRANTED
+
+    def test_approval_is_action_bound_no_reuse(self):
+        """A granted approval for action_id=X cannot satisfy a different action_id=Y."""
+        from packages.approval import ApprovalRegistry
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid_x = uuid4()
+        aid_y = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid_x,
+            envelope_digest="sha256:x", risk_tier="R2", requestor_id="alice",
+        )
+        reg.grant(tid, aid_x, "bob")
+        # Y has no request at all → is_approved must return False
+        assert not reg.is_approved(tid, aid_y)
+
+    def test_generic_approved_flag_rejected(self):
+        """Approval must be bound to an exact action; generic bool is rejected."""
+        from packages.approval import ApprovalRegistry
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        # Without a matching request, is_approved is always False
+        assert not reg.is_approved(tid, uuid4())
+
+
+class TestInvariant_ApprovalBinding:
+    """§13.8: Binding digest links approval to exact envelope content."""
+
+    def test_tampered_envelope_invalidates_binding(self):
+        from packages.approval import ApprovalRegistry
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid,
+            envelope_digest="sha256:original", risk_tier="R2", requestor_id="alice",
+        )
+        decision = reg.grant(tid, aid, "bob")
+        # Tamper: different envelope_digest
+        assert not reg.verify_binding(tid, aid, "sha256:tampered", decision.binding_digest)
+
+    def test_correct_envelope_validates_binding(self):
+        from packages.approval import ApprovalRegistry
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid,
+            envelope_digest="sha256:original", risk_tier="R2", requestor_id="alice",
+        )
+        decision = reg.grant(tid, aid, "bob")
+        assert reg.verify_binding(tid, aid, "sha256:original", decision.binding_digest)
+
+    def test_expired_approval_not_valid(self):
+        from packages.approval import ApprovalRegistry, ApprovalRequest
+
+        reg = ApprovalRegistry()
+        tid = uuid4()
+        eid = uuid4()
+        aid = uuid4()
+        reg.create_request(
+            tenant_id=tid, engagement_id=eid, action_id=aid,
+            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            expires_in=timedelta(hours=1),
+        )
+        reg.grant(tid, aid, "bob")
+        # Manually expire the request
+        req = reg.get_request_for_action(tid, aid)
+        expired_req = ApprovalRequest(
+            request_id=req.request_id,
+            tenant_id=req.tenant_id,
+            engagement_id=req.engagement_id,
+            action_id=req.action_id,
+            envelope_digest=req.envelope_digest,
+            risk_tier=req.risk_tier,
+            requestor_id=req.requestor_id,
+            requires_two_person=req.requires_two_person,
+            metadata=req.metadata,
+            created_at=req.created_at,
+            expires_at=req.created_at - timedelta(seconds=1),
+        )
+        reg._requests[(tid, req.request_id)] = expired_req
+        assert not reg.is_approved(tid, aid)
+
+
+class TestInvariant_BudgetEmergencyStop:
+    """§9.6: Emergency stop zeroes budget immediately and is irreversible."""
+
+    def test_emergency_stop_denies_all_subsequent_requests(self):
+        from packages.rate_limiter import BudgetLedger, BudgetDenialReason, BudgetSpec
+
+        ledger = BudgetLedger()
+        tid, eid = uuid4(), uuid4()
+        ledger.register(tid, eid, BudgetSpec(requests_per_second=1000.0, burst_capacity=1000))
+        # Before stop: allowed
+        assert ledger.check(tid, eid, requests_needed=1).allowed
+        # Emergency stop
+        ledger.emergency_stop(tid, eid)
+        result = ledger.check(tid, eid, requests_needed=1)
+        assert not result.allowed
+        assert result.denial_reason == BudgetDenialReason.EMERGENCY_STOP
+
+    def test_emergency_stop_is_irreversible(self):
+        from packages.rate_limiter import BudgetLedger, BudgetSpec
+
+        ledger = BudgetLedger()
+        tid, eid = uuid4(), uuid4()
+        ledger.register(tid, eid, BudgetSpec(requests_per_second=1000.0, burst_capacity=1000))
+        ledger.emergency_stop(tid, eid)
+        # No method to reverse it — still stopped
+        assert ledger.is_emergency_stopped(tid, eid)
+
+    def test_emergency_stop_does_not_affect_other_engagements(self):
+        from packages.rate_limiter import BudgetLedger, BudgetSpec
+
+        ledger = BudgetLedger()
+        tid, eid_a, eid_b = uuid4(), uuid4(), uuid4()
+        spec = BudgetSpec(requests_per_second=1000.0, burst_capacity=1000)
+        ledger.register(tid, eid_a, spec)
+        ledger.register(tid, eid_b, spec)
+        ledger.emergency_stop(tid, eid_a)
+        assert not ledger.check(tid, eid_a, requests_needed=1).allowed
+        assert ledger.check(tid, eid_b, requests_needed=1).allowed
+
+
+class TestInvariant_TruthMaintenance:
+    """PRX-019: Retracting an observation cascades STALE to dependent hypotheses."""
+
+    def test_retraction_cascades_stale(self):
+        from packages.hypothesis import HypothesisRegistry, HypothesisState
+
+        reg = HypothesisRegistry()
+        tid, eid = uuid4(), uuid4()
+        h = reg.create(tid, eid, "authz may be absent", "differential pattern observed")
+        obs = reg.record_observation(tid, eid, "http_response", {"status": 200}, "tool")
+        reg.link_observation(tid, h.hypothesis_id, obs.observation_id)
+        reg.retract_observation(tid, obs.observation_id, "contradicted")
+        assert reg.get(tid, h.hypothesis_id).state == HypothesisState.STALE
+
+    def test_stale_hypothesis_can_be_reopened_with_new_evidence(self):
+        from packages.hypothesis import HypothesisRegistry, HypothesisState
+
+        reg = HypothesisRegistry()
+        tid, eid = uuid4(), uuid4()
+        h = reg.create(tid, eid, "authz may be absent", "differential pattern observed")
+        obs = reg.record_observation(tid, eid, "http_response", {"status": 200}, "tool")
+        reg.link_observation(tid, h.hypothesis_id, obs.observation_id)
+        reg.retract_observation(tid, obs.observation_id)
+        reg.transition(tid, h.hypothesis_id, HypothesisState.OPEN, "re-investigating")
+        assert reg.get(tid, h.hypothesis_id).state == HypothesisState.OPEN
