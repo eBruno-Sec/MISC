@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:arsgoatia:module:web.authorization.idor.differential:output:v1",
+  "title": "IDOR Differential Module Output",
+  "description": "Versioned output schema for the BOLA/IDOR differential module (§14.1). Every ConfirmationResult from this module must validate against this schema.",
+  "type": "object",
+  "required": ["module_id", "technique_id", "version", "decision", "rule_version", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "module_id": {
+      "type": "string",
+      "const": "web.authorization.idor.differential"
+    },
+    "technique_id": {
+      "type": "string",
+      "const": "web.authz.bola.differential"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["confirmed", "refuted", "inconclusive"]
+    },
+    "rule_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "capability_name": {
+      "type": ["string", "null"],
+      "enum": ["read_foreign_object", null]
+    },
+    "capability_description": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "differential_status": {"type": ["integer", "null"]},
+        "negative_control_status": {"type": ["integer", "null"]},
+        "technique_id": {"type": "string"},
+        "cwe": {"type": "string"},
+        "owasp": {"type": "string"}
+      }
+    }
+  },
+  "if": {
+    "properties": {"decision": {"const": "confirmed"}}
+  },
+  "then": {
+    "required": ["evidence_digest", "capability_name"],
+    "properties": {
+      "evidence_digest": {"type": "string"},
+      "capability_name": {"const": "read_foreign_object"}
+    }
+  }
+}
