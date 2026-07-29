@@ -58,8 +58,19 @@ def _dns_suffix_match(pattern: str, host: str) -> bool:
     return host == pattern
 
 
+def _bare_host(s: str) -> str:
+    """Strip scheme, port, and path — return only the hostname portion."""
+    if "://" in s:
+        parsed = urlparse(s)
+        return parsed.hostname or s
+    # host:port format
+    if ":" in s and not s.startswith("["):
+        return s.split(":")[0]
+    return s
+
+
 def _exact_host_match(expected: str, host: str) -> bool:
-    return normalize_host(expected) == normalize_host(host)
+    return normalize_host(_bare_host(expected)) == normalize_host(_bare_host(host))
 
 
 def _cidr_match(cidr: str, addr: str) -> bool:

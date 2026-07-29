@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from policy.scope_firewall import ScopeFirewall
+from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
+from scope.firewall import ScopeFirewall
 from reasoning.constraints import ActionCandidate, ConstraintContext, ConstraintSolver
 
 
 def _ctx(**over) -> ConstraintContext:
     base = dict(
-        firewall=ScopeFirewall.from_targets([{"value": "juice-shop:3000", "disposition": "include"}]),
+        firewall=ScopeFirewall(ScopeSpec(include=[ScopeRule(type="exact_host", value="juice-shop:3000")])),
         max_rps=2.0,
         max_requests_remaining=500,
         allow_mutation=False,
