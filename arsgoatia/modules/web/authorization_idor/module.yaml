@@ -1,49 +1,50 @@
-module:
-  id: web.authorization.idor
-  version: 1.0.0
-  domain: web
-  execution_mode: dynamic
-  description: >
-    Object-level authorization (IDOR/BOLA) module. Establishes two standard-user
-    identities, issues a differential request for one identity's object using the
-    other identity's session, and confirms cross-user object access with a
-    positive and a negative control. Read-only by default (R2); mutation is
-    conditional and disabled under production-default policy.
+id: web.authorization.idor.differential
+version: "1.0.0"
+name: "BOLA / IDOR Differential Access"
+description: >
+  Detects Broken Object Level Authorization (BOLA / IDOR) by executing a
+  four-exchange differential access pattern against object-level REST endpoints.
+  Requires two authenticated test identities (A and B) and one unauthenticated
+  probe.  Confirmation is deterministic — no AI involved.
 
-requires:
-  asset_kinds: [web_application, api]
-  contexts:
-    - identity_count_min: 2
-      session_types: [browser, api]
-      privilege_labels: [standard_user]
-  capabilities: []
-  observations: []
+technique_id: web.authz.bola.differential
+risk_tier: R2
+mutation_class: none
+evidence_profile: authorization_differential
+confirmation_rule_version: "1.0.0"
 
-consumes:
-  - endpoints
-  - object_identifiers
-  - sessions
-  - authorization_matrix
+prerequisites:
+  - min_2_authenticated_identities
+  - object_level_endpoint_in_scope
+  - recon_completed
 
 produces:
-  observations: [cross_user_response_difference]
-  hypotheses: [authorization.object_level]
-  candidate_findings: [authorization.object_level]
-  capabilities: [read_foreign_object, modify_foreign_object]
+  - capability: read_foreign_object
+    condition: confirmed
 
-safety:
-  default_risk_class: R2
-  mutation: conditional
-  destructive: false
-  production_default: read_only
-  max_requests: 500
-  default_rps: 2
-  approval_class: normal
+references:
+  - cwe: "CWE-639"
+    title: "Authorization Bypass Through User-Controlled Key"
+  - cwe: "CWE-284"
+    title: "Improper Access Control"
+  - owasp: "API1:2023"
+    title: "Broken Object Level Authorization"
+  - url: "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"
 
-validation:
-  evidence_profile: authorization_differential
-
-runtime:
-  task_queue: api-testing
-  timeout_seconds: 1800
-  retry_policy: bounded
+exchanges:
+  - label: baseline_own
+    description: Identity A reads its own object; expect HTTP 200.
+    token_source: identity_a
+    expected_status: 200
+  - label: differential_cross
+    description: Identity A reads identity B's object; expect HTTP 403 (BOLA if 200).
+    token_source: identity_a
+    expected_status: 403
+  - label: positive_control
+    description: Identity B reads its own object; expect HTTP 200.
+    token_source: identity_b
+    expected_status: 200
+  - label: negative_control
+    description: Unauthenticated request to B's object; expect HTTP 401.
+    token_source: none
+    expected_status: 401

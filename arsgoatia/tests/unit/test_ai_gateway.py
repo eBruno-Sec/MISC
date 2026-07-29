@@ -1,56 +1,75 @@
-"""AI gateway: redaction, JSON extraction, budget, and deterministic fallback."""
-
 from __future__ import annotations
 
-import asyncio
+import pytest
 
-from ai_gateway.gateway import AIGateway, BudgetLedger, extract_json, redact, validate_against_schema
-
-
-def test_redact_masks_secrets():
-    text = (
-        "token eyJhbGciOiJIUzI1.abcDEF.sig here, "
-        "Authorization: Bearer abc.def.ghi, password=hunter2"
-    )
-    out = redact(text)
-    assert "eyJhbGciOiJIUzI1.abcDEF.sig" not in out
-    assert "hunter2" not in out
-    assert "abc.def.ghi" not in out
+from packages.ai_gateway import (
+    AIBudgetExceeded,
+    AIGateway,
+    AIGatewayConfig,
+    AIRequest,
+    AIUnavailable,
+    BudgetTracker,
+    build_structured_prompt,
+    redact_secrets_from_text,
+)
 
 
-def test_extract_json_from_fenced_and_prose():
-    assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
-    assert extract_json('here you go: {"x": [1,2]} thanks') == {"x": [1, 2]}
-    assert extract_json("no json here") is None
+def test_redact_bearer_token():
+    text = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig"
+    redacted, labels = redact_secrets_from_text(text)
+    assert "eyJ" not in redacted
+    assert len(labels) > 0
 
 
-def test_validate_against_schema():
-    schema = {"type": "object", "required": ["a"], "properties": {"a": {"type": "integer"}}}
-    ok, _ = validate_against_schema({"a": 1}, schema)
-    assert ok is True
-    bad, _ = validate_against_schema({"a": "x"}, schema)
-    assert bad is False
+def test_redact_basic_auth():
+    text = "Authorization: Basic dXNlcjpwYXNzd29yZA=="
+    redacted, labels = redact_secrets_from_text(text)
+    assert "dXNlcjpwYXNz" not in redacted
 
 
-def test_budget_ledger():
-    b = BudgetLedger(request_budget_usd=1, assessment_budget_usd=2, daily_budget_usd=5)
-    assert b.can_spend(0.5) is True
-    b.record(1.5)
-    assert b.can_spend(1.0) is False  # would exceed assessment budget
-    assert b.last_denied_reason == "assessment_budget"
-    assert b.can_spend(2.0) is False  # exceeds per-request budget
-    assert b.last_denied_reason == "request_budget"
+def test_no_redaction_for_safe_text():
+    text = "This is a normal response with no secrets."
+    redacted, labels = redact_secrets_from_text(text)
+    assert redacted == text
+    assert labels == []
 
 
-def test_complete_structured_falls_back_without_ai_key(monkeypatch):
-    # No AI key -> AIUnavailable -> deterministic fallback (AI is advisory).
-    monkeypatch.delenv("AI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    gw = AIGateway()
-    schema = {"type": "object"}
-    fallback = {"hypothesis_class": "authorization.object_level"}
-    result, source = asyncio.run(
-        gw.complete_structured(role="hypothesis", prompt="observations...", schema=schema, fallback=fallback)
-    )
-    assert result == fallback
-    assert source.startswith("fallback:")
+def test_budget_tracker():
+    bt = BudgetTracker(limit_usd=10.0)
+    assert bt.remaining() == 10.0
+    assert not bt.is_exceeded()
+    bt.record(7.0)
+    assert bt.remaining() == 3.0
+    bt.record(4.0)
+    assert bt.is_exceeded()
+
+
+def test_build_structured_prompt():
+    config = AIGatewayConfig()
+    request = AIRequest(role="hypothesis", prompt="Analyze this endpoint for BOLA")
+    result = build_structured_prompt(request, config)
+    assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_gateway_raises_unavailable():
+    config = AIGatewayConfig()
+    gateway = AIGateway(config)
+    request = AIRequest(role="hypothesis", prompt="test")
+    with pytest.raises(AIUnavailable):
+        await gateway.complete(request)
+
+
+def test_gateway_budget_status():
+    config = AIGatewayConfig(budget_limit_usd=5.0)
+    gateway = AIGateway(config)
+    status = gateway.get_budget_status()
+    assert status["remaining_usd"] == 5.0
+    assert not status["is_exceeded"]
+
+
+def test_config_defaults():
+    config = AIGatewayConfig()
+    assert config.temperature == 0.0
+    assert config.redact_secrets is True
+    assert config.max_tokens == 4096

@@ -24,7 +24,7 @@ jobs:
       - name: Install test deps
         run: python -m pip install --upgrade pip "pydantic>=2.6" "pydantic-settings>=2.2" "pyyaml>=6.0" "jsonschema>=4.21" "sqlalchemy>=2.0" pytest
       - name: Run tests
-        run: python -m pytest tests/unit tests/contract tests/security -q
+        run: python -m pytest tests/unit tests/contract tests/security tests/integration tests/isolation tests/performance -q
 
   replay:
     # Temporal determinism/replay tests. temporalio pulls its test server;
