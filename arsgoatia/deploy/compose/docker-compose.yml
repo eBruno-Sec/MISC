@@ -1,0 +1,219 @@
+name: arsgoatia
+
+x-common: &common
+  restart: unless-stopped
+  networks:
+    - arsgoatia-net
+
+services:
+  # ---------------------------------------------------------------------------
+  # Data stores
+  # ---------------------------------------------------------------------------
+  postgres:
+    <<: *common
+    image: postgres:16-alpine
+    profiles: ["core"]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: arsgoatia
+      POSTGRES_PASSWORD: arsgoatia
+      POSTGRES_DB: arsgoatia
+    volumes:
+      - arsgoatia-postgres:/var/lib/postgresql/data
+      - ../../infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arsgoatia"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_stat_statements
+        -c log_min_duration_statement=200
+
+  minio:
+    <<: *common
+    image: minio/minio:latest
+    profiles: ["core"]
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    environment:
+      MINIO_ROOT_USER: arsgoatia
+      MINIO_ROOT_PASSWORD: arsgoatia-dev-secret
+    volumes:
+      - arsgoatia-minio:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio-init:
+    <<: *common
+    image: minio/mc:latest
+    profiles: ["core"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 arsgoatia arsgoatia-dev-secret &&
+        mc mb --ignore-existing local/arsgoatia-evidence &&
+        mc version enable local/arsgoatia-evidence &&
+        echo 'Bucket arsgoatia-evidence ready with versioning enabled'
+      "
+    restart: "no"
+
+  neo4j:
+    <<: *common
+    image: neo4j:5-community
+    profiles: ["graph"]
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/arsgoatia-graph
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - arsgoatia-neo4j:/data
+
+  # ---------------------------------------------------------------------------
+  # Temporal
+  # ---------------------------------------------------------------------------
+  temporal:
+    <<: *common
+    image: temporalio/auto-setup:latest
+    profiles: ["core"]
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: arsgoatia
+      POSTGRES_PWD: arsgoatia
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - arsgoatia-temporal:/etc/temporal
+
+  temporal-ui:
+    <<: *common
+    image: temporalio/ui:latest
+    profiles: ["core"]
+    ports:
+      - "8088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:3100"
+    depends_on:
+      - temporal
+
+  # ---------------------------------------------------------------------------
+  # Application services
+  # ---------------------------------------------------------------------------
+  api:
+    <<: *common
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+    profiles: ["core"]
+    ports:
+      - "8080:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      TEMPORAL_HOST: temporal:7233
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: arsgoatia
+      MINIO_SECRET_KEY: arsgoatia-dev-secret
+      MINIO_BUCKET: arsgoatia-evidence
+      SIGNING_KEY: dev-signing-key-change-in-production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  worker:
+    <<: *common
+    build:
+      context: ../../
+      dockerfile: services/worker/Dockerfile
+    profiles: ["core"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      TEMPORAL_HOST: temporal:7233
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: arsgoatia
+      MINIO_SECRET_KEY: arsgoatia-dev-secret
+      SIGNING_KEY: dev-signing-key-change-in-production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  evidence:
+    <<: *common
+    build:
+      context: ../../
+      dockerfile: apps/evidence/Dockerfile
+    profiles: ["core"]
+    ports:
+      - "8081:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: arsgoatia
+      MINIO_SECRET_KEY: arsgoatia-dev-secret
+      MINIO_BUCKET: arsgoatia-evidence
+      SIGNING_KEY: dev-signing-key-change-in-production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  web:
+    <<: *common
+    build:
+      context: ../../apps/web
+      dockerfile: Dockerfile
+    profiles: ["ui"]
+    ports:
+      - "3100:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
+
+  # ---------------------------------------------------------------------------
+  # Lab targets
+  # ---------------------------------------------------------------------------
+  juice-shop:
+    <<: *common
+    image: bkimminich/juice-shop:latest
+    profiles: ["lab"]
+    ports:
+      - "127.0.0.1:42000:3000"
+
+networks:
+  arsgoatia-net:
+    driver: bridge
+
+volumes:
+  arsgoatia-postgres:
+  arsgoatia-minio:
+  arsgoatia-neo4j:
+  arsgoatia-temporal:

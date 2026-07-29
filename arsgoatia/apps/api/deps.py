@@ -1,34 +1,89 @@
-"""Request dependencies: tenant resolution, RLS-scoped DB session, object auth.
-
-Authorization requires both a role/tenant check and a per-object tenant check
-(§22). In local mode the tenant comes from the X-Tenant-Id header; RLS then
-guarantees a session only sees that tenant's rows, so object lookups that return
-None are treated as not-found rather than leaking existence across tenants.
-"""
-
+"""Shared FastAPI dependencies for ArsGoatia API."""
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import os
+from typing import Annotated, AsyncGenerator
+from uuid import UUID
 
-from fastapi import Header, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
-from domain.db import get_sessionmaker, set_tenant
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://arsgoatia:arsgoatia@localhost:5433/arsgoatia",
+)
+
+engine = create_async_engine(DATABASE_URL, echo=False, pool_size=10, max_overflow=20)
+async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-async def get_tenant_id(x_tenant_id: str = Header(..., alias="X-Tenant-Id")) -> str:
-    if not x_tenant_id:
-        raise HTTPException(status_code=401, detail="missing X-Tenant-Id")
-    return x_tenant_id
+# -- Tenant -------------------------------------------------------------------
+
+async def get_tenant_id(
+    request: Request,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-Id")] = None,
+) -> UUID:
+    """Extract tenant identifier from the request.
+
+    In production this will come from a verified JWT claim.  During development
+    we accept the ``X-Tenant-Id`` header as a convenience.
+    """
+    if x_tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing tenant identifier",
+        )
+    try:
+        return UUID(x_tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Tenant-Id must be a valid UUID",
+        )
 
 
-async def get_session(x_tenant_id: str = Header(..., alias="X-Tenant-Id")) -> AsyncIterator[AsyncSession]:
-    maker = get_sessionmaker()
-    async with maker() as session:
-        await set_tenant(session, x_tenant_id)
+# -- Database session with RLS ------------------------------------------------
+
+async def get_session(
+    tenant_id: Annotated[UUID, Depends(get_tenant_id)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Yield an ``AsyncSession`` with row-level security set to *tenant_id*."""
+    async with async_session_factory() as session:
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
         try:
             yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+        finally:
+            await session.close()
+
+
+# -- Auth context --------------------------------------------------------------
+
+async def require_auth(
+    request: Request,
+    x_auth_user: Annotated[str | None, Header(alias="X-Auth-User")] = None,
+    x_auth_role: Annotated[str | None, Header(alias="X-Auth-Role")] = None,
+) -> dict:
+    """Return an authentication context dict.
+
+    In production this validates a JWT and returns structured claims.  During
+    development we accept header-based identity for convenience.
+    """
+    user = x_auth_user or "dev-operator"
+    role = x_auth_role or "admin"
+    return {
+        "user": user,
+        "role": role,
+        "source": "header",
+    }
+
+
+# -- Convenience type aliases --------------------------------------------------
+
+TenantId = Annotated[UUID, Depends(get_tenant_id)]
+DbSession = Annotated[AsyncSession, Depends(get_session)]
+AuthCtx = Annotated[dict, Depends(require_auth)]

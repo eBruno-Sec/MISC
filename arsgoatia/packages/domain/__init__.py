@@ -1,7 +1,17 @@
-"""Canonical persistence layer.
+"""ArsGoatia domain models.
 
-models.py holds the SQLAlchemy 2.0 ORM; the authoritative DDL (tables, RLS
-policies, append-only/immutability triggers) lives in Alembic migrations. The
-repository layer routes all writes so immutable/append-only rules hold above the
-database as well as inside it.
+This package owns every persistent aggregate in the system.  Each
+subpackage corresponds to a bounded context and maps to a dedicated
+PostgreSQL schema.
 """
+from __future__ import annotations
+
+__all__ = [
+    "evidence",
+    "findings",
+    "governance",
+    "iam",
+    "knowledge",
+    "remediation",
+    "reporting",
+]
