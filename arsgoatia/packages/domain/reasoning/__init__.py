@@ -30,8 +30,8 @@ HYPOTHESIS_TRANSITIONS: dict[HypothesisState, frozenset[HypothesisState]] = {
         HypothesisState.INCONCLUSIVE,
         HypothesisState.STALE,
     }),
-    HypothesisState.SUPPORTED: frozenset(),
-    HypothesisState.REFUTED: frozenset(),
+    HypothesisState.SUPPORTED: frozenset({HypothesisState.STALE}),
+    HypothesisState.REFUTED: frozenset({HypothesisState.STALE}),
     HypothesisState.INCONCLUSIVE: frozenset({HypothesisState.OPEN}),
     HypothesisState.STALE: frozenset({HypothesisState.OPEN}),
 }

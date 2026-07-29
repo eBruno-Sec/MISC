@@ -29,10 +29,15 @@ def test_hypothesis_invalid_transitions():
     assert not can_transition_hypothesis(HypothesisState.REFUTED, HypothesisState.TESTING)
 
 
-def test_terminal_states_cannot_transition():
+def test_supported_refuted_can_only_transition_to_stale():
+    # Truth maintenance: SUPPORTED/REFUTED collapse to STALE when evidence retracts
     for state in (HypothesisState.SUPPORTED, HypothesisState.REFUTED):
+        assert can_transition_hypothesis(state, HypothesisState.STALE)
         for target in HypothesisState:
-            assert not can_transition_hypothesis(state, target)
+            if target is not HypothesisState.STALE:
+                assert not can_transition_hypothesis(state, target), (
+                    f"{state} → {target} must be disallowed"
+                )
 
 
 def test_inconclusive_can_reopen():
