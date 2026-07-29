@@ -22,6 +22,7 @@ from packages.application import (
     PauseEngagementCommand,
     ProposeActionCommand,
     RecordEvidenceCommand,
+    RejectActionCommand,
     ResumeEngagementCommand,
     StartEngagementCommand,
     handle_approve_action,
@@ -30,9 +31,12 @@ from packages.application import (
     handle_pause_engagement,
     handle_propose_action,
     handle_record_evidence,
+    handle_reject_action,
     handle_resume_engagement,
     handle_start_engagement,
 )
+from packages.approval import ApprovalRegistry
+from packages.rate_limiter import BudgetLedger, BudgetSpec
 from packages.testing import (
     assert_audit_recorded,
     assert_event_emitted,
@@ -426,6 +430,173 @@ class TestOutboxEventRelay:
         relay.poll_and_dispatch()
         assert len(actions) == 2
         assert len(findings) == 1
+
+
+class TestApprovalGateFlow:
+    """Full approval-gate-pause-resume flow per §37 steps 7-14."""
+
+    def setup_method(self):
+        self.eng_repo = InMemoryEngagementRepo()
+        self.action_repo = InMemoryActionRepo()
+        self.evidence_store = InMemoryEvidenceStore()
+        self.bus = InMemoryEventBus()
+        self.audit = InMemoryAuditLog()
+        self.approval_reg = ApprovalRegistry()
+        self.budget_ledger = BudgetLedger()
+        self.tenant_id = uuid4()
+        self.engagement_id = uuid4()
+        spec = BudgetSpec(
+            max_requests=100, max_cost_usd=5.0, max_concurrent=5,
+            requests_per_second=100.0, burst_capacity=100,
+        )
+        self.budget_ledger.register(self.tenant_id, self.engagement_id, spec)
+        self.eng_repo.create(self.tenant_id, {
+            "id": self.engagement_id,
+            "state": "running",
+            "started_at": utcnow().isoformat(),
+        })
+
+    def test_full_approve_gate_flow(self):
+        """propose→pause→request_approval→grant→resume→execute."""
+        # 1. Propose R2 action (with approval registry: creates request)
+        propose_result = handle_propose_action(
+            ProposeActionCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                technique_id="web.authz.bola.differential",
+                target_locator="http://juice-shop:3000/rest/basket/1",
+                risk_tier="R2", mutation_class="none", actor="planner",
+            ),
+            self.eng_repo,
+            self.action_repo,
+            self.bus,
+            budget_ledger=self.budget_ledger,
+            approval_registry=self.approval_reg,
+        )
+        assert propose_result.status == CommandStatus.SUCCESS
+        assert propose_result.data.get("requires_approval") is True
+        action_id = propose_result.resource_id
+
+        # 2. Pause engagement (waiting for approval)
+        pause_result = handle_pause_engagement(
+            PauseEngagementCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                actor="orchestrator", reason="awaiting R2 approval",
+            ),
+            self.eng_repo, self.bus,
+        )
+        assert pause_result.status == CommandStatus.SUCCESS
+        assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "paused"
+
+        # 3. Approval request already created by propose handler
+        req = self.approval_reg.get_request_for_action(self.tenant_id, action_id)
+        assert req is not None
+        assert req.requestor_id == "planner"
+        assert req.risk_tier == "R2"
+        assert not self.approval_reg.is_approved(self.tenant_id, action_id)
+
+        # 4. Grant approval from a different actor
+        approve_result = handle_approve_action(
+            ApproveActionCommand(
+                tenant_id=self.tenant_id, action_id=action_id,
+                approver="security-lead", reason="approved for Juice Shop",
+            ),
+            self.action_repo,
+            self.bus,
+            self.audit,
+            approval_registry=self.approval_reg,
+        )
+        assert approve_result.status == CommandStatus.SUCCESS
+        binding = approve_result.data.get("binding_digest", "")
+        assert binding.startswith("sha256:")
+        assert self.approval_reg.is_approved(self.tenant_id, action_id)
+
+        # 5. Verify binding matches
+        assert self.approval_reg.verify_binding(
+            self.tenant_id, action_id, req.envelope_digest, binding
+        )
+
+        # 6. Resume engagement
+        resume_result = handle_resume_engagement(
+            ResumeEngagementCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                actor="orchestrator",
+            ),
+            self.eng_repo, self.bus,
+        )
+        assert resume_result.status == CommandStatus.SUCCESS
+        assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "running"
+
+        # 7. Check events emitted
+        event_types = [e.event_type for e in self.bus.events]
+        assert "action.proposed" in event_types
+        assert "engagement.paused" in event_types
+        assert "action.approved" in event_types
+        assert "engagement.resumed" in event_types
+
+    def test_rejected_action_flow(self):
+        """propose→reject: action goes to rejected, no execution possible."""
+        propose_result = handle_propose_action(
+            ProposeActionCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                technique_id="web.authz.bola.write",
+                target_locator="http://juice-shop:3000/api/users",
+                risk_tier="R2", mutation_class="write", actor="planner",
+            ),
+            self.eng_repo, self.action_repo, self.bus,
+            approval_registry=self.approval_reg,
+        )
+        action_id = propose_result.resource_id
+
+        reject_result = handle_reject_action(
+            RejectActionCommand(
+                tenant_id=self.tenant_id, action_id=action_id,
+                approver="security-lead", reason="out of scope for this engagement",
+            ),
+            self.action_repo, self.bus, self.audit,
+            approval_registry=self.approval_reg,
+        )
+        assert reject_result.status == CommandStatus.SUCCESS
+        assert self.action_repo.get(self.tenant_id, action_id)["state"] == "rejected"
+        assert not self.approval_reg.is_approved(self.tenant_id, action_id)
+        event_types = [e.event_type for e in self.bus.events]
+        assert "action.rejected" in event_types
+
+    def test_budget_exhausted_blocks_proposals(self):
+        """Once budget is exhausted, propose returns POLICY_DENIED."""
+        exhausted_ledger = BudgetLedger()
+        exhausted_spec = BudgetSpec(
+            max_requests=1, max_cost_usd=0.0,
+            requests_per_second=100.0, burst_capacity=1,
+        )
+        exhausted_ledger.register(self.tenant_id, self.engagement_id, exhausted_spec)
+        # Use the 1 allowed request
+        exhausted_ledger.consume(self.tenant_id, self.engagement_id, uuid4(), 1)
+        # Now propose should be denied
+        result = handle_propose_action(
+            ProposeActionCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                technique_id="web.recon", target_locator="http://juice-shop:3000",
+                risk_tier="R1", mutation_class="none", actor="planner",
+            ),
+            self.eng_repo, self.action_repo,
+            budget_ledger=exhausted_ledger,
+        )
+        assert result.status == CommandStatus.POLICY_DENIED
+
+    def test_emergency_stop_integration(self):
+        """Emergency stop blocks budget and marks engagement stopping."""
+        handle_emergency_stop(
+            EmergencyStopCommand(
+                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                actor="security-lead", reason="threat detected",
+            ),
+            self.eng_repo, self.bus, self.audit,
+        )
+        self.budget_ledger.emergency_stop(self.tenant_id, self.engagement_id)
+        assert self.budget_ledger.is_emergency_stopped(self.tenant_id, self.engagement_id)
+        assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "stopping"
+        # Budget check after emergency stop
+        assert not self.budget_ledger.check(self.tenant_id, self.engagement_id, requests_needed=1).allowed
 
 
 class TestCrossModuleEvidence:
