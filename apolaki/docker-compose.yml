@@ -32,6 +32,9 @@ services:
       - ZAP_API_KEY=${ZAP_API_KEY:-bbh-zap}
       # OAST for blind/OOB vulns (SSRF/XXE/RCE). Empty = off. e.g. BOAST or Interactsh
       - ZAP_OAST_SERVICE=${ZAP_OAST_SERVICE:-}
+      # Headless-browser CDP runtime collector (cdp.py). Empty = off (static collectors only).
+      # Set to the sidecar's origin to activate, e.g. http://headless-chrome:3000
+      - CDP_BROWSER_URL=${CDP_BROWSER_URL:-}
     ports:
       - "8000:8000"
     volumes:
@@ -62,6 +65,48 @@ services:
       retries: 20
       start_period: 30s
 
+  # ── Benchmark / lab targets (public images, pulled on `up`; NOT real engagements) ──
+  # OWASP Juice Shop, reachable at http://juice-shop:3000 on the compose network — used by
+  # Lab Mode (the ▶ Solve button), the Conquest tab, and general-scan benchmarks. safetyMode
+  # is disabled so the full XSS/NoSQL challenge set is reachable. No source is vendored: this
+  # just runs the public image.
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    environment:
+      - 'NODE_CONFIG={"challenges":{"safetyMode":"disabled"}}'
+    ports:
+      - "127.0.0.1:42000:3000"
+    volumes:
+      - juiceshop_data:/juice-shop/data
+    restart: unless-stopped
+    mem_limit: 3g
+
+  # DVWA — a SECOND lab so techniques can be validated on >=2 labs (the "generalized" bar in
+  # the Taxonomy tab). One-time setup after `up`: open http://localhost:42080, click "Create
+  # Database", log in admin/password, set DVWA Security = low. Reachable at http://dvwa on the
+  # compose network.
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    ports:
+      - "127.0.0.1:42080:80"
+    restart: unless-stopped
+
+  # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
+  # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
+  # the default stack (heavy). Activate with:
+  #   docker compose --profile browser up -d headless-chrome
+  #   (and set CDP_BROWSER_URL=http://headless-chrome:3000 for the agent)
+  headless-chrome:
+    image: ghcr.io/browserless/chromium:latest
+    profiles: ["browser"]
+    environment:
+      - CONCURRENT=2
+      - TIMEOUT=30000
+    expose:
+      - "3000"
+    restart: unless-stopped
+
 volumes:
   nuclei_templates:
   bbh_data:
+  juiceshop_data:

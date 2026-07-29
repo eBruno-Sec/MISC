@@ -109,6 +109,43 @@ python -m pytest tests/unit -v
 python -m services.worker.worker
 ```
 
+CI runs on every change under `arsgoatia/**`
+(`.github/workflows/arsgoatia-tests.yml`).
+
+## Layout
+
+```
+apps/        api (FastAPI), web (React/Vite), worker-control, worker-web
+packages/    schemas, domain, policy, planner, evidence, events, ai_gateway,
+             module_sdk, tool_sdk, temporal_common, audit, config
+modules/     web/authorization_idor (the slice's module), + intent stubs
+temporal/    root + child workflows and their activities
+infrastructure/  postgres init, temporal dynamic config
+docs/adr/    architecture decision records (deviations from the spec)
+tests/       unit, contract, replay, security, e2e
+```
+
+## Deterministic reasoning layer (post-slice)
+
+Extending ArsGoatia toward the Deterministic Cyber Reasoning, Planning and
+Execution vision (structured reasoning decides, LLMs never in the control path).
+`packages/reasoning/` adds pure, replayable engines:
+
+- **Constraint solver** — fail-closed elimination of any action violating scope,
+  testing window, rate, data-handling, mutation, approval, or risk class.
+- **Attack graph + pathfinding** — GOAP-style best-first search over capability
+  states, ranked by strategy (shortest / highest-confidence / lowest-noise /
+  least-privilege / lowest-cost).
+
+Next candidates: truth-maintenance system, HTN/GOAP goal decomposition, Bayesian
+confidence, property/metamorphic testing engines, MCTS + multi-armed-bandit
+test-order learning.
+
+## Scope
+
+The slice covers spec Phases 0–4. Phases 5–7 (network / cloud / Active Directory
+/ Kubernetes / SaaS domains, full standards coverage, multi-region hardening) are
+future work. Deviations from the spec are recorded in [`docs/adr/`](docs/adr/).
 ## Milestones
 
 - **M0** Contracts & scaffold -- Pydantic schemas, project structure, compose

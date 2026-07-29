@@ -5,7 +5,69 @@ Curated seed lists for content discovery, plus deterministic generation of
 target-specific candidate paths/params/credentials from the discovered surface.
 Inspired by OLYMPUS core/wordlists.py + HEPHAESTUS. Pure and deterministic.
 """
+import os
 from urllib.parse import urlparse
+
+# ── SecLists integration (optional, graceful) ────────────────────
+# If a SecLists checkout is present on disk we expose a curated slice of its high-value
+# lists through the SAME catalog/get_words API, so content-discovery / ffuf / fuzzing can
+# use them. Absent SecLists, everything falls back to the native curated lists below with
+# no error. Path is configurable via SECLISTS_PATH; a few conventional roots are tried.
+_SECLISTS_ROOTS = [
+    os.environ.get("SECLISTS_PATH", ""),
+    "/usr/share/seclists", "/usr/share/wordlists/seclists", "/usr/share/wordlists/SecLists",
+    "/opt/SecLists", "/opt/seclists",
+]
+# id -> (relative path under the SecLists root, label, description)
+_SECLISTS_INDEX = {
+    "seclists:web-common": ("Discovery/Web-Content/common.txt", "SecLists common web content", "Directory/file brute-force (common)."),
+    "seclists:raft-dirs": ("Discovery/Web-Content/raft-medium-directories.txt", "SecLists raft directories", "raft-medium directories."),
+    "seclists:raft-files": ("Discovery/Web-Content/raft-medium-files.txt", "SecLists raft files", "raft-medium files."),
+    "seclists:api-endpoints": ("Discovery/Web-Content/api/api-endpoints.txt", "SecLists API endpoints", "Common REST/API endpoint names."),
+    "seclists:subdomains": ("Discovery/DNS/subdomains-top1million-5000.txt", "SecLists subdomains (5k)", "Top 5000 subdomain labels."),
+    "seclists:passwords-10k": ("Passwords/Common-Credentials/10-million-password-list-top-10000.txt", "SecLists top 10k passwords", "Offline/authorized password lists only."),
+    "seclists:usernames": ("Usernames/top-usernames-shortlist.txt", "SecLists usernames", "Common usernames."),
+    "seclists:lfi": ("Fuzzing/LFI/LFI-Jhaddix.txt", "SecLists LFI payloads", "Path traversal / LFI payloads."),
+}
+_SECLISTS_MAXLINES = 20000   # bound any single list so a huge file never blows memory
+
+
+def _seclists_root():
+    for r in _SECLISTS_ROOTS:
+        if r and os.path.isdir(r):
+            return r
+    return None
+
+
+def _seclists_file(rel: str):
+    root = _seclists_root()
+    if not root:
+        return None
+    p = os.path.normpath(os.path.join(root, rel))
+    # containment guard: never escape the SecLists root via a crafted relative path
+    if not p.startswith(os.path.normpath(root) + os.sep):
+        return None
+    return p if os.path.isfile(p) else None
+
+
+def _read_wordfile(path: str) -> list:
+    words = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i >= _SECLISTS_MAXLINES:
+                    break
+                w = line.strip()
+                if w and not w.startswith("#"):
+                    words.append(w)
+    except OSError:
+        return []
+    return words
+
+
+def seclists_available() -> bool:
+    return _seclists_root() is not None
+
 
 # ── Curated seed catalog ─────────────────────────────────────────
 CATALOG = {
@@ -67,7 +129,9 @@ CATALOG = {
 
 
 def catalog() -> list:
-    """List available seed wordlists with size + preview."""
+    """List available seed wordlists with size + preview. Native curated lists always
+    appear; SecLists entries are appended only when the file actually exists on disk
+    (graceful — absent SecLists changes nothing)."""
     out = []
     for wid, entry in CATALOG.items():
         out.append({
@@ -77,10 +141,27 @@ def catalog() -> list:
             "count": len(entry["words"]),
             "preview": entry["words"][:8],
         })
+    for wid, (rel, label, desc) in _SECLISTS_INDEX.items():
+        path = _seclists_file(rel)
+        if not path:
+            continue
+        words = _read_wordfile(path)
+        if not words:
+            continue
+        out.append({"id": wid, "label": label, "description": desc,
+                    "count": len(words), "preview": words[:8], "source": "seclists"})
     return out
 
 
 def get_words(wordlist_id: str) -> list:
+    """Words for a catalog id. `seclists:*` ids read the on-disk SecLists file (bounded);
+    an unknown or unavailable id returns []."""
+    if (wordlist_id or "").startswith("seclists:"):
+        spec = _SECLISTS_INDEX.get(wordlist_id)
+        if not spec:
+            return []
+        path = _seclists_file(spec[0])
+        return _read_wordfile(path) if path else []
     entry = CATALOG.get(wordlist_id)
     return list(entry["words"]) if entry else []
 

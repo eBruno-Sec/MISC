@@ -142,7 +142,19 @@ SQLite (db.py, /app/data volume)  --  missions · findings · exchanges · logs 
 | run_cmdi | INTRUSIVE | OS command injection: computed-output (echo can't false-positive) + time-based blind + OOB via collaborator |
 | run_zap | INTRUSIVE | Full OWASP ZAP DAST (spider + AJAX spider + active scan), scope-fenced (optional daemon) |
 | run_dalfox / run_sqlmap | INTRUSIVE | XSS / SQLi confirmation (optional binaries) |
+| run_dork_gen | PASSIVE | Offline search-operator (Google-dork) query generation — scoped with `site:`, never scrapes |
+| run_hash_id | PASSIVE | Offline hash-type identification (length/charset/prefix) for already-obtained tokens |
+| run_sourcemap | ACTIVE | Discover + analyse JS source maps (`*.js.map`): hidden routes, API endpoints, feature flags, secret leads |
+| run_metadata | ACTIVE | Extract embedded metadata (EXIF GPS, author, software) from a served file — exiftool if present, else native |
+| run_hash_crack | INTRUSIVE | **Offline** dictionary crack of a *supplied* hash via hashcat/John — never touches live auth, never brute-forces over the network |
+| run_ferox / run_dirsearch / run_gobuster | INTRUSIVE | Optional content-discovery binaries (native `run_content_discovery` + `run_ffuf` remain default) |
+| run_nosqlmap | INTRUSIVE | Optional NoSQLMap adapter (native `run_nosqli` remains default) |
 | store_finding | PASSIVE | Save a confirmed finding + attach evidence |
+
+**Optional integrations (all degrade gracefully when absent):**
+- **SecLists** — if a checkout is on disk (`SECLISTS_PATH`, or `/usr/share/seclists`, `/opt/SecLists`, …) its high-value lists appear in the wordlist catalog and feed content discovery / ffuf. Absent → native curated lists, no error.
+- **exiftool / hashcat / John / feroxbuster / dirsearch / gobuster / nosqlmap** — auto-detected via `PATH`; each tool reports "not installed" and the run continues on the native equivalent.
+- Hash cracking is **offline only** (a hash you already hold vs a local wordlist) — the prohibition on live-endpoint credential brute-forcing is preserved.
 
 **PASSIVE:** No direct target contact. Auto-run.
 **ACTIVE:** Direct target contact. Auto-run within scope.

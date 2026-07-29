@@ -210,6 +210,7 @@ details{margin-top:.5rem}summary{cursor:pointer;color:var(--accent);font-size:.8
 .pb-curl pre{border:none;border-radius:0;margin:0}
 .pb-curl.empty{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.6rem .7rem;flex-wrap:wrap}
 .pb-curl.empty span{font-size:.78rem;color:var(--text-dim)}
+.pb-run{padding:0 .7rem}.pb-run-r{font-size:.8rem;padding:.5rem 0}.pb-run-r.err{color:var(--sev-high)}
 .pb-obj{font-size:.86rem;margin-bottom:.5rem}
 .pb-sec ol,.pb-sec ul,.pb-adv ul{padding-left:1.2rem;font-size:.83rem}
 .pb-sec li,.pb-adv li{margin:.2rem 0}
@@ -306,6 +307,9 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="run" onclick="showView('run')">Live Run</button>
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
+  <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
+  <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
+  <button class="navbtn" data-view="codereview" onclick="showView('codereview')">Code Review</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -404,6 +408,13 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <label class="chk"><input type="checkbox" id="enableNmapVuln"> <strong>nmap NSE vuln scan</strong> — full <code class="inline">vuln</code> category (DoS excluded): known-CVE services, weak TLS, config weaknesses</label>
             <label class="chk" style="margin-top:.5rem"><input type="checkbox" id="enableNucleiHeavy"> <strong>Heavy nuclei</strong> — full vulnerability template set (CVEs, network, misconfig, exposures, default creds, SSL)</label>
             <div class="hint" style="margin-top:.4rem"><strong>Intrusive &amp; slow.</strong> Both produce truth-first advisory <strong>leads</strong> (version/behaviour/template-based — verify before reporting), never confirmed findings. The default fast scan already runs safe-tag nuclei.</div>
+          </div>
+          <div class="block">
+            <h4>Lab packs <span class="muted">(benchmark / training targets)</span></h4>
+            <label class="chk"><input type="checkbox" id="packJuiceShop" checked> <strong>OWASP Juice Shop Pack</strong> — target-specific solver pack, <strong>fingerprint-gated</strong> (only runs against a Juice Shop instance)</label>
+            <div class="hint" style="margin-top:.4rem">Isolated from the general detector — solves the lab's own challenges end-to-end to prove exploitation. <strong>No brute-force, no DoS.</strong> Same idea as Burp scan profiles / Nuclei tags: activate the pack for the target you're on.</div>
+            <button class="btn block" id="btnLabSolve" style="margin-top:.6rem" onclick="runLabPack('juiceshop')">▶ Solve OWASP Juice Shop now</button>
+            <div id="labResult" class="hint" style="margin-top:.5rem"></div>
           </div>
           <div class="block">
             <h4>Objective &amp; authentication <span class="muted">(optional)</span></h4>
@@ -582,6 +593,148 @@ X-Requested-With: </textarea>
       <div id="helpList"></div>
     </section>
 
+    <style>
+    #p-conquest .cq-hero{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:1.2rem 1.3rem;margin-bottom:1.3rem}
+    #p-conquest .cq-num{font-size:3.4rem;font-weight:800;color:var(--accent);line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+    #p-conquest .cq-num span{font-size:1.05rem;color:var(--text-dim);font-weight:700;margin-left:.25rem}
+    #p-conquest .cq-meta{flex:1;min-width:220px}
+    #p-conquest .cq-pct{font-size:1.5rem;font-weight:800;color:var(--text-bright);margin-right:.5rem;font-variant-numeric:tabular-nums}
+    #p-conquest .cq-bar{height:10px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2);overflow:hidden;margin-top:.55rem}
+    #p-conquest .cq-bar>i{display:block;height:100%;width:0;border-radius:999px;
+      background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#fff));transition:width 1.1s cubic-bezier(.16,1,.3,1)}
+    #p-conquest .cq-troph{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.7rem;margin:.3rem 0 1.4rem}
+    #p-conquest .cq-troph .card{padding:.85rem .95rem}
+    #p-conquest .cq-troph .card p{color:var(--text-dim);font-size:.79rem;margin:.15rem 0 .6rem;line-height:1.45}
+    #p-conquest .cq-cat{margin-bottom:1.1rem}
+    #p-conquest .cq-cathead{display:flex;align-items:center;gap:.6rem;padding-bottom:.4rem;border-bottom:1.5px solid var(--border2);margin-bottom:.15rem}
+    #p-conquest .cq-catname{font-weight:700;color:var(--text-bright);font-size:.96rem}
+    #p-conquest .cq-row{border-bottom:1px solid var(--border)}
+    #p-conquest .cq-row:last-child{border-bottom:none}
+    #p-conquest .cq-rowtop{display:flex;align-items:baseline;gap:.65rem;padding:.55rem .2rem;cursor:pointer}
+    #p-conquest .cq-rowtop:hover .cq-name{color:var(--accent)}
+    #p-conquest .cq-tick{color:var(--accent);font-weight:800;flex:none}
+    #p-conquest .cq-name{font-weight:600;color:var(--text);flex:none}
+    #p-conquest .cq-tech{color:var(--text-dim);font-size:.77rem;font-family:var(--mono);flex:1;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #p-conquest .cq-stars{color:var(--warn);font-size:.72rem;letter-spacing:1px;flex:none;white-space:nowrap}
+    #p-conquest .cq-caret{flex:none;color:var(--text-dim);font-size:.7rem;transition:transform .15s}
+    #p-conquest .cq-row.open .cq-caret{transform:rotate(90deg)}
+    #p-conquest .cq-detail{display:none;padding:0 .2rem .7rem 1.5rem;color:var(--text);font-size:.83rem;line-height:1.55;max-width:70ch}
+    #p-conquest .cq-row.open .cq-detail{display:block}
+    #p-conquest .cq-detail .lbl{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);display:block;margin-bottom:.2rem}
+    #p-conquest .cq-rgroup{margin-bottom:.85rem}
+    #p-conquest .cq-rlabel{font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.4rem;display:flex;align-items:center;gap:.45rem}
+    #p-conquest .cq-dot{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none}
+    #p-conquest .cq-hint{color:var(--text-dim);font-size:.75rem;margin:.2rem 0 1rem}
+    @media(max-width:640px){
+      #p-conquest .cq-tech{flex-basis:100%;order:5;white-space:normal;margin-left:1.5rem}
+      #p-conquest .cq-rowtop{flex-wrap:wrap;gap:.3rem}
+    }
+    </style>
+    <section class="panel" id="p-conquest">
+      <div class="view-head"><h3 class="sec">Juice Shop Conquest</h3>
+        <span class="muted">Every solved challenge — live from the scoreboard — with the exploit and a full write-up. Click any row.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadConquest()">Refresh</button>
+        <button class="btn sm" onclick="solveThenConquest(this)">▶ Solve now</button>
+      </div>
+      <div id="conquestBody"><div class="empty"><h4>Loading the conquest…</h4><p>Reading the live board.</p></div></div>
+    </section>
+
+    <style>
+    #p-taxonomy .tx-bar{display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:1rem 1.2rem;margin-bottom:1rem}
+    #p-taxonomy .tx-stat{display:flex;flex-direction:column}
+    #p-taxonomy .tx-stat .v{font-size:1.5rem;font-weight:800;color:var(--text-bright);font-variant-numeric:tabular-nums;line-height:1}
+    #p-taxonomy .tx-stat .v.acc{color:var(--accent)}
+    #p-taxonomy .tx-stat .k{font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:.25rem}
+    #p-taxonomy .tx-note{flex:1;min-width:230px;font-size:.76rem;color:var(--text-dim);line-height:1.55}
+    #p-taxonomy .tx-note b{color:var(--text)}
+    #p-taxonomy .tx-lenses{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.1rem}
+    #p-taxonomy .tx-lens{font-family:var(--sans);font-size:.76rem;font-weight:600;color:var(--text-dim);
+      background:var(--surface2);border:1px solid var(--border2);border-radius:999px;padding:.4rem .9rem;cursor:pointer;transition:.15s}
+    #p-taxonomy .tx-lens:hover{color:var(--text-bright);border-color:var(--accent)}
+    #p-taxonomy .tx-lens.active{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+    :root[data-theme="light"] #p-taxonomy .tx-lens.active{color:#fff}
+    #p-taxonomy .tx-group{margin-bottom:1.1rem}
+    #p-taxonomy .tx-ghead{display:flex;align-items:baseline;gap:.6rem;padding-bottom:.4rem;border-bottom:1.5px solid var(--border2);margin-bottom:.55rem}
+    #p-taxonomy .tx-gkey{font-family:var(--mono);font-weight:700;color:var(--text-bright);font-size:.9rem;letter-spacing:.01em}
+    #p-taxonomy .tx-gcount{margin-left:auto;font-size:.68rem;font-weight:700;color:var(--accent);background:var(--surface2);border:1px solid var(--border2);padding:.1rem .55rem;border-radius:999px}
+    #p-taxonomy .tx-tech{border:1px solid var(--border);border-left:3px solid var(--tc,var(--border2));background:var(--surface);
+      border-radius:var(--radius);padding:.7rem .85rem;margin-bottom:.5rem}
+    #p-taxonomy .tx-tname{font-weight:700;color:var(--text-bright);font-size:.9rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    #p-taxonomy .tx-sum{color:var(--text-dim);font-size:.8rem;margin:.25rem 0 .5rem;line-height:1.5;max-width:80ch}
+    #p-taxonomy .tx-tags{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
+    #p-taxonomy .tx-chip{font-family:var(--mono);font-size:.66rem;padding:.12rem .45rem;border-radius:5px;background:var(--surface2);border:1px solid var(--border2);color:var(--text-dim)}
+    #p-taxonomy .tx-badge{font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:.14rem .5rem;border-radius:999px;white-space:nowrap}
+    #p-taxonomy .tx-badge.proven{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
+    #p-taxonomy .tx-badge.catalogued{background:transparent;color:var(--text-dim);border:1px dashed var(--border2)}
+    #p-taxonomy .tx-badge.lablocal{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+    #p-taxonomy .tx-ev{margin-top:.45rem;font-size:.72rem;color:var(--text-dim)}
+    #p-taxonomy .tx-ev b{color:var(--text);font-weight:600}
+    #p-taxonomy .tx-thead{display:flex;align-items:center;gap:.5rem;cursor:pointer}
+    #p-taxonomy .tx-thead:hover .tx-tname{color:var(--accent)}
+    #p-taxonomy .tx-caret{margin-left:auto;color:var(--text-dim);font-size:.66rem;transition:transform .15s;flex:none}
+    #p-taxonomy .tx-tech.open .tx-caret{transform:rotate(90deg)}
+    #p-taxonomy .tx-lesson{display:none;margin-top:.55rem;border-top:1px solid var(--border);padding-top:.55rem}
+    #p-taxonomy .tx-tech.open .tx-lesson{display:block}
+    #p-taxonomy .tx-step{font-size:.78rem;color:var(--text);margin:.3rem 0;line-height:1.55;max-width:82ch}
+    #p-taxonomy .tx-slabel{display:inline-block;font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);min-width:56px;margin-right:.5rem;font-weight:700;vertical-align:top}
+    </style>
+    <section class="panel" id="p-taxonomy">
+      <div class="view-head"><h3 class="sec">Technique Taxonomy</h3>
+        <span class="muted">The transferable techniques — one registry, switchable lenses. Techniques are the capability; the lens is just the view.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadTaxonomy()">Refresh</button>
+      </div>
+      <div id="taxonomyBody"><div class="empty"><h4>Loading the taxonomy…</h4></div></div>
+    </section>
+
+    <style>
+    #p-codereview .cr-intro{font-size:.82rem;color:var(--text-dim);line-height:1.6;margin-bottom:1rem;max-width:80ch}
+    #p-codereview .cr-intro b{color:var(--text)}
+    #p-codereview .cr-run{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.1rem}
+    #p-codereview .cr-run input{flex:1;min-width:260px;font-family:var(--mono);font-size:.8rem;padding:.5rem .7rem;
+      background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text)}
+    #p-codereview .cr-bar{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:.9rem 1.2rem;margin-bottom:1rem}
+    #p-codereview .cr-stat .v{font-size:1.4rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+    #p-codereview .cr-stat .k{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:.2rem}
+    #p-codereview .cr-stat .v.crit{color:var(--danger)} #p-codereview .cr-stat .v.high{color:var(--warn)}
+    #p-codereview .cr-git{margin-left:auto;font-size:.75rem;font-weight:700;padding:.3rem .7rem;border-radius:999px}
+    #p-codereview .cr-git.yes{color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 12%,transparent)}
+    #p-codereview .cr-git.no{color:var(--text-dim);border:1px solid var(--border2)}
+    #p-codereview .cr-find{border:1px solid var(--border);border-left:3px solid var(--fc,var(--border2));background:var(--surface);
+      border-radius:var(--radius);padding:.6rem .8rem;margin-bottom:.45rem}
+    #p-codereview .cr-fhead{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    #p-codereview .cr-loc{font-family:var(--mono);font-size:.76rem;color:var(--text-bright);font-weight:600}
+    #p-codereview .cr-sev{font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .45rem;border-radius:999px}
+    #p-codereview .cr-sev.critical{background:color-mix(in srgb,var(--danger) 18%,transparent);color:var(--danger)}
+    #p-codereview .cr-sev.high{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+    #p-codereview .cr-sev.medium{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border2)}
+    #p-codereview .cr-tech{margin-left:auto;font-family:var(--mono);font-size:.66rem;color:var(--accent);background:var(--surface2);border:1px solid var(--border2);padding:.08rem .4rem;border-radius:5px}
+    #p-codereview .cr-snip{font-family:var(--mono);font-size:.72rem;color:var(--text-dim);margin:.35rem 0;white-space:pre-wrap;word-break:break-word;background:var(--surface2);padding:.35rem .5rem;border-radius:6px;overflow-x:auto}
+    #p-codereview .cr-why{font-size:.78rem;color:var(--text);margin-top:.15rem}
+    #p-codereview .cr-conf{font-size:.76rem;color:var(--text-dim);margin-top:.25rem}
+    #p-codereview .cr-conf b{color:var(--ok)}
+    </style>
+    <section class="panel" id="p-codereview">
+      <div class="view-head"><h3 class="sec">Code Intelligence</h3>
+        <span class="muted">Black-box — curl the target, mine its code into actionable intel.</span></div>
+      <div class="cr-intro">Nothing handed over. Apolaki curls the target's served <b>JS bundles</b> and probes exposed vectors (<b>source maps</b>, <b>.git</b>, browsable dirs), then mines them into <b>actionable intel</b> — API endpoints, unlinked/sensitive routes, leaked versions — the recon that feeds PoC, deeper testing, and exploitation. If the target leaks real source (via source maps), it also runs the static sink review on it.</div>
+      <div class="cr-run">
+        <input id="crUrl" value="http://juice-shop:3000" placeholder="https://target (in-scope)">
+        <button class="btn" onclick="runHarvest()">▶ Harvest intel</button>
+      </div>
+      <div id="codereviewBody"><div class="empty"><h4>Ready</h4><p>Enter a target URL and hit Harvest.</p></div></div>
+      <details style="margin-top:1.1rem">
+        <summary style="cursor:pointer;color:var(--text-dim);font-size:.78rem">Advanced · white-box folder review (only if you already have the source on disk)</summary>
+        <div class="cr-run" style="margin-top:.6rem">
+          <input id="crPath" value="/labsrc/juiceshop" placeholder="/path/to/source the agent can read">
+          <button class="btn ghost" onclick="runCodeReview()">Review folder</button>
+        </div>
+      </details>
+    </section>
+
   </div>
 </main>
 
@@ -639,6 +792,9 @@ const VIEWS={
   run:      [["feed","Activity feed"]],
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
   reports:  [["report","Report & export"]],
+  conquest: [["conquest","Juice Shop Conquest"]],
+  taxonomy: [["taxonomy","Technique Taxonomy"]],
+  codereview:[["codereview","Code Review"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
@@ -664,6 +820,9 @@ function switchTab(name){
   if(name==="surface")loadSurface(); if(name==="playbooks")loadPlaybook();
   if(name==="topology")loadTopology(); if(name==="access")loadProfiles();
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
+  if(name==="conquest")loadConquest();
+  if(name==="taxonomy")loadTaxonomy();
+  if(name==="codereview")loadCodeReview();
 }
 
 /* ── phase bar ── */
@@ -1037,8 +1196,9 @@ function renderPlaybookCard(g,i){
     ? `<div class="pb-curl"><div class="pb-curl-head"><span>Recommended cURL</span><div class="pb-curl-actions">
          <button class="btn ghost sm" onclick="copyPlaybookCurl(${i})">Copy cURL</button>
          <button class="btn ghost sm" onclick="accessFromPlaybook(${i})">Access check</button>
-         <button class="btn primary sm" onclick="sendToCurl(${i})">Send to cURL Console →</button></div></div>
-       <pre class="code">${esc(cmd)}</pre></div>`
+         <button class="btn ghost sm" onclick="sendToCurl(${i})">Send to Console →</button>
+         <button class="btn primary sm" onclick="runPlaybookTest(${i})">▶ Run this test</button></div></div>
+       <pre class="code">${esc(cmd)}</pre><div id="pbRun${i}" class="pb-run"></div></div>`
     : `<div class="pb-curl empty"><span>No prebuilt cURL for this surface.</span>
          <button class="btn ghost sm" onclick="sendToCurl(${i})">Open in cURL Console →</button></div>`;
   const steps=(g.how_to_test||[]).map(h=>`<li>${esc(h)}</li>`).join("");
@@ -1059,6 +1219,26 @@ function renderPlaybookCard(g,i){
 }
 function copyPlaybookCurl(i){const g=pbData[i];const cmd=g&&g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd;
   if(cmd)copyText(cmd,"cURL copied to clipboard.");}
+/* One-click executable playbook: parse the recommended cURL and run it through the
+   SAME scope-guarded /curl endpoint the console uses, showing the response inline. */
+async function runPlaybookTest(i){
+  const g=pbData[i]; const out=document.getElementById("pbRun"+i); if(!g||!out)return;
+  const cmd=(g.curl_steps&&g.curl_steps[0]&&g.curl_steps[0].cmd)||"";
+  const p=cmd?parseCurl(cmd):{method:"GET",url:g.surface||"",headers:{},body:""};
+  if(!p.url){out.innerHTML=`<div class="pb-run-r err">No runnable URL in this cURL.</div>`;return;}
+  if(!sessionId){out.innerHTML=`<div class="pb-run-r err">Start or load a mission first.</div>`;return;}
+  out.innerHTML=`<div class="pb-run-r">Running <code>${esc(p.method)} ${esc(p.url)}</code> …</div>`;
+  try{
+    const r=await fetch(`${API}/curl/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({method:p.method,url:p.url,headers:p.headers,body:p.body,follow_redirects:true})});
+    if(!r.ok){const t=await r.text();out.innerHTML=`<div class="pb-run-r err">${r.status} — ${esc(t.slice(0,200))}</div>`;return;}
+    const d=await r.json();const sc=d.status||0;
+    const col=sc>=200&&sc<300?"var(--sev-low)":sc>=400?"var(--sev-high)":"var(--text-dim)";
+    out.innerHTML=`<div class="pb-run-r"><b style="color:${col}">HTTP ${sc}</b>
+      <span class="muted">${(d.body||"").length} bytes</span>
+      <pre class="code" style="max-height:220px;overflow:auto;margin:.4rem 0 0">${esc((d.body||"").slice(0,1500))}</pre></div>`;
+  }catch(e){out.innerHTML=`<div class="pb-run-r err">${esc(e.message)}</div>`;}
+}
 
 /* ── cURL Console ergonomics (client-side only; same scope-guarded endpoint) ── */
 function buildCurl(m,u,h,b){
@@ -1281,28 +1461,33 @@ function renderTopology(){
     if(e.rel==="found")(findByNode[e.source]=findByNode[e.source]||[]).push(byId[e.target]);
   });
   const leadTargets=new Set((leads||[]).map(l=>_normTarget(l.target)).filter(Boolean));
-  // ── compute ORIGINAL positions for ALL nodes (root, hosts, every endpoint) ──
-  const maxLeaves=Math.max(1,...hosts.map(h=>(epByHost[h]||[]).length));
-  const W=Math.max(760,hosts.length*210), H=210+maxLeaves*26;
-  const ROOT="__root__", orig={}, nodeList=[], edgeList=[];
-  orig[ROOT]={x:W/2,y:46};
+  // ── compute ORIGINAL positions as a tidy PATH-PREFIX TREE ──
+  // host → /api/ → /api/products/ → endpoint (NOT a flat host→every-endpoint starburst).
+  // Follow the graph's own contains/serves edges; leaves get sequential slots, parents centre.
+  const ROOT="__root__";
+  const kids={}; const kpush=(p,c)=>{(kids[p]=kids[p]||[]).push(c);};
+  hosts.forEach(h=>kpush(ROOT,h));
+  edges.forEach(e=>{ if(e.rel==="contains"||e.rel==="serves") kpush(e.source,e.target); });
+  const LEAFW=58, LAYER=72, orig={}; let _slot=0;
+  (function place(id,depth){
+    const cs=kids[id]||[];
+    if(!cs.length){ orig[id]={x:(_slot++ +0.5)*LEAFW, y:44+depth*LAYER}; return orig[id].x; }
+    const xs=cs.map(c=>place(c,depth+1));
+    orig[id]={x:(xs[0]+xs[xs.length-1])/2, y:44+depth*LAYER}; return orig[id].x;
+  })(ROOT,0);
+  const W=Math.max(760,(_slot+1)*LEAFW), H=Math.max(240, 80+Math.max(0,...Object.values(orig).map(p=>p.y)));
+  const nodeList=[], edgeList=[]; topoNodes=[];
   nodeList.push({id:ROOT,kind:"root",label:document.getElementById("programName").value||"target"});
-  topoNodes=[];
-  hosts.forEach((hid,i)=>{
-    const hx=(i+0.5)*(W/hosts.length), hy=150;
-    orig[hid]={x:hx,y:hy};
-    const hf=findByNode[hid]||[];
-    nodeList.push({id:hid,kind:"host",label:byId[hid].label,sev:_worstSev(hf)});
-    edgeList.push({a:ROOT,b:hid}); topoNodes.push({id:hid,kind:"host",label:byId[hid].label});
-    (epByHost[hid]||[]).forEach((eid,j)=>{
-      const ep=byId[eid]; orig[eid]={x:hx,y:hy+42+j*26};
-      const ef=findByNode[eid]||[], eSev=_worstSev(ef);
-      const isLead=!eSev&&leadTargets.has(_normTarget(ep.example||ep.url||""));
-      nodeList.push({id:eid,kind:"endpoint",label:String(ep.label).slice(0,30),sev:eSev,lead:isLead});
-      edgeList.push({a:hid,b:eid});
-      topoNodes.push({id:eid,kind:"endpoint",label:ep.label,url:ep.example||"",host:ep.host||byId[hid].label});
-    });
+  Object.keys(orig).forEach(id=>{
+    if(id===ROOT) return;
+    const n=byId[id]; if(!n) return;
+    const f=findByNode[id]||[], sev=_worstSev(f);
+    nodeList.push({id,kind:n.kind,label:String(n.label).slice(0,32),sev,
+      lead: n.kind==="endpoint" && !sev && leadTargets.has(_normTarget(n.example||n.url||""))});
+    if(n.kind==="host"||n.kind==="endpoint")
+      topoNodes.push({id,kind:n.kind,label:n.label,url:n.example||"",host:n.host||""});
   });
+  Object.entries(kids).forEach(([p,cs])=>cs.forEach(c=>{ if(orig[p]&&orig[c]) edgeList.push({a:p,b:c}); }));
   topoOrig=orig;
   // keep dragged positions when the graph is unchanged; otherwise lay out fresh
   const sameSet=Object.keys(topoLive).length && Object.keys(orig).every(id=>topoLive[id]);
@@ -1342,6 +1527,7 @@ function _topoDraw(){
     if(n.kind==="root"){inner=`<circle r="8" fill="${cRoot}"/><text x="13" y="4" fill="${cBright}" font-weight="600">${esc(n.label)}</text>`;}
     else if(n.kind==="host"){const ring=n.sev?`<circle r="10" fill="none" stroke="${SEV_HEX[n.sev]||cHost}" stroke-width="2"/>`:"";
       inner=ring+`<circle r="6" fill="${cHost}"/><text x="12" y="3" fill="${cText}">${esc(n.label)}</text>`;}
+    else if(n.kind==="pathgroup"){inner=`<rect x="-4" y="-4" width="8" height="8" rx="2" fill="none" stroke="${cLine}" stroke-width="1.5"/><text x="10" y="3" fill="${cText}" opacity="0.8">${esc(n.label)}</text>`;}
     else{const col=n.sev?SEV_HEX[n.sev]:cLeaf, r=n.sev?4.5:3;
       const lr=n.lead?`<circle r="8" fill="none" stroke="${cWarn}" stroke-width="1.5" stroke-dasharray="2 2"/>`:"";
       inner=lr+`<circle r="${r}" fill="${col}"/><text x="9" y="3" fill="${cText}">${esc(n.label)}</text>`;}
@@ -1439,6 +1625,243 @@ async function fetchReport(){
 function openHtmlReport(){if(sessionId)window.open(`${API}/report/${sessionId}/html`,"_blank");else alert("Start or load a mission first.");}
 function downloadHtml(){if(sessionId)window.open(`${API}/report/${sessionId}/html?download=1`,"_blank");else alert("Start or load a mission first.");}
 function dl(fmt){if(sessionId)window.open(`${API}/report/${sessionId}/${fmt}`,"_blank");else alert("Start or load a mission first.");}
+async function runLabPack(lab){
+  const btn=document.getElementById('btnLabSolve'), out=document.getElementById('labResult');
+  if(btn){btn.disabled=true;} if(out){out.textContent='Running '+lab+' lab pack — solving challenges…';}
+  try{
+    const r=await fetch(`${API}/lab/${lab}/solve`,{method:'POST'});
+    const d=await r.json();
+    if(d.error){ out.textContent='Error: '+d.error; }
+    else{ out.innerHTML='<strong>'+(d.lab||lab)+'</strong>: scoreboard '+d.before+' → <strong>'+d.after+'</strong> / '+d.total+' ('+d.percent+'%). Newly solved this run: '+((d.newly_solved||[]).length); }
+  }catch(e){ if(out){out.textContent='Error: '+e;} }
+  if(btn){btn.disabled=false;}
+}
+
+/* ── Conquest: in-app Juice Shop knowledge base (live board + technique write-ups) ── */
+const CQ_BUCKET={
+  dos:{label:"Won't run — denial of service (off by policy)",c:"var(--text-dim)"},
+  not_hosted:{label:"Not hosted in this build — needs an LLM key or a live chain",c:"var(--warn)"},
+  frontier:{label:"Still on the board — the open frontier",c:"var(--accent)"}
+};
+function cqStars(d){let s="";for(let i=0;i<(d||0);i++)s+="★";return s||"·";}
+function cqToggle(el){el.parentElement.classList.toggle("open");}
+async function loadConquest(){
+  const el=document.getElementById("conquestBody");
+  el.innerHTML=`<div class="empty"><h4>Reading the scoreboard…</h4><p>Merging the live board with the technique write-ups.</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/lab/juiceshop/conquest`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't read the board</h4><p>${esc(d.error)}</p><p class="muted">Is the Juice Shop lab target up?</p></div>`;return;}
+    el.innerHTML=renderConquest(d);
+    requestAnimationFrame(()=>{const b=document.getElementById("cqBar");if(b)b.style.width=(d.percent||0)+"%";});
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderConquest(d){
+  let h=`<div class="cq-hero">
+    <div class="cq-num">${d.solved}<span>/ ${d.total}</span></div>
+    <div class="cq-meta">
+      <span class="cq-pct">${d.percent}%</span><span class="muted">of the full scoreboard</span>
+      <div class="cq-bar"><i id="cqBar"></i></div>
+      <div class="muted" style="margin-top:.55rem;font-size:.8rem">${d.solved} of ${d.reachable} <b>reachable</b> = <b style="color:var(--accent)">${d.reachable_percent}%</b>. The rest need a DoS we won't run, an LLM chatbot, or a live chain this build doesn't host.</div>
+    </div></div>`;
+  if(d.signature&&d.signature.length){
+    h+=`<h5>Signature exploits</h5><div class="cq-troph">`;
+    d.signature.forEach(s=>{h+=`<div class="card" style="--c:var(--accent)"><h4>${esc(s.title)}</h4><p>${esc(s.blurb)}</p><code class="chip">${esc(s.tag)}</code></div>`;});
+    h+=`</div>`;
+  }
+  h+=`<h5>The conquest ledger · ${d.solved} solves</h5><div class="cq-hint">★ = difficulty (1–6). Click any row for the full write-up.</div>`;
+  (d.categories||[]).forEach(cat=>{
+    h+=`<div class="cq-cat"><div class="cq-cathead"><span class="cq-catname">${esc(cat.category)}</span><span class="pill" style="--c:var(--accent)">${cat.count}</span></div>`;
+    cat.items.forEach(it=>{
+      h+=`<div class="cq-row"><div class="cq-rowtop" onclick="cqToggle(this)">`+
+        `<span class="cq-tick">✓</span><span class="cq-name">${esc(it.name)}</span>`+
+        `<span class="cq-tech">${esc(it.technique||"")}</span>`+
+        `<span class="cq-stars" title="difficulty ${it.difficulty}/6">${cqStars(it.difficulty)}</span>`+
+        `<span class="cq-caret">▶</span></div>`+
+        `<div class="cq-detail"><span class="lbl">How it was solved</span>${esc(it.detail||it.technique||"—")}</div></div>`;
+    });
+    h+=`</div>`;
+  });
+  if(d.remaining&&d.remaining.length){
+    h+=`<h5>Not taken — ${d.remaining.length}, and why</h5>`;
+    ["dos","not_hosted","frontier"].forEach(b=>{
+      const items=d.remaining.filter(x=>x.bucket===b);if(!items.length)return;
+      const m=CQ_BUCKET[b];
+      h+=`<div class="cq-rgroup"><div class="cq-rlabel"><span class="cq-dot" style="background:${m.c}"></span>${m.label} <span class="muted">· ${items.length}</span></div><div class="chips">`;
+      items.forEach(x=>{const fr=b==='frontier';h+=`<span class="chip" style="${fr?'border-style:dashed;border-color:var(--accent);color:var(--accent)':''}">${esc(x.name)}</span>`;});
+      h+=`</div></div>`;
+    });
+  }
+  return h;
+}
+async function solveThenConquest(btn){
+  if(btn){btn.disabled=true;btn.textContent="Solving…";}
+  const el=document.getElementById("conquestBody");
+  el.insertAdjacentHTML("afterbegin",`<div class="cq-hint" id="cqSolving">Running the solver pack against the lab target — this takes ~30s…</div>`);
+  try{ await fetch(`${API}/lab/juiceshop/solve`,{method:'POST'}); }catch(e){}
+  if(btn){btn.disabled=false;btn.textContent="▶ Solve now";}
+  loadConquest();
+}
+
+/* ── Technique Taxonomy: one registry, switchable lenses (OWASP / WSTG / CWE / MITRE / class) ── */
+let _txLens="owasp";
+function txLens(lens){ loadTaxonomy(lens); }
+function txHuman(id){ return id.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+async function loadTaxonomy(lens){
+  if(lens) _txLens=lens;
+  const el=document.getElementById("taxonomyBody");
+  el.innerHTML=`<div class="empty"><h4>Reading the registry…</h4></div>`;
+  try{
+    const d=await(await fetch(`${API}/techniques?lens=${encodeURIComponent(_txLens)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(d.error)}</p></div>`;return;}
+    el.innerHTML=renderTaxonomy(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderTaxonomy(d){
+  let h=`<div class="tx-bar">
+    <div class="tx-stat"><span class="v acc">${d.proven}</span><span class="k">Proven</span></div>
+    <div class="tx-stat"><span class="v">${d.total}</span><span class="k">Techniques</span></div>
+    <div class="tx-stat"><span class="v">${d.transferable}</span><span class="k">Transferable</span></div>
+    <div class="tx-stat"><span class="v">${d.generalized}</span><span class="k">Generalized ≥2 labs</span></div>
+    <div class="tx-note"><b>Proven</b> = oracle-confirmed on a lab. <b>Catalogued</b> = known, not yet demonstrated. <b>Generalized</b> needs ≥2 labs — everything's Juice-Shop-only for now, so <b>0</b> is the honest number until a 2nd corpus lands.</div>
+  </div>`;
+  h+=`<div class="tx-lenses">`+ (d.lenses||[]).map(l=>`<button class="tx-lens ${l.id===d.lens?"active":""}" onclick="txLens('${l.id}')">${esc(l.label)}</button>`).join("") +`</div>`;
+  (d.groups||[]).forEach(g=>{
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">${esc(g.key)}</span><span class="tx-gcount">${g.count}</span></div>`;
+    g.techniques.forEach(t=>{
+      const col = t.status==="proven" ? "var(--ok)" : (!t.transferable ? "var(--warn)" : "var(--border2)");
+      const badge = !t.transferable ? `<span class="tx-badge lablocal">lab-local</span>`
+                    : (t.status==="proven" ? `<span class="tx-badge proven">proven</span>` : `<span class="tx-badge catalogued">catalogued</span>`);
+      const tags = [["CWE",t.cwe],["OWASP",t.owasp],["WSTG",t.wstg],["ATT&CK",t.mitre]]
+        .filter(x=>x[1]).map(x=>`<span class="tx-chip">${esc(String(x[1]))}</span>`).join("");
+      const js = (t.maps_to&&t.maps_to.juiceshop&&t.maps_to.juiceshop.length)
+        ? `<div class="tx-ev">Proof on Juice Shop: <b>${t.maps_to.juiceshop.map(esc).join("</b>, <b>")}</b></div>` : "";
+      h+=`<div class="tx-tech" style="--tc:${col}">
+        <div class="tx-thead" onclick="this.closest('.tx-tech').classList.toggle('open')">
+          <span class="tx-tname">${esc(txHuman(t.id))} ${badge}</span><span class="tx-caret" title="learn the method">▶</span>
+        </div>
+        <div class="tx-sum">${esc(t.summary)}</div>
+        <div class="tx-tags">${tags}</div>${js}
+        <div class="tx-lesson">
+          <div class="tx-step"><span class="tx-slabel">Detect</span>${esc(t.detect||'—')}</div>
+          <div class="tx-step"><span class="tx-slabel">Exploit</span>${esc(t.exploit||'—')}</div>
+          <div class="tx-step"><span class="tx-slabel">Confirm</span>${esc(t.oracle||'—')}</div>
+          ${t.try_it?`<div class="tx-step"><span class="tx-slabel" style="color:var(--ok)">Try it</span><code style="font-family:var(--mono);font-size:.73rem;color:var(--text);word-break:break-word">${esc(t.try_it)}</code></div>`:''}
+        </div></div>`;
+    });
+    h+=`</div>`;
+  });
+  return h;
+}
+
+/* ── Code Review: static Code Intelligence over a source tree ── */
+function loadCodeReview(){ runHarvest(); }   /* black-box harvest is fast — auto-run on open */
+async function runHarvest(){
+  const url=(document.getElementById("crUrl").value||"").trim();
+  const el=document.getElementById("codereviewBody");
+  el.innerHTML=`<div class="empty"><h4>Harvesting…</h4><p class="mono">curl ${esc(url)}</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/codeintel?url=${encodeURIComponent(url)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't reach target</h4><p>${esc(d.error)}</p></div>`;return;}
+    el.innerHTML=renderHarvest(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderHarvest(d){
+  const c=d.counts||{};
+  let h=`<div class="cr-bar">
+    <div class="cr-stat"><span class="v">${c.endpoints||0}</span><span class="k">Endpoints</span></div>
+    <div class="cr-stat"><span class="v">${c.routes||0}</span><span class="k">Routes</span></div>
+    <div class="cr-stat"><span class="v high">${c.sensitive_routes||0}</span><span class="k">Sensitive</span></div>
+    <div class="cr-stat"><span class="v ${c.exposed?'crit':''}">${c.exposed||0}</span><span class="k">Exposed</span></div>
+    <div class="cr-stat"><span class="v ${c.cloud?'crit':''}">${c.cloud||0}</span><span class="k">Cloud</span></div>
+    <div class="cr-stat"><span class="v">${(d.bundles||[]).length}</span><span class="k">JS bundles</span></div>
+  </div>`;
+  if((d.exposed||[]).length){
+    h+=`<h5 style="color:var(--danger)">⚠ Exposed source / files</h5>`;
+    d.exposed.forEach(e=>{ h+=`<div class="cr-find" style="--fc:var(--danger)"><div class="cr-fhead"><span class="cr-sev critical">exposed</span><span class="cr-loc">${esc(e.path)}</span></div><div class="cr-why">${esc(e.label)} — pull it for secrets / source.</div></div>`; });
+  }
+  if((d.sensitive_routes||[]).length){
+    h+=`<h5>Unlinked / sensitive routes — attack surface</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.sensitive_routes.forEach(r=>{ h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">${esc(r)}</span>`; }); h+=`</div>`;
+  }
+  if((d.endpoints||[]).length){
+    h+=`<h5>API endpoints</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.endpoints.forEach(e=>{ h+=`<span class="chip">${esc(e)}</span>`; }); h+=`</div>`;
+  }
+  if((d.versions||[]).length){
+    h+=`<h5>Leaked dependency versions</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.versions.forEach(v=>{ h+=`<span class="chip">${esc(v)}</span>`; }); h+=`</div>`;
+  }
+  if((d.cloud||[]).length){
+    h+=`<h5 style="color:var(--danger)">☁ Cloud resources referenced in code</h5><div class="chips" style="margin-bottom:.9rem">`;
+    d.cloud.forEach(cc=>{ h+=`<span class="chip" style="border-color:var(--danger);color:var(--danger)">${esc(cc.provider)}: ${esc(cc.value)}</span>`; }); h+=`</div>`;
+  }
+  if(d.graphql&&d.graphql.introspection){
+    const g=d.graphql;
+    h+=`<h5 style="color:var(--warn)">GraphQL — introspection OPEN @ <code>${esc(g.endpoint)}</code></h5><div class="chips" style="margin-bottom:.9rem">`;
+    h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">${g.type_count||0} types</span>`;
+    (g.query_fields||[]).slice(0,16).forEach(f=>{ h+=`<span class="chip">query:${esc(f)}</span>`; });
+    (g.mutation_fields||[]).slice(0,16).forEach(f=>{ h+=`<span class="chip" style="border-color:var(--warn);color:var(--warn)">mut:${esc(f)}</span>`; });
+    h+=`</div>`;
+  }
+  if((d.wasm||[]).length){
+    h+=`<h5>WebAssembly modules</h5>`;
+    d.wasm.forEach(w=>{ h+=`<div class="cr-find" style="--fc:var(--accent)"><div class="cr-fhead"><span class="cr-loc">${esc(w.module)}</span><span class="cr-tech">${w.bytes||0} bytes</span></div><div class="cr-snip">${esc((w.strings||[]).slice(0,12).join('  ·  '))}</div></div>`; });
+  }
+  if(d.logic&&(d.logic.detail||[]).length){
+    h+=`<h5>⚙ Business-logic tests to run — ${d.logic.test_count||0} hypotheses</h5>`;
+    h+=`<p class="cr-hint" style="margin:-.2rem 0 .6rem">Workflows inferred from the harvested routes → concrete abuse tests a scanner can't derive. Recon → actionable.</p>`;
+    (d.logic.detail||[]).forEach(w=>{
+      h+=`<div class="cr-find" style="--fc:var(--warn)"><div class="cr-fhead"><span class="cr-loc">${esc(w.workflow)}</span><span class="cr-tech">${(w.tests||[]).length} tests</span></div>`;
+      (w.tests||[]).slice(0,5).forEach(t=>{ h+=`<div class="cr-why"><b>${esc(t.kind)}:</b> ${esc(t.test)}</div>`; });
+      h+=`</div>`;
+    });
+  }
+  const sr=d.source_review;
+  if(sr&&sr.total){
+    h+=`<h5>Static review of reconstructed source · ${sr.total} leads</h5>`;
+    (sr.findings||[]).slice(0,25).forEach(f=>{ h+=`<div class="cr-find" style="--fc:var(--warn)"><div class="cr-fhead"><span class="cr-sev ${esc(f.severity)}">${esc(f.severity)}</span><span class="cr-loc">${esc(f.file)}:${f.line}</span><span class="cr-tech">${esc(f.technique)}</span></div><div class="cr-why">${esc(f.why)}</div></div>`; });
+  } else {
+    h+=`<p class="muted" style="font-size:.78rem;margin-top:.4rem">${(d.notes&&d.notes.length)?d.notes.map(esc).join(' · '):'No source maps served — no full-source reconstruction. The endpoints/routes above are the actionable intel.'}</p>`;
+  }
+  return h;
+}
+async function runCodeReview(){
+  const path=(document.getElementById("crPath").value||"").trim();
+  const el=document.getElementById("codereviewBody");
+  el.innerHTML=`<div class="empty"><h4>Reviewing source…</h4><p class="mono">${esc(path)}</p></div>`;
+  try{
+    const d=await(await fetch(`${API}/codereview?path=${encodeURIComponent(path)}`)).json();
+    if(d.error){el.innerHTML=`<div class="empty"><h4>Couldn't review</h4><p>${esc(d.error)}</p><p class="muted">Give a source path the agent container can read (a mounted repo, or reconstructed source).</p></div>`;return;}
+    el.innerHTML=renderCodeReview(d);
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
+}
+function renderCodeReview(d){
+  const sev=d.by_severity||{};
+  let h=`<div class="cr-bar">
+    <div class="cr-stat"><span class="v crit">${sev.critical||0}</span><span class="k">Critical</span></div>
+    <div class="cr-stat"><span class="v high">${sev.high||0}</span><span class="k">High</span></div>
+    <div class="cr-stat"><span class="v">${sev.medium||0}</span><span class="k">Medium</span></div>
+    <div class="cr-stat"><span class="v">${d.total||0}</span><span class="k">Leads</span></div>
+    <div class="cr-stat"><span class="v">${d.files_scanned||0}</span><span class="k">Files</span></div>
+    <span class="cr-git ${d.exposed_dot_git?'yes':'no'}">${d.exposed_dot_git?'⚠ .git exposed':'.git not exposed'}</span>
+  </div>`;
+  if(!(d.findings||[]).length){ h+=`<div class="empty"><h4>No leads</h4><p>Nothing matched in that tree.</p></div>`; return h; }
+  const col={critical:'var(--danger)',high:'var(--warn)',medium:'var(--border2)'};
+  (d.findings||[]).forEach(f=>{
+    h+=`<div class="cr-find" style="--fc:${col[f.severity]||'var(--border2)'}">
+      <div class="cr-fhead">
+        <span class="cr-sev ${esc(f.severity)}">${esc(f.severity)}</span>
+        <span class="cr-loc">${esc(f.file)}:${f.line}</span>
+        <span class="cr-tech" title="maps to a Taxonomy technique">${esc(f.technique)}</span>
+      </div>
+      <div class="cr-snip">${esc(f.snippet||'')}</div>
+      <div class="cr-why">${esc(f.why||'')}</div>
+      <div class="cr-conf"><b>Confirm:</b> ${esc(f.confirm||'')}</div>
+    </div>`;
+  });
+  return h;
+}
+
 function dlBackup(){if(sessionId)window.open(`${API}/backup/${sessionId}`,"_blank");}
 function copyReport(){copyText(reportMd||"","Report markdown copied.");}
 function rescanCurrent(){if(!sessionId)return alert("Load or run a mission first.");rescan(sessionId);}
@@ -1603,8 +2026,115 @@ const HELP=[
    "Load a past mission to browse its findings/report — its original run is replayed into Live Run so you can inspect the tool calls and results too. Rescan copies its scope/mode/objective into the Launch form for a brand-new child mission (the original is never changed). Load / Rescan / Delete are keyboard-accessible buttons.",
    "Example: rescan last week's run after new subdomains appeared."],
 ];
+/* ── Field Manual: the beginner → godly training that turns anyone into an operator.
+   Rendered above the per-feature cards. Plain language first, then the pro move. ── */
+const TRAINING = `
+<div class="card" style="border-left:3px solid var(--accent,#00e5ff)">
+  <h4>Apolaki Field Manual &mdash; zero to operator</h4>
+  <div class="muted" style="font-size:.84rem;line-height:1.6">
+    Apolaki drives a full recon &rarr; scan &rarr; confirm &rarr; report pipeline against targets
+    <em>you are authorized to test</em>. You do not need to know the tools. You pick a scope and a mode;
+    Apolaki runs the playbook a senior pentester would, and only reports what it can <strong>prove</strong>.
+    Read the nine sections below once and you can run a real assessment today.
+  </div>
+</div>
+
+<div class="card"><h4>1 &middot; Your first mission in 60 seconds</h4>
+  <ol style="font-size:.85rem;line-height:1.7;margin:.2rem 0 0 1.1rem">
+    <li><strong>Launch</strong> tab &rarr; <strong>Program name</strong> = anything (e.g. "My first test").</li>
+    <li><strong>In-scope</strong> = the host you may test, one per line. Non-standard port? include it: <code class="inline">juice-shop:3000</code>.</li>
+    <li><strong>Mode</strong> = <strong>Active</strong> to start (safe scanning). <strong>AI usage</strong> = <strong>Deterministic</strong> (no key needed, best detection).</li>
+    <li>Click <strong>Start Hunt</strong>. Watch <strong>Live Run</strong> narrate every step.</li>
+    <li>When it finishes, open <strong>Findings</strong>, then <strong>Reports &rarr; Open HTML / PDF</strong>. That HTML is client-ready.</li>
+  </ol>
+</div>
+
+<div class="card"><h4>2 &middot; Pick the right mode (permission) and AI usage (brains)</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.82rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Mode</th><th>What runs</th><th>Use when</th></tr>
+    <tr><td><strong>Passive</strong></td><td>Recon + playbook only, no target attacks</td><td>You only want mapping / OSINT</td></tr>
+    <tr><td><strong>Active</strong></td><td>+ scanning &amp; probing (one approval gate)</td><td>Default for real testing</td></tr>
+    <tr><td><strong>Full</strong></td><td>+ deep intrusive probing (SQLi/XSS/IDOR/XXE/SSRF)</td><td>You want maximum confirmed findings</td></tr>
+  </table></div>
+  <div class="muted" style="font-size:.82rem;margin-top:.5rem;line-height:1.6">
+    <strong>AI usage:</strong> <em>Deterministic</em> = proof-first engines, no API key, peak detection (recommended).
+    <em>Low-AI</em> adds an AI executive summary. <em>Agentic</em> adds an AI business-logic hunt (needs a key, many calls).
+    <em>Manual</em> = you drive the tools yourself. <strong>Intensity</strong> (Standard/Deep/Insane) controls how hard each tool digs.
+  </div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--sev-high,#ff8c42)"><h4>3 &middot; The one rule that makes you trustworthy: truth-first</h4>
+  <div class="muted" style="font-size:.84rem;line-height:1.65">
+    Apolaki splits results into <strong>Confirmed Findings</strong> (actively proven &mdash; a real request/response, a fired
+    payload, a browser screenshot) and <strong>Leads</strong> (a signal that still needs a human to verify). The risk score is
+    computed from <em>confirmed only</em> &mdash; leads never inflate it. When you report, <strong>submit confirmed, verify leads first.</strong>
+    This is the difference between a pro and a scanner-spammer: never claim what you did not prove.
+  </div>
+</div>
+
+<div class="card"><h4>4 &middot; How to read a finding</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    Every confirmed finding gives you: <strong>Why this matters</strong> (plain English), <strong>Technical detail</strong>,
+    <strong>Evidence</strong> (the proof), a copy-paste <strong>Reproduction</strong> (cURL or a browser step),
+    <strong>CVSS / CWE / OWASP</strong>, <strong>Remediation</strong>, and a <strong>Validation-after-fix</strong> regression test.
+    To reproduce: copy the cURL block, run it, and compare to the evidence. If it matches, it is real.
+  </div>
+</div>
+
+<div class="card"><h4>5 &middot; Vulnerability field guide &mdash; what Apolaki does, and your next move</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.79rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Class</th><th>Apolaki confirms by&hellip;</th><th>Your escalation (godly move)</th></tr>
+    <tr><td><strong>SQL injection</strong></td><td>Error-signature + boolean-diff + time-blind, baseline-checked</td><td>Use the cURL Console to UNION-extract data; try <code class="inline">' OR 1=1--</code> at logins</td></tr>
+    <tr><td><strong>XSS (reflected/DOM)</strong></td><td>Context analysis + real headless-browser execution</td><td>Swap in an <code class="inline">&lt;iframe src=javascript:&gt;</code> payload; check stored sinks</td></tr>
+    <tr><td><strong>Access control (IDOR/BOLA/BFLA)</strong></td><td>Cross-role replay + side-channel oracle</td><td>Access Check tab: register two users, request A's object as B</td></tr>
+    <tr><td><strong>Auth / JWT</strong></td><td>alg:none forge, weak-secret crack, forged-admin live test</td><td>Replay a forged token in the Workbench</td></tr>
+    <tr><td><strong>SSRF / XXE</strong></td><td>Cloud-metadata reflect + native out-of-band callback</td><td>Point the payload at an internal service you know</td></tr>
+    <tr><td><strong>Exposure / secrets</strong></td><td>Signature-confirmed .git/.env/backup + JS secret mining</td><td>Fetch the leaked file with the cURL Console; rotate + report</td></tr>
+    <tr><td><strong>Open redirect / CSRF / CORS</strong></td><td>Real navigation / token-less form / origin-reflection checks</td><td>Chain into phishing or state-change PoC</td></tr>
+  </table></div>
+  <div class="muted" style="font-size:.8rem;margin-top:.45rem">Every class links to its OWASP WSTG + PortSwigger reference inside the <strong>Playbooks</strong> tab &mdash; that is your built-in tutor.</div>
+</div>
+
+<div class="card"><h4>6 &middot; The three manual tools (this is where you feel godly)</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    <strong>cURL Console</strong> &mdash; fire one scope-guarded request and read the raw response; prefilled from any finding.<br>
+    <strong>Workbench</strong> &mdash; Repeater (replay + tweak) and Intruder (fuzz one parameter, anomaly-ranked).<br>
+    <strong>Access Check</strong> &mdash; register roles and replay one request as each to expose IDOR/BOLA/BFLA.<br>
+    Every one is scope-guarded server-side: off-scope requests are refused, so you cannot wander out of bounds.
+  </div>
+</div>
+
+<div class="card"><h4>7 &middot; Deliver the report</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    <strong>Reports</strong> tab &rarr; <strong>Open HTML / PDF</strong> (print &rarr; Save as PDF) for the client deliverable, or export
+    Markdown / CSV / JSON / PoC-Markdown. The report carries an executive summary, <strong>Risk Signals</strong>, confirmed findings
+    with proof, attack-path chains, a manual testing playbook, the tool ledger, and a report-integrity block. Hand it over as-is.
+  </div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--accent,#00e5ff)"><h4>8 &middot; The beginner &rarr; godly ladder</h4>
+  <div style="overflow-x:auto"><table style="width:100%;font-size:.8rem;border-collapse:collapse">
+    <tr style="text-align:left;color:var(--muted)"><th>Level</th><th>You can&hellip;</th></tr>
+    <tr><td><strong>1 Recruit</strong></td><td>Run an Active deterministic scan and open the HTML report.</td></tr>
+    <tr><td><strong>2 Operator</strong></td><td>Read findings, reproduce one with the cURL Console, verify a lead.</td></tr>
+    <tr><td><strong>3 Hunter</strong></td><td>Run Full mode, use Access Check for IDOR, fuzz a param in the Workbench.</td></tr>
+    <tr><td><strong>4 Specialist</strong></td><td>Follow a Playbook to manually confirm SQLi/XSS/JWT the scanner only hinted at.</td></tr>
+    <tr><td><strong>5 Godly</strong></td><td>Chain findings into an attack path, write the client report, and know exactly why every claim is true.</td></tr>
+  </table></div>
+</div>
+
+<div class="card" style="border-left:3px solid var(--sev-crit,#ff3860)"><h4>9 &middot; Rules of engagement</h4>
+  <div class="muted" style="font-size:.83rem;line-height:1.65">
+    Test <strong>only</strong> targets you are authorized to test and that are inside your program's scope. Apolaki enforces scope at
+    the tool wrapper, redacts secrets at rest, and gates intrusive tools behind an approval &mdash; but the authorization is <em>yours</em>.
+    Never test assets outside the defined scope.
+  </div>
+</div>
+
+<div class="view-head" style="margin-top:1.2rem"><h3 class="sec">Feature reference</h3><span class="muted">every tab, in one line</span></div>
+`;
 function renderHelp(){
-  document.getElementById("helpList").innerHTML=HELP.map(([t,nontech,tech,ex])=>
+  document.getElementById("helpList").innerHTML = TRAINING + HELP.map(([t,nontech,tech,ex])=>
     `<div class="card"><h4>${esc(t)}</h4>
       <div style="font-size:.86rem;margin-bottom:.4rem">${nontech}</div>
       <div class="muted" style="font-size:.82rem;line-height:1.55"><strong>Details:</strong> ${tech}</div>
@@ -1617,7 +2147,8 @@ renderHelp();
    inline onclick can only see the global scope). Belt-and-suspenders. */
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
-  delSelectedMissions,toggleAllMissions,updateMissionSel});
+  delSelectedMissions,toggleAllMissions,updateMissionSel,
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest});
 
 /* land on the Launch view */
 showView("launch");

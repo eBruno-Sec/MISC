@@ -1417,20 +1417,25 @@ def test_codereview_client_side_classes_named():
 
 def test_dom_audit_probes_and_confirmation():
     import dom_tool as dom
-    probes = dom.build_probes("https://ginandjuice.shop/blog")
+    # CSTI/redirect probes now also target the page's OWN params (e.g. category), not just
+    # a fixed name list — so a page's app-specific reflected params get template-tested.
+    probes = dom.build_probes("https://ginandjuice.shop/catalog?category=Gifts")
     classes = {p["class"] for p in probes}
     assert {"proto", "redirect", "xss", "csti"} <= classes
-    assert all(p["nav"] for p in probes) and len(probes) <= 16
+    assert all(p["nav"] for p in probes) and len(probes) <= 24
+    assert any(p["class"] == "csti" and p["src"] == "category" for p in probes)   # own-param CSTI
     # each confirmation keys on the unique canary — no false positives
     assert dom.confirmed_proto(dom.MARK) and not dom.confirmed_proto("other")
     assert dom.confirmed_redirect([f"https://{dom.EVIL}/"]) and not dom.confirmed_redirect(["https://safe/"])
     assert dom.confirmed_xss(dom.MARK) and not dom.confirmed_xss(None)
     assert dom.confirmed_csti("x 49" + dom.MARK) and not dom.confirmed_csti("{{7*7}}" + dom.MARK)
-    # builder emits a CONFIRMED, evidence-backed finding
-    f = dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=dom.MARK)
+    # builder emits a CONFIRMED, evidence-backed finding (pick a proto probe explicitly —
+    # probe order is not guaranteed since CSTI-on-own-params is now emitted first)
+    proto_probe = next(p for p in probes if p["class"] == "proto")
+    f = dom.build_finding({**proto_probe, "base": "https://t/blog"}, pp_value=dom.MARK)
     assert f["confidence"] == "confirmed" and f["family"] == "prototype_pollution" and f["evidence"]
     # a probe whose result does NOT prove the class yields nothing
-    assert dom.build_finding({**probes[0], "base": "https://t/blog"}, pp_value=None) is None
+    assert dom.build_finding({**proto_probe, "base": "https://t/blog"}, pp_value=None) is None
 
 
 def test_sca_deparam_gadget_is_a_lead():
@@ -1830,7 +1835,10 @@ def test_sca_maps_exact_version_to_cve_with_guardrail():
     vulns = dep.assess_component(comp)
     assert vulns and any("CVE-2023-26117" in v["ids"] for v in vulns)
     f = dep.vulnerable_component_finding(comp, vulns)
-    assert f["confidence"] == "confirmed" and f["severity"] == "high" and f["evidence"]
+    # SCA presence findings are capped at MEDIUM (reachability unconfirmed = not High);
+    # the upstream CVE severity is stated in the impact text.
+    assert f["confidence"] == "confirmed" and f["severity"] == "medium" and f["evidence"]
+    assert "high" in f["impact"].lower()   # upstream CVE severity still surfaced
     # GUARDRAIL: no version, or LOW confidence -> never CVE-eligible, no vulns
     assert dep.assess_component(dep.make_component("jquery", "", "x", dep.LOW)) == []
     assert dep.assess_component(dep.make_component("angular", "1.7.7", "guess", dep.LOW)) == []
@@ -2636,8 +2644,9 @@ def test_graph_neighbors_and_related_findings():
     g = graph_model.build_graph(_G_RECON, _G_URLS, _G_FINDINGS)
     hid = "host:api.example.com"
     nb = graph_model.neighbors(g, hid)
-    assert "tech:Django" in nb and any(x.startswith("ep:api.example.com") for x in nb)
-    rf = graph_model.related_findings(g, hid)          # host->endpoint->finding (2 hops)
+    # host now links to its first-level path GROUP (tree), plus its tech — not straight to every endpoint
+    assert "tech:Django" in nb and any(x.startswith(("pg:api.example.com", "ep:api.example.com")) for x in nb)
+    rf = graph_model.related_findings(g, hid)          # host -> groups -> endpoint -> finding (subtree)
     assert any("IDOR" in f["label"] for f in rf)
     # the www finding is NOT reachable from the api host
     assert not any("headers" in f["label"].lower() for f in rf)
@@ -3173,7 +3182,7 @@ def test_planner_passive_mode_stays_passive():
         for s in b:
             st["done"].add(s["key"]); tools.add(s["tool"])
     assert tools <= {"run_subfinder", "run_crtsh", "run_wayback", "run_dns", "run_asn",
-                     "run_github_recon", "generate_playbook"}
+                     "run_github_recon", "generate_playbook", "run_dork_gen"}
 
 
 def test_planner_estimate_scales_with_mode():
@@ -3656,3 +3665,480 @@ def test_estimate_endpoint():
             assert jd["estimated_ai_calls"] == 0
     finally:
         _env_restore(snap)
+
+
+# ── OPTEST 2026-07-25 regression: patches from the Juice Shop full-optest ─────────
+def test_confirmed_redirect_no_false_positive_from_fragment():
+    """APO-1: the attacker host in the probe URL's own fragment/query must NOT confirm
+    an open redirect — only a genuine navigation whose HOST is the attacker host does."""
+    import dom_tool as dom
+    E = dom.EVIL
+    # FP cases: EVIL only in fragment / query of the same-origin probe URL
+    assert dom.confirmed_redirect([f"http://target.tld/x#https://{E}/"]) is False
+    assert dom.confirmed_redirect([f"http://target.tld/?redirect=https://{E}/"]) is False
+    assert dom.confirmed_redirect(["http://target.tld/", "http://target.tld/#/https:"]) is False
+    # TP cases: the browser actually navigated to the attacker host
+    assert dom.confirmed_redirect(["http://target.tld/", f"https://{E}/"]) is True
+    assert dom.confirmed_redirect([f"https://sub.{E}/path"]) is True
+
+
+def test_extract_endpoints_mines_template_literal_api_routes():
+    """APO-2: SPA bundles write API routes as template literals with ${...}; the miner
+    must recover the REST/api surface, not just absolute quoted literals."""
+    import codereview as cr
+    js = ('a=`${this.hostServer}/rest/basket/${e}`;'
+          'b=this.hostServer+"/api/BasketItems";'
+          'c=`${h}/rest/user/security-question`;'
+          'd=`${x}/ftp/order_${id}.pdf`;')
+    eps = cr.extract_endpoints(js)
+    joined = " ".join(eps)
+    assert "/rest/basket/{id}" in joined
+    assert "/api/BasketItems" in joined
+    assert "/rest/user/security-question" in joined
+    assert any(p.startswith("/ftp") for p in eps)
+
+
+def test_risk_signals_tolerates_non_numeric_surface_values():
+    """APO (report): surface/coverage metrics may be 'n/a'/None/strings; risk_signals
+    must never raise (a 500 on the report is worse than a soft 0)."""
+    import report
+    sig = report.risk_signals(
+        findings=[{"severity": "high", "family": "sqli"}],
+        leads=[{"family": "exposure"}],
+        coverage={"surface_urls": "n/a"},
+        attack_surface={"endpoints": "n/a", "params": None, "parameterized": "12"},
+        chains=[])
+    assert isinstance(sig, list) and len(sig) == 6
+    assert all(0 <= s["pct"] <= 100 for s in sig)
+    # confirmed load reflects the one high finding
+    load = next(s for s in sig if "load" in s["label"].lower())
+    assert load["pct"] > 0
+
+
+def test_union_extraction_builders_and_parsers():
+    """Iteration 2: UNION extraction escalates a confirmed injection into proof-by-data.
+    Generic across context (closing/column count) and schema (catalogue -> users table)."""
+    import sqli_tool as sqli
+    q = sqli.union_count_probe("zz", "'))", 9)
+    assert "UNION SELECT" in q and q.count(sqli.UNION_MARK) == 9 and q.rstrip().endswith("-")
+    e = sqli.union_extract_probe("zz", "'))", 9, "(SELECT sql FROM sqlite_master)")
+    assert e.startswith("zz')) UNION SELECT (SELECT sql FROM sqlite_master)")
+    assert e.count(sqli.UNION_MARK) == 8
+    assert sqli.union_hit("...%s..." % sqli.UNION_MARK) and not sqli.union_hit("nope")
+    schema = ("CREATE TABLE `Users` (`id` INTEGER, `email` TEXT, `password` TEXT)~~"
+              "CREATE TABLE `Products` (`id` INTEGER)")
+    assert "Users" in sqli.parse_tables(schema) and "Products" in sqli.parse_tables(schema)
+    assert sqli.parse_users_table(schema) == "Users"
+    cols = sqli.parse_columns(schema, "Users")
+    assert "email" in cols and "password" in cols
+    ce = sqli.creds_expr("Users", cols)
+    assert "email" in ce and "password" in ce and "Users" in ce
+    assert sqli.parse_creds("x admin@juice-sh.op:0192023a7bbd73250516f069df18b500 y")
+    f = sqli.union_finding("http://t/rest/products/search?q=x", "q", 9, "'))",
+                           ["Users", "Products"], ["admin@a.b:0192023a7bbd7325abcd"])
+    assert f["severity"] == "critical" and f["confidence"] == "confirmed" and "union" in " ".join(f["tags"])
+    # redaction: the full hash must NOT appear in evidence
+    assert "0192023a7bbd7325abcd" not in f["evidence"]
+
+
+def test_group_findings_promotes_to_strongest_severity():
+    """Iteration 2: a merged sibling that is MORE severe (UNION extraction, critical)
+    must promote the group — a critical never hides behind a high on the same param."""
+    import report
+    fs = [
+        {"title": "SQL injection (error-based) in 'q'", "severity": "high", "family": "sqli",
+         "target": "http://t/s?q", "tags": ["sqli", "error-based"]},
+        {"title": "SQL injection (union-extraction) in 'q'", "severity": "critical", "family": "sqli",
+         "target": "http://t/s?q", "tags": ["sqli", "union-extraction"], "evidence": "DB tables: Users"},
+    ]
+    g = report.group_findings(fs)
+    assert len(g) == 1
+    assert g[0]["severity"] == "critical"
+    assert "union-extraction" in g[0]["title"]
+    tags = " ".join(g[0]["tags"])
+    assert "union-extraction" in tags and "error-based" in tags
+
+
+# ── Capability expansion (2026-07): deterministic tests ──────────────────────────
+def test_dork_generation_is_scoped_and_offline():
+    import dorks
+    d = dorks.generate("juice-sh.op")
+    assert d["target"] == "juice-sh.op" and len(d["flat"]) > 15
+    # every query is scoped to the authorized host (site: operator) — no bare web queries
+    assert all("juice-sh.op" in q for q in d["flat"])
+    # URL / scheme / port / wildcard are normalised to a bare host
+    assert dorks.generate("https://JUICE-sh.op:3000/x")["target"] == "juice-sh.op"
+    assert dorks.generate("*.juice-sh.op")["target"] == "juice-sh.op"
+    # junk input yields nothing (no network, no crash)
+    assert dorks.generate("not a host!!")["flat"] == []
+    assert "site:" in dorks.as_markdown("juice-sh.op")
+
+
+def test_offline_hash_identification():
+    import hashid_tool as h
+    assert any(c["name"] == "MD5" for c in h.identify("0192023a7bbd73250516f069df18b500"))
+    assert any(c["name"] == "SHA-1" for c in h.identify("a" * 40))
+    assert any(c["name"] == "SHA-256" for c in h.identify("a" * 64))
+    assert any(c["name"] == "bcrypt" for c in h.identify("$2b$10$" + "x" * 53))
+    assert any("JWT" in c["name"] for c in h.identify("eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.sig"))
+    assert h.identify("short") == [] and h.identify("has space in it") == []
+    # crack command builders are arg arrays with NO shell metacharacters
+    hc = h.hashcat_cmd("/tmp/h", "/tmp/w", "0")
+    assert hc[0] == "hashcat" and "-m" in hc and all(";" not in a and "|" not in a for a in hc)
+    assert h.john_cmd("/tmp/h", "/tmp/w")[0] == "john"
+
+
+def test_sourcemap_parse_and_analyze():
+    import sourcemap_tool as sm
+    smjson = ('{"version":3,"sources":["webpack:///./src/app/admin/secret.ts",'
+              '"webpack:///./node_modules/x.js"],"sourcesContent":'
+              '["const API=\\"/rest/admin/secret\\"; const featureFlags={beta:true};"],"mappings":"AAAA"}')
+    a = sm.analyze(sm.parse(smjson))
+    assert a["sources"] == ["webpack:///./src/app/admin/secret.ts"]      # node_modules dropped
+    assert "featureFlags" in a["feature_flags"]
+    assert "/rest/admin/secret" in a["endpoints"]
+    # candidate map URL resolution
+    assert "https://t/main.js.map" in sm.candidate_map_urls("https://t/main.js")
+    # non-sourcemap input is handled without raising
+    assert sm.parse("not json")["sources"] == []
+
+
+def test_seclists_graceful_fallback():
+    import wordlists as wl
+    # native lists always present regardless of SecLists availability
+    assert wl.get_words("content-common")
+    # unknown / unavailable seclists id returns [] (never raises)
+    assert wl.get_words("seclists:does-not-exist") == []
+    # catalog always includes the native curated lists
+    ids = {e["id"] for e in wl.catalog()}
+    assert "content-common" in ids and "params-common" in ids
+
+
+def test_native_metadata_extraction():
+    import upload_tool
+    pdf = b"%PDF-1.4\n/Author (Jane Doe) /Producer (SecretTool 1.2) trailer"
+    meta = upload_tool.extract_metadata(pdf)
+    assert meta.get("PDF:Author") == "Jane Doe" and meta.get("PDF:Producer") == "SecretTool 1.2"
+    xmp = (b"\xff\xd8" + b"<x:xmpmeta><exif:GPSLatitude>12.34</exif:GPSLatitude>"
+           b"<tiff:Model>Pixel 7</tiff:Model></x:xmpmeta>")
+    m2 = upload_tool.extract_metadata(xmp)
+    assert m2.get("GPSLatitude") == "12.34" and m2.get("Model") == "Pixel 7"
+    assert upload_tool.extract_metadata(b"") == {}
+
+
+def test_new_optional_binaries_and_permissions():
+    import tools
+    from scope import PermissionLevel
+    # PASSIVE/ACTIVE/INTRUSIVE classifications preserved for the new tools
+    assert tools.TOOL_PERMISSIONS["run_dork_gen"] == PermissionLevel.PASSIVE
+    assert tools.TOOL_PERMISSIONS["run_hash_id"] == PermissionLevel.PASSIVE
+    assert tools.TOOL_PERMISSIONS["run_sourcemap"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["run_metadata"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["run_ferox"] == PermissionLevel.INTRUSIVE
+    assert tools.TOOL_PERMISSIONS["run_hash_crack"] == PermissionLevel.INTRUSIVE
+    # every new tool has a spec and a transport method
+    specs = {s["name"] for s in tools.CLAUDE_TOOLS}
+    for t in ("run_dork_gen", "run_hash_id", "run_sourcemap", "run_metadata", "run_hash_crack",
+              "run_ferox", "run_dirsearch", "run_gobuster", "run_nosqlmap"):
+        assert t in specs and hasattr(tools.ToolRegistry, "_" + t)
+
+
+def test_dir_harvest_listing_and_nullbyte():
+    """Iteration 3: browsable-directory harvest + poison-null-byte bypass (general)."""
+    import exposure_tool as exp
+    html = ('<a href="ftp/acquisitions.md">x</a><a href="ftp/legal.md">y</a>'
+            '<a href="ftp/package.json.bak">z</a><a href="../">up</a><a href="http://ext/e">e</a>')
+    assert exp.looks_like_listing(html)
+    files = exp.parse_listing(html)
+    assert "ftp/acquisitions.md" in files and "ftp/package.json.bak" in files
+    assert not any(f.startswith(("http", "..")) for f in files)   # external / traversal dropped
+    # null-byte variants append an allowlisted extension after an encoded null byte
+    variants = exp.nullbyte_variants("ftp/coupons.md.bak")
+    assert "ftp/coupons.md.bak%2500.md" in variants and "ftp/coupons.md.bak%00.md" in variants
+    assert exp.is_harvestable("x/secret.bak") and not exp.is_harvestable("x/logo.png")
+    # finding is confirmed + flags the bypass technique
+    f = exp.harvest_finding("http://t/ftp/x.bak%2500.md", "ftp/x.bak", True, "confidential data")
+    assert f["severity"] == "high" and f["confidence"] == "confirmed"
+    assert "poison-null-byte" in f["tags"] and f["cwe"] == "CWE-552"
+
+
+def test_dir_harvest_registered_intrusive():
+    import tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["run_dir_harvest"] == PermissionLevel.INTRUSIVE
+    assert any(s["name"] == "run_dir_harvest" for s in tools.CLAUDE_TOOLS)
+    assert hasattr(tools.ToolRegistry, "_run_dir_harvest")
+
+
+def test_llm_investigative_primitives_registered_and_classed():
+    import tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["http_read"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["http_diff"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["http_request"] == PermissionLevel.INTRUSIVE  # gated
+    specs = {s["name"] for s in tools.CLAUDE_TOOLS}
+    for t in ("http_read", "http_diff", "http_request"):
+        assert t in specs and hasattr(tools.ToolRegistry, "_" + t)
+
+
+def test_investigative_primitives_scope_and_method_guards():
+    import asyncio, json, tools
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    async def go():
+        # off-scope is refused BEFORE any network call (deny-overrides-allow preserved)
+        r = await reg._http_read({"url": "http://evil.example/x"})
+        assert r.error and "SCOPE" in r.error
+        r2 = await reg._http_request({"method": "POST", "url": "http://evil.example/x"})
+        assert r2.error and "SCOPE" in r2.error
+        # http_read refuses state-changing methods (that is http_request's job, gated)
+        r3 = await reg._http_read({"method": "POST", "url": "http://target.tld/x"})
+        assert r3.error and "read-only" in r3.error
+        # http_diff refuses write methods too
+        r4 = await reg._http_diff({"a": {"url": "http://target.tld/a", "method": "DELETE"},
+                                   "b": {"url": "http://target.tld/b"}})
+        assert r4.error
+    asyncio.run(go())
+
+
+def test_http_response_shaping_redacts_and_caps():
+    import tools
+    import scope as scope_mod
+    reg = tools.ToolRegistry(scope_mod.ScopeEngine(), lab_mode=True)
+
+    class _R:
+        status_code = 200
+        text = "A" * 9000
+        headers = type("H", (), {"items": lambda self: [("Set-Cookie", "token=SECRET"),
+                                                        ("Content-Type", "text/html")]})()
+    view = reg._shape_response(_R(), 0.012)
+    assert view["headers"]["Set-Cookie"] == "<redacted>"      # secret headers hidden from the model
+    assert len(view["body"]) <= reg._RESP_CAP and view["truncated"] is True
+    assert view["status"] == 200 and view["length"] == 9000
+
+
+def test_idor_oracle_and_enumeration_registered_and_guarded():
+    import asyncio, json, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["confirm_idor"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["enumerate_ids"] == PermissionLevel.INTRUSIVE  # gated
+    specs = {s["name"] for s in tools.CLAUDE_TOOLS}
+    assert {"confirm_idor", "enumerate_ids"} <= specs
+    assert hasattr(tools.ToolRegistry, "_confirm_idor") and hasattr(tools.ToolRegistry, "_run_enumerate_ids")
+
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    async def go():
+        # off-scope refused (deny-overrides-allow preserved on the new primitives)
+        r = await reg._confirm_idor({"owned_url": "http://evil.example/1", "target_url": "http://evil.example/2"})
+        assert r.error and "SCOPE" in r.error
+        r2 = await reg._run_enumerate_ids({"url_template": "http://evil.example/{id}"})
+        assert r2.error and "SCOPE" in r2.error
+        # enumerate_ids requires a template hole
+        r3 = await reg._run_enumerate_ids({"url_template": "http://target.tld/no-hole"})
+        assert r3.error and "{id}" in r3.error
+        # confirm_idor needs both urls
+        r4 = await reg._confirm_idor({"owned_url": "http://target.tld/1"})
+        assert r4.error
+    asyncio.run(go())
+
+
+def test_acquire_session_registration_guards_and_injection():
+    import asyncio, json, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["acquire_session"] == PermissionLevel.ACTIVE
+    assert any(s["name"] == "acquire_session" for s in tools.CLAUDE_TOOLS)
+    assert hasattr(tools.ToolRegistry, "_acquire_session")
+
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+    # named-session injection: token stored server-side, merged into request headers
+    reg._sessions["victim"] = {"Authorization": "Bearer SECRETTOK"}
+    h = reg._resolve_headers({"session": "victim", "headers": {"X-Extra": "1"}})
+    assert h["Authorization"] == "Bearer SECRETTOK" and h["X-Extra"] == "1"
+    # unknown session name is simply ignored (no crash)
+    assert "Authorization" not in reg._resolve_headers({"session": "nope"})
+
+    async def go():
+        # anti-brute-force: hard cap, refuses to iterate credentials (no network reached)
+        reg._login_attempts = 8
+        r = await reg._acquire_session({"login_url": "http://target.tld/login", "password": "x"})
+        assert r.error and "cap" in r.error
+        # off-scope login refused
+        reg._login_attempts = 0
+        r2 = await reg._acquire_session({"login_url": "http://evil.example/login", "password": "x"})
+        assert r2.error and "SCOPE" in r2.error
+    asyncio.run(go())
+
+
+def test_browser_navigate_registered_and_scope_guarded():
+    import asyncio, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["browser_navigate"] == PermissionLevel.ACTIVE
+    assert any(s["name"] == "browser_navigate" for s in tools.CLAUDE_TOOLS)
+    assert hasattr(tools.ToolRegistry, "_browser_navigate")
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    async def go():
+        r = await reg._browser_navigate({"url": "http://evil.example/x"})
+        assert r.error and ("SCOPE" in r.error or "unavailable" in r.error)
+    asyncio.run(go())
+
+
+def test_numeric_abuse_registered_and_guarded():
+    import asyncio, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["test_numeric_abuse"] == PermissionLevel.INTRUSIVE
+    assert any(s["name"] == "test_numeric_abuse" for s in tools.CLAUDE_TOOLS)
+    assert hasattr(tools.ToolRegistry, "_test_numeric_abuse")
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    async def go():
+        r = await reg._test_numeric_abuse({"url": "http://evil.example/x", "param": "quantity"})
+        assert r.error and "SCOPE" in r.error
+        r2 = await reg._test_numeric_abuse({"url": "http://target.tld/x"})   # missing param
+        assert r2.error
+    asyncio.run(go())
+
+
+def test_store_finding_demotes_unevidenced_access_control():
+    import asyncio, tools
+    import scope as scope_mod
+    reg = tools.ToolRegistry(scope_mod.ScopeEngine(), lab_mode=True)  # no mission_id -> no db write
+
+    async def go():
+        # IDOR claimed confirmed WITHOUT evidence -> demoted to lead
+        r = await reg._store_finding({"title": "IDOR", "family": "idor", "confidence": "confirmed",
+                                      "severity": "high", "target": "http://t/1"})
+        assert r.findings[0]["confidence"] == "lead"
+        # IDOR WITH evidence + repro -> stays confirmed
+        r2 = await reg._store_finding({"title": "IDOR", "family": "idor", "confidence": "confirmed",
+                                       "severity": "high", "target": "http://t/1",
+                                       "evidence": "owned 200 / target 200 distinct", "reproduction_steps": ["GET /1", "GET /2"]})
+        assert r2.findings[0]["confidence"] == "confirmed"
+        # non-oracle class (sqli) is untouched
+        r3 = await reg._store_finding({"title": "SQLi", "family": "sqli", "confidence": "confirmed", "target": "http://t"})
+        assert r3.findings[0]["confidence"] == "confirmed"
+    asyncio.run(go())
+
+
+def test_confirm_idor_requires_two_identities_to_confirm():
+    """Audit #7 fix: two distinct 200s under ONE identity is only a lead; a CONFIRMED
+    IDOR requires the attacker (a different identity) reading the SAME object as the owner."""
+    import asyncio, json, tools
+    import scope as scope_mod
+    sc = scope_mod.ScopeEngine(); sc.load_manual(["target.tld"], [], "t")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+    reg._sessions["owner"] = {"Authorization": "Bearer O"}
+    reg._sessions["attacker"] = {"Authorization": "Bearer A"}
+
+    class _R:
+        def __init__(s, status, text):
+            s.status_code, s.text = status, text
+            s.headers = type("H", (), {"items": lambda self: []})()
+
+    async def go():
+        # two identities both read the SAME victim object -> CONFIRMED
+        async def same_object(method, url, headers, body, follow):
+            return _R(200, "victim basket: apples, juice, x"), 0.01
+        reg._http_send = same_object
+        r = await reg._confirm_idor({"target_url": "http://target.tld/basket/2",
+                                     "owner_session": "owner", "attacker_session": "attacker"})
+        d = json.loads(r.output)
+        assert d["confirmed"] is True and r.findings and r.findings[0]["confidence"] == "confirmed"
+
+        # single identity, two DISTINCT objects -> never confirmed, lead at most (over-confirm fix)
+        async def distinct(method, url, headers, body, follow):
+            if "99999999" in url:
+                return _R(404, "not found"), 0.01
+            return _R(200, "objA" if url.endswith("/1") else "objB-different"), 0.01
+        reg._http_send = distinct
+        r2 = await reg._confirm_idor({"owned_url": "http://target.tld/basket/1",
+                                      "target_url": "http://target.tld/basket/2", "session": "owner"})
+        d2 = json.loads(r2.output)
+        assert d2["confirmed"] is False
+        assert all(f.get("confidence") != "confirmed" for f in (r2.findings or []))
+
+        # two identities but attacker gets a DIFFERENT object (their own) -> not confirmed
+        async def per_identity(method, url, headers, body, follow):
+            who = "O" if headers.get("Authorization") == "Bearer O" else "A"
+            return _R(200, "owner-object" if who == "O" else "attacker-own-object"), 0.01
+        reg._http_send = per_identity
+        r3 = await reg._confirm_idor({"target_url": "http://target.tld/basket/2",
+                                      "owner_session": "owner", "attacker_session": "attacker"})
+        assert json.loads(r3.output)["confirmed"] is False
+    asyncio.run(go())
+
+
+def test_investigation_state_and_capability_graph():
+    import investigation as inv
+    s = inv.InvestigationState()
+    s.add_identity("admin", {"auth_type": "bearer", "identity": "admin@x", "is_admin": True})
+    assert s.has(inv.Capability.SESSION_ACQUIRED) and s.has(inv.Capability.ADMIN_SESSION)
+    s.add_capability(inv.Capability.DATABASE_READ, "union dump")
+    d = s.to_dict()
+    caps = [c["capability"] for c in d["capabilities"]]
+    assert "database_read" in caps and "admin_session" in caps
+    assert any(h["chase"] == "password_hash_obtained" for h in d["chaining_hints"])  # DB_READ -> hash
+    s.set_var("bid", "42"); assert s.get_var("bid") == "42"
+
+
+def test_mission_state_tool_and_registry_wiring():
+    import tools
+    from scope import PermissionLevel
+    import scope as scope_mod
+    assert tools.TOOL_PERMISSIONS["mission_state"] == PermissionLevel.PASSIVE
+    assert any(x["name"] == "mission_state" for x in tools.CLAUDE_TOOLS)
+    reg = tools.ToolRegistry(scope_mod.ScopeEngine(), lab_mode=True)
+    assert hasattr(reg, "state") and hasattr(reg, "_mission_state")
+
+
+def test_workflow_extractors_subst_and_registration():
+    import json as _j, workflow as wf, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["run_workflow"] == PermissionLevel.INTRUSIVE
+    assert any(s["name"] == "run_workflow" for s in tools.CLAUDE_TOOLS)
+    # variable substitution
+    assert wf._subst({"url": "/basket/{bid}"}, {"bid": "42"})["url"] == "/basket/42"
+    # jsonpath-lite (safe traversal)
+    assert wf._jsonpath_lite({"data": [{"id": 7}]}, "$.data[0].id") == 7
+    # extractors: json path + regex over the response body
+    g = wf._extract(_j.dumps({"body": '{"authentication":{"token":"abc"}}'}), {}, {"t": "$.authentication.token"})
+    assert g["t"] == "abc"
+    g2 = wf._extract(_j.dumps({"body": "user id=99 here"}), {}, {"n": {"regex": r"id=(\d+)"}})
+    assert g2["n"] == "99"
+
+
+def test_technique_packs_registered_and_shaped():
+    import packs, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["list_workflows"] == PermissionLevel.PASSIVE
+    assert any(s["name"] == "list_workflows" for s in tools.CLAUDE_TOOLS)
+    ids = {p["id"] for p in packs.list_packs()}
+    assert {"idor_read", "bfla_privileged_action", "price_quantity_tamper", "object_id_sweep"} <= ids
+    p = packs.get("idor_read")
+    assert p["assert"]["field"] == "confirmed" and "victim_email" in p["inputs_required"]
+    assert packs.get("nonexistent") is None
+
+
+def test_labs_benchmark_and_browser_promote_registration():
+    import labs, tools
+    from scope import PermissionLevel
+    assert tools.TOOL_PERMISSIONS["benchmark_lab"] == PermissionLevel.ACTIVE
+    assert any(s["name"] == "benchmark_lab" for s in tools.CLAUDE_TOOLS)
+    assert "juiceshop" in labs.list_labs()
+    assert labs.detect("<title>OWASP Juice Shop</title>") == "juiceshop"
+    assert labs.detect("plain page") is None
+    assert "error" in labs.benchmark("nonexistent", "http://x")
+    # browser_navigate advertises promote_session
+    spec = next(s for s in tools.CLAUDE_TOOLS if s["name"] == "browser_navigate")
+    assert "promote_session" in spec["input_schema"]["properties"]

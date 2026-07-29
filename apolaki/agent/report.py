@@ -6,6 +6,7 @@ deterministic; no network.
 """
 import csv
 import html as _html
+import re
 import io
 import json
 from datetime import datetime, timezone
@@ -74,7 +75,7 @@ def _leads_md(leads: list) -> str:
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
                      ai_summary: str = None, execution: dict = None, leads: list = None,
-                     delta: dict = None, tool_ledger: dict = None) -> str:
+                     delta: dict = None, tool_ledger: dict = None, intel: dict = None) -> str:
     now = _now()
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
@@ -192,6 +193,31 @@ def generate_report(program: str, findings: list, scope: dict,
         lines += ["", delta_block]
     if ledger_block:
         lines += ["", ledger_block]
+    # Target Intelligence — what the target itself leaked (harvested from its own surface),
+    # the raw material a general technique consumes as fixtures. Noisy 'encoded' bucket omitted.
+    if intel and (intel.get("candidates") or {}):
+        _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
+                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("hint", "Hints")]
+        _cand = intel.get("candidates", {})
+        _ilines = []
+        for _k, _lbl in _SHOW:
+            _vals = _cand.get(_k) or []
+            if not _vals:
+                continue
+            _shown = ", ".join("`" + str(v) + "`" for v in _vals[:12])
+            _more = len(_vals) - 12
+            if _more > 0:
+                _shown += " _(+" + str(_more) + " more)_"
+            _ilines.append("- **" + _lbl + "** (" + str(len(_vals)) + "): " + _shown)
+        if _ilines:
+            lines += ["", "## Target Intelligence", "",
+                      "_Candidates harvested from the target's own surface (DOM, JS, source maps, API "
+                      "responses) — the clues the target leaks, and the raw material a general technique "
+                      "consumes as run-time fixtures. Derived live from the target, not hardcoded. "
+                      "Secrets redacted._", ""]
+            lines += _ilines
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
@@ -277,6 +303,11 @@ _BIZ = {
                             "On its own it corrupts client-side logic; chained with a suitable sink it becomes DOM "
                             "XSS — attacker script running in your customers' browsers (session theft, account "
                             "takeover)."),
+    "csti": ("The page's client-side template engine (AngularJS) evaluates attacker text from a link as code in "
+             "the visitor's browser — it runs JavaScript, it does NOT run code on your server.",
+             "From a crafted link on your real domain, an attacker's script runs in a victim's browser: stealing "
+             "session cookies, taking over the account, capturing typed data, or driving convincing phishing. "
+             "Impact is client-side (the same class as XSS); the server itself is not compromised by this bug."),
 }
 # CWE -> family, so a finding with a CWE but no recognised family still gets text.
 _CWE_FAMILY = {
@@ -365,6 +396,9 @@ _FAMILY_FIX = {
     "open_redirect": "Validate redirect targets against an allowlist of internal paths; never redirect to a "
                      "user-supplied absolute URL, and strip //, /\\ and scheme tricks.",
     "ssti": "Never render user input as a template; pass it as data to a sandboxed, auto-escaping engine.",
+    "csti": "Never place untrusted input where a client-side template engine will evaluate it. Bind user data as "
+            "text (Angular {{ }} interpolation of a scope value / ng-bind), not by concatenating it into the "
+            "template; upgrade off the end-of-life AngularJS 1.x sandbox and add a strict Content-Security-Policy.",
     "deserialization": "Do not deserialise untrusted data; use a data-only format (JSON) with a strict schema, "
                        "or signed/allowlisted types.",
     "takeover": "Remove the dangling DNS record or reclaim the third-party resource; monitor for unclaimed CNAMEs.",
@@ -394,6 +428,45 @@ def remediation_line(finding: dict) -> str:
     return "Validate and neutralise the untrusted input at this sink, and add a regression test."
 
 
+# ── per-family "Validation After Fix" (how to prove the fix worked + a regression test) ──
+_FAMILY_VALIDATION = {
+    "sqli": "Re-send the confirming payloads (single quote, then the UNION metadata request). PASS = a normal 200 "
+            "with the ordinary result set, no DB error, and no version/user/schema echoed back. Add an automated "
+            "test that asserts the parameter is bound (parameterised) and that a quote yields no SQL error.",
+    "xxe": "Re-send the external-entity XML body against the endpoint. PASS = the parser rejects the DOCTYPE/entity "
+           "(fast error, no outbound fetch) and the baseline-vs-payload timing delta collapses to ~0s. Add a test "
+           "posting a SYSTEM-entity body and asserting it is refused.",
+    "csti": "Reload the crafted URL in a browser after the fix. PASS = the DOM shows the literal text {{7*7}} (or the "
+            "value bound as inert text), NOT 49. Add an end-to-end (Playwright/Cypress) test asserting the marker is "
+            "not evaluated for that parameter.",
+    "crlf": "Replay the request with encoded CR/LF (%0d%0a) in the parameter. PASS = the injected header/line does "
+            "NOT appear in the response headers. Add a test asserting CR/LF are stripped or rejected before any "
+            "header write.",
+    "prototype_pollution": "Reload the crafted URL and read Object.prototype in the console. PASS = the injected "
+                           "marker property is absent (undefined). Add a browser test asserting the gadget no longer "
+                           "writes to the prototype.",
+    "open_redirect": "Reload the crafted URL in a browser. PASS = the browser stays on-site (or shows a blocked-"
+                     "redirect notice) instead of navigating to the attacker host. Add a test asserting only "
+                     "allowlisted internal targets are honoured.",
+    "vulnerable_component": "After upgrading/removing the library, re-fingerprint the page. PASS = the vulnerable "
+                            "version string is gone and SCA reports no known CVEs for the shipped version. Add the "
+                            "version assertion to CI.",
+    "xss": "Replay the payload and load the page in a browser. PASS = the payload renders as inert text and no "
+           "script/alert executes. Add a test asserting the output is context-encoded at this sink.",
+}
+
+
+def validation_line(finding: dict) -> str:
+    """How to PROVE the fix worked, plus the regression test to keep it fixed. Explicit
+    field first, then the family map, else a safe generic tied to the reproduction."""
+    v = str(finding.get("validation") or finding.get("regression_test") or "").strip()
+    if v:
+        return v
+    return _FAMILY_VALIDATION.get(_family_of(finding),
+                                  "Re-run the exact reproduction above and confirm the confirming condition no "
+                                  "longer occurs; then add an automated regression test for this input at this sink.")
+
+
 # ── estimated CVSS v3.1 per family (clearly labelled 'estimated' in the report) ──
 # base-class estimates, NOT authoritative scoring — they orient triage; a real
 # assessor should refine per exploitability. Kept deterministic (no invention beyond
@@ -414,10 +487,39 @@ _FAMILY_CVSS = {
     "idor": (6.5, "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"),
     "csrf": (6.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N"),
     "xss": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
-    "crlf": (6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+    "csti": (8.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"),
+    "crlf": (7.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N"),
+    "prototype_pollution": (7.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N"),
     "cors": (5.4, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"),
     "open_redirect": (4.7, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N"),
 }
+
+
+# Canonical OWASP Top-10 (2021) category per finding family. Authoritative at render so a
+# tool that mis-tagged (e.g. a vulnerable component as A03 Injection) is corrected centrally.
+_OWASP_BY_FAMILY = {
+    "sqli": "A03:2021 Injection", "xss": "A03:2021 Injection", "csti": "A03:2021 Injection",
+    "ssti": "A03:2021 Injection", "crlf": "A03:2021 Injection", "cmdi": "A03:2021 Injection",
+    "nosqli": "A03:2021 Injection", "code_injection": "A03:2021 Injection",
+    "idor": "A01:2021 Broken Access Control", "bola": "A01:2021 Broken Access Control",
+    "bfla": "A01:2021 Broken Access Control", "access_control": "A01:2021 Broken Access Control",
+    "broken_access": "A01:2021 Broken Access Control", "open_redirect": "A01:2021 Broken Access Control",
+    "csrf": "A01:2021 Broken Access Control", "traversal": "A01:2021 Broken Access Control",
+    "ssrf": "A10:2021 Server-Side Request Forgery", "xxe": "A05:2021 Security Misconfiguration",
+    "prototype_pollution": "A08:2021 Software and Data Integrity Failures",
+    "deserialization": "A08:2021 Software and Data Integrity Failures",
+    "vulnerable_component": "A06:2021 Vulnerable and Outdated Components",
+    "backup_exposure": "A05:2021 Security Misconfiguration", "git_exposure": "A05:2021 Security Misconfiguration",
+    "config_exposure": "A05:2021 Security Misconfiguration", "info_disclosure": "A05:2021 Security Misconfiguration",
+    "credential_exposure": "A07:2021 Identification and Authentication Failures",
+    "jwt": "A07:2021 Identification and Authentication Failures", "auth": "A07:2021 Identification and Authentication Failures",
+    "business_logic": "A04:2021 Insecure Design",
+}
+
+
+def _owasp_of(f: dict) -> str:
+    """Corrected OWASP category: canonical family map wins over a tool-supplied tag."""
+    return _OWASP_BY_FAMILY.get(_family_of(f), str(f.get("owasp") or ""))
 
 
 def estimated_cvss(finding: dict):
@@ -530,6 +632,28 @@ def group_findings(findings: list) -> list:
         tgt = f.get("target") or f.get("surface") or ""
         if tgt and tgt not in g["instances"]:
             g["instances"].append(tgt)
+        # The representative must reflect the STRONGEST proven finding in the group. When a
+        # merged sibling is more severe (e.g. a UNION data-extraction that outranks the
+        # error-based signal on the same parameter), promote its severity and proof fields
+        # onto the representative — a critical must never hide behind a high just because it
+        # was appended second. Accumulated instances / screenshots are preserved.
+        if (SEV_ORDER.get((f.get("severity") or "info").lower(), 9)
+                < SEV_ORDER.get((g.get("severity") or "info").lower(), 9)):
+            _tags = list(dict.fromkeys((g.get("tags") or []) + (f.get("tags") or [])))
+            for _k in ("severity", "title", "description", "evidence", "impact",
+                       "reproduction_steps", "cwe", "capec", "owasp", "extracted_tables"):
+                if f.get(_k) is not None:
+                    g[_k] = f[_k]
+            g["tags"] = _tags
+        # carry the strongest browser PoC from ANY instance onto the representative, so
+        # dedup never discards a screenshot / DOM snippet that a sibling captured. Prefer the
+        # LARGEST screenshot: a blank/near-white page compresses to a few KB, so the biggest
+        # base64 is the one with real page content (never let a blank-first instance win).
+        _sh = f.get("screenshot") or ""
+        if _sh and len(_sh) > len(g.get("screenshot") or ""):
+            g["screenshot"] = _sh
+        if not g.get("dom_snippet") and f.get("dom_snippet"):
+            g["dom_snippet"] = f["dom_snippet"]
     return [groups[k] for k in order]
 
 
@@ -571,6 +695,140 @@ def risk_score(findings: list) -> dict:
     return {"score": score, "label": label, "color": color,
             "note": "Score = weighted sum of confirmed findings (critical 40 / high 25 / medium 10 / "
                     "low 3), capped at 100; label capped at the highest confirmed severity."}
+
+
+def risk_signals(findings: list, leads: list, coverage: dict, attack_surface: dict,
+                 chains: list) -> list:
+    """Multi-axis risk SIGNALS for the executive view (absorbed from the reference
+    dashboards) — but truth-first: these are descriptive signals about the engagement,
+    NOT the risk score. The single confirmed-only score in risk_score() remains the
+    authoritative posture; a target with zero confirmed findings never reads 'critical'
+    here no matter how large its surface. Every signal states the factual basis it is
+    computed from, so nothing is a black box. Returns [{label,pct,basis}]."""
+    coverage = coverage or {}
+    attack_surface = attack_surface or {}
+    leads = leads or []
+    chains = chains or []
+
+    def _num(v):
+        # Surface/coverage metrics can be 'n/a', None, or a formatted string — coerce
+        # anything non-numeric to 0 so a descriptive placeholder never 500s the report.
+        try:
+            return int(float(str(v).strip()))
+        except (TypeError, ValueError):
+            return 0
+    endpoints = _num(attack_surface.get("endpoints", 0))
+    params = _num(attack_surface.get("params", 0))
+    parameterized = _num(attack_surface.get("parameterized", 0))
+    probed = _num(coverage.get("surface_urls", 0)) or endpoints
+    exposure = sum(1 for x in (findings + leads)
+                   if any(k in ((x.get("family") or "") + " " + " ".join(x.get("tags") or [])).lower()
+                          for k in ("exposure", "secret", "disclosure", "backup", "sensitive")))
+    conf_load = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in findings))
+    sig = [
+        {"label": "Confirmed vulnerability load", "pct": conf_load,
+         "basis": f"{len(findings)} confirmed finding(s), severity-weighted"},
+        {"label": "Attack surface", "pct": min(100, round(endpoints * 1.5 + params * 2)),
+         "basis": f"{endpoints} endpoint(s), {params} unique parameter(s) mapped"},
+        {"label": "Injectable surface", "pct": (round(100 * parameterized / endpoints) if endpoints else 0),
+         "basis": f"{parameterized} of {endpoints} endpoint(s) accept input (injection candidates)"},
+        {"label": "Information exposure", "pct": min(100, exposure * 20),
+         "basis": f"{exposure} exposure signal(s) — secrets / backups / disclosure"},
+        {"label": "Attack-chain potential", "pct": min(100, len(chains) * 34),
+         "basis": f"{len(chains)} multi-step attack path(s) identified"},
+        {"label": "Leads awaiting verification", "pct": min(100, len(leads) * 7),
+         "basis": f"{len(leads)} advisory lead(s) not yet confirmed"},
+    ]
+    return sig
+
+
+# ── Coverage Engine: the honest INVERSE of coverage ─────────────────────────
+def coverage_gaps(mode=None, execution=None, tool_ledger=None, authenticated=None) -> list:
+    """Whole test areas that could NOT be exercised this run, each with the concrete reason — so a
+    reader knows the report's boundaries (absence of a finding in a gap area is NOT proof of safety).
+    Returns [[area, reason_tag, explanation], ...]. Deterministic."""
+    gaps = []
+    m = (mode or "").lower()
+    strat = ((execution or {}).get("strategy") or "").lower()
+    led = tool_ledger if isinstance(tool_ledger, dict) else {}
+    if authenticated is not True:
+        gaps.append(["Authenticated attack surface", "no credentials supplied",
+                     "Authenticated flows — role-based access, per-user objects (IDOR/BOLA) and admin "
+                     "functions (BFLA) behind login — were not exercised. Supply a test account to cover them."])
+    if m and m != "full":
+        gaps.append(["Intrusive / deep DAST", "not run in Full mode",
+                     "The intrusive active scanners (ZAP thorough-active, nmap NSE vuln scripts, the heavy "
+                     "nuclei template set) only run in Full mode; this assessment did not include them."])
+    if strat in ("deterministic", "manual", ""):
+        gaps.append(["AI business-logic hunt", "proof-first (no-AI) run",
+                     "The optional AI-driven business-logic reasoning pass was not performed. It is an "
+                     "enhancement layer on the deterministic floor, not a detector — no CONFIRMED finding "
+                     "is lost by skipping it."])
+    gaps.append(["Fully-rendered browser behaviour", "request-level coverage",
+                 "Issues that only surface in a real rendered browser (some DOM XSS, SPA client-side "
+                 "routing/state) are only partially covered by request-level testing."])
+    for t in (led.get("tools") or []):
+        if not isinstance(t, dict):
+            continue
+        st = str(t.get("status") or "").lower()
+        if st in ("error", "failed", "unavailable", "timeout", "skipped", "not-run"):
+            gaps.append([str(t.get("tool", "tool")), st,
+                         "This tool did not complete, so its coverage area may be incomplete."])
+    return gaps
+
+
+# ── Root-Cause inference: group findings by architectural weakness, not symptom ──
+_ROOT_CAUSE = {
+    "idor": "Broken object-level authorization", "bfla": "Broken function-level authorization",
+    "mass_assignment": "Broken object-level authorization", "access_control": "Broken authorization",
+    "sqli": "Unsafe handling of untrusted input (injection)", "nosqli": "Unsafe handling of untrusted input (injection)",
+    "cmdi": "Unsafe handling of untrusted input (injection)", "ssti": "Unsafe handling of untrusted input (injection)",
+    "xxe": "Unsafe handling of untrusted input (injection)", "crlf": "Unsafe handling of untrusted input (injection)",
+    "command_injection": "Unsafe handling of untrusted input (injection)",
+    "xss": "Output not neutralised before rendering (XSS)", "csti": "Output not neutralised before rendering (XSS)",
+    "weak_password_reset": "Broken authentication / session management",
+    "csrf": "Missing request-forgery protection", "open_redirect": "Unvalidated redirects & forwards",
+    "vulnerable_component": "Known-vulnerable dependencies",
+    "exposure": "Sensitive data / source exposure", "path_traversal": "Sensitive data / source exposure",
+    "ssrf": "Server trusts a user-supplied destination (SSRF)", "deserialization": "Unsafe deserialization",
+    "cors": "Overly-permissive cross-origin policy", "takeover": "Dangling / unclaimed infrastructure",
+    "business_logic": "Business-logic / design flaw", "misconfig": "Security misconfiguration",
+    # tool-emitted family aliases folded onto the same architectural causes (so groups MERGE, not split)
+    "bola": "Broken object-level authorization", "stored_xss": "Output not neutralised before rendering (XSS)",
+    "git_exposure": "Sensitive data / source exposure", "backup_exposure": "Sensitive data / source exposure",
+    "config_exposure": "Sensitive data / source exposure", "credential_exposure": "Sensitive data / source exposure",
+    "info_disclosure": "Sensitive data / source exposure",
+    "jwt": "Broken authentication / session management", "oauth": "Broken authentication / session management",
+    "prototype_pollution": "Unsafe handling of untrusted input (injection)",
+    "host_header": "Unsafe handling of untrusted input (injection)",
+    "llm_prompt_injection": "Unsafe handling of untrusted input (injection)",
+    "crypto": "Weak or misused cryptography", "race": "Business-logic / design flaw",
+    "cache_poisoning": "Security misconfiguration", "graphql": "Security misconfiguration",
+    "upload": "Unrestricted file upload",
+}
+
+
+def root_cause_groups(findings: list) -> list:
+    """Group confirmed findings by their ARCHITECTURAL root cause (e.g. 5 IDORs -> one 'Broken
+    object-level authorization' weakness with 5 manifestations) so remediation targets the cause,
+    not each symptom. Returns [{root_cause, count, worst, families, titles}], worst-first."""
+    rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4, "info": 4}
+    groups: dict = {}
+    for f in findings or []:
+        fam = (_family_of(f) or "").lower()
+        rc = _ROOT_CAUSE.get(fam) or "Other"
+        g = groups.setdefault(rc, {"root_cause": rc, "count": 0, "worst": "info",
+                                   "families": set(), "titles": []})
+        g["count"] += 1
+        g["families"].add(fam or "?")
+        g["titles"].append(f.get("title", "finding"))
+        sev = (f.get("severity") or "info").lower()
+        if rank.get(sev, 9) < rank.get(g["worst"], 9):
+            g["worst"] = sev
+    out = [{"root_cause": v["root_cause"], "count": v["count"], "worst": v["worst"],
+            "families": sorted(v["families"]), "titles": v["titles"]} for v in groups.values()]
+    out.sort(key=lambda g: (rank.get(g["worst"], 9), -g["count"]))
+    return out
 
 
 # ── Since-Last-Scan (historical delta) — truth-first, never calls "fixed" ──
@@ -656,29 +914,76 @@ def _exec_summary_text(program, findings, leads, execution, counts) -> list:
     rk = risk_score(findings)
     sev_bits = [f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low")
                 if counts.get(s)]
-    line1 = (f"This assessment of {program} confirmed {n_conf} "
-             f"{'vulnerability' if n_conf == 1 else 'vulnerabilities'}"
-             + (f" ({', '.join(sev_bits)})" if sev_bits else "")
-             + f", for an overall confirmed-risk posture of {rk['label']} ({rk['score']}/100).")
+    out = []
     if n_conf:
+        worst = findings[0]                       # findings are severity-sorted (worst first)
+        bi = business_impact(worst)
+        consequence = ((bi[1] if bi else "") or str(worst.get("impact") or "")).strip()
+        wsev = (worst.get("severity") or "").lower()
+        # 1) headline ATTACK STORY — what a real attacker achieves, grounded in the worst CONFIRMED
+        #    finding. The punch is in dramatising what is PROVEN, never in inflating the count.
+        if consequence:
+            out.append("Bottom line: " + (consequence[:1].lower() + consequence[1:]
+                                          if consequence[:1].isupper() else consequence))
+        # 2) the honest posture — proven, evidence-backed, confirmed-only score
+        out.append(f"This assessment of {program} confirmed {n_conf} "
+                   f"{'vulnerability' if n_conf == 1 else 'vulnerabilities'}"
+                   + (f" ({', '.join(sev_bits)})" if sev_bits else "")
+                   + " — every one reproduced with evidence — for a confirmed-risk posture of "
+                     f"{rk['label']} ({rk['score']}/100).")
+        # 3) the named issues, each proven below
         tops = ", ".join(f.get("title", "finding") for f in findings[:3])
-        line2 = f"The most significant confirmed issues are: {tops}. Each carries reproducible evidence below."
+        out.append(f"The most serious are {tops}. Each is proven below with a copy-paste reproduction.")
+        # 4) why this matters NOW (only when there is a critical/high — keep it honest)
+        if wsev in ("critical", "high"):
+            out.append("Why this matters now: these are exploitable from the public internet today with "
+                       "off-the-shelf tooling — an active exposure to close, not a backlog item to schedule.")
     else:
-        line2 = ("No vulnerability was CONFIRMED with reproducible evidence during this engagement. "
-                 "The risk score reflects confirmed findings only.")
-    line3 = ""
+        out.append(f"This assessment of {program} confirmed no vulnerabilities with reproducible evidence — "
+                   "and nothing was inflated to pad the report. The risk score reflects confirmed findings only.")
     if n_lead:
-        line3 = (f"An additional {n_lead} unconfirmed lead{'s' if n_lead != 1 else ''} "
-                 "(static/candidate signals) require manual verification before they can be treated as "
-                 "vulnerabilities — they are listed separately and are NOT counted in the risk score.")
-    return [x for x in (line1, line2, line3) if x]
+        out.append(f"Separately, {n_lead} unconfirmed lead{'s' if n_lead != 1 else ''} (static/candidate "
+                   "signals) need manual verification before they count as vulnerabilities — listed apart, and "
+                   "NOT included in the risk score.")
+    return out
+
+
+_HARDENING_RX = __import__("re").compile(
+    r"content.security.policy|\bcsp\b|strict.transport|\bhsts\b|httponly|samesite|secure flag|"
+    r"x-frame|clickjack|x-content-type|referrer.policy|permissions.policy|"
+    r"\bspf\b|\bdmarc\b|\bcaa\b|dnssec|\bcors\b|cross-origin", __import__("re").I)
+
+
+def hardening_summary(leads: list) -> list:
+    """Consolidate the scattered response-header / cookie / DNS-email hardening LEADS
+    (often dozens of duplicate ZAP alerts like 'CSP Not Set') into one compact posture
+    list: (control, worst-severity, instance count). Truth-first — these are the same
+    advisory leads, summarised (not new confirmed findings), so the risk score is
+    unaffected. This is the one genuinely-missing presentation the market reports had."""
+    import re as _re
+    _rank = {"high": 3, "medium": 2, "low": 1, "info": 0, "informational": 0}
+    groups: dict = {}
+    for l in leads or []:
+        title = str(l.get("title") or "")
+        if not _HARDENING_RX.search(title):
+            continue
+        name = _re.sub(r"^\s*zap:\s*", "", title, flags=_re.I).strip()
+        name = _re.sub(r"\s*\(\d+\)\s*$", "", name)
+        g = groups.setdefault(name, {"sev": "info", "n": 0})
+        g["n"] += 1
+        sev = (l.get("severity") or "info").lower()
+        if _rank.get(sev, 0) > _rank.get(g["sev"], 0):
+            g["sev"] = sev
+    return sorted(([n, v["sev"], v["n"]] for n, v in groups.items()),
+                  key=lambda r: (-_rank.get(r[1], 0), -r[2]))
 
 
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
-                         delta: dict = None, tool_ledger: dict = None, report_id: str = None) -> str:
+                         delta: dict = None, tool_ledger: dict = None, report_id: str = None,
+                         security_headers: list = None, intel: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -690,6 +995,11 @@ def generate_html_report(program: str, findings: list, scope: dict,
     counts = _counts(findings)
     rk = risk_score(findings)
     engagement = _ENGAGEMENT.get((mode or "").lower(), "Security Assessment")
+    # Metric consistency: the Assessment Coverage tile must report the same UNIQUE finding
+    # count as the headline, not the raw pre-grouping count (a CRLF on 2 endpoints is one
+    # finding, not two). This kills the "6 confirmed vs 7 findings" contradiction.
+    if isinstance(coverage, dict) and "findings" in coverage:
+        coverage = {**coverage, "findings": len(findings)}
 
     # severity distribution bars (confirmed only)
     total_conf = len(findings) or 1
@@ -718,6 +1028,129 @@ def generate_html_report(program: str, findings: list, scope: dict,
                        for k, v in coverage.items())
         cov_html = f"<h2 id='coverage'>Assessment Coverage</h2><div class='cov-grid'>{rows}</div>"
 
+    # Risk Signals — multi-axis executive view absorbed from the reference dashboards,
+    # kept truth-first: descriptive signals only, the confirmed-only score stays the
+    # authoritative posture. Each bar shows the factual basis it was computed from.
+    signals_html = ""
+    _sig = risk_signals(findings, leads, coverage, attack_surface, chains or [])
+    if _sig:
+        def _sig_color(p):
+            return SEV_COLORS["high"] if p >= 70 else SEV_COLORS["medium"] if p >= 40 else "#00b8d4"
+        sig_rows = "".join(
+            f"<div class='distrow'><span class='distlabel'>{e(s['label'])}</span>"
+            f"<span class='distbar'><i style='width:{int(s['pct'])}%;background:{_sig_color(s['pct'])}'></i></span>"
+            f"<span class='distn'>{int(s['pct'])}</span></div>"
+            f"<div class='sub' style='margin:-4px 0 10px 0'>{e(s['basis'])}</div>"
+            for s in _sig)
+        signals_html = ("<h2 id='signals'>Risk Signals</h2>"
+                        "<p class='sub'>Descriptive, factual signals about this engagement. The confirmed-only "
+                        "score above stays authoritative &mdash; these signals never change it.</p>"
+                        f"<div class='dist' style='max-width:none'>{sig_rows}</div>")
+
+    # ── absorbed from the reference reports' client-facing polish: Rules of Engagement
+    #    block + CVSS score distribution (kept truth-first — buckets the CONFIRMED findings'
+    #    estimated CVSS, no inflation). ──
+    roe_html = (
+        "<h2 id='roe'>Rules of Engagement</h2><div class='cov-grid'>"
+        f"<div class='cov'><span>{e((mode or 'n/a').title())}</span><label>Assessment mode</label></div>"
+        "<div class='cov'><span>Authorized</span><label>Engagement basis</label></div>"
+        "<div class='cov'><span>Scope-enforced</span><label>Targeting</label></div>"
+        "<div class='cov'><span>Non-destructive</span><label>Impact policy</label></div>"
+        "<div class='cov'><span>CONFIDENTIAL</span><label>Classification</label></div></div>"
+        "<p class='sub'>Testing is limited to in-scope hosts, enforced at the tool wrapper. Intrusive actions are "
+        "gated by operator approval; no denial-of-service and no irreversible changes are performed. Authorized "
+        "security assessment only.</p>")
+    _buckets = {"Critical (9.0-10)": 0, "High (7.0-8.9)": 0, "Medium (4.0-6.9)": 0, "Low (0.1-3.9)": 0}
+    _bcol = {"Critical (9.0-10)": "critical", "High (7.0-8.9)": "high", "Medium (4.0-6.9)": "medium", "Low (0.1-3.9)": "low"}
+    for f in findings:
+        cv = estimated_cvss(f)
+        try:
+            s = float(cv[0]) if cv else 0.0
+        except (TypeError, ValueError):
+            s = 0.0
+        if s >= 9:
+            _buckets["Critical (9.0-10)"] += 1
+        elif s >= 7:
+            _buckets["High (7.0-8.9)"] += 1
+        elif s >= 4:
+            _buckets["Medium (4.0-6.9)"] += 1
+        elif s > 0:
+            _buckets["Low (0.1-3.9)"] += 1
+    cvss_html = ""
+    if any(_buckets.values()):
+        _tot = sum(_buckets.values()) or 1
+        _rows = "".join(
+            f"<div class='distrow'><span class='distlabel'>{k}</span>"
+            f"<span class='distbar'><i style='width:{int(100 * v / _tot)}%;background:{SEV_COLORS[_bcol[k]]}'></i></span>"
+            f"<span class='distn'>{v}</span></div>" for k, v in _buckets.items())
+        cvss_html = f"<h2 id='cvss'>CVSS Score Distribution</h2><div class='dist' style='max-width:none'>{_rows}</div>"
+
+    # Security Headers Coverage — absorbed from the reference reports. Factual: which
+    # protective response headers were seen across probed hosts (present vs missing).
+    sechdr_html = ""
+    if security_headers:
+        rows = ""
+        for h in security_headers:
+            pct = int(100 * h.get("present", 0) / max(1, h.get("total", 1)))
+            col = SEV_COLORS["low"] if pct >= 80 else SEV_COLORS["medium"] if pct >= 40 else SEV_COLORS["high"]
+            rows += (f"<div class='distrow'><span class='distlabel'>{e(h.get('header', ''))}</span>"
+                     f"<span class='distbar'><i style='width:{pct}%;background:{col}'></i></span>"
+                     f"<span class='distn'>{h.get('present', 0)}/{h.get('total', 0)}</span></div>")
+        sechdr_html = ("<h2 id='secheaders'>Security Headers Coverage</h2>"
+                       "<p class='sub'>Protective response headers observed across probed hosts. Low coverage on "
+                       "CSP / HSTS / X-Frame-Options / X-Content-Type-Options is a hardening gap.</p>"
+                       f"<div class='dist' style='max-width:none'>{rows}</div>")
+
+    # CVE Intelligence — absorbed from the reference reports. Aggregates every CVE named in
+    # confirmed findings + leads (from dependency/vulnerable-component detection).
+    import re as _re2
+    _cve_map = {}
+    for _f in (findings + (leads or [])):
+        _blob = (str(_f.get("title", "")) + " " + str(_f.get("description", "")) + " " + str(_f.get("evidence", "")))
+        for _c in set(_re2.findall(r"CVE-\d{4}-\d{4,7}", _blob)):
+            _cve_map.setdefault(_c, {"where": _f.get("title", ""), "sev": (_f.get("severity") or "info")})
+    cve_html = ""
+    if _cve_map:
+        _rows = "".join(
+            f"<tr><td><code>{e(c)}</code></td><td>{e(v['where'][:70])}</td>"
+            f"<td><span class='sev' style='background:{SEV_COLORS.get(v['sev'].lower(), '#6a8a9a')}'>{e(v['sev'].upper())}</span></td></tr>"
+            for c, v in sorted(_cve_map.items()))
+        cve_html = ("<h2 id='cve'>CVE Intelligence</h2>"
+                    f"<p class='sub'>{len(_cve_map)} CVE(s) identified from vulnerable components and behaviour.</p>"
+                    "<table class='cve-tbl' style='width:100%;border-collapse:collapse;font-size:.85rem'>"
+                    "<tr style='text-align:left;color:var(--muted)'><th>CVE</th><th>Source finding</th><th>Severity</th></tr>"
+                    f"{_rows}</table>")
+
+    # Target Intelligence — what the target itself leaked, harvested from its own surface
+    # (DOM/JS/source-maps/API). The raw material a general technique consumes as fixtures
+    # (the OSINT / source-review loop). Noisy 'encoded' bucket is intentionally not shown.
+    intel_html = ""
+    if intel and (intel.get("candidates") or {}):
+        _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
+                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("hint", "Hints")]
+        _cand = intel.get("candidates", {})
+        _rows = ""
+        for _k, _label in _SHOW:
+            _vals = _cand.get(_k) or []
+            if not _vals:
+                continue
+            _sample = ", ".join(e(str(v)) for v in _vals[:12])
+            _more = len(_vals) - 12
+            _moretxt = (" <span class='sub'>(+" + str(_more) + " more)</span>") if _more > 0 else ""
+            _rows += ("<tr><td style='white-space:nowrap'><b>" + e(_label) + "</b></td>"
+                      "<td>" + str(len(_vals)) + "</td>"
+                      "<td style='font-family:monospace;font-size:.8rem'>" + _sample + _moretxt + "</td></tr>")
+        if _rows:
+            intel_html = ("<h2 id='intel'>Target Intelligence</h2>"
+                          "<p class='sub'>Candidates harvested from the target's own surface (DOM, JS, source maps, "
+                          "API responses) — the clues the target leaks, and the raw material a general technique "
+                          "consumes as run-time fixtures. Derived live from the target, not hardcoded. Secrets redacted.</p>"
+                          "<table style='width:100%;border-collapse:collapse;font-size:.85rem'>"
+                          "<tr style='text-align:left;color:var(--muted)'><th>Kind</th><th>Count</th><th>Sample</th></tr>"
+                          + _rows + "</table>")
+
     # confirmed findings — full proof density (grouped by root cause)
     cards = []
     for i, f in enumerate(findings, 1):
@@ -736,6 +1169,18 @@ def generate_html_report(program: str, findings: list, scope: dict,
         ev = f"<h4>Evidence</h4><pre class='ev'>{e(str(f.get('evidence','')))}</pre>" if f.get("evidence") else ""
         # raw proof artifacts (request/response/tool log/timing) — the hard proof
         raw_html = "".join(f"<h4>{e(lbl)}</h4><pre class='ev'>{e(txt)}</pre>" for lbl, txt in evidence_items(f))
+        # browser PoC: an embedded viewport screenshot (visual proof the bug fired in a
+        # real headless browser) + a DOM snippet around the confirmation marker. Present
+        # only on browser-confirmed findings (DOM audit); self-contained base64 data-URI.
+        poc_html = ""
+        _shot = str(f.get("screenshot") or "")
+        if _shot.startswith("data:image/"):
+            poc_html += ("<h4>Proof of concept (browser screenshot)</h4>"
+                         f"<img alt='browser proof-of-concept screenshot' src='{e(_shot)}' "
+                         "style='max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px'>")
+        if str(f.get("dom_snippet") or "").strip():
+            poc_html += ("<h4>DOM proof (rendered markup at the sink)</h4>"
+                         f"<pre class='ev'>{e(str(f.get('dom_snippet')))}</pre>")
         prov = proof_provenance(f)
         prov_html = f"<span>Tool &amp; settings: <code>{e(prov)}</code></span>" if prov else ""
         fpc = str(f.get("false_positive_check") or "").strip()
@@ -747,12 +1192,34 @@ def generate_html_report(program: str, findings: list, scope: dict,
         if cwe and note_txt and ("cwe-" in note_txt.lower()) and (cwe.lower() not in note_txt.lower()):
             note_txt = ""
         notes = f"<p class='notes'>Triage: {e(note_txt)}</p>" if note_txt.strip() else ""
+        # browser-confirmed bugs (DOM/CSTI/proto/redirect/XSS): the PROOF is the headless
+        # browser evidence, NOT curl. Demote curl to a supplemental page-load request so it
+        # is never mistaken for the reproduction of client-side execution.
+        _ev_txt = str(f.get("evidence", ""))
+        dom_confirmed = ("dom" in (f.get("tags") or [])) or ("Chromium" in _ev_txt) or ("rendered" in _ev_txt.lower())
         curl = finding_curl(f)
-        curl_html = (f"<h4>Reproduction (copy-paste)</h4><pre class='ev'>{e(curl)}</pre>" if curl else "")
+        if not curl:
+            curl_html = ""
+        elif dom_confirmed:
+            curl_html = (f"<h4>Supplemental request (page load only — not the proof)</h4>"
+                         f"<pre class='ev'>{e(curl)}</pre>"
+                         f"<p class='sub'>This bug is confirmed in a real headless browser (see Evidence above); "
+                         f"curl only fetches the page and cannot demonstrate client-side execution.</p>")
+        else:
+            curl_html = f"<h4>Reproduction (copy-paste)</h4><pre class='ev'>{e(curl)}</pre>"
         cv = estimated_cvss(f)
         cvss_disp = f"{cv[0]}{' (est.)' if cv[2] else ''}" if cv else "N/A"
         cvss_vec = f"<span>Vector: <code>{e(cv[1])}</code></span>" if (cv and cv[1]) else ""
+        # CVSS-vs-evidence honesty: when a class-baseline CVSS assumes worst-case
+        # (Integrity/Availability impact) but the test only DEMONSTRATED read access, say so —
+        # never claim more impact than was proven.
+        _evl = str(f.get("evidence", "")).lower()
+        cvss_basis = ""
+        if cv and cv[2] and ("read-only" in _evl or "no data dumped" in _evl or "read access" in _evl):
+            cvss_basis = ("<span class='sub'>CVSS reflects the vulnerability class's full potential; the impact "
+                          "<b>demonstrated in this test was read-only</b> (write/RCE not attempted per rules of engagement).</span>")
         rem = f"<h4>Remediation</h4><p>{e(remediation_line(f))}</p>"
+        val = f"<h4>Validation After Fix (regression test)</h4><p>{e(validation_line(f))}</p>"
         inst = [x for x in (f.get("instances") or []) if x and x != f.get("target")]
         inst_html = ("<h4>Affected instances (" + str(len(inst) + 1) + ")</h4><ul>"
                      + "".join(f"<li><code>{e(str(x))}</code></li>" for x in [f.get('target')] + inst)
@@ -771,16 +1238,17 @@ def generate_html_report(program: str, findings: list, scope: dict,
             <span>CVSS: {e(cvss_disp)}</span>
             <span>CWE: {e(cwe or 'N/A')}</span>
             {f"<span>CAPEC: {e(str(f.get('capec')))}</span>" if f.get('capec') else ''}
-            {f"<span>OWASP: {e(str(f.get('owasp')))}</span>" if f.get('owasp') else ''}
+            {f"<span>OWASP: {e(_owasp_of(f))}</span>" if _owasp_of(f) else ''}
             {cvss_vec}
             {prov_html}
             <span class="tag-conf">CONFIRMED</span>
           </div>
+          {cvss_basis}
           {biz_html}
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
-          {curl_html}{ev}{raw_html}{fpc_html}{inst_html}{rem}{notes}
+          {curl_html}{ev}{raw_html}{poc_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")
     findings_html = "".join(cards) if cards else (
         "<p class='sub'>No vulnerability was confirmed with reproducible evidence during this engagement. "
@@ -800,6 +1268,21 @@ def generate_html_report(program: str, findings: list, scope: dict,
 
     # attack paths + chaining potential
     chain_html = ""
+    if chains:
+        # Dedup near-identical chains (same root → same outcome) and drop malformed nodes
+        # (no narrative) so the section is not padded with duplicate SQLi paths or a raw dict.
+        _cseen, _cclean = set(), []
+        for _c in chains:
+            _nar = str(_c.get("narrative") or "").strip()
+            if not _nar:
+                continue
+            _parts = [p.strip().lower() for p in re.split(r"→|->", _nar) if p.strip()]
+            _key = (_parts[0] if _parts else _nar.lower(), _parts[-1] if _parts else "")
+            if _key in _cseen:
+                continue
+            _cseen.add(_key)
+            _cclean.append(_c)
+        chains = _cclean
     if chains:
         def _chain_li(c):
             _k = c.get("kind")
@@ -821,16 +1304,48 @@ def generate_html_report(program: str, findings: list, scope: dict,
     # unconfirmed leads (Apolaki's honesty edge — kept distinct + labelled)
     leads_html = ""
     if leads:
-        rows = "".join(
-            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get((l.get('severity') or 'info').lower(),'#6a8a9a')}'>"
-            f"{e((l.get('severity') or 'info').upper())}</span></td><td>{e(l.get('confidence','candidate'))}</td>"
-            f"<td>{e(l.get('title',''))}</td><td><code>{e(l.get('target',''))}</code></td></tr>"
-            for l in sorted(leads, key=lambda x: SEV_ORDER.get((x.get('severity') or 'info').lower(), 5)))
-        leads_html = ("<h2 id='leads'>Unconfirmed Leads</h2><p class='sub'>Signals worth manual verification — "
+        # Dedup: collapse repeated leads (same title) into ONE row with an instance count and
+        # the affected-endpoint total, so the list is not padded with "AngularJS ng-app x3".
+        _lg = {}
+        for l in leads:
+            k = (l.get("title", "").strip().lower(), (l.get("severity") or "info").lower())
+            g = _lg.setdefault(k, {"l": l, "targets": []})
+            t = l.get("target", "")
+            if t and t not in g["targets"]:
+                g["targets"].append(t)
+        _uniq = [{**v["l"], "_n": max(1, len(v["targets"])), "_first": (v["targets"][0] if v["targets"] else v["l"].get("target", ""))}
+                 for v in _lg.values()]
+        def _lead_row(l):
+            n = l.get("_n", 1)
+            cnt = (" <span class='muted'>x" + str(n) + "</span>") if n > 1 else ""
+            more = (" <span class='muted'>+" + str(n - 1) + " more</span>") if n > 1 else ""
+            col = SEV_COLORS.get((l.get("severity") or "info").lower(), "#6a8a9a")
+            return ("<tr><td><span class='sev' style='--c:" + col + "'>"
+                    + e((l.get("severity") or "info").upper()) + "</span></td><td>"
+                    + e(l.get("confidence", "candidate")) + "</td><td>"
+                    + e(l.get("title", "")) + cnt + "</td><td><code>"
+                    + e(l["_first"]) + "</code>" + more + "</td></tr>")
+        rows = "".join(_lead_row(l) for l in sorted(_uniq, key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)))
+        leads_html = (f"<h2 id='leads'>Unconfirmed Leads ({len(_uniq)})</h2><p class='sub'>Signals worth manual verification — "
                       "<strong>NOT confirmed vulnerabilities</strong> and NOT counted in the risk score. "
                       "Confirm before reporting to a program.</p>"
                       "<table class='tbl'><tr><th>Severity</th><th>Confidence</th><th>Lead</th><th>Target</th></tr>"
                       + rows + "</table>")
+
+    # Security Hardening Summary — consolidate the scattered header/cookie/DNS hardening
+    # leads (dozens of duplicate ZAP alerts) into one compact posture table.
+    hard_html = ""
+    _hard = hardening_summary(leads)
+    if _hard:
+        hbody = "".join(
+            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get(sev, '#6a8a9a')}'>{e(sev.upper())}</span></td>"
+            f"<td>{e(name)}</td><td>{n}</td></tr>" for name, sev, n in _hard)
+        hard_html = ("<h2 id='hardening'>Security Hardening Summary</h2>"
+                     "<p class='sub'>Response-header, cookie and DNS/email hardening gaps, consolidated and "
+                     "de-duplicated from the advisory leads. These are hardening improvements, <strong>not "
+                     "confirmed exploits</strong>, and do not affect the risk score.</p>"
+                     "<table class='tbl'><tr><th>Severity</th><th>Control / gap</th><th>Instances</th></tr>"
+                     + hbody + "</table>")
 
     # manual-testing playbook (Round Table strength — what/how/cURL per surface)
     pb_html = ""
@@ -874,6 +1389,35 @@ def generate_html_report(program: str, findings: list, scope: dict,
                                    ("info", "Observation with no direct security impact.")))
     appendix = ("<h2 id='appendix'>Appendix — Severity Definitions</h2>"
                 f"<table class='tbl'><tr><th>Level</th><th>Meaning</th></tr>{sevdefs}</table>")
+
+    # root-cause summary — group confirmed findings by architectural weakness, not symptom
+    rootcause_html = ""
+    _rcg = root_cause_groups(findings)
+    if _rcg and len(findings) > 1:
+        rrows = "".join(
+            f"<tr><td><span class='sev' style='--c:{SEV_COLORS.get(g['worst'], '#6a8a9a')}'>{e(g['worst'].upper())}</span></td>"
+            f"<td><b>{e(g['root_cause'])}</b></td><td>{g['count']}</td>"
+            f"<td class='sub'>{e(', '.join(g['titles'][:4]))}{'…' if len(g['titles']) > 4 else ''}</td></tr>"
+            for g in _rcg)
+        rootcause_html = ("<h2 id='rootcause'>Root-Cause Summary</h2>"
+                          "<p class='sub'>The confirmed findings grouped by the underlying architectural weakness "
+                          "rather than the symptom — fix the cause and multiple findings close at once.</p>"
+                          "<table class='tbl'><tr><th>Severity</th><th>Root cause</th><th>Findings</th>"
+                          "<th>Manifestations</th></tr>" + rrows + "</table>")
+
+    # coverage & limitations — the honest inverse of coverage: what could NOT be tested, and why
+    gaps_html = ""
+    _auth = bool(tool_ledger and tool_ledger.get("authenticated"))
+    _gaps = coverage_gaps(mode, execution, tool_ledger, authenticated=_auth)
+    if _gaps:
+        grows = "".join(
+            f"<tr><td><b>{e(a)}</b></td><td class='sub'><code>{e(tag)}</code></td><td class='sub'>{e(exp)}</td></tr>"
+            for a, tag, exp in _gaps)
+        gaps_html = ("<h2 id='coverage-gaps'>Coverage &amp; Limitations</h2>"
+                     "<p class='sub'>What this assessment could <b>not</b> exercise, and why — so the boundaries are "
+                     "explicit. <b>Absence of a finding in these areas is not evidence of safety.</b></p>"
+                     "<table class='tbl'><tr><th>Area not covered</th><th>Reason</th><th>Detail</th></tr>"
+                     + grows + "</table>")
 
     # methodology & tool ledger (tools run / skipped + why, ZAP status, auth, AI)
     method_html = ""
@@ -985,6 +1529,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
         toc_items.append(("paths", "Attack-Path Chains"))
     if leads_html:
         toc_items.append(("leads", "Unconfirmed Leads"))
+    if hard_html:
+        toc_items.append(("hardening", "Security Hardening Summary"))
     if rem_html:
         toc_items.append(("remediation", "Priority Remediation"))
     if delta_html:
@@ -1004,7 +1550,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
     if leads:
         peek += f'<span class="chip lead" title="unconfirmed — verify before reporting">LEADS: {len(leads)}</span>'
 
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+    _doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Apolaki Report — {e(program)}</title>
 <style>
@@ -1017,7 +1563,7 @@ body{{margin:0;background:var(--bg);color:var(--text);line-height:1.6;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}}
 code,pre,.mono{{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}}
 .wrap{{max-width:920px;margin:0 auto;padding:2rem 1.4rem}}
-h1{{color:var(--bright);font-size:1.7rem;margin:0}}
+h1{{color:var(--bright);font-size:2.15rem;font-weight:800;letter-spacing:-.015em;margin:0}}
 h2{{color:var(--bright);border-bottom:1px solid var(--border);padding-bottom:.4rem;margin-top:2.6rem;font-size:1.15rem}}
 h3{{color:var(--bright);margin:.2rem 0;font-size:1rem}}
 h4{{color:var(--dim);text-transform:uppercase;font-size:.68rem;letter-spacing:.1em;margin:1rem 0 .3rem}}
@@ -1054,7 +1600,7 @@ a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}
 .cov span{{display:block;font-size:1.5rem;color:var(--accent);font-weight:700;font-family:'JetBrains Mono',monospace}}
 .cov label{{font-size:.6rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}}
 .chips{{display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0}}
-.chip{{border:1px solid var(--c);color:var(--c);border-radius:3px;padding:.2rem .6rem;font-size:.7rem;letter-spacing:.06em;font-family:'JetBrains Mono',monospace}}
+.chip{{border:1px solid var(--c);color:var(--c);border-radius:3px;padding:.28rem .7rem;font-size:.73rem;font-weight:600;letter-spacing:.06em;font-family:'JetBrains Mono',monospace}}
 .chip.lead{{--c:#c98a2b;border-style:dashed}}
 .summary{{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
   border-radius:6px;padding:.9rem 1.2rem}}.summary p{{margin:.45rem 0}}
@@ -1124,25 +1670,39 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
   <div>
     <div class="plabel" style="color:{rk['color']}">{e(rk['label'])}</div>
     <div class="sub">Confirmed-risk score — computed from confirmed findings only. Unconfirmed leads never inflate it.</div>
+    <div class="sub" style="margin-top:.25rem"><b>Methodology:</b> {e(rk['note'])}</div>
   </div>
   <div class="dist">{dist_rows}</div>
 </div>
+{signals_html}
+{cvss_html}
+{roe_html}
 {surf_html}
 {cov_html}
+{sechdr_html}
+{cve_html}
+{intel_html}
+{rootcause_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}
 {chain_html}
 {leads_html}
+{hard_html}
 {rem_html}
 {delta_html}
 {pb_html}
+{gaps_html}
 {method_html}
 {integrity_html}
 {appendix}
 <footer>Generated by Apolaki · deterministic, truth-first reporting. Confirmed findings carry reproducible
 evidence; unconfirmed leads are advisory and must be verified before submission. Authorized security research only.</footer>
 </div></body></html>"""
+    # UTF-8 safety: encode EVERY non-ASCII glyph as a numeric HTML entity so arrows,
+    # dashes, checks and icons render correctly no matter how the byte stream is served
+    # or opened — this is what kills the "â†'/â€"/Â·" mojibake once and for all.
+    return _doc.encode("ascii", "xmlcharrefreplace").decode("ascii")
 
 
 # ── CSV / JSON export ────────────────────────────────────────────
@@ -1170,7 +1730,11 @@ def findings_json(program: str, findings: list, scope: dict,
     lead_counts, coverage, chains, findings, leads) are always present and unchanged;
     the richer sections below are additive so existing consumers never break."""
     leads = leads or []
-    findings = _with_capec(findings)
+    # Dedupe to the SAME grouped findings the HTML renders (each carries an `instances`
+    # list of every affected target), so the JSON headline count matches the HTML's — no
+    # more "JSON says 13 confirmed / HTML says 7". Counts, risk and integrity all derive
+    # from the grouped set here too.
+    findings = group_findings(_with_capec(findings))
     pkg = {
         # ── report metadata ──
         "report_id": report_id or "",

@@ -568,12 +568,31 @@ def _tool_ledger(session_id: str) -> dict:
         if typ == "tool_call":
             a["calls"] += 1
         elif typ == "tool_result":
-            a["findings"] += int(l.get("count") or 0)
+            cnt = int(l.get("count") or 0)
             out = str(l.get("output") or "")
-            if out and not a["note"]:
-                a["note"] = out[:140]
+            # A no-confirmation pass that still returned a data-carrier (e.g. sqlmap's
+            # log-tail record) must not inflate the findings count — otherwise the ledger
+            # reads "9 findings / No SQLi confirmed". Mirrors the scan-time count fix so a
+            # report rendered from older logs is consistent too.
+            if cnt and re.search(r"no\b[\w\s/]*\bconfirmed|\b0\s+confirmed", out, re.I):
+                cnt = 0
+            a["findings"] += cnt
+            # Prefer the note from a call that actually produced findings, so the ledger
+            # reflects the CONFIRMING call — not an earlier 0-result call on another
+            # endpoint (the bug that made run_sqli/run_xxe read "0 confirmed" next to a
+            # confirmed finding). A hit-call note locks; benign notes only fill a blank.
+            if out:
+                if cnt > 0:
+                    a["note"], a["_locked"] = out[:140], True
+                elif not a["note"] and not a.get("_locked"):
+                    a["note"] = out[:140]
         else:  # tool_error / scope_block
             a["error"] = str(l.get("error") or "")[:140]
+    # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
+    # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
+    _sqli_confirmed = any(
+        str(f.get("family") or "").lower() == "sqli" or "cwe-89" in str(f.get("cwe") or "").lower()
+        for f in db.get_findings(session_id))
     tools = []
     for t, a in sorted(agg.items()):
         low = (a["note"] + " " + a["error"]).lower()
@@ -583,6 +602,14 @@ def _tool_ledger(session_id: str) -> dict:
             status, note = "skipped", a["note"]
         else:
             status, note = "executed", a["note"]
+        # sqlmap is corroboration here — the native SQLi oracle + UNION enrichment do the
+        # confirming. Reword its "No SQLi confirmed" so the ledger never reads contradictory
+        # next to a confirmed SQLi finding.
+        if t == "run_sqlmap" and re.search(r"no sqli confirmed|\b0 confirmed|not confirmed", note, re.I):
+            note = ("sqlmap did not independently confirm; the native SQLi oracle + UNION "
+                    "enrichment confirmed the injection and extracted DB metadata"
+                    if _sqli_confirmed else
+                    "sqlmap found no injection on the tested endpoints")
         tools.append({"tool": t, "status": status, "calls": a["calls"],
                       "findings": a["findings"], "note": note})
     # ZAP status is reported honestly: if no ZAP daemon is configured (ZAP_ADDR unset)
@@ -652,8 +679,27 @@ async def get_report(session_id: str):
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
-                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    intel=m["context"].get("intel"))
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
+
+
+def _report_fname(m: dict, scope: dict, ext: str) -> str:
+    """Convention: target_config_YYYYMMDD@HHMMPST.ext (e.g. juiceshop_full-det_20260726@1440PST.html)."""
+    import re as _re
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        now = datetime.utcnow()
+    sc = scope if isinstance(scope, dict) else {}
+    ins = sc.get("in_scope") or []
+    tgt = (ins[0] if ins else (m.get("program") or "target"))
+    tgt = _re.sub(r"[^a-z0-9]+", "", tgt.split(":")[0].split(".")[0].lower()) or "target"
+    smap = {"deterministic": "det", "agentic": "agentic", "low_ai": "lowai", "manual": "man"}
+    cfg = f"{(m.get('mode') or 'scan')[:4]}-{smap.get(m.get('strategy'), (m.get('strategy') or 'det'))}"
+    return f"{tgt}_{cfg}_{now.strftime('%Y%m%d@%H%M')}PST.{ext}"
 
 
 @app.get("/report/{session_id}/md")
@@ -662,10 +708,186 @@ async def get_report_md(session_id: str):
     md = report_mod.generate_report(m["program"], findings, scope, coverage, chains,
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
-                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id))
-    fname = f"bbh-report-{session_id}.md"
+                                    delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    intel=m["context"].get("intel"))
+    fname = _report_fname(m, scope, "md")
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# ── Lab Mode: activatable target-specific solver packs (fingerprint-gated, isolated from the
+# general detector). The lab target is fixed server-side — the UI cannot point it at an
+# arbitrary host, so a lab pack can never fire against a real engagement. ──
+_LAB_SOLVE_TARGETS = {"juiceshop": "http://juice-shop:3000"}
+
+
+@app.get("/lab/targets")
+async def lab_targets():
+    """List available lab solver packs for the UI (the activatable 'packs' taxonomy)."""
+    return {"labs": [{"id": k, "target": v} for k, v in _LAB_SOLVE_TARGETS.items()]}
+
+
+@app.post("/lab/{lab_id}/solve")
+async def lab_solve(lab_id: str):
+    """Run a lab-mode SOLVER pack against its fixed lab target; return the scoreboard delta."""
+    import labs
+    base = _LAB_SOLVE_TARGETS.get(lab_id)
+    if not base:
+        return {"error": "no solver pack for lab '%s'" % lab_id, "available": list(_LAB_SOLVE_TARGETS)}
+    return labs.solve(lab_id, base)
+
+
+@app.get("/lab/{lab_id}/conquest")
+async def lab_conquest(lab_id: str):
+    """Read-only knowledge base: the lab's solved challenges annotated with the technique and a full
+    write-up per solve, merged live with the scoreboard. Same fixed-target safety as /solve."""
+    import labs
+    base = _LAB_SOLVE_TARGETS.get(lab_id)
+    if not base:
+        return {"error": "no solver pack for lab '%s'" % lab_id, "available": list(_LAB_SOLVE_TARGETS)}
+    return labs.conquest(lab_id, base)
+
+
+@app.get("/techniques")
+async def techniques_taxonomy(lens: str = "owasp"):
+    """Technique registry grouped by a taxonomy lens (owasp/wstg/cwe/mitre/class). Switching the
+    lens only changes the view; the techniques themselves are the transferable capability."""
+    import techniques as T
+    try:
+        return T.taxonomy_view(lens)
+    except Exception as e:
+        return {"error": str(e), "lens": lens}
+
+
+@app.get("/codereview")
+async def code_review(path: str = ""):
+    """Code Intelligence: static review of a source tree — a path the operator provides, or source
+    the recon phase reconstructed from the target's own leaks (source maps / exposed .git / backups).
+    Returns leads (file:line + why + the dynamic confirmation the scanner can fire), each mapped to a
+    technique in the Taxonomy. Source finds the candidate; a live request proves it."""
+    import codeintel
+    p = path or os.environ.get("CODEREVIEW_DEFAULT", "/labsrc/juiceshop")
+    try:
+        return codeintel.review(p)
+    except Exception as e:
+        return {"error": str(e), "findings": []}
+
+
+@app.get("/codeintel")
+async def code_intel(url: str = ""):
+    """Black-box Code Intelligence: curl a target and mine its served JS bundles + exposed vectors
+    into ACTIONABLE intel — API endpoints, client routes (incl. unlinked/sensitive ones), leaked
+    versions, browsable dirs, and any source the target leaks (source maps -> reconstructed source,
+    which then gets the static sink review). No source folder handed over: recon-phase automation."""
+    import codeintel
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        return codeintel.harvest(u)
+    except Exception as e:
+        return {"error": str(e), "target": url}
+
+
+class AuthzMatrixRequest(BaseModel):
+    base_url: str = ""
+    roles: list = []       # [{"role","rank":0|1|2,"headers"?,"tenant"?}]
+    requests: list = []    # [{"request"|"path","method"?,"owner"?}]
+
+
+@app.post("/authz/matrix")
+async def authz_matrix(req: AuthzMatrixRequest):
+    """Differential Authorization Engine: replay the given requests as EVERY role and return the
+    authorization matrix + detected gaps (missing-auth / BOLA-IDOR / BFLA / cross-tenant). The
+    differences between roles are the signal a single-user scan can't see. Read-only by default
+    (GET/HEAD/OPTIONS) so it is a safe recon differential."""
+    import authz
+    base = req.base_url or _LAB_SOLVE_TARGETS.get("juiceshop", "")
+    if not base:
+        return {"error": "base_url required (or a known lab target)"}
+    try:
+        return authz.run_matrix(base, req.roles, req.requests)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/bizlogic")
+async def biz_logic(url: str = ""):
+    """Business-Logic Graph: infer the target's workflows from its discovered routes (harvested
+    black-box) and generate the logic-abuse tests a scanner can't derive — replay/double-execute,
+    negative amount, skip a mandatory step, run steps out of order. Recon -> workflow understanding
+    -> concrete test hypotheses."""
+    import codeintel
+    import bizlogic
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        h = codeintel.harvest(u)
+        routes = (h.get("routes") or []) + (h.get("endpoints") or [])
+        return bizlogic.analyze(routes)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/packs")
+async def list_packs():
+    """Unified activatable pack registry (the 'taxonomies you enable' model): LAB packs (target-
+    specific, oracle-confirmed solvers) + TECHNIQUE packs (general, grouped by vuln class from the
+    registry, each with its proven/generalized counts). One place to see every activatable capability."""
+    import techniques as T
+    packs = []
+    for lab, tgt in _LAB_SOLVE_TARGETS.items():
+        packs.append({"id": "lab:" + lab, "kind": "lab", "name": lab.replace("_", " ").title() + " solver pack",
+                      "target": tgt, "activatable": True,
+                      "detail": "Target-specific, oracle-confirmed solvers (Lab Mode)."})
+    by_class: dict = {}
+    for t in T.TECHNIQUES.values():
+        by_class.setdefault(t["vuln_class"], []).append(t)
+    for cls, ts in sorted(by_class.items()):
+        proven = sum(1 for t in ts if t.get("validated_on"))
+        gen = sum(1 for t in ts if T.is_generalized(t))
+        packs.append({"id": "tech:" + cls, "kind": "technique",
+                      "name": cls.replace("_", " ").title() + " pack", "count": len(ts),
+                      "proven": proven, "generalized": gen, "activatable": True,
+                      "detail": "%d techniques — %d proven, %d generalized." % (len(ts), proven, gen)})
+    return {"packs": packs,
+            "lab_packs": sum(1 for p in packs if p["kind"] == "lab"),
+            "technique_packs": sum(1 for p in packs if p["kind"] == "technique")}
+
+
+@app.get("/cdp")
+async def cdp_collect(url: str = ""):
+    """Headless-browser RUNTIME collection: service workers, runtime XHR/GraphQL endpoints, lazily
+    loaded JS chunks, storage keys and window config hints — the artifacts a curl never sees.
+    Needs the optional headless-chrome sidecar (env CDP_BROWSER_URL); with none configured it
+    returns a clearly-labelled empty result (nothing faked)."""
+    import cdp
+    u = url or _LAB_SOLVE_TARGETS.get("juiceshop", "http://juice-shop:3000")
+    try:
+        return cdp.collect(u)
+    except Exception as e:
+        return {"error": str(e), "target": url}
+
+
+def _sec_headers(session_id: str) -> list:
+    """Aggregate protective-header coverage across probed responses (present per header
+    vs total responses seen). Data for the report's Security Headers Coverage section."""
+    KEYS = ["content-security-policy", "strict-transport-security", "x-frame-options",
+            "x-content-type-options", "referrer-policy", "permissions-policy"]
+    NICE = {"content-security-policy": "Content-Security-Policy", "strict-transport-security": "Strict-Transport-Security",
+            "x-frame-options": "X-Frame-Options", "x-content-type-options": "X-Content-Type-Options",
+            "referrer-policy": "Referrer-Policy", "permissions-policy": "Permissions-Policy"}
+    ex = db.get_exchanges(session_id) or []
+    total, present = 0, {k: 0 for k in KEYS}
+    for e in ex:
+        h = e.get("response_headers") or {}
+        if not isinstance(h, dict):
+            continue
+        total += 1
+        low = {k.lower() for k in h.keys()}
+        for k in KEYS:
+            if k in low:
+                present[k] += 1
+    if not total:
+        return []
+    return [{"header": NICE[k], "present": present[k], "total": total} for k in KEYS]
 
 
 @app.get("/report/{session_id}/html")
@@ -676,8 +898,10 @@ async def get_report_html(session_id: str, download: bool = False):
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-        report_id=session_id)
-    headers = {"Content-Disposition": f'attachment; filename="bbh-report-{session_id}.html"'} if download else {}
+        report_id=session_id, security_headers=_sec_headers(session_id),
+        intel=m["context"].get("intel"))
+    _fn = _report_fname(m, scope, "html")
+    headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
 
 
@@ -705,8 +929,9 @@ async def get_report_poc(session_id: str, redact: bool = True):
     findings = db.get_findings(session_id)
     ex_by_f = {f.get("id"): db.get_exchanges(session_id, f.get("id")) for f in findings}
     md = poc.mission_markdown(m["program"], findings, ex_by_f, redact=redact)
+    _fn = _report_fname(m, m.get("scope") or {}, "poc.md")
     return PlainTextResponse(md, media_type="text/markdown",
-                             headers={"Content-Disposition": f'attachment; filename="bbh-poc-{session_id}.md"'})
+                             headers={"Content-Disposition": f'attachment; filename="{_fn}"'})
 
 
 # ── cross-session memory: record + graph + diff ──────────────────
@@ -817,6 +1042,27 @@ def _finalize_mission(session_id: str) -> None:
     _ensure_playbook(session_id)
     _record_execution(session_id)
     _record_memory(session_id)
+    _record_intel(session_id)
+
+
+def _record_intel(session_id: str) -> None:
+    """At mission end: snapshot the harvested Target Intelligence (redacted) into the mission
+    context so the report/UI can surface what the target itself leaked. Best-effort — never
+    breaks the run teardown."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        store = getattr(sessions[session_id]["tools"], "intel", None)
+        if store is None:
+            return
+        ctx = dict(m["context"])
+        ctx["intel"] = store.to_dict(redact_secrets=True)
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
 
 
 def _sanitize_error(e: Exception) -> str:
@@ -1209,6 +1455,12 @@ async def restore(payload: dict):
 @app.on_event("startup")
 async def startup():
     db.init()
+    # DEF-3: reconcile orphaned missions. Any run still marked in-flight belongs to a
+    # process that has since exited (a prior crash/restart), so nothing in memory drives
+    # it — mark it interrupted so the archive never shows a phantom "running" scan.
+    for _m in db.list_missions(limit=500):
+        if _m.get("status") in ("running", "stopping", "awaiting_approval"):
+            db.update_mission(_m["id"], status="interrupted")
     st = ai_status()   # secret-free; never prints the key
     if not st["ready"]:
         print(f"[WARN] AI provider '{st['provider']}' has no credentials — {st['hint']}")

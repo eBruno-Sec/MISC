@@ -52,28 +52,34 @@ def build_probes(url: str) -> list:
     """Bounded set of DOM probes for one page. Each item:
     {"class", "nav" (URL to load), "src" (source), "expect"}."""
     probes = []
+    # the page's OWN query params — the reflected ones most likely to reach a template or
+    # a client-side redirect sink (e.g. /catalog?category, /blog?search). Testing these —
+    # not just a fixed name list — is what catches CSTI on app-specific params like category.
+    own_params = [k for k, _ in parse_qsl(urlparse(url).query, keep_blank_values=True) if k]
+    csti_params = list(dict.fromkeys(own_params + list(TEMPLATE_PARAMS)))
+    redir_params = list(dict.fromkeys(own_params + list(REDIRECT_PARAMS)))
+    # ── CSTI first (highest value): reflected template expression into own + common params ──
+    for pn in csti_params:
+        probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
     # ── prototype pollution: hash (deparam/hash routers) + query ──
     for src, nav in (("hash", _set_fragment(url, f"__proto__[{PP_KEY}]={MARK}")),
                      ("query", _add_query(url, f"__proto__[{PP_KEY}]", MARK)),
                      ("hash", _set_fragment(url, f"constructor[prototype][{PP_KEY}]={MARK}"))):
         probes.append({"class": "proto", "nav": nav, "src": src})
-    # ── DOM open redirect: hash + redirect-ish params ──
+    # ── DOM open redirect: hash + redirect-ish + own params ──
     probes.append({"class": "redirect", "nav": _set_fragment(url, f"https://{EVIL}/"), "src": "hash"})
-    for pn in REDIRECT_PARAMS:
+    for pn in redir_params:
         probes.append({"class": "redirect", "nav": _add_query(url, pn, f"https://{EVIL}/"), "src": pn})
     # ── DOM XSS: hash execution (covers hashchange/render sinks) ──
     for pl in EXEC_PAYLOADS:
         probes.append({"class": "xss", "nav": _set_fragment(url, pl), "src": "hash"})
-    # ── CSTI: reflected template expression ──
-    for pn in TEMPLATE_PARAMS:
-        probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
-    # de-dup by nav URL, keep order, cap so the browser pass stays bounded
+    # de-dup by nav URL, keep order (CSTI-on-own-params prioritised), cap for a bounded pass
     seen, out = set(), []
     for p in probes:
         if p["nav"] not in seen:
             seen.add(p["nav"])
             out.append(p)
-    return out[:16]
+    return out[:24]
 
 
 # ── interpret one probe's browser result ─────────────────────────
@@ -82,7 +88,21 @@ def confirmed_proto(pp_value) -> bool:
 
 
 def confirmed_redirect(nav_targets) -> bool:
-    return any(EVIL in (t or "").lower() for t in (nav_targets or []))
+    # A real DOM open redirect NAVIGATES the top document to a URL whose HOST is
+    # the attacker host. A substring test on the raw nav URL is wrong and yields a
+    # false positive: our probe URL carries EVIL in its own fragment/query
+    # (e.g. http://target/#https://bbh-evil.example/), so the initial same-origin
+    # load — reported by page.on("framenavigated") — trivially "contains" EVIL even
+    # though the browser never left the target. Compare the parsed HOST instead, so
+    # only a genuine navigation whose host IS the attacker host confirms.
+    for t in (nav_targets or []):
+        try:
+            host = (urlparse((t or "").strip()).hostname or "").lower()
+        except ValueError:
+            continue
+        if host == EVIL or host.endswith("." + EVIL):
+            return True
+    return False
 
 
 def confirmed_xss(dialog_msg) -> bool:
@@ -131,12 +151,23 @@ def xss_finding(url, nav, src):
 
 
 def csti_finding(url, nav, src):
-    return _base(url, f"Client-side template injection (CSTI, via {src})", "high",
-                 (f"Input in '{src}' is rendered by a client-side template engine (e.g. AngularJS): the "
-                  "expression {{7*7}} evaluated to 49, so attacker expressions run in the browser."),
-                 f"Loaded {nav} → the DOM rendered \"49{MARK}\" (the template evaluated 7*7).",
-                 "ssti", "CWE-1336", ["csti", "ssti", "dom"],
-                 [f"Load {nav}", "Observe 49 rendered in place of {{7*7}} (expression evaluated)"])
+    f = _base(url, f"Client-side template injection (CSTI, via {src})", "high",
+              (f"Input in '{src}' is evaluated by the page's CLIENT-SIDE template engine (AngularJS) in the "
+               "victim's browser: the expression {{7*7}} rendered as 49. This is client-side code execution "
+               "(an AngularJS sandbox escape to JavaScript) — NOT server-side template injection, and it does "
+               "NOT give server RCE or server compromise."),
+              (f"Headless Chromium loaded {nav}; after the AngularJS digest the rendered DOM contained "
+               f"\"49{MARK}\" — the expression 7*7 was evaluated in-browser (browser-confirmed, not reflection)."),
+              "csti", "CWE-79", ["csti", "dom-xss", "client-side"],
+              [f"Open {nav} in a browser running the AngularJS app",
+               "Let the AngularJS digest cycle run",
+               "Observe 49 rendered in place of {{7*7}} in the live DOM — the expression executed client-side"])
+    f["capec"] = "CAPEC-588: DOM-Based Cross-Site Scripting"
+    f["impact"] = ("Attacker-controlled AngularJS expressions execute as JavaScript in the victim's browser "
+                   "(client-side code execution / DOM XSS). Realistic impact: session-cookie theft, account "
+                   "takeover, keylogging of form input, and convincing phishing served from the trusted domain. "
+                   "This does not compromise the server itself.")
+    return f
 
 
 def build_finding(probe: dict, *, pp_value=None, nav_targets=None, dialog_msg=None, body=None):

