@@ -1745,6 +1745,7 @@ function renderTaxonomy(d){
           <div class="tx-step"><span class="tx-slabel">Detect</span>${esc(t.detect||'—')}</div>
           <div class="tx-step"><span class="tx-slabel">Exploit</span>${esc(t.exploit||'—')}</div>
           <div class="tx-step"><span class="tx-slabel">Confirm</span>${esc(t.oracle||'—')}</div>
+          ${t.try_it?`<div class="tx-step"><span class="tx-slabel" style="color:var(--ok)">Try it</span><code style="font-family:var(--mono);font-size:.73rem;color:var(--text);word-break:break-word">${esc(t.try_it)}</code></div>`:''}
         </div></div>`;
     });
     h+=`</div>`;

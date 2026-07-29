@@ -826,6 +826,32 @@ async def biz_logic(url: str = ""):
         return {"error": str(e)}
 
 
+@app.get("/packs")
+async def list_packs():
+    """Unified activatable pack registry (the 'taxonomies you enable' model): LAB packs (target-
+    specific, oracle-confirmed solvers) + TECHNIQUE packs (general, grouped by vuln class from the
+    registry, each with its proven/generalized counts). One place to see every activatable capability."""
+    import techniques as T
+    packs = []
+    for lab, tgt in _LAB_SOLVE_TARGETS.items():
+        packs.append({"id": "lab:" + lab, "kind": "lab", "name": lab.replace("_", " ").title() + " solver pack",
+                      "target": tgt, "activatable": True,
+                      "detail": "Target-specific, oracle-confirmed solvers (Lab Mode)."})
+    by_class: dict = {}
+    for t in T.TECHNIQUES.values():
+        by_class.setdefault(t["vuln_class"], []).append(t)
+    for cls, ts in sorted(by_class.items()):
+        proven = sum(1 for t in ts if t.get("validated_on"))
+        gen = sum(1 for t in ts if T.is_generalized(t))
+        packs.append({"id": "tech:" + cls, "kind": "technique",
+                      "name": cls.replace("_", " ").title() + " pack", "count": len(ts),
+                      "proven": proven, "generalized": gen, "activatable": True,
+                      "detail": "%d techniques — %d proven, %d generalized." % (len(ts), proven, gen)})
+    return {"packs": packs,
+            "lab_packs": sum(1 for p in packs if p["kind"] == "lab"),
+            "technique_packs": sum(1 for p in packs if p["kind"] == "technique")}
+
+
 def _sec_headers(session_id: str) -> list:
     """Aggregate protective-header coverage across probed responses (present per header
     vs total responses seen). Data for the report's Security Headers Coverage section."""
