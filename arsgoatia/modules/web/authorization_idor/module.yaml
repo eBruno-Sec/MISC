@@ -1,0 +1,50 @@
+id: web.authorization.idor.differential
+version: "1.0.0"
+name: "BOLA / IDOR Differential Access"
+description: >
+  Detects Broken Object Level Authorization (BOLA / IDOR) by executing a
+  four-exchange differential access pattern against object-level REST endpoints.
+  Requires two authenticated test identities (A and B) and one unauthenticated
+  probe.  Confirmation is deterministic — no AI involved.
+
+technique_id: web.authz.bola.differential
+risk_tier: R2
+mutation_class: none
+evidence_profile: authorization_differential
+confirmation_rule_version: "1.0.0"
+
+prerequisites:
+  - min_2_authenticated_identities
+  - object_level_endpoint_in_scope
+  - recon_completed
+
+produces:
+  - capability: read_foreign_object
+    condition: confirmed
+
+references:
+  - cwe: "CWE-639"
+    title: "Authorization Bypass Through User-Controlled Key"
+  - cwe: "CWE-284"
+    title: "Improper Access Control"
+  - owasp: "API1:2023"
+    title: "Broken Object Level Authorization"
+  - url: "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"
+
+exchanges:
+  - label: baseline_own
+    description: Identity A reads its own object; expect HTTP 200.
+    token_source: identity_a
+    expected_status: 200
+  - label: differential_cross
+    description: Identity A reads identity B's object; expect HTTP 403 (BOLA if 200).
+    token_source: identity_a
+    expected_status: 403
+  - label: positive_control
+    description: Identity B reads its own object; expect HTTP 200.
+    token_source: identity_b
+    expected_status: 200
+  - label: negative_control
+    description: Unauthenticated request to B's object; expect HTTP 401.
+    token_source: none
+    expected_status: 401
