@@ -1,0 +1,59 @@
+id: web.workflow.reversible_preference_update
+version: "1.0.0"
+name: "Reversible Preference Update"
+description: >
+  Exercises the mutation + cleanup-verification path required by the §14.2
+  vertical-slice fixture. Reads a user preference, mutates it, verifies the
+  mutation, restores the original value, and verifies the restore. The finding
+  is confirmed only when the mutation took effect AND the original value was
+  restored — the restore step is the proof that cleanup was performed.
+  Confirmation is deterministic — no AI involved.
+
+technique_id: web.workflow.reversible-preference-update
+risk_tier: R3
+mutation_class: reversible
+evidence_profile: reversible_state_mutation
+confirmation_rule_version: "1.0.0"
+
+prerequisites:
+  - min_1_authenticated_identity
+  - writable_preference_endpoint_in_scope
+  - recon_completed
+
+produces:
+  - capability: reversible_state_write
+    condition: confirmed
+
+cleanup:
+  required: true
+  obligation: "restore preference to captured baseline value"
+  proof: "verify_restore exchange returns baseline value"
+
+references:
+  - cwe: "CWE-none"
+    title: "Reversible benign state mutation (fixture technique, not a defect)"
+  - note: >
+      This technique is not a vulnerability class. It exists to exercise the
+      state-changing / cleanup / R3-approval path of the platform end-to-end.
+
+exchanges:
+  - label: read_baseline
+    description: Identity reads its own preference; capture original value; expect 200.
+    token_source: identity
+    expected_status: 200
+  - label: mutate
+    description: Identity writes a new preference value; expect 200.
+    token_source: identity
+    expected_status: 200
+  - label: verify_mutation
+    description: Identity re-reads; value must differ from baseline; expect 200.
+    token_source: identity
+    expected_status: 200
+  - label: restore
+    description: Identity writes the original value back; expect 200.
+    token_source: identity
+    expected_status: 200
+  - label: verify_restore
+    description: Identity re-reads; value must equal baseline (cleanup proof); expect 200.
+    token_source: identity
+    expected_status: 200
