@@ -34,6 +34,15 @@ class ScopeSpec(BaseContract):
     ports: list[int] = Field(default_factory=list)
     redirect_policy: str = Field(default="reject")
     dns: list[str] = Field(default_factory=list)
+    allow_private_targets: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: permit RFC1918 private resolved addresses for in-scope "
+            "targets (e.g. Docker-lab bridge IPs). Fail-closed default is False. "
+            "Metadata, loopback, and link-local addresses stay blocked even when "
+            "this is True — those are never legitimate targets."
+        ),
+    )
 
 
 class RulesSpec(BaseContract):

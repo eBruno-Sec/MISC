@@ -60,6 +60,11 @@ services (metadata endpoints, internal APIs, RFC1918 addresses).
 - RFC1918 and link-local blocks (169.254.169.254, 10.0.0.0/8, etc.)
 - Redirects re-checked against firewall before following
 - Scope ambiguity → deny (fail-closed)
+- **Private-target opt-in** (`ScopeSpec.allow_private_targets`, default `False`):
+  RFC1918 ranges may be permitted for explicitly-scoped internal/lab targets
+  (e.g. Docker-bridge IPs), but cloud-metadata (169.254.169.254 / IMDSv6),
+  loopback, and link-local addresses remain blocked *regardless* of the flag —
+  the SSRF pivot targets are never reachable.
 - Tests: `tests/unit/test_firewall.py`, `tests/unit/test_scope_security.py`
 
 ### T2: Envelope forgery / replay attack
@@ -151,3 +156,4 @@ stored evidence, or report output, enabling token theft.
 | MinIO versioning (not object-lock) | Dev/lab profile only; ADR#0005 documents S3 object-lock for prod |
 | Single-node Compose (not K8s) | Dev/lab only; ADR#0003 documents K8s deployment path |
 | Juice Shop at 127.0.0.1:42000 | Lab target — explicit scope, not reachable from open internet in compose |
+| `allow_private_targets` opt-in for lab | Off by default (fail-closed); when enabled it permits RFC1918 only — metadata/loopback/link-local stay blocked. Production engagements against public targets leave it `False`. |

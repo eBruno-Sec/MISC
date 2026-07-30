@@ -38,8 +38,10 @@ async def get_tenant_id(
     try:
         return UUID(x_tenant_id)
     except ValueError:
+        # 422 = FastAPI-standard validation error. Use the literal rather than
+        # the status constant, whose name differs across Starlette versions.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=422,
             detail="X-Tenant-Id must be a valid UUID",
         )
 

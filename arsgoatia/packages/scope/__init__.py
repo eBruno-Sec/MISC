@@ -58,8 +58,19 @@ def _dns_suffix_match(pattern: str, host: str) -> bool:
     return host == pattern
 
 
+def _bare_host(s: str) -> str:
+    """Strip scheme, port, and path — return only the hostname portion."""
+    if "://" in s:
+        parsed = urlparse(s)
+        return parsed.hostname or s
+    # host:port format
+    if ":" in s and not s.startswith("["):
+        return s.split(":")[0]
+    return s
+
+
 def _exact_host_match(expected: str, host: str) -> bool:
-    return normalize_host(expected) == normalize_host(host)
+    return normalize_host(_bare_host(expected)) == normalize_host(_bare_host(host))
 
 
 def _cidr_match(cidr: str, addr: str) -> bool:
@@ -93,19 +104,40 @@ def _resolve_ip(addr: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | No
 # ---------------------------------------------------------------------------
 
 
-def _is_dangerous_address(addr: str) -> bool:
-    """Block metadata, loopback, link-local, private, IPv4-mapped-IPv6."""
+def _classify_address(addr: str) -> str:
+    """Classify a resolved address: 'safe', 'private', or 'dangerous'.
+
+    Order matters — metadata / loopback / link-local are checked before the
+    private-range test, because Python's ``is_private`` also returns True for
+    link-local (169.254/16) and loopback. That guarantees the cloud-metadata
+    address stays 'dangerous' even when private targets are permitted.
+    """
     ip = _resolve_ip(addr)
     if ip is None:
-        return False
+        return "safe"
     if ip in _METADATA_ADDRESSES:
-        return True
+        return "dangerous"
     if ip.is_loopback:
-        return True
+        return "dangerous"
     if ip.is_link_local:
-        return True
+        return "dangerous"
     if ip.is_private:
+        return "private"
+    return "safe"
+
+
+def _is_dangerous_address(addr: str, *, allow_private: bool = False) -> bool:
+    """Block metadata, loopback, link-local, private, IPv4-mapped-IPv6.
+
+    When *allow_private* is True, RFC1918 private ranges are permitted (for
+    explicitly-scoped internal/lab targets). Metadata, loopback, and link-local
+    remain blocked regardless — they are never legitimate targets.
+    """
+    classification = _classify_address(addr)
+    if classification == "dangerous":
         return True
+    if classification == "private":
+        return not allow_private
     return False
 
 
@@ -164,7 +196,7 @@ def check_target(
     host = _extract_host(target)
 
     # Dangerous address check
-    if host and _is_dangerous_address(host):
+    if host and _is_dangerous_address(host, allow_private=scope.allow_private_targets):
         return ScopeVerdict(allowed=False, reason=f"dangerous address blocked: {host}")
 
     # Redirect policy

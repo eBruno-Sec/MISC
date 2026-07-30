@@ -37,7 +37,7 @@ class ScopeFirewall:
         checks.append("scope")
 
         for addr in resolved_addresses:
-            if _is_dangerous_address(addr):
+            if _is_dangerous_address(addr, allow_private=self._scope.allow_private_targets):
                 return FirewallResult(
                     allowed=False,
                     reason=f"resolved address {addr} is dangerous",
@@ -71,7 +71,7 @@ class ScopeFirewall:
 
     def check_dns_answers(self, hostname: str, addresses: list[str]) -> FirewallResult:
         for addr in addresses:
-            if _is_dangerous_address(addr):
+            if _is_dangerous_address(addr, allow_private=self._scope.allow_private_targets):
                 return FirewallResult(
                     allowed=False,
                     reason=f"DNS answer {addr} for {hostname} is dangerous",

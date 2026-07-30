@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from policy.scope_firewall import ScopeFirewall
+from scope.firewall import ScopeFirewall
 
 _SENSITIVITY_RANK = {"public": 0, "internal": 1, "confidential": 2, "regulated": 3, "secret": 4}
 _RISK_RANK = {"R0": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5}
@@ -61,7 +61,7 @@ class ConstraintSolver:
         v: list[str] = []
 
         # Scope (deny-overrides-allow, arg-injection guard live in the firewall).
-        if not ctx.firewall.validate(candidate.destination).allowed:
+        if not ctx.firewall.preflight(candidate.destination, []).allowed:
             v.append("scope")
 
         # Risk class: R5 prohibited by default; otherwise must not exceed the cap.
