@@ -754,9 +754,95 @@ async def techniques_taxonomy(lens: str = "owasp"):
     lens only changes the view; the techniques themselves are the transferable capability."""
     import techniques as T
     try:
-        return T.taxonomy_view(lens)
+        return _intel_enrich_view(T.taxonomy_view(lens))
     except Exception as e:
         return {"error": str(e), "lens": lens}
+
+
+# --- Offensive intel feeds (Phase 0): enrich the registry with KEV/CAPEC. Deterministic, cached. ---
+_INTEL_CACHE = {"mtime": None, "snaps": {}}
+
+
+def _intel_snapshots():
+    """Load feed snapshots, re-reading only when the on-disk manifest changes."""
+    import intel_feeds
+    man = os.path.join(intel_feeds._dir(), "manifest.json")
+    try:
+        mtime = os.path.getmtime(man)
+    except OSError:
+        return {}
+    if _INTEL_CACHE["mtime"] != mtime:
+        _INTEL_CACHE["snaps"] = intel_feeds.load()
+        _INTEL_CACHE["mtime"] = mtime
+    return _INTEL_CACHE["snaps"]
+
+
+def _kev_cwes():
+    """The set of CWE ids CISA lists as known-exploited-in-the-wild (empty if no feeds loaded)."""
+    import intel_feeds
+    try:
+        return intel_feeds.known_exploited_cwes(_intel_snapshots())
+    except Exception:
+        return set()
+
+
+def _intel_enrich_view(view):
+    """Merge KEV known-exploited flags + CAPEC patterns into each technique of a taxonomy_view.
+    Degrades cleanly to {'intel': {'loaded': False}} when no feed snapshots are present."""
+    import intel_feeds
+    snaps = _intel_snapshots()
+    if not snaps:
+        view["intel"] = {"loaded": False}
+        return view
+    flat = [{"id": t.get("id"), "cwe": t.get("cwe")}
+            for g in view.get("groups", []) for t in g.get("techniques", [])]
+    enr = intel_feeds.enrich_techniques(flat, snaps)
+    ke = 0
+    for g in view.get("groups", []):
+        for t in g.get("techniques", []):
+            e = enr.get(t.get("id"))
+            if not e:
+                continue
+            t["known_exploited"] = e["known_exploited"]
+            t["kev_cves"] = e["kev_cves"]
+            t["kev_ransomware"] = e["kev_ransomware"]
+            t["capec"] = e["capec"]
+            ke += 1 if e["known_exploited"] else 0
+    kev = snaps.get("kev") or {}
+    view["intel"] = {"loaded": True, "kev_catalog_version": kev.get("catalog_version"),
+                     "known_exploited_techniques": ke}
+    return view
+
+
+@app.get("/intel/feeds")
+async def intel_feeds_status():
+    """Offensive intelligence feeds (Phase 0): CISA KEV + MITRE CAPEC status/freshness. Tier-A,
+    deterministic, no crawl, no LLM. The optional intel-feeds sidecar refreshes these on a schedule."""
+    import intel_feeds
+    st = intel_feeds.status()
+    try:
+        import techniques as T
+        snaps = _intel_snapshots()
+        if snaps:
+            enr = intel_feeds.enrich_techniques(
+                [{"id": t["id"], "cwe": t.get("cwe")} for t in T.TECHNIQUES.values()], snaps)
+            st["registry"] = {"techniques": len(enr),
+                              "known_exploited": sum(1 for e in enr.values() if e["known_exploited"]),
+                              "with_capec": sum(1 for e in enr.values() if e["capec"])}
+    except Exception:
+        pass
+    return st
+
+
+@app.post("/intel/feeds/refresh")
+async def intel_feeds_refresh():
+    """Trigger a one-shot deterministic feed refresh (KEV + CAPEC from Tier-A sources). Best-effort;
+    the sidecar normally does this on a schedule. Returns the manifest."""
+    import intel_feeds
+    try:
+        return intel_feeds.refresh()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/codereview")
@@ -899,7 +985,7 @@ async def get_report_html(session_id: str, download: bool = False):
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
-        intel=m["context"].get("intel"))
+        intel=m["context"].get("intel"), kev_cwes=_kev_cwes())
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)

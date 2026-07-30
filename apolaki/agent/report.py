@@ -983,7 +983,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
-                         security_headers: list = None, intel: dict = None) -> str:
+                         security_headers: list = None, intel: dict = None, kev_cwes: set = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -1405,6 +1405,24 @@ def generate_html_report(program: str, findings: list, scope: dict,
                           "<table class='tbl'><tr><th>Severity</th><th>Root cause</th><th>Findings</th>"
                           "<th>Manifestations</th></tr>" + rrows + "</table>")
 
+    # CISA KEV context — flag confirmed weakness classes that are known-exploited in the wild. Deterministic,
+    # sourced from the intel-feeds pipeline (Phase 0); adds real-world urgency without touching the risk score.
+    kev_html = ""
+    if kev_cwes:
+        _kev_hits, _seen = [], set()
+        for f in findings or []:
+            cwe = str(f.get("cwe") or "").strip().upper()
+            if cwe in kev_cwes and cwe not in _seen:
+                _seen.add(cwe)
+                _kev_hits.append((cwe, f.get("title", "finding")))
+        if _kev_hits:
+            _krows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td></tr>" % (e(c), e(t)) for c, t in _kev_hits)
+            kev_html = ("<h2 id='kev'>Known-Exploited in the Wild (CISA KEV)</h2>"
+                        "<p class='sub'>%d confirmed weakness class(es) below appear in CISA's Known Exploited "
+                        "Vulnerabilities catalog. These classes are under active exploitation in the wild, which "
+                        "raises real-world urgency independent of this assessment's own scoring.</p>"
+                        "<table class='tbl'><tr><th>CWE</th><th>Confirmed finding</th></tr>%s</table>" % (len(_kev_hits), _krows))
+
     # coverage & limitations — the honest inverse of coverage: what could NOT be tested, and why
     gaps_html = ""
     _auth = bool(tool_ledger and tool_ledger.get("authenticated"))
@@ -1683,6 +1701,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {cve_html}
 {intel_html}
 {rootcause_html}
+{kev_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}

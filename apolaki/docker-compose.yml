@@ -35,12 +35,16 @@ services:
       # Headless-browser CDP runtime collector (cdp.py). Empty = off (static collectors only).
       # Set to the sidecar's origin to activate, e.g. http://headless-chrome:3000
       - CDP_BROWSER_URL=${CDP_BROWSER_URL:-}
+      # Offensive intel feeds (Phase 0): the intel-feeds sidecar writes KEV/CAPEC snapshots here and
+      # the agent reads them to enrich the technique registry (known-exploited flags, CAPEC patterns).
+      - INTEL_FEEDS_DIR=/app/data/intel_feeds
     ports:
       - "8000:8000"
     volumes:
       - ./ui:/app/ui:ro
       - nuclei_templates:/root/nuclei-templates
       - bbh_data:/app/data
+      - intel_feeds_data:/app/data/intel_feeds
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -106,7 +110,24 @@ services:
       - "3000"
     restart: unless-stopped
 
+  # Offensive intel feeds (Phase 0): an INDEPENDENT deterministic ingestion service. Pulls Tier-A,
+  # redistributable sources (CISA KEV + MITRE CAPEC) on a schedule and writes normalized JSON
+  # snapshots to a shared volume; the agent reads them to enrich the technique registry with
+  # known-exploited-in-the-wild flags + CAPEC attack patterns. No crawl, no LLM, nothing auto-fires.
+  # Reuses the agent image, just a different entrypoint. Last arg = refresh interval in seconds (6h).
+  intel-feeds:
+    build: ./agent
+    command: ["python", "-m", "intel_feeds", "serve", "/app/data/intel_feeds", "21600"]
+    environment:
+      - INTEL_FEEDS_DIR=/app/data/intel_feeds
+      # Set INTEL_FEEDS_ATTACK=1 to also pull the (large ~47MB) MITRE ATT&CK Enterprise STIX bundle.
+      - INTEL_FEEDS_ATTACK=${INTEL_FEEDS_ATTACK:-}
+    volumes:
+      - intel_feeds_data:/app/data/intel_feeds
+    restart: unless-stopped
+
 volumes:
   nuclei_templates:
   bbh_data:
   juiceshop_data:
+  intel_feeds_data:

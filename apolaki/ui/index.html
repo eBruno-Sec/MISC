@@ -1722,6 +1722,7 @@ function renderTaxonomy(d){
     <div class="tx-stat"><span class="v">${d.total}</span><span class="k">Techniques</span></div>
     <div class="tx-stat"><span class="v">${d.transferable}</span><span class="k">Transferable</span></div>
     <div class="tx-stat"><span class="v">${d.generalized}</span><span class="k">Generalized ≥2 labs</span></div>
+    ${d.intel&&d.intel.loaded?`<div class="tx-stat"><span class="v" style="color:var(--danger)">${d.intel.known_exploited_techniques}</span><span class="k">Known-exploited (CISA KEV ${esc(d.intel.kev_catalog_version||'')})</span></div>`:``}
     <div class="tx-note"><b>Proven</b> = oracle-confirmed on a lab. <b>Catalogued</b> = known, not yet demonstrated. <b>Generalized</b> needs ≥2 labs — everything's Juice-Shop-only for now, so <b>0</b> is the honest number until a 2nd corpus lands.</div>
   </div>`;
   h+=`<div class="tx-lenses">`+ (d.lenses||[]).map(l=>`<button class="tx-lens ${l.id===d.lens?"active":""}" onclick="txLens('${l.id}')">${esc(l.label)}</button>`).join("") +`</div>`;
@@ -1731,13 +1732,15 @@ function renderTaxonomy(d){
       const col = t.status==="proven" ? "var(--ok)" : (!t.transferable ? "var(--warn)" : "var(--border2)");
       const badge = !t.transferable ? `<span class="tx-badge lablocal">lab-local</span>`
                     : (t.status==="proven" ? `<span class="tx-badge proven">proven</span>` : `<span class="tx-badge catalogued">catalogued</span>`);
+      const kev = t.known_exploited ? `<span class="tx-badge" style="background:var(--danger);color:#fff;border-color:var(--danger)" title="This weakness class is in CISA's Known Exploited Vulnerabilities catalog${t.kev_ransomware?', ransomware-associated':''}">KEV exploited</span>` : "";
+      const caps = (t.capec||[]).slice(0,4).map(c=>`<span class="tx-chip" title="CAPEC: ${esc(c.name)}${c.severity?' · '+esc(c.severity)+' severity':''}">${esc(c.id)}</span>`).join("");
       const tags = [["CWE",t.cwe],["OWASP",t.owasp],["WSTG",t.wstg],["ATT&CK",t.mitre]]
-        .filter(x=>x[1]).map(x=>`<span class="tx-chip">${esc(String(x[1]))}</span>`).join("");
+        .filter(x=>x[1]).map(x=>`<span class="tx-chip">${esc(String(x[1]))}</span>`).join("") + caps;
       const js = (t.maps_to&&t.maps_to.juiceshop&&t.maps_to.juiceshop.length)
         ? `<div class="tx-ev">Proof on Juice Shop: <b>${t.maps_to.juiceshop.map(esc).join("</b>, <b>")}</b></div>` : "";
       h+=`<div class="tx-tech" style="--tc:${col}">
         <div class="tx-thead" onclick="this.closest('.tx-tech').classList.toggle('open')">
-          <span class="tx-tname">${esc(txHuman(t.id))} ${badge}</span><span class="tx-caret" title="learn the method">▶</span>
+          <span class="tx-tname">${esc(txHuman(t.id))} ${badge}${kev}</span><span class="tx-caret" title="learn the method">▶</span>
         </div>
         <div class="tx-sum">${esc(t.summary)}</div>
         <div class="tx-tags">${tags}</div>${js}
@@ -1745,6 +1748,7 @@ function renderTaxonomy(d){
           <div class="tx-step"><span class="tx-slabel">Detect</span>${esc(t.detect||'—')}</div>
           <div class="tx-step"><span class="tx-slabel">Exploit</span>${esc(t.exploit||'—')}</div>
           <div class="tx-step"><span class="tx-slabel">Confirm</span>${esc(t.oracle||'—')}</div>
+          ${t.known_exploited?`<div class="tx-step"><span class="tx-slabel" style="color:var(--danger)">Exploited ITW</span>CISA KEV lists this weakness class as known-exploited in the wild${t.kev_ransomware?', ransomware-associated':''}. Real CVEs: ${(t.kev_cves||[]).slice(0,3).map(esc).join(', ')||'n/a'}</div>`:''}
           ${t.try_it?`<div class="tx-step"><span class="tx-slabel" style="color:var(--ok)">Try it</span><code style="font-family:var(--mono);font-size:.73rem;color:var(--text);word-break:break-word">${esc(t.try_it)}</code></div>`:''}
         </div></div>`;
     });
