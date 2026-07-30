@@ -1,8 +1,8 @@
 """ArsGoatia Temporal worker entry point.
 
 Starts two task queues:
-  - workflow-control: root + child workflows, control activities
-  - workflow-web: recon / module / validation / evidence / reporting activities
+  - arsgoatia-control: root + child workflows, control activities
+  - arsgoatia-web: recon / module / validation / evidence / reporting activities
 """
 
 from __future__ import annotations
@@ -16,26 +16,27 @@ from temporalio.worker import Worker
 
 from services.worker.activities.chain import create_chain_step
 from services.worker.activities.cleanup import run_cleanup
-from services.worker.activities.evidence import store_evidence
+from services.worker.activities.evidence import store_evidence, verify_evidence
 from services.worker.activities.identity import establish_identities
 from services.worker.activities.recon import safe_http_recon
 from services.worker.activities.reporting import generate_reports
 from services.worker.activities.validation import run_bola_validation
+from services.worker.queues import CONTROL_QUEUE, WEB_QUEUE
 from services.worker.workflows.engagement import EngagementWorkflow
 from services.worker.workflows.recon import ReconWorkflow
 from services.worker.workflows.validation import ValidationWorkflow
 
 logger = logging.getLogger("arsgoatia.worker")
 
-TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
-TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
-
-CONTROL_QUEUE = "workflow-control"
-WEB_QUEUE = "workflow-web"
+TEMPORAL_ADDRESS = os.getenv(
+    "ARSGOATIA_TEMPORAL_ADDRESS",
+    os.getenv("TEMPORAL_ADDRESS", "localhost:7233"),
+)
+TEMPORAL_NAMESPACE = os.getenv("ARSGOATIA_TEMPORAL_NAMESPACE", "default")
 
 CONTROL_WORKFLOWS = [EngagementWorkflow, ReconWorkflow, ValidationWorkflow]
 CONTROL_ACTIVITIES = [establish_identities, create_chain_step, run_cleanup]
-WEB_ACTIVITIES = [safe_http_recon, run_bola_validation, store_evidence, generate_reports]
+WEB_ACTIVITIES = [safe_http_recon, run_bola_validation, store_evidence, verify_evidence, generate_reports]
 
 
 async def run() -> None:

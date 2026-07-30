@@ -12,6 +12,7 @@ with workflow.unsafe.imports_passed_through():
         BOLAParams,
         run_bola_validation,
     )
+    from services.worker.queues import WEB_QUEUE
 
 
 @dataclass
@@ -70,6 +71,7 @@ class ValidationWorkflow:
                     "ApprovalRequiredError",
                 ],
             ),
+            task_queue=WEB_QUEUE,
         )
 
         return ValidationWorkflowResult(

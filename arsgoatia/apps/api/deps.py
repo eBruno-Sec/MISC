@@ -12,8 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://arsgoatia:arsgoatia@localhost:5433/arsgoatia",
+    "ARSGOATIA_DATABASE_URL",
+    os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://arsgoatia:arsgoatia@localhost:5433/arsgoatia",
+    ),
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False, pool_size=10, max_overflow=20)
@@ -27,11 +30,6 @@ async def get_tenant_id(
     request: Request,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-Id")] = None,
 ) -> UUID:
-    """Extract tenant identifier from the request.
-
-    In production this will come from a verified JWT claim.  During development
-    we accept the ``X-Tenant-Id`` header as a convenience.
-    """
     if x_tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -40,8 +38,6 @@ async def get_tenant_id(
     try:
         return UUID(x_tenant_id)
     except ValueError:
-        # 422 = FastAPI-standard validation error. Use the literal rather than
-        # the status constant, whose name differs across Starlette versions.
         raise HTTPException(
             status_code=422,
             detail="X-Tenant-Id must be a valid UUID",
@@ -54,7 +50,6 @@ async def get_tenant_id(
 async def get_session(
     tenant_id: Annotated[UUID, Depends(get_tenant_id)],
 ) -> AsyncGenerator[AsyncSession, None]:
-    """Yield an ``AsyncSession`` with row-level security set to *tenant_id*."""
     async with async_session_factory() as session:
         await session.execute(
             text("SELECT set_config('app.tenant_id', :tid, true)"),
@@ -74,11 +69,6 @@ async def require_auth(
     x_auth_user: Annotated[str | None, Header(alias="X-Auth-User")] = None,
     x_auth_role: Annotated[str | None, Header(alias="X-Auth-Role")] = None,
 ) -> dict:
-    """Return an authentication context dict.
-
-    In production this validates a JWT and returns structured claims.  During
-    development we accept header-based identity for convenience.
-    """
     user = x_auth_user or "dev-operator"
     role = x_auth_role or "admin"
     return {

@@ -51,6 +51,8 @@ class ReconResult:
 
 
 def _is_in_scope(url: str, scope_rules: list[ScopeRuleParam]) -> bool:
+    if not scope_rules:
+        return False
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
     for rule in scope_rules:
@@ -60,7 +62,7 @@ def _is_in_scope(url: str, scope_rules: list[ScopeRuleParam]) -> bool:
             return True
         if rule.type == "url_prefix" and url.startswith(rule.value):
             return True
-    return len(scope_rules) == 0
+    return False
 
 
 @activity.defn

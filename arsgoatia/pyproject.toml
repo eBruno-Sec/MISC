@@ -13,7 +13,7 @@ dependencies = [
     "alembic",
     "httpx",
     "temporalio",
-    "minio",
+    "miniopy-async",
     "cryptography",
     "python-jose[cryptography]",
 ]

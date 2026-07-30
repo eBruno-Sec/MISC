@@ -95,12 +95,9 @@ services:
       POSTGRES_USER: arsgoatia
       POSTGRES_PWD: arsgoatia
       POSTGRES_SEEDS: postgres
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - arsgoatia-temporal:/etc/temporal
 
   temporal-ui:
     <<: *common
@@ -126,14 +123,14 @@ services:
     ports:
       - "8080:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
-      TEMPORAL_HOST: temporal:7233
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: arsgoatia
-      MINIO_SECRET_KEY: arsgoatia-dev-secret
-      MINIO_BUCKET: arsgoatia-evidence
-      SIGNING_KEY: dev-signing-key-change-in-production
-      LOG_LEVEL: INFO
+      ARSGOATIA_DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      ARSGOATIA_TEMPORAL_ADDRESS: temporal:7233
+      ARSGOATIA_MINIO_ENDPOINT: minio:9000
+      ARSGOATIA_MINIO_ACCESS_KEY: arsgoatia
+      ARSGOATIA_MINIO_SECRET_KEY: arsgoatia-dev-secret
+      ARSGOATIA_MINIO_BUCKET: arsgoatia-evidence
+      ARSGOATIA_SIGNING_KEY: dev-signing-key-change-in-production
+      ARSGOATIA_LOG_LEVEL: INFO
     depends_on:
       postgres:
         condition: service_healthy
@@ -149,13 +146,14 @@ services:
       dockerfile: services/worker/Dockerfile
     profiles: ["core"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
-      TEMPORAL_HOST: temporal:7233
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: arsgoatia
-      MINIO_SECRET_KEY: arsgoatia-dev-secret
-      SIGNING_KEY: dev-signing-key-change-in-production
-      LOG_LEVEL: INFO
+      ARSGOATIA_DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      ARSGOATIA_TEMPORAL_ADDRESS: temporal:7233
+      ARSGOATIA_MINIO_ENDPOINT: minio:9000
+      ARSGOATIA_MINIO_ACCESS_KEY: arsgoatia
+      ARSGOATIA_MINIO_SECRET_KEY: arsgoatia-dev-secret
+      ARSGOATIA_MINIO_BUCKET: arsgoatia-evidence
+      ARSGOATIA_SIGNING_KEY: dev-signing-key-change-in-production
+      ARSGOATIA_LOG_LEVEL: INFO
     depends_on:
       postgres:
         condition: service_healthy
@@ -171,13 +169,13 @@ services:
     ports:
       - "8081:8001"
     environment:
-      DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: arsgoatia
-      MINIO_SECRET_KEY: arsgoatia-dev-secret
-      MINIO_BUCKET: arsgoatia-evidence
-      SIGNING_KEY: dev-signing-key-change-in-production
-      LOG_LEVEL: INFO
+      ARSGOATIA_DATABASE_URL: postgresql+asyncpg://arsgoatia:arsgoatia@postgres:5432/arsgoatia
+      ARSGOATIA_MINIO_ENDPOINT: minio:9000
+      ARSGOATIA_MINIO_ACCESS_KEY: arsgoatia
+      ARSGOATIA_MINIO_SECRET_KEY: arsgoatia-dev-secret
+      ARSGOATIA_MINIO_BUCKET: arsgoatia-evidence
+      ARSGOATIA_SIGNING_KEY: dev-signing-key-change-in-production
+      ARSGOATIA_LOG_LEVEL: INFO
     depends_on:
       postgres:
         condition: service_healthy
@@ -194,7 +192,7 @@ services:
       dockerfile: Dockerfile
     profiles: ["ui"]
     ports:
-      - "3100:3000"
+      - "3100:80"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
 

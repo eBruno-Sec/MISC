@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -117,20 +118,28 @@ def _build_json_report(params: ReportParams) -> dict:
 def _build_html_report(params: ReportParams, json_data: dict) -> str:
     findings_rows = ""
     for f in params.findings:
+        fid = html.escape(f.finding_id)
+        weakness = html.escape(f.weakness)
+        obj = html.escape(f.affected_object)
+        st = html.escape(f.status)
         findings_rows += (
-            f"<tr><td>{f.finding_id}</td><td>{f.weakness}</td>"
-            f"<td>{f.affected_object}</td><td>{f.status}</td>"
+            f"<tr><td>{fid}</td><td>{weakness}</td>"
+            f"<td>{obj}</td><td>{st}</td>"
             f"<td>{f.severity}</td><td>{f.confidence}</td></tr>\n"
         )
+
+    eid = html.escape(params.engagement_id)
+    tid = html.escape(params.tenant_id)
+    gen = html.escape(json_data["generated_at"])
 
     return f"""<!DOCTYPE html>
 <html>
 <head><title>ArsGoatia Engagement Report</title></head>
 <body>
 <h1>ArsGoatia Security Validation Report</h1>
-<p>Engagement: {params.engagement_id}</p>
-<p>Tenant: {params.tenant_id}</p>
-<p>Generated: {json_data["generated_at"]}</p>
+<p>Engagement: {eid}</p>
+<p>Tenant: {tid}</p>
+<p>Generated: {gen}</p>
 <h2>Findings ({len(params.findings)})</h2>
 <table border="1">
 <tr><th>ID</th><th>Weakness</th><th>Object</th>

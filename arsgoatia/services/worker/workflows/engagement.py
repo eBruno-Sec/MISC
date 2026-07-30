@@ -30,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
         AccessContextParam,
         ActionEnvelopeParam,
     )
+    from services.worker.queues import CONTROL_QUEUE, WEB_QUEUE
     from services.worker.workflows.recon import ReconWorkflow, ReconWorkflowInput
     from services.worker.workflows.validation import (
         ValidationWorkflow,
@@ -72,9 +73,6 @@ class EngagementResult:
     report_ids: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
     cleanup_verified: bool = False
-    # Set from a workflow.get_version guard (see the reporting phase). Histories
-    # recorded before the evolution replay at DEFAULT_VERSION and report 0; runs
-    # on the evolved code report the current reporting-contract version.
     report_contract_version: int = 0
 
 
@@ -203,7 +201,7 @@ class EngagementWorkflow:
                 tenant_id=input.tenant_id,
             ),
             id=f"recon-{input.engagement_id}-{wf_id_suffix}",
-            task_queue="arsgoatia-execution",
+            task_queue=CONTROL_QUEUE,
         )
         self._child_handles.append(recon_handle)
 
@@ -235,7 +233,7 @@ class EngagementWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
             heartbeat_timeout=timedelta(seconds=30),
             retry_policy=ACTIVITY_RETRY,
-            task_queue="arsgoatia-execution",
+            task_queue=CONTROL_QUEUE,
         )
         self._cleanup_needed = True
         self._update(progress=50)
@@ -250,9 +248,6 @@ class EngagementWorkflow:
         requires_approval = any(tier in input.approval_required_tiers for tier in ["R2"])
 
         if requires_approval:
-            # Block on the action-bound approval gate (HITL). The signal's
-            # arrival is the gate; the ref itself is bound into the envelope
-            # by the executor, not here.
             await self._await_approval(action_id)
 
         access_ctxs = [
@@ -286,7 +281,7 @@ class EngagementWorkflow:
                         requires_approval=False,
                     ),
                     id=f"validation-{input.engagement_id}-{str(workflow.uuid4())[:8]}",
-                    task_queue="arsgoatia-execution",
+                    task_queue=CONTROL_QUEUE,
                 )
                 self._child_handles.append(validation_handle)
 
@@ -338,7 +333,7 @@ class EngagementWorkflow:
                     ),
                     start_to_close_timeout=timedelta(minutes=2),
                     retry_policy=ACTIVITY_RETRY,
-                    task_queue="arsgoatia-execution",
+                    task_queue=CONTROL_QUEUE,
                 )
 
         self._update(progress=80)
@@ -359,17 +354,10 @@ class EngagementWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=ACTIVITY_RETRY,
-            task_queue="arsgoatia-execution",
+            task_queue=WEB_QUEUE,
         )
         self._update(progress=90)
 
-        # Safe workflow evolution (spec §14.5): the reporting contract gained a
-        # version marker after the first histories were recorded. Guarding the
-        # change with workflow.get_version keeps replay of pre-evolution
-        # histories deterministic — they resolve to DEFAULT_VERSION and report
-        # 0, while runs on the evolved code report version 1. Both a v1 and a v2
-        # recorded history therefore replay cleanly against this single
-        # code path (see tests/replay/test_workflow_evolution.py).
         _report_version = workflow.get_version(
             "reporting-contract-version", workflow.DEFAULT_VERSION, 1
         )
@@ -416,7 +404,7 @@ class EngagementWorkflow:
             start_to_close_timeout=timedelta(minutes=10),
             heartbeat_timeout=timedelta(seconds=60),
             retry_policy=ACTIVITY_RETRY,
-            task_queue="arsgoatia-execution",
+            task_queue=CONTROL_QUEUE,
         )
 
     async def _finalize(self, input: EngagementInput, *, aborted: bool = False) -> EngagementResult:

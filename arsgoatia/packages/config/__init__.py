@@ -33,7 +33,7 @@ class ArsGoatiaSettings(BaseSettings):
     # -- MinIO (evidence object storage) --------------------------------
     minio_endpoint: str = "localhost:9100"
     minio_access_key: str = "arsgoatia"
-    minio_secret_key: str = "arsgoatia-secret"
+    minio_secret_key: str = "arsgoatia-dev-secret"
     minio_bucket: str = "arsgoatia-evidence"
 
     # -- Envelope signing ------------------------------------------------
@@ -44,7 +44,10 @@ class ArsGoatiaSettings(BaseSettings):
     log_level: str = "INFO"
 
     # -- AI gateway --------------------------------------------------------
-    ai_model: str = "gpt-4o-mini"
+    ai_provider: str = "openrouter"
+    ai_api_key: str = ""
+    ai_model: str = "openrouter/free"
+    ai_base_url: str = "https://openrouter.ai/api/v1"
     ai_budget_usd: float = 25.0
     ai_redact_secrets: bool = True
 

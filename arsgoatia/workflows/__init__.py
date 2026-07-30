@@ -7,8 +7,8 @@ or delegate to activities.
 
 from __future__ import annotations
 
-CONTROL_QUEUE = "workflow-control"
-WEB_QUEUE = "workflow-web"
+CONTROL_QUEUE = "arsgoatia-control"
+WEB_QUEUE = "arsgoatia-web"
 NAMESPACE = "arsgoatia"
 
 SIGNAL_PAUSE = "PauseAssessment"

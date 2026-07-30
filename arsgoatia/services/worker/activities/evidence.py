@@ -1,9 +1,26 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 
 from temporalio import activity
+
+MINIO_ENDPOINT = os.getenv("ARSGOATIA_MINIO_ENDPOINT", "localhost:9100")
+MINIO_ACCESS_KEY = os.getenv("ARSGOATIA_MINIO_ACCESS_KEY", "arsgoatia")
+MINIO_SECRET_KEY = os.getenv("ARSGOATIA_MINIO_SECRET_KEY", "arsgoatia-dev-secret")
+MINIO_BUCKET = os.getenv("ARSGOATIA_MINIO_BUCKET", "arsgoatia-evidence")
+
+
+def _get_client():
+    import miniopy_async  # noqa: PLC0415
+
+    return miniopy_async.Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False,
+    )
 
 
 @dataclass
@@ -22,22 +39,14 @@ async def store_evidence(params: StoreEvidenceParams) -> str:
     digest = hashlib.sha256(params.payload).hexdigest()
     object_key = f"evidence/{params.tenant_id}/{params.engagement_id}/{params.action_id}/{digest}"
 
-    import miniopy_async  # noqa: PLC0415
-
-    client = miniopy_async.Minio(
-        "minio:9000",
-        access_key="arsgoatia",
-        secret_key="arsgoatia",
-        secure=False,
-    )
-    bucket = "arsgoatia-evidence"
-    if not await client.bucket_exists(bucket):
-        await client.make_bucket(bucket)
+    client = _get_client()
+    if not await client.bucket_exists(MINIO_BUCKET):
+        await client.make_bucket(MINIO_BUCKET)
 
     from io import BytesIO  # noqa: PLC0415
 
     await client.put_object(
-        bucket,
+        MINIO_BUCKET,
         object_key,
         BytesIO(params.payload),
         length=len(params.payload),
@@ -64,19 +73,10 @@ async def verify_evidence(evidence_id: str) -> bool:
         return False
 
     expected_digest = evidence_id.removeprefix("sha256:")
-
-    import miniopy_async  # noqa: PLC0415
-
-    client = miniopy_async.Minio(
-        "minio:9000",
-        access_key="arsgoatia",
-        secret_key="arsgoatia",
-        secure=False,
-    )
-    bucket = "arsgoatia-evidence"
+    client = _get_client()
 
     objects = []
-    async for obj in client.list_objects(bucket, recursive=True):
+    async for obj in client.list_objects(MINIO_BUCKET, recursive=True):
         if obj.object_name and obj.object_name.endswith(f"/{expected_digest}"):
             objects.append(obj)
             break
@@ -85,7 +85,7 @@ async def verify_evidence(evidence_id: str) -> bool:
         activity.logger.warning("Evidence not found", extra={"evidence_id": evidence_id})
         return False
 
-    response = await client.get_object(bucket, objects[0].object_name)
+    response = await client.get_object(MINIO_BUCKET, objects[0].object_name)
     try:
         data = await response.read()
     finally:

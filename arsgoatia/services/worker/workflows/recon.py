@@ -12,6 +12,7 @@ with workflow.unsafe.imports_passed_through():
         ScopeRuleParam,
         safe_http_recon,
     )
+    from services.worker.queues import WEB_QUEUE
 
 
 @dataclass
@@ -49,6 +50,7 @@ class ReconWorkflow:
                 maximum_attempts=3,
                 non_retryable_error_types=["ScopeViolationError"],
             ),
+            task_queue=WEB_QUEUE,
         )
 
         return ReconWorkflowResult(

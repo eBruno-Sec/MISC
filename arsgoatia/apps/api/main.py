@@ -55,3 +55,8 @@ app.include_router(audit.router, prefix=PREFIX)
 @app.get("/health", tags=["infra"])
 async def health():
     return {"status": "ok", "service": "arsgoatia-api"}
+
+
+@app.get(f"{PREFIX}/health", tags=["infra"])
+async def health_prefixed():
+    return {"status": "ok", "service": "arsgoatia-api"}

@@ -83,8 +83,8 @@ class TestIsInScope:
     def _rule(self, type_: str, value: str) -> ScopeRuleParam:
         return ScopeRuleParam(type=type_, value=value)
 
-    def test_empty_rules_allows_everything(self):
-        assert _is_in_scope("http://anything.example.com/path", []) is True
+    def test_empty_rules_denies_everything(self):
+        assert _is_in_scope("http://anything.example.com/path", []) is False
 
     def test_exact_host_match(self):
         rules = [self._rule("exact_host", "juice-shop")]

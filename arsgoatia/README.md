@@ -82,11 +82,18 @@ arsgoatia/
 # Copy environment
 cp .env.example .env
 
-# Start infrastructure
-docker compose --profile lab up -d
+# Start the full stack (core services, UI, lab targets)
+docker compose -f deploy/compose/docker-compose.yml \
+  --profile core --profile ui --profile lab up --build -d
 
-# Run migrations
-alembic upgrade head
+# Health checks
+curl -sf http://localhost:8080/health         # API
+curl -sf http://localhost:3100/healthz        # Web console
+# Temporal UI at http://localhost:8088
+# MinIO console at http://localhost:9101
+
+# Run migrations (once the stack is up)
+docker compose -f deploy/compose/docker-compose.yml exec api alembic upgrade head
 
 # Run tests
 python -m pytest tests/unit -q
@@ -115,14 +122,17 @@ CI runs on every change under `arsgoatia/**`
 ## Layout
 
 ```
-apps/        api (FastAPI), web (React/Vite), worker-control, worker-web
-packages/    schemas, domain, policy, planner, evidence, events, ai_gateway,
-             module_sdk, tool_sdk, temporal_common, audit, config
-modules/     web/authorization_idor (the slice's module), + intent stubs
-temporal/    root + child workflows and their activities
-infrastructure/  postgres init, temporal dynamic config
-docs/adr/    architecture decision records (deviations from the spec)
-tests/       unit, contract, replay, security, e2e
+apps/        api (FastAPI), web (React/Vite), evidence (content-addressed store)
+packages/    contracts, domain, policy, planner, evidence, events, ai_gateway,
+             crypto, envelope, scope, approval, capability, cleanup,
+             hypothesis, identity, persistence, config, observability
+modules/     web/authorization_idor (BOLA slice), + intent stubs
+packs/       techniques (bola_differential), tools, labs
+services/worker/  Temporal workflows + activities (recon, validation, evidence, ...)
+infrastructure/   postgres init.sql
+deploy/compose/   docker-compose.yml (profiles: core, ui, graph, lab)
+docs/adr/    architecture decision records
+tests/       unit, contract, replay, security, integration, isolation, performance, e2e
 ```
 
 ## Deterministic reasoning layer (post-slice)
