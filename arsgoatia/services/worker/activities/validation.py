@@ -50,15 +50,12 @@ class _ExchangeResult:
 @activity.defn
 async def run_bola_validation(params: BOLAParams) -> BOLAResult:
     if len(params.access_contexts) < 2:
-        activity.logger.error(
-            "BOLA validation requires at least 2 access contexts"
-        )
+        activity.logger.error("BOLA validation requires at least 2 access contexts")
         return BOLAResult(finding_status="INCONCLUSIVE")
 
     import httpx  # noqa: PLC0415
 
     from services.worker.activities.evidence import (  # noqa: PLC0415
-        StoreEvidenceParams,
         store_evidence,
     )
 
@@ -141,9 +138,7 @@ async def run_bola_validation(params: BOLAParams) -> BOLAResult:
         "BOLA validation complete",
         extra={
             "finding_status": finding_status,
-            "exchanges": [
-                {"label": ex.label, "matched": ex.matched} for ex in exchanges
-            ],
+            "exchanges": [{"label": ex.label, "matched": ex.matched} for ex in exchanges],
         },
     )
 

@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib
-import os
 import pathlib
-import sys
-import textwrap
 
 import pytest
 
@@ -44,29 +41,31 @@ ALL_WORKFLOW_FILES = [ENGAGEMENT_WF, RECON_WF, VALIDATION_WF]
 # I/O-bearing packages that must never appear as top-level imports in a
 # workflow file (inside ``with workflow.unsafe.imports_passed_through()`` is
 # acceptable because those are type-only pass-throughs).
-FORBIDDEN_IO_PACKAGES = frozenset({
-    "httpx",
-    "aiohttp",
-    "requests",
-    "urllib3",
-    "sqlalchemy",
-    "asyncpg",
-    "psycopg",
-    "psycopg2",
-    "pymongo",
-    "redis",
-    "minio",
-    "miniopy_async",
-    "boto3",
-    "botocore",
-    "grpc",
-    "grpcio",
-    "paramiko",
-    "fabric",
-    "smtplib",
-    "socket",
-    "subprocess",
-})
+FORBIDDEN_IO_PACKAGES = frozenset(
+    {
+        "httpx",
+        "aiohttp",
+        "requests",
+        "urllib3",
+        "sqlalchemy",
+        "asyncpg",
+        "psycopg",
+        "psycopg2",
+        "pymongo",
+        "redis",
+        "minio",
+        "miniopy_async",
+        "boto3",
+        "botocore",
+        "grpc",
+        "grpcio",
+        "paramiko",
+        "fabric",
+        "smtplib",
+        "socket",
+        "subprocess",
+    }
+)
 
 # Non-deterministic call patterns that must not appear in workflow method
 # bodies.  Each entry is (module_or_attr, function_name).
@@ -92,6 +91,7 @@ NONDETERMINISTIC_CALLS: list[tuple[str, str]] = [
 # ===================================================================
 # AST helpers
 # ===================================================================
+
 
 def _parse_file(path: pathlib.Path) -> ast.Module:
     return ast.parse(path.read_text(), filename=str(path))
@@ -175,7 +175,11 @@ def _class_nodes_with_decorator(tree: ast.Module, decorator_attr: str) -> list[a
         if not isinstance(node, ast.ClassDef):
             continue
         for dec in node.decorator_list:
-            name = _call_name(ast.Call(func=dec, args=[], keywords=[])) if isinstance(dec, (ast.Attribute, ast.Name)) else None
+            name = (
+                _call_name(ast.Call(func=dec, args=[], keywords=[]))
+                if isinstance(dec, (ast.Attribute, ast.Name))
+                else None
+            )
             if name is None and isinstance(dec, ast.Attribute):
                 name = f"{_attr_chain(dec)}"
             if name and name.endswith(decorator_attr):
@@ -222,7 +226,11 @@ def _extract_lifecycle_strings_from_workflow(tree: ast.Module) -> set[str]:
         # self._update(lifecycle="RUNNING", ...)
         if isinstance(node, ast.Call):
             for kw in node.keywords:
-                if kw.arg == "lifecycle" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                if (
+                    kw.arg == "lifecycle"
+                    and isinstance(kw.value, ast.Constant)
+                    and isinstance(kw.value.value, str)
+                ):
                     states.add(kw.value.value)
         # self._state.lifecycle = "RUNNING"
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -236,7 +244,11 @@ def _extract_lifecycle_strings_from_workflow(tree: ast.Module) -> set[str]:
                 states.add(node.value.value)
         # Dataclass field default: lifecycle: str = "DRAFT"
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id == "lifecycle" and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            if (
+                node.target.id == "lifecycle"
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
                 states.add(node.value.value)
     return states
 
@@ -279,6 +291,7 @@ def _extract_child_workflow_classes(tree: ast.Module) -> set[str]:
 # 1. Determinism boundary tests
 # ===================================================================
 
+
 class TestDeterminismBoundary:
     """Workflow files must not call non-deterministic stdlib functions
     directly.  Only ``workflow.uuid4()`` etc. are allowed."""
@@ -292,9 +305,7 @@ class TestDeterminismBoundary:
             for name, lineno, func in calls
             if name in ("datetime.now", "datetime.datetime.now", "datetime.datetime.utcnow")
         ]
-        assert not violations, (
-            f"{wf_path.name} calls datetime.now() directly: {violations}"
-        )
+        assert not violations, f"{wf_path.name} calls datetime.now() directly: {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_bare_uuid4(self, wf_path: pathlib.Path) -> None:
@@ -306,9 +317,7 @@ class TestDeterminismBoundary:
             if name in ("uuid.uuid4", "uuid.uuid1", "uuid4")
             # workflow.uuid4() is fine -- only bare uuid.uuid4() is banned
         ]
-        assert not violations, (
-            f"{wf_path.name} calls uuid.uuid4() directly: {violations}"
-        )
+        assert not violations, f"{wf_path.name} calls uuid.uuid4() directly: {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_random_module_usage(self, wf_path: pathlib.Path) -> None:
@@ -320,9 +329,7 @@ class TestDeterminismBoundary:
             for name, lineno, func in calls
             if any(name == f"random.{fn}" for fn in random_funcs)
         ]
-        assert not violations, (
-            f"{wf_path.name} uses random module: {violations}"
-        )
+        assert not violations, f"{wf_path.name} uses random module: {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_time_sleep(self, wf_path: pathlib.Path) -> None:
@@ -333,9 +340,7 @@ class TestDeterminismBoundary:
             for name, lineno, func in calls
             if name in ("time.sleep", "asyncio.sleep")
         ]
-        assert not violations, (
-            f"{wf_path.name} calls time.sleep()/asyncio.sleep(): {violations}"
-        )
+        assert not violations, f"{wf_path.name} calls time.sleep()/asyncio.sleep(): {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_os_environ_reads(self, wf_path: pathlib.Path) -> None:
@@ -348,14 +353,13 @@ class TestDeterminismBoundary:
             for name, lineno, func in calls
             if name in ("os.environ.get", "os.getenv", "os.environ.__getitem__")
         ]
-        assert not violations, (
-            f"{wf_path.name} reads env vars: {violations}"
-        )
+        assert not violations, f"{wf_path.name} reads env vars: {violations}"
 
 
 # ===================================================================
 # 2. Signal handler existence tests
 # ===================================================================
+
 
 class TestSignalHandlers:
     """The engagement workflow must expose the expected signal handlers."""
@@ -424,6 +428,7 @@ class TestSignalHandlers:
 # 3. Activity registration tests
 # ===================================================================
 
+
 class TestActivityRegistration:
     """Every activity function referenced in workflow code must be importable
     from the activities package."""
@@ -473,9 +478,7 @@ class TestActivityRegistration:
                     defined_functions.add(node.name)
 
         missing = all_activities - defined_functions
-        assert not missing, (
-            f"Activities referenced in workflows but not defined: {missing}"
-        )
+        assert not missing, f"Activities referenced in workflows but not defined: {missing}"
 
     def test_child_workflows_referenced_correctly(self) -> None:
         """Child workflow classes referenced in engagement.py should be
@@ -510,6 +513,7 @@ class TestActivityRegistration:
 # ===================================================================
 # 4. State machine / lifecycle transition tests
 # ===================================================================
+
 
 class TestLifecycleTransitions:
     """Lifecycle states used in the workflow must be consistent with the
@@ -546,16 +550,12 @@ class TestLifecycleTransitions:
             f"Domain states: {sorted(domain_states)}"
         )
 
-    def test_domain_main_sequence_present_in_workflow(
-        self, workflow_states: set[str]
-    ) -> None:
+    def test_domain_main_sequence_present_in_workflow(self, workflow_states: set[str]) -> None:
         """The domain's main sequence states should all appear in the
         engagement workflow."""
         main_seq = {"DRAFT", "AUTHORIZATION_PENDING", "SCOPE_COMPILED", "READY", "RUNNING"}
         missing = main_seq - workflow_states
-        assert not missing, (
-            f"Main sequence states missing from workflow: {missing}"
-        )
+        assert not missing, f"Main sequence states missing from workflow: {missing}"
 
     def test_terminal_states_present(self, workflow_states: set[str]) -> None:
         """The workflow should reference at least COMPLETED and FAILED."""
@@ -611,14 +611,13 @@ class TestLifecycleTransitions:
                         transition_keys.add(key.attr)
 
         missing = enum_members - transition_keys
-        assert not missing, (
-            f"LifecycleState members missing from LIFECYCLE_TRANSITIONS: {missing}"
-        )
+        assert not missing, f"LifecycleState members missing from LIFECYCLE_TRANSITIONS: {missing}"
 
 
 # ===================================================================
 # 5. Workflow file purity tests
 # ===================================================================
+
 
 class TestWorkflowPurity:
     """Workflow files must not import I/O-bearing packages at top level."""
@@ -628,9 +627,7 @@ class TestWorkflowPurity:
         tree = _parse_file(wf_path)
         top_imports = _top_level_import_names(tree)
         violations = top_imports & FORBIDDEN_IO_PACKAGES
-        assert not violations, (
-            f"{wf_path.name} imports I/O packages at top level: {violations}"
-        )
+        assert not violations, f"{wf_path.name} imports I/O packages at top level: {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_io_packages_anywhere(self, wf_path: pathlib.Path) -> None:
@@ -640,17 +637,13 @@ class TestWorkflowPurity:
         tree = _parse_file(wf_path)
         all_imports = _all_import_names(tree)
         violations = all_imports & FORBIDDEN_IO_PACKAGES
-        assert not violations, (
-            f"{wf_path.name} imports I/O packages: {violations}"
-        )
+        assert not violations, f"{wf_path.name} imports I/O packages: {violations}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_subprocess_usage(self, wf_path: pathlib.Path) -> None:
         tree = _parse_file(wf_path)
         all_imports = _all_import_names(tree)
-        assert "subprocess" not in all_imports, (
-            f"{wf_path.name} imports subprocess"
-        )
+        assert "subprocess" not in all_imports, f"{wf_path.name} imports subprocess"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_no_open_calls(self, wf_path: pathlib.Path) -> None:
@@ -663,9 +656,7 @@ class TestWorkflowPurity:
             for name, lineno, func in calls
             if name == "open" or name == "builtins.open"
         ]
-        assert not violations, (
-            f"{wf_path.name} calls open(): {violations}"
-        )
+        assert not violations, f"{wf_path.name} calls open(): {violations}"
 
     def test_activities_are_io_boundary(self) -> None:
         """Activity files (not workflow files) are where I/O packages belong.
@@ -689,6 +680,7 @@ class TestWorkflowPurity:
 # ===================================================================
 # 6. Structural / miscellaneous tests
 # ===================================================================
+
 
 class TestStructural:
     """Miscellaneous structural checks."""
@@ -715,17 +707,13 @@ class TestStructural:
         classes = _class_nodes_with_decorator(tree, "workflow.defn")
         assert classes
         runs = _method_names_with_decorator(classes[0], "workflow.run")
-        assert "run" in runs, (
-            f"EngagementWorkflow missing @workflow.run method. Found: {runs}"
-        )
+        assert "run" in runs, f"EngagementWorkflow missing @workflow.run method. Found: {runs}"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_each_workflow_file_has_defn_class(self, wf_path: pathlib.Path) -> None:
         tree = _parse_file(wf_path)
         classes = _class_nodes_with_decorator(tree, "workflow.defn")
-        assert len(classes) >= 1, (
-            f"{wf_path.name} has no @workflow.defn class"
-        )
+        assert len(classes) >= 1, f"{wf_path.name} has no @workflow.defn class"
 
     @pytest.mark.parametrize("wf_path", ALL_WORKFLOW_FILES, ids=lambda p: p.name)
     def test_each_workflow_has_run_method(self, wf_path: pathlib.Path) -> None:
@@ -734,20 +722,14 @@ class TestStructural:
         assert classes
         for cls in classes:
             runs = _method_names_with_decorator(cls, "workflow.run")
-            assert runs, (
-                f"{wf_path.name}::{cls.name} has no @workflow.run method"
-            )
+            assert runs, f"{wf_path.name}::{cls.name} has no @workflow.run method"
 
     def test_engagement_uses_workflow_uuid4_not_stdlib(self) -> None:
         """The engagement workflow should use ``workflow.uuid4()`` for ID
         generation, not ``uuid.uuid4()``."""
         tree = _parse_file(ENGAGEMENT_WF)
         calls = _find_calls_in_functions(tree)
-        wf_uuid_calls = [
-            (name, lineno)
-            for name, lineno, func in calls
-            if name == "workflow.uuid4"
-        ]
+        wf_uuid_calls = [(name, lineno) for name, lineno, func in calls if name == "workflow.uuid4"]
         # The workflow calls workflow.uuid4() in multiple places
         assert len(wf_uuid_calls) >= 1, (
             "EngagementWorkflow should use workflow.uuid4() for deterministic UUIDs"

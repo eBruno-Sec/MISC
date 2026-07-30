@@ -3,6 +3,7 @@
 Tracks the full action state machine from PROPOSED through execution
 to cleanup verification per §6.3 and §9.6 of the spec.
 """
+
 from __future__ import annotations
 
 import enum
@@ -31,28 +32,34 @@ class ActionState(enum.Enum):
 
 
 ACTION_TRANSITIONS: dict[ActionState, frozenset[ActionState]] = {
-    ActionState.PROPOSED: frozenset({
-        ActionState.REJECTED,
-        ActionState.APPROVAL_REQUIRED,
-        ActionState.DISPATCHED,
-    }),
+    ActionState.PROPOSED: frozenset(
+        {
+            ActionState.REJECTED,
+            ActionState.APPROVAL_REQUIRED,
+            ActionState.DISPATCHED,
+        }
+    ),
     ActionState.REJECTED: frozenset(),
     ActionState.APPROVAL_REQUIRED: frozenset({ActionState.APPROVED, ActionState.REJECTED}),
     ActionState.APPROVED: frozenset({ActionState.DISPATCHED}),
     ActionState.DISPATCHED: frozenset({ActionState.LEASED, ActionState.CANCELLED}),
     ActionState.LEASED: frozenset({ActionState.RUNNING, ActionState.CANCELLED}),
-    ActionState.RUNNING: frozenset({
-        ActionState.SUCCEEDED,
-        ActionState.FAILED,
-        ActionState.TIMED_OUT,
-        ActionState.CANCELLED,
-        ActionState.UNKNOWN_REQUIRES_REVIEW,
-    }),
-    ActionState.SUCCEEDED: frozenset({
-        ActionState.EVIDENCE_ACCEPTED,
-        ActionState.EVIDENCE_REJECTED,
-        ActionState.CLEANUP_PENDING,
-    }),
+    ActionState.RUNNING: frozenset(
+        {
+            ActionState.SUCCEEDED,
+            ActionState.FAILED,
+            ActionState.TIMED_OUT,
+            ActionState.CANCELLED,
+            ActionState.UNKNOWN_REQUIRES_REVIEW,
+        }
+    ),
+    ActionState.SUCCEEDED: frozenset(
+        {
+            ActionState.EVIDENCE_ACCEPTED,
+            ActionState.EVIDENCE_REJECTED,
+            ActionState.CLEANUP_PENDING,
+        }
+    ),
     ActionState.FAILED: frozenset({ActionState.CLEANUP_PENDING}),
     ActionState.TIMED_OUT: frozenset({ActionState.CLEANUP_PENDING}),
     ActionState.CANCELLED: frozenset({ActionState.CLEANUP_PENDING}),
@@ -112,13 +119,15 @@ def is_lease_valid(lease: RunnerLease, now: datetime) -> bool:
     return not lease.revoked and now < lease.expires_at
 
 
-MUTATION_STATES = frozenset({
-    ActionState.RUNNING,
-    ActionState.SUCCEEDED,
-    ActionState.FAILED,
-    ActionState.TIMED_OUT,
-    ActionState.UNKNOWN_REQUIRES_REVIEW,
-})
+MUTATION_STATES = frozenset(
+    {
+        ActionState.RUNNING,
+        ActionState.SUCCEEDED,
+        ActionState.FAILED,
+        ActionState.TIMED_OUT,
+        ActionState.UNKNOWN_REQUIRES_REVIEW,
+    }
+)
 
 
 def requires_cleanup(state: ActionState, mutation_class: str) -> bool:

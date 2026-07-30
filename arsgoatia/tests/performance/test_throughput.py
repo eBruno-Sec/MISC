@@ -4,13 +4,12 @@ These tests establish that the in-memory fast paths (policy evaluation,
 scope checking, envelope signing/verification, evidence hashing) can
 sustain the throughput needed for real assessments.
 """
+
 from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-
-import pytest
 
 
 class TestPolicyEvalThroughput:
@@ -21,8 +20,10 @@ class TestPolicyEvalThroughput:
 
         ctx = PolicyContext(current_time=datetime.now(timezone.utc))
         request = ActionRequest(
-            technique="web.authz.bola", target="https://api.test",
-            risk_tier=RiskTier.R2, mutation=MutationClass.none,
+            technique="web.authz.bola",
+            target="https://api.test",
+            risk_tier=RiskTier.R2,
+            mutation=MutationClass.none,
         )
 
         start = time.perf_counter()
@@ -45,7 +46,9 @@ class TestScopeCheckThroughput:
                 ScopeRule(type="dns_suffix", value="api.example.test", action="allow"),
             ],
             exclude=[
-                ScopeRule(type="url_prefix", value="https://admin.apps.example.test/", action="deny"),
+                ScopeRule(
+                    type="url_prefix", value="https://admin.apps.example.test/", action="deny"
+                ),
             ],
         )
 
@@ -115,8 +118,11 @@ class TestEvidenceHashThroughput:
 class TestGraphQueryThroughput:
     def test_bfs_100_nodes_under_10ms(self):
         from packages.graph import (
-            GraphNode, GraphEdge, EdgeLabel,
-            InMemoryGraphRepository, NodeLabel,
+            EdgeLabel,
+            GraphEdge,
+            GraphNode,
+            InMemoryGraphRepository,
+            NodeLabel,
         )
 
         graph = InMemoryGraphRepository()
@@ -130,15 +136,19 @@ class TestGraphQueryThroughput:
         for i in range(99):
             graph.project_edge(
                 GraphEdge(
-                    id=uuid4(), tenant_id=tid, label=EdgeLabel.LEADS_TO,
-                    source_id=nodes[i], target_id=nodes[i + 1],
+                    id=uuid4(),
+                    tenant_id=tid,
+                    label=EdgeLabel.LEADS_TO,
+                    source_id=nodes[i],
+                    target_id=nodes[i + 1],
                 )
             )
 
         start = time.perf_counter()
         for _ in range(10):
             graph.execute_query(
-                tid, "shortest_path",
+                tid,
+                "shortest_path",
                 {"source_id": nodes[0], "target_id": nodes[99]},
             )
         elapsed = time.perf_counter() - start

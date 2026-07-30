@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from packages.ai_gateway import (
-    AIBudgetExceeded,
     AIGateway,
     AIGatewayConfig,
     AIRequest,

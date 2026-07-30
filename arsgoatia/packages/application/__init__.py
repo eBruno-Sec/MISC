@@ -3,6 +3,7 @@
 The single authoritative domain-write path. All mutations flow through
 commands; reads flow through queries. Infrastructure implements ports.
 """
+
 from __future__ import annotations
 
 import enum
@@ -17,8 +18,7 @@ from packages.approval import (
     DuplicateApprovalError,
     TwoPersonRuleError,
 )
-from packages.rate_limiter import BudgetDenialReason, BudgetLedger
-
+from packages.rate_limiter import BudgetLedger
 
 # ---------------------------------------------------------------------------
 # Ports — interfaces that infrastructure must implement
@@ -33,9 +33,7 @@ class EngagementRepository(Protocol):
 
     def create(self, tenant_id: UUID, engagement: dict[str, Any]) -> UUID: ...
 
-    def update_state(
-        self, tenant_id: UUID, engagement_id: UUID, state: str
-    ) -> None: ...
+    def update_state(self, tenant_id: UUID, engagement_id: UUID, state: str) -> None: ...
 
     def create_revision(
         self, tenant_id: UUID, engagement_id: UUID, revision: dict[str, Any]
@@ -54,13 +52,9 @@ class ActionRepository(Protocol):
 
     def get(self, tenant_id: UUID, action_id: UUID) -> dict[str, Any] | None: ...
 
-    def update_state(
-        self, tenant_id: UUID, action_id: UUID, state: str
-    ) -> None: ...
+    def update_state(self, tenant_id: UUID, action_id: UUID, state: str) -> None: ...
 
-    def list_by_engagement(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> list[dict[str, Any]]: ...
+    def list_by_engagement(self, tenant_id: UUID, engagement_id: UUID) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable
@@ -420,9 +414,7 @@ def handle_pause_engagement(
 ) -> CommandResult:
     engagement = repo.get(cmd.tenant_id, cmd.engagement_id)
     if engagement is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="engagement not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="engagement not found")
 
     if engagement["state"] != "running":
         return CommandResult(
@@ -455,9 +447,7 @@ def handle_resume_engagement(
 ) -> CommandResult:
     engagement = repo.get(cmd.tenant_id, cmd.engagement_id)
     if engagement is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="engagement not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="engagement not found")
 
     if engagement["state"] != "paused":
         return CommandResult(
@@ -490,9 +480,7 @@ def handle_emergency_stop(
 ) -> CommandResult:
     engagement = repo.get(cmd.tenant_id, cmd.engagement_id)
     if engagement is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="engagement not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="engagement not found")
 
     terminal = {"completed", "revoked"}
     if engagement["state"] in terminal:
@@ -545,9 +533,7 @@ def handle_propose_action(
 ) -> CommandResult:
     engagement = engagement_repo.get(cmd.tenant_id, cmd.engagement_id)
     if engagement is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="engagement not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="engagement not found")
 
     active_states = {"running"}
     if engagement["state"] not in active_states:
@@ -563,9 +549,7 @@ def handle_propose_action(
         )
 
     if budget_ledger is not None:
-        budget_result = budget_ledger.check(
-            cmd.tenant_id, cmd.engagement_id, requests_needed=1
-        )
+        budget_result = budget_ledger.check(cmd.tenant_id, cmd.engagement_id, requests_needed=1)
         if not budget_result.allowed:
             reason = (
                 budget_result.denial_reason.value
@@ -604,18 +588,23 @@ def handle_propose_action(
     action_repo.create(cmd.tenant_id, action)
 
     if approval_registry is not None and requires_approval:
-        import hashlib, json
-        envelope_digest = "sha256:" + hashlib.sha256(
-            json.dumps(
-                {
-                    "action_id": str(action_id),
-                    "technique_id": cmd.technique_id,
-                    "target_locator": cmd.target_locator,
-                    "risk_tier": cmd.risk_tier,
-                },
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()
+        import hashlib
+        import json
+
+        envelope_digest = (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps(
+                    {
+                        "action_id": str(action_id),
+                        "technique_id": cmd.technique_id,
+                        "target_locator": cmd.target_locator,
+                        "risk_tier": cmd.risk_tier,
+                    },
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
+        )
         try:
             approval_registry.create_request(
                 tenant_id=cmd.tenant_id,
@@ -665,9 +654,7 @@ def handle_approve_action(
 ) -> CommandResult:
     action = action_repo.get(cmd.tenant_id, cmd.action_id)
     if action is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="action not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="action not found")
 
     approvable = {"proposed", "approval_required"}
     if action["state"] not in approvable:
@@ -741,9 +728,7 @@ def handle_reject_action(
 ) -> CommandResult:
     action = action_repo.get(cmd.tenant_id, cmd.action_id)
     if action is None:
-        return CommandResult(
-            status=CommandStatus.NOT_FOUND, message="action not found"
-        )
+        return CommandResult(status=CommandStatus.NOT_FOUND, message="action not found")
 
     rejectable = {"proposed", "approval_required"}
     if action["state"] not in rejectable:
@@ -754,9 +739,7 @@ def handle_reject_action(
 
     if approval_registry is not None:
         try:
-            approval_registry.deny(
-                cmd.tenant_id, cmd.action_id, cmd.approver, reason=cmd.reason
-            )
+            approval_registry.deny(cmd.tenant_id, cmd.action_id, cmd.approver, reason=cmd.reason)
         except ApprovalRegistryError as exc:
             return CommandResult(status=CommandStatus.REJECTED, message=str(exc))
 
@@ -800,9 +783,7 @@ def handle_record_evidence(
     bus: EventBus | None = None,
 ) -> CommandResult:
     if not cmd.data:
-        return CommandResult(
-            status=CommandStatus.REJECTED, message="evidence data is empty"
-        )
+        return CommandResult(status=CommandStatus.REJECTED, message="evidence data is empty")
 
     metadata = {
         **cmd.metadata,
@@ -849,9 +830,7 @@ class InMemoryEngagementRepo:
         self._store[(tenant_id, eid)] = engagement
         return eid
 
-    def update_state(
-        self, tenant_id: UUID, engagement_id: UUID, state: str
-    ) -> None:
+    def update_state(self, tenant_id: UUID, engagement_id: UUID, state: str) -> None:
         key = (tenant_id, engagement_id)
         if key in self._store:
             self._store[key]["state"] = state
@@ -863,9 +842,7 @@ class InMemoryEngagementRepo:
         self._revisions.setdefault(key, []).append(revision)
         return revision.get("id", uuid4())
 
-    def get_current_revision(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> dict[str, Any] | None:
+    def get_current_revision(self, tenant_id: UUID, engagement_id: UUID) -> dict[str, Any] | None:
         key = (tenant_id, engagement_id)
         revs = self._revisions.get(key, [])
         return revs[-1] if revs else None
@@ -883,16 +860,12 @@ class InMemoryActionRepo:
         self._store[(tenant_id, aid)] = action
         return aid
 
-    def update_state(
-        self, tenant_id: UUID, action_id: UUID, state: str
-    ) -> None:
+    def update_state(self, tenant_id: UUID, action_id: UUID, state: str) -> None:
         key = (tenant_id, action_id)
         if key in self._store:
             self._store[key]["state"] = state
 
-    def list_by_engagement(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> list[dict[str, Any]]:
+    def list_by_engagement(self, tenant_id: UUID, engagement_id: UUID) -> list[dict[str, Any]]:
         return [
             a
             for (tid, _), a in self._store.items()
@@ -904,9 +877,7 @@ class InMemoryEvidenceStore:
     def __init__(self) -> None:
         self._store: dict[tuple[UUID, str], tuple[bytes, str, dict[str, Any]]] = {}
 
-    def store(
-        self, tenant_id: UUID, data: bytes, media_type: str, metadata: dict[str, Any]
-    ) -> str:
+    def store(self, tenant_id: UUID, data: bytes, media_type: str, metadata: dict[str, Any]) -> str:
         import hashlib
 
         digest = "sha256:" + hashlib.sha256(data).hexdigest()

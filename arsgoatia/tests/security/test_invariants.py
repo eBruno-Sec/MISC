@@ -3,6 +3,7 @@
 These tests ensure the non-negotiable invariants are enforced across
 the codebase. Each test maps to one or more spec invariants.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -155,9 +156,7 @@ class TestInvariant_SignedEnvelopes:
             "target": {"locator": "https://api.test/basket/1"},
             "effectiveRiskTier": "R2",
             "nonce": "unique-nonce",
-            "expiresAt": (
-                datetime.now(timezone.utc) + timedelta(minutes=5)
-            ).isoformat(),
+            "expiresAt": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
         }
         key = b"signing-key"
         sig = sign_action_envelope(env, key)
@@ -177,9 +176,7 @@ class TestInvariant_SignedEnvelopes:
             "target": {"locator": "https://api.test"},
             "effectiveRiskTier": "R2",
             "nonce": "nonce",
-            "expiresAt": (
-                datetime.now(timezone.utc) + timedelta(minutes=5)
-            ).isoformat(),
+            "expiresAt": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
         }
         sig = sign_action_envelope(env, b"key-a")
         assert not verify_action_envelope(env, sig, b"key-b")
@@ -310,9 +307,7 @@ class TestInvariant_SecretsRedaction:
         from packages.testing import assert_no_secrets_in_dict
 
         with pytest.raises(AssertionError):
-            assert_no_secrets_in_dict(
-                {"data": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"}
-            )
+            assert_no_secrets_in_dict({"data": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"})
 
 
 class TestInvariant_TenantIsolation:
@@ -441,20 +436,32 @@ class TestInvariant_DeterministicConfirmation:
         )
 
         baseline = ExchangeResult(
-            label="baseline", status_code=200, body_contains_object=True,
-            object_id="1", evidence_digest="sha256:a",
+            label="baseline",
+            status_code=200,
+            body_contains_object=True,
+            object_id="1",
+            evidence_digest="sha256:a",
         )
         differential = ExchangeResult(
-            label="differential", status_code=200, body_contains_object=True,
-            object_id="1", evidence_digest="sha256:b",
+            label="differential",
+            status_code=200,
+            body_contains_object=True,
+            object_id="1",
+            evidence_digest="sha256:b",
         )
         positive_control = ExchangeResult(
-            label="positive_control", status_code=200, body_contains_object=True,
-            object_id="2", evidence_digest="sha256:c",
+            label="positive_control",
+            status_code=200,
+            body_contains_object=True,
+            object_id="2",
+            evidence_digest="sha256:c",
         )
         negative_control = ExchangeResult(
-            label="negative_control", status_code=200, body_contains_object=True,
-            object_id="1", evidence_digest="sha256:d",
+            label="negative_control",
+            status_code=200,
+            body_contains_object=True,
+            object_id="1",
+            evidence_digest="sha256:d",
         )
         result = confirm_bola(baseline, differential, positive_control, negative_control)
         assert not result.confirmed
@@ -510,9 +517,13 @@ class TestInvariant_TwoPersonRule:
         eid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R4",
-            requestor_id="alice", requires_two_person=True,
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R4",
+            requestor_id="alice",
+            requires_two_person=True,
         )
         with pytest.raises(TwoPersonRuleError):
             reg.grant(tid, aid, "alice")
@@ -525,9 +536,13 @@ class TestInvariant_TwoPersonRule:
         eid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R4",
-            requestor_id="alice", requires_two_person=True,
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R4",
+            requestor_id="alice",
+            requires_two_person=True,
         )
         decision = reg.grant(tid, aid, "bob")
         assert decision.state == ApprovalState.GRANTED
@@ -542,8 +557,12 @@ class TestInvariant_TwoPersonRule:
         aid_x = uuid4()
         aid_y = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid_x,
-            envelope_digest="sha256:x", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid_x,
+            envelope_digest="sha256:x",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.grant(tid, aid_x, "bob")
         # Y has no request at all → is_approved must return False
@@ -570,8 +589,12 @@ class TestInvariant_ApprovalBinding:
         eid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid,
-            envelope_digest="sha256:original", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid,
+            envelope_digest="sha256:original",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.grant(tid, aid, "bob")
         # Tamper: different envelope_digest
@@ -585,8 +608,12 @@ class TestInvariant_ApprovalBinding:
         eid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid,
-            envelope_digest="sha256:original", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid,
+            envelope_digest="sha256:original",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.grant(tid, aid, "bob")
         assert reg.verify_binding(tid, aid, "sha256:original", decision.binding_digest)
@@ -599,8 +626,12 @@ class TestInvariant_ApprovalBinding:
         eid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=eid, action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=eid,
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
             expires_in=timedelta(hours=1),
         )
         reg.grant(tid, aid, "bob")
@@ -627,7 +658,7 @@ class TestInvariant_BudgetEmergencyStop:
     """§9.6: Emergency stop zeroes budget immediately and is irreversible."""
 
     def test_emergency_stop_denies_all_subsequent_requests(self):
-        from packages.rate_limiter import BudgetLedger, BudgetDenialReason, BudgetSpec
+        from packages.rate_limiter import BudgetDenialReason, BudgetLedger, BudgetSpec
 
         ledger = BudgetLedger()
         tid, eid = uuid4(), uuid4()

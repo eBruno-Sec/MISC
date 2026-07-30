@@ -1,4 +1,5 @@
 """Evidence upload and retrieval endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,7 +20,9 @@ router = APIRouter(prefix="/evidence", tags=["evidence"])
 class CreateUploadGrantRequest(BaseModel):
     engagement_id: UUID
     action_id: UUID
-    kind: str = Field(min_length=1, description="Evidence kind: request, response, screenshot, pcap, etc.")
+    kind: str = Field(
+        min_length=1, description="Evidence kind: request, response, screenshot, pcap, etc."
+    )
     media_type: str = Field(default="application/octet-stream")
     size_hint: int | None = Field(default=None, ge=0, description="Expected size in bytes")
     sensitivity: str = Field(default="restricted")

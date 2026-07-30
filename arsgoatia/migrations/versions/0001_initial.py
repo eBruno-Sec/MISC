@@ -4,10 +4,11 @@ Revision ID: 0001
 Revises:
 Create Date: 2026-07-29
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0001"
@@ -94,17 +95,32 @@ def upgrade() -> None:
         "tenant",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="iam",
     )
     op.create_table(
         "app_user",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("iam.tenant.id"), nullable=False),
+        sa.Column(
+            "tenant_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("iam.tenant.id"),
+            nullable=False,
+        ),
         sa.Column("email", sa.String(320), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("roles", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="iam",
     )
 
@@ -118,8 +134,18 @@ def upgrade() -> None:
         sa.Column("current_revision_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("temporal_workflow_id", sa.String(255), nullable=True),
         sa.Column("temporal_run_id", sa.String(255), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="governance",
     )
     op.create_table(
@@ -130,7 +156,12 @@ def upgrade() -> None:
         sa.Column("revision_number", sa.Integer, nullable=False),
         sa.Column("content_digest", sa.String(128), nullable=False),
         sa.Column("spec", postgresql.JSONB, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("created_by", sa.String(255), nullable=False),
         schema="governance",
     )
@@ -143,7 +174,12 @@ def upgrade() -> None:
         sa.Column("issuer", sa.String(255), nullable=False),
         sa.Column("valid_from", sa.DateTime(timezone=True), nullable=False),
         sa.Column("valid_until", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("verified_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "verified_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="governance",
     )
     op.create_table(
@@ -154,7 +190,12 @@ def upgrade() -> None:
         sa.Column("revision_number", sa.Integer, nullable=False),
         sa.Column("content_digest", sa.String(128), nullable=False),
         sa.Column("spec", postgresql.JSONB, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="governance",
     )
     op.create_table(
@@ -165,7 +206,12 @@ def upgrade() -> None:
         sa.Column("revision_number", sa.Integer, nullable=False),
         sa.Column("content_digest", sa.String(128), nullable=False),
         sa.Column("rules", postgresql.JSONB, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="governance",
     )
     op.create_table(
@@ -177,7 +223,12 @@ def upgrade() -> None:
         sa.Column("approver_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("decision", sa.String(50), nullable=False),
         sa.Column("reason", sa.Text, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="governance",
     )
 
@@ -189,8 +240,15 @@ def upgrade() -> None:
         sa.Column("engagement_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("kind", sa.String(50), nullable=False),
         sa.Column("identifier", sa.String(500), nullable=False),
-        sa.Column("metadata_", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "metadata_", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="knowledge",
     )
     op.create_table(
@@ -202,7 +260,12 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(100), nullable=False),
         sa.Column("content", postgresql.JSONB, nullable=False),
         sa.Column("evidence_ref", sa.String(255), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="knowledge",
     )
 
@@ -216,9 +279,21 @@ def upgrade() -> None:
         sa.Column("technique_id", sa.String(255), nullable=False),
         sa.Column("target", sa.String(500), nullable=False),
         sa.Column("rationale", sa.Text, nullable=False),
-        sa.Column("evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="reasoning",
     )
     op.create_table(
@@ -232,8 +307,15 @@ def upgrade() -> None:
         sa.Column("target", sa.String(500), nullable=False),
         sa.Column("risk_tier", sa.String(10), nullable=False),
         sa.Column("mutation_class", sa.String(50), nullable=False),
-        sa.Column("parameters", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "parameters", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="reasoning",
     )
 
@@ -249,7 +331,12 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("result", postgresql.JSONB, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="execution",
     )
     op.create_table(
@@ -260,7 +347,12 @@ def upgrade() -> None:
         sa.Column("identity_label", sa.String(255), nullable=False),
         sa.Column("credential_ref", sa.String(500), nullable=True),
         sa.Column("fingerprint", sa.String(128), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="execution",
     )
     op.create_table(
@@ -273,7 +365,12 @@ def upgrade() -> None:
         sa.Column("response_digest", sa.String(128), nullable=True),
         sa.Column("status_code", sa.Integer, nullable=True),
         sa.Column("duration_ms", sa.Integer, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="execution",
     )
     op.create_table(
@@ -285,7 +382,12 @@ def upgrade() -> None:
         sa.Column("state", sa.String(50), nullable=False, server_default="planned"),
         sa.Column("description", sa.Text, nullable=False),
         sa.Column("handler", sa.String(255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         schema="execution",
     )
@@ -303,7 +405,12 @@ def upgrade() -> None:
         sa.Column("media_type", sa.String(100), nullable=False),
         sa.Column("storage_uri", sa.String(500), nullable=False),
         sa.Column("sensitivity", sa.String(50), nullable=False, server_default="restricted"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="evidence",
     )
 
@@ -318,10 +425,27 @@ def upgrade() -> None:
         sa.Column("target", sa.String(500), nullable=False),
         sa.Column("title", sa.String(500), nullable=False),
         sa.Column("severity", sa.String(50), nullable=True),
-        sa.Column("evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
-        sa.Column("capability_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False
+        ),
+        sa.Column(
+            "capability_refs",
+            postgresql.JSONB,
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="findings",
     )
     op.create_table(
@@ -333,9 +457,16 @@ def upgrade() -> None:
         sa.Column("type", sa.String(100), nullable=False),
         sa.Column("technique_id", sa.String(255), nullable=False),
         sa.Column("target", sa.String(500), nullable=False),
-        sa.Column("evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
+        sa.Column(
+            "evidence_refs", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False
+        ),
         sa.Column("proven", sa.Boolean, nullable=False, server_default=sa.text("false")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="findings",
     )
     op.create_table(
@@ -345,7 +476,12 @@ def upgrade() -> None:
         sa.Column("engagement_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("objective", sa.Text, nullable=False),
         sa.Column("steps", postgresql.JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="findings",
     )
 
@@ -359,7 +495,12 @@ def upgrade() -> None:
         sa.Column("format", sa.String(20), nullable=False),
         sa.Column("digest", sa.String(128), nullable=False),
         sa.Column("storage_uri", sa.String(500), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="reporting",
     )
 
@@ -371,8 +512,15 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(100), nullable=False),
         sa.Column("actor_id", sa.String(255), nullable=True),
         sa.Column("engagement_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("payload", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "payload", postgresql.JSONB, server_default=sa.text("'{}'::jsonb"), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="audit",
     )
     op.create_table(
@@ -382,7 +530,12 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(100), nullable=False),
         sa.Column("payload", postgresql.JSONB, nullable=False),
         sa.Column("dispatched_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         schema="audit",
     )
 

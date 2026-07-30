@@ -3,6 +3,7 @@
 A report template describes the sections and export formats that the
 reporting subsystem uses to materialise assessment outputs.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

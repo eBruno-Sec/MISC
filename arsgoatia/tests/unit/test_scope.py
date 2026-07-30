@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
 from packages.scope import (
-    ScopeVerdict,
     _is_dangerous_address,
     check_target,
     normalize_host,

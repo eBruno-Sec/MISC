@@ -4,6 +4,7 @@ Per §13.2: propagate trace_id, tenant-safe hashed tenant ID, engagement revisio
 workflow/run/action IDs. Never place secrets, raw bodies, command payloads, prompts,
 or source snippets in labels/logs.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +16,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Generator
 from uuid import UUID, uuid4
-
 
 # ---------------------------------------------------------------------------
 # Trace context (W3C-style)
@@ -72,11 +72,24 @@ def hash_tenant_id(tenant_id: UUID) -> str:
 # ---------------------------------------------------------------------------
 
 
-_FORBIDDEN_FIELDS = frozenset({
-    "password", "secret", "token", "bearer", "authorization",
-    "cookie", "api_key", "apikey", "private_key", "credential",
-    "prompt", "raw_body", "command_payload", "source_snippet",
-})
+_FORBIDDEN_FIELDS = frozenset(
+    {
+        "password",
+        "secret",
+        "token",
+        "bearer",
+        "authorization",
+        "cookie",
+        "api_key",
+        "apikey",
+        "private_key",
+        "credential",
+        "prompt",
+        "raw_body",
+        "command_payload",
+        "source_snippet",
+    }
+)
 
 
 def _is_safe_field(key: str) -> bool:
@@ -126,8 +139,14 @@ class LogContext:
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
         for k in (
-            "trace_id", "tenant_hash", "engagement_id", "workflow_id",
-            "run_id", "action_id", "adapter", "runner_pool",
+            "trace_id",
+            "tenant_hash",
+            "engagement_id",
+            "workflow_id",
+            "run_id",
+            "action_id",
+            "adapter",
+            "runner_pool",
         ):
             v = getattr(self, k)
             if v:
@@ -181,15 +200,15 @@ class MetricsRegistry:
         self._gauges: dict[str, dict[tuple[str, ...], float]] = defaultdict(
             lambda: defaultdict(float)
         )
-        self._histograms: dict[str, list[tuple[tuple[str, ...], float]]] = defaultdict(
-            list
-        )
+        self._histograms: dict[str, list[tuple[tuple[str, ...], float]]] = defaultdict(list)
 
     def _label_key(self, labels: dict[str, str]) -> tuple[str, ...]:
         safe = sanitize_log_fields(labels)
         return tuple(sorted(safe.items()))  # type: ignore[arg-type]
 
-    def increment(self, name: str, value: float = 1.0, labels: dict[str, str] | None = None) -> None:
+    def increment(
+        self, name: str, value: float = 1.0, labels: dict[str, str] | None = None
+    ) -> None:
         key = self._label_key(labels or {})
         self._counters[name][key] += value
 
@@ -230,10 +249,7 @@ class MetricsRegistry:
                 name: {str(k): v for k, v in buckets.items()}
                 for name, buckets in self._gauges.items()
             },
-            "histograms": {
-                name: len(samples)
-                for name, samples in self._histograms.items()
-            },
+            "histograms": {name: len(samples) for name, samples in self._histograms.items()},
         }
 
 

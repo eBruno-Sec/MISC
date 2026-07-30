@@ -15,6 +15,7 @@ Scoring layers (spec §8.2):
   7. Deduplication — skip already-tested hypotheses
   8. Rate limiting — enforce budget and pacing constraints
 """
+
 from __future__ import annotations
 
 import math
@@ -85,9 +86,7 @@ def _layer1_eligibility(
     return True, None
 
 
-def _layer2_priority_score(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> float:
+def _layer2_priority_score(candidate: PlannerCandidate, ctx: PlannerContext) -> float:
     score = 0.0
 
     if candidate.technique_id not in ctx.completed_techniques:
@@ -107,9 +106,7 @@ def _layer3_risk_ordering(candidate: PlannerCandidate) -> float:
     return 10.0 - (rank * 2.0)
 
 
-def _layer4_cost_efficiency(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> float:
+def _layer4_cost_efficiency(candidate: PlannerCandidate, ctx: PlannerContext) -> float:
     if ctx.budget_remaining_requests <= 0:
         return -100.0
     efficiency = 1.0 - (candidate.estimated_requests / max(ctx.budget_remaining_requests, 1))
@@ -117,9 +114,7 @@ def _layer4_cost_efficiency(
     return (efficiency + cost_ratio) * 5.0
 
 
-def _layer5_dependency_order(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> float:
+def _layer5_dependency_order(candidate: PlannerCandidate, ctx: PlannerContext) -> float:
     if not candidate.prerequisite_capabilities:
         return 2.0
     met = len(candidate.prerequisite_capabilities & ctx.available_capabilities)
@@ -127,9 +122,7 @@ def _layer5_dependency_order(
     return (met / total) * 2.0 if total > 0 else 2.0
 
 
-def _layer7_deduplication(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> float:
+def _layer7_deduplication(candidate: PlannerCandidate, ctx: PlannerContext) -> float:
     if candidate.hypothesis_id and candidate.hypothesis_id in ctx.tested_hypotheses:
         return -50.0
     if candidate.technique_id in ctx.completed_techniques:
@@ -137,9 +130,7 @@ def _layer7_deduplication(
     return 0.0
 
 
-def _layer8_rate_limiting(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> float:
+def _layer8_rate_limiting(candidate: PlannerCandidate, ctx: PlannerContext) -> float:
     if candidate.estimated_requests > ctx.budget_remaining_requests:
         return -100.0
     if candidate.estimated_cost_usd > ctx.budget_remaining_usd:
@@ -147,9 +138,7 @@ def _layer8_rate_limiting(
     return 0.0
 
 
-def score_candidate(
-    candidate: PlannerCandidate, ctx: PlannerContext
-) -> ScoredCandidate:
+def score_candidate(candidate: PlannerCandidate, ctx: PlannerContext) -> ScoredCandidate:
     eligible, reason = _layer1_eligibility(candidate, ctx)
     if not eligible:
         return ScoredCandidate(

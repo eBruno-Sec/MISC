@@ -5,8 +5,8 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, Index, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -83,6 +83,7 @@ class CleanupStateDB(str, enum.Enum):
 
 # ── governance schema ──────────────────────────────────────────────
 
+
 class Tenant(Base):
     __tablename__ = "tenant"
     __table_args__ = {"schema": "governance"}
@@ -91,8 +92,12 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(sa.String(255))
     region: Mapped[str | None] = mapped_column(sa.String(64))
     status: Mapped[str] = mapped_column(sa.String(32), server_default="active")
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
 
 
 class Engagement(Base):
@@ -103,14 +108,20 @@ class Engagement(Base):
     )
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
-    tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("governance.tenant.id"), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("governance.tenant.id"), nullable=False
+    )
     name: Mapped[str] = mapped_column(sa.String(255))
     lifecycle_state: Mapped[str] = mapped_column(sa.String(64), server_default="draft")
     current_revision_id: Mapped[UUID | None] = mapped_column(sa.Uuid)
     temporal_workflow_id: Mapped[str | None] = mapped_column(sa.String(255))
     temporal_run_id: Mapped[str | None] = mapped_column(sa.String(255))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
 
 
 class EngagementRevision(Base):
@@ -122,7 +133,9 @@ class EngagementRevision(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    engagement_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("governance.engagement.id"), nullable=False)
+    engagement_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("governance.engagement.id"), nullable=False
+    )
     revision_number: Mapped[int] = mapped_column(sa.Integer)
     authorization_digest: Mapped[str | None] = mapped_column(sa.String(128))
     scope_revision_id: Mapped[UUID | None] = mapped_column(sa.Uuid)
@@ -131,7 +144,9 @@ class EngagementRevision(Base):
     time_window_end: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     budgets_json: Mapped[dict | None] = mapped_column(sa.JSON)
     digest: Mapped[str | None] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class AuthorizationVerification(Base):
@@ -143,7 +158,9 @@ class AuthorizationVerification(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    engagement_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("governance.engagement.id"), nullable=False)
+    engagement_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("governance.engagement.id"), nullable=False
+    )
     artifact_digest: Mapped[str] = mapped_column(sa.String(128))
     issuer: Mapped[str] = mapped_column(sa.String(255))
     verifier: Mapped[str | None] = mapped_column(sa.String(255))
@@ -152,7 +169,9 @@ class AuthorizationVerification(Base):
     valid_until: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
     verification_method: Mapped[str | None] = mapped_column(sa.String(128))
     verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class ScopeRevision(Base):
@@ -169,7 +188,9 @@ class ScopeRevision(Base):
     compiled_claims_json: Mapped[dict | None] = mapped_column(sa.JSON)
     compiler_version: Mapped[str] = mapped_column(sa.String(64))
     digest: Mapped[str] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class PolicyRevision(Base):
@@ -186,7 +207,9 @@ class PolicyRevision(Base):
     risk_tier_decisions_json: Mapped[dict | None] = mapped_column(sa.JSON)
     version: Mapped[str] = mapped_column(sa.String(64))
     digest: Mapped[str] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class ScopeTarget(Base):
@@ -198,7 +221,9 @@ class ScopeTarget(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    scope_revision_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("governance.scope_revision.id"), nullable=False)
+    scope_revision_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("governance.scope_revision.id"), nullable=False
+    )
     rule_type: Mapped[str] = mapped_column(sa.String(64))
     value: Mapped[str] = mapped_column(sa.String(1024))
     is_exclude: Mapped[bool] = mapped_column(sa.Boolean, server_default="false")
@@ -222,10 +247,13 @@ class Approval(Base):
     quorum_slot: Mapped[int] = mapped_column(sa.Integer, server_default="1")
     expiry: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     rationale: Mapped[str | None] = mapped_column(sa.Text)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── knowledge schema ──────────────────────────────────────────────
+
 
 class Asset(Base):
     __tablename__ = "asset"
@@ -240,8 +268,12 @@ class Asset(Base):
     asset_type: Mapped[str] = mapped_column(sa.String(64))
     canonical_name: Mapped[str] = mapped_column(sa.String(1024))
     ownership_confidence: Mapped[str] = mapped_column(sa.String(32), server_default="candidate")
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class Service(Base):
@@ -253,12 +285,16 @@ class Service(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    asset_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("knowledge.asset.id"), nullable=False)
+    asset_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("knowledge.asset.id"), nullable=False
+    )
     protocol: Mapped[str] = mapped_column(sa.String(32))
     port: Mapped[int] = mapped_column(sa.Integer)
     name: Mapped[str | None] = mapped_column(sa.String(255))
     version: Mapped[str | None] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class Endpoint(Base):
@@ -270,11 +306,15 @@ class Endpoint(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    service_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("knowledge.service.id"), nullable=False)
+    service_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("knowledge.service.id"), nullable=False
+    )
     method: Mapped[str] = mapped_column(sa.String(16))
     path: Mapped[str] = mapped_column(sa.String(2048))
     parameters_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class Observation(Base):
@@ -296,10 +336,13 @@ class Observation(Base):
     evidence_refs_json: Mapped[dict | None] = mapped_column(sa.JSON)
     retracted: Mapped[bool] = mapped_column(sa.Boolean, server_default="false")
     retracted_reason: Mapped[str | None] = mapped_column(sa.Text)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── reasoning schema ──────────────────────────────────────────────
+
 
 class Hypothesis(Base):
     __tablename__ = "hypothesis"
@@ -317,8 +360,12 @@ class Hypothesis(Base):
     confidence: Mapped[float] = mapped_column(sa.Float, server_default="0.0")
     status: Mapped[str] = mapped_column(sa.String(32), server_default="open")
     missing_evidence_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class ActionProposal(Base):
@@ -338,7 +385,9 @@ class ActionProposal(Base):
     risk_tier: Mapped[str] = mapped_column(sa.String(8))
     expected_evidence_json: Mapped[dict | None] = mapped_column(sa.JSON)
     status: Mapped[str] = mapped_column(sa.String(64), server_default="proposed")
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class Capability(Base):
@@ -360,7 +409,9 @@ class Capability(Base):
     valid_from: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     revision: Mapped[int] = mapped_column(sa.Integer, server_default="1")
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class AttackPath(Base):
@@ -377,7 +428,9 @@ class AttackPath(Base):
     combined_risk: Mapped[float] = mapped_column(sa.Float, server_default="0.0")
     pre_state_json: Mapped[dict | None] = mapped_column(sa.JSON)
     post_state_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class AttackPathStep(Base):
@@ -389,7 +442,9 @@ class AttackPathStep(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
-    attack_path_id: Mapped[UUID] = mapped_column(sa.Uuid, ForeignKey("reasoning.attack_path.id"), nullable=False)
+    attack_path_id: Mapped[UUID] = mapped_column(
+        sa.Uuid, ForeignKey("reasoning.attack_path.id"), nullable=False
+    )
     sequence: Mapped[int] = mapped_column(sa.Integer)
     technique_id: Mapped[str] = mapped_column(sa.String(255))
     preconditions_json: Mapped[dict | None] = mapped_column(sa.JSON)
@@ -399,6 +454,7 @@ class AttackPathStep(Base):
 
 
 # ── execution schema ──────────────────────────────────────────────
+
 
 class Execution(Base):
     __tablename__ = "execution"
@@ -420,7 +476,9 @@ class Execution(Base):
     exit_class: Mapped[str | None] = mapped_column(sa.String(64))
     resource_use_json: Mapped[dict | None] = mapped_column(sa.JSON)
     idempotency_key: Mapped[str] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class AccessContext(Base):
@@ -439,7 +497,9 @@ class AccessContext(Base):
     privileges_json: Mapped[dict | None] = mapped_column(sa.JSON)
     source: Mapped[str | None] = mapped_column(sa.String(128))
     expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 class CleanupObligationDB(Base):
@@ -458,11 +518,16 @@ class CleanupObligationDB(Base):
     deadline: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     status: Mapped[str] = mapped_column(sa.String(32), server_default="planned")
     proof_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── evidence schema ───────────────────────────────────────────────
+
 
 class Evidence(Base):
     __tablename__ = "evidence"
@@ -484,11 +549,16 @@ class Evidence(Base):
     redaction_json: Mapped[dict | None] = mapped_column(sa.JSON)
     lineage_json: Mapped[dict | None] = mapped_column(sa.JSON)
     sensitivity: Mapped[str] = mapped_column(sa.String(32), server_default="restricted")
-    retention_policy: Mapped[str] = mapped_column(sa.String(128), server_default="engagement-plus-365d")
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    retention_policy: Mapped[str] = mapped_column(
+        sa.String(128), server_default="engagement-plus-365d"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── findings schema ───────────────────────────────────────────────
+
 
 class Finding(Base):
     __tablename__ = "finding"
@@ -508,11 +578,16 @@ class Finding(Base):
     root_cause: Mapped[str | None] = mapped_column(sa.Text)
     evidence_profile_version: Mapped[str | None] = mapped_column(sa.String(64))
     validator_digest: Mapped[str | None] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
-    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── reporting schema ──────────────────────────────────────────────
+
 
 class Report(Base):
     __tablename__ = "report"
@@ -528,10 +603,13 @@ class Report(Base):
     manifest_json: Mapped[dict | None] = mapped_column(sa.JSON)
     template_version: Mapped[str | None] = mapped_column(sa.String(64))
     renderer_digest: Mapped[str | None] = mapped_column(sa.String(128))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
 
 
 # ── audit schema ──────────────────────────────────────────────────
+
 
 class AuditEvent(Base):
     __tablename__ = "audit_event"
@@ -547,7 +625,9 @@ class AuditEvent(Base):
     causation_id: Mapped[UUID | None] = mapped_column(sa.Uuid)
     correlation_id: Mapped[UUID | None] = mapped_column(sa.Uuid)
     payload_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    occurred_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    occurred_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
     trace_context_json: Mapped[dict | None] = mapped_column(sa.JSON)
 
 
@@ -562,7 +642,9 @@ class OutboxEvent(Base):
     aggregate_id: Mapped[UUID | None] = mapped_column(sa.Uuid)
     aggregate_version: Mapped[int | None] = mapped_column(sa.Integer)
     payload_json: Mapped[dict | None] = mapped_column(sa.JSON)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
     dispatched_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     consumer_id: Mapped[str | None] = mapped_column(sa.String(128))
     attempts: Mapped[int] = mapped_column(sa.Integer, server_default="0")
@@ -570,15 +652,31 @@ class OutboxEvent(Base):
 
 
 ALL_MODELS = [
-    Tenant, Engagement, EngagementRevision, AuthorizationVerification,
-    ScopeRevision, PolicyRevision, ScopeTarget, Approval,
-    Asset, Service, Endpoint, Observation,
-    Hypothesis, ActionProposal, Capability, AttackPath, AttackPathStep,
-    Execution, AccessContext, CleanupObligationDB,
+    Tenant,
+    Engagement,
+    EngagementRevision,
+    AuthorizationVerification,
+    ScopeRevision,
+    PolicyRevision,
+    ScopeTarget,
+    Approval,
+    Asset,
+    Service,
+    Endpoint,
+    Observation,
+    Hypothesis,
+    ActionProposal,
+    Capability,
+    AttackPath,
+    AttackPathStep,
+    Execution,
+    AccessContext,
+    CleanupObligationDB,
     Evidence,
     Finding,
     Report,
-    AuditEvent, OutboxEvent,
+    AuditEvent,
+    OutboxEvent,
 ]
 
 IMMUTABLE_TABLES = {

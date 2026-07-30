@@ -20,6 +20,7 @@ escalation.
 This module never imports other modules. Cross-module progress flows only
 through the produced capability via the planner.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -169,7 +170,11 @@ class ReversiblePreferenceUpdateModule(ModuleBase):
         }
 
         required = {
-            "read_baseline", "mutate", "verify_mutation", "restore", "verify_restore",
+            "read_baseline",
+            "mutate",
+            "verify_mutation",
+            "restore",
+            "verify_restore",
         }
         missing = required - set(exchanges.keys())
         if missing:
@@ -236,7 +241,10 @@ class ReversiblePreferenceUpdateModule(ModuleBase):
             )
 
         # Rule 6: restore must return the resource to its baseline value.
-        if verify_restore.get("actual_status") != 200 or verify_restore.get("value") != baseline_value:
+        if (
+            verify_restore.get("actual_status") != 200
+            or verify_restore.get("value") != baseline_value
+        ):
             return ConfirmationResult(
                 decision=ConfirmationDecision.REFUTED,
                 reason=(

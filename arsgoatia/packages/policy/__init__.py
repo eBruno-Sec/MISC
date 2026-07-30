@@ -26,7 +26,6 @@ from packages.contracts.schemas.engagement import (
 )
 from packages.contracts.schemas.policy import ActionRequest
 
-
 # ---------------------------------------------------------------------------
 # Policy context -- everything the engine needs to decide
 # ---------------------------------------------------------------------------

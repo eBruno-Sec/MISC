@@ -1,4 +1,5 @@
 """Engagement lifecycle endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,7 +18,9 @@ router = APIRouter(prefix="/engagements", tags=["engagements"])
 
 
 class ScopeRuleIn(BaseModel):
-    type: str = Field(description="dns_suffix | cidr | url_prefix | exact_host | repository | cloud_account")
+    type: str = Field(
+        description="dns_suffix | cidr | url_prefix | exact_host | repository | cloud_account"
+    )
     value: str
 
 

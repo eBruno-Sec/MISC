@@ -34,6 +34,7 @@ _state: dict[str, object] = {}
 
 # -- Step 1: Create authorized assessment ----------------------------------
 
+
 @api_available
 def test_step01_create_authorized_assessment():
     """POST /assessments with authorization proof.
@@ -50,6 +51,7 @@ def test_step01_create_authorized_assessment():
 
 
 # -- Step 2: Compile scope -------------------------------------------------
+
 
 @api_available
 def test_step02_compile_scope():
@@ -70,6 +72,7 @@ def test_step02_compile_scope():
 
 # -- Step 3: Start engagement ----------------------------------------------
 
+
 @api_available
 def test_step03_start_engagement():
     """POST /engagements to start the assessment engagement.
@@ -85,6 +88,7 @@ def test_step03_start_engagement():
 
 
 # -- Step 4: Recon discovers endpoints -------------------------------------
+
 
 @api_available
 def test_step04_recon_discovers_endpoints():
@@ -103,6 +107,7 @@ def test_step04_recon_discovers_endpoints():
 
 # -- Step 5: Bootstrap test identities -------------------------------------
 
+
 @api_available
 def test_step05_bootstrap_test_identities():
     """Create two test identities on Juice Shop for differential testing.
@@ -120,6 +125,7 @@ def test_step05_bootstrap_test_identities():
 
 # -- Step 6: Observe + hypothesize (authorization.object_level) -------------
 
+
 @api_available
 def test_step06_observe_and_hypothesize():
     """The reasoning engine observes endpoint behavior and generates hypotheses.
@@ -135,6 +141,7 @@ def test_step06_observe_and_hypothesize():
 
 
 # -- Step 7: Policy evaluates -> require_approval for R2 -------------------
+
 
 @api_available
 def test_step07_policy_requires_approval():
@@ -154,6 +161,7 @@ def test_step07_policy_requires_approval():
 
 # -- Step 8: Approval gate pauses workflow ---------------------------------
 
+
 @api_available
 def test_step08_approval_gate_pauses():
     """Verify the engagement workflow is paused at the approval gate.
@@ -169,6 +177,7 @@ def test_step08_approval_gate_pauses():
 
 # -- Step 9: Provide approval -> resume ------------------------------------
 
+
 @api_available
 def test_step09_provide_approval_and_resume():
     """Operator approves the pending action, resuming the workflow.
@@ -183,6 +192,7 @@ def test_step09_provide_approval_and_resume():
 
 
 # -- Step 10: Differential BOLA test executes ------------------------------
+
 
 @api_available
 def test_step10_differential_bola_test_executes():
@@ -205,6 +215,7 @@ def test_step10_differential_bola_test_executes():
 
 # -- Step 11: Evidence stored immutably with SHA-256 -----------------------
 
+
 @api_available
 def test_step11_evidence_stored_immutably():
     """Verify that test evidence is stored with SHA-256 content hashes.
@@ -226,6 +237,7 @@ def test_step11_evidence_stored_immutably():
 
 # -- Step 12: Finding confirmed deterministically --------------------------
 
+
 @api_available
 def test_step12_finding_confirmed_deterministically():
     """Verify the BOLA finding is confirmed deterministically.
@@ -245,6 +257,7 @@ def test_step12_finding_confirmed_deterministically():
 
 # -- Step 13: read_foreign_object capability produced ----------------------
 
+
 @api_available
 def test_step13_capability_produced():
     """Verify the confirmed finding produces a capability descriptor.
@@ -259,6 +272,7 @@ def test_step13_capability_produced():
 
 
 # -- Step 14: Attack chain step created ------------------------------------
+
 
 @api_available
 def test_step14_attack_chain_step_created():
@@ -278,6 +292,7 @@ def test_step14_attack_chain_step_created():
 
 
 # -- Step 15: Reports generated (atomic + chain + SARIF) -------------------
+
 
 @api_available
 def test_step15_reports_generated():

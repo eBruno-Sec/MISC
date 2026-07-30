@@ -4,6 +4,7 @@ A policy profile maps risk tiers to decisions and encodes approval
 requirements, data-residency constraints, and persistence behaviour
 that the policy engine enforces at action-proposal time.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -41,3 +41,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded self-contained HTML/CSS report template — CSS/markup lines
+# legitimately exceed the line length and must not be wrapped.
+"packages/domain/reporting/__init__.py" = ["E501"]

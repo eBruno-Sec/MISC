@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from uuid import UUID
 
 
 class FindingState(enum.Enum):
@@ -19,8 +18,12 @@ class FindingState(enum.Enum):
 
 
 FINDING_TRANSITIONS: dict[FindingState, frozenset[FindingState]] = {
-    FindingState.CANDIDATE: frozenset({FindingState.CONFIRMED, FindingState.REJECTED, FindingState.INCONCLUSIVE}),
-    FindingState.CONFIRMED: frozenset({FindingState.ACCEPTED_RISK, FindingState.REMEDIATION_PLANNED}),
+    FindingState.CANDIDATE: frozenset(
+        {FindingState.CONFIRMED, FindingState.REJECTED, FindingState.INCONCLUSIVE}
+    ),
+    FindingState.CONFIRMED: frozenset(
+        {FindingState.ACCEPTED_RISK, FindingState.REMEDIATION_PLANNED}
+    ),
     FindingState.REJECTED: frozenset(),
     FindingState.INCONCLUSIVE: frozenset({FindingState.CANDIDATE}),
     FindingState.ACCEPTED_RISK: frozenset(),

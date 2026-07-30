@@ -10,6 +10,7 @@ Per spec §6.3 / PRX-019:
     hypotheses STALE unless they remain independently supported.
   - Scoped to (tenant_id, engagement_id); cross-tenant access returns None / empty list.
 """
+
 from __future__ import annotations
 
 import enum
@@ -30,37 +31,47 @@ class HypothesisState(enum.Enum):
 
 
 HYPOTHESIS_TRANSITIONS: dict[HypothesisState, frozenset[HypothesisState]] = {
-    HypothesisState.OPEN: frozenset({
-        HypothesisState.TESTABLE,
-        HypothesisState.STALE,
-    }),
-    HypothesisState.TESTABLE: frozenset({
-        HypothesisState.TESTING,
-        HypothesisState.STALE,
-    }),
-    HypothesisState.TESTING: frozenset({
-        HypothesisState.SUPPORTED,
-        HypothesisState.REFUTED,
-        HypothesisState.INCONCLUSIVE,
-        HypothesisState.STALE,
-    }),
+    HypothesisState.OPEN: frozenset(
+        {
+            HypothesisState.TESTABLE,
+            HypothesisState.STALE,
+        }
+    ),
+    HypothesisState.TESTABLE: frozenset(
+        {
+            HypothesisState.TESTING,
+            HypothesisState.STALE,
+        }
+    ),
+    HypothesisState.TESTING: frozenset(
+        {
+            HypothesisState.SUPPORTED,
+            HypothesisState.REFUTED,
+            HypothesisState.INCONCLUSIVE,
+            HypothesisState.STALE,
+        }
+    ),
     HypothesisState.SUPPORTED: frozenset({HypothesisState.STALE}),
     HypothesisState.REFUTED: frozenset({HypothesisState.STALE}),
-    HypothesisState.INCONCLUSIVE: frozenset({
-        HypothesisState.TESTABLE,
-        HypothesisState.STALE,
-    }),
+    HypothesisState.INCONCLUSIVE: frozenset(
+        {
+            HypothesisState.TESTABLE,
+            HypothesisState.STALE,
+        }
+    ),
     HypothesisState.STALE: frozenset({HypothesisState.OPEN}),
 }
 
 TERMINAL_HYPOTHESIS_STATES: frozenset[HypothesisState] = frozenset()
 
-ACTIVE_HYPOTHESIS_STATES: frozenset[HypothesisState] = frozenset({
-    HypothesisState.OPEN,
-    HypothesisState.TESTABLE,
-    HypothesisState.TESTING,
-    HypothesisState.SUPPORTED,
-})
+ACTIVE_HYPOTHESIS_STATES: frozenset[HypothesisState] = frozenset(
+    {
+        HypothesisState.OPEN,
+        HypothesisState.TESTABLE,
+        HypothesisState.TESTING,
+        HypothesisState.SUPPORTED,
+    }
+)
 
 
 class HypothesisError(Exception):
@@ -82,6 +93,7 @@ class ObservationAlreadyRetractedError(HypothesisError):
 @dataclass(frozen=True)
 class ObservationRecord:
     """An immutable observation that supports one or more hypotheses."""
+
     observation_id: UUID
     tenant_id: UUID
     engagement_id: UUID
@@ -99,6 +111,7 @@ class ObservationRecord:
 @dataclass(frozen=True)
 class HypothesisRecord:
     """An immutable snapshot of a hypothesis at a point in time."""
+
     hypothesis_id: UUID
     tenant_id: UUID
     engagement_id: UUID
@@ -116,6 +129,7 @@ class HypothesisRecord:
 @dataclass(frozen=True)
 class HypothesisTransition:
     """Immutable audit record of a state transition."""
+
     transition_id: UUID
     hypothesis_id: UUID
     from_state: HypothesisState
@@ -207,11 +221,19 @@ class HypothesisRegistry:
                 continue
             # Check if any remaining linked observations are still active
             remaining_active = any(
-                not self._observations.get((tid, oid), ObservationRecord(
-                    observation_id=oid, tenant_id=tid, engagement_id=eid,
-                    observation_type="", value={}, provenance="",
-                    confidence=0.0, retracted=True,
-                )).retracted
+                not self._observations.get(
+                    (tid, oid),
+                    ObservationRecord(
+                        observation_id=oid,
+                        tenant_id=tid,
+                        engagement_id=eid,
+                        observation_type="",
+                        value={},
+                        provenance="",
+                        confidence=0.0,
+                        retracted=True,
+                    ),
+                ).retracted
                 for oid in obs_ids
                 if oid != retracted_obs_id
             )
@@ -276,9 +298,7 @@ class HypothesisRegistry:
         key = (tenant_id, hyp.engagement_id, hypothesis_id)
         self._support_links.setdefault(key, set()).add(observation_id)
 
-    def observations_for(
-        self, tenant_id: UUID, hypothesis_id: UUID
-    ) -> list[ObservationRecord]:
+    def observations_for(self, tenant_id: UUID, hypothesis_id: UUID) -> list[ObservationRecord]:
         hyp = self._hypotheses.get((tenant_id, hypothesis_id))
         if hyp is None:
             return []
@@ -320,14 +340,16 @@ class HypothesisRegistry:
     ) -> HypothesisRecord:
         key = (tenant_id, hypothesis_id)
         record = self._hypotheses[key]
-        self._transitions.append(HypothesisTransition(
-            transition_id=uuid4(),
-            hypothesis_id=hypothesis_id,
-            from_state=record.state,
-            to_state=new_state,
-            reason=reason,
-            actor=actor,
-        ))
+        self._transitions.append(
+            HypothesisTransition(
+                transition_id=uuid4(),
+                hypothesis_id=hypothesis_id,
+                from_state=record.state,
+                to_state=new_state,
+                reason=reason,
+                actor=actor,
+            )
+        )
         now = datetime.now(timezone.utc)
         updated = HypothesisRecord(
             hypothesis_id=record.hypothesis_id,
@@ -416,19 +438,16 @@ class HypothesisRegistry:
         states: frozenset[HypothesisState] | None = None,
     ) -> list[HypothesisRecord]:
         results = [
-            r for r in self._hypotheses.values()
+            r
+            for r in self._hypotheses.values()
             if r.tenant_id == tenant_id and r.engagement_id == engagement_id
         ]
         if states is not None:
             results = [r for r in results if r.state in states]
         return results
 
-    def active_for_engagement(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> list[HypothesisRecord]:
-        return self.list_for_engagement(
-            tenant_id, engagement_id, states=ACTIVE_HYPOTHESIS_STATES
-        )
+    def active_for_engagement(self, tenant_id: UUID, engagement_id: UUID) -> list[HypothesisRecord]:
+        return self.list_for_engagement(tenant_id, engagement_id, states=ACTIVE_HYPOTHESIS_STATES)
 
     def hypotheses_for_observation(
         self, tenant_id: UUID, observation_id: UUID

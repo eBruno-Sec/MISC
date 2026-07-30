@@ -8,6 +8,7 @@ Per spec §9.6:
   - Emergency stop zeroes out all remaining budget immediately.
   - All state is append-only: consumption records form the audit trail.
 """
+
 from __future__ import annotations
 
 import enum
@@ -232,7 +233,8 @@ class BudgetLedger:
         self, tenant_id: UUID, engagement_id: UUID
     ) -> list[ConsumptionRecord]:
         return [
-            r for r in self._records
+            r
+            for r in self._records
             if r.tenant_id == tenant_id and r.engagement_id == engagement_id
         ]
 

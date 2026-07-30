@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from packages.contracts.schemas.engagement import ScopeSpec
-from packages.scope import ScopeVerdict, _is_dangerous_address, check_target
+from packages.scope import _is_dangerous_address, check_target
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,9 @@ class ScopeFirewall:
                 checks_passed=[],
                 failed_check="redirect_scope",
             )
-        return FirewallResult(allowed=True, reason="redirect in scope", checks_passed=["redirect_scope"])
+        return FirewallResult(
+            allowed=True, reason="redirect in scope", checks_passed=["redirect_scope"]
+        )
 
     def check_dns_answers(self, hostname: str, addresses: list[str]) -> FirewallResult:
         for addr in addresses:
@@ -78,4 +80,6 @@ class ScopeFirewall:
                     checks_passed=[],
                     failed_check="dns_answer_classification",
                 )
-        return FirewallResult(allowed=True, reason="DNS answers safe", checks_passed=["dns_answer_classification"])
+        return FirewallResult(
+            allowed=True, reason="DNS answers safe", checks_passed=["dns_answer_classification"]
+        )

@@ -15,8 +15,8 @@ from reasoning.attack_graph import AttackEdge, AttackGraph, PathResult
 from reasoning.constraints import (
     ActionCandidate,
     ConstraintContext,
-    ConstraintSolver,
     ConstraintResult,
+    ConstraintSolver,
 )
 
 __all__ = [

@@ -174,15 +174,13 @@ def build_structured_prompt(request: AIRequest, config: AIGatewayConfig) -> dict
     their SDK expects.
     """
     system_lines = [
-        f"You are the {request.role} component of the ArsGoatia security "
-        "validation platform.",
+        f"You are the {request.role} component of the ArsGoatia security validation platform.",
         "You must respond with valid JSON only -- no prose, no markdown "
         "code fences, no commentary.",
     ]
     if request.response_schema is not None:
         system_lines.append(
-            "Your JSON response MUST conform exactly to this schema: "
-            f"{request.response_schema}"
+            f"Your JSON response MUST conform exactly to this schema: {request.response_schema}"
         )
 
     return {
@@ -222,9 +220,7 @@ class AIGateway:
         no provider wired in.
         """
         if self._budget.is_exceeded():
-            raise AIBudgetExceeded(
-                f"AI budget of ${self.config.budget_limit_usd:.2f} exceeded"
-            )
+            raise AIBudgetExceeded(f"AI budget of ${self.config.budget_limit_usd:.2f} exceeded")
 
         # Contract layer only -- building the request is as far as this
         # goes without a concrete provider adapter installed.

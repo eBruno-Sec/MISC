@@ -4,6 +4,7 @@ Implements the full AdapterContract lifecycle for HTTP-based techniques
 such as BOLA differential probing, HTTP reconnaissance, and header
 analysis per spec sections 7.5 and 9.6.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -167,9 +168,7 @@ class HttpAdapter(AdapterContract):
             target = envelope.target
             locator = target.locator if hasattr(target, "locator") else str(target)
             expected_addresses = (
-                list(target.expected_addresses)
-                if hasattr(target, "expected_addresses")
-                else []
+                list(target.expected_addresses) if hasattr(target, "expected_addresses") else []
             )
         elif isinstance(envelope, dict):
             target_dict = envelope.get("target", {})
@@ -184,9 +183,7 @@ class HttpAdapter(AdapterContract):
         # Validate URL scheme
         parsed = urlparse(locator)
         if parsed.scheme not in ("http", "https"):
-            raise AdapterError(
-                f"unsupported URL scheme '{parsed.scheme}'; expected http or https"
-            )
+            raise AdapterError(f"unsupported URL scheme '{parsed.scheme}'; expected http or https")
 
         # Scope check
         if self._scope is not None:
@@ -421,9 +418,7 @@ class HttpAdapter(AdapterContract):
         making real network calls.
         """
         if self._http_client is None:
-            raise AdapterError(
-                "no HTTP client configured; inject one via http_client parameter"
-            )
+            raise AdapterError("no HTTP client configured; inject one via http_client parameter")
 
         # The injected client must be a callable matching:
         #   client(url, method, headers, body, follow_redirects, timeout) -> HttpRawResponse

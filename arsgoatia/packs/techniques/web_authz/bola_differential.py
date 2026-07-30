@@ -59,7 +59,9 @@ def confirm_bola(
     if differential.status_code != 200:
         return BOLAConfirmation(
             confirmed=False,
-            reason=f"differential access denied (status {differential.status_code}), not vulnerable",
+            reason=(
+                f"differential access denied (status {differential.status_code}), not vulnerable"
+            ),
             exchanges=exchanges,
         )
 
@@ -72,7 +74,10 @@ def confirm_bola(
 
     return BOLAConfirmation(
         confirmed=True,
-        reason="BOLA confirmed: identity A accessed identity B's object with discriminating data returned",
+        reason=(
+            "BOLA confirmed: identity A accessed identity B's object with "
+            "discriminating data returned"
+        ),
         exchanges=exchanges,
     )
 

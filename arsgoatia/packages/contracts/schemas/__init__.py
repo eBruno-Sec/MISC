@@ -45,6 +45,11 @@ from .engagement import (
     ScopeRule,
     ScopeSpec,
 )
+from .events import (
+    EventEnvelope,
+    EventType,
+    TraceContext,
+)
 from .evidence import (
     ArtifactRef,
     CaptureMetadata,
@@ -52,11 +57,6 @@ from .evidence import (
     LineageEntry,
     RedactionInfo,
     RetentionPolicy,
-)
-from .events import (
-    EventEnvelope,
-    EventType,
-    TraceContext,
 )
 from .policy import (
     ActionRequest,

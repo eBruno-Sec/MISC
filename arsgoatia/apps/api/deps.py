@@ -1,4 +1,5 @@
 """Shared FastAPI dependencies for ArsGoatia API."""
+
 from __future__ import annotations
 
 import os
@@ -6,9 +7,9 @@ from typing import Annotated, AsyncGenerator
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -20,6 +21,7 @@ async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_comm
 
 
 # -- Tenant -------------------------------------------------------------------
+
 
 async def get_tenant_id(
     request: Request,
@@ -48,6 +50,7 @@ async def get_tenant_id(
 
 # -- Database session with RLS ------------------------------------------------
 
+
 async def get_session(
     tenant_id: Annotated[UUID, Depends(get_tenant_id)],
 ) -> AsyncGenerator[AsyncSession, None]:
@@ -64,6 +67,7 @@ async def get_session(
 
 
 # -- Auth context --------------------------------------------------------------
+
 
 async def require_auth(
     request: Request,

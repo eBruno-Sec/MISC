@@ -2,18 +2,17 @@
 
 Database and auth dependencies are overridden so no Postgres connection is needed.
 """
+
 from __future__ import annotations
 
-import asyncio
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.main import app
 from apps.api.deps import get_session, get_tenant_id, require_auth
+from apps.api.main import app
 
 # ---------------------------------------------------------------------------
 # Dependency overrides
@@ -37,7 +36,11 @@ async def _override_auth() -> dict:
 
 
 TENANT_HDR = {"X-Tenant-Id": str(_TENANT_ID)}
-TENANT_AUTH_HDR = {"X-Tenant-Id": str(_TENANT_ID), "X-Auth-User": "tester", "X-Auth-Role": "operator"}
+TENANT_AUTH_HDR = {
+    "X-Tenant-Id": str(_TENANT_ID),
+    "X-Auth-User": "tester",
+    "X-Auth-Role": "operator",
+}
 
 
 @pytest.fixture(autouse=True)

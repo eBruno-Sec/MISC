@@ -10,7 +10,6 @@ with workflow.unsafe.imports_passed_through():
         AccessContextParam,
         ActionEnvelopeParam,
         BOLAParams,
-        BOLAResult,
         run_bola_validation,
     )
 
@@ -36,7 +35,6 @@ class ValidationWorkflowResult:
 
 @workflow.defn
 class ValidationWorkflow:
-
     def __init__(self) -> None:
         self._approval_granted: bool = False
         self._approval_ref: str = ""

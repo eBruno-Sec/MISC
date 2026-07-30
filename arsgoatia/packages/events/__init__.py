@@ -6,6 +6,7 @@ tenant_id, aggregate info, causation/correlation IDs, actor, occurred time,
 trace context, classification, and payload. Consumers are idempotent;
 ordering is guaranteed only per aggregate. Unknown versions are quarantined.
 """
+
 from __future__ import annotations
 
 import enum
@@ -14,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, runtime_checkable
 from uuid import UUID, uuid4
-
 
 # ---------------------------------------------------------------------------
 # Outbox entry
@@ -187,17 +187,15 @@ class InMemoryOutbox:
 
     def get_pending(self, batch_size: int = 100) -> list[OutboxEntry]:
         pending = [
-            e for e in self._entries.values()
+            e
+            for e in self._entries.values()
             if e.status in (DeliveryStatus.PENDING, DeliveryStatus.FAILED)
         ]
         pending.sort(key=lambda e: e.created_at)
         return pending[:batch_size]
 
     def get_dead_letters(self, tenant_id: UUID | None = None) -> list[OutboxEntry]:
-        dead = [
-            e for e in self._entries.values()
-            if e.status == DeliveryStatus.DEAD_LETTER
-        ]
+        dead = [e for e in self._entries.values() if e.status == DeliveryStatus.DEAD_LETTER]
         if tenant_id is not None:
             dead = [e for e in dead if e.tenant_id == tenant_id]
         return dead

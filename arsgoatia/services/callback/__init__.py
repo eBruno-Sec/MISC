@@ -4,6 +4,7 @@ Receives out-of-band callbacks from external interactions (DNS lookups,
 HTTP pingbacks) and records them as observations tied to the originating
 action and engagement.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,9 +38,7 @@ class CallbackService:
     correlates the token back to the originating action.
     """
 
-    _observations: list[CallbackObservation] = field(
-        default_factory=list, init=False, repr=False
-    )
+    _observations: list[CallbackObservation] = field(default_factory=list, init=False, repr=False)
 
     def handle_dns_callback(
         self,

@@ -9,6 +9,7 @@ Per spec §18:
   - Capability transitions track the provenance chain: discovery → proven.
   - Capabilities are scoped to (tenant_id, engagement_id) pairs.
 """
+
 from __future__ import annotations
 
 import enum
@@ -118,9 +119,7 @@ class CapabilityRegistry:
 
         for digest in evidence_digests:
             if not digest.startswith("sha256:"):
-                raise EvidenceRequiredError(
-                    f"evidence digest must be sha256-prefixed: {digest!r}"
-                )
+                raise EvidenceRequiredError(f"evidence digest must be sha256-prefixed: {digest!r}")
 
         now = datetime.now(timezone.utc)
         expires_at = (now + expires_in) if expires_in else None
@@ -171,14 +170,16 @@ class CapabilityRegistry:
                 f"invalid capability transition: {record.state.value} → {new_state.value}"
             )
 
-        self._transitions.append(CapabilityTransition(
-            transition_id=uuid4(),
-            capability_id=capability_id,
-            from_state=record.state,
-            to_state=new_state,
-            reason=reason,
-            actor=actor,
-        ))
+        self._transitions.append(
+            CapabilityTransition(
+                transition_id=uuid4(),
+                capability_id=capability_id,
+                from_state=record.state,
+                to_state=new_state,
+                reason=reason,
+                actor=actor,
+            )
+        )
 
         updated = CapabilityRecord(
             capability_id=record.capability_id,
@@ -217,7 +218,8 @@ class CapabilityRegistry:
         active_only: bool = False,
     ) -> list[CapabilityRecord]:
         results = [
-            r for r in self._capabilities.values()
+            r
+            for r in self._capabilities.values()
             if r.tenant_id == tenant_id and r.engagement_id == engagement_id
         ]
         if active_only:

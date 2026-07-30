@@ -4,6 +4,7 @@ Polls the transactional outbox at a configurable interval and dispatches
 pending events to subscribers.  Designed to run as a standalone process
 alongside the API and worker.
 """
+
 from __future__ import annotations
 
 import logging
@@ -13,7 +14,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packages.events import EventSubscription, OutboxRelay, OutboxWriter
+    from packages.events import OutboxRelay
 
 logger = logging.getLogger("arsgoatia.services.outbox")
 

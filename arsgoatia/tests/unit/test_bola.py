@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from packs.techniques.web_authz.bola_differential import (
-    BOLAConfirmation,
     ExchangeResult,
     build_capability,
     confirm_bola,
 )
 
 
-def _exchange(label: str, status: int, body_contains_object: bool = False, object_id: str | None = None):
+def _exchange(
+    label: str, status: int, body_contains_object: bool = False, object_id: str | None = None
+):
     return ExchangeResult(
         label=label,
         status_code=status,
@@ -20,8 +21,12 @@ def _exchange(label: str, status: int, body_contains_object: bool = False, objec
 def test_confirmed_bola():
     result = confirm_bola(
         baseline=_exchange("baseline", 200, body_contains_object=True, object_id="basket-1"),
-        differential=_exchange("differential", 200, body_contains_object=True, object_id="basket-1"),
-        positive_control=_exchange("positive", 200, body_contains_object=True, object_id="basket-2"),
+        differential=_exchange(
+            "differential", 200, body_contains_object=True, object_id="basket-1"
+        ),
+        positive_control=_exchange(
+            "positive", 200, body_contains_object=True, object_id="basket-2"
+        ),
         negative_control=_exchange("negative", 401),
     )
     assert result.confirmed is True
@@ -30,8 +35,12 @@ def test_confirmed_bola():
 def test_bola_negative_control_must_fail():
     result = confirm_bola(
         baseline=_exchange("baseline", 200, body_contains_object=True, object_id="basket-1"),
-        differential=_exchange("differential", 200, body_contains_object=True, object_id="basket-1"),
-        positive_control=_exchange("positive", 200, body_contains_object=True, object_id="basket-2"),
+        differential=_exchange(
+            "differential", 200, body_contains_object=True, object_id="basket-1"
+        ),
+        positive_control=_exchange(
+            "positive", 200, body_contains_object=True, object_id="basket-2"
+        ),
         negative_control=_exchange("negative", 200, body_contains_object=True),
     )
     assert result.confirmed is False
@@ -41,7 +50,9 @@ def test_bola_differential_must_succeed():
     result = confirm_bola(
         baseline=_exchange("baseline", 200, body_contains_object=True, object_id="basket-1"),
         differential=_exchange("differential", 403),
-        positive_control=_exchange("positive", 200, body_contains_object=True, object_id="basket-2"),
+        positive_control=_exchange(
+            "positive", 200, body_contains_object=True, object_id="basket-2"
+        ),
         negative_control=_exchange("negative", 401),
     )
     assert result.confirmed is False

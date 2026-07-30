@@ -5,6 +5,7 @@ Tools are leaf-level executors that adapters compose. Each tool:
 - Produces normalized output + evidence references
 - Has no policy authority (adapters enforce envelopes)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -44,11 +45,13 @@ def extract_content_type(headers: dict[str, str]) -> str:
 
 def compute_body_fingerprint(body: bytes) -> str:
     import hashlib
+
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
 def redact_exchange_headers(exchange: HttpExchange) -> HttpExchange:
     from packages.domain.evidence import redact_headers
+
     return HttpExchange(
         method=exchange.method,
         url=exchange.url,

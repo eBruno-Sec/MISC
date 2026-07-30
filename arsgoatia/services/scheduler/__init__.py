@@ -5,6 +5,7 @@ Periodically checks for:
 - Deadline expirations that require pause/stop signals.
 - Cleanup obligations that are overdue.
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,7 +13,6 @@ import os
 import signal
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from uuid import UUID
 
 logger = logging.getLogger("arsgoatia.services.scheduler")

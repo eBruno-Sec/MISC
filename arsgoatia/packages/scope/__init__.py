@@ -8,13 +8,10 @@ Fail-closed: if scope is empty or data is missing the answer is DENY.
 from __future__ import annotations
 
 import ipaddress
-import re
-from dataclasses import dataclass, field
-from typing import Sequence
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
-
 
 # ---------------------------------------------------------------------------
 # Internal constants

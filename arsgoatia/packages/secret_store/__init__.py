@@ -7,12 +7,13 @@ or conversation history. This module provides:
 - Lease-based access: callers get time-bounded leases, not persistent handles
 - Revocation: emergency stop can revoke all leases instantly
 """
+
 from __future__ import annotations
 
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 
@@ -43,14 +44,11 @@ class SecretLease:
 
 @runtime_checkable
 class SecretProvider(Protocol):
-    def store(self, tenant_id: UUID, value: bytes, metadata: dict[str, str]) -> SecretRef:
-        ...
+    def store(self, tenant_id: UUID, value: bytes, metadata: dict[str, str]) -> SecretRef: ...
 
-    def retrieve(self, tenant_id: UUID, ref: SecretRef) -> bytes | None:
-        ...
+    def retrieve(self, tenant_id: UUID, ref: SecretRef) -> bytes | None: ...
 
-    def revoke(self, tenant_id: UUID, ref: SecretRef) -> bool:
-        ...
+    def revoke(self, tenant_id: UUID, ref: SecretRef) -> bool: ...
 
 
 def compute_fingerprint(value: bytes) -> str:
@@ -64,7 +62,9 @@ class InMemorySecretStore:
         self._leases: dict[UUID, SecretLease] = {}
         self._revoked: set[UUID] = set()
 
-    def store(self, tenant_id: UUID, value: bytes, metadata: dict[str, str] | None = None) -> SecretRef:
+    def store(
+        self, tenant_id: UUID, value: bytes, metadata: dict[str, str] | None = None
+    ) -> SecretRef:
         ref = SecretRef(
             ref_id=uuid4(),
             fingerprint=compute_fingerprint(value),
@@ -123,10 +123,7 @@ class InMemorySecretStore:
 
     def revoke_all_leases(self, tenant_id: UUID) -> int:
         revoked = 0
-        to_remove = [
-            lid for lid, lease in self._leases.items()
-            if lease.tenant_id == tenant_id
-        ]
+        to_remove = [lid for lid, lease in self._leases.items() if lease.tenant_id == tenant_id]
         for lid in to_remove:
             del self._leases[lid]
             revoked += 1
@@ -134,10 +131,7 @@ class InMemorySecretStore:
 
     def revoke_all_secrets(self, tenant_id: UUID) -> int:
         revoked = 0
-        to_remove = [
-            key for key in self._secrets
-            if key[0] == tenant_id
-        ]
+        to_remove = [key for key in self._secrets if key[0] == tenant_id]
         for key in to_remove:
             self._revoked.add(key[1])
             del self._secrets[key]

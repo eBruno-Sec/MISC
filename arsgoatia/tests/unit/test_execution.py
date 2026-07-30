@@ -23,7 +23,12 @@ def test_proposed_to_rejected():
 
 
 def test_running_terminal_states():
-    for target in (ActionState.SUCCEEDED, ActionState.FAILED, ActionState.TIMED_OUT, ActionState.CANCELLED):
+    for target in (
+        ActionState.SUCCEEDED,
+        ActionState.FAILED,
+        ActionState.TIMED_OUT,
+        ActionState.CANCELLED,
+    ):
         assert can_transition_action(ActionState.RUNNING, target)
 
 

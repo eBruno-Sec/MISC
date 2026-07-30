@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
-from scope.firewall import ScopeFirewall
 from reasoning.constraints import ActionCandidate, ConstraintContext, ConstraintSolver
+from scope.firewall import ScopeFirewall
+
+from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
 
 
 def _ctx(**over) -> ConstraintContext:
     base = dict(
-        firewall=ScopeFirewall(ScopeSpec(include=[ScopeRule(type="exact_host", value="juice-shop:3000")])),
+        firewall=ScopeFirewall(
+            ScopeSpec(include=[ScopeRule(type="exact_host", value="juice-shop:3000")])
+        ),
         max_rps=2.0,
         max_requests_remaining=500,
         allow_mutation=False,
@@ -66,7 +69,9 @@ def test_rate_and_budget():
 
 
 def test_data_sensitivity_limit():
-    r = ConstraintSolver().check(_candidate(data_sensitivity="secret"), _ctx(max_data_sensitivity="confidential"))
+    r = ConstraintSolver().check(
+        _candidate(data_sensitivity="secret"), _ctx(max_data_sensitivity="confidential")
+    )
     assert "data_sensitivity" in r.violations
 
 

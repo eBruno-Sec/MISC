@@ -1,11 +1,12 @@
 """Finding management endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Header, Query, status
 from pydantic import BaseModel, Field
 
 from apps.api.deps import AuthCtx, DbSession, TenantId

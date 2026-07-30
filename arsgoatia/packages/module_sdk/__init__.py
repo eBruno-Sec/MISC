@@ -17,6 +17,7 @@ Lifecycle:
   run(context) → ModuleRunResult          (advisory / recon)
   confirm(evidence, context) → ConfirmationResult   (deterministic)
 """
+
 from __future__ import annotations
 
 import abc
@@ -51,6 +52,7 @@ class EligibilityResult:
 @dataclass(frozen=True)
 class ActionProposal:
     """A proposed action from the module — never an execution."""
+
     proposal_id: UUID = field(default_factory=uuid4)
     technique_id: str = ""
     target_locator: str = ""
@@ -70,6 +72,7 @@ class ModuleRunResult:
     run() is for gathering recon / advisory data.  It must NOT execute
     actions against the target (that's the runner-agent's job).
     """
+
     module_id: str
     engagement_id: UUID
     observations: list[dict[str, Any]] = field(default_factory=list)
@@ -85,6 +88,7 @@ class ConfirmationResult:
     capability emission.  It must be deterministic — no AI, no IO, no
     randomness.  All inputs (evidence, exchanges) must be passed in.
     """
+
     decision: ConfirmationDecision
     reason: str
     rule_version: str
@@ -107,6 +111,7 @@ class ModuleContext:
     and confirm().  run() may call registered activities indirectly
     via the provided activity_refs, but never directly.
     """
+
     engagement_id: UUID
     tenant_id: UUID
     target_locator: str

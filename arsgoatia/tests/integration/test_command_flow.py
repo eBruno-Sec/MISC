@@ -4,9 +4,9 @@ These tests exercise the command handlers with in-memory infrastructure,
 verifying that the application layer correctly orchestrates domain logic,
 event emission, and audit recording end-to-end.
 """
+
 from __future__ import annotations
 
-from datetime import timedelta
 from uuid import uuid4
 
 from packages.application import (
@@ -17,8 +17,8 @@ from packages.application import (
     InMemoryActionRepo,
     InMemoryAuditLog,
     InMemoryEngagementRepo,
-    InMemoryEvidenceStore,
     InMemoryEventBus,
+    InMemoryEvidenceStore,
     PauseEngagementCommand,
     ProposeActionCommand,
     RecordEvidenceCommand,
@@ -39,7 +39,6 @@ from packages.approval import ApprovalRegistry
 from packages.rate_limiter import BudgetLedger, BudgetSpec
 from packages.testing import (
     assert_audit_recorded,
-    assert_event_emitted,
     hours_from_now,
     utcnow,
 )
@@ -65,9 +64,7 @@ class TestFullEngagementLifecycle:
             authorization_artifact_digest="sha256:auth123",
             valid_from=utcnow(),
             valid_until=hours_from_now(168),
-            scope_rules=[
-                {"type": "dns_suffix", "value": "apps.example.test", "action": "allow"}
-            ],
+            scope_rules=[{"type": "dns_suffix", "value": "apps.example.test", "action": "allow"}],
             allowed_risk_tiers=["R0", "R1", "R2"],
             budget={"requests": 50000, "ai_cost_usd": 25},
         )
@@ -83,9 +80,7 @@ class TestFullEngagementLifecycle:
         self._advance_to_ready(eid)
 
         result = handle_start_engagement(
-            StartEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            StartEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
             self.audit,
@@ -106,9 +101,7 @@ class TestFullEngagementLifecycle:
         assert result.status == CommandStatus.SUCCESS
 
         result = handle_resume_engagement(
-            ResumeEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            ResumeEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
         )
@@ -134,23 +127,17 @@ class TestFullEngagementLifecycle:
         self._advance_to_ready(eid)
 
         handle_start_engagement(
-            StartEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            StartEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
         )
         handle_pause_engagement(
-            PauseEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            PauseEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
         )
         handle_resume_engagement(
-            ResumeEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            ResumeEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
         )
@@ -166,9 +153,7 @@ class TestFullEngagementLifecycle:
         self._advance_to_ready(eid)
 
         handle_start_engagement(
-            StartEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            StartEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
             self.audit,
@@ -396,7 +381,10 @@ class TestOutboxEventRelay:
         subs.subscribe("finding.confirmed", lambda e: received.append(e))
 
         entry = create_outbox_entry(
-            "finding.confirmed", uuid4(), "finding", uuid4(),
+            "finding.confirmed",
+            uuid4(),
+            "finding",
+            uuid4(),
             {"severity": "high", "cwe": "CWE-639"},
         )
         outbox.write(entry)
@@ -446,25 +434,34 @@ class TestApprovalGateFlow:
         self.tenant_id = uuid4()
         self.engagement_id = uuid4()
         spec = BudgetSpec(
-            max_requests=100, max_cost_usd=5.0, max_concurrent=5,
-            requests_per_second=100.0, burst_capacity=100,
+            max_requests=100,
+            max_cost_usd=5.0,
+            max_concurrent=5,
+            requests_per_second=100.0,
+            burst_capacity=100,
         )
         self.budget_ledger.register(self.tenant_id, self.engagement_id, spec)
-        self.eng_repo.create(self.tenant_id, {
-            "id": self.engagement_id,
-            "state": "running",
-            "started_at": utcnow().isoformat(),
-        })
+        self.eng_repo.create(
+            self.tenant_id,
+            {
+                "id": self.engagement_id,
+                "state": "running",
+                "started_at": utcnow().isoformat(),
+            },
+        )
 
     def test_full_approve_gate_flow(self):
         """propose→pause→request_approval→grant→resume→execute."""
         # 1. Propose R2 action (with approval registry: creates request)
         propose_result = handle_propose_action(
             ProposeActionCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
                 technique_id="web.authz.bola.differential",
                 target_locator="http://juice-shop:3000/rest/basket/1",
-                risk_tier="R2", mutation_class="none", actor="planner",
+                risk_tier="R2",
+                mutation_class="none",
+                actor="planner",
             ),
             self.eng_repo,
             self.action_repo,
@@ -479,10 +476,13 @@ class TestApprovalGateFlow:
         # 2. Pause engagement (waiting for approval)
         pause_result = handle_pause_engagement(
             PauseEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
-                actor="orchestrator", reason="awaiting R2 approval",
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
+                actor="orchestrator",
+                reason="awaiting R2 approval",
             ),
-            self.eng_repo, self.bus,
+            self.eng_repo,
+            self.bus,
         )
         assert pause_result.status == CommandStatus.SUCCESS
         assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "paused"
@@ -497,8 +497,10 @@ class TestApprovalGateFlow:
         # 4. Grant approval from a different actor
         approve_result = handle_approve_action(
             ApproveActionCommand(
-                tenant_id=self.tenant_id, action_id=action_id,
-                approver="security-lead", reason="approved for Juice Shop",
+                tenant_id=self.tenant_id,
+                action_id=action_id,
+                approver="security-lead",
+                reason="approved for Juice Shop",
             ),
             self.action_repo,
             self.bus,
@@ -518,10 +520,12 @@ class TestApprovalGateFlow:
         # 6. Resume engagement
         resume_result = handle_resume_engagement(
             ResumeEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
                 actor="orchestrator",
             ),
-            self.eng_repo, self.bus,
+            self.eng_repo,
+            self.bus,
         )
         assert resume_result.status == CommandStatus.SUCCESS
         assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "running"
@@ -537,22 +541,31 @@ class TestApprovalGateFlow:
         """propose→reject: action goes to rejected, no execution possible."""
         propose_result = handle_propose_action(
             ProposeActionCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
                 technique_id="web.authz.bola.write",
                 target_locator="http://juice-shop:3000/api/users",
-                risk_tier="R2", mutation_class="write", actor="planner",
+                risk_tier="R2",
+                mutation_class="write",
+                actor="planner",
             ),
-            self.eng_repo, self.action_repo, self.bus,
+            self.eng_repo,
+            self.action_repo,
+            self.bus,
             approval_registry=self.approval_reg,
         )
         action_id = propose_result.resource_id
 
         reject_result = handle_reject_action(
             RejectActionCommand(
-                tenant_id=self.tenant_id, action_id=action_id,
-                approver="security-lead", reason="out of scope for this engagement",
+                tenant_id=self.tenant_id,
+                action_id=action_id,
+                approver="security-lead",
+                reason="out of scope for this engagement",
             ),
-            self.action_repo, self.bus, self.audit,
+            self.action_repo,
+            self.bus,
+            self.audit,
             approval_registry=self.approval_reg,
         )
         assert reject_result.status == CommandStatus.SUCCESS
@@ -565,8 +578,10 @@ class TestApprovalGateFlow:
         """Once budget is exhausted, propose returns POLICY_DENIED."""
         exhausted_ledger = BudgetLedger()
         exhausted_spec = BudgetSpec(
-            max_requests=1, max_cost_usd=0.0,
-            requests_per_second=100.0, burst_capacity=1,
+            max_requests=1,
+            max_cost_usd=0.0,
+            requests_per_second=100.0,
+            burst_capacity=1,
         )
         exhausted_ledger.register(self.tenant_id, self.engagement_id, exhausted_spec)
         # Use the 1 allowed request
@@ -574,11 +589,16 @@ class TestApprovalGateFlow:
         # Now propose should be denied
         result = handle_propose_action(
             ProposeActionCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
-                technique_id="web.recon", target_locator="http://juice-shop:3000",
-                risk_tier="R1", mutation_class="none", actor="planner",
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
+                technique_id="web.recon",
+                target_locator="http://juice-shop:3000",
+                risk_tier="R1",
+                mutation_class="none",
+                actor="planner",
             ),
-            self.eng_repo, self.action_repo,
+            self.eng_repo,
+            self.action_repo,
             budget_ledger=exhausted_ledger,
         )
         assert result.status == CommandStatus.POLICY_DENIED
@@ -587,16 +607,22 @@ class TestApprovalGateFlow:
         """Emergency stop blocks budget and marks engagement stopping."""
         handle_emergency_stop(
             EmergencyStopCommand(
-                tenant_id=self.tenant_id, engagement_id=self.engagement_id,
-                actor="security-lead", reason="threat detected",
+                tenant_id=self.tenant_id,
+                engagement_id=self.engagement_id,
+                actor="security-lead",
+                reason="threat detected",
             ),
-            self.eng_repo, self.bus, self.audit,
+            self.eng_repo,
+            self.bus,
+            self.audit,
         )
         self.budget_ledger.emergency_stop(self.tenant_id, self.engagement_id)
         assert self.budget_ledger.is_emergency_stopped(self.tenant_id, self.engagement_id)
         assert self.eng_repo.get(self.tenant_id, self.engagement_id)["state"] == "stopping"
         # Budget check after emergency stop
-        assert not self.budget_ledger.check(self.tenant_id, self.engagement_id, requests_needed=1).allowed
+        assert not self.budget_ledger.check(
+            self.tenant_id, self.engagement_id, requests_needed=1
+        ).allowed
 
 
 class TestCrossModuleEvidence:

@@ -16,7 +16,6 @@ import secrets
 from collections import OrderedDict
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Canonical JSON
 # ---------------------------------------------------------------------------
@@ -37,9 +36,7 @@ def canonical_json(obj: Any) -> bytes:
 
 def _sort_keys_recursive(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return OrderedDict(
-            sorted((k, _sort_keys_recursive(v)) for k, v in obj.items())
-        )
+        return OrderedDict(sorted((k, _sort_keys_recursive(v)) for k, v in obj.items()))
     if isinstance(obj, (list, tuple)):
         return [_sort_keys_recursive(item) for item in obj]
     return obj

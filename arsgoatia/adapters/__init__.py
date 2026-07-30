@@ -4,13 +4,13 @@ Every adapter (HTTP, browser, nuclei, etc.) implements AdapterContract
 so the execution engine can drive them uniformly through preflight,
 execute, heartbeat, cancel, and cleanup phases per spec section 7.5.
 """
+
 from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
-
 
 # ---------------------------------------------------------------------------
 # Exceptions

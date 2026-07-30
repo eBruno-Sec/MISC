@@ -1,4 +1,5 @@
 """Unit tests for the approval registry package."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -7,7 +8,6 @@ from uuid import uuid4
 import pytest
 
 from packages.approval import (
-    ApprovalDecision,
     ApprovalRegistry,
     ApprovalRegistryError,
     ApprovalRequest,
@@ -50,6 +50,7 @@ def _request(
 class TestComputeBindingDigest:
     def test_deterministic(self):
         from datetime import datetime, timezone
+
         aid = uuid4()
         now = datetime(2024, 1, 1, tzinfo=timezone.utc)
         d1 = compute_binding_digest(aid, "sha256:abc", "alice", now)
@@ -58,6 +59,7 @@ class TestComputeBindingDigest:
 
     def test_different_approvers_differ(self):
         from datetime import datetime, timezone
+
         aid = uuid4()
         now = datetime(2024, 1, 1, tzinfo=timezone.utc)
         d1 = compute_binding_digest(aid, "sha256:abc", "alice", now)
@@ -66,6 +68,7 @@ class TestComputeBindingDigest:
 
     def test_different_envelope_differ(self):
         from datetime import datetime, timezone
+
         aid = uuid4()
         now = datetime(2024, 1, 1, tzinfo=timezone.utc)
         d1 = compute_binding_digest(aid, "sha256:abc", "alice", now)
@@ -74,6 +77,7 @@ class TestComputeBindingDigest:
 
     def test_format(self):
         from datetime import datetime, timezone
+
         d = compute_binding_digest(uuid4(), "sha256:abc", "alice", datetime.now(timezone.utc))
         assert d.startswith("sha256:")
 
@@ -102,13 +106,21 @@ class TestCreateRequest:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         with pytest.raises(DuplicateApprovalError):
             reg.create_request(
-                tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-                envelope_digest="sha256:xyz", risk_tier="R2", requestor_id="alice",
+                tenant_id=tid,
+                engagement_id=uuid4(),
+                action_id=aid,
+                envelope_digest="sha256:xyz",
+                risk_tier="R2",
+                requestor_id="alice",
             )
 
     def test_same_action_different_tenant_ok(self):
@@ -116,12 +128,20 @@ class TestCreateRequest:
         tid_a, tid_b = uuid4(), uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid_a, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid_a,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         req = reg.create_request(
-            tenant_id=tid_b, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="bob",
+            tenant_id=tid_b,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="bob",
         )
         assert req is not None
 
@@ -130,8 +150,12 @@ class TestCreateRequest:
         tid = uuid4()
         aid = uuid4()
         req = reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         found = reg.get_request(tid, req.request_id)
         assert found == req
@@ -140,8 +164,12 @@ class TestCreateRequest:
         reg = _registry()
         tid_a, tid_b = uuid4(), uuid4()
         req = reg.create_request(
-            tenant_id=tid_a, engagement_id=uuid4(), action_id=uuid4(),
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid_a,
+            engagement_id=uuid4(),
+            action_id=uuid4(),
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         assert reg.get_request(tid_b, req.request_id) is None
 
@@ -150,8 +178,12 @@ class TestCreateRequest:
         tid = uuid4()
         aid = uuid4()
         req = reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         found = reg.get_request_for_action(tid, aid)
         assert found == req
@@ -167,8 +199,12 @@ class TestGrant:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.grant(tid, aid, "bob", reason="approved by security lead")
         assert decision.state == ApprovalState.GRANTED
@@ -186,8 +222,12 @@ class TestGrant:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.grant(tid, aid, "bob")
         with pytest.raises(DuplicateApprovalError):
@@ -198,8 +238,12 @@ class TestGrant:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
             expires_in=timedelta(seconds=-1),
         )
         with pytest.raises(ApprovalRegistryError, match="expired"):
@@ -210,8 +254,12 @@ class TestGrant:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R4", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R4",
+            requestor_id="alice",
             requires_two_person=True,
         )
         with pytest.raises(TwoPersonRuleError):
@@ -222,8 +270,12 @@ class TestGrant:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R4", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R4",
+            requestor_id="alice",
             requires_two_person=True,
         )
         decision = reg.grant(tid, aid, "bob")
@@ -236,8 +288,12 @@ class TestDeny:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.deny(tid, aid, "bob", reason="too risky")
         assert decision.state == ApprovalState.DENIED
@@ -253,8 +309,12 @@ class TestDeny:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.deny(tid, aid, "bob")
         with pytest.raises(DuplicateApprovalError):
@@ -267,8 +327,12 @@ class TestIsApproved:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.grant(tid, aid, "bob")
         assert reg.is_approved(tid, aid) is True
@@ -278,8 +342,12 @@ class TestIsApproved:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.deny(tid, aid, "bob")
         assert reg.is_approved(tid, aid) is False
@@ -289,8 +357,12 @@ class TestIsApproved:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         assert reg.is_approved(tid, aid) is False
 
@@ -299,15 +371,19 @@ class TestIsApproved:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
             expires_in=timedelta(hours=4),
         )
         reg.grant(tid, aid, "bob")
         # manually expire the request by patching the expires_at
         request = reg.get_request_for_action(tid, aid)
         key = (tid, request.request_id)
-        from datetime import timezone
+
         expired_req = ApprovalRequest(
             request_id=request.request_id,
             tenant_id=request.tenant_id,
@@ -331,8 +407,12 @@ class TestVerifyBinding:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.grant(tid, aid, "bob")
         assert reg.verify_binding(tid, aid, "sha256:abc", decision.binding_digest) is True
@@ -342,8 +422,12 @@ class TestVerifyBinding:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         decision = reg.grant(tid, aid, "bob")
         assert reg.verify_binding(tid, aid, "sha256:xyz", decision.binding_digest) is False
@@ -353,8 +437,12 @@ class TestVerifyBinding:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         reg.grant(tid, aid, "bob")
         assert reg.verify_binding(tid, aid, "sha256:abc", "sha256:tampered") is False
@@ -364,8 +452,12 @@ class TestVerifyBinding:
         tid = uuid4()
         aid = uuid4()
         reg.create_request(
-            tenant_id=tid, engagement_id=uuid4(), action_id=aid,
-            envelope_digest="sha256:abc", risk_tier="R2", requestor_id="alice",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            action_id=aid,
+            envelope_digest="sha256:abc",
+            risk_tier="R2",
+            requestor_id="alice",
         )
         assert reg.verify_binding(tid, aid, "sha256:abc", "sha256:fake") is False
 

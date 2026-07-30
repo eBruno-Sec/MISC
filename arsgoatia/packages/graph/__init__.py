@@ -12,6 +12,7 @@ Graph nodes: Asset, Service, Endpoint, Identity, Capability, Finding,
 Graph edges: EXPOSES, RUNS_ON, HAS_ENDPOINT, PROVED_BY, LEADS_TO,
              GAINED_BY, SUPPORTS, REFUTES
 """
+
 from __future__ import annotations
 
 import enum
@@ -21,10 +22,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import UUID
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class NodeLabel(enum.Enum):
     ASSET = "Asset"
@@ -52,6 +53,7 @@ class EdgeLabel(enum.Enum):
 # ---------------------------------------------------------------------------
 # Core dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class GraphNode:
@@ -84,6 +86,7 @@ class StoredQuery:
 # Errors
 # ---------------------------------------------------------------------------
 
+
 class GraphError(Exception):
     """Base error for graph operations."""
 
@@ -107,6 +110,7 @@ class NodeNotFoundError(GraphError):
 # ---------------------------------------------------------------------------
 # Repository contract (ABC)
 # ---------------------------------------------------------------------------
+
 
 class GraphRepository(ABC):
     """Abstract graph repository -- all implementations must satisfy this contract."""
@@ -162,6 +166,7 @@ def _register_query(
     cost_limit: int = 1000,
 ) -> Callable[[QueryFunc], QueryFunc]:
     """Decorator that registers a named stored query."""
+
     def decorator(fn: QueryFunc) -> QueryFunc:
         _STORED_QUERIES[name] = StoredQuery(
             name=name,
@@ -172,12 +177,14 @@ def _register_query(
         )
         _QUERY_FUNCS[name] = fn
         return fn
+
     return decorator
 
 
 # ---------------------------------------------------------------------------
 # Named stored queries
 # ---------------------------------------------------------------------------
+
 
 @_register_query(
     name="shortest_path",
@@ -221,8 +228,7 @@ def _shortest_path(
         nodes_visited += 1
         if nodes_visited > cost_limit:
             raise CostLimitExceededError(
-                f"shortest_path exceeded cost limit of {cost_limit} "
-                f"(visited {nodes_visited} nodes)"
+                f"shortest_path exceeded cost limit of {cost_limit} (visited {nodes_visited} nodes)"
             )
 
         for neighbor_id, edge in adjacency.get(current, []):
@@ -232,11 +238,13 @@ def _shortest_path(
             new_path_edges = path_edges + [edge]
             if neighbor_id == target_id:
                 tenant_nodes = repo._nodes_by_tenant[tenant_id]
-                return [{
-                    "path": [_node_to_dict(tenant_nodes[nid]) for nid in new_path_nodes],
-                    "edges": [_edge_to_dict(e) for e in new_path_edges],
-                    "length": len(new_path_edges),
-                }]
+                return [
+                    {
+                        "path": [_node_to_dict(tenant_nodes[nid]) for nid in new_path_nodes],
+                        "edges": [_edge_to_dict(e) for e in new_path_edges],
+                        "length": len(new_path_edges),
+                    }
+                ]
             visited.add(neighbor_id)
             queue.append((neighbor_id, new_path_nodes, new_path_edges))
 
@@ -322,9 +330,7 @@ def _attack_surface(
     for edge in tenant_edges.values():
         nodes_visited += 1
         if nodes_visited > cost_limit:
-            raise CostLimitExceededError(
-                f"attack_surface exceeded cost limit of {cost_limit}"
-            )
+            raise CostLimitExceededError(f"attack_surface exceeded cost limit of {cost_limit}")
         if edge.label in (EdgeLabel.EXPOSES, EdgeLabel.HAS_ENDPOINT):
             exposed_ids.add(edge.source_id)
             exposed_ids.add(edge.target_id)
@@ -368,9 +374,7 @@ def _evidence_for_step(
     for edge in tenant_edges.values():
         nodes_visited += 1
         if nodes_visited > cost_limit:
-            raise CostLimitExceededError(
-                f"evidence_for_step exceeded cost limit of {cost_limit}"
-            )
+            raise CostLimitExceededError(f"evidence_for_step exceeded cost limit of {cost_limit}")
         if edge.label in (EdgeLabel.PROVED_BY, EdgeLabel.SUPPORTS):
             if edge.source_id == step_id:
                 evidence_ids.add(edge.target_id)
@@ -443,6 +447,7 @@ def _invalidated_findings(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _node_to_dict(node: GraphNode) -> dict[str, Any]:
     return {
         "id": node.id,
@@ -466,6 +471,7 @@ def _edge_to_dict(edge: GraphEdge) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # In-memory implementation
 # ---------------------------------------------------------------------------
+
 
 class InMemoryGraphRepository(GraphRepository):
     """Pure-Python in-memory graph satisfying the repository contract.
@@ -495,7 +501,8 @@ class InMemoryGraphRepository(GraphRepository):
         # Remove edges that reference this node
         tenant_edges = self._edges_by_tenant.get(tenant_id, {})
         to_remove = [
-            eid for eid, edge in tenant_edges.items()
+            eid
+            for eid, edge in tenant_edges.items()
             if edge.source_id == node_id or edge.target_id == node_id
         ]
         for eid in to_remove:

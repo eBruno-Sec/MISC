@@ -1,11 +1,12 @@
 """Action proposal, approval, and execution streaming endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -209,8 +210,8 @@ async def stream_execution(
 ):
     async def event_generator():
         # TODO: subscribe to Temporal execution updates
-        yield f"event: connected\ndata: {{\"execution_id\": \"{execution_id}\"}}\n\n"
-        yield f"event: status\ndata: {{\"state\": \"pending\", \"message\": \"Awaiting execution start\"}}\n\n"
+        yield f'event: connected\ndata: {{"execution_id": "{execution_id}"}}\n\n'
+        yield 'event: status\ndata: {"state": "pending", "message": "Awaiting execution start"}\n\n'
 
     return StreamingResponse(
         event_generator(),
