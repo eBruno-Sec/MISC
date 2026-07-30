@@ -59,6 +59,7 @@ type View =
   | "engagementDetail"
   | "actions"
   | "approvals"
+  | "capabilities"
   | "evidence"
   | "findings"
   | "reports"
@@ -1428,6 +1429,180 @@ function ActionsView() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Capabilities
+// ---------------------------------------------------------------------------
+function CapabilitiesView() {
+  const { data, loading } = usePolling<{ total: number; items: any[] }>(
+    "/capabilities",
+    30000,
+  );
+
+  const sevColor = (s: string) => {
+    switch (s) {
+      case "critical":
+        return C.blood;
+      case "high":
+        return C.guard;
+      case "medium":
+        return "#E67E22";
+      case "low":
+        return "#F1C40F";
+      case "info":
+        return C.mint;
+      default:
+        return C.textMuted;
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1rem" }}>
+        <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Capabilities</h2>
+        <div style={{ color: C.textMuted, fontSize: "0.78rem", marginTop: 4 }}>
+          What arsgoatia can actually do — every technique pack the platform has
+          compiled from source.{" "}
+          {data && (
+            <span style={{ color: C.pink, fontWeight: 500 }}>
+              {data.total} packs registered.
+            </span>
+          )}
+        </div>
+      </div>
+
+      {loading && !data ? (
+        <div style={{ color: C.textMuted, fontSize: "0.85rem" }}>Loading capability registry...</div>
+      ) : !data || data.items.length === 0 ? (
+        <EmptyState message="No capability packs discovered. Check packs/**/*.capability.yaml on disk." />
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+            gap: "1rem",
+          }}
+        >
+          {data.items.map((pack: any) => (
+            <div
+              key={pack.metadata.id}
+              style={{
+                background: C.surface,
+                border: `1px solid ${C.border}`,
+                borderLeft: `3px solid ${sevColor(pack.classification.severity)}`,
+                borderRadius: 8,
+                padding: "1rem 1.15rem",
+                fontSize: "0.8rem",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 8,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, color: C.text, fontSize: "0.9rem" }}>
+                    {pack.metadata.name}
+                  </div>
+                  <div style={{ color: C.textMuted, fontSize: "0.7rem", fontFamily: "monospace" }}>
+                    {pack.metadata.id} @ {pack.metadata.version}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <RiskBadge tier={pack.classification.risk_tier} />
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      fontSize: "0.62rem",
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: sevColor(pack.classification.severity),
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    {pack.classification.severity}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 10px", fontSize: "0.72rem" }}>
+                {pack.classification.weakness_id && (
+                  <>
+                    <span style={{ color: C.textMuted }}>Weakness</span>
+                    <span style={{ color: C.text, fontFamily: "monospace" }}>
+                      {pack.classification.weakness_id}
+                    </span>
+                  </>
+                )}
+                {pack.classification.owasp && (
+                  <>
+                    <span style={{ color: C.textMuted }}>OWASP</span>
+                    <span style={{ color: C.text }}>{pack.classification.owasp}</span>
+                  </>
+                )}
+                <span style={{ color: C.textMuted }}>Confirmation</span>
+                <span style={{ color: C.text }}>{pack.confirmation.strategy}</span>
+                {pack.confirmation.determinism && (
+                  <>
+                    <span style={{ color: C.textMuted }}>Determinism</span>
+                    <span style={{ color: C.mint }}>{pack.confirmation.determinism}</span>
+                  </>
+                )}
+              </div>
+
+              {pack.remediation?.short && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "6px 10px",
+                    borderLeft: `2px solid ${C.mint}`,
+                    background: C.dark,
+                    color: C.text,
+                    fontSize: "0.72rem",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <div
+                    style={{
+                      color: C.mint,
+                      fontSize: "0.62rem",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: 3,
+                    }}
+                  >
+                    Remediation
+                  </div>
+                  {pack.remediation.short}
+                </div>
+              )}
+
+              {pack.confirmation.false_positive_conditions?.length > 0 && (
+                <details style={{ marginTop: 8, fontSize: "0.72rem", color: C.textMuted }}>
+                  <summary style={{ cursor: "pointer", color: C.pink }}>
+                    False-positive conditions ({pack.confirmation.false_positive_conditions.length})
+                  </summary>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: "1.2rem" }}>
+                    {pack.confirmation.false_positive_conditions.map((c: string, i: number) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SystemView({ health }: any) {
   return (
     <div>
@@ -1759,6 +1934,7 @@ function App() {
     { key: "engagements", label: "Engagements", badge: engagements.data?.total },
     { key: "actions", label: "Actions" },
     { key: "approvals", label: "Approvals" },
+    { key: "capabilities", label: "Capabilities" },
     { key: "evidence", label: "Evidence", badge: evidenceP.data?.total },
     { key: "findings", label: "Findings", badge: findings.data?.total },
     { key: "reports", label: "Reports", badge: reports.data?.total },
@@ -1872,6 +2048,7 @@ function App() {
         )}
         {view === "actions" && <ActionsView />}
         {view === "approvals" && <ApprovalsView />}
+        {view === "capabilities" && <CapabilitiesView />}
         {view === "evidence" && <EvidenceView data={evidenceP.data} />}
         {view === "findings" && <FindingsView data={findings.data} />}
         {view === "reports" && <ReportsView data={reports.data} />}

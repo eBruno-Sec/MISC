@@ -16,6 +16,7 @@ dependencies = [
     "miniopy-async",
     "cryptography",
     "python-jose[cryptography]",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]

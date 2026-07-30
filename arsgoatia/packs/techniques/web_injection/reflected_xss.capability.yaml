@@ -1,0 +1,50 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_injection.reflected_xss
+  name: Reflected cross-site scripting
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-79
+  owasp: A03:2021 — Injection
+  capec: CAPEC-591
+  severity: high
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    parameterised_endpoint: true
+    content_type_family: [html]
+
+confirmation:
+  strategy: unique-canary reflection
+  determinism: strict
+  false_positive_conditions:
+    - canary reflected only in HTML-encoded form (server escapes correctly)
+    - content-type is not html (not a rendering context)
+    - Content-Security-Policy header present (may prevent script execution)
+
+reliability:
+  source_authority: OWASP + PortSwigger canon
+  historical_success_rate: null
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 1
+  required_kinds: [broad_audit_xss]
+  stored_fields: [canary, canary_reflected, canary_html_encoded, csp_present, content_type]
+
+execution:
+  activity: services.worker.activities.broad_web_audit.run_broad_web_audit
+  task_queue: arsgoatia-web
+
+remediation:
+  short: Context-appropriate output encoding + strict CSP
+  long: >
+    HTML-escape all user input before rendering into HTML contexts. Deploy
+    a strict Content-Security-Policy (no unsafe-inline, nonce-based script
+    tags) as defence in depth.

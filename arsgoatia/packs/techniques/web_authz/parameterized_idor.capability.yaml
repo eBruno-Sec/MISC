@@ -1,0 +1,52 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_authz.parameterized_idor
+  name: Generic parameterized-URL IDOR / BOLA
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  capec: CAPEC-115
+  severity: high
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    url_template_contains: "{id}"
+  requires:
+    identity_count: 2
+    authenticated: true
+
+confirmation:
+  strategy: 4-exchange differential
+  determinism: strict
+  false_positive_conditions:
+    - identities own the same object id
+    - endpoint is public (negative control returns own_codes)
+    - baseline fails (unrelated auth issue)
+
+reliability:
+  source_authority: internal
+  historical_success_rate: null   # depends on target
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 4
+  required_kinds: [broad_audit_idor]
+
+execution:
+  activity: services.worker.activities.juice_shop.run_juice_shop_basket_idor
+  task_queue: arsgoatia-web
+  reuses: parameterized_idor.run_parameterized_idor
+
+remediation:
+  short: Verify object ownership server-side, never trust client-supplied ids
+  long: >
+    Every endpoint that accepts an object identifier from the client must
+    check ownership against the authenticated principal before returning
+    content. Consider deterministic authz middleware over per-endpoint checks.

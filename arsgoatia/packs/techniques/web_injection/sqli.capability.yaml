@@ -1,0 +1,51 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_injection.sqli_reflected
+  name: SQL injection (error + boolean-based)
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-89
+  owasp: A03:2021 — Injection
+  capec: CAPEC-66
+  severity: high
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    parameterised_endpoint: true
+  supported_databases: [mysql, postgresql, mssql, oracle, sqlite]
+
+confirmation:
+  strategy: error-signature OR boolean-length-differential
+  exchanges: [baseline, error_payload, boolean_true, boolean_false, negative_control]
+  determinism: strict
+  false_positive_conditions:
+    - baseline already contains a DB error signature
+    - target returns static content (no length variation possible)
+    - dynamic content unrelated to param value
+
+reliability:
+  source_authority: OWASP + PortSwigger canon
+  historical_success_rate: null
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 5
+  required_kinds: [broad_audit_sqli]
+  stored_fields: [status_code, body_length, error_signature, body_preview]
+
+execution:
+  activity: services.worker.activities.broad_web_audit.run_broad_web_audit
+  task_queue: arsgoatia-web
+
+remediation:
+  short: Use parameterised queries — never concatenate untrusted input into SQL
+  long: >
+    Replace all string-built SQL with prepared statements or an ORM query
+    builder that binds parameters. Where dynamic identifiers are required,
+    allow-list them; never accept them from the request.

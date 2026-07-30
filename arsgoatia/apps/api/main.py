@@ -12,6 +12,7 @@ from apps.api.routers import (
     actions,
     audit,
     auth as auth_router,
+    capabilities,
     engagements,
     evidence,
     findings,
@@ -53,6 +54,7 @@ app.add_middleware(
 PREFIX = "/api/v1"
 
 app.include_router(auth_router.router, prefix=PREFIX)
+app.include_router(capabilities.router, prefix=PREFIX)
 app.include_router(engagements.router, prefix=PREFIX)
 app.include_router(actions.router, prefix=PREFIX)
 app.include_router(evidence.router, prefix=PREFIX)

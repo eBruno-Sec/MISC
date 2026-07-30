@@ -1,0 +1,52 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_passive.security_headers_audit
+  name: Security headers audit
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-693
+  owasp: A05:2021 — Security Misconfiguration
+  severity: low
+  risk_tier: R1
+  mutation_class: none
+
+targeting:
+  applies_when:
+    any_http_endpoint: true
+
+confirmation:
+  strategy: header presence + weak-config detection
+  audited_headers:
+    - content-security-policy (also flags unsafe-inline)
+    - strict-transport-security
+    - x-frame-options
+    - x-content-type-options
+    - referrer-policy
+  determinism: strict
+
+reliability:
+  source_authority: OWASP Secure Headers Project
+  historical_success_rate: null
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 1
+  required_kinds: [broad_audit_headers]
+  stored_fields: [header, severity, note, observed_headers]
+
+execution:
+  activity: services.worker.activities.broad_web_audit.run_broad_web_audit
+  task_queue: arsgoatia-web
+
+remediation:
+  short: Ship the standard OWASP Secure Headers baseline
+  long: >
+    Configure the reverse proxy or application to always emit
+    Content-Security-Policy (nonce-based, no unsafe-inline),
+    Strict-Transport-Security (min-age 6 months, includeSubDomains),
+    X-Frame-Options DENY, X-Content-Type-Options nosniff, and a
+    conservative Referrer-Policy (strict-origin-when-cross-origin).

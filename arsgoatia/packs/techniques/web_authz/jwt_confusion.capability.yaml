@@ -1,0 +1,47 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_authz.jwt_confusion
+  name: JWT alg=none + weak-secret confusion
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-347
+  owasp: A02:2021 — Cryptographic Failures
+  capec: CAPEC-593
+  severity: critical
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    jwt_bearer_token_present: true
+
+confirmation:
+  strategy: alg-none-forgery OR weak-hmac-secret-match
+  determinism: strict
+  bounded_secret_dictionary_size: 12
+
+reliability:
+  source_authority: OWASP + auth0 canonical CVEs
+  historical_success_rate: null
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 2
+  required_kinds: [jwt_confusion_probe]
+
+execution:
+  activity: services.worker.activities.broad_web_audit.run_broad_web_audit
+  task_queue: arsgoatia-web
+  status: available_but_not_yet_dispatched
+
+remediation:
+  short: Reject alg=none, mandate strong HMAC secret ≥ 256 random bits
+  long: >
+    Configure your JWT library to reject any token whose header claims
+    alg=none. Sign with HS256 only if the secret is ≥ 32 bytes of CSPRNG
+    output — never with a memorable string. Prefer asymmetric RS256/ES256
+    where multiple services must verify without sharing the signing key.

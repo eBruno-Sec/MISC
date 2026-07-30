@@ -1,0 +1,55 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_injection.path_traversal
+  name: Path traversal / local file inclusion
+  version: 1.0.0
+  authors: [erwin.v.bruno@gmail.com]
+  license: proprietary
+
+classification:
+  weakness_id: CWE-22
+  owasp: A01:2021 — Broken Access Control
+  capec: CAPEC-126
+  severity: critical
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    parameterised_endpoint: true
+  supported_targets: [linux, windows]
+
+confirmation:
+  strategy: signature-in-response
+  probes:
+    - "../../../../etc/passwd → contains 'root:x:0:0'"
+    - "....//....//....//etc/passwd → contains 'root:x:0:0'"
+    - "..%2f..%2f..%2fetc%2fpasswd → contains 'root:x:0:0'"
+    - "../../../../windows/win.ini → contains '[fonts]'"
+    - "..\\..\\..\\..\\windows\\win.ini → contains '[fonts]'"
+  determinism: strict
+  false_positive_conditions:
+    - baseline already returns the signature substring (target echoes content)
+
+reliability:
+  source_authority: OWASP
+  historical_success_rate: null
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 2
+  required_kinds: [broad_audit_traversal]
+  stored_fields: [status_code, signature_found, signature, body_preview]
+
+execution:
+  activity: services.worker.activities.broad_web_audit.run_broad_web_audit
+  task_queue: arsgoatia-web
+
+remediation:
+  short: Canonicalise + allow-list file paths, chroot the reader
+  long: >
+    Resolve the requested path to its canonical form and verify it stays
+    within a known allow-list of directories before opening. Where possible,
+    restrict the process to a chroot / sandbox so traversal cannot reach
+    system files even if application-layer checks are bypassed.

@@ -1,0 +1,66 @@
+apiVersion: arsgoatia/v1
+kind: CapabilityPack
+metadata:
+  id: web_authz.juice_shop_basket_idor
+  name: OWASP Juice Shop — basket IDOR
+  version: 1.0.0
+  authors:
+    - erwin.v.bruno@gmail.com
+  license: proprietary
+
+classification:
+  weakness_id: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  capec: CAPEC-115
+  severity: high
+  risk_tier: R2
+  mutation_class: none
+
+targeting:
+  applies_when:
+    target_host_contains: ["juice-shop"]
+  requires:
+    identity_count: 2
+    authenticated: true
+
+confirmation:
+  strategy: differential
+  exchanges_required: [baseline_a_own, differential_a_reads_b, positive_control_b_own, negative_control_noauth]
+  determinism: strict
+  false_positive_conditions:
+    - basket ids collide (identities own the same basket)
+    - baseline fails (auth broken independent of BOLA)
+    - endpoint is public (negative control returns 200)
+
+reliability:
+  source_authority: internal
+  corroboration: [OWASP Juice Shop official challenge board]
+  historical_success_rate: 1.0
+  last_validated: 2026-07-30
+
+evidence_profile:
+  minimum_exchanges: 4
+  required_kinds: [juice_shop_basket_probe, juice_shop_basket_summary]
+  stored_fields: [status_code, expected_codes, matched, body_preview]
+
+execution:
+  activity: services.worker.activities.juice_shop.run_juice_shop_basket_idor
+  task_queue: arsgoatia-web
+  timeout_seconds: 180
+  retry_policy:
+    initial_seconds: 2
+    max_attempts: 3
+    non_retryable: [ScopeViolationError]
+
+remediation:
+  short: Enforce object-ownership checks on every basket read
+  long: >
+    Verify server-side that the authenticated user is the owner of the
+    requested basket_id before returning any content. Use a middleware or
+    query filter — never trust a client-supplied object id as authoritative.
+
+known_failures: []
+known_successes:
+  - target: juice-shop 14.x
+    date: 2026-07-30
+    finding_id: dev-verified
