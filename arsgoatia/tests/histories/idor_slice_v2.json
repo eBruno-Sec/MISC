@@ -1,0 +1,250 @@
+{
+  "version": "2.0",
+  "description": "IDOR vertical slice history \u2014 \u00a737 first end-to-end run \u2014 evolved run: reporting contract gained a version marker, guarded by workflow.get_version('reporting-contract-version').",
+  "engagement_id": "00000000-0000-0000-0000-000000000001",
+  "tenant_id": "00000000-0000-0000-0000-000000000002",
+  "target": "juice-shop:3000",
+  "technique": "web.authorization.idor.differential",
+  "events": [
+    {
+      "seq": 1,
+      "event_type": "engagement.created",
+      "state": "draft",
+      "actor": "system-test",
+      "notes": "authorized assessment created with valid auth artifact"
+    },
+    {
+      "seq": 2,
+      "event_type": "engagement.scope_compiled",
+      "state": "ready",
+      "scope": {
+        "targets": [
+          "juice-shop:3000"
+        ],
+        "allowed_ports": [
+          3000
+        ],
+        "protocol": "http"
+      }
+    },
+    {
+      "seq": 3,
+      "event_type": "engagement.started",
+      "state": "running"
+    },
+    {
+      "seq": 4,
+      "event_type": "recon.endpoints_discovered",
+      "endpoints": [
+        "/rest/user/login",
+        "/api/Users",
+        "/rest/basket/{id}"
+      ],
+      "evidence_digest": "sha256:recon-evidence-placeholder"
+    },
+    {
+      "seq": 5,
+      "event_type": "identity.bootstrapped",
+      "identities": [
+        {
+          "username": "alice@test.invalid",
+          "role": "user",
+          "identity_index": 0
+        },
+        {
+          "username": "bob@test.invalid",
+          "role": "user",
+          "identity_index": 1
+        }
+      ],
+      "sessions_established": 2
+    },
+    {
+      "seq": 6,
+      "event_type": "observation.recorded",
+      "observation_type": "http_response_differential",
+      "value": {
+        "endpoint": "/rest/basket/{id}",
+        "own_status": 200,
+        "cross_status_observed": "unknown",
+        "confidence": 0.6
+      },
+      "provenance": "recon.passive"
+    },
+    {
+      "seq": 7,
+      "event_type": "hypothesis.created",
+      "claim": "object-level authorization may be absent on /rest/basket/{id}",
+      "state": "OPEN",
+      "confidence": 0.6,
+      "missing_evidence": [
+        "differential_request",
+        "negative_control"
+      ]
+    },
+    {
+      "seq": 8,
+      "event_type": "hypothesis.transitioned",
+      "from_state": "OPEN",
+      "to_state": "TESTABLE",
+      "reason": "prerequisites met: two identities, recon completed"
+    },
+    {
+      "seq": 9,
+      "event_type": "policy.decision_recorded",
+      "risk_tier": "R2",
+      "decision": "require_approval",
+      "technique": "web.authorization.idor.differential",
+      "notes": "R2 actions require human approval before execution"
+    },
+    {
+      "seq": 10,
+      "event_type": "action.proposed",
+      "technique_id": "web.authorization.idor.differential",
+      "target_locator": "http://juice-shop:3000/rest/basket/{id}",
+      "risk_tier": "R2",
+      "state": "approval_required"
+    },
+    {
+      "seq": 11,
+      "event_type": "engagement.paused",
+      "reason": "awaiting approval for IDOR differential action",
+      "state": "paused"
+    },
+    {
+      "seq": 12,
+      "event_type": "approval.requested",
+      "requestor_id": "planner",
+      "risk_tier": "R2",
+      "expires_in_hours": 4
+    },
+    {
+      "seq": 13,
+      "event_type": "approval.granted",
+      "approver_id": "security-lead",
+      "binding_digest": "sha256:approval-binding-placeholder",
+      "reason": "IDOR differential approved for Juice Shop engagement"
+    },
+    {
+      "seq": 14,
+      "event_type": "engagement.resumed",
+      "state": "running"
+    },
+    {
+      "seq": 15,
+      "event_type": "action.executed",
+      "technique_id": "web.authorization.idor.differential",
+      "envelope_verified": true,
+      "firewall_checked": true,
+      "exchanges": [
+        {
+          "label": "baseline_own",
+          "method": "GET",
+          "path": "/rest/basket/1",
+          "token_identity": "alice",
+          "expected_status": 200,
+          "actual_status": 200
+        },
+        {
+          "label": "differential_cross",
+          "method": "GET",
+          "path": "/rest/basket/2",
+          "token_identity": "alice",
+          "expected_status": 403,
+          "actual_status": 200
+        },
+        {
+          "label": "positive_control",
+          "method": "GET",
+          "path": "/rest/basket/2",
+          "token_identity": "bob",
+          "expected_status": 200,
+          "actual_status": 200
+        },
+        {
+          "label": "negative_control",
+          "method": "GET",
+          "path": "/rest/basket/2",
+          "token_identity": null,
+          "expected_status": 401,
+          "actual_status": 401
+        }
+      ]
+    },
+    {
+      "seq": 16,
+      "event_type": "evidence.accepted",
+      "profile": "authorization_differential",
+      "digest": "sha256:evidence-placeholder",
+      "immutable": true,
+      "completeness": "complete",
+      "exchanges_count": 4
+    },
+    {
+      "seq": 17,
+      "event_type": "finding.confirmed",
+      "finding_id": "00000000-0000-0000-0000-000000000010",
+      "weakness": "BOLA / IDOR on basket endpoint",
+      "cwe": "CWE-639",
+      "owasp": "API1:2023",
+      "state": "confirmed",
+      "validator": "deterministic_bola_confirm_v1",
+      "notes": "differential returns 200 with owner-discriminating content; negative control denies"
+    },
+    {
+      "seq": 18,
+      "event_type": "capability.proved",
+      "capability_name": "read_foreign_object",
+      "technique_id": "web.authorization.idor.differential",
+      "target_locator": "http://juice-shop:3000/rest/basket/2",
+      "state": "proven",
+      "evidence_digest": "sha256:evidence-placeholder",
+      "notes": "emitted only after finding=confirmed and evidence digests verified (\u00a718)"
+    },
+    {
+      "seq": 19,
+      "event_type": "attack_chain.step_created",
+      "capability": "read_foreign_object",
+      "blast_radius": "all basket objects readable by any authenticated user",
+      "cut_point": "add object-level authorization check on /rest/basket/:id"
+    },
+    {
+      "seq": 20,
+      "event_type": "report.snapshot_created",
+      "report_types": [
+        "atomic_finding",
+        "attack_chain"
+      ],
+      "formats": [
+        "html",
+        "json",
+        "sarif"
+      ],
+      "notes": "atomic report: CWE-639/CWE-284, OWASP API1:2023. chain report: read_foreign_object step."
+    },
+    {
+      "seq": 21,
+      "event_type": "engagement.completed",
+      "state": "completed",
+      "findings_count": 1,
+      "capabilities_proven": 1,
+      "cleanup_obligations_verified": true,
+      "report_contract_version": 1,
+      "notes": "evolved reporting contract v1 emitted under get_version guard; pre-evolution histories replay at DEFAULT_VERSION and report 0"
+    }
+  ],
+  "determinism_notes": {
+    "all_uuids_from_workflow_context": true,
+    "all_timestamps_from_workflow_context": true,
+    "no_direct_datetime_now_in_workflow_code": true,
+    "confirmation_deterministic": true,
+    "ai_advisory_only": true
+  },
+  "replay_compatibility": {
+    "activity_only_changes_safe": true,
+    "get_version_guards_required_for_workflow_changes": true,
+    "workflow_change_guarded_by_get_version": "reporting-contract-version",
+    "backward_compatible_with": "v1",
+    "slice_test_version": "v2"
+  }
+}
