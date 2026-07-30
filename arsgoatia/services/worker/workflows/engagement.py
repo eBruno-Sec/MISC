@@ -72,6 +72,10 @@ class EngagementResult:
     report_ids: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
     cleanup_verified: bool = False
+    # Set from a workflow.get_version guard (see the reporting phase). Histories
+    # recorded before the evolution replay at DEFAULT_VERSION and report 0; runs
+    # on the evolved code report the current reporting-contract version.
+    report_contract_version: int = 0
 
 
 @workflow.defn
@@ -359,6 +363,18 @@ class EngagementWorkflow:
         )
         self._update(progress=90)
 
+        # Safe workflow evolution (spec §14.5): the reporting contract gained a
+        # version marker after the first histories were recorded. Guarding the
+        # change with workflow.get_version keeps replay of pre-evolution
+        # histories deterministic — they resolve to DEFAULT_VERSION and report
+        # 0, while runs on the evolved code report version 1. Both a v1 and a v2
+        # recorded history therefore replay cleanly against this single
+        # code path (see tests/replay/test_workflow_evolution.py).
+        _report_version = workflow.get_version(
+            "reporting-contract-version", workflow.DEFAULT_VERSION, 1
+        )
+        report_contract_version = 0 if _report_version == workflow.DEFAULT_VERSION else 1
+
         # Phase 9: Cleanup
         cleanup_result = await self._run_cleanup_phase(input)
         self._update(progress=95)
@@ -375,6 +391,7 @@ class EngagementWorkflow:
             ],
             evidence_refs=self._all_evidence_refs,
             cleanup_verified=cleanup_result.all_verified if cleanup_result else True,
+            report_contract_version=report_contract_version,
         )
 
     async def _run_cleanup_phase(self, input: EngagementInput) -> CleanupResult | None:
