@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -60,5 +60,7 @@ def can_approve_high_risk(ctx: AuthContext) -> bool:
     )
 
 
-APPROVAL_ROLES = frozenset({PlatformRole.APPROVER, PlatformRole.ENGAGEMENT_OWNER, PlatformRole.OPERATOR})
+APPROVAL_ROLES = frozenset(
+    {PlatformRole.APPROVER, PlatformRole.ENGAGEMENT_OWNER, PlatformRole.OPERATOR}
+)
 ADMIN_ROLES = frozenset({PlatformRole.TENANT_ADMIN})

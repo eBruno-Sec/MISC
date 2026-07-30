@@ -4,6 +4,7 @@ The fixture is a canonical record of the first vertical slice run. These tests
 verify its structural integrity and that it encodes every mandatory step from
 §37 of the spec — in order — without requiring the Temporal runtime.
 """
+
 from __future__ import annotations
 
 import json
@@ -110,9 +111,7 @@ class TestSliceEventCoverage:
         assert completed["state"] == "completed"
 
     def test_finding_confirmed_deterministically(self, slice_history):
-        finding = next(
-            e for e in slice_history["events"] if e["event_type"] == "finding.confirmed"
-        )
+        finding = next(e for e in slice_history["events"] if e["event_type"] == "finding.confirmed")
         assert finding["state"] == "confirmed"
         assert "validator" in finding
 
@@ -125,28 +124,20 @@ class TestSliceEventCoverage:
         )
 
     def test_capability_name_is_read_foreign_object(self, slice_history):
-        cap = next(
-            e for e in slice_history["events"] if e["event_type"] == "capability.proved"
-        )
+        cap = next(e for e in slice_history["events"] if e["event_type"] == "capability.proved")
         assert cap["capability_name"] == "read_foreign_object"
         assert cap["state"] == "proven"
 
     def test_evidence_immutable(self, slice_history):
-        ev = next(
-            e for e in slice_history["events"] if e["event_type"] == "evidence.accepted"
-        )
+        ev = next(e for e in slice_history["events"] if e["event_type"] == "evidence.accepted")
         assert ev["immutable"] is True
 
     def test_evidence_digest_sha256(self, slice_history):
-        ev = next(
-            e for e in slice_history["events"] if e["event_type"] == "evidence.accepted"
-        )
+        ev = next(e for e in slice_history["events"] if e["event_type"] == "evidence.accepted")
         assert ev["digest"].startswith("sha256:")
 
     def test_approval_required_for_r2(self, slice_history):
-        proposed = next(
-            e for e in slice_history["events"] if e["event_type"] == "action.proposed"
-        )
+        proposed = next(e for e in slice_history["events"] if e["event_type"] == "action.proposed")
         assert proposed["risk_tier"] == "R2"
         assert proposed["state"] == "approval_required"
 
@@ -160,9 +151,7 @@ class TestSliceEventCoverage:
         )
 
     def test_four_differential_exchanges(self, slice_history):
-        executed = next(
-            e for e in slice_history["events"] if e["event_type"] == "action.executed"
-        )
+        executed = next(e for e in slice_history["events"] if e["event_type"] == "action.executed")
         exchanges = executed["exchanges"]
         assert len(exchanges) == 4
         labels = {ex["label"] for ex in exchanges}
@@ -172,18 +161,14 @@ class TestSliceEventCoverage:
         assert "negative_control" in labels
 
     def test_differential_cross_shows_bola(self, slice_history):
-        executed = next(
-            e for e in slice_history["events"] if e["event_type"] == "action.executed"
-        )
+        executed = next(e for e in slice_history["events"] if e["event_type"] == "action.executed")
         cross = next(ex for ex in executed["exchanges"] if ex["label"] == "differential_cross")
         # The BOLA: Alice's token can read Bob's basket (should be 403, gets 200)
         assert cross["actual_status"] == 200
         assert cross["expected_status"] != 200
 
     def test_negative_control_denies(self, slice_history):
-        executed = next(
-            e for e in slice_history["events"] if e["event_type"] == "action.executed"
-        )
+        executed = next(e for e in slice_history["events"] if e["event_type"] == "action.executed")
         neg = next(ex for ex in executed["exchanges"] if ex["label"] == "negative_control")
         assert neg["actual_status"] == 401
         assert neg["token_identity"] is None
@@ -216,9 +201,7 @@ class TestSliceEventCoverage:
         assert completed.get("cleanup_obligations_verified") is True
 
     def test_two_identities_bootstrapped(self, slice_history):
-        ib = next(
-            e for e in slice_history["events"] if e["event_type"] == "identity.bootstrapped"
-        )
+        ib = next(e for e in slice_history["events"] if e["event_type"] == "identity.bootstrapped")
         assert ib["sessions_established"] == 2
 
     def test_recon_discovers_basket_endpoint(self, slice_history):

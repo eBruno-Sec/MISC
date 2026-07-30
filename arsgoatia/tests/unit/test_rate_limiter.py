@@ -1,10 +1,9 @@
 """Unit tests for the rate limiter and budget ledger."""
+
 from __future__ import annotations
 
 import time
 from uuid import uuid4
-
-import pytest
 
 from packages.rate_limiter import (
     BudgetDenialReason,

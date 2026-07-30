@@ -7,6 +7,7 @@ Verifies that every ConfirmationResult from the IDOR module:
   - module_id, technique_id, version fields are correct
   - Provenance fields are always present (no silent omissions)
 """
+
 from __future__ import annotations
 
 import json
@@ -16,14 +17,14 @@ import pytest
 
 try:
     import jsonschema  # type: ignore[import]
+
     _HAS_JSONSCHEMA = True
 except ImportError:
     _HAS_JSONSCHEMA = False
 
-from packages.module_sdk import ConfirmationDecision, ConfirmationResult
-from modules.web.authorization_idor import MODULE_ID, TECHNIQUE_ID, VERSION, module as idor_module
-from modules.web.authorization_idor import IDORDifferentialModule
-from packages.module_sdk import ModuleContext
+from modules.web.authorization_idor import MODULE_ID, TECHNIQUE_ID, VERSION
+from modules.web.authorization_idor import module as idor_module
+from packages.module_sdk import ConfirmationDecision, ConfirmationResult, ModuleContext
 
 # ---------------------------------------------------------------------------
 # Load output schema
@@ -31,7 +32,10 @@ from packages.module_sdk import ModuleContext
 
 _SCHEMA_PATH = (
     pathlib.Path(__file__).resolve().parents[2]
-    / "modules" / "web" / "authorization_idor" / "output_schema.json"
+    / "modules"
+    / "web"
+    / "authorization_idor"
+    / "output_schema.json"
 )
 
 _OUTPUT_SCHEMA: dict = {}
@@ -43,11 +47,13 @@ if _SCHEMA_PATH.exists():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ctx(
     identities: list[str] | None = None,
     endpoints: list[str] | None = None,
 ) -> ModuleContext:
     from uuid import uuid4
+
     return ModuleContext(
         engagement_id=uuid4(),
         tenant_id=uuid4(),
@@ -68,10 +74,14 @@ def _evidence(
     return {
         "evidence_digest": evidence_digest,
         "exchanges": [
-            {"label": "baseline_own",       "actual_status": 200},
-            {"label": "differential_cross",  "actual_status": diff_status, "body_contains_object": diff_body},
-            {"label": "positive_control",    "actual_status": 200},
-            {"label": "negative_control",    "actual_status": neg_status},
+            {"label": "baseline_own", "actual_status": 200},
+            {
+                "label": "differential_cross",
+                "actual_status": diff_status,
+                "body_contains_object": diff_body,
+            },
+            {"label": "positive_control", "actual_status": 200},
+            {"label": "negative_control", "actual_status": neg_status},
         ],
     }
 
@@ -101,6 +111,7 @@ skipif_no_jsonschema = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Schema file structural tests (always run)
 # ---------------------------------------------------------------------------
+
 
 class TestOutputSchemaFile:
     def test_schema_file_exists(self):
@@ -137,6 +148,7 @@ class TestOutputSchemaFile:
 # Module output shape (always run, no jsonschema needed)
 # ---------------------------------------------------------------------------
 
+
 class TestModuleOutputShape:
     def test_confirmed_has_capability_name(self):
         result = idor_module.confirm(_evidence(), _ctx())
@@ -154,9 +166,7 @@ class TestModuleOutputShape:
         assert result.capability_name is None
 
     def test_inconclusive_has_no_capability(self):
-        result = idor_module.confirm(
-            _evidence(diff_status=200, diff_body=False), _ctx()
-        )
+        result = idor_module.confirm(_evidence(diff_status=200, diff_body=False), _ctx())
         assert result.decision == ConfirmationDecision.INCONCLUSIVE
         assert result.capability_name is None
 
@@ -190,6 +200,7 @@ class TestModuleOutputShape:
 # ---------------------------------------------------------------------------
 # JSON Schema validation (skipped without jsonschema)
 # ---------------------------------------------------------------------------
+
 
 @skipif_no_jsonschema
 class TestOutputSchemaValidation:

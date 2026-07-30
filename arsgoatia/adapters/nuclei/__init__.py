@@ -3,6 +3,7 @@
 Wraps Project Discovery's nuclei scanner behind the adapter contract.
 Each template run is envelope-bound and scope-checked before execution.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -40,7 +41,10 @@ class NucleiAdapter(AdapterContract):
                     },
                     "severity": {
                         "type": "array",
-                        "items": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+                        "items": {
+                            "type": "string",
+                            "enum": ["info", "low", "medium", "high", "critical"],
+                        },
                     },
                     "rate_limit": {"type": "integer", "default": 50},
                     "timeout_seconds": {"type": "integer", "default": 300},

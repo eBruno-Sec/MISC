@@ -1,16 +1,12 @@
 """Unit tests for the planner scoring engine."""
+
 from __future__ import annotations
 
-import math
 from uuid import uuid4
-
-import pytest
 
 from packages.planner import (
     PlannerCandidate,
     PlannerContext,
-    PlannerResult,
-    ScoredCandidate,
     next_action,
     plan,
     score_candidate,
@@ -67,9 +63,7 @@ class TestEligibilityFilter:
         assert "session_hijack" in result.rejection_reason
 
     def test_all_prerequisites_met(self):
-        c = _candidate(
-            prerequisite_capabilities=frozenset({"read_foreign_object"})
-        )
+        c = _candidate(prerequisite_capabilities=frozenset({"read_foreign_object"}))
         ctx = _ctx(available_capabilities=frozenset({"read_foreign_object"}))
         result = score_candidate(c, ctx)
         assert result.eligible

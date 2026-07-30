@@ -9,7 +9,6 @@ with workflow.unsafe.imports_passed_through():
     from services.worker.activities.recon import (
         DiscoveredEndpoint,
         ReconParams,
-        ReconResult,
         ScopeRuleParam,
         safe_http_recon,
     )

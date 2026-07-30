@@ -4,6 +4,7 @@ Uses Playwright under the hood. Validates envelope + scope before every navigati
 Not part of the first vertical slice (HTTP adapter covers it), but the contract
 is defined so future packs can declare browser dependencies.
 """
+
 from __future__ import annotations
 
 from typing import Any

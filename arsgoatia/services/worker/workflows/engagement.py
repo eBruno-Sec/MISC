@@ -16,27 +16,19 @@ with workflow.unsafe.imports_passed_through():
     )
     from services.worker.activities.identity import (
         IdentityParams,
-        IdentityResult,
         establish_identities,
     )
     from services.worker.activities.recon import (
-        ReconParams,
-        ReconResult,
         ScopeRuleParam,
-        safe_http_recon,
     )
     from services.worker.activities.reporting import (
         FindingParam,
         ReportParams,
-        ReportResult,
         generate_reports,
     )
     from services.worker.activities.validation import (
         AccessContextParam,
         ActionEnvelopeParam,
-        BOLAParams,
-        BOLAResult,
-        run_bola_validation,
     )
     from services.worker.workflows.recon import ReconWorkflow, ReconWorkflowInput
     from services.worker.workflows.validation import (
@@ -84,7 +76,6 @@ class EngagementResult:
 
 @workflow.defn
 class EngagementWorkflow:
-
     def __init__(self) -> None:
         self._state = EngagementState()
         self._paused: bool = False
@@ -137,14 +128,10 @@ class EngagementWorkflow:
     # -- Helpers --
 
     async def _gate(self) -> None:
-        await workflow.wait_condition(
-            lambda: not self._paused and not self._emergency_stop
-        )
+        await workflow.wait_condition(lambda: not self._paused and not self._emergency_stop)
 
     async def _await_approval(self, action_id: str) -> str:
-        await workflow.wait_condition(
-            lambda: action_id in self._pending_approvals
-        )
+        await workflow.wait_condition(lambda: action_id in self._pending_approvals)
         return self._pending_approvals[action_id]
 
     def _update(
@@ -178,9 +165,7 @@ class EngagementWorkflow:
                 await self._run_cleanup_phase(input)
             raise
 
-    async def _execute(
-        self, input: EngagementInput, wf_id_suffix: str
-    ) -> EngagementResult:
+    async def _execute(self, input: EngagementInput, wf_id_suffix: str) -> EngagementResult:
         # Phase 1: Authorization
         self._update(lifecycle="AUTHORIZATION_PENDING", phase="authorization", progress=5)
         await self._gate()
@@ -258,12 +243,13 @@ class EngagementWorkflow:
             return await self._finalize(input, aborted=True)
 
         action_id = str(workflow.uuid4())
-        requires_approval = any(
-            tier in input.approval_required_tiers for tier in ["R2"]
-        )
+        requires_approval = any(tier in input.approval_required_tiers for tier in ["R2"])
 
         if requires_approval:
-            approval_ref = await self._await_approval(action_id)
+            # Block on the action-bound approval gate (HITL). The signal's
+            # arrival is the gate; the ref itself is bound into the envelope
+            # by the executor, not here.
+            await self._await_approval(action_id)
 
         access_ctxs = [
             AccessContextParam(
@@ -416,9 +402,7 @@ class EngagementWorkflow:
             task_queue="arsgoatia-execution",
         )
 
-    async def _finalize(
-        self, input: EngagementInput, *, aborted: bool = False
-    ) -> EngagementResult:
+    async def _finalize(self, input: EngagementInput, *, aborted: bool = False) -> EngagementResult:
         cleanup_result: CleanupResult | None = None
         if self._cleanup_needed:
             cleanup_result = await self._run_cleanup_phase(input)

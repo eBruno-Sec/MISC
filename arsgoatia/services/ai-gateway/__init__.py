@@ -4,6 +4,7 @@ Provides a unified interface for AI model interactions with budget
 tracking, rate limiting, and model routing.  All AI calls from the
 platform flow through this gateway so spend is centrally controlled.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,9 +53,7 @@ class AIGatewayService:
     enabled: bool = False
 
     _total_spend_usd: float = field(default=0.0, init=False, repr=False)
-    _usage_records: list[UsageRecord] = field(
-        default_factory=list, init=False, repr=False
-    )
+    _usage_records: list[UsageRecord] = field(default_factory=list, init=False, repr=False)
     _budget_limit_usd: float = field(default=100.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -139,9 +138,7 @@ class AIGatewayService:
         ``limit_usd``, and ``within_budget``.
         """
         engagement_spend = sum(
-            r.estimated_cost_usd
-            for r in self._usage_records
-            if r.engagement_id == engagement_id
+            r.estimated_cost_usd for r in self._usage_records if r.engagement_id == engagement_id
         )
         remaining = max(0.0, self._budget_limit_usd - engagement_spend)
 

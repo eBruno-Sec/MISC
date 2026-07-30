@@ -4,6 +4,7 @@ Manages an HTTP/HTTPS capture proxy that records all exchanges between
 the platform and target systems.  Captured exchanges form the raw
 evidence chain for every action.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,9 +55,7 @@ class CaptureService:
     engagement_id: UUID | None = None
 
     _state: ProxyState = field(default=ProxyState.STOPPED, init=False, repr=False)
-    _exchanges: list[CapturedExchange] = field(
-        default_factory=list, init=False, repr=False
-    )
+    _exchanges: list[CapturedExchange] = field(default_factory=list, init=False, repr=False)
 
     @property
     def state(self) -> ProxyState:
@@ -96,9 +95,7 @@ class CaptureService:
             If the proxy is not running.
         """
         if self._state != ProxyState.RUNNING:
-            raise RuntimeError(
-                f"Cannot stop proxy in state {self._state.value}"
-            )
+            raise RuntimeError(f"Cannot stop proxy in state {self._state.value}")
 
         self._state = ProxyState.STOPPING
 

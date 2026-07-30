@@ -3,12 +3,13 @@
 Covers the AdapterContract ABC, shared dataclasses, EvidenceSink protocol,
 budget tracking, cancellation, and the full HttpAdapter lifecycle.
 """
+
 from __future__ import annotations
 
 import hashlib
 import threading
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -23,7 +24,6 @@ from adapters import (
 )
 from adapters.http import BudgetTracker, HttpAdapter, HttpRawResponse
 from packages.contracts.schemas.engagement import ScopeRule, ScopeSpec
-
 
 # ---------------------------------------------------------------------------
 # Helpers

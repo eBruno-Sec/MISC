@@ -5,6 +5,7 @@ executes for a particular kind of assessment.  Each step references
 an optional technique and declares a gate type that the orchestrator
 must honour before proceeding.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ class WorkflowStep:
     step_id: str
     technique_id: str | None
     description: str
-    gate: str = "none"          # "none" | "approval" | "stop_condition"
+    gate: str = "none"  # "none" | "approval" | "stop_condition"
     coverage_expectation: str = ""
 
 

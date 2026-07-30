@@ -1,4 +1,5 @@
 """ArsGoatia CLI — command-line interface for assessment management."""
+
 from __future__ import annotations
 
 import argparse

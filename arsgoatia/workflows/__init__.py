@@ -4,6 +4,7 @@ Workflow code must be deterministic: no I/O, no datetime.now(), no random,
 no uuid4(). Use workflow.now() and workflow.uuid4() from the Temporal SDK,
 or delegate to activities.
 """
+
 from __future__ import annotations
 
 CONTROL_QUEUE = "workflow-control"

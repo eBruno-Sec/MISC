@@ -1,4 +1,5 @@
 """Unit tests for the identity bootstrap package."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -10,7 +11,6 @@ from packages.identity import (
     BootstrapResult,
     IdentityBootstrapPlan,
     IdentityRegistry,
-    TestIdentity,
     create_test_identity,
     fingerprint_credential,
 )

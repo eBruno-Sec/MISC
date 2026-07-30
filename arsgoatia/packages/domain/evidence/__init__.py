@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
@@ -67,20 +66,22 @@ def storage_key(tenant_id: UUID, digest: str) -> str:
     return f"tenants/{tenant_id}/{alg}/{hex_val[:2]}/{hex_val}"
 
 
-SECRET_PATTERNS = frozenset({
-    "bearer ",
-    "eyj",
-    "basic ",
-    "set-cookie",
-    "authorization:",
-    "x-api-key:",
-    "password",
-    "secret",
-    "token",
-    "apikey",
-    "aws_secret",
-    "private_key",
-})
+SECRET_PATTERNS = frozenset(
+    {
+        "bearer ",
+        "eyj",
+        "basic ",
+        "set-cookie",
+        "authorization:",
+        "x-api-key:",
+        "password",
+        "secret",
+        "token",
+        "apikey",
+        "aws_secret",
+        "private_key",
+    }
+)
 
 
 def contains_secret_marker(text: str) -> bool:

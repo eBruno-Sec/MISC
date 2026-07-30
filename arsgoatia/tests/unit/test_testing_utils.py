@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import timezone
 from uuid import UUID
 
 import pytest
@@ -163,7 +163,9 @@ def test_assert_no_secrets_clean():
 
 def test_assert_no_secrets_catches_jwt():
     with pytest.raises(AssertionError, match="possible secret"):
-        assert_no_secrets_in_dict({"token_value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"})
+        assert_no_secrets_in_dict(
+            {"token_value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"}
+        )
 
 
 def test_assert_no_secrets_nested():

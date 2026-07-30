@@ -3,12 +3,12 @@
 Provides deterministic builders for domain objects, contracts, and evidence
 so tests stay focused on behavior, not construction boilerplate.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
-
 
 # ---------------------------------------------------------------------------
 # Deterministic UUID factory (sequential for readability in test output)
@@ -237,13 +237,8 @@ def build_principal(**overrides: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def assert_event_emitted(
-    events: list[Any], event_type: str, **field_checks: Any
-) -> None:
-    matching = [
-        e for e in events
-        if getattr(e, "event_type", None) == event_type
-    ]
+def assert_event_emitted(events: list[Any], event_type: str, **field_checks: Any) -> None:
+    matching = [e for e in events if getattr(e, "event_type", None) == event_type]
     assert matching, f"no event of type {event_type!r} found"
     if field_checks:
         event = matching[0]
@@ -257,19 +252,17 @@ def assert_event_emitted(
 def assert_audit_recorded(
     entries: list[Any], action: str, resource_type: str | None = None
 ) -> None:
-    matching = [
-        e for e in entries
-        if getattr(e, "action", None) == action
-    ]
+    matching = [e for e in entries if getattr(e, "action", None) == action]
     assert matching, f"no audit entry with action {action!r} found"
     if resource_type:
-        assert any(
-            getattr(e, "resource_type", None) == resource_type for e in matching
-        ), f"no audit entry for resource_type {resource_type!r}"
+        assert any(getattr(e, "resource_type", None) == resource_type for e in matching), (
+            f"no audit entry for resource_type {resource_type!r}"
+        )
 
 
 def assert_no_secrets_in_dict(d: dict[str, Any], path: str = "") -> None:
     import re
+
     secret_patterns = [
         re.compile(r"eyJ[A-Za-z0-9_-]{10,}"),  # JWT
         re.compile(r"Bearer\s+\S{10,}"),

@@ -130,7 +130,7 @@ def _build_html_report(params: ReportParams, json_data: dict) -> str:
 <h1>ArsGoatia Security Validation Report</h1>
 <p>Engagement: {params.engagement_id}</p>
 <p>Tenant: {params.tenant_id}</p>
-<p>Generated: {json_data['generated_at']}</p>
+<p>Generated: {json_data["generated_at"]}</p>
 <h2>Findings ({len(params.findings)})</h2>
 <table border="1">
 <tr><th>ID</th><th>Weakness</th><th>Object</th>
@@ -150,8 +150,7 @@ def _build_sarif_report(params: ReportParams) -> dict:
                 "level": "error" if f.severity >= 7.0 else "warning",
                 "message": {
                     "text": (
-                        f"{f.weakness} found on {f.affected_object} "
-                        f"(confidence: {f.confidence})"
+                        f"{f.weakness} found on {f.affected_object} (confidence: {f.confidence})"
                     ),
                 },
                 "properties": {

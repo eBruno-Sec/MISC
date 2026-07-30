@@ -1,4 +1,5 @@
 """Unit tests for the hypothesis registry with truth maintenance."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -6,9 +7,7 @@ from uuid import uuid4
 import pytest
 
 from packages.hypothesis import (
-    ACTIVE_HYPOTHESIS_STATES,
     HYPOTHESIS_TRANSITIONS,
-    HypothesisError,
     HypothesisNotFoundError,
     HypothesisRegistry,
     HypothesisState,
@@ -31,13 +30,17 @@ def _create(
 ):
     tid = tenant_id or uuid4()
     eid = engagement_id or uuid4()
-    return reg.create(
-        tenant_id=tid,
-        engagement_id=eid,
-        claim=claim,
-        rationale=rationale,
-        **kw,
-    ), tid, eid
+    return (
+        reg.create(
+            tenant_id=tid,
+            engagement_id=eid,
+            claim=claim,
+            rationale=rationale,
+            **kw,
+        ),
+        tid,
+        eid,
+    )
 
 
 class TestTransitionTable:
@@ -463,9 +466,7 @@ class TestListForEngagement:
         h1, _, _ = _create(reg, tenant_id=tid, engagement_id=eid)
         h2, _, _ = _create(reg, tenant_id=tid, engagement_id=eid, claim="c2")
         reg.transition(tid, h2.hypothesis_id, HypothesisState.STALE)
-        result = reg.list_for_engagement(
-            tid, eid, states=frozenset({HypothesisState.OPEN})
-        )
+        result = reg.list_for_engagement(tid, eid, states=frozenset({HypothesisState.OPEN}))
         ids = {r.hypothesis_id for r in result}
         assert h1.hypothesis_id in ids
         assert h2.hypothesis_id not in ids

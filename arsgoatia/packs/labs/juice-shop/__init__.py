@@ -3,9 +3,10 @@
 Defines the Juice Shop container target, known endpoints, identity bootstrapping
 sequences, and challenge-to-technique mappings for the IDOR slice.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,9 @@ KNOWN_ENDPOINTS = [
     LabEndpoint("GET", "/api/Feedbacks", "List feedbacks", requires_auth=False),
     LabEndpoint("POST", "/api/Feedbacks", "Submit feedback", requires_auth=True),
     LabEndpoint("GET", "/api/Quantitys", "Get quantities", requires_auth=True),
-    LabEndpoint("POST", "/rest/basket/{id}/checkout", "Checkout basket", requires_auth=True, risk_tier="R3"),
+    LabEndpoint(
+        "POST", "/rest/basket/{id}/checkout", "Checkout basket", requires_auth=True, risk_tier="R3"
+    ),
 ]
 
 TEST_IDENTITIES = [

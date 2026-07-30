@@ -53,8 +53,7 @@ async def run_cleanup(params: CleanupParams) -> CleanupResult:
     ) as client:
         for i, obligation in enumerate(params.obligations):
             activity.heartbeat(
-                f"cleanup {i + 1}/{len(params.obligations)}: "
-                f"{obligation.inverse_action}"
+                f"cleanup {i + 1}/{len(params.obligations)}: {obligation.inverse_action}"
             )
 
             success = False

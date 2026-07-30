@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 
 from temporalio import activity
@@ -21,10 +20,7 @@ class StoreEvidenceParams:
 @activity.defn
 async def store_evidence(params: StoreEvidenceParams) -> str:
     digest = hashlib.sha256(params.payload).hexdigest()
-    object_key = (
-        f"evidence/{params.tenant_id}/{params.engagement_id}"
-        f"/{params.action_id}/{digest}"
-    )
+    object_key = f"evidence/{params.tenant_id}/{params.engagement_id}/{params.action_id}/{digest}"
 
     import miniopy_async  # noqa: PLC0415
 
@@ -86,9 +82,7 @@ async def verify_evidence(evidence_id: str) -> bool:
             break
 
     if not objects:
-        activity.logger.warning(
-            "Evidence not found", extra={"evidence_id": evidence_id}
-        )
+        activity.logger.warning("Evidence not found", extra={"evidence_id": evidence_id})
         return False
 
     response = await client.get_object(bucket, objects[0].object_name)

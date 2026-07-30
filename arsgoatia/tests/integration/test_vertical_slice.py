@@ -7,11 +7,11 @@ Exercises the complete IDOR slice chain using only in-memory registries:
 This mirrors every mandatory event in tests/histories/idor_slice.json
 but validates the live Python code, not just the fixture JSON.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -24,8 +24,8 @@ from packages.application import (
     InMemoryActionRepo,
     InMemoryAuditLog,
     InMemoryEngagementRepo,
-    InMemoryEvidenceStore,
     InMemoryEventBus,
+    InMemoryEvidenceStore,
     PauseEngagementCommand,
     ProposeActionCommand,
     RecordEvidenceCommand,
@@ -46,7 +46,7 @@ from packages.hypothesis import (
     HypothesisRegistry,
     HypothesisState,
 )
-from packages.rate_limiter import BudgetLedger, BudgetSpec
+from packages.rate_limiter import BudgetLedger
 from packages.testing import hours_from_now, utcnow
 from packs.techniques.web_authz.bola_differential import (
     BOLAConfirmation,
@@ -55,10 +55,10 @@ from packs.techniques.web_authz.bola_differential import (
     confirm_bola,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _sha256(data: bytes | str) -> str:
     if isinstance(data, str):
@@ -73,6 +73,7 @@ def _evidence_bytes(exchanges: list[dict]) -> bytes:
 # ---------------------------------------------------------------------------
 # Main slice fixture
 # ---------------------------------------------------------------------------
+
 
 class TestVerticalSliceIDOR:
     """Walk through every mandatory §37 step in one coherent test chain."""
@@ -146,9 +147,7 @@ class TestVerticalSliceIDOR:
         self.eng_repo.update_state(self.tenant_id, eid, "ready")
 
         started = handle_start_engagement(
-            StartEngagementCommand(
-                tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor
-            ),
+            StartEngagementCommand(tenant_id=self.tenant_id, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
             self.audit,
@@ -164,7 +163,8 @@ class TestVerticalSliceIDOR:
     def test_step03_observation_recorded(self):
         tid, eid = self.tenant_id, uuid4()
         obs = self.hypothesis_registry.record_observation(
-            tid, eid,
+            tid,
+            eid,
             observation_type="http_response",
             value={
                 "endpoint": "/rest/basket/{id}",
@@ -209,8 +209,10 @@ class TestVerticalSliceIDOR:
         )
         self.hypothesis_registry.link_observation(tid, h.hypothesis_id, obs.observation_id)
         updated = self.hypothesis_registry.transition(
-            tid, h.hypothesis_id, HypothesisState.TESTABLE,
-            reason="prerequisites met: two identities, recon completed"
+            tid,
+            h.hypothesis_id,
+            HypothesisState.TESTABLE,
+            reason="prerequisites met: two identities, recon completed",
         )
         assert updated.state == HypothesisState.TESTABLE
         # Verify transition history recorded
@@ -307,9 +309,7 @@ class TestVerticalSliceIDOR:
 
         # Resume
         resume_result = handle_resume_engagement(
-            ResumeEngagementCommand(
-                tenant_id=tid, engagement_id=eid, actor=self.actor
-            ),
+            ResumeEngagementCommand(tenant_id=tid, engagement_id=eid, actor=self.actor),
             self.eng_repo,
             self.bus,
         )
@@ -327,10 +327,15 @@ class TestVerticalSliceIDOR:
 
         # Simulate the 4 differential exchanges
         exchanges = [
-            {"label": "baseline_own",      "status": 200, "token": "alice", "path": "/rest/basket/1"},
-            {"label": "differential_cross", "status": 200, "token": "alice", "path": "/rest/basket/2"},
-            {"label": "positive_control",   "status": 200, "token": "bob",   "path": "/rest/basket/2"},
-            {"label": "negative_control",   "status": 401, "token": None,    "path": "/rest/basket/2"},
+            {"label": "baseline_own", "status": 200, "token": "alice", "path": "/rest/basket/1"},
+            {
+                "label": "differential_cross",
+                "status": 200,
+                "token": "alice",
+                "path": "/rest/basket/2",
+            },
+            {"label": "positive_control", "status": 200, "token": "bob", "path": "/rest/basket/2"},
+            {"label": "negative_control", "status": 401, "token": None, "path": "/rest/basket/2"},
         ]
         evidence_bytes = _evidence_bytes(exchanges)
 
@@ -358,19 +363,26 @@ class TestVerticalSliceIDOR:
 
     def test_step09_bola_confirmed_deterministically(self):
         baseline = ExchangeResult(
-            label="baseline_own", status_code=200,
-            body_contains_object=True, object_id="basket-1",
+            label="baseline_own",
+            status_code=200,
+            body_contains_object=True,
+            object_id="basket-1",
         )
         differential = ExchangeResult(
-            label="differential_cross", status_code=200,
-            body_contains_object=True, object_id="basket-2",
+            label="differential_cross",
+            status_code=200,
+            body_contains_object=True,
+            object_id="basket-2",
         )
         positive_control = ExchangeResult(
-            label="positive_control", status_code=200,
-            body_contains_object=True, object_id="basket-2",
+            label="positive_control",
+            status_code=200,
+            body_contains_object=True,
+            object_id="basket-2",
         )
         negative_control = ExchangeResult(
-            label="negative_control", status_code=401,
+            label="negative_control",
+            status_code=401,
             body_contains_object=False,
         )
 
@@ -427,14 +439,20 @@ class TestVerticalSliceIDOR:
         eid = uuid4()
 
         # 1. Create + start engagement
-        self.eng_repo.create(tid, {
-            "id": eid, "tenant_id": tid,
-            "name": "full-slice", "state": "running",
-        })
+        self.eng_repo.create(
+            tid,
+            {
+                "id": eid,
+                "tenant_id": tid,
+                "name": "full-slice",
+                "state": "running",
+            },
+        )
 
         # 2. Record observation
         obs = self.hypothesis_registry.record_observation(
-            tid, eid,
+            tid,
+            eid,
             "http_response_differential",
             {"endpoint": "/rest/basket/{id}", "cross_status": "unknown"},
             "recon.passive",
@@ -481,7 +499,8 @@ class TestVerticalSliceIDOR:
         # 6. Pause + approve + resume
         handle_pause_engagement(
             PauseEngagementCommand(tenant_id=tid, engagement_id=eid, actor=self.actor),
-            self.eng_repo, self.bus,
+            self.eng_repo,
+            self.bus,
         )
         assert self.eng_repo.get(tid, eid)["state"] == "paused"
 
@@ -492,13 +511,16 @@ class TestVerticalSliceIDOR:
                 approver="security-lead",
                 decision_digest="sha256:binding-idor",
             ),
-            self.action_repo, self.bus, self.audit,
+            self.action_repo,
+            self.bus,
+            self.audit,
             approval_registry=self.approval_registry,
         )
 
         handle_resume_engagement(
             ResumeEngagementCommand(tenant_id=tid, engagement_id=eid, actor=self.actor),
-            self.eng_repo, self.bus,
+            self.eng_repo,
+            self.bus,
         )
         assert self.eng_repo.get(tid, eid)["state"] == "running"
 
@@ -510,7 +532,12 @@ class TestVerticalSliceIDOR:
         # 8. Record evidence (4 exchanges)
         exchanges = [
             {"label": "baseline_own", "status": 200, "token": "alice", "path": "/rest/basket/1"},
-            {"label": "differential_cross", "status": 200, "token": "alice", "path": "/rest/basket/2"},
+            {
+                "label": "differential_cross",
+                "status": 200,
+                "token": "alice",
+                "path": "/rest/basket/2",
+            },
             {"label": "positive_control", "status": 200, "token": "bob", "path": "/rest/basket/2"},
             {"label": "negative_control", "status": 401, "token": None, "path": "/rest/basket/2"},
         ]
@@ -523,7 +550,8 @@ class TestVerticalSliceIDOR:
                 media_type="application/json",
                 actor="runner-agent",
             ),
-            self.evidence_store, self.bus,
+            self.evidence_store,
+            self.bus,
         )
         evidence_digest = evidence_result.data["digest"]
         assert evidence_digest.startswith("sha256:")
@@ -618,8 +646,10 @@ class TestVerticalSliceIDOR:
 
         # Hypothesis supported by one observation
         h = self.hypothesis_registry.create(
-            tenant_id=tid, engagement_id=eid,
-            claim="IDOR on basket", rationale="sequential IDs",
+            tenant_id=tid,
+            engagement_id=eid,
+            claim="IDOR on basket",
+            rationale="sequential IDs",
         )
         obs = self.hypothesis_registry.record_observation(
             tid, eid, "http_response", {"endpoint": "/rest/basket/{id}"}, "recon"

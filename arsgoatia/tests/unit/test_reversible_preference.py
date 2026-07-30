@@ -4,6 +4,7 @@ This technique exercises the state-changing / cleanup-verification path that
 the BOLA module (mutation: none) does not. Confirmation is deterministic and
 requires that the mutation took effect AND the original value was restored.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -11,22 +12,22 @@ from uuid import uuid4
 
 import pytest
 
+from modules.web.workflow_preference import (
+    TECHNIQUE_ID,
+    ReversiblePreferenceUpdateModule,
+)
+from modules.web.workflow_preference import (
+    module as pref_module,
+)
 from packages.module_sdk import (
-    ActionProposal,
     ConfirmationDecision,
     EligibilityDecision,
     ModuleContext,
     ModuleRunResult,
 )
-from modules.web.workflow_preference import (
-    MODULE_ID,
-    TECHNIQUE_ID,
-    ReversiblePreferenceUpdateModule,
-    module as pref_module,
-)
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
 
 def _ctx(
     *,
@@ -61,9 +62,17 @@ def _evidence(
     exchanges = [
         {"label": "read_baseline", "actual_status": baseline_status, "value": baseline_value},
         {"label": "mutate", "actual_status": mutate_status},
-        {"label": "verify_mutation", "actual_status": verify_mutation_status, "value": mutated_value},
+        {
+            "label": "verify_mutation",
+            "actual_status": verify_mutation_status,
+            "value": mutated_value,
+        },
         {"label": "restore", "actual_status": restore_status},
-        {"label": "verify_restore", "actual_status": verify_restore_status, "value": restored_value},
+        {
+            "label": "verify_restore",
+            "actual_status": verify_restore_status,
+            "value": restored_value,
+        },
     ]
     if drop is not None:
         exchanges = [ex for ex in exchanges if ex["label"] != drop]
@@ -71,6 +80,7 @@ def _evidence(
 
 
 # ── Identity ─────────────────────────────────────────────────────────────────
+
 
 class TestIdentity:
     def test_module_id(self):
@@ -90,6 +100,7 @@ class TestIdentity:
 
 
 # ── Eligibility ──────────────────────────────────────────────────────────────
+
 
 class TestEligibility:
     def test_eligible_with_identity_and_preference_endpoint(self):
@@ -115,6 +126,7 @@ class TestEligibility:
 
 
 # ── Proposals ─────────────────────────────────────────────────────────────────
+
 
 class TestProposals:
     def test_one_proposal_per_endpoint(self):
@@ -145,6 +157,7 @@ class TestProposals:
 
 
 # ── Confirmation ──────────────────────────────────────────────────────────────
+
 
 class TestConfirmation:
     def test_confirmed_full_reversible_cycle(self):
@@ -199,6 +212,7 @@ class TestConfirmation:
 
 
 # ── Advisory run ──────────────────────────────────────────────────────────────
+
 
 class TestRun:
     def test_run_finds_candidates(self):

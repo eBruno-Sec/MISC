@@ -1,4 +1,5 @@
 """Unit tests for the module SDK base class and IDOR differential module."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -6,6 +7,14 @@ from uuid import uuid4
 
 import pytest
 
+from modules.web.authorization_idor import (
+    MODULE_ID,
+    TECHNIQUE_ID,
+    IDORDifferentialModule,
+)
+from modules.web.authorization_idor import (
+    module as idor_module,
+)
 from packages.module_sdk import (
     ActionProposal,
     ConfirmationDecision,
@@ -14,18 +23,11 @@ from packages.module_sdk import (
     EligibilityResult,
     ModuleBase,
     ModuleContext,
-    ModuleOutputError,
     ModuleRunResult,
 )
-from modules.web.authorization_idor import (
-    IDORDifferentialModule,
-    MODULE_ID,
-    TECHNIQUE_ID,
-    module as idor_module,
-)
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
 
 def _ctx(
     *,
@@ -55,15 +57,20 @@ def _evidence(
     return {
         "evidence_digest": evidence_digest,
         "exchanges": [
-            {"label": "baseline_own",      "actual_status": baseline_status},
-            {"label": "differential_cross", "actual_status": diff_status, "body_contains_object": diff_body_object},
-            {"label": "positive_control",   "actual_status": positive_status},
-            {"label": "negative_control",   "actual_status": negative_status},
+            {"label": "baseline_own", "actual_status": baseline_status},
+            {
+                "label": "differential_cross",
+                "actual_status": diff_status,
+                "body_contains_object": diff_body_object,
+            },
+            {"label": "positive_control", "actual_status": positive_status},
+            {"label": "negative_control", "actual_status": negative_status},
         ],
     }
 
 
 # ── Module SDK base ────────────────────────────────────────────────────────
+
 
 class TestModuleSDKBase:
     def test_action_proposal_frozen(self):
@@ -155,14 +162,19 @@ class TestModuleSDKBase:
             def confirm(self, evidence, ctx): ...
 
         m = MinimalModule()
-        errors = m.validate_output({
-            "module_id": "m", "technique_id": "t",
-            "version": "1.0.0", "decision": "confirmed",
-        })
+        errors = m.validate_output(
+            {
+                "module_id": "m",
+                "technique_id": "t",
+                "version": "1.0.0",
+                "decision": "confirmed",
+            }
+        )
         assert errors == []
 
 
 # ── IDOR module identity ────────────────────────────────────────────────────
+
 
 class TestIDORModuleIdentity:
     def test_module_id(self):
@@ -182,10 +194,12 @@ class TestIDORModuleIdentity:
 
     def test_singleton_is_module_instance(self):
         from modules.web.authorization_idor import module
+
         assert isinstance(module, IDORDifferentialModule)
 
 
 # ── IDOR eligibility ────────────────────────────────────────────────────────
+
 
 class TestIDOREligibility:
     def test_eligible_with_two_identities_and_basket(self):
@@ -251,6 +265,7 @@ class TestIDOREligibility:
 
 # ── IDOR proposals ──────────────────────────────────────────────────────────
 
+
 class TestIDORProposals:
     def test_builds_one_proposal_per_endpoint(self):
         ctx = _ctx(
@@ -313,6 +328,7 @@ class TestIDORProposals:
 
 # ── IDOR confirmation ───────────────────────────────────────────────────────
 
+
 class TestIDORConfirmation:
     def test_confirmed_bola_all_green(self):
         ctx = _ctx(identities=["alice", "bob"], endpoints=["/rest/basket/{id}"])
@@ -348,9 +364,7 @@ class TestIDORConfirmation:
 
     def test_inconclusive_when_differential_has_no_object(self):
         ctx = _ctx(identities=["alice", "bob"], endpoints=["/rest/basket/{id}"])
-        result = idor_module.confirm(
-            _evidence(diff_status=200, diff_body_object=False), ctx
-        )
+        result = idor_module.confirm(_evidence(diff_status=200, diff_body_object=False), ctx)
         assert result.decision == ConfirmationDecision.INCONCLUSIVE
         assert "owner-discriminating" in result.reason
 
@@ -363,9 +377,7 @@ class TestIDORConfirmation:
 
     def test_confirmation_preserves_evidence_digest(self):
         ctx = _ctx(identities=["alice", "bob"], endpoints=["/rest/basket/{id}"])
-        result = idor_module.confirm(
-            _evidence(evidence_digest="sha256:abc123"), ctx
-        )
+        result = idor_module.confirm(_evidence(evidence_digest="sha256:abc123"), ctx)
         assert result.is_confirmed
         assert result.evidence_digest == "sha256:abc123"
 
@@ -391,6 +403,7 @@ class TestIDORConfirmation:
 
 
 # ── IDOR advisory run ───────────────────────────────────────────────────────
+
 
 class TestIDORRun:
     def test_run_finds_candidates(self):

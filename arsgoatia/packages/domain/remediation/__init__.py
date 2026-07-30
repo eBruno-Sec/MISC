@@ -21,13 +21,27 @@ class RemediationState(enum.Enum):
 
 
 REMEDIATION_TRANSITIONS: dict[RemediationState, frozenset[RemediationState]] = {
-    RemediationState.PROPOSED: frozenset({RemediationState.DIFF_READY, RemediationState.REJECTED, RemediationState.EXPIRED}),
-    RemediationState.DIFF_READY: frozenset({RemediationState.DIFF_APPROVED, RemediationState.REJECTED}),
-    RemediationState.DIFF_APPROVED: frozenset({RemediationState.TESTING, RemediationState.REJECTED}),
-    RemediationState.TESTING: frozenset({RemediationState.TESTS_PASSED, RemediationState.TESTS_FAILED}),
-    RemediationState.TESTS_PASSED: frozenset({RemediationState.COMMIT_APPROVED, RemediationState.REJECTED}),
-    RemediationState.TESTS_FAILED: frozenset({RemediationState.DIFF_READY, RemediationState.REJECTED}),
-    RemediationState.COMMIT_APPROVED: frozenset({RemediationState.COMMITTED, RemediationState.REJECTED}),
+    RemediationState.PROPOSED: frozenset(
+        {RemediationState.DIFF_READY, RemediationState.REJECTED, RemediationState.EXPIRED}
+    ),
+    RemediationState.DIFF_READY: frozenset(
+        {RemediationState.DIFF_APPROVED, RemediationState.REJECTED}
+    ),
+    RemediationState.DIFF_APPROVED: frozenset(
+        {RemediationState.TESTING, RemediationState.REJECTED}
+    ),
+    RemediationState.TESTING: frozenset(
+        {RemediationState.TESTS_PASSED, RemediationState.TESTS_FAILED}
+    ),
+    RemediationState.TESTS_PASSED: frozenset(
+        {RemediationState.COMMIT_APPROVED, RemediationState.REJECTED}
+    ),
+    RemediationState.TESTS_FAILED: frozenset(
+        {RemediationState.DIFF_READY, RemediationState.REJECTED}
+    ),
+    RemediationState.COMMIT_APPROVED: frozenset(
+        {RemediationState.COMMITTED, RemediationState.REJECTED}
+    ),
     RemediationState.COMMITTED: frozenset({RemediationState.PR_CREATED}),
     RemediationState.PR_CREATED: frozenset(),
     RemediationState.REJECTED: frozenset(),

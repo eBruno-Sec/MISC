@@ -21,7 +21,9 @@ def _finding(**overrides):
 
 
 def _evidence():
-    return [{"kind": "http_transaction", "digest": "sha256:" + "b" * 64, "sensitivity": "restricted"}]
+    return [
+        {"kind": "http_transaction", "digest": "sha256:" + "b" * 64, "sensitivity": "restricted"}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +69,7 @@ def test_render_finding_html_escapes_xss_in_title_field():
 
 def test_render_finding_html_escapes_xss_in_description_fields():
     malicious = _finding(
-        root_cause="\"><img src=x onerror=alert(document.cookie)>",
+        root_cause='"><img src=x onerror=alert(document.cookie)>',
         affected_object="<svg onload=alert(1)>",
     )
     html_out = render_finding_html(malicious, _evidence(), nonce="N")
@@ -77,7 +79,9 @@ def test_render_finding_html_escapes_xss_in_description_fields():
 
 
 def test_render_finding_html_escapes_xss_in_evidence_rows():
-    evidence = [{"kind": "<script>evil()</script>", "digest": "sha256:x", "sensitivity": "restricted"}]
+    evidence = [
+        {"kind": "<script>evil()</script>", "digest": "sha256:x", "sensitivity": "restricted"}
+    ]
     html_out = render_finding_html(_finding(), evidence, nonce="N")
     assert "<script>evil()</script>" not in html_out
     assert "&lt;script&gt;evil()&lt;/script&gt;" in html_out
@@ -108,7 +112,10 @@ def test_render_sarif_result_mapping():
     assert result["ruleId"] == "Broken Object Level Authorization"
     assert result["level"] == "error"
     assert result["message"]["text"] == "missing tenant scoping on lookup"
-    assert result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "/api/v1/users/{id}"
+    assert (
+        result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        == "/api/v1/users/{id}"
+    )
 
 
 def test_render_sarif_non_confirmed_is_warning_level():

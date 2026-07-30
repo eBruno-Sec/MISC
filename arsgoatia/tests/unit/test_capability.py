@@ -1,4 +1,5 @@
 """Unit tests for the capability registry."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -7,11 +8,11 @@ from uuid import uuid4
 import pytest
 
 from packages.capability import (
+    CAPABILITY_TRANSITIONS,
     CapabilityError,
     CapabilityRecord,
     CapabilityRegistry,
     CapabilityState,
-    CAPABILITY_TRANSITIONS,
     EvidenceRequiredError,
     FindingNotConfirmedError,
     InvalidTransitionError,
@@ -152,7 +153,9 @@ class TestTransition:
         cap = _emit(reg, tenant_id=tid)
         new_cap = _emit(reg, tenant_id=tid)
         updated = reg.transition(
-            tid, cap.capability_id, CapabilityState.SUPERSEDED,
+            tid,
+            cap.capability_id,
+            CapabilityState.SUPERSEDED,
             superseded_by=new_cap.capability_id,
         )
         assert updated.state == CapabilityState.SUPERSEDED
@@ -186,9 +189,15 @@ class TestTransition:
         reg = CapabilityRegistry()
         tid = uuid4()
         cap = reg.emit(
-            tenant_id=tid, engagement_id=uuid4(), name="cap",
-            description="d", finding_id=uuid4(), evidence_digests=_GOOD_DIGESTS,
-            technique_id="t", target_locator="http://x", finding_state="confirmed",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            name="cap",
+            description="d",
+            finding_id=uuid4(),
+            evidence_digests=_GOOD_DIGESTS,
+            technique_id="t",
+            target_locator="http://x",
+            finding_state="confirmed",
             initial_state=CapabilityState.DISCOVERED,
         )
         reg.transition(tid, cap.capability_id, CapabilityState.PROVEN, "verified")
@@ -226,9 +235,15 @@ class TestIsActive:
         reg = CapabilityRegistry()
         tid = uuid4()
         cap = reg.emit(
-            tenant_id=tid, engagement_id=uuid4(), name="cap",
-            description="d", finding_id=uuid4(), evidence_digests=_GOOD_DIGESTS,
-            technique_id="t", target_locator="http://x", finding_state="confirmed",
+            tenant_id=tid,
+            engagement_id=uuid4(),
+            name="cap",
+            description="d",
+            finding_id=uuid4(),
+            evidence_digests=_GOOD_DIGESTS,
+            technique_id="t",
+            target_locator="http://x",
+            finding_state="confirmed",
             expires_in=timedelta(seconds=-1),
         )
         assert reg.is_active(tid, cap.capability_id) is False

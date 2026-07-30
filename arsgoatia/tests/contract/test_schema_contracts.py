@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 from packages.contracts.schemas.action_envelope import (
     ActionEnvelope,
-    ApprovalBinding,
     AttemptPolicy,
     EnvelopeSignature,
     RevisionDigests,
@@ -37,10 +36,6 @@ from packages.contracts.schemas.common import (
     ToolOutcome,
 )
 from packages.contracts.schemas.domain import (
-    AccessContext,
-    AttackPath,
-    AttackPathStep,
-    Capability,
     CleanupObligation,
     CostVector,
     Finding,
@@ -50,7 +45,6 @@ from packages.contracts.schemas.domain import (
 from packages.contracts.schemas.engagement import (
     AuthorizationSpec,
     BudgetSpec,
-    CredentialRef,
     EngagementRevision,
     EngagementSpec,
     RulesSpec,
@@ -60,28 +54,19 @@ from packages.contracts.schemas.engagement import (
 from packages.contracts.schemas.events import (
     EventEnvelope,
     EventType,
-    TraceContext,
 )
 from packages.contracts.schemas.evidence import (
     ArtifactRef,
     CaptureMetadata,
     EvidenceEnvelope,
-    LineageEntry,
     RedactionInfo,
-    RetentionPolicy,
 )
 from packages.contracts.schemas.policy import (
-    ActionRequest,
     PolicyDecision,
-    PolicyRule,
 )
 from packages.contracts.schemas.technique import (
-    ActionBudget,
-    PromotionRequirements,
-    SafetyConstraints,
     TechniqueManifest,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers -- reusable factory kwargs for constructing valid instances
@@ -147,7 +132,9 @@ def _artifact_ref():
 
 def _capture_meta():
     return CaptureMetadata(
-        tool="curl", tool_version="8.0", captured_at=_TS,
+        tool="curl",
+        tool_version="8.0",
+        captured_at=_TS,
     )
 
 
@@ -293,10 +280,24 @@ class TestRequiredFields:
     @pytest.mark.parametrize(
         "field",
         [
-            "action_id", "action_digest", "tenant_id", "engagement_revision_id",
-            "proposal_id", "actor", "revisions", "technique", "adapter", "runner",
-            "target", "request_spec_digest", "effective_risk_tier", "mutation_class",
-            "expires_at", "nonce", "idempotency_key", "signature",
+            "action_id",
+            "action_digest",
+            "tenant_id",
+            "engagement_revision_id",
+            "proposal_id",
+            "actor",
+            "revisions",
+            "technique",
+            "adapter",
+            "runner",
+            "target",
+            "request_spec_digest",
+            "effective_risk_tier",
+            "mutation_class",
+            "expires_at",
+            "nonce",
+            "idempotency_key",
+            "signature",
         ],
     )
     def test_action_envelope_missing_required(self, field):
@@ -307,8 +308,16 @@ class TestRequiredFields:
 
     @pytest.mark.parametrize(
         "field",
-        ["evidence_id", "tenant_id", "engagement_revision_id", "action_id",
-         "kind", "artifact", "capture", "signature"],
+        [
+            "evidence_id",
+            "tenant_id",
+            "engagement_revision_id",
+            "action_id",
+            "kind",
+            "artifact",
+            "capture",
+            "signature",
+        ],
     )
     def test_evidence_envelope_missing_required(self, field):
         kwargs = _evidence_envelope_kwargs()
@@ -318,8 +327,16 @@ class TestRequiredFields:
 
     @pytest.mark.parametrize(
         "field",
-        ["event_id", "event_type", "tenant_id", "aggregate_type",
-         "aggregate_id", "aggregate_version", "actor", "occurred_at"],
+        [
+            "event_id",
+            "event_type",
+            "tenant_id",
+            "aggregate_type",
+            "aggregate_id",
+            "aggregate_version",
+            "actor",
+            "occurred_at",
+        ],
     )
     def test_event_envelope_missing_required(self, field):
         kwargs = _event_envelope_kwargs()
@@ -632,9 +649,17 @@ class TestEventTypeCompleteness:
         """Every expected domain category is represented."""
         values = {e.value for e in EventType}
         expected_prefixes = [
-            "engagement.", "execution.", "action.", "evidence.",
-            "finding.", "hypothesis.", "cleanup.", "policy.",
-            "scope.", "budget.", "revocation.",
+            "engagement.",
+            "execution.",
+            "action.",
+            "evidence.",
+            "finding.",
+            "hypothesis.",
+            "cleanup.",
+            "policy.",
+            "scope.",
+            "budget.",
+            "revocation.",
         ]
         for prefix in expected_prefixes:
             matching = [v for v in values if v.startswith(prefix)]
@@ -716,11 +741,22 @@ class TestStateEnumCompleteness:
         """Verify key terminal and intermediate states exist."""
         names = {s.name for s in ActionState}
         for expected in [
-            "PROPOSED", "REJECTED", "APPROVAL_REQUIRED", "APPROVED",
-            "DISPATCHED", "LEASED", "RUNNING", "SUCCEEDED", "FAILED",
-            "TIMED_OUT", "CANCELLED", "UNKNOWN_REQUIRES_REVIEW",
-            "EVIDENCE_ACCEPTED", "EVIDENCE_REJECTED",
-            "CLEANUP_PENDING", "CLEANUP_VERIFIED",
+            "PROPOSED",
+            "REJECTED",
+            "APPROVAL_REQUIRED",
+            "APPROVED",
+            "DISPATCHED",
+            "LEASED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "UNKNOWN_REQUIRES_REVIEW",
+            "EVIDENCE_ACCEPTED",
+            "EVIDENCE_REJECTED",
+            "CLEANUP_PENDING",
+            "CLEANUP_VERIFIED",
         ]:
             assert expected in names, f"ActionState missing '{expected}'"
 
@@ -746,8 +782,10 @@ class TestFieldConstraints:
     def test_artifact_ref_negative_size_rejected(self):
         with pytest.raises(ValidationError):
             ArtifactRef(
-                digest="sha256:abc", size=-1,
-                media_type="text/plain", storage_uri="s3://b/k",
+                digest="sha256:abc",
+                size=-1,
+                media_type="text/plain",
+                storage_uri="s3://b/k",
             )
 
     def test_confidence_above_one_rejected(self):

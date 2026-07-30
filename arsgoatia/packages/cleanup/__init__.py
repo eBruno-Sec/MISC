@@ -8,6 +8,7 @@ can transition to COMPLETED.
 Cleanup obligations are tracked as an append-only ledger. Each obligation
 has a state machine: PENDING → ATTEMPTED → VERIFIED | FAILED → ESCALATED.
 """
+
 from __future__ import annotations
 
 import enum
@@ -128,7 +129,8 @@ class CleanupLedger:
         self, tenant_id: UUID, engagement_id: UUID
     ) -> list[CleanupObligation]:
         return [
-            o for o in self._obligations.values()
+            o
+            for o in self._obligations.values()
             if o.tenant_id == tenant_id
             and o.engagement_id == engagement_id
             and o.state not in TERMINAL_STATES

@@ -4,6 +4,7 @@ Technique manifests describe security test logic independent of tool
 implementation.  They specify preconditions, risk tier, evidence profile,
 validator, cleanup, and safety constraints per §7.2 of the spec.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -139,7 +140,9 @@ BOLA_DIFFERENTIAL = TechniqueManifest(
         "endpoint.has_object_identifier == true",
         "access_context_count >= 2",
     ],
-    action_budget=ActionBudget(max_requests=12, max_bytes_received=2 * 1024 * 1024, timeout_seconds=60),
+    action_budget=ActionBudget(
+        max_requests=12, max_bytes_received=2 * 1024 * 1024, timeout_seconds=60
+    ),
     evidence_profile="evidence/web-authz-differential@1",
     cleanup="none",
 )

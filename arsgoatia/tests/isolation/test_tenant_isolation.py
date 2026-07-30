@@ -3,19 +3,18 @@
 These tests verify that every data-access path enforces tenant boundaries.
 A leak between tenants is a zero-tolerance invariant per spec section 3.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
-
-import pytest
 
 from packages.application import (
     CommandStatus,
     InMemoryActionRepo,
     InMemoryAuditLog,
     InMemoryEngagementRepo,
-    InMemoryEvidenceStore,
     InMemoryEventBus,
+    InMemoryEvidenceStore,
 )
 
 
@@ -144,9 +143,9 @@ class TestGraphTenantIsolation:
 
     def test_graph_query_wrong_tenant(self):
         from packages.graph import (
+            EdgeLabel,
             GraphEdge,
             GraphNode,
-            EdgeLabel,
             InMemoryGraphRepository,
             NodeLabel,
         )
@@ -162,8 +161,11 @@ class TestGraphTenantIsolation:
         )
         graph.project_edge(
             GraphEdge(
-                id=uuid4(), tenant_id=tid_a, label=EdgeLabel.GAINED_BY,
-                source_id=nid2, target_id=nid1,
+                id=uuid4(),
+                tenant_id=tid_a,
+                label=EdgeLabel.GAINED_BY,
+                source_id=nid2,
+                target_id=nid1,
             )
         )
         results_a = graph.execute_query(tid_a, "capabilities_by_identity", {"identity_id": nid1})

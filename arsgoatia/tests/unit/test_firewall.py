@@ -36,10 +36,12 @@ def test_preflight_blocks_metadata_address():
 
 
 def test_preflight_port_pinning():
-    fw = ScopeFirewall(_scope(
-        include=[_rule("exact_host", "api.target.test")],
-        ports=[443],
-    ))
+    fw = ScopeFirewall(
+        _scope(
+            include=[_rule("exact_host", "api.target.test")],
+            ports=[443],
+        )
+    )
     assert fw.preflight("api.target.test", ["8.8.8.8"], port=443).allowed
     assert not fw.preflight("api.target.test", ["8.8.8.8"], port=8080).allowed
 

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import enum
-import html
 import hashlib
+import html
 import json
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -85,7 +85,7 @@ def render_finding_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-{nonce}'; script-src 'nonce-{nonce}';">
-<title>ArsGoatia Finding: {esc(str(finding.get('weakness', 'Unknown')))}</title>
+<title>ArsGoatia Finding: {esc(str(finding.get("weakness", "Unknown")))}</title>
 <style nonce="{nonce}">
 :root {{--bg:#0d1117;--fg:#c9d1d9;--accent:#58a6ff;--border:#30363d;--warn:#f85149;--ok:#3fb950}}
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -106,14 +106,14 @@ code{{background:#161b22;padding:.1rem .3rem;border-radius:3px;font-size:.85em}}
 </head>
 <body>
 <h1>ArsGoatia Finding Report</h1>
-<h2>Finding: {esc(str(finding.get('weakness', '')))}</h2>
+<h2>Finding: {esc(str(finding.get("weakness", "")))}</h2>
 <table>
-<tr><th>Status</th><td><span class="badge badge-{esc(str(finding.get('status', 'candidate')))}">{esc(str(finding.get('status', '')))}</span></td></tr>
-<tr><th>Affected Object</th><td>{esc(str(finding.get('affected_object', '')))}</td></tr>
-<tr><th>Confidence</th><td>{esc(str(finding.get('confidence', '')))}</td></tr>
-<tr><th>Severity</th><td>{esc(str(finding.get('severity', '')))}</td></tr>
-<tr><th>Root Cause</th><td>{esc(str(finding.get('root_cause', '')))}</td></tr>
-<tr><th>Validator</th><td><code>{esc(str(finding.get('validator_digest', '')))}</code></td></tr>
+<tr><th>Status</th><td><span class="badge badge-{esc(str(finding.get("status", "candidate")))}">{esc(str(finding.get("status", "")))}</span></td></tr>
+<tr><th>Affected Object</th><td>{esc(str(finding.get("affected_object", "")))}</td></tr>
+<tr><th>Confidence</th><td>{esc(str(finding.get("confidence", "")))}</td></tr>
+<tr><th>Severity</th><td>{esc(str(finding.get("severity", "")))}</td></tr>
+<tr><th>Root Cause</th><td>{esc(str(finding.get("root_cause", "")))}</td></tr>
+<tr><th>Validator</th><td><code>{esc(str(finding.get("validator_digest", "")))}</code></td></tr>
 </table>
 
 <h2>Evidence</h2>
@@ -137,23 +137,25 @@ document.addEventListener('keydown',e=>{{if((e.ctrlKey||e.metaKey)&&e.key==='p')
 def render_sarif(findings: list[dict], tool_version: str = "0.1.0") -> dict:
     results = []
     for f in findings:
-        results.append({
-            "ruleId": f.get("weakness", "unknown"),
-            "level": "error" if f.get("status") == "confirmed" else "warning",
-            "message": {"text": f.get("root_cause", "No root cause provided")},
-            "locations": [
-                {
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": f.get("affected_object", "unknown")},
+        results.append(
+            {
+                "ruleId": f.get("weakness", "unknown"),
+                "level": "error" if f.get("status") == "confirmed" else "warning",
+                "message": {"text": f.get("root_cause", "No root cause provided")},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": f.get("affected_object", "unknown")},
+                        }
                     }
-                }
-            ],
-            "properties": {
-                "confidence": f.get("confidence"),
-                "severity": f.get("severity"),
-                "evidenceDigests": f.get("evidence_digests", []),
-            },
-        })
+                ],
+                "properties": {
+                    "confidence": f.get("confidence"),
+                    "severity": f.get("severity"),
+                    "evidenceDigests": f.get("evidence_digests", []),
+                },
+            }
+        )
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",

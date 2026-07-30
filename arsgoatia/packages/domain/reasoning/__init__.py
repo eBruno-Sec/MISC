@@ -3,6 +3,7 @@
 Handles the hypothesis lifecycle, observation management, truth maintenance,
 and technique eligibility per §9.1-9.4 of the spec.
 """
+
 from __future__ import annotations
 
 import enum
@@ -24,12 +25,14 @@ class HypothesisState(enum.Enum):
 HYPOTHESIS_TRANSITIONS: dict[HypothesisState, frozenset[HypothesisState]] = {
     HypothesisState.OPEN: frozenset({HypothesisState.TESTABLE, HypothesisState.STALE}),
     HypothesisState.TESTABLE: frozenset({HypothesisState.TESTING, HypothesisState.STALE}),
-    HypothesisState.TESTING: frozenset({
-        HypothesisState.SUPPORTED,
-        HypothesisState.REFUTED,
-        HypothesisState.INCONCLUSIVE,
-        HypothesisState.STALE,
-    }),
+    HypothesisState.TESTING: frozenset(
+        {
+            HypothesisState.SUPPORTED,
+            HypothesisState.REFUTED,
+            HypothesisState.INCONCLUSIVE,
+            HypothesisState.STALE,
+        }
+    ),
     HypothesisState.SUPPORTED: frozenset({HypothesisState.STALE}),
     HypothesisState.REFUTED: frozenset({HypothesisState.STALE}),
     HypothesisState.INCONCLUSIVE: frozenset({HypothesisState.OPEN}),
@@ -145,9 +148,5 @@ def score_candidate(
     noise: float = 0.0,
 ) -> float:
     return (
-        0.3 * info_gain
-        + 0.25 * capability_gain
-        + 0.3 * finding_value
-        - 0.1 * cost
-        - 0.05 * noise
+        0.3 * info_gain + 0.25 * capability_gain + 0.3 * finding_value - 0.1 * cost - 0.05 * noise
     )

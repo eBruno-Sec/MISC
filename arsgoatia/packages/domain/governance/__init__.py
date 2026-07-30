@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
-from datetime import datetime
-from uuid import UUID
 
 
 class LifecycleState(enum.Enum):
@@ -30,44 +27,52 @@ MAIN_SEQUENCE: list[LifecycleState] = [
     LifecycleState.RUNNING,
 ]
 
-ACTIVE_STATES: frozenset[LifecycleState] = frozenset({
-    LifecycleState.RUNNING,
-    LifecycleState.PAUSED,
-    LifecycleState.STOPPING,
-})
-
-TERMINAL_STATES: frozenset[LifecycleState] = frozenset({
-    LifecycleState.COMPLETED,
-    LifecycleState.REVOKED,
-})
-
-NONTERMINAL_STATES: frozenset[LifecycleState] = frozenset(
-    set(LifecycleState) - TERMINAL_STATES
+ACTIVE_STATES: frozenset[LifecycleState] = frozenset(
+    {
+        LifecycleState.RUNNING,
+        LifecycleState.PAUSED,
+        LifecycleState.STOPPING,
+    }
 )
+
+TERMINAL_STATES: frozenset[LifecycleState] = frozenset(
+    {
+        LifecycleState.COMPLETED,
+        LifecycleState.REVOKED,
+    }
+)
+
+NONTERMINAL_STATES: frozenset[LifecycleState] = frozenset(set(LifecycleState) - TERMINAL_STATES)
 
 LIFECYCLE_TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
     LifecycleState.DRAFT: frozenset({LifecycleState.AUTHORIZATION_PENDING}),
     LifecycleState.AUTHORIZATION_PENDING: frozenset({LifecycleState.SCOPE_COMPILED}),
     LifecycleState.SCOPE_COMPILED: frozenset({LifecycleState.READY}),
     LifecycleState.READY: frozenset({LifecycleState.RUNNING}),
-    LifecycleState.RUNNING: frozenset({
-        LifecycleState.PAUSED,
-        LifecycleState.STOPPING,
-        LifecycleState.REVOCATION_REQUESTED,
-        LifecycleState.FAILED,
-    }),
-    LifecycleState.PAUSED: frozenset({
-        LifecycleState.RUNNING,
-        LifecycleState.STOPPING,
-        LifecycleState.REVOCATION_REQUESTED,
-        LifecycleState.FAILED,
-    }),
+    LifecycleState.RUNNING: frozenset(
+        {
+            LifecycleState.PAUSED,
+            LifecycleState.STOPPING,
+            LifecycleState.REVOCATION_REQUESTED,
+            LifecycleState.FAILED,
+        }
+    ),
+    LifecycleState.PAUSED: frozenset(
+        {
+            LifecycleState.RUNNING,
+            LifecycleState.STOPPING,
+            LifecycleState.REVOCATION_REQUESTED,
+            LifecycleState.FAILED,
+        }
+    ),
     LifecycleState.STOPPING: frozenset({LifecycleState.CLEANUP_PENDING}),
-    LifecycleState.CLEANUP_PENDING: frozenset({
-        LifecycleState.REPORTING,
-        LifecycleState.REVOKED,
-        LifecycleState.COMPLETED,
-    }),
+    LifecycleState.CLEANUP_PENDING: frozenset(
+        {
+            LifecycleState.REPORTING,
+            LifecycleState.REVOKED,
+            LifecycleState.COMPLETED,
+        }
+    ),
     LifecycleState.REPORTING: frozenset({LifecycleState.COMPLETED}),
     LifecycleState.COMPLETED: frozenset(),
     LifecycleState.REVOCATION_REQUESTED: frozenset({LifecycleState.CLEANUP_PENDING}),
@@ -97,9 +102,7 @@ class EngagementLifecycle:
 
     def transition(self, target: LifecycleState) -> None:
         if not self.can_transition(target):
-            raise ValueError(
-                f"invalid transition: {self._state.value} -> {target.value}"
-            )
+            raise ValueError(f"invalid transition: {self._state.value} -> {target.value}")
         self._state = target
 
     def advance(self) -> None:

@@ -5,16 +5,14 @@ from uuid import uuid4
 
 from packages.application import (
     ApproveActionCommand,
-    CommandResult,
     CommandStatus,
     CreateEngagementCommand,
-    DomainEvent,
     EmergencyStopCommand,
     InMemoryActionRepo,
     InMemoryAuditLog,
     InMemoryEngagementRepo,
-    InMemoryEvidenceStore,
     InMemoryEventBus,
+    InMemoryEvidenceStore,
     PauseEngagementCommand,
     ProposeActionCommand,
     RecordEvidenceCommand,
@@ -207,9 +205,7 @@ def test_emergency_stop():
 def test_emergency_stop_terminal_fails():
     repo, tid, eid = _make_repo_with_engagement("completed")
     result = handle_emergency_stop(
-        EmergencyStopCommand(
-            tenant_id=tid, engagement_id=eid, actor="op", reason="late"
-        ),
+        EmergencyStopCommand(tenant_id=tid, engagement_id=eid, actor="op", reason="late"),
         repo,
     )
     assert result.status == CommandStatus.CONFLICT
@@ -403,10 +399,13 @@ def test_propose_action_r2_creates_approval_request():
     action_repo = InMemoryActionRepo()
     approval_reg = ApprovalRegistry()
     cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.authz.bola.differential",
         target_locator="https://api.test/basket/1",
-        risk_tier="R2", mutation_class="none", actor="alice",
+        risk_tier="R2",
+        mutation_class="none",
+        actor="alice",
     )
     result = handle_propose_action(cmd, repo, action_repo, approval_registry=approval_reg)
     assert result.status == CommandStatus.SUCCESS
@@ -422,10 +421,13 @@ def test_propose_action_r1_no_approval_needed():
     action_repo = InMemoryActionRepo()
     approval_reg = ApprovalRegistry()
     cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.recon.passive",
         target_locator="https://api.test",
-        risk_tier="R1", mutation_class="none", actor="alice",
+        risk_tier="R1",
+        mutation_class="none",
+        actor="alice",
     )
     result = handle_propose_action(cmd, repo, action_repo, approval_registry=approval_reg)
     assert result.status == CommandStatus.SUCCESS
@@ -437,13 +439,18 @@ def test_propose_action_budget_denied():
     repo, tid, eid = _make_repo_with_engagement("running")
     action_repo = InMemoryActionRepo()
     ledger = BudgetLedger()
-    spec = BudgetSpec(max_requests=0, max_cost_usd=0.0, requests_per_second=1000.0, burst_capacity=0)
+    spec = BudgetSpec(
+        max_requests=0, max_cost_usd=0.0, requests_per_second=1000.0, burst_capacity=0
+    )
     ledger.register(tid, eid, spec)
     cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.authz.bola.differential",
         target_locator="https://api.test",
-        risk_tier="R1", mutation_class="none", actor="planner",
+        risk_tier="R1",
+        mutation_class="none",
+        actor="planner",
     )
     result = handle_propose_action(cmd, repo, action_repo, budget_ledger=ledger)
     assert result.status == CommandStatus.POLICY_DENIED
@@ -455,10 +462,13 @@ def test_approve_action_with_registry_enforces_two_person_rule():
     action_repo = InMemoryActionRepo()
     approval_reg = ApprovalRegistry()
     propose_cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.authz.bola.write",
         target_locator="https://api.test",
-        risk_tier="R4", mutation_class="write", actor="alice",
+        risk_tier="R4",
+        mutation_class="write",
+        actor="alice",
     )
     propose_result = handle_propose_action(
         propose_cmd, repo_eng, action_repo, approval_registry=approval_reg
@@ -479,10 +489,13 @@ def test_approve_action_with_registry_different_approver_ok():
     action_repo = InMemoryActionRepo()
     approval_reg = ApprovalRegistry()
     propose_cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.authz.bola.write",
         target_locator="https://api.test",
-        risk_tier="R2", mutation_class="write", actor="alice",
+        risk_tier="R2",
+        mutation_class="write",
+        actor="alice",
     )
     propose_result = handle_propose_action(
         propose_cmd, repo_eng, action_repo, approval_registry=approval_reg
@@ -531,10 +544,13 @@ def test_reject_action_with_registry_records_denial():
     action_repo = InMemoryActionRepo()
     approval_reg = ApprovalRegistry()
     propose_cmd = ProposeActionCommand(
-        tenant_id=tid, engagement_id=eid,
+        tenant_id=tid,
+        engagement_id=eid,
         technique_id="web.authz.bola.write",
         target_locator="https://api.test",
-        risk_tier="R2", mutation_class="write", actor="alice",
+        risk_tier="R2",
+        mutation_class="write",
+        actor="alice",
     )
     propose_result = handle_propose_action(
         propose_cmd, repo_eng, action_repo, approval_registry=approval_reg

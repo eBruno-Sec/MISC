@@ -6,7 +6,6 @@ from packages.events import (
     DeliveryStatus,
     EventSubscription,
     InMemoryOutbox,
-    OutboxEntry,
     OutboxRelay,
     create_outbox_entry,
 )
@@ -14,9 +13,7 @@ from packages.events import (
 
 def test_create_outbox_entry():
     tid = uuid4()
-    entry = create_outbox_entry(
-        "action.proposed", tid, "action", uuid4(), {"technique": "bola"}
-    )
+    entry = create_outbox_entry("action.proposed", tid, "action", uuid4(), {"technique": "bola"})
     assert entry.event_type == "action.proposed"
     assert entry.tenant_id == tid
     assert entry.status == DeliveryStatus.PENDING

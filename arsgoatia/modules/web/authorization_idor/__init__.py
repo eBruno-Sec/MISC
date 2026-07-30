@@ -11,11 +11,11 @@ Module lifecycle:
 This module never imports other modules.  Cross-module progress (e.g.
 exploit after BOLA) flows only through the planner via read_foreign_object.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from packages.module_sdk import (
     ActionProposal,
@@ -120,8 +120,7 @@ class IDORDifferentialModule(ModuleBase):
         return EligibilityResult(
             decision=EligibilityDecision.ELIGIBLE,
             reason=(
-                f"found {len(identities)} identities and "
-                f"{len(candidates)} candidate endpoint(s)"
+                f"found {len(identities)} identities and {len(candidates)} candidate endpoint(s)"
             ),
             confidence=min(0.9, 0.5 + 0.1 * len(candidates)),
         )
@@ -137,24 +136,26 @@ class IDORDifferentialModule(ModuleBase):
 
         proposals = []
         for endpoint in candidates:
-            proposals.append(ActionProposal(
-                proposal_id=uuid4(),
-                technique_id=self.TECHNIQUE_ID,
-                target_locator=f"{context.target_locator}{endpoint}",
-                risk_tier=self.RISK_TIER,
-                mutation_class=self.MUTATION_CLASS,
-                description=(
-                    f"BOLA differential: test object-level authz on {endpoint} "
-                    f"using identities {identities[0]!r} and {identities[1]!r}"
-                ),
-                parameters={
-                    "endpoint": endpoint,
-                    "identity_a": identities[0],
-                    "identity_b": identities[1],
-                    "evidence_profile": self.EVIDENCE_PROFILE,
-                },
-                expected_evidence_profile=self.EVIDENCE_PROFILE,
-            ))
+            proposals.append(
+                ActionProposal(
+                    proposal_id=uuid4(),
+                    technique_id=self.TECHNIQUE_ID,
+                    target_locator=f"{context.target_locator}{endpoint}",
+                    risk_tier=self.RISK_TIER,
+                    mutation_class=self.MUTATION_CLASS,
+                    description=(
+                        f"BOLA differential: test object-level authz on {endpoint} "
+                        f"using identities {identities[0]!r} and {identities[1]!r}"
+                    ),
+                    parameters={
+                        "endpoint": endpoint,
+                        "identity_a": identities[0],
+                        "identity_b": identities[1],
+                        "evidence_profile": self.EVIDENCE_PROFILE,
+                    },
+                    expected_evidence_profile=self.EVIDENCE_PROFILE,
+                )
+            )
         return proposals
 
     def confirm(
@@ -181,8 +182,10 @@ class IDORDifferentialModule(ModuleBase):
         }
 
         required_labels = {
-            "baseline_own", "differential_cross",
-            "positive_control", "negative_control",
+            "baseline_own",
+            "differential_cross",
+            "positive_control",
+            "negative_control",
         }
         missing_labels = required_labels - set(exchanges.keys())
         if missing_labels:
@@ -201,10 +204,7 @@ class IDORDifferentialModule(ModuleBase):
         if baseline.get("actual_status") != 200:
             return ConfirmationResult(
                 decision=ConfirmationDecision.REFUTED,
-                reason=(
-                    f"baseline_own failed: expected 200, "
-                    f"got {baseline.get('actual_status')}"
-                ),
+                reason=(f"baseline_own failed: expected 200, got {baseline.get('actual_status')}"),
                 rule_version=self.CONFIRMATION_RULE_VERSION,
             )
 
@@ -213,8 +213,7 @@ class IDORDifferentialModule(ModuleBase):
             return ConfirmationResult(
                 decision=ConfirmationDecision.REFUTED,
                 reason=(
-                    f"positive_control failed: expected 200, "
-                    f"got {positive.get('actual_status')}"
+                    f"positive_control failed: expected 200, got {positive.get('actual_status')}"
                 ),
                 rule_version=self.CONFIRMATION_RULE_VERSION,
             )
@@ -224,10 +223,7 @@ class IDORDifferentialModule(ModuleBase):
         if neg_status not in (401, 403):
             return ConfirmationResult(
                 decision=ConfirmationDecision.REFUTED,
-                reason=(
-                    f"negative_control not denied: expected 401/403, "
-                    f"got {neg_status}"
-                ),
+                reason=(f"negative_control not denied: expected 401/403, got {neg_status}"),
                 rule_version=self.CONFIRMATION_RULE_VERSION,
             )
 
@@ -283,12 +279,14 @@ class IDORDifferentialModule(ModuleBase):
         observations = []
         for ep in endpoints:
             if _looks_like_object_endpoint(ep):
-                observations.append({
-                    "type": "candidate_object_endpoint",
-                    "endpoint": ep,
-                    "reason": "path pattern suggests object-level resource",
-                    "confidence": 0.6,
-                })
+                observations.append(
+                    {
+                        "type": "candidate_object_endpoint",
+                        "endpoint": ep,
+                        "reason": "path pattern suggests object-level resource",
+                        "confidence": 0.6,
+                    }
+                )
         return ModuleRunResult(
             module_id=self.MODULE_ID,
             engagement_id=context.engagement_id,

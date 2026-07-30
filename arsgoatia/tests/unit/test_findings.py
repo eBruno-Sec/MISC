@@ -3,7 +3,6 @@ from __future__ import annotations
 from packages.domain.findings import (
     EVIDENCE_PROFILES,
     FINDING_TRANSITIONS,
-    EvidenceProfileCheck,
     FindingState,
     can_confirm,
     can_transition,
@@ -41,15 +40,21 @@ def test_evidence_profile_check_satisfied():
 
 
 def test_can_confirm_from_candidate():
-    assert can_confirm(FindingState.CANDIDATE, evidence_profile_satisfied=True, validator_passed=True)
+    assert can_confirm(
+        FindingState.CANDIDATE, evidence_profile_satisfied=True, validator_passed=True
+    )
 
 
 def test_cannot_confirm_without_evidence():
-    assert not can_confirm(FindingState.CANDIDATE, evidence_profile_satisfied=False, validator_passed=True)
+    assert not can_confirm(
+        FindingState.CANDIDATE, evidence_profile_satisfied=False, validator_passed=True
+    )
 
 
 def test_cannot_confirm_from_wrong_state():
-    assert not can_confirm(FindingState.CONFIRMED, evidence_profile_satisfied=True, validator_passed=True)
+    assert not can_confirm(
+        FindingState.CONFIRMED, evidence_profile_satisfied=True, validator_passed=True
+    )
 
 
 def test_all_transitions_map_valid_states():

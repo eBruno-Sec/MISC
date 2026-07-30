@@ -11,11 +11,11 @@ For the first vertical slice (Juice Shop IDOR):
   - Create access contexts mapping identity → capabilities
   - Track session validity and credential fingerprints
 """
+
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any
 from uuid import UUID, uuid4
 
 
@@ -71,11 +71,10 @@ class IdentityRegistry:
     def get(self, tenant_id: UUID, identity_id: UUID) -> TestIdentity | None:
         return self._identities.get((tenant_id, identity_id))
 
-    def list_for_engagement(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> list[TestIdentity]:
+    def list_for_engagement(self, tenant_id: UUID, engagement_id: UUID) -> list[TestIdentity]:
         return [
-            ident for ident in self._identities.values()
+            ident
+            for ident in self._identities.values()
             if ident.tenant_id == tenant_id and ident.engagement_id == engagement_id
         ]
 
@@ -86,22 +85,22 @@ class IdentityRegistry:
     def get_context(self, tenant_id: UUID, context_id: UUID) -> AccessContext | None:
         return self._contexts.get((tenant_id, context_id))
 
-    def contexts_for_identity(
-        self, tenant_id: UUID, identity_id: UUID
-    ) -> list[AccessContext]:
+    def contexts_for_identity(self, tenant_id: UUID, identity_id: UUID) -> list[AccessContext]:
         return [
-            ctx for ctx in self._contexts.values()
-            if ctx.identity.tenant_id == tenant_id
-            and ctx.identity.identity_id == identity_id
+            ctx
+            for ctx in self._contexts.values()
+            if ctx.identity.tenant_id == tenant_id and ctx.identity.identity_id == identity_id
         ]
 
     def invalidate_all(self, tenant_id: UUID, engagement_id: UUID) -> int:
         count = 0
         to_update = []
         for key, ctx in self._contexts.items():
-            if (ctx.identity.tenant_id == tenant_id
-                    and ctx.identity.engagement_id == engagement_id
-                    and ctx.is_valid):
+            if (
+                ctx.identity.tenant_id == tenant_id
+                and ctx.identity.engagement_id == engagement_id
+                and ctx.is_valid
+            ):
                 to_update.append(key)
 
         for key in to_update:

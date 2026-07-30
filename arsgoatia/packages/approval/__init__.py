@@ -8,6 +8,7 @@ Per spec §13.8:
   - Two-person rule: R4 requires approver_id != requestor_id, both must be listed
     on the authorization record for that engagement.
 """
+
 from __future__ import annotations
 
 import enum
@@ -29,22 +30,26 @@ class ApprovalState(enum.Enum):
 
 
 APPROVAL_TRANSITIONS: dict[ApprovalState, frozenset[ApprovalState]] = {
-    ApprovalState.PENDING: frozenset({
-        ApprovalState.GRANTED,
-        ApprovalState.DENIED,
-        ApprovalState.REVOKED,
-    }),
+    ApprovalState.PENDING: frozenset(
+        {
+            ApprovalState.GRANTED,
+            ApprovalState.DENIED,
+            ApprovalState.REVOKED,
+        }
+    ),
     ApprovalState.GRANTED: frozenset({ApprovalState.EXPIRED, ApprovalState.REVOKED}),
     ApprovalState.DENIED: frozenset(),
     ApprovalState.EXPIRED: frozenset(),
     ApprovalState.REVOKED: frozenset(),
 }
 
-TERMINAL_APPROVAL_STATES = frozenset({
-    ApprovalState.DENIED,
-    ApprovalState.EXPIRED,
-    ApprovalState.REVOKED,
-})
+TERMINAL_APPROVAL_STATES = frozenset(
+    {
+        ApprovalState.DENIED,
+        ApprovalState.EXPIRED,
+        ApprovalState.REVOKED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -140,8 +145,7 @@ class ApprovalRegistry:
         if action_key in self._action_index:
             existing_rid = self._action_index[action_key]
             raise DuplicateApprovalError(
-                f"approval request already exists for action {action_id}: "
-                f"request_id={existing_rid}"
+                f"approval request already exists for action {action_id}: request_id={existing_rid}"
             )
 
         now = datetime.now(timezone.utc)
@@ -166,9 +170,7 @@ class ApprovalRegistry:
     def get_request(self, tenant_id: UUID, request_id: UUID) -> ApprovalRequest | None:
         return self._requests.get((tenant_id, request_id))
 
-    def get_request_for_action(
-        self, tenant_id: UUID, action_id: UUID
-    ) -> ApprovalRequest | None:
+    def get_request_for_action(self, tenant_id: UUID, action_id: UUID) -> ApprovalRequest | None:
         rid = self._action_index.get((tenant_id, action_id))
         if rid is None:
             return None
@@ -190,9 +192,7 @@ class ApprovalRegistry:
             raise ApprovalRegistryError(f"no approval request found for action {action_id}")
 
         if self._is_decided(tenant_id, action_id):
-            raise DuplicateApprovalError(
-                f"approval for action {action_id} already decided"
-            )
+            raise DuplicateApprovalError(f"approval for action {action_id} already decided")
 
         if datetime.now(timezone.utc) > request.expires_at:
             raise ApprovalRegistryError(f"approval request for action {action_id} has expired")
@@ -235,14 +235,10 @@ class ApprovalRegistry:
             raise ApprovalRegistryError(f"no approval request found for action {action_id}")
 
         if self._is_decided(tenant_id, action_id):
-            raise DuplicateApprovalError(
-                f"approval for action {action_id} already decided"
-            )
+            raise DuplicateApprovalError(f"approval for action {action_id} already decided")
 
         if request.requires_two_person and approver_id == request.requestor_id:
-            raise TwoPersonRuleError(
-                "two-person rule: approver_id must differ from requestor_id"
-            )
+            raise TwoPersonRuleError("two-person rule: approver_id must differ from requestor_id")
 
         now = datetime.now(timezone.utc)
         decision = ApprovalDecision(
@@ -301,9 +297,7 @@ class ApprovalRegistry:
         )
         return hmac.compare_digest(expected, binding_digest)
 
-    def pending_for_engagement(
-        self, tenant_id: UUID, engagement_id: UUID
-    ) -> list[ApprovalRequest]:
+    def pending_for_engagement(self, tenant_id: UUID, engagement_id: UUID) -> list[ApprovalRequest]:
         return [
             req
             for req in self._requests.values()

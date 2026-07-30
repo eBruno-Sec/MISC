@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from packages.domain.reasoning import (
-    HYPOTHESIS_TRANSITIONS,
     CandidateAction,
     HypothesisRecord,
     HypothesisState,
@@ -71,12 +70,22 @@ def test_truth_maintenance_cascade_retraction():
     now = datetime.now(timezone.utc)
 
     parent = ObservationFact(
-        id=uuid4(), engagement_id=eid, source="recon", kind="host",
-        value="api.test", provenance=ProvenanceClass.OBSERVED, observed_at=now,
+        id=uuid4(),
+        engagement_id=eid,
+        source="recon",
+        kind="host",
+        value="api.test",
+        provenance=ProvenanceClass.OBSERVED,
+        observed_at=now,
     )
     child = ObservationFact(
-        id=uuid4(), engagement_id=eid, source="inference", kind="endpoint",
-        value="/api/v1", provenance=ProvenanceClass.INFERRED, observed_at=now,
+        id=uuid4(),
+        engagement_id=eid,
+        source="inference",
+        kind="endpoint",
+        value="/api/v1",
+        provenance=ProvenanceClass.INFERRED,
+        observed_at=now,
     )
     tm.record(parent)
     tm.record(child)

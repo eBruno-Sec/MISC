@@ -5,6 +5,7 @@ against target systems.  It verifies the signed action envelope before
 execution, runs the action within the declared safety constraints, and
 reports the result back to the orchestration layer.
 """
+
 from __future__ import annotations
 
 import logging

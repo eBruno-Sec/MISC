@@ -1,4 +1,5 @@
 """ArsGoatia API -- Unified Deterministic Autonomous Security Validation Platform."""
+
 from __future__ import annotations
 
 import logging

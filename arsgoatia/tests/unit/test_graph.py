@@ -13,13 +13,12 @@ from packages.graph import (
     NodeLabel,
     NodeNotFoundError,
     QueryNotFoundError,
-    TenantViolationError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tenant_a() -> "uuid4":
@@ -55,6 +54,7 @@ def _edge(tenant_id, label, source_id, target_id, **props) -> GraphEdge:
 # Node CRUD
 # ---------------------------------------------------------------------------
 
+
 def test_project_and_get_node(repo, tenant_a):
     node = _node(tenant_a, NodeLabel.ASSET, hostname="web01")
     repo.project_node(node)
@@ -77,6 +77,7 @@ def test_remove_nonexistent_node(repo, tenant_a):
 # ---------------------------------------------------------------------------
 # Edge CRUD
 # ---------------------------------------------------------------------------
+
 
 def test_project_and_get_edge(repo, tenant_a):
     n1 = _node(tenant_a, NodeLabel.SERVICE)
@@ -131,6 +132,7 @@ def test_project_edge_missing_target_raises(repo, tenant_a):
 # Tenant isolation
 # ---------------------------------------------------------------------------
 
+
 def test_cross_tenant_node_invisible(repo, tenant_a, tenant_b):
     node = _node(tenant_a, NodeLabel.IDENTITY, username="admin")
     repo.project_node(node)
@@ -170,6 +172,7 @@ def test_clear_tenant(repo, tenant_a, tenant_b):
 # Stored query: shortest_path
 # ---------------------------------------------------------------------------
 
+
 def test_shortest_path_direct(repo, tenant_a):
     n1 = _node(tenant_a, NodeLabel.ASSET)
     n2 = _node(tenant_a, NodeLabel.ASSET)
@@ -178,7 +181,8 @@ def test_shortest_path_direct(repo, tenant_a):
     repo.project_edge(_edge(tenant_a, EdgeLabel.LEADS_TO, n1.id, n2.id))
 
     results = repo.execute_query(
-        tenant_a, "shortest_path",
+        tenant_a,
+        "shortest_path",
         {"source_id": n1.id, "target_id": n2.id},
     )
     assert len(results) == 1
@@ -190,7 +194,8 @@ def test_shortest_path_same_node(repo, tenant_a):
     node = _node(tenant_a)
     repo.project_node(node)
     results = repo.execute_query(
-        tenant_a, "shortest_path",
+        tenant_a,
+        "shortest_path",
         {"source_id": node.id, "target_id": node.id},
     )
     assert len(results) == 1
@@ -203,7 +208,8 @@ def test_shortest_path_no_connection(repo, tenant_a):
     repo.project_node(n1)
     repo.project_node(n2)
     results = repo.execute_query(
-        tenant_a, "shortest_path",
+        tenant_a,
+        "shortest_path",
         {"source_id": n1.id, "target_id": n2.id},
     )
     assert results == []
@@ -215,7 +221,8 @@ def test_shortest_path_cross_tenant_returns_empty(repo, tenant_a, tenant_b):
     repo.project_node(n1)
     repo.project_node(n2)
     results = repo.execute_query(
-        tenant_a, "shortest_path",
+        tenant_a,
+        "shortest_path",
         {"source_id": n1.id, "target_id": n2.id},
     )
     assert results == []
@@ -224,6 +231,7 @@ def test_shortest_path_cross_tenant_returns_empty(repo, tenant_a, tenant_b):
 # ---------------------------------------------------------------------------
 # Stored query: capabilities_by_identity
 # ---------------------------------------------------------------------------
+
 
 def test_capabilities_by_identity(repo, tenant_a):
     identity = _node(tenant_a, NodeLabel.IDENTITY, name="svc-account")
@@ -241,7 +249,8 @@ def test_capabilities_by_identity(repo, tenant_a):
     repo.project_edge(_edge(tenant_a, EdgeLabel.GAINED_BY, cap2.id, identity.id))
 
     results = repo.execute_query(
-        tenant_a, "capabilities_by_identity",
+        tenant_a,
+        "capabilities_by_identity",
         {"identity_id": identity.id},
     )
     result_ids = {r["id"] for r in results}
@@ -253,6 +262,7 @@ def test_capabilities_by_identity(repo, tenant_a):
 # ---------------------------------------------------------------------------
 # Stored query: attack_surface
 # ---------------------------------------------------------------------------
+
 
 def test_attack_surface(repo, tenant_a):
     asset = _node(tenant_a, NodeLabel.ASSET, hostname="web01")
@@ -269,7 +279,9 @@ def test_attack_surface(repo, tenant_a):
     repo.project_edge(_edge(tenant_a, EdgeLabel.HAS_ENDPOINT, service.id, endpoint.id))
 
     results = repo.execute_query(
-        tenant_a, "attack_surface", {"tenant_id": tenant_a},
+        tenant_a,
+        "attack_surface",
+        {"tenant_id": tenant_a},
     )
     result_ids = {r["id"] for r in results}
     assert asset.id in result_ids
@@ -281,6 +293,7 @@ def test_attack_surface(repo, tenant_a):
 # ---------------------------------------------------------------------------
 # Stored query: evidence_for_step
 # ---------------------------------------------------------------------------
+
 
 def test_evidence_for_step(repo, tenant_a):
     step = _node(tenant_a, NodeLabel.ATTACK_STEP, description="exploit CVE-2024-1234")
@@ -295,7 +308,9 @@ def test_evidence_for_step(repo, tenant_a):
     repo.project_edge(_edge(tenant_a, EdgeLabel.SUPPORTS, step.id, obs2.id))
 
     results = repo.execute_query(
-        tenant_a, "evidence_for_step", {"step_id": step.id},
+        tenant_a,
+        "evidence_for_step",
+        {"step_id": step.id},
     )
     result_ids = {r["id"] for r in results}
     assert obs1.id in result_ids
@@ -305,6 +320,7 @@ def test_evidence_for_step(repo, tenant_a):
 # ---------------------------------------------------------------------------
 # Stored query: invalidated_findings
 # ---------------------------------------------------------------------------
+
 
 def test_invalidated_findings(repo, tenant_a):
     obs = _node(tenant_a, NodeLabel.OBSERVATION, detail="open port 22")
@@ -318,7 +334,8 @@ def test_invalidated_findings(repo, tenant_a):
     repo.project_edge(_edge(tenant_a, EdgeLabel.SUPPORTS, obs.id, finding.id))
 
     results = repo.execute_query(
-        tenant_a, "invalidated_findings",
+        tenant_a,
+        "invalidated_findings",
         {"retracted_fact_id": obs.id},
     )
     result_ids = {r["id"] for r in results}
@@ -330,19 +347,19 @@ def test_invalidated_findings(repo, tenant_a):
 # Cost limit enforcement
 # ---------------------------------------------------------------------------
 
+
 def test_cost_limit_exceeded(repo, tenant_a):
     # Build a chain of nodes long enough to exceed a tiny cost limit
     nodes = [_node(tenant_a) for _ in range(20)]
     for n in nodes:
         repo.project_node(n)
     for i in range(len(nodes) - 1):
-        repo.project_edge(
-            _edge(tenant_a, EdgeLabel.LEADS_TO, nodes[i].id, nodes[i + 1].id)
-        )
+        repo.project_edge(_edge(tenant_a, EdgeLabel.LEADS_TO, nodes[i].id, nodes[i + 1].id))
 
     with pytest.raises(CostLimitExceededError):
         repo.execute_query(
-            tenant_a, "shortest_path",
+            tenant_a,
+            "shortest_path",
             {"source_id": nodes[0].id, "target_id": nodes[-1].id},
             cost_limit=3,
         )
@@ -351,6 +368,7 @@ def test_cost_limit_exceeded(repo, tenant_a):
 # ---------------------------------------------------------------------------
 # Query registry
 # ---------------------------------------------------------------------------
+
 
 def test_unknown_query_raises(repo, tenant_a):
     with pytest.raises(QueryNotFoundError):
@@ -371,9 +389,11 @@ def test_list_stored_queries():
 # Empty graph edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_empty_graph_shortest_path(repo, tenant_a):
     results = repo.execute_query(
-        tenant_a, "shortest_path",
+        tenant_a,
+        "shortest_path",
         {"source_id": uuid4(), "target_id": uuid4()},
     )
     assert results == []
@@ -381,7 +401,8 @@ def test_empty_graph_shortest_path(repo, tenant_a):
 
 def test_empty_graph_capabilities(repo, tenant_a):
     results = repo.execute_query(
-        tenant_a, "capabilities_by_identity",
+        tenant_a,
+        "capabilities_by_identity",
         {"identity_id": uuid4()},
     )
     assert results == []
@@ -389,14 +410,18 @@ def test_empty_graph_capabilities(repo, tenant_a):
 
 def test_empty_graph_attack_surface(repo, tenant_a):
     results = repo.execute_query(
-        tenant_a, "attack_surface", {"tenant_id": tenant_a},
+        tenant_a,
+        "attack_surface",
+        {"tenant_id": tenant_a},
     )
     assert results == []
 
 
 def test_empty_graph_evidence(repo, tenant_a):
     results = repo.execute_query(
-        tenant_a, "evidence_for_step", {"step_id": uuid4()},
+        tenant_a,
+        "evidence_for_step",
+        {"step_id": uuid4()},
     )
     assert results == []
 

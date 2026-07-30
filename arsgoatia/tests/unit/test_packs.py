@@ -1,10 +1,23 @@
 """Tests for the packs/ subsystem -- tools, workflows, labs, policy, reports, knowledge."""
+
 from __future__ import annotations
 
 import dataclasses
 
 import pytest
 
+from packs.knowledge import (
+    CWE_639,
+    cwes_for_technique,
+    get_cwe,
+    list_cwes,
+)
+from packs.labs import JUICE_SHOP_LAB
+from packs.policy import LAB_SAFE_PROFILE, PRODUCTION_STRICT_PROFILE
+from packs.reports import (
+    CHAIN_REPORT_TEMPLATE,
+    FINDING_REPORT_TEMPLATE,
+)
 from packs.tools import (
     HTTP_PROBE,
     ToolPack,
@@ -12,25 +25,10 @@ from packs.tools import (
     list_tool_packs,
     register_tool_pack,
 )
-from packs.workflows import BOLA_ASSESSMENT_FLOW, WorkflowPack, WorkflowStep
-from packs.labs import JUICE_SHOP_LAB, LabDefinition
-from packs.policy import LAB_SAFE_PROFILE, PRODUCTION_STRICT_PROFILE, PolicyProfile
-from packs.reports import (
-    CHAIN_REPORT_TEMPLATE,
-    FINDING_REPORT_TEMPLATE,
-    ReportTemplate,
-)
-from packs.knowledge import (
-    CWE_639,
-    CWE_89,
-    CWEMapping,
-    cwes_for_technique,
-    get_cwe,
-    list_cwes,
-)
-
+from packs.workflows import BOLA_ASSESSMENT_FLOW
 
 # ── Tool packs ────────────────────────────────────────────────────────────
+
 
 class TestToolPacks:
     def test_http_probe_registered(self) -> None:
@@ -65,6 +63,7 @@ class TestToolPacks:
 
 
 # ── Workflow packs ────────────────────────────────────────────────────────
+
 
 class TestWorkflowPacks:
     def test_bola_flow_step_count(self) -> None:
@@ -105,6 +104,7 @@ class TestWorkflowPacks:
 
 # ── Lab definitions ───────────────────────────────────────────────────────
 
+
 class TestLabDefinitions:
     def test_juice_shop_image(self) -> None:
         assert JUICE_SHOP_LAB.target_image == "bkimminich/juice-shop"
@@ -124,15 +124,19 @@ class TestLabDefinitions:
 
 # ── Policy profiles ──────────────────────────────────────────────────────
 
+
 class TestPolicyProfiles:
-    @pytest.mark.parametrize("tier,expected", [
-        ("R0", "allow"),
-        ("R1", "allow"),
-        ("R2", "require_approval"),
-        ("R3", "require_approval"),
-        ("R4", "deny"),
-        ("R5", "deny"),
-    ])
+    @pytest.mark.parametrize(
+        "tier,expected",
+        [
+            ("R0", "allow"),
+            ("R1", "allow"),
+            ("R2", "require_approval"),
+            ("R3", "require_approval"),
+            ("R4", "deny"),
+            ("R5", "deny"),
+        ],
+    )
     def test_lab_safe_decisions(self, tier: str, expected: str) -> None:
         assert LAB_SAFE_PROFILE.risk_tier_decisions[tier] == expected
 
@@ -148,6 +152,7 @@ class TestPolicyProfiles:
 
 
 # ── Report templates ─────────────────────────────────────────────────────
+
 
 class TestReportTemplates:
     def test_finding_report_sections(self) -> None:
@@ -181,6 +186,7 @@ class TestReportTemplates:
 
 
 # ── Knowledge / CWE mappings ─────────────────────────────────────────────
+
 
 class TestKnowledgePacks:
     def test_get_cwe_639(self) -> None:

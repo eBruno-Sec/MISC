@@ -4,19 +4,18 @@ Patches temporalio out of sys.modules so tests run without the SDK installed.
 Only the deterministic helper functions are tested; network-dependent portions
 require the lab environment.
 """
+
 from __future__ import annotations
 
 import hashlib
-import importlib
 import sys
 from types import ModuleType
-from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
-
+from unittest.mock import AsyncMock, MagicMock
 
 # ---------------------------------------------------------------------------
 # Patch temporalio before any activity module is imported
 # ---------------------------------------------------------------------------
+
 
 def _make_temporal_mock() -> ModuleType:
     mod = ModuleType("temporalio")
@@ -36,7 +35,9 @@ def _make_temporal_mock() -> ModuleType:
     workflow_mod.query = lambda f: f
     workflow_mod.wait_condition = AsyncMock()
     workflow_mod.uuid4 = lambda: __import__("uuid").uuid4()
-    workflow_mod.now = lambda: __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    workflow_mod.now = lambda: __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    )
     workflow_mod.execute_activity = AsyncMock()
     workflow_mod.start_child_workflow = AsyncMock()
     workflow_mod.unsafe = MagicMock()
@@ -70,9 +71,8 @@ sys.modules.setdefault("miniopy_async", _minio_mod)
 # Import activity modules AFTER mocks are in place
 # ---------------------------------------------------------------------------
 
-from services.worker.activities.recon import _is_in_scope, ScopeRuleParam  # noqa: E402
 from services.worker.activities.evidence import StoreEvidenceParams  # noqa: E402
-
+from services.worker.activities.recon import ScopeRuleParam, _is_in_scope  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # _is_in_scope tests
@@ -162,15 +162,23 @@ class TestStoreEvidenceParams:
 
     def test_metadata_default_empty(self):
         p = StoreEvidenceParams(
-            engagement_id="e", tenant_id="t", action_id="a",
-            kind="k", media_type="m", payload=b"",
+            engagement_id="e",
+            tenant_id="t",
+            action_id="a",
+            kind="k",
+            media_type="m",
+            payload=b"",
         )
         assert p.metadata == {}
 
     def test_custom_metadata(self):
         p = StoreEvidenceParams(
-            engagement_id="e", tenant_id="t", action_id="a",
-            kind="k", media_type="m", payload=b"",
+            engagement_id="e",
+            tenant_id="t",
+            action_id="a",
+            kind="k",
+            media_type="m",
+            payload=b"",
             metadata={"source": "bola-test"},
         )
         assert p.metadata["source"] == "bola-test"
@@ -280,6 +288,7 @@ class TestBOLADecisionLogic:
 class TestCleanupObligationTypes:
     def test_obligation_fields(self):
         from services.worker.activities.cleanup import CleanupObligation
+
         obl = CleanupObligation(
             obligation_id="obl-1",
             inverse_action="delete_user",
@@ -291,6 +300,7 @@ class TestCleanupObligationTypes:
 
     def test_cleanup_result_all_verified(self):
         from services.worker.activities.cleanup import CleanupOutcome, CleanupResult
+
         outcomes = [
             CleanupOutcome(obligation_id="o1", success=True, detail="ok"),
             CleanupOutcome(obligation_id="o2", success=True, detail="ok"),
@@ -301,6 +311,7 @@ class TestCleanupObligationTypes:
 
     def test_cleanup_result_not_all_verified(self):
         from services.worker.activities.cleanup import CleanupOutcome, CleanupResult
+
         outcomes = [
             CleanupOutcome(obligation_id="o1", success=True, detail="ok"),
             CleanupOutcome(obligation_id="o2", success=False, detail="error: 500"),
@@ -320,11 +331,13 @@ class TestCleanupObligationTypes:
 class TestIdentityActivityTypes:
     def test_identity_result_empty_by_default(self):
         from services.worker.activities.identity import IdentityResult
+
         r = IdentityResult()
         assert r.access_contexts == []
 
     def test_access_context_result(self):
         from services.worker.activities.identity import AccessContextResult
+
         ctx = AccessContextResult(
             persona="arsgoatia-test-abc123-0",
             credential_ref="secret://arsgoatia/tenant1/eng1/identity/arsgoatia-test-abc123-0",
@@ -334,6 +347,7 @@ class TestIdentityActivityTypes:
 
     def test_identity_params(self):
         from services.worker.activities.identity import IdentityParams
+
         p = IdentityParams(
             target_url="http://juice-shop:3000",
             engagement_id="eng-1",
@@ -351,6 +365,7 @@ class TestIdentityActivityTypes:
 class TestChainActivityTypes:
     def test_chain_params(self):
         from services.worker.activities.chain import ChainParams
+
         p = ChainParams(
             engagement_id="eng-1",
             tenant_id="tenant-1",
@@ -366,6 +381,7 @@ class TestChainActivityTypes:
 
     def test_chain_params_defaults(self):
         from services.worker.activities.chain import ChainParams
+
         p = ChainParams(
             engagement_id="e",
             tenant_id="t",
@@ -386,6 +402,7 @@ class TestChainActivityTypes:
 class TestReconTypes:
     def test_recon_result_defaults(self):
         from services.worker.activities.recon import ReconResult
+
         r = ReconResult()
         assert r.discovered_endpoints == []
         assert r.assets == []
@@ -393,6 +410,7 @@ class TestReconTypes:
 
     def test_discovered_endpoint(self):
         from services.worker.activities.recon import DiscoveredEndpoint
+
         ep = DiscoveredEndpoint(
             url="http://juice-shop:3000/rest/basket/1",
             method="GET",

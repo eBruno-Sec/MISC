@@ -1,11 +1,12 @@
 """ArsGoatia evidence service — content-addressed immutable artifact storage."""
+
 from __future__ import annotations
 
 import hashlib
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="ArsGoatia Evidence Service", version="0.1.0")

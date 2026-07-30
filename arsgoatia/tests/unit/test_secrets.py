@@ -1,12 +1,10 @@
 """Unit tests for the secret store."""
+
 from __future__ import annotations
 
-import time
 from uuid import uuid4
 
-import pytest
-
-from packages.secret_store import InMemorySecretStore, SecretRef, compute_fingerprint
+from packages.secret_store import InMemorySecretStore, compute_fingerprint
 
 
 class TestComputeFingerprint:

@@ -3,10 +3,10 @@
 Defines request templates, response matchers, and evidence capture profiles
 for the HTTP adapter's differential testing mode.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass(frozen=True)

@@ -85,9 +85,7 @@ async def safe_http_recon(params: ReconParams) -> ReconResult:
             probe_url = f"{base}{path}"
 
             if not _is_in_scope(probe_url, params.scope_rules):
-                activity.logger.info(
-                    "Skipping out-of-scope URL", extra={"url": probe_url}
-                )
+                activity.logger.info("Skipping out-of-scope URL", extra={"url": probe_url})
                 continue
 
             activity.heartbeat(f"probing {path}")

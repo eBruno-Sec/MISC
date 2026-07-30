@@ -1,9 +1,9 @@
 """ArsGoatia webhook receiver — ingests external callback events."""
+
 from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
@@ -24,13 +24,13 @@ async def healthz() -> dict[str, str]:
 
 @app.post("/api/v1/webhooks/dns-callback")
 async def dns_callback(request: Request) -> dict[str, str]:
-    body = await request.json()
+    await request.json()  # validate the payload parses as JSON
     return {"status": "received", "type": "dns_callback"}
 
 
 @app.post("/api/v1/webhooks/http-callback")
 async def http_callback(request: Request) -> dict[str, str]:
-    body = await request.json()
+    await request.json()  # validate the payload parses as JSON
     return {"status": "received", "type": "http_callback"}
 
 

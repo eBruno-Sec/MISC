@@ -4,6 +4,7 @@ A lab definition pins a container image, port, fingerprint data, and
 the set of challenges the lab is expected to expose so that the
 orchestrator can scope assessments automatically.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

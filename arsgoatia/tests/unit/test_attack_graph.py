@@ -28,17 +28,41 @@ def _two_path_graph() -> AttackGraph:
     g = AttackGraph()
     # Path A: one loud, low-confidence hop straight to admin.
     g.add_edge(
-        AttackEdge(id="a_direct", technique="loud_direct", requires=frozenset({"u"}),
-                   provides=frozenset({"admin"}), confidence=0.5, noise=10.0, risk=5.0, cost=1.0)
+        AttackEdge(
+            id="a_direct",
+            technique="loud_direct",
+            requires=frozenset({"u"}),
+            provides=frozenset({"admin"}),
+            confidence=0.5,
+            noise=10.0,
+            risk=5.0,
+            cost=1.0,
+        )
     )
     # Path B: two quiet, high-confidence hops to admin.
     g.add_edge(
-        AttackEdge(id="b1", technique="quiet_token", requires=frozenset({"u"}),
-                   provides=frozenset({"token"}), confidence=0.9, noise=1.0, risk=1.0, cost=1.0)
+        AttackEdge(
+            id="b1",
+            technique="quiet_token",
+            requires=frozenset({"u"}),
+            provides=frozenset({"token"}),
+            confidence=0.9,
+            noise=1.0,
+            risk=1.0,
+            cost=1.0,
+        )
     )
     g.add_edge(
-        AttackEdge(id="b2", technique="quiet_escalate", requires=frozenset({"token"}),
-                   provides=frozenset({"admin"}), confidence=0.9, noise=1.0, risk=1.0, cost=1.0)
+        AttackEdge(
+            id="b2",
+            technique="quiet_escalate",
+            requires=frozenset({"token"}),
+            provides=frozenset({"admin"}),
+            confidence=0.9,
+            noise=1.0,
+            risk=1.0,
+            cost=1.0,
+        )
     )
     return g
 

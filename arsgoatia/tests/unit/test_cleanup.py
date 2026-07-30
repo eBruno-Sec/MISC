@@ -1,16 +1,18 @@
 """Unit tests for the cleanup verification ledger."""
+
 from __future__ import annotations
 
-import pytest
 from uuid import uuid4
 
+import pytest
+
 from packages.cleanup import (
+    CLEANUP_TRANSITIONS,
+    TERMINAL_STATES,
     CleanupAttempt,
     CleanupLedger,
     CleanupObligation,
     CleanupState,
-    CLEANUP_TRANSITIONS,
-    TERMINAL_STATES,
 )
 
 
@@ -279,14 +281,22 @@ class TestCleanupLedger:
     def test_attempts_for_filters_by_obligation(self):
         ledger = CleanupLedger()
         oid1, oid2 = uuid4(), uuid4()
-        ledger.record_attempt(CleanupAttempt(
-            attempt_id=uuid4(), obligation_id=oid1,
-            technique="t1", result="ok",
-        ))
-        ledger.record_attempt(CleanupAttempt(
-            attempt_id=uuid4(), obligation_id=oid2,
-            technique="t2", result="ok",
-        ))
+        ledger.record_attempt(
+            CleanupAttempt(
+                attempt_id=uuid4(),
+                obligation_id=oid1,
+                technique="t1",
+                result="ok",
+            )
+        )
+        ledger.record_attempt(
+            CleanupAttempt(
+                attempt_id=uuid4(),
+                obligation_id=oid2,
+                technique="t2",
+                result="ok",
+            )
+        )
         assert len(ledger.attempts_for(oid1)) == 1
         assert len(ledger.attempts_for(oid2)) == 1
         assert len(ledger.attempts_for(uuid4())) == 0
@@ -296,8 +306,9 @@ class TestCleanupLedger:
         tid = uuid4()
         eid = uuid4()
         obl1 = ledger.create_obligation(tid, eid, uuid4(), "reversible", "a")
-        obl2 = ledger.create_obligation(tid, eid, uuid4(), "reversible", "b")
-        obl3 = ledger.create_obligation(tid, eid, uuid4(), "reversible", "c")
+        # obl2/obl3 exist only to populate the ledger; the ledger holds them.
+        ledger.create_obligation(tid, eid, uuid4(), "reversible", "b")
+        ledger.create_obligation(tid, eid, uuid4(), "reversible", "c")
         ledger.transition(tid, obl1.obligation_id, CleanupState.ATTEMPTED)
         ledger.transition(tid, obl1.obligation_id, CleanupState.VERIFIED)
         pending = ledger.pending_for_engagement(tid, eid)

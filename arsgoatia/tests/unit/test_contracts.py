@@ -22,7 +22,6 @@ from packages.contracts.schemas.common import (
 from packages.contracts.schemas.evidence import ArtifactRef, CaptureMetadata, EvidenceEnvelope
 from packages.crypto import canonical_json
 
-
 # ---------------------------------------------------------------------------
 # Enum value checks
 # ---------------------------------------------------------------------------

@@ -91,8 +91,7 @@ async def establish_identities(params: IdentityParams) -> IdentityResult:
             }
 
             secret_ref = (
-                f"secret://arsgoatia/{params.tenant_id}"
-                f"/{params.engagement_id}/identity/{persona}"
+                f"secret://arsgoatia/{params.tenant_id}/{params.engagement_id}/identity/{persona}"
             )
 
             from services.worker.activities.evidence import (  # noqa: PLC0415
