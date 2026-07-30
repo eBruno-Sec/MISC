@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:arsgoatia:module:web.workflow.reversible_preference_update:output:v1",
+  "title": "Reversible Preference Update Module Output",
+  "description": "Versioned output schema for the reversible-preference-update fixture technique (§14.2). Every ConfirmationResult from this module must validate against this schema.",
+  "type": "object",
+  "required": ["module_id", "technique_id", "version", "decision", "rule_version", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "module_id": {
+      "type": "string",
+      "const": "web.workflow.reversible_preference_update"
+    },
+    "technique_id": {
+      "type": "string",
+      "const": "web.workflow.reversible-preference-update"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["confirmed", "refuted", "inconclusive"]
+    },
+    "rule_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "capability_name": {
+      "type": ["string", "null"],
+      "enum": ["reversible_state_write", null]
+    },
+    "capability_description": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "technique_id": {"type": "string"},
+        "mutation_class": {"type": "string"},
+        "cleanup_verified": {"type": "boolean"},
+        "cwe": {"type": "string"},
+        "owasp": {"type": "string"}
+      }
+    }
+  },
+  "if": {
+    "properties": {"decision": {"const": "confirmed"}}
+  },
+  "then": {
+    "required": ["evidence_digest", "capability_name"],
+    "properties": {
+      "evidence_digest": {"type": "string"},
+      "capability_name": {"const": "reversible_state_write"},
+      "metadata": {
+        "required": ["cleanup_verified"],
+        "properties": {"cleanup_verified": {"const": true}}
+      }
+    }
+  }
+}
