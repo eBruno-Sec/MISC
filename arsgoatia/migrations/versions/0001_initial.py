@@ -42,48 +42,45 @@ APPEND_ONLY_TABLES = [
     ("governance", "approval"),
     ("knowledge", "observation"),
     ("execution", "tool_execution"),
-    ("findings", "capability_transition"),
     ("audit", "outbox_event"),
 ]
 
 
-def _immutable_trigger_sql(schema: str, table: str) -> str:
+def _immutable_trigger_stmts(schema: str, table: str) -> list[str]:
     func_name = f"{schema}.reject_{table}_mutation"
-    return f"""
-CREATE OR REPLACE FUNCTION {func_name}() RETURNS trigger AS $$
+    return [
+        f"""CREATE OR REPLACE FUNCTION {func_name}() RETURNS trigger AS $$
 BEGIN
     RAISE EXCEPTION 'Table {schema}.{table} is immutable: UPDATE and DELETE are prohibited';
 END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_{table}_immutable
+$$ LANGUAGE plpgsql""",
+        f"""CREATE TRIGGER trg_{table}_immutable
     BEFORE UPDATE OR DELETE ON {schema}.{table}
-    FOR EACH ROW EXECUTE FUNCTION {func_name}();
-"""
+    FOR EACH ROW EXECUTE FUNCTION {func_name}()""",
+    ]
 
 
-def _append_only_trigger_sql(schema: str, table: str) -> str:
+def _append_only_trigger_stmts(schema: str, table: str) -> list[str]:
     func_name = f"{schema}.reject_{table}_update"
-    return f"""
-CREATE OR REPLACE FUNCTION {func_name}() RETURNS trigger AS $$
+    return [
+        f"""CREATE OR REPLACE FUNCTION {func_name}() RETURNS trigger AS $$
 BEGIN
     RAISE EXCEPTION 'Table {schema}.{table} is append-only: UPDATE and DELETE are prohibited';
 END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_{table}_append_only
+$$ LANGUAGE plpgsql""",
+        f"""CREATE TRIGGER trg_{table}_append_only
     BEFORE UPDATE OR DELETE ON {schema}.{table}
-    FOR EACH ROW EXECUTE FUNCTION {func_name}();
-"""
+    FOR EACH ROW EXECUTE FUNCTION {func_name}()""",
+    ]
 
 
-def _rls_sql(schema: str, table: str) -> str:
-    return f"""
-ALTER TABLE {schema}.{table} ENABLE ROW LEVEL SECURITY;
-ALTER TABLE {schema}.{table} FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON {schema}.{table}
-    USING (tenant_id = current_setting('app.tenant_id')::uuid);
-"""
+def _rls_stmts(schema: str, table: str) -> list[str]:
+    return [
+        f"ALTER TABLE {schema}.{table} ENABLE ROW LEVEL SECURITY",
+        f"ALTER TABLE {schema}.{table} FORCE ROW LEVEL SECURITY",
+        f"CREATE POLICY tenant_isolation ON {schema}.{table} "
+        f"USING (tenant_id = current_setting('app.tenant_id')::uuid)",
+    ]
 
 
 def upgrade() -> None:
@@ -565,15 +562,18 @@ def upgrade() -> None:
         ("audit", "outbox_event"),
     ]
     for schema, table in rls_tables:
-        op.execute(_rls_sql(schema, table))
+        for stmt in _rls_stmts(schema, table):
+            op.execute(stmt)
 
     # --- Immutability triggers ---
     for schema, table in IMMUTABLE_TABLES:
-        op.execute(_immutable_trigger_sql(schema, table))
+        for stmt in _immutable_trigger_stmts(schema, table):
+            op.execute(stmt)
 
     # --- Append-only triggers ---
     for schema, table in APPEND_ONLY_TABLES:
-        op.execute(_append_only_trigger_sql(schema, table))
+        for stmt in _append_only_trigger_stmts(schema, table):
+            op.execute(stmt)
 
 
 def downgrade() -> None:

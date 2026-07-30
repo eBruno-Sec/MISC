@@ -1,20 +1,17 @@
-"""Finding management endpoints."""
+"""Finding read endpoints."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated
-from uuid import UUID, uuid4
+from datetime import datetime
+from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from apps.api.deps import AuthCtx, DbSession, TenantId
+from packages.persistence import repos
 
 router = APIRouter(prefix="/findings", tags=["findings"])
-
-
-# -- Request / Response models -------------------------------------------------
 
 
 class FindingSummary(BaseModel):
@@ -30,10 +27,9 @@ class FindingSummary(BaseModel):
 
 
 class FindingDetail(FindingSummary):
-    root_cause: str | None = None
-    evidence_refs: list[UUID] = Field(default_factory=list)
-    validator_digest: str | None = None
-    evidence_profile_version: str | None = None
+    title: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    capability_refs: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
 
 
@@ -44,39 +40,32 @@ class FindingListResponse(BaseModel):
     limit: int
 
 
-class AcceptRiskRequest(BaseModel):
-    justification: str = Field(min_length=1, max_length=4000)
-    accepted_by: str = Field(default="")
-    review_date: datetime | None = None
+def _severity_num(sev: str | None) -> float:
+    m = {"critical": 9.5, "high": 7.5, "medium": 5.0, "low": 3.0, "info": 1.0}
+    if not sev:
+        return 0.0
+    return m.get(sev.lower(), 0.0)
 
 
-class AcceptRiskResponse(BaseModel):
-    id: UUID
-    state: str
-    justification: str
-    accepted_by: str
-    accepted_at: datetime
-
-
-class RetestRequest(BaseModel):
-    engagement_id: UUID | None = None
-    notes: str = Field(default="", max_length=2000)
-
-
-class RetestResponse(BaseModel):
-    retest_id: UUID
-    finding_id: UUID
-    state: str
-    created_at: datetime
-
-
-# -- Endpoints -----------------------------------------------------------------
+def _to_summary(row: dict) -> FindingSummary:
+    evidence_refs = row.get("evidence_refs") or []
+    return FindingSummary(
+        id=row["id"],
+        engagement_id=row["engagement_id"],
+        weakness=row["technique_id"],
+        affected_object=row["target"],
+        severity=_severity_num(row.get("severity")),
+        confidence=1.0 if row.get("state") == "CONFIRMED" else 0.5,
+        state=row["state"],
+        evidence_count=len(evidence_refs),
+        created_at=row["created_at"],
+    )
 
 
 @router.get(
     "",
     response_model=FindingListResponse,
-    summary="List findings with filtering",
+    summary="List findings with filters",
 )
 async def list_findings(
     tenant_id: TenantId,
@@ -84,57 +73,43 @@ async def list_findings(
     auth: AuthCtx,
     engagement_id: UUID | None = Query(default=None),
     state: str | None = Query(default=None),
-    min_severity: float | None = Query(default=None, ge=0, le=10),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    # TODO: paginated query with filters
-    return FindingListResponse(items=[], total=0, offset=offset, limit=limit)
-
-
-@router.post(
-    "/{finding_id}:accept-risk",
-    response_model=AcceptRiskResponse,
-    summary="Accept risk for a confirmed finding",
-)
-async def accept_risk(
-    finding_id: UUID,
-    body: AcceptRiskRequest,
-    tenant_id: TenantId,
-    session: DbSession,
-    auth: AuthCtx,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-):
-    now = datetime.now(timezone.utc)
-    # TODO: verify finding exists, transition to ACCEPTED_RISK, emit audit event
-    return AcceptRiskResponse(
-        id=finding_id,
-        state="ACCEPTED_RISK",
-        justification=body.justification,
-        accepted_by=body.accepted_by or auth["user"],
-        accepted_at=now,
+    rows, total = await repos.list_findings(
+        session,
+        engagement_id=engagement_id,
+        state=state,
+        offset=offset,
+        limit=limit,
+    )
+    return FindingListResponse(
+        items=[_to_summary(r) for r in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
     )
 
 
-@router.post(
-    "/{finding_id}:retest",
-    response_model=RetestResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a retest for a finding",
+@router.get(
+    "/{finding_id}",
+    response_model=FindingDetail,
+    summary="Get finding detail",
 )
-async def create_retest(
+async def get_finding(
     finding_id: UUID,
-    body: RetestRequest,
     tenant_id: TenantId,
     session: DbSession,
     auth: AuthCtx,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
-    now = datetime.now(timezone.utc)
-    # TODO: create retest engagement or action
-    return RetestResponse(
-        retest_id=uuid4(),
-        finding_id=finding_id,
-        state="RETEST_PENDING",
-        created_at=now,
+    row = await repos.get_finding(session, finding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    summary = _to_summary(row)
+    return FindingDetail(
+        **summary.model_dump(),
+        title=row.get("title", ""),
+        evidence_refs=row.get("evidence_refs") or [],
+        capability_refs=row.get("capability_refs") or [],
+        updated_at=row.get("updated_at"),
     )

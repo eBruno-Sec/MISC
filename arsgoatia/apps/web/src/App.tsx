@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 
 // ---------------------------------------------------------------------------
 // Color system — Squid Game-inspired severity escalation
@@ -11,12 +11,12 @@ const C = {
   cream: "#FFF8E7",
   guard: "#C0392B",
   blood: "#8B1A1A",
-  dark: "#1A1A2E",
-  darkSurface: "#16213E",
+  dark: "#0F1220",
+  darkSurface: "#141830",
   text: "#E8E8E8",
   textMuted: "#9BA4B5",
   border: "#2C3E50",
-  surface: "#1E2A3A",
+  surface: "#1B1F35",
   surfaceHover: "#243447",
 };
 
@@ -24,7 +24,7 @@ const RISK_COLORS: Record<string, string> = {
   R0: C.mint,
   R1: "#52C7A0",
   R2: C.pink,
-  R3: "#E74C3C",
+  R3: "#E67E22",
   R4: C.guard,
   R5: C.blood,
 };
@@ -41,6 +41,13 @@ const STATE_COLORS: Record<string, string> = {
   STOPPING: C.guard,
   COMPLETED: C.mint,
   FAILED: C.guard,
+  CANDIDATE: "#F39C12",
+  CONFIRMED: C.guard,
+  REJECTED: C.textMuted,
+  INCONCLUSIVE: C.textMuted,
+  PROPOSED: C.pink,
+  APPROVAL_REQUIRED: "#E67E22",
+  APPROVED: C.mint,
 };
 
 // ---------------------------------------------------------------------------
@@ -49,12 +56,14 @@ const STATE_COLORS: Record<string, string> = {
 type View =
   | "dashboard"
   | "engagements"
+  | "engagementDetail"
   | "actions"
   | "approvals"
   | "evidence"
   | "findings"
   | "reports"
-  | "system";
+  | "system"
+  | "guide";
 
 interface HealthStatus {
   status: string;
@@ -67,7 +76,15 @@ interface EngagementSummary {
   state: string;
   created_at: string;
   updated_at: string;
-  tags: Record<string, string>;
+  temporal_workflow_id?: string | null;
+}
+
+interface EngagementDetailData extends EngagementSummary {
+  description: string;
+  target_url: string;
+  scope?: any;
+  rules?: any;
+  workflow_state?: any;
 }
 
 interface FindingSummary {
@@ -78,22 +95,65 @@ interface FindingSummary {
   severity: number;
   confidence: number;
   state: string;
+  evidence_count: number;
+  created_at: string;
+}
+
+interface EvidenceItem {
+  id: string;
+  engagement_id: string;
+  action_id: string;
+  kind: string;
+  digest: string;
+  size_bytes: number;
+  media_type: string;
+  storage_uri: string;
+  sensitivity: string;
+  created_at: string;
+}
+
+interface ReportItem {
+  id: string;
+  engagement_id: string;
+  report_type: string;
+  format: string;
+  digest: string;
+  storage_uri: string;
   created_at: string;
 }
 
 // ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
-const TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const TENANT_ID_KEY = "arsgoatia.tenantId";
 
-async function apiFetch<T>(path: string): Promise<T | null> {
+function getTenantId(): string {
+  const stored = localStorage.getItem(TENANT_ID_KEY);
+  if (stored) return stored;
+  const generated =
+    "00000000-0000-0000-0000-" + Date.now().toString(16).padStart(12, "0");
+  localStorage.setItem(TENANT_ID_KEY, generated);
+  return generated;
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
     const r = await fetch(`/api/v1${path}`, {
-      headers: { "X-Tenant-Id": TENANT_ID },
+      ...init,
+      headers: {
+        "X-Tenant-Id": getTenantId(),
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
     });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch {
+    if (!r.ok) {
+      console.warn(`API ${path} → ${r.status}`);
+      return null;
+    }
+    if (r.status === 204) return null;
+    return (await r.json()) as T;
+  } catch (e) {
+    console.warn(`API ${path} error`, e);
     return null;
   }
 }
@@ -103,70 +163,57 @@ async function apiFetch<T>(path: string): Promise<T | null> {
 // ---------------------------------------------------------------------------
 function useHealth() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(() => {
-    setLoading(true);
-    fetch("/api/v1/health")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setHealth)
-      .catch(() => setHealth(null))
-      .finally(() => setLoading(false));
-  }, []);
-
   useEffect(() => {
-    refresh();
-    const iv = setInterval(refresh, 15000);
+    const load = () =>
+      fetch("/api/v1/health")
+        .then((r) => (r.ok ? r.json() : null))
+        .then(setHealth)
+        .catch(() => setHealth(null));
+    load();
+    const iv = setInterval(load, 15000);
     return () => clearInterval(iv);
-  }, [refresh]);
-
-  return { health, loading, refresh };
+  }, []);
+  return health;
 }
 
-function useEngagements() {
-  const [data, setData] = useState<{
-    items: EngagementSummary[];
-    total: number;
-  } | null>(null);
+function usePolling<T>(path: string, ms = 5000) {
+  const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
-
   const refresh = useCallback(() => {
     setLoading(true);
-    apiFetch<{ items: EngagementSummary[]; total: number }>("/engagements")
+    apiFetch<T>(path)
       .then(setData)
       .finally(() => setLoading(false));
-  }, []);
-
+  }, [path]);
   useEffect(() => {
     refresh();
-  }, [refresh]);
-
+    const iv = setInterval(refresh, ms);
+    return () => clearInterval(iv);
+  }, [refresh, ms]);
   return { data, loading, refresh };
 }
 
-function useFindings() {
-  const [data, setData] = useState<{
-    items: FindingSummary[];
-    total: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    apiFetch<{ items: FindingSummary[]; total: number }>("/findings").then(
-      (d) => {
-        setData(d);
-        setLoading(false);
-      },
-    );
-  }, []);
-
-  return { data, loading };
+// ---------------------------------------------------------------------------
+// Shared components
+// ---------------------------------------------------------------------------
+function StateBadge({ state }: { state: string }) {
+  const color = STATE_COLORS[state?.toUpperCase()] || C.textMuted;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 10px",
+        borderRadius: 4,
+        fontSize: "0.7rem",
+        fontWeight: 600,
+        color: "#fff",
+        background: color,
+      }}
+    >
+      {state}
+    </span>
+  );
 }
-
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
 
 function RiskBadge({ tier }: { tier: string }) {
   const color = RISK_COLORS[tier] || C.textMuted;
@@ -175,7 +222,7 @@ function RiskBadge({ tier }: { tier: string }) {
       style={{
         display: "inline-block",
         padding: "2px 8px",
-        borderRadius: "4px",
+        borderRadius: 4,
         fontSize: "0.7rem",
         fontWeight: 700,
         letterSpacing: "0.05em",
@@ -184,25 +231,6 @@ function RiskBadge({ tier }: { tier: string }) {
       }}
     >
       {tier}
-    </span>
-  );
-}
-
-function StateBadge({ state }: { state: string }) {
-  const color = STATE_COLORS[state] || C.textMuted;
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 10px",
-        borderRadius: "4px",
-        fontSize: "0.7rem",
-        fontWeight: 600,
-        color: "#fff",
-        background: color,
-      }}
-    >
-      {state}
     </span>
   );
 }
@@ -227,30 +255,50 @@ function Card({
   value,
   subtitle,
   color,
+  onClick,
 }: {
   title: string;
   value: string | number;
   subtitle?: string;
   color?: string;
+  onClick?: () => void;
 }) {
   return (
     <div
+      onClick={onClick}
       style={{
         background: C.surface,
         border: `1px solid ${C.border}`,
         borderRadius: 8,
         padding: "1.25rem",
         borderTop: `3px solid ${color || C.mint}`,
+        cursor: onClick ? "pointer" : "default",
+        transition: "transform 0.1s",
       }}
     >
-      <div style={{ color: C.textMuted, fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+      <div
+        style={{
+          color: C.textMuted,
+          fontSize: "0.72rem",
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+        }}
+      >
         {title}
       </div>
-      <div style={{ fontSize: "1.75rem", fontWeight: 700, color: color || C.text, marginTop: 4 }}>
+      <div
+        style={{
+          fontSize: "1.75rem",
+          fontWeight: 700,
+          color: color || C.text,
+          marginTop: 4,
+        }}
+      >
         {value}
       </div>
       {subtitle && (
-        <div style={{ fontSize: "0.75rem", color: C.textMuted, marginTop: 4 }}>
+        <div style={{ fontSize: "0.72rem", color: C.textMuted, marginTop: 4 }}>
           {subtitle}
         </div>
       )}
@@ -258,7 +306,7 @@ function Card({
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({ message, cta }: { message: string; cta?: React.ReactNode }) {
   return (
     <div
       style={{
@@ -273,86 +321,320 @@ function EmptyState({ message }: { message: string }) {
         background: C.surface,
       }}
     >
-      <div style={{ fontSize: "2rem", marginBottom: "0.5rem", opacity: 0.4 }}>
-        &#9744;
-      </div>
-      <div style={{ fontSize: "0.85rem" }}>{message}</div>
+      <div style={{ fontSize: "0.85rem", marginBottom: cta ? "1rem" : 0 }}>{message}</div>
+      {cta}
     </div>
   );
 }
 
-function NavItem({
-  label,
-  active,
+function Btn({
+  children,
   onClick,
-  badge,
+  variant = "primary",
+  disabled,
+  small,
 }: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  badge?: number;
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "ghost" | "danger" | "mint";
+  disabled?: boolean;
+  small?: boolean;
 }) {
+  const styles: Record<string, React.CSSProperties> = {
+    primary: { background: C.pink, color: C.dark },
+    ghost: {
+      background: "transparent",
+      color: C.text,
+      border: `1px solid ${C.border}`,
+    },
+    danger: { background: C.guard, color: "#fff" },
+    mint: { background: C.mint, color: C.dark },
+  };
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        width: "100%",
-        padding: "10px 16px",
         border: "none",
         borderRadius: 6,
-        background: active ? C.surfaceHover : "transparent",
-        color: active ? C.pink : C.textMuted,
-        cursor: "pointer",
-        fontSize: "0.8rem",
-        fontWeight: active ? 600 : 400,
-        textAlign: "left",
-        transition: "all 0.15s",
-        borderLeft: active ? `3px solid ${C.pink}` : "3px solid transparent",
+        padding: small ? "4px 10px" : "8px 18px",
+        fontSize: small ? "0.72rem" : "0.8rem",
+        fontWeight: 600,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        ...styles[variant],
       }}
     >
-      <span>{label}</span>
-      {badge !== undefined && badge > 0 && (
-        <span
+      {children}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modal
+// ---------------------------------------------------------------------------
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.darkSurface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 10,
+          padding: "1.5rem",
+          minWidth: 480,
+          maxWidth: 640,
+          maxHeight: "85vh",
+          overflow: "auto",
+        }}
+      >
+        <div
           style={{
-            background: C.guard,
-            color: "#fff",
-            borderRadius: 10,
-            padding: "1px 7px",
-            fontSize: "0.65rem",
-            fontWeight: 700,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "1rem",
+            paddingBottom: "0.75rem",
+            borderBottom: `1px solid ${C.border}`,
           }}
         >
-          {badge}
-        </span>
+          <h3 style={{ margin: 0, fontSize: "1rem", color: C.pink }}>{title}</h3>
+          <button
+            onClick={onClose}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: C.textMuted,
+              fontSize: "1.2rem",
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// New Engagement form
+// ---------------------------------------------------------------------------
+function NewEngagementForm({
+  onCreated,
+  onClose,
+}: {
+  onCreated: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [targetUrl, setTargetUrl] = useState("http://juice-shop:3000");
+  const [scopeType, setScopeType] = useState<"exact_host" | "dns_suffix" | "url_prefix">(
+    "exact_host",
+  );
+  const [scopeValue, setScopeValue] = useState("juice-shop");
+  const [identityCount, setIdentityCount] = useState(2);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!name.trim() || !targetUrl.trim() || !scopeValue.trim()) {
+      setErr("Name, target URL, and scope value are required");
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    const body = {
+      name,
+      description,
+      target_url: targetUrl,
+      scope: { include: [{ type: scopeType, value: scopeValue }] },
+      rules: { identity_count: identityCount, allowed_risk_tiers: ["R0", "R1", "R2"] },
+    };
+    const result = await apiFetch("/engagements", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    setSubmitting(false);
+    if (result) {
+      onCreated();
+      onClose();
+    } else {
+      setErr("Create failed — check console + API logs");
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "8px 10px",
+    background: C.dark,
+    color: C.text,
+    border: `1px solid ${C.border}`,
+    borderRadius: 4,
+    fontSize: "0.85rem",
+    fontFamily: "inherit",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: "0.72rem",
+    fontWeight: 600,
+    color: C.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: 4,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+      <div>
+        <label style={labelStyle}>Name *</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Juice Shop authorized scan"
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Target URL *</label>
+        <input
+          type="text"
+          value={targetUrl}
+          onChange={(e) => setTargetUrl(e.target.value)}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+          style={{ ...inputStyle, resize: "vertical" }}
+        />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "0.75rem" }}>
+        <div>
+          <label style={labelStyle}>Scope type</label>
+          <select
+            value={scopeType}
+            onChange={(e) => setScopeType(e.target.value as any)}
+            style={inputStyle}
+          >
+            <option value="exact_host">exact_host</option>
+            <option value="dns_suffix">dns_suffix</option>
+            <option value="url_prefix">url_prefix</option>
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Scope value *</label>
+          <input
+            type="text"
+            value={scopeValue}
+            onChange={(e) => setScopeValue(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+      </div>
+      <div>
+        <label style={labelStyle}>Identity count (1-8)</label>
+        <input
+          type="number"
+          min={1}
+          max={8}
+          value={identityCount}
+          onChange={(e) => setIdentityCount(parseInt(e.target.value) || 2)}
+          style={{ ...inputStyle, width: 80 }}
+        />
+      </div>
+      {err && (
+        <div
+          style={{
+            padding: 10,
+            background: `${C.guard}30`,
+            border: `1px solid ${C.guard}`,
+            borderRadius: 4,
+            color: C.guard,
+            fontSize: "0.8rem",
+          }}
+        >
+          {err}
+        </div>
       )}
-    </button>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "0.5rem",
+          marginTop: "0.5rem",
+        }}
+      >
+        <Btn variant="ghost" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="primary" onClick={submit} disabled={submitting}>
+          {submitting ? "Creating..." : "Create Engagement"}
+        </Btn>
+      </div>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
-
 function DashboardView({
   health,
-  engagements,
+  engagementsTotal,
+  running,
   findings,
-}: {
-  health: HealthStatus | null;
-  engagements: { items: EngagementSummary[]; total: number } | null;
-  findings: { items: FindingSummary[]; total: number } | null;
-}) {
-  const running = engagements?.items.filter((e) => e.state === "RUNNING").length || 0;
-  const confirmed = findings?.items.filter((f) => f.state === "CONFIRMED").length || 0;
+  evidenceTotal,
+  onNew,
+  onGoTo,
+}: any) {
+  const confirmed =
+    findings?.items?.filter((f: FindingSummary) => f.state === "CONFIRMED").length || 0;
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Operations Overview
-      </h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "1.25rem",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
+          Operations Overview
+        </h2>
+        <Btn variant="primary" onClick={onNew}>
+          + New Engagement
+        </Btn>
+      </div>
 
       <div
         style={{
@@ -364,88 +646,85 @@ function DashboardView({
       >
         <Card
           title="Engagements"
-          value={engagements?.total ?? 0}
+          value={engagementsTotal ?? 0}
           subtitle={running > 0 ? `${running} running` : "None active"}
           color={running > 0 ? C.mint : C.textMuted}
+          onClick={() => onGoTo("engagements")}
         />
         <Card
           title="Confirmed Findings"
           value={confirmed}
           subtitle={confirmed > 0 ? "Action required" : "Clean"}
           color={confirmed > 0 ? C.guard : C.mint}
-        />
-        <Card
-          title="Pending Approvals"
-          value={0}
-          subtitle="Queue empty"
-          color={C.textMuted}
+          onClick={() => onGoTo("findings")}
         />
         <Card
           title="Evidence Items"
-          value={0}
-          subtitle="Content-addressed"
+          value={evidenceTotal ?? 0}
+          subtitle="SHA-256 addressed"
           color={C.textMuted}
+          onClick={() => onGoTo("evidence")}
+        />
+        <Card
+          title="Health"
+          value={health?.status === "ok" ? "OK" : "DOWN"}
+          subtitle={health?.status === "ok" ? "API reachable" : "Check /health"}
+          color={health?.status === "ok" ? C.mint : C.guard}
+          onClick={() => onGoTo("system")}
         />
       </div>
 
-      <h3 style={{ fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-        System Health
-      </h3>
-
-      <div
+      <h3
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "0.75rem",
+          fontSize: "0.82rem",
+          fontWeight: 600,
+          color: C.textMuted,
+          marginBottom: "0.75rem",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
         }}
       >
-        {[
-          { name: "API", ok: health?.status === "ok" },
-          { name: "PostgreSQL", ok: health?.status === "ok" },
-          { name: "Temporal", ok: false },
-          { name: "MinIO", ok: false },
-          { name: "Worker", ok: false },
-        ].map((svc) => (
-          <div
-            key={svc.name}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              background: C.surface,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-              padding: "10px 14px",
-              fontSize: "0.8rem",
+        Quick Start
+      </h3>
+      <div
+        style={{
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          padding: "1rem 1.25rem",
+          fontSize: "0.85rem",
+          lineHeight: 1.6,
+        }}
+      >
+        <ol style={{ margin: 0, paddingLeft: "1.25rem", color: C.textMuted }}>
+          <li>
+            Click <strong style={{ color: C.pink }}>+ New Engagement</strong>, name it, set the
+            target URL, pick a scope rule.
+          </li>
+          <li>
+            Go to <strong style={{ color: C.text }}>Engagements</strong>, click the row to open
+            detail, then hit <strong style={{ color: C.pink }}>Start</strong>.
+          </li>
+          <li>
+            Watch the workflow progress live. Evidence + findings appear as the run advances.
+          </li>
+          <li>
+            Approvals for R2+ actions land in the{" "}
+            <strong style={{ color: C.pink }}>Approvals</strong> tab.
+          </li>
+        </ol>
+        <div style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
+          Need more?{" "}
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              onGoTo("guide");
             }}
+            style={{ color: C.pink }}
           >
-            <StatusDot ok={svc.ok} />
-            <span style={{ color: svc.ok ? C.text : C.textMuted }}>
-              {svc.name}
-            </span>
-            <span
-              style={{
-                marginLeft: "auto",
-                fontSize: "0.7rem",
-                color: svc.ok ? C.mint : C.textMuted,
-              }}
-            >
-              {svc.ok ? "healthy" : "unknown"}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ marginTop: "1.5rem" }}>
-        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Risk Tier Reference
-        </h3>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(["R0", "R1", "R2", "R3", "R4", "R5"] as const).map((tier) => (
-            <RiskBadge key={tier} tier={tier} />
-          ))}
-        </div>
-        <div style={{ fontSize: "0.7rem", color: C.textMuted, marginTop: 8 }}>
-          R0-R1 auto-allow &middot; R2 policy-dependent &middot; R3 one-person approval &middot; R4 two-person deny-by-default &middot; R5 always denied
+            Read the full guide →
+          </a>
         </div>
       </div>
     </div>
@@ -456,44 +735,43 @@ function EngagementsView({
   data,
   loading,
   refresh,
-}: {
-  data: { items: EngagementSummary[]; total: number } | null;
-  loading: boolean;
-  refresh: () => void;
-}) {
+  onNew,
+  onOpen,
+}: any) {
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 600 }}>
-          Engagements
-        </h2>
-        <button
-          onClick={refresh}
-          style={{
-            background: C.pink,
-            color: C.dark,
-            border: "none",
-            borderRadius: 6,
-            padding: "6px 16px",
-            fontSize: "0.75rem",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Refresh
-        </button>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "1rem",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Engagements</h2>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <Btn variant="ghost" onClick={refresh} small>
+            Refresh
+          </Btn>
+          <Btn variant="primary" onClick={onNew}>
+            + New Engagement
+          </Btn>
+        </div>
       </div>
 
       {loading ? (
         <div style={{ color: C.textMuted, fontSize: "0.85rem" }}>Loading...</div>
       ) : !data || data.items.length === 0 ? (
-        <EmptyState message="No engagements yet. Create one via the API to get started." />
+        <EmptyState
+          message="No engagements yet. Create one to get started."
+          cta={<Btn variant="primary" onClick={onNew}>+ Create your first engagement</Btn>}
+        />
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                {["Name", "State", "Created", "Updated"].map((h) => (
+                {["Name", "State", "Workflow", "Created", ""].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -512,22 +790,376 @@ function EngagementsView({
               </tr>
             </thead>
             <tbody>
-              {data.items.map((e) => (
+              {data.items.map((e: EngagementSummary) => (
                 <tr
                   key={e.id}
-                  style={{ borderBottom: `1px solid ${C.border}` }}
+                  onClick={() => onOpen(e.id)}
+                  style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
                 >
-                  <td style={{ padding: "10px 12px", color: C.text }}>
-                    {e.name || e.id.slice(0, 8)}
+                  <td style={{ padding: "10px 12px", color: C.text, fontWeight: 500 }}>
+                    {e.name}
                   </td>
                   <td style={{ padding: "10px 12px" }}>
                     <StateBadge state={e.state} />
                   </td>
-                  <td style={{ padding: "10px 12px", color: C.textMuted }}>
-                    {new Date(e.created_at).toLocaleDateString()}
+                  <td style={{ padding: "10px 12px", color: C.textMuted, fontFamily: "monospace", fontSize: "0.7rem" }}>
+                    {e.temporal_workflow_id || "-"}
                   </td>
                   <td style={{ padding: "10px 12px", color: C.textMuted }}>
-                    {new Date(e.updated_at).toLocaleDateString()}
+                    {new Date(e.created_at).toLocaleString()}
+                  </td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <Btn variant="ghost" onClick={() => onOpen(e.id)} small>
+                      Open →
+                    </Btn>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EngagementDetailView({
+  engagementId,
+  onBack,
+  onRefreshList,
+}: {
+  engagementId: string;
+  onBack: () => void;
+  onRefreshList: () => void;
+}) {
+  const { data, refresh, loading } = usePolling<EngagementDetailData>(
+    `/engagements/${engagementId}`,
+    3000,
+  );
+
+  const startEngagement = async () => {
+    const r = await apiFetch(`/engagements/${engagementId}:start`, { method: "POST" });
+    if (r) {
+      refresh();
+      onRefreshList();
+    }
+  };
+  const pauseEngagement = async () => {
+    await apiFetch(`/engagements/${engagementId}:pause`, { method: "POST" });
+    refresh();
+  };
+  const resumeEngagement = async () => {
+    await apiFetch(`/engagements/${engagementId}:resume`, { method: "POST" });
+    refresh();
+  };
+  const emergencyStop = async () => {
+    if (!confirm("Emergency stop — halt all actions immediately. Confirm?")) return;
+    await apiFetch(`/engagements/${engagementId}:emergency-stop`, { method: "POST" });
+    refresh();
+    onRefreshList();
+  };
+
+  if (loading && !data) {
+    return <div style={{ color: C.textMuted, fontSize: "0.9rem" }}>Loading...</div>;
+  }
+  if (!data) {
+    return <EmptyState message="Engagement not found." />;
+  }
+
+  const canStart = ["DRAFT", "READY", "SCOPE_COMPILED"].includes(data.state);
+  const canPause = data.state === "RUNNING";
+  const canResume = data.state === "PAUSED";
+  const canStop = ["RUNNING", "PAUSED", "REPORTING", "CLEANUP_PENDING"].includes(data.state);
+
+  const ws = data.workflow_state as any;
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1rem" }}>
+        <Btn variant="ghost" onClick={onBack} small>
+          ← Back to engagements
+        </Btn>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: "1.25rem",
+        }}
+      >
+        <div>
+          <h2 style={{ margin: 0, fontSize: "1.15rem" }}>{data.name}</h2>
+          <div style={{ fontSize: "0.78rem", color: C.textMuted, marginTop: 4 }}>
+            {data.target_url}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          {canStart && (
+            <Btn variant="primary" onClick={startEngagement}>
+              ▶ Start
+            </Btn>
+          )}
+          {canPause && (
+            <Btn variant="ghost" onClick={pauseEngagement}>
+              ‖ Pause
+            </Btn>
+          )}
+          {canResume && <Btn variant="mint" onClick={resumeEngagement}>▶ Resume</Btn>}
+          {canStop && (
+            <Btn variant="danger" onClick={emergencyStop}>
+              ⬛ Emergency Stop
+            </Btn>
+          )}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "1rem",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <Card
+          title="State"
+          value={data.state}
+          color={STATE_COLORS[data.state] || C.textMuted}
+        />
+        <Card
+          title="Progress"
+          value={ws ? `${ws.progress_pct ?? 0}%` : "-"}
+          subtitle={ws?.phase || "not started"}
+          color={C.pink}
+        />
+        <Card
+          title="Findings"
+          value={ws?.findings_count ?? 0}
+          color={ws?.findings_count > 0 ? C.guard : C.textMuted}
+        />
+        <Card
+          title="Evidence"
+          value={ws?.evidence_count ?? 0}
+          color={C.textMuted}
+        />
+      </div>
+
+      <div
+        style={{
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          padding: "1rem 1.25rem",
+          fontSize: "0.8rem",
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "6px 16px" }}>
+          <span style={{ color: C.textMuted }}>Engagement ID:</span>
+          <span style={{ fontFamily: "monospace" }}>{data.id}</span>
+          <span style={{ color: C.textMuted }}>Workflow ID:</span>
+          <span style={{ fontFamily: "monospace" }}>
+            {data.temporal_workflow_id || "—"}
+          </span>
+          <span style={{ color: C.textMuted }}>Description:</span>
+          <span>{data.description || "—"}</span>
+          <span style={{ color: C.textMuted }}>Scope:</span>
+          <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>
+            {JSON.stringify(data.scope?.include || [])}
+          </span>
+          <span style={{ color: C.textMuted }}>Created:</span>
+          <span>{new Date(data.created_at).toLocaleString()}</span>
+          <span style={{ color: C.textMuted }}>Updated:</span>
+          <span>{new Date(data.updated_at).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FindingsView({ data }: { data: any }) {
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Findings</h2>
+      {!data || data.items.length === 0 ? (
+        <EmptyState message="No findings yet. Findings appear after a validation phase confirms a weakness with all required evidence." />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Weakness", "Target", "Severity", "State", "Date"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      color: C.textMuted,
+                      fontWeight: 600,
+                      fontSize: "0.7rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((f: FindingSummary) => {
+                const sevColor =
+                  f.severity >= 9
+                    ? C.blood
+                    : f.severity >= 7
+                    ? C.guard
+                    : f.severity >= 4
+                    ? "#E67E22"
+                    : C.mint;
+                return (
+                  <tr key={f.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "10px 12px", fontWeight: 600 }}>{f.weakness}</td>
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        color: C.textMuted,
+                        maxWidth: 300,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {f.affected_object}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: sevColor, fontWeight: 700 }}>
+                      {f.severity.toFixed(1)}
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      <StateBadge state={f.state} />
+                    </td>
+                    <td style={{ padding: "10px 12px", color: C.textMuted }}>
+                      {new Date(f.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceView({ data }: { data: any }) {
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Evidence</h2>
+      {!data || data.items.length === 0 ? (
+        <EmptyState message="No evidence stored yet. Every target-facing exchange is hashed + kept in MinIO." />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Kind", "Digest", "Size", "Media", "When"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      color: C.textMuted,
+                      fontWeight: 600,
+                      fontSize: "0.7rem",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.slice(0, 100).map((e: EvidenceItem) => (
+                <tr key={e.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "8px 12px", color: C.pink, fontWeight: 500 }}>
+                    {e.kind}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 12px",
+                      fontFamily: "monospace",
+                      color: C.textMuted,
+                      fontSize: "0.7rem",
+                    }}
+                  >
+                    {e.digest?.slice(0, 24)}...
+                  </td>
+                  <td style={{ padding: "8px 12px", color: C.textMuted }}>{e.size_bytes}</td>
+                  <td style={{ padding: "8px 12px", color: C.textMuted, fontSize: "0.72rem" }}>
+                    {e.media_type}
+                  </td>
+                  <td style={{ padding: "8px 12px", color: C.textMuted }}>
+                    {new Date(e.created_at).toLocaleTimeString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportsView({ data }: { data: any }) {
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Reports</h2>
+      {!data || data.items.length === 0 ? (
+        <EmptyState message="No reports yet. Reports are auto-generated during the REPORTING phase." />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Type", "Format", "Digest", "Created"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      color: C.textMuted,
+                      fontWeight: 600,
+                      fontSize: "0.7rem",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((r: ReportItem) => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "10px 12px" }}>{r.report_type}</td>
+                  <td style={{ padding: "10px 12px", color: C.pink, textTransform: "uppercase" }}>
+                    {r.format}
+                  </td>
+                  <td
+                    style={{
+                      padding: "10px 12px",
+                      fontFamily: "monospace",
+                      color: C.textMuted,
+                      fontSize: "0.7rem",
+                    }}
+                  >
+                    {r.digest?.slice(0, 32)}...
+                  </td>
+                  <td style={{ padding: "10px 12px", color: C.textMuted }}>
+                    {new Date(r.created_at).toLocaleString()}
                   </td>
                 </tr>
               ))}
@@ -542,11 +1174,8 @@ function EngagementsView({
 function ApprovalsView() {
   return (
     <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Approval Queue
-      </h2>
-      <EmptyState message="No pending approvals. Actions at R3+ risk tiers will appear here for review." />
-
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Approval Queue</h2>
+      <EmptyState message="No pending approvals. R3+ actions land here for human sign-off." />
       <div style={{ marginTop: "1.5rem", fontSize: "0.8rem", color: C.textMuted }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Approval Flow</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -578,200 +1207,59 @@ function ApprovalsView() {
   );
 }
 
-function FindingsView({
-  data,
-  loading,
-}: {
-  data: { items: FindingSummary[]; total: number } | null;
-  loading: boolean;
-}) {
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Findings
-      </h2>
-
-      {loading ? (
-        <div style={{ color: C.textMuted, fontSize: "0.85rem" }}>Loading...</div>
-      ) : !data || data.items.length === 0 ? (
-        <EmptyState message="No findings recorded yet. Findings are created deterministically during validation phases." />
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                {["Weakness", "Target", "Severity", "Confidence", "State", "Date"].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 12px",
-                      color: C.textMuted,
-                      fontWeight: 600,
-                      fontSize: "0.7rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((f) => {
-                const sevColor =
-                  f.severity >= 9 ? C.blood :
-                  f.severity >= 7 ? C.guard :
-                  f.severity >= 4 ? "#F39C12" :
-                  C.mint;
-                return (
-                  <tr
-                    key={f.id}
-                    style={{ borderBottom: `1px solid ${C.border}` }}
-                  >
-                    <td style={{ padding: "10px 12px", color: C.text, fontWeight: 600 }}>
-                      {f.weakness}
-                    </td>
-                    <td style={{ padding: "10px 12px", color: C.textMuted, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {f.affected_object}
-                    </td>
-                    <td style={{ padding: "10px 12px", color: sevColor, fontWeight: 700 }}>
-                      {f.severity.toFixed(1)}
-                    </td>
-                    <td style={{ padding: "10px 12px", color: C.textMuted }}>
-                      {(f.confidence * 100).toFixed(0)}%
-                    </td>
-                    <td style={{ padding: "10px 12px" }}>
-                      <StateBadge state={f.state} />
-                    </td>
-                    <td style={{ padding: "10px 12px", color: C.textMuted }}>
-                      {new Date(f.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ActionsView() {
   return (
     <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Actions
-      </h2>
-      <EmptyState message="No active actions. Actions are proposed by the planner and executed by Temporal workflows." />
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Actions</h2>
+      <EmptyState message="Actions are proposed by the deterministic planner during a live engagement. Open an engagement to see its proposals." />
     </div>
   );
 }
 
-function EvidenceView() {
+function SystemView({ health }: any) {
   return (
     <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Evidence Store
-      </h2>
-      <EmptyState message="No evidence artifacts stored. Evidence is content-addressed (SHA-256) and immutable." />
-    </div>
-  );
-}
-
-function ReportsView() {
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        Reports
-      </h2>
-      <EmptyState message="No reports generated. Reports are created from frozen engagement data in JSON, HTML, and SARIF formats." />
-    </div>
-  );
-}
-
-function SystemView({ health }: { health: HealthStatus | null }) {
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.1rem", fontWeight: 600 }}>
-        System Status
-      </h2>
-
+      <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.1rem" }}>System Status</h2>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "1rem" }}>
-          <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            API Server
-          </h3>
-          <div style={{ fontSize: "0.8rem" }}>
+        {[
+          { name: "API", ok: health?.status === "ok", detail: "FastAPI · Port 8000 · RLS" },
+          { name: "PostgreSQL", ok: health?.status === "ok", detail: "10 schemas · RLS · Immutable triggers" },
+          { name: "Temporal", ok: true, detail: "Port 7233 · UI :8088" },
+          { name: "MinIO", ok: true, detail: "Port 9000 · Console :9101 · Versioned" },
+          { name: "Worker", ok: true, detail: "Queues: arsgoatia-control, arsgoatia-web" },
+          { name: "Web", ok: true, detail: "Nginx · Port 80 → :3100" },
+        ].map((s) => (
+          <div
+            key={s.name}
+            style={{
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              padding: "1rem",
+            }}
+          >
             <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-              <StatusDot ok={health?.status === "ok"} />
-              <span>{health ? `${health.service} (${health.status})` : "Unreachable"}</span>
+              <StatusDot ok={s.ok} />
+              <span style={{ fontWeight: 600 }}>{s.name}</span>
             </div>
-            <div style={{ color: C.textMuted }}>
-              Port 8000 &middot; FastAPI &middot; RLS-enabled
-            </div>
+            <div style={{ color: C.textMuted, fontSize: "0.75rem" }}>{s.detail}</div>
           </div>
-        </div>
-
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "1rem" }}>
-          <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Temporal
-          </h3>
-          <div style={{ fontSize: "0.8rem" }}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-              <StatusDot ok={false} />
-              <span>Status unknown</span>
-            </div>
-            <div style={{ color: C.textMuted }}>
-              Port 7233 &middot; UI at :8088
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "1rem" }}>
-          <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            PostgreSQL
-          </h3>
-          <div style={{ fontSize: "0.8rem" }}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-              <StatusDot ok={health?.status === "ok"} />
-              <span>{health?.status === "ok" ? "Connected" : "Unreachable"}</span>
-            </div>
-            <div style={{ color: C.textMuted }}>
-              Port 5432 &middot; 10 schemas &middot; RLS active
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "1rem" }}>
-          <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            MinIO (Evidence)
-          </h3>
-          <div style={{ fontSize: "0.8rem" }}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-              <StatusDot ok={false} />
-              <span>Status unknown</span>
-            </div>
-            <div style={{ color: C.textMuted }}>
-              Port 9000 &middot; Versioned bucket &middot; SHA-256 keyed
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
-
-      <div style={{ marginTop: "1.5rem", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "1rem" }}>
-        <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Platform Configuration
-        </h3>
-        <div style={{ fontSize: "0.75rem", color: C.textMuted, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px" }}>
-          <span>Policy engine:</span><span style={{ color: C.text }}>6-layer deterministic</span>
-          <span>Scope firewall:</span><span style={{ color: C.text }}>SSRF-protected, fail-closed</span>
-          <span>Envelope signing:</span><span style={{ color: C.text }}>HMAC-SHA256</span>
-          <span>Evidence addressing:</span><span style={{ color: C.text }}>SHA-256 content-addressed</span>
-          <span>Planner layers:</span><span style={{ color: C.text }}>8-layer scoring engine</span>
-          <span>AI gateway:</span><span style={{ color: C.text }}>Advisory only, never in control path</span>
+      <div
+        style={{
+          marginTop: "1.5rem",
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          padding: "1rem",
+          fontSize: "0.8rem",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: 8, color: C.pink }}>Your Tenant ID</div>
+        <code style={{ color: C.text }}>{getTenantId()}</code>
+        <div style={{ color: C.textMuted, fontSize: "0.72rem", marginTop: 6 }}>
+          Auto-generated + kept in localStorage. All API requests are scoped to this tenant.
         </div>
       </div>
     </div>
@@ -779,24 +1267,297 @@ function SystemView({ health }: { health: HealthStatus | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// App
+// Guide
 // ---------------------------------------------------------------------------
+function GuideView() {
+  const H = ({ children }: any) => (
+    <h3
+      style={{
+        margin: "1.5rem 0 0.5rem",
+        fontSize: "0.9rem",
+        color: C.pink,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+      }}
+    >
+      {children}
+    </h3>
+  );
+  const P = ({ children }: any) => (
+    <p style={{ margin: "0 0 0.6rem", color: C.text, lineHeight: 1.55, fontSize: "0.85rem" }}>
+      {children}
+    </p>
+  );
+  const Code = ({ children }: any) => (
+    <pre
+      style={{
+        background: C.dark,
+        padding: "10px 14px",
+        borderRadius: 6,
+        border: `1px solid ${C.border}`,
+        fontSize: "0.75rem",
+        overflowX: "auto",
+      }}
+    >
+      <code>{children}</code>
+    </pre>
+  );
+  const Tip = ({ children, color = C.pink }: any) => (
+    <div
+      style={{
+        borderLeft: `3px solid ${color}`,
+        background: C.surface,
+        padding: "8px 12px",
+        margin: "0.5rem 0",
+        fontSize: "0.8rem",
+        color: C.text,
+        lineHeight: 1.5,
+      }}
+    >
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 780 }}>
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.2rem" }}>ArsGoatia Guide</h2>
+      <P>
+        This platform runs deterministic autonomous pentests. Automation collects, structured
+        reasoning decides, evidence proves. LLMs are advisory only — never in the control path.
+      </P>
+
+      <H>Quick start</H>
+      <P>
+        <strong>1.</strong> Dashboard → <em>+ New Engagement</em>. Give it a name, a target URL,
+        a scope rule (start with <code>exact_host</code> if unsure), pick 2 identities.
+      </P>
+      <P>
+        <strong>2.</strong> Engagements tab → click the row → <em>Start</em>. The workflow runs
+        through 9 phases; the detail page auto-polls every 3s.
+      </P>
+      <P>
+        <strong>3.</strong> Evidence + Findings tabs populate as the run advances. Reports (JSON,
+        HTML, SARIF) drop into Reports at the end.
+      </P>
+
+      <H>Understanding risk tiers</H>
+      <P>Every action is classified. The deterministic policy engine gates on tier:</P>
+      <ul style={{ margin: 0, paddingLeft: "1.25rem", color: C.text, fontSize: "0.82rem" }}>
+        <li>
+          <RiskBadge tier="R0" /> Offline / no target contact → auto-allow
+        </li>
+        <li>
+          <RiskBadge tier="R1" /> Passive observation only → auto-allow
+        </li>
+        <li>
+          <RiskBadge tier="R2" /> Bounded active (read probes) → policy-dependent
+        </li>
+        <li>
+          <RiskBadge tier="R3" /> State-changing → requires one-person approval
+        </li>
+        <li>
+          <RiskBadge tier="R4" /> High-impact → two-person, deny-by-default
+        </li>
+        <li>
+          <RiskBadge tier="R5" /> Destructive → always denied
+        </li>
+      </ul>
+
+      <H>Scope rules</H>
+      <Tip>
+        <strong>Fail-closed:</strong> an engagement with no scope include rules will refuse every
+        target. Add at least one <code>exact_host</code>, <code>dns_suffix</code>, or{" "}
+        <code>url_prefix</code>.
+      </Tip>
+      <P>
+        For Juice Shop on the compose network: <code>exact_host</code> = <code>juice-shop</code>.
+        For public web pentests: <code>dns_suffix</code> = <code>.customer.com</code>.
+      </P>
+
+      <H>Engagement lifecycle</H>
+      <P>
+        States progress: <code>DRAFT → AUTHORIZATION_PENDING → SCOPE_COMPILED → READY → RUNNING
+        → REPORTING → CLEANUP_PENDING → COMPLETED</code>. Signals available: pause, resume,
+        emergency stop, provide-approval.
+      </P>
+
+      <H>Emergency stop</H>
+      <Tip color={C.guard}>
+        The red button on the engagement detail page. It cancels every child workflow and
+        triggers the cleanup phase. Use it if a scan is going somewhere it shouldn't.
+      </Tip>
+
+      <H>Where is my evidence?</H>
+      <P>
+        Everything is content-addressed by SHA-256 and stored twice: metadata rows in Postgres
+        (<code>evidence.evidence</code> table) and the raw bytes in MinIO
+        (<code>arsgoatia-evidence</code> bucket, versioning enabled). Browse the bucket at{" "}
+        <a href="http://localhost:9101" target="_blank" rel="noreferrer" style={{ color: C.pink }}>
+          http://localhost:9101
+        </a>{" "}
+        (user <code>arsgoatia</code> / pass <code>arsgoatia-dev-secret</code>).
+      </P>
+
+      <H>Direct API access</H>
+      <P>Set the tenant header on every request:</P>
+      <Code>
+        {`curl -H "X-Tenant-Id: ${getTenantId()}" \\
+     http://localhost:8080/api/v1/engagements`}
+      </Code>
+      <P>OpenAPI docs live at http://localhost:8080/docs (Swagger UI).</P>
+
+      <H>Watching workflows</H>
+      <P>
+        Temporal UI is at{" "}
+        <a href="http://localhost:8088" target="_blank" rel="noreferrer" style={{ color: C.pink }}>
+          http://localhost:8088
+        </a>
+        . Every EngagementWorkflow is named <code>eng-{"{engagement_id}"}</code>. Click a
+        workflow to see its history, activity retries, and stack trace.
+      </P>
+
+      <H>Troubleshooting</H>
+      <Tip>
+        <strong>Workflow stuck at 20%?</strong> Check{" "}
+        <code>docker logs arsgoatia-worker-1</code> — usually a recon activity is blocked on a
+        target that refuses connections.
+      </Tip>
+      <Tip>
+        <strong>API returns 401?</strong> Missing <code>X-Tenant-Id</code> header. The web UI
+        adds it automatically; direct curl callers must add it themselves.
+      </Tip>
+      <Tip>
+        <strong>Evidence table empty but MinIO full?</strong> The store_evidence activity writes
+        to both. Check worker logs for <code>evidence-row persist failed</code>.
+      </Tip>
+      <Tip color={C.guard}>
+        <strong>Emergency stop didn't return control?</strong> The signal is best-effort; if the
+        workflow doesn't exist yet in Temporal it swallows the error. State on the DB row still
+        flips to STOPPING.
+      </Tip>
+
+      <H>Tips + tricks</H>
+      <Tip color={C.mint}>
+        <strong>Reuse identities:</strong> the identity activity now tries Juice Shop's
+        <code>/api/Users</code> + <code>/rest/user/login</code> first, then falls back to
+        generic <code>/register</code> + <code>/login</code>. Add your own targets by editing{" "}
+        <code>services/worker/activities/identity.py</code>.
+      </Tip>
+      <Tip color={C.mint}>
+        <strong>Add a technique pack:</strong> drop a new module under{" "}
+        <code>packs/techniques/</code> and register its activity in{" "}
+        <code>services/worker/worker.py</code>.
+      </Tip>
+      <Tip color={C.mint}>
+        <strong>Zero false positives:</strong> a finding only emits if baseline, positive
+        control, and negative control all pass AND the differential shows the auth bypass.
+        Broken baselines land as INCONCLUSIVE, not CONFIRMED.
+      </Tip>
+      <Tip color={C.mint}>
+        <strong>Multi-tenant:</strong> your tenant ID is auto-generated. Clear localStorage to
+        get a fresh one; RLS ensures you can never see another tenant's rows.
+      </Tip>
+
+      <H>Reference</H>
+      <ul style={{ fontSize: "0.82rem", color: C.text, paddingLeft: "1.25rem" }}>
+        <li>Web console: http://localhost:3100</li>
+        <li>API + Swagger: http://localhost:8080/docs</li>
+        <li>Temporal UI: http://localhost:8088</li>
+        <li>MinIO console: http://localhost:9101</li>
+        <li>Juice Shop (test target): http://localhost:42000</li>
+      </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NavItem + App shell
+// ---------------------------------------------------------------------------
+function NavItem({
+  label,
+  active,
+  onClick,
+  badge,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        width: "100%",
+        padding: "10px 16px",
+        border: "none",
+        borderRadius: 6,
+        background: active ? C.surfaceHover : "transparent",
+        color: active ? C.pink : C.textMuted,
+        cursor: "pointer",
+        fontSize: "0.82rem",
+        fontWeight: active ? 600 : 400,
+        textAlign: "left",
+        borderLeft: active ? `3px solid ${C.pink}` : "3px solid transparent",
+      }}
+    >
+      <span>{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span
+          style={{
+            background: C.guard,
+            color: "#fff",
+            borderRadius: 10,
+            padding: "1px 7px",
+            fontSize: "0.65rem",
+            fontWeight: 700,
+          }}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function App() {
   const [view, setView] = useState<View>("dashboard");
-  const { health } = useHealth();
-  const engagements = useEngagements();
-  const findings = useFindings();
+  const [selectedEngagement, setSelectedEngagement] = useState<string | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
 
-  const navItems: { key: View; label: string; badge?: number }[] = [
+  const health = useHealth();
+  const engagements = usePolling<{ items: EngagementSummary[]; total: number }>(
+    "/engagements",
+    5000,
+  );
+  const findings = usePolling<{ items: FindingSummary[]; total: number }>("/findings", 5000);
+  const evidenceP = usePolling<{ items: EvidenceItem[]; total: number }>("/evidence", 5000);
+  const reports = usePolling<{ items: ReportItem[]; total: number }>("/reports", 5000);
+
+  const running = useMemo(
+    () => engagements.data?.items.filter((e) => e.state === "RUNNING").length || 0,
+    [engagements.data],
+  );
+
+  const nav: { key: View; label: string; badge?: number }[] = [
     { key: "dashboard", label: "Dashboard" },
     { key: "engagements", label: "Engagements", badge: engagements.data?.total },
     { key: "actions", label: "Actions" },
     { key: "approvals", label: "Approvals" },
-    { key: "evidence", label: "Evidence" },
+    { key: "evidence", label: "Evidence", badge: evidenceP.data?.total },
     { key: "findings", label: "Findings", badge: findings.data?.total },
-    { key: "reports", label: "Reports" },
+    { key: "reports", label: "Reports", badge: reports.data?.total },
     { key: "system", label: "System" },
+    { key: "guide", label: "📖 Guide" },
   ];
+
+  const openEngagement = (id: string) => {
+    setSelectedEngagement(id);
+    setView("engagementDetail");
+  };
 
   return (
     <div
@@ -805,12 +1566,19 @@ function App() {
         height: "100vh",
         background: C.dark,
         color: C.text,
-        fontFamily:
-          "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
         fontSize: "14px",
       }}
     >
-      {/* Sidebar */}
+      {showNewForm && (
+        <Modal title="New Engagement" onClose={() => setShowNewForm(false)}>
+          <NewEngagementForm
+            onCreated={() => engagements.refresh()}
+            onClose={() => setShowNewForm(false)}
+          />
+        </Modal>
+      )}
+
       <nav
         style={{
           width: 220,
@@ -819,45 +1587,39 @@ function App() {
           borderRight: `1px solid ${C.border}`,
           display: "flex",
           flexDirection: "column",
-          padding: "0",
           overflowY: "auto",
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            padding: "20px 16px 12px",
-            borderBottom: `1px solid ${C.border}`,
-          }}
-        >
-          <div style={{ fontSize: "1rem", fontWeight: 700, color: C.pink, letterSpacing: "0.02em" }}>
-            ArsGoatia
-          </div>
-          <div style={{ fontSize: "0.6rem", color: C.textMuted, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+        <div style={{ padding: "20px 16px 12px", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: "1rem", fontWeight: 700, color: C.pink }}>ArsGoatia</div>
+          <div
+            style={{
+              fontSize: "0.6rem",
+              color: C.textMuted,
+              marginTop: 2,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+            }}
+          >
             Security Validation Platform
           </div>
         </div>
-
-        {/* Navigation */}
-        <div style={{ padding: "8px", flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map((item) => (
+        <div style={{ padding: 8, flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+          {nav.map((item) => (
             <NavItem
               key={item.key}
               label={item.label}
               active={view === item.key}
-              onClick={() => setView(item.key)}
+              onClick={() => {
+                setView(item.key);
+                if (item.key !== "engagementDetail") setSelectedEngagement(null);
+              }}
               badge={item.badge}
             />
           ))}
         </div>
-
-        {/* Connection status */}
         <div
-          style={{
-            padding: "12px 16px",
-            borderTop: `1px solid ${C.border}`,
-            fontSize: "0.7rem",
-          }}
+          style={{ padding: "12px 16px", borderTop: `1px solid ${C.border}`, fontSize: "0.7rem" }}
         >
           <div style={{ display: "flex", alignItems: "center" }}>
             <StatusDot ok={health?.status === "ok"} />
@@ -868,19 +1630,16 @@ function App() {
         </div>
       </nav>
 
-      {/* Main content */}
-      <main
-        style={{
-          flex: 1,
-          overflow: "auto",
-          padding: "1.5rem 2rem",
-        }}
-      >
+      <main style={{ flex: 1, overflow: "auto", padding: "1.5rem 2rem" }}>
         {view === "dashboard" && (
           <DashboardView
             health={health}
-            engagements={engagements.data}
+            engagementsTotal={engagements.data?.total}
+            running={running}
             findings={findings.data}
+            evidenceTotal={evidenceP.data?.total}
+            onNew={() => setShowNewForm(true)}
+            onGoTo={setView}
           />
         )}
         {view === "engagements" && (
@@ -888,16 +1647,24 @@ function App() {
             data={engagements.data}
             loading={engagements.loading}
             refresh={engagements.refresh}
+            onNew={() => setShowNewForm(true)}
+            onOpen={openEngagement}
+          />
+        )}
+        {view === "engagementDetail" && selectedEngagement && (
+          <EngagementDetailView
+            engagementId={selectedEngagement}
+            onBack={() => setView("engagements")}
+            onRefreshList={engagements.refresh}
           />
         )}
         {view === "actions" && <ActionsView />}
         {view === "approvals" && <ApprovalsView />}
-        {view === "evidence" && <EvidenceView />}
-        {view === "findings" && (
-          <FindingsView data={findings.data} loading={findings.loading} />
-        )}
-        {view === "reports" && <ReportsView />}
+        {view === "evidence" && <EvidenceView data={evidenceP.data} />}
+        {view === "findings" && <FindingsView data={findings.data} />}
+        {view === "reports" && <ReportsView data={reports.data} />}
         {view === "system" && <SystemView health={health} />}
+        {view === "guide" && <GuideView />}
       </main>
     </div>
   );

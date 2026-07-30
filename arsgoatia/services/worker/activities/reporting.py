@@ -2,10 +2,101 @@ from __future__ import annotations
 
 import html
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from temporalio import activity
+
+
+async def _persist_report_row(
+    *,
+    tenant_id: str,
+    engagement_id: str,
+    report_type: str,
+    fmt: str,
+    digest: str,
+    storage_uri: str,
+) -> None:
+    from sqlalchemy import text  # noqa: PLC0415
+
+    from packages.persistence import get_session_factory, set_tenant  # noqa: PLC0415
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                await set_tenant(session, tenant_id)
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO reporting.report
+                            (id, tenant_id, engagement_id, report_type, format,
+                             digest, storage_uri, created_at)
+                        VALUES
+                            (:id, :tid, :eid, :rt, :fmt, :dg, :uri, :now)
+                        """
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "tid": tenant_id,
+                        "eid": engagement_id,
+                        "rt": report_type,
+                        "fmt": fmt,
+                        "dg": digest,
+                        "uri": storage_uri,
+                        "now": datetime.now(timezone.utc),
+                    },
+                )
+    except Exception as exc:
+        activity.logger.warning(f"report-row persist failed: {exc}")
+
+
+async def _persist_finding_row(
+    *,
+    tenant_id: str,
+    engagement_id: str,
+    finding_id: str,
+    technique: str,
+    target: str,
+    title: str,
+    severity: str,
+    evidence_refs: list[str],
+) -> None:
+    from sqlalchemy import text  # noqa: PLC0415
+
+    from packages.persistence import get_session_factory, set_tenant  # noqa: PLC0415
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                await set_tenant(session, tenant_id)
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO findings.finding
+                            (id, tenant_id, engagement_id, state, technique_id, target,
+                             title, severity, evidence_refs, capability_refs, created_at, updated_at)
+                        VALUES
+                            (:id, :tid, :eid, 'CONFIRMED', :tech, :tgt, :title, :sev,
+                             CAST(:refs AS jsonb), '[]'::jsonb, :now, :now)
+                        """
+                    ),
+                    {
+                        "id": finding_id,
+                        "tid": tenant_id,
+                        "eid": engagement_id,
+                        "tech": technique,
+                        "tgt": target,
+                        "title": title,
+                        "sev": severity,
+                        "refs": json.dumps(evidence_refs),
+                        "now": datetime.now(timezone.utc),
+                    },
+                )
+    except Exception as exc:
+        activity.logger.warning(f"finding-row persist failed: {exc}")
 
 
 @dataclass
@@ -54,6 +145,14 @@ async def generate_reports(params: ReportParams) -> ReportResult:
             payload=json.dumps(json_report, sort_keys=True, indent=2).encode(),
         )
     )
+    await _persist_report_row(
+        tenant_id=params.tenant_id,
+        engagement_id=params.engagement_id,
+        report_type="engagement",
+        fmt="json",
+        digest=json_id,
+        storage_uri=f"evidence://{json_id}",
+    )
 
     activity.heartbeat("generating HTML report")
     html_report = _build_html_report(params, json_report)
@@ -66,6 +165,14 @@ async def generate_reports(params: ReportParams) -> ReportResult:
             media_type="text/html",
             payload=html_report.encode(),
         )
+    )
+    await _persist_report_row(
+        tenant_id=params.tenant_id,
+        engagement_id=params.engagement_id,
+        report_type="engagement",
+        fmt="html",
+        digest=html_id,
+        storage_uri=f"evidence://{html_id}",
     )
 
     activity.heartbeat("generating SARIF report")
@@ -80,6 +187,27 @@ async def generate_reports(params: ReportParams) -> ReportResult:
             payload=json.dumps(sarif_report, sort_keys=True, indent=2).encode(),
         )
     )
+    await _persist_report_row(
+        tenant_id=params.tenant_id,
+        engagement_id=params.engagement_id,
+        report_type="engagement",
+        fmt="sarif",
+        digest=sarif_id,
+        storage_uri=f"evidence://{sarif_id}",
+    )
+
+    # Persist each finding into findings.finding so the UI /findings list works.
+    for f in params.findings:
+        await _persist_finding_row(
+            tenant_id=params.tenant_id,
+            engagement_id=params.engagement_id,
+            finding_id=f.finding_id,
+            technique=f.weakness,
+            target=f.affected_object,
+            title=f"{f.weakness} on {f.affected_object}",
+            severity=_severity_label(f.severity),
+            evidence_refs=f.evidence_refs,
+        )
 
     activity.logger.info(
         "Reports generated",
@@ -91,6 +219,18 @@ async def generate_reports(params: ReportParams) -> ReportResult:
         json_report_id=json_id,
         sarif_report_id=sarif_id,
     )
+
+
+def _severity_label(sev: float) -> str:
+    if sev >= 9.0:
+        return "critical"
+    if sev >= 7.0:
+        return "high"
+    if sev >= 4.0:
+        return "medium"
+    if sev >= 1.0:
+        return "low"
+    return "info"
 
 
 def _build_json_report(params: ReportParams) -> dict:

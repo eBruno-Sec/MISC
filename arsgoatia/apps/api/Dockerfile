@@ -37,6 +37,9 @@ COPY --from=builder /install /usr/local
 COPY apps/api/ apps/api/
 COPY packages/ packages/
 COPY packs/ packs/
+COPY services/ services/
+COPY migrations/ migrations/
+COPY alembic.ini ./
 
 # Ensure __init__.py files exist at top-level package roots
 COPY apps/__init__.py apps/__init__.py

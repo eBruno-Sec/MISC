@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from services.worker.activities.validation import (
@@ -62,7 +63,7 @@ class ValidationWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=10),
             heartbeat_timeout=timedelta(seconds=60),
-            retry_policy=workflow.RetryPolicy(
+            retry_policy=RetryPolicy(
                 initial_interval=timedelta(seconds=2),
                 maximum_interval=timedelta(seconds=60),
                 maximum_attempts=3,

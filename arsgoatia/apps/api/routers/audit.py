@@ -9,25 +9,19 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from apps.api.deps import AuthCtx, DbSession, TenantId
+from packages.persistence import repos
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
-# -- Response models -----------------------------------------------------------
-
-
 class AuditEvent(BaseModel):
-    event_id: UUID
+    id: UUID
     event_type: str
     tenant_id: UUID
-    aggregate_type: str
-    aggregate_id: UUID
-    actor: str
-    occurred_at: datetime
-    classification: str = Field(default="internal")
-    payload: dict[str, object] = Field(default_factory=dict)
-    correlation_id: UUID | None = None
-    causation_id: UUID | None = None
+    engagement_id: UUID | None = None
+    actor_id: str | None = None
+    payload: dict = Field(default_factory=dict)
+    created_at: datetime
 
 
 class AuditEventListResponse(BaseModel):
@@ -35,10 +29,6 @@ class AuditEventListResponse(BaseModel):
     total: int
     offset: int
     limit: int
-    has_more: bool
-
-
-# -- Endpoints -----------------------------------------------------------------
 
 
 @router.get(
@@ -52,19 +42,19 @@ async def list_audit_events(
     auth: AuthCtx,
     engagement_id: UUID | None = Query(default=None),
     event_type: str | None = Query(default=None),
-    actor: str | None = Query(default=None),
-    after: datetime | None = Query(default=None, description="Events after this timestamp"),
-    before: datetime | None = Query(default=None, description="Events before this timestamp"),
-    aggregate_type: str | None = Query(default=None),
-    aggregate_id: UUID | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
 ):
-    # TODO: query append-only audit event store with filters
-    return AuditEventListResponse(
-        items=[],
-        total=0,
+    rows, total = await repos.list_audit_events(
+        session,
+        engagement_id=engagement_id,
+        event_type=event_type,
         offset=offset,
         limit=limit,
-        has_more=False,
+    )
+    return AuditEventListResponse(
+        items=[AuditEvent(**r) for r in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
     )

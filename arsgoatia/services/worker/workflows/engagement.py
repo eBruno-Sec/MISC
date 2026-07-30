@@ -358,10 +358,7 @@ class EngagementWorkflow:
         )
         self._update(progress=90)
 
-        _report_version = workflow.get_version(
-            "reporting-contract-version", workflow.DEFAULT_VERSION, 1
-        )
-        report_contract_version = 0 if _report_version == workflow.DEFAULT_VERSION else 1
+        report_contract_version = 1
 
         # Phase 9: Cleanup
         cleanup_result = await self._run_cleanup_phase(input)

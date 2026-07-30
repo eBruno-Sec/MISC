@@ -1,116 +1,93 @@
-"""Evidence upload and retrieval endpoints."""
+"""Evidence read endpoints."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated
-from uuid import UUID, uuid4
+from datetime import datetime
+from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from apps.api.deps import AuthCtx, DbSession, TenantId
+from packages.persistence import repos
 
 router = APIRouter(prefix="/evidence", tags=["evidence"])
 
 
-# -- Request / Response models -------------------------------------------------
-
-
-class CreateUploadGrantRequest(BaseModel):
-    engagement_id: UUID
-    action_id: UUID
-    kind: str = Field(
-        min_length=1, description="Evidence kind: request, response, screenshot, pcap, etc."
-    )
-    media_type: str = Field(default="application/octet-stream")
-    size_hint: int | None = Field(default=None, ge=0, description="Expected size in bytes")
-    sensitivity: str = Field(default="restricted")
-
-
-class UploadGrant(BaseModel):
-    evidence_id: UUID
-    upload_url: str = Field(description="Pre-signed MinIO PUT URL")
-    upload_headers: dict[str, str] = Field(default_factory=dict)
-    expires_at: datetime
-    max_bytes: int
-
-
 class EvidenceMetadata(BaseModel):
-    evidence_id: UUID
+    id: UUID
     engagement_id: UUID
     action_id: UUID
     kind: str
-    media_type: str
-    size: int
     digest: str
-    sensitivity: str
-    captured_at: datetime
-    storage_uri: str
-
-
-class ArtifactGrant(BaseModel):
-    evidence_id: UUID
-    download_url: str = Field(description="Pre-signed MinIO GET URL")
-    expires_at: datetime
+    size_bytes: int
     media_type: str
-    size: int
+    storage_uri: str
+    sensitivity: str
+    created_at: datetime
 
 
-# -- Endpoints -----------------------------------------------------------------
+class EvidenceListResponse(BaseModel):
+    items: list[EvidenceMetadata]
+    total: int
+    offset: int
+    limit: int
 
 
-@router.post(
-    "/uploads",
-    response_model=UploadGrant,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create an upload grant for evidence submission",
+def _to_metadata(row: dict) -> EvidenceMetadata:
+    return EvidenceMetadata(
+        id=row["id"],
+        engagement_id=row["engagement_id"],
+        action_id=row["action_id"],
+        kind=row["kind"],
+        digest=row["digest"],
+        size_bytes=row["size_bytes"],
+        media_type=row["media_type"],
+        storage_uri=row["storage_uri"],
+        sensitivity=row["sensitivity"],
+        created_at=row["created_at"],
+    )
+
+
+@router.get(
+    "",
+    response_model=EvidenceListResponse,
+    summary="List evidence artifacts",
 )
-async def create_upload_grant(
-    body: CreateUploadGrantRequest,
+async def list_evidence(
     tenant_id: TenantId,
     session: DbSession,
     auth: AuthCtx,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    engagement_id: UUID | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
 ):
-    now = datetime.now(timezone.utc)
-    evidence_id = uuid4()
-
-    # TODO: generate MinIO pre-signed PUT URL, record pending upload
-    return UploadGrant(
-        evidence_id=evidence_id,
-        upload_url=f"http://localhost:9100/arsgoatia-evidence/{evidence_id}",
-        upload_headers={"Content-Type": body.media_type},
-        expires_at=now,
-        max_bytes=100 * 1024 * 1024,  # 100 MiB default
+    rows, total = await repos.list_evidence(
+        session,
+        engagement_id=engagement_id,
+        offset=offset,
+        limit=limit,
+    )
+    return EvidenceListResponse(
+        items=[_to_metadata(r) for r in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
     )
 
 
 @router.get(
     "/{evidence_id}",
-    summary="Get evidence metadata or artifact download grant",
+    response_model=EvidenceMetadata,
+    summary="Get evidence artifact metadata",
 )
 async def get_evidence(
     evidence_id: UUID,
     tenant_id: TenantId,
     session: DbSession,
     auth: AuthCtx,
-    artifact: bool = False,
 ):
-    # TODO: look up evidence record
-
-    if artifact:
-        # Return a download grant
-        now = datetime.now(timezone.utc)
-        return ArtifactGrant(
-            evidence_id=evidence_id,
-            download_url=f"http://localhost:9100/arsgoatia-evidence/{evidence_id}",
-            expires_at=now,
-            media_type="application/octet-stream",
-            size=0,
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Evidence not found",
-    )
+    row = await repos.get_evidence(session, evidence_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return _to_metadata(row)

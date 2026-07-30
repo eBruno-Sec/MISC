@@ -50,13 +50,24 @@ async def get_tenant_id(
 async def get_session(
     tenant_id: Annotated[UUID, Depends(get_tenant_id)],
 ) -> AsyncGenerator[AsyncSession, None]:
+    """Yield an ``AsyncSession`` with RLS set and a transaction started.
+
+    The transaction is committed on normal exit and rolled back on any
+    exception raised by the handler, so writes are only persisted when the
+    handler returned cleanly.
+    """
     async with async_session_factory() as session:
-        await session.execute(
-            text("SELECT set_config('app.tenant_id', :tid, true)"),
-            {"tid": str(tenant_id)},
-        )
         try:
+            await session.begin()
+            await session.execute(
+                text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
             yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await session.close()
 

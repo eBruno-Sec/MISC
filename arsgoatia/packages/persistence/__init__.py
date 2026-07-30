@@ -15,8 +15,11 @@ from sqlalchemy.ext.asyncio import (
 
 def get_database_url() -> str:
     return os.environ.get(
-        "DATABASE_URL",
-        "postgresql+asyncpg://arsgoatia:arsgoatia@localhost:5433/arsgoatia",
+        "ARSGOATIA_DATABASE_URL",
+        os.environ.get(
+            "DATABASE_URL",
+            "postgresql+asyncpg://arsgoatia:arsgoatia@localhost:5433/arsgoatia",
+        ),
     )
 
 
@@ -47,8 +50,10 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def set_tenant(session: AsyncSession, tenant_id: str) -> None:
+    # Bound parameters are safer than string interpolation, but SET LOCAL
+    # does not accept parameters — use set_config() instead.
     await session.execute(
-        sa.text("SET LOCAL app.tenant_id = :tid"),
+        sa.text("SELECT set_config('app.tenant_id', :tid, true)"),
         {"tid": str(tenant_id)},
     )
 

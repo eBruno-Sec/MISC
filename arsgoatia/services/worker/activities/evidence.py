@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from temporalio import activity
 
@@ -32,6 +34,65 @@ class StoreEvidenceParams:
     media_type: str
     payload: bytes
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+async def _persist_evidence_row(
+    *,
+    tenant_id: str,
+    engagement_id: str,
+    action_id: str,
+    kind: str,
+    digest: str,
+    size_bytes: int,
+    media_type: str,
+    storage_uri: str,
+) -> None:
+    """Write an evidence.evidence row so the API/UI can list it.
+
+    Best-effort: DB errors are logged and swallowed so a broken control-plane
+    never blocks the deterministic workflow from finishing.
+    """
+    from sqlalchemy import text  # noqa: PLC0415
+
+    from packages.persistence import get_session_factory, set_tenant  # noqa: PLC0415
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                await set_tenant(session, tenant_id)
+                # Coerce non-UUID action_id (recon uses labels) into a stable UUID
+                # via SHA-1 namespace so the FK-less action_id column is still typed.
+                try:
+                    action_uuid = uuid.UUID(action_id)
+                except ValueError:
+                    action_uuid = uuid.uuid5(uuid.NAMESPACE_URL, action_id)
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO evidence.evidence
+                            (id, tenant_id, engagement_id, action_id, kind, digest,
+                             size_bytes, media_type, storage_uri, sensitivity, created_at)
+                        VALUES
+                            (:id, :tid, :eid, :aid, :kind, :dg, :size, :mt, :uri, 'restricted', :now)
+                        ON CONFLICT (digest) DO NOTHING
+                        """
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "tid": tenant_id,
+                        "eid": engagement_id,
+                        "aid": str(action_uuid),
+                        "kind": kind,
+                        "dg": digest,
+                        "size": size_bytes,
+                        "mt": media_type,
+                        "uri": storage_uri,
+                        "now": datetime.now(timezone.utc),
+                    },
+                )
+    except Exception as exc:
+        activity.logger.warning(f"evidence-row persist failed: {exc}")
 
 
 @activity.defn
@@ -64,6 +125,18 @@ async def store_evidence(params: StoreEvidenceParams) -> str:
         "Evidence stored",
         extra={"object_key": object_key, "digest": digest},
     )
+
+    await _persist_evidence_row(
+        tenant_id=params.tenant_id,
+        engagement_id=params.engagement_id,
+        action_id=params.action_id,
+        kind=params.kind,
+        digest=f"sha256:{digest}",
+        size_bytes=len(params.payload),
+        media_type=params.media_type,
+        storage_uri=f"minio://{MINIO_BUCKET}/{object_key}",
+    )
+
     return f"sha256:{digest}"
 
 
