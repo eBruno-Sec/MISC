@@ -19,6 +19,7 @@ class IdentityParams:
 class AccessContextResult:
     persona: str
     credential_ref: str
+    object_id: int | None = None  # e.g. Juice Shop basket id owned by this identity
 
 
 @dataclass
@@ -70,6 +71,21 @@ def _extract_token(response_json: object) -> str | None:
     return None
 
 
+def _extract_object_id(response_json: object) -> int | None:
+    """Pull an owned-object id (e.g. Juice Shop's basket bid) from a login response."""
+    if not isinstance(response_json, dict):
+        return None
+    auth = response_json.get("authentication")
+    if isinstance(auth, dict):
+        for key in ("bid", "basketId", "basket_id"):
+            v = auth.get(key)
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str) and v.isdigit():
+                return int(v)
+    return None
+
+
 @activity.defn
 async def establish_identities(params: IdentityParams) -> IdentityResult:
     import httpx  # noqa: PLC0415
@@ -114,6 +130,7 @@ async def establish_identities(params: IdentityParams) -> IdentityResult:
                 )
 
             token: str | None = None
+            object_id: int | None = None
             login_status = 0
             for path, payload_fn in _LOGIN_ENDPOINTS:
                 try:
@@ -127,13 +144,19 @@ async def establish_identities(params: IdentityParams) -> IdentityResult:
                 login_status = r.status_code
                 if r.status_code in (200, 201):
                     try:
-                        token = _extract_token(r.json())
+                        body = r.json()
+                        token = _extract_token(body)
+                        object_id = _extract_object_id(body)
                     except ValueError:
                         token = None
                     if token:
                         activity.logger.info(
                             "Login token acquired",
-                            extra={"persona": persona, "path": path},
+                            extra={
+                                "persona": persona,
+                                "path": path,
+                                "object_id": object_id,
+                            },
                         )
                         break
 
@@ -170,6 +193,7 @@ async def establish_identities(params: IdentityParams) -> IdentityResult:
                 AccessContextResult(
                     persona=persona,
                     credential_ref=credential_ref,
+                    object_id=object_id,
                 )
             )
 

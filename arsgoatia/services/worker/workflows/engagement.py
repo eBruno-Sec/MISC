@@ -18,6 +18,10 @@ with workflow.unsafe.imports_passed_through():
         IdentityParams,
         establish_identities,
     )
+    from services.worker.activities.juice_shop import (
+        JuiceShopBOLAParams,
+        run_juice_shop_basket_idor,
+    )
     from services.worker.activities.recon import (
         ScopeRuleParam,
     )
@@ -238,6 +242,60 @@ class EngagementWorkflow:
         self._cleanup_needed = True
         self._update(progress=50)
 
+        # Phase 5b: Juice Shop-specific technique pack (best-effort; only meaningful
+        # when the target actually is Juice Shop). Produces a CONFIRMED finding if
+        # cross-user basket read succeeds.
+        if "juice-shop" in input.target_url and len(identity_result.access_contexts) >= 2:
+            self._update(phase="juice_shop_probe", progress=52)
+            await self._gate()
+            if not self._check_stop():
+                ida = identity_result.access_contexts[0]
+                idb = identity_result.access_contexts[1]
+                # credential_ref may be a real token or a "secret://..." fallback;
+                # the pack degrades to INCONCLUSIVE if tokens are missing.
+                token_a = "" if ida.credential_ref.startswith("secret://") else ida.credential_ref
+                token_b = "" if idb.credential_ref.startswith("secret://") else idb.credential_ref
+                id_a = getattr(ida, "object_id", None)
+                id_b = getattr(idb, "object_id", None)
+                js_result = await workflow.execute_activity(
+                    run_juice_shop_basket_idor,
+                    JuiceShopBOLAParams(
+                        engagement_id=input.engagement_id,
+                        tenant_id=input.tenant_id,
+                        action_id=str(workflow.uuid4()),
+                        target_url=input.target_url,
+                        identity_a={
+                            "persona": ida.persona,
+                            "token": token_a,
+                            "object_id": id_a,
+                        },
+                        identity_b={
+                            "persona": idb.persona,
+                            "token": token_b,
+                            "object_id": id_b,
+                        },
+                    ),
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=ACTIVITY_RETRY,
+                    task_queue=WEB_QUEUE,
+                )
+                self._all_evidence_refs.extend(js_result.evidence_refs)
+                self._state.evidence_count = len(self._all_evidence_refs)
+                if js_result.finding_status == "CONFIRMED":
+                    finding_id = str(workflow.uuid4())
+                    self._findings.append(
+                        FindingParam(
+                            finding_id=finding_id,
+                            weakness="BOLA (Juice Shop basket IDOR)",
+                            affected_object=f"{input.target_url}/rest/basket/{{id}}",
+                            status="CONFIRMED",
+                            confidence=1.0,
+                            severity=8.5,
+                            evidence_refs=js_result.evidence_refs,
+                        )
+                    )
+                    self._state.findings_count = len(self._findings)
+
         # Phase 6: Validation (with approval gate for R2+)
         self._update(phase="validation", progress=55)
         await self._gate()
@@ -358,7 +416,13 @@ class EngagementWorkflow:
         )
         self._update(progress=90)
 
-        report_contract_version = 1
+        # Safe workflow evolution (§14.5): the reporting contract gained
+        # additional fields after the initial cut. workflow.patched() records
+        # the patch decision in history so replays of pre-evolution histories
+        # deterministically resolve to version 0, while new runs resolve to 1.
+        report_contract_version = (
+            1 if workflow.patched("reporting-contract-version") else 0
+        )
 
         # Phase 9: Cleanup
         cleanup_result = await self._run_cleanup_phase(input)

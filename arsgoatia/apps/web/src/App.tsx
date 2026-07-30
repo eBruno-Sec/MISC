@@ -836,6 +836,10 @@ function EngagementDetailView({
     `/engagements/${engagementId}`,
     3000,
   );
+  const { data: auditData } = usePolling<{ items: any[]; total: number }>(
+    `/audit/events?engagement_id=${engagementId}&limit=25`,
+    3000,
+  );
 
   const startEngagement = async () => {
     const r = await apiFetch(`/engagements/${engagementId}:start`, { method: "POST" });
@@ -948,30 +952,120 @@ function EngagementDetailView({
 
       <div
         style={{
-          background: C.surface,
-          border: `1px solid ${C.border}`,
-          borderRadius: 8,
-          padding: "1rem 1.25rem",
-          fontSize: "0.8rem",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "1rem",
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "6px 16px" }}>
-          <span style={{ color: C.textMuted }}>Engagement ID:</span>
-          <span style={{ fontFamily: "monospace" }}>{data.id}</span>
-          <span style={{ color: C.textMuted }}>Workflow ID:</span>
-          <span style={{ fontFamily: "monospace" }}>
-            {data.temporal_workflow_id || "—"}
-          </span>
-          <span style={{ color: C.textMuted }}>Description:</span>
-          <span>{data.description || "—"}</span>
-          <span style={{ color: C.textMuted }}>Scope:</span>
-          <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>
-            {JSON.stringify(data.scope?.include || [])}
-          </span>
-          <span style={{ color: C.textMuted }}>Created:</span>
-          <span>{new Date(data.created_at).toLocaleString()}</span>
-          <span style={{ color: C.textMuted }}>Updated:</span>
-          <span>{new Date(data.updated_at).toLocaleString()}</span>
+        <div
+          style={{
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: "1rem 1.25rem",
+            fontSize: "0.78rem",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              color: C.textMuted,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              marginBottom: "0.75rem",
+            }}
+          >
+            Details
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: "6px 12px" }}>
+            <span style={{ color: C.textMuted }}>Engagement ID:</span>
+            <span style={{ fontFamily: "monospace", fontSize: "0.7rem" }}>{data.id}</span>
+            <span style={{ color: C.textMuted }}>Workflow ID:</span>
+            <span style={{ fontFamily: "monospace", fontSize: "0.7rem" }}>
+              {data.temporal_workflow_id || "—"}
+            </span>
+            <span style={{ color: C.textMuted }}>Description:</span>
+            <span>{data.description || "—"}</span>
+            <span style={{ color: C.textMuted }}>Scope:</span>
+            <span style={{ fontFamily: "monospace", fontSize: "0.7rem" }}>
+              {JSON.stringify(data.scope?.include || [])}
+            </span>
+            <span style={{ color: C.textMuted }}>Created:</span>
+            <span>{new Date(data.created_at).toLocaleString()}</span>
+            <span style={{ color: C.textMuted }}>Updated:</span>
+            <span>{new Date(data.updated_at).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: "1rem 1.25rem",
+            fontSize: "0.78rem",
+            maxHeight: 320,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              color: C.textMuted,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              marginBottom: "0.75rem",
+            }}
+          >
+            Activity Timeline
+          </div>
+          {!auditData || auditData.items.length === 0 ? (
+            <div style={{ color: C.textMuted, fontStyle: "italic" }}>
+              No events yet.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+              {auditData.items.map((ev: any) => (
+                <div
+                  key={ev.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "70px 1fr",
+                    gap: "0.5rem",
+                    borderLeft: `2px solid ${
+                      ev.event_type.includes("emergency") || ev.event_type.includes("rejected")
+                        ? C.guard
+                        : ev.event_type.includes("approved") ||
+                          ev.event_type.includes("started")
+                        ? C.mint
+                        : C.pink
+                    }`,
+                    paddingLeft: "0.5rem",
+                  }}
+                >
+                  <span
+                    style={{
+                      color: C.textMuted,
+                      fontSize: "0.68rem",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {new Date(ev.created_at).toLocaleTimeString()}
+                  </span>
+                  <span>
+                    <span style={{ color: C.pink, fontWeight: 500 }}>{ev.event_type}</span>
+                    {ev.actor_id && (
+                      <span style={{ color: C.textMuted, marginLeft: 6 }}>
+                        by {ev.actor_id}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1114,6 +1208,23 @@ function EvidenceView({ data }: { data: any }) {
 }
 
 function ReportsView({ data }: { data: any }) {
+  const download = async (id: string, fmt: string) => {
+    const r = await fetch(`/api/v1/reports/${id}/download`, {
+      headers: { "X-Tenant-Id": getTenantId() },
+    });
+    if (!r.ok) {
+      alert(`Download failed: ${r.status}`);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `arsgoatia-report-${id.slice(0, 8)}.${fmt}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
       <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Reports</h2>
@@ -1124,7 +1235,7 @@ function ReportsView({ data }: { data: any }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                {["Type", "Format", "Digest", "Created"].map((h) => (
+                {["Type", "Format", "Digest", "Created", ""].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -1161,6 +1272,11 @@ function ReportsView({ data }: { data: any }) {
                   <td style={{ padding: "10px 12px", color: C.textMuted }}>
                     {new Date(r.created_at).toLocaleString()}
                   </td>
+                  <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                    <Btn variant="primary" onClick={() => download(r.id, r.format)} small>
+                      ⬇ Download
+                    </Btn>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1172,12 +1288,108 @@ function ReportsView({ data }: { data: any }) {
 }
 
 function ApprovalsView() {
+  const { data, refresh } = usePolling<{ items: any[]; total: number }>(
+    "/approvals/pending",
+    3000,
+  );
+
+  const approve = async (id: string) => {
+    if (!confirm(`Approve action ${id.slice(0, 8)}? This will unblock the workflow.`)) return;
+    await apiFetch(`/actions/${id}:approve`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "approved via web console" }),
+    });
+    refresh();
+  };
+  const reject = async (id: string) => {
+    const reason = prompt("Rejection reason:");
+    if (!reason) return;
+    await apiFetch(`/actions/${id}:reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    refresh();
+  };
+
   return (
     <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>Approval Queue</h2>
-      <EmptyState message="No pending approvals. R3+ actions land here for human sign-off." />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "1rem",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Approval Queue</h2>
+        <Btn variant="ghost" onClick={refresh} small>
+          Refresh
+        </Btn>
+      </div>
+
+      {!data || data.items.length === 0 ? (
+        <EmptyState message="Queue empty. R2+ action proposals land here for operator sign-off." />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Risk", "Technique", "Target", "Proposed", ""].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      color: C.textMuted,
+                      fontWeight: 600,
+                      fontSize: "0.7rem",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((a: any) => (
+                <tr key={a.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "10px 12px" }}>
+                    <RiskBadge tier={a.risk_tier} />
+                  </td>
+                  <td style={{ padding: "10px 12px", fontWeight: 500 }}>{a.technique_id}</td>
+                  <td
+                    style={{
+                      padding: "10px 12px",
+                      color: C.textMuted,
+                      maxWidth: 300,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {a.target}
+                  </td>
+                  <td style={{ padding: "10px 12px", color: C.textMuted }}>
+                    {new Date(a.created_at).toLocaleString()}
+                  </td>
+                  <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                    <Btn variant="mint" onClick={() => approve(a.id)} small>
+                      ✓ Approve
+                    </Btn>{" "}
+                    <Btn variant="danger" onClick={() => reject(a.id)} small>
+                      ✗ Reject
+                    </Btn>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div style={{ marginTop: "1.5rem", fontSize: "0.8rem", color: C.textMuted }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Approval Flow</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Risk-tier reference</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {[
             { label: "R0-R1", desc: "Auto-allow", color: RISK_COLORS.R0 },

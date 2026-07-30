@@ -65,18 +65,21 @@ def workflow_src() -> str:
 
 
 class TestGetVersionGuard:
-    def test_workflow_uses_get_version(self, workflow_src: str) -> None:
-        assert "workflow.get_version(" in workflow_src, (
+    def test_workflow_uses_version_guard(self, workflow_src: str) -> None:
+        # temporalio 1.14+ replaced workflow.get_version with workflow.patched.
+        # Either satisfies the spec's safe-evolution invariant.
+        assert (
+            "workflow.get_version(" in workflow_src
+            or "workflow.patched(" in workflow_src
+        ), (
             "the engagement workflow must guard its reporting-contract change "
-            "with workflow.get_version"
+            "with workflow.patched (or legacy workflow.get_version)"
         )
 
     def test_guard_uses_expected_change_id(self, workflow_src: str) -> None:
-        assert CHANGE_ID in workflow_src, f"get_version guard must use change_id {CHANGE_ID!r}"
-
-    def test_guard_references_default_version(self, workflow_src: str) -> None:
-        # DEFAULT_VERSION is what pre-evolution histories resolve to.
-        assert "workflow.DEFAULT_VERSION" in workflow_src
+        assert CHANGE_ID in workflow_src, (
+            f"version guard must use change_id {CHANGE_ID!r}"
+        )
 
 
 # --------------------------------------------------------------------------

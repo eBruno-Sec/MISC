@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from apps.api import temporal as temporal_client
@@ -14,6 +14,24 @@ from apps.api.deps import AuthCtx, DbSession, TenantId
 from packages.persistence import repos
 
 router = APIRouter(tags=["actions"])
+
+
+class ActionSummary(BaseModel):
+    id: UUID
+    engagement_id: UUID
+    state: str
+    technique_id: str
+    target: str
+    risk_tier: str
+    mutation_class: str
+    created_at: datetime
+
+
+class ActionListResponse(BaseModel):
+    items: list[ActionSummary]
+    total: int
+    offset: int
+    limit: int
 
 
 class ProposeActionRequest(BaseModel):
@@ -104,6 +122,63 @@ def _evaluate_policy(risk_tier: str, mutation_class: str) -> PolicyEvaluation:
         risk_tier=risk_tier,
         reason=f"{risk_tier} auto-allowed by default policy",
         layers_evaluated=["risk_tier"],
+    )
+
+
+@router.get(
+    "/actions",
+    response_model=ActionListResponse,
+    summary="List action proposals",
+)
+async def list_actions(
+    tenant_id: TenantId,
+    session: DbSession,
+    auth: AuthCtx,
+    engagement_id: UUID | None = Query(default=None),
+    state: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    rows, total = await repos.list_actions(
+        session,
+        engagement_id=engagement_id,
+        state=state,
+        offset=offset,
+        limit=limit,
+    )
+    return ActionListResponse(
+        items=[ActionSummary(**r) for r in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/approvals/pending",
+    response_model=ActionListResponse,
+    summary="List actions waiting for approval (R2+ pending)",
+)
+async def list_pending_approvals(
+    tenant_id: TenantId,
+    session: DbSession,
+    auth: AuthCtx,
+    engagement_id: UUID | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    rows, total = await repos.list_actions(
+        session,
+        engagement_id=engagement_id,
+        state="APPROVAL_REQUIRED",
+        offset=offset,
+        limit=limit,
+    )
+    return ActionListResponse(
+        items=[ActionSummary(**r) for r in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
     )
 
 

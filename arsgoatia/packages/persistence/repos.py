@@ -246,6 +246,47 @@ async def create_action_proposal(
     }
 
 
+async def list_actions(
+    session: AsyncSession,
+    *,
+    engagement_id: UUID | None = None,
+    state: str | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> tuple[list[dict[str, Any]], int]:
+    where = []
+    params: dict[str, Any] = {"offset": offset, "limit": limit}
+    if engagement_id:
+        where.append("engagement_id = :eid")
+        params["eid"] = engagement_id
+    if state:
+        where.append("state = :state")
+        params["state"] = state
+    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = (
+        await session.execute(
+            text(
+                f"""
+                SELECT id, tenant_id, engagement_id, state, technique_id, target,
+                       risk_tier, mutation_class, parameters, created_at
+                FROM reasoning.action_proposal
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            params,
+        )
+    ).all()
+    total = (
+        await session.execute(
+            text(f"SELECT COUNT(*) FROM reasoning.action_proposal {where_clause}"),
+            {k: v for k, v in params.items() if k not in ("offset", "limit")},
+        )
+    ).scalar_one()
+    return [_row(r) for r in rows], int(total)
+
+
 async def get_action(session: AsyncSession, action_id: UUID) -> dict[str, Any] | None:
     r = (
         await session.execute(
