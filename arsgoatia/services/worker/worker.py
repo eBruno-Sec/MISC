@@ -14,6 +14,7 @@ import os
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from services.worker.activities.broad_web_audit import run_broad_web_audit
 from services.worker.activities.chain import create_chain_step
 from services.worker.activities.cleanup import run_cleanup
 from services.worker.activities.evidence import store_evidence, verify_evidence
@@ -41,6 +42,7 @@ WEB_ACTIVITIES = [
     safe_http_recon,
     run_bola_validation,
     run_juice_shop_basket_idor,
+    run_broad_web_audit,
     store_evidence,
     verify_evidence,
     generate_reports,

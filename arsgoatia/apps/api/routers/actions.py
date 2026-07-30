@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from apps.api import temporal as temporal_client
+from apps.api.auth import operator_totp_secret, require_mfa_for, verify_totp
 from apps.api.deps import AuthCtx, DbSession, TenantId
 from packages.persistence import repos
 
@@ -245,12 +246,25 @@ async def approve_action(
     tenant_id: TenantId,
     session: DbSession,
     auth: AuthCtx,
+    x_mfa_code: Annotated[str | None, Header(alias="X-MFA-Code")] = None,
 ):
     action = await repos.get_action(session, action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
     if action["state"] not in ("APPROVAL_REQUIRED", "PROPOSED"):
         raise HTTPException(status_code=409, detail=f"Action in state {action['state']} cannot be approved")
+
+    # MFA gate for R3/R4/R5 approvals — enforced only when an operator
+    # TOTP secret is configured. Dev stacks with no secret bypass this.
+    secret = operator_totp_secret()
+    if secret and require_mfa_for(auth.get("role", ""), action["risk_tier"]):
+        if not x_mfa_code:
+            raise HTTPException(
+                status_code=401,
+                detail=f"MFA required for {action['risk_tier']} approvals — set X-MFA-Code header",
+            )
+        if not verify_totp(x_mfa_code, secret=secret):
+            raise HTTPException(status_code=401, detail="invalid MFA code")
 
     approval = await repos.create_approval(
         session,

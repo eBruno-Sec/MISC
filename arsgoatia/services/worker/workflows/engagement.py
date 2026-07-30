@@ -7,6 +7,10 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from services.worker.activities.broad_web_audit import (
+        BroadWebAuditParams,
+        run_broad_web_audit,
+    )
     from services.worker.activities.chain import ChainParams, create_chain_step
     from services.worker.activities.cleanup import (
         CleanupObligation,
@@ -47,6 +51,16 @@ ACTIVITY_RETRY = RetryPolicy(
     maximum_interval=timedelta(seconds=30),
     maximum_attempts=3,
 )
+
+
+def _severity_num(sev: str) -> float:
+    return {
+        "critical": 9.5,
+        "high": 7.5,
+        "medium": 5.0,
+        "low": 3.0,
+        "info": 1.0,
+    }.get(sev.lower(), 0.0)
 
 
 @dataclass
@@ -218,6 +232,47 @@ class EngagementWorkflow:
 
         self._all_evidence_refs.extend(recon_result.evidence_refs)
         self._state.evidence_count = len(self._all_evidence_refs)
+        self._update(progress=30)
+
+        # Phase 4b: Broad web audit — passive headers + active SQLi/XSS/LFI
+        # against every discovered parameterised endpoint. Results are
+        # deterministic; one CONFIRMED finding per pack per (endpoint, param).
+        if recon_result.discovered_endpoints and not self._check_stop():
+            self._update(phase="broad_web_audit", progress=32)
+            await self._gate()
+            audit_result = await workflow.execute_activity(
+                run_broad_web_audit,
+                BroadWebAuditParams(
+                    engagement_id=input.engagement_id,
+                    tenant_id=input.tenant_id,
+                    action_id=str(workflow.uuid4()),
+                    endpoints=[
+                        {"url": ep.url, "content_type": ep.content_type}
+                        for ep in recon_result.discovered_endpoints
+                    ],
+                    token="",
+                ),
+                start_to_close_timeout=timedelta(minutes=8),
+                retry_policy=ACTIVITY_RETRY,
+                task_queue=WEB_QUEUE,
+            )
+            self._all_evidence_refs.extend(audit_result.evidence_refs)
+            self._state.evidence_count = len(self._all_evidence_refs)
+            for f in audit_result.findings:
+                finding_id = str(workflow.uuid4())
+                self._findings.append(
+                    FindingParam(
+                        finding_id=finding_id,
+                        weakness=f.weakness,
+                        affected_object=f.target,
+                        status=f.status,
+                        confidence=1.0,
+                        severity=_severity_num(f.severity),
+                        evidence_refs=f.evidence_refs,
+                    )
+                )
+            self._state.findings_count = len(self._findings)
+
         self._update(progress=35)
 
         # Phase 5: Establish identities

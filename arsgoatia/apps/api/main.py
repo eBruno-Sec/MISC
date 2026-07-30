@@ -8,7 +8,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.routers import actions, audit, engagements, evidence, findings, reports
+from apps.api.routers import (
+    actions,
+    audit,
+    auth as auth_router,
+    engagements,
+    evidence,
+    findings,
+    reports,
+    streams,
+)
 
 logger = logging.getLogger("arsgoatia.api")
 
@@ -43,12 +52,14 @@ app.add_middleware(
 # -- Routers ------------------------------------------------------------------
 PREFIX = "/api/v1"
 
+app.include_router(auth_router.router, prefix=PREFIX)
 app.include_router(engagements.router, prefix=PREFIX)
 app.include_router(actions.router, prefix=PREFIX)
 app.include_router(evidence.router, prefix=PREFIX)
 app.include_router(findings.router, prefix=PREFIX)
 app.include_router(reports.router, prefix=PREFIX)
 app.include_router(audit.router, prefix=PREFIX)
+app.include_router(streams.router, prefix=PREFIX)
 
 
 # -- Health -------------------------------------------------------------------
