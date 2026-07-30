@@ -162,3 +162,58 @@ def test_null_byte_in_hostname_does_not_match_scope():
 def test_null_byte_in_hostname_normalizes_without_crashing():
     normalized = normalize_host("target.test\x00evil.test")
     assert isinstance(normalized, str)
+
+
+# ---------------------------------------------------------------------------
+# allow_private_targets opt-in (F-04): permit RFC1918 for scoped lab targets,
+# but keep metadata / loopback / link-local blocked regardless.
+# ---------------------------------------------------------------------------
+
+
+def _private_scope(allow_private: bool):
+    return ScopeSpec(
+        include=[_rule("exact_host", "juice-shop")],
+        ports=[3000],
+        allow_private_targets=allow_private,
+    )
+
+
+def test_private_target_blocked_by_default():
+    # Fail-closed default: a scoped host resolving to a Docker-bridge private IP
+    # is still blocked when allow_private_targets is False.
+    fw = ScopeFirewall(_private_scope(allow_private=False))
+    result = fw.preflight("juice-shop", resolved_addresses=["172.18.0.5"], port=3000)
+    assert result.allowed is False
+    assert result.failed_check == "address_classification"
+
+
+def test_private_target_allowed_when_opted_in():
+    fw = ScopeFirewall(_private_scope(allow_private=True))
+    for addr in ["172.18.0.5", "10.0.0.9", "192.168.1.20"]:
+        result = fw.preflight("juice-shop", resolved_addresses=[addr], port=3000)
+        assert result.allowed is True, f"{addr} should be permitted with opt-in"
+
+
+def test_metadata_still_blocked_even_with_private_opt_in():
+    # The SSRF crown jewel must stay blocked regardless of the opt-in.
+    fw = ScopeFirewall(_private_scope(allow_private=True))
+    for addr in ["169.254.169.254", "127.0.0.1", "::1", "fd00:ec2::254"]:
+        result = fw.preflight("juice-shop", resolved_addresses=[addr], port=3000)
+        assert result.allowed is False, f"{addr} must stay blocked even with opt-in"
+        assert result.failed_check == "address_classification"
+
+
+def test_dns_answers_respect_private_opt_in():
+    fw = ScopeFirewall(_private_scope(allow_private=True))
+    assert fw.check_dns_answers("juice-shop", ["172.18.0.5"]).allowed is True
+    # but a mixed answer set with metadata is still blocked
+    assert fw.check_dns_answers("juice-shop", ["172.18.0.5", "169.254.169.254"]).allowed is False
+
+
+def test_is_dangerous_address_private_flag():
+    # Direct unit coverage of the classifier flag.
+    assert _is_dangerous_address("172.18.0.5") is True
+    assert _is_dangerous_address("172.18.0.5", allow_private=True) is False
+    # link-local / metadata never permitted
+    assert _is_dangerous_address("169.254.169.254", allow_private=True) is True
+    assert _is_dangerous_address("127.0.0.1", allow_private=True) is True

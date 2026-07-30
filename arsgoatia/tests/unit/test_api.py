@@ -206,14 +206,15 @@ class TestTenantIdRequired:
         app.dependency_overrides[get_session] = _override_session
         app.dependency_overrides[require_auth] = _override_auth
 
-    def test_invalid_tenant_uuid_returns_400(self, client):
+    def test_invalid_tenant_uuid_returns_422(self, client):
         app.dependency_overrides.clear()
         r = client.post(
             "/api/v1/engagements",
             json={"name": "Test"},
             headers={"X-Tenant-Id": "not-a-uuid"},
         )
-        assert r.status_code in (400, 422)
+        # FastAPI-standard validation error code for a malformed request value.
+        assert r.status_code == 422
         app.dependency_overrides[get_tenant_id] = _override_tenant
         app.dependency_overrides[get_session] = _override_session
         app.dependency_overrides[require_auth] = _override_auth
