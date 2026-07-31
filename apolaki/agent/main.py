@@ -1247,10 +1247,18 @@ def _record_execution(session_id: str) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            leads.append({"title": lead.get("title", ""), "severity": lead.get("severity", "info"),
-                          "target": lead.get("target", ""), "confidence": lead.get("confidence", "candidate"),
-                          "description": lead.get("description", "") or lead.get("detail", "")})
-        ctx["leads"] = leads[:60]
+            # carry the fields the operator needs to CONFIRM a lead (how-to steps, evidence) + a stable
+            # id so the confirm/dismiss actions can address it after the run.
+            leads.append({"_lid": "L%d" % len(leads), "title": lead.get("title", ""),
+                          "severity": lead.get("severity", "info"), "target": lead.get("target", ""),
+                          "confidence": lead.get("confidence", "candidate"),
+                          "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
+                          "tags": lead.get("tags", []),
+                          "description": lead.get("description", "") or lead.get("detail", "") or lead.get("evidence", ""),
+                          "evidence": lead.get("evidence", ""),
+                          "how_to_confirm": lead.get("reproduction_steps", []),
+                          "analyst_notes": lead.get("analyst_notes", "")})
+        ctx["leads"] = leads[:80]
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
@@ -1577,6 +1585,56 @@ async def update_finding(session_id: str, fid: str, finding: dict):
 async def delete_finding(session_id: str, fid: str):
     db.delete_finding(fid)
     return {"ok": True}
+
+
+# ── lead confirmation workflow: leads are UNCONFIRMED; a human confirms (or dismisses) them ──
+@app.get("/leads/{session_id}")
+async def get_leads(session_id: str):
+    """The scan's unconfirmed leads (candidate signals), each carrying how-to-confirm steps. The tool
+    can't auto-prove these -- the operator confirms them into findings or dismisses them."""
+    m = _require_mission(session_id)
+    return {"leads": (m.get("context") or {}).get("leads", [])}
+
+
+@app.post("/leads/{session_id}/{lid}/confirm")
+async def confirm_lead(session_id: str, lid: str):
+    """Promote an unconfirmed lead to a CONFIRMED finding (the operator verified it), then drop it from
+    the lead list. The report updates automatically. Confirmation can't be automated -- this is the
+    human saying 'I proved this'."""
+    m = _require_mission(session_id)
+    ctx = dict(m["context"])
+    leads = list(ctx.get("leads", []))
+    lead = next((l for l in leads if l.get("_lid") == lid), None)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    finding = {"title": lead.get("title", ""), "severity": lead.get("severity", "info"),
+               "url": lead.get("target", ""), "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
+               "confidence": "confirmed", "confirmed": True,
+               "evidence": lead.get("evidence", "") or lead.get("description", ""),
+               "reproduction_steps": lead.get("how_to_confirm", []),
+               "analyst_notes": ("Operator-confirmed from a lead. " + (lead.get("analyst_notes", "") or "")).strip(),
+               "tags": (lead.get("tags") or []) + ["operator-confirmed"]}
+    fid = db.add_finding(session_id, finding)
+    ctx["leads"] = [l for l in leads if l.get("_lid") != lid]
+    db.update_mission(session_id, context=ctx)
+    return {"ok": True, "finding_id": fid, "promoted": lead.get("title", "")}
+
+
+@app.post("/leads/{session_id}/{lid}/dismiss")
+async def dismiss_lead(session_id: str, lid: str):
+    """Mark a lead as NOT a finding and drop it (kept in a dismissed list for audit)."""
+    m = _require_mission(session_id)
+    ctx = dict(m["context"])
+    leads = list(ctx.get("leads", []))
+    lead = next((l for l in leads if l.get("_lid") == lid), None)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    ctx["leads"] = [l for l in leads if l.get("_lid") != lid]
+    dm = list(ctx.get("dismissed_leads", []))
+    dm.append(lead.get("title", ""))
+    ctx["dismissed_leads"] = dm[:100]
+    db.update_mission(session_id, context=ctx)
+    return {"ok": True, "dismissed": lead.get("title", "")}
 
 
 # ── notes ────────────────────────────────────────────────────────

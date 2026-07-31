@@ -475,6 +475,22 @@ X-Requested-With: </textarea>
       <div id="findingsList"></div>
     </section>
 
+    <style>
+    #p-findings .find-bar{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
+    #p-findings .find-filters{display:flex;gap:.4rem;flex-wrap:wrap}
+    #p-findings .find-fchip{font-family:var(--sans);font-size:.74rem;font-weight:700;color:var(--text-dim);cursor:pointer;border:1px solid var(--border2);border-radius:999px;padding:.32rem .75rem;background:none}
+    #p-findings .find-fchip.on{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+    :root[data-theme="light"] #p-findings .find-fchip.on{color:#fff}
+    #p-findings .find-bar>button{margin-left:auto}
+    #p-findings .lead-foot{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.6rem}
+    #p-findings .lead-confirm{color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 10%,transparent)}
+    #p-findings .lead-dismiss{color:var(--text-dim)}
+    #p-findings .add-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:.6rem 0}
+    #p-findings .add-grid input,#p-findings .add-grid select,#p-findings .add-grid textarea{font-size:.8rem;padding:.45rem .6rem;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:var(--sans)}
+    #p-findings .add-grid textarea{grid-column:1/3;min-height:52px;resize:vertical;font-family:var(--mono);font-size:.76rem}
+    #p-findings .add-acts{display:flex;gap:.5rem}
+    </style>
+
     <!-- SURFACE -->
     <section class="panel" id="p-surface">
       <div class="view-head"><h3 class="sec">Attack surface</h3><button class="btn ghost sm" onclick="loadSurface()">Refresh</button></div>
@@ -496,7 +512,7 @@ X-Requested-With: </textarea>
 
     <!-- PLAYBOOKS -->
     <section class="panel" id="p-playbooks">
-      <div class="view-head"><h3 class="sec">Test playbooks</h3><span class="muted">Rule-based · advisory · cURL-ready</span><button class="btn ghost sm" style="margin-left:auto" onclick="loadPlaybook()">Refresh</button></div>
+      <div class="view-head"><h3 class="sec">Test playbooks <span id="pbCount" class="muted" style="font-weight:400"></span></h3><span class="muted">Per-surface test recipes — the exact checks (with ready cURL) a senior tester runs to CONFIRM a lead. Running one fires the request and shows the response; YOU decide if it's a finding, then confirm it in Findings.</span><button class="btn ghost sm" style="margin-left:auto" onclick="loadPlaybook()">Refresh</button></div>
       <div id="playbookList"><div class="empty"><h4>No playbook yet</h4><p>The agent builds a per-surface playbook via <code class="inline">generate_playbook</code> after recon. Refresh once a run is underway.</p></div></div>
     </section>
 
@@ -1161,33 +1177,92 @@ async function resolveApproval(ok){
 }
 
 /* ── findings ── */
+let _findFilter="all";
+function setFindFilter(f){_findFilter=f;renderFindings();}
 function renderFindings(){
   const el=document.getElementById("findingsList"), badge=document.getElementById("findBadge");
-  const fHtml = findings.length ? findings.map((f,i)=>{
-    const sev=(f.severity||"info").toLowerCase();
-    const col=SEV_HEX[sev]||SEV_HEX.info;
-    const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
-    const retest=/^https?:\/\//i.test(f.target||"")?`<button type="button" class="btn ghost sm link-act" style="margin-left:auto" onclick="testFindingIdx(${i})">Re-test in cURL →</button>`:"";
-    return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}${retest}</h4>
-      <div class="kv"><span>Target <code>${esc(f.target||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
-      <div>${esc(f.description||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
-      ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
-  }).join("") : emptyState("No confirmed findings yet",
-    "This list holds only <strong>confirmed, reproducible</strong> vulnerabilities. Weaker signals appear under <em>Unconfirmed Leads</em> below (or as Playbooks) — verify them in the cURL Console / Workbench / Access Check, and anything confirmed shows up here.");
-  // Unconfirmed leads: candidate / static signals, clearly separated from findings.
+  const showF=_findFilter!=="unconfirmed", showL=_findFilter!=="confirmed";
+  const chip=(f,label,n)=>`<button class="find-fchip ${_findFilter===f?'on':''}" onclick="setFindFilter('${f}')">${label} <b>${n}</b></button>`;
+  const bar=`<div class="find-bar">
+    <div class="find-filters">${chip("all","All",findings.length+leads.length)}${chip("confirmed","Confirmed",findings.length)}${chip("unconfirmed","Unconfirmed",leads.length)}</div>
+    <button class="btn sm" onclick="showAddFinding()">＋ Add finding</button></div>`;
+  // confirmed findings
+  let fHtml="";
+  if(showF) fHtml = findings.length ? findings.map((f,i)=>{
+      const sev=(f.severity||"info").toLowerCase(); const col=SEV_HEX[sev]||SEV_HEX.info;
+      const steps=(f.reproduction_steps||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
+      const manual=(f.tags||[]).includes("manual")||(f.tags||[]).includes("operator-confirmed");
+      const retest=/^https?:\/\//i.test(f.target||f.url||"")?`<button type="button" class="btn ghost sm link-act" style="margin-left:auto" onclick="testFindingIdx(${i})">Re-test in cURL →</button>`:"";
+      return `<div class="card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(f.title||"Untitled")}${manual?` <span class="pill" style="--c:var(--ok)">you confirmed</span>`:""}${retest}</h4>
+        <div class="kv"><span>Target <code>${esc(f.target||f.url||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
+        <div>${esc(f.description||f.evidence||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
+        ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
+    }).join("") : (_findFilter==="confirmed"?emptyState("No confirmed findings yet","Confirm a lead below, or ＋ Add a manual finding. Anything you confirm lands here and in the report."):"");
+  // unconfirmed leads — the operator confirms (or dismisses) these
   let lHtml="";
-  if(leads.length){
-    lHtml=`<div class="leads-sec"><h4>Unconfirmed Leads <span class="muted">(${leads.length} — verify before reporting)</span></h4>`+
-      leads.map((l,i)=>{const sev=(l.severity||"info").toLowerCase();const col=SEV_HEX[sev]||SEV_HEX.info;
-        const rt=/^https?:\/\//i.test(l.target||"")?`<button type="button" class="btn ghost sm link-act" style="margin-left:auto" onclick="testLeadIdx(${i})">Verify in cURL →</button>`:"";
-        return `<div class="card lead-card" style="--c:${col}"><h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(l.title||"Lead")} <span class="pill" style="--c:var(--sev-info)">${esc(l.confidence||"candidate")}</span>${rt}</h4>
-          <div class="kv"><span>Target <code>${esc(l.target||"")}</code></span></div>${l.description?`<div class="muted">${esc(l.description)}</div>`:""}</div>`;
-      }).join("")+`</div>`;
+  if(showL && leads.length){
+    lHtml=`<div class="leads-sec"><h4>Unconfirmed Leads <span class="muted">(${leads.length} — the tool can't auto-prove these; you confirm)</span></h4>`+
+      leads.map((l,i)=>renderLeadCard(l,i)).join("")+`</div>`;
+  } else if(showL && _findFilter==="unconfirmed"){
+    lHtml=emptyState("No unconfirmed leads","Everything is confirmed or dismissed.");
   }
-  el.innerHTML=fHtml+lHtml;
+  el.innerHTML=bar+fHtml+lHtml;
   if(findings.length){badge.style.display="inline-block";badge.textContent=findings.length;}else{badge.style.display="none";}
 }
+function renderLeadCard(l,i){
+  const sev=(l.severity||"info").toLowerCase(); const col=SEV_HEX[sev]||SEV_HEX.info;
+  const rt=/^https?:\/\//i.test(l.target||"")?`<button type="button" class="btn ghost sm link-act" onclick="testLeadIdx(${i})">Run in cURL →</button>`:"";
+  const how=(l.how_to_confirm||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
+  const acts=l._lid?`<button class="btn sm lead-confirm" onclick="confirmLead('${esc(l._lid)}')">✓ Confirm as finding</button>
+      <button class="btn ghost sm lead-dismiss" onclick="dismissLead('${esc(l._lid)}')">✕ Not a finding</button>`:"";
+  return `<div class="card lead-card" style="--c:${col}">
+    <h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(l.title||"Lead")} <span class="pill" style="--c:var(--sev-info)">${esc(l.confidence||"candidate")}</span></h4>
+    <div class="kv"><span>Target <code>${esc(l.target||"")}</code></span>${l.cwe?`<span>CWE ${esc(l.cwe)}</span>`:""}</div>
+    ${l.description?`<div class="muted">${esc(l.description)}</div>`:""}
+    ${how?`<details open><summary>How to confirm</summary><ol>${how}</ol></details>`:""}
+    <div class="lead-foot">${rt}${acts}</div></div>`;
+}
 function testLeadIdx(i){const l=leads[i];if(!l)return;const p=/^https?:\/\//i.test(l.target||"")?l.target:"";prefillCurl("GET",p,{},"",`Lead — ${l.title||""}`);}
+async function refreshFindingsAndLeads(){
+  try{findings=(await(await fetch(`${API}/findings/${sessionId}`)).json()).findings||findings;}catch(e){}
+  try{leads=(await(await fetch(`${API}/leads/${sessionId}`)).json()).leads||leads;}catch(e){}
+  renderFindings();
+}
+async function confirmLead(lid){ if(!sessionId)return;
+  try{await fetch(`${API}/leads/${sessionId}/${encodeURIComponent(lid)}/confirm`,{method:"POST"});}catch(e){}
+  await refreshFindingsAndLeads(); }
+async function dismissLead(lid){ if(!sessionId)return;
+  try{await fetch(`${API}/leads/${sessionId}/${encodeURIComponent(lid)}/dismiss`,{method:"POST"});}catch(e){}
+  await refreshFindingsAndLeads(); }
+function showAddFinding(){
+  if(document.getElementById("addFindForm"))return;
+  if(!sessionId){alert("Start or load a mission first.");return;}
+  const f=document.createElement("div"); f.id="addFindForm"; f.className="card"; f.style.cssText="--c:var(--accent)";
+  f.innerHTML=`<h4>＋ Add a manual finding</h4>
+    <div class="add-grid">
+      <input id="afTitle" placeholder="Title — what you proved">
+      <select id="afSev"><option value="critical">critical</option><option value="high">high</option><option value="medium" selected>medium</option><option value="low">low</option><option value="info">info</option></select>
+      <input id="afUrl" placeholder="Target URL">
+      <input id="afCwe" placeholder="CWE (optional, e.g. CWE-89)">
+      <textarea id="afEvidence" placeholder="Evidence — how you proved it (request/response, screenshot note…)"></textarea>
+      <textarea id="afSteps" placeholder="Reproduction steps (one per line)"></textarea>
+    </div>
+    <div class="add-acts"><button class="btn sm" onclick="submitAddFinding()">Add to findings</button>
+      <button class="btn ghost sm" onclick="document.getElementById('addFindForm').remove()">Cancel</button></div>`;
+  document.getElementById("findingsList").prepend(f);
+  document.getElementById("afTitle").focus();
+}
+async function submitAddFinding(){
+  const g=id=>(document.getElementById(id)?.value||"").trim();
+  const title=g("afTitle"); if(!title){alert("Title is required.");return;}
+  const finding={title,severity:g("afSev"),url:g("afUrl"),target:g("afUrl"),cwe:g("afCwe"),
+    confidence:"confirmed",confirmed:true,evidence:g("afEvidence"),description:g("afEvidence"),
+    reproduction_steps:g("afSteps").split("\n").map(s=>s.trim()).filter(Boolean),
+    analyst_notes:"Manually added by the operator.",tags:["manual","operator-confirmed"]};
+  try{await fetch(`${API}/findings/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(finding)});}catch(e){}
+  document.getElementById("addFindForm")?.remove();
+  await refreshFindingsAndLeads();
+}
 
 /* ── "since last scan" diff (cross-session memory) ── */
 async function loadDiff(){
@@ -1238,6 +1313,7 @@ async function loadPlaybook(){
   if(!sessionId){document.getElementById("playbookList").innerHTML=emptyState("No active session","Start or load a mission, then refresh once recon has run.");return;}
   try{const d=await(await fetch(`${API}/playbook/${sessionId}`)).json();
     pbData=d.playbook||[];
+    const pc=document.getElementById("pbCount"); if(pc)pc.textContent=pbData.length?`· ${pbData.length} test recipe${pbData.length>1?"s":""}`:"";
     document.getElementById("playbookList").innerHTML=pbData.length
       ? pbData.map((g,i)=>renderPlaybookCard(g,i)).join("")
       : emptyState("No playbook yet","The agent builds one via <code class=\"inline\">generate_playbook</code> after recon. Refresh once a run is underway.");
@@ -1251,7 +1327,7 @@ function renderPlaybookCard(g,i){
          <button class="btn ghost sm" onclick="copyPlaybookCurl(${i})">Copy cURL</button>
          <button class="btn ghost sm" onclick="accessFromPlaybook(${i})">Access check</button>
          <button class="btn ghost sm" onclick="sendToCurl(${i})">Send to Console →</button>
-         <button class="btn primary sm" onclick="runPlaybookTest(${i})">▶ Run this test</button></div></div>
+         <button class="btn primary sm" title="Fires the cURL and shows the response inline. This does NOT confirm a finding — read the response, and if it's a real bug, confirm it in Findings." onclick="runPlaybookTest(${i})">▶ Run this test</button></div></div>
        <pre class="code">${esc(cmd)}</pre><div id="pbRun${i}" class="pb-run"></div></div>`
     : `<div class="pb-curl empty"><span>No prebuilt cURL for this surface.</span>
          <button class="btn ghost sm" onclick="sendToCurl(${i})">Open in cURL Console →</button></div>`;
@@ -2296,7 +2372,8 @@ Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,re
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
   loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest,
-  loadIntel,intelReview,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch});
+  loadIntel,intelReview,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch,
+  setFindFilter,confirmLead,dismissLead,showAddFinding,submitAddFinding});
 
 /* land on the Launch view */
 showView("launch");
