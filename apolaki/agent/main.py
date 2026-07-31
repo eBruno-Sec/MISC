@@ -1002,6 +1002,40 @@ async def benchmark_fixture(fixture: str, session: str = ""):
     return benchmark.evaluate(fixture, findings, leads)
 
 
+@app.get("/plan/{session_id}")
+async def technique_plan(session_id: str):
+    """Deterministic evidence-driven plan (CHAD's core, zero-token): derive observations from everything
+    the scan gathered (surface + harvest + code-intel + findings/leads), gate techniques by their
+    preconditions, and return the ordered next-best actions. Empty plan = honest 'exhausted path'."""
+    import asyncio
+    import technique_planner as TP
+    import intel_feeds
+    import codeintel
+    m = _require_mission(session_id)
+    ctx = m.get("context") or {}
+    findings = db.get_findings(session_id)
+    leads = ctx.get("leads", [])
+    harvest = ctx.get("intel") or {}
+    targets = [f.get("target") or f.get("url") for f in findings] + [l.get("target") for l in leads]
+    base = next((u for u in targets if isinstance(u, str) and u.startswith("http")), "")
+    code_intel = {}
+    if base:
+        from urllib.parse import urlparse
+        p = urlparse(base)
+        origin = "%s://%s" % (p.scheme, p.netloc)
+        try:
+            code_intel = await asyncio.to_thread(codeintel.harvest, origin)
+        except Exception:
+            code_intel = {}
+    obs = TP.derive_observations(
+        surface=[t for t in targets if t], harvest=harvest, findings=findings, leads=leads,
+        code_intel=code_intel, authenticated=bool(ctx.get("authenticated")))
+    snaps = _intel_snapshots()
+    kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
+    p = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
+    return {"session": session_id, "observations": sorted(obs), "plan": p, "plan_size": len(p)}
+
+
 @app.get("/codereview")
 async def code_review(path: str = ""):
     """Code Intelligence: static review of a source tree — a path the operator provides, or source
