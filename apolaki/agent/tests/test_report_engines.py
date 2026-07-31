@@ -65,3 +65,16 @@ def test_gaps_surface_failed_tools():
                                              "tools": [{"tool": "run_zap", "status": "failed"}]},
                                 authenticated=True)
     assert any(tag == "failed" for _a, tag, _e in gaps)
+
+
+def test_orchestration_next_best_renders_in_markdown_report():
+    orch = {"advisor": [{"id": "idor_bola_read", "name": "IDOR/BOLA", "score": 71, "reasons": ["object ids"]}],
+            "next_best": [{"id": "reflected_xss", "family": "xss", "action": "inject a reflected param"}]}
+    # with a confirmed finding -> the Intelligence Orchestration section carries the next-best actions
+    f = [{"title": "SQLi", "severity": "high", "confidence": "confirmed", "target": "http://x/",
+          "family": "sql_injection"}]
+    md = report.generate_report("Demo", f, {"in_scope": ["x"]}, orchestration=orch)
+    assert "## Intelligence Orchestration" in md and "reflected_xss" in md
+    # with NO findings -> the operator still gets the deterministic path to keep testing
+    md0 = report.generate_report("Demo", [], {"in_scope": ["x"]}, orchestration=orch)
+    assert "## Recommended Next Actions" in md0 and "reflected_xss" in md0

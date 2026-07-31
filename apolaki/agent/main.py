@@ -690,7 +690,8 @@ async def get_report(session_id: str):
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
                                     delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-                                    intel=m["context"].get("intel"))
+                                    intel=m["context"].get("intel"),
+                                    orchestration=m["context"].get("orchestration"))
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
 
 
@@ -719,7 +720,8 @@ async def get_report_md(session_id: str):
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
                                     delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-                                    intel=m["context"].get("intel"))
+                                    intel=m["context"].get("intel"),
+                                    orchestration=m["context"].get("orchestration"))
     fname = _report_fname(m, scope, "md")
     return PlainTextResponse(md, media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -1522,7 +1524,8 @@ def _record_orchestration(session_id: str) -> None:
         ag = sessions[session_id].get("agent")
         ctx = dict(m["context"])
         ctx["orchestration"] = {"code_intel": getattr(ag, "_codeintel_summary", {}) or {},
-                                "advisor": getattr(ag, "_advisor_recs", []) or []}
+                                "advisor": getattr(ag, "_advisor_recs", []) or [],
+                                "next_best": getattr(ag, "_next_best", []) or []}
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass

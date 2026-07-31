@@ -75,7 +75,8 @@ def _leads_md(leads: list) -> str:
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
                      ai_summary: str = None, execution: dict = None, leads: list = None,
-                     delta: dict = None, tool_ledger: dict = None, intel: dict = None) -> str:
+                     delta: dict = None, tool_ledger: dict = None, intel: dict = None,
+                     orchestration: dict = None) -> str:
     now = _now()
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
@@ -89,6 +90,16 @@ def generate_report(program: str, findings: list, scope: dict,
         # "ended early" only when the STATUS says so — not merely because an
         # execution note is present (which it always is for deterministic/low-AI).
         tail = " before the run ended early." if status_banner else " during this engagement."
+        # A no-findings report is exactly where next-best-action matters most: hand the operator the
+        # deterministic planner's ordered path to keep testing rather than a dead-end "nothing found".
+        nb_block = ""
+        _nb = (orchestration or {}).get("next_best") or []
+        if _nb:
+            _rows = "\n".join("- **%s** _(%s)_%s" % (a.get("id", ""), a.get("family", ""),
+                              ((" — " + (a.get("action") or a.get("oracle") or "")[:90])
+                               if (a.get("action") or a.get("oracle")) else "")) for a in _nb[:6])
+            nb_block = ("\n\n## Recommended Next Actions\n\n_Deterministic, evidence-driven planner "
+                        "(precondition-gated, KEV-ranked) — where to keep testing next:_\n\n" + _rows + "\n")
         return (
             f"# Security Assessment Report: {program}\n\n"
             + (banner + "\n\n" if banner else "")
@@ -97,6 +108,7 @@ def generate_report(program: str, findings: list, scope: dict,
             + ai_block
             + "No confirmed vulnerabilities were recorded" + tail + "\n"
             + leads_md
+            + nb_block
             + (("\n" + delta_block) if delta_block else "")
             + (("\n" + ledger_block) if ledger_block else "")
         )
@@ -218,6 +230,27 @@ def generate_report(program: str, findings: list, scope: dict,
                       "consumes as run-time fixtures. Derived live from the target, not hardcoded. "
                       "Secrets redacted._", ""]
             lines += _ilines
+    # Intelligence Orchestration — prove the knowledge model DROVE the scan, and give the operator the
+    # deterministic next-best actions (the ordered path to keep testing), memory-aware from this engagement.
+    if orchestration:
+        _adv = orchestration.get("advisor") or []
+        _nb = orchestration.get("next_best") or []
+        if _adv or _nb:
+            lines += ["", "## Intelligence Orchestration", ""]
+            if _adv:
+                lines += ["_The scan consulted the first-class technique knowledge model and prioritized "
+                          "these techniques (relevance + CISA-KEV + confidence):_", ""]
+                for a in _adv[:8]:
+                    _why = ", ".join(a.get("reasons", []))[:100]
+                    lines.append("- **%s** (score %s)%s" % (a.get("name") or a.get("id", ""),
+                                 a.get("score", ""), (" — " + _why) if _why else ""))
+            if _nb:
+                lines += ["", "_**Next-best actions** (evidence-driven planner: precondition-gated, "
+                          "KEV-ranked, aware of what this engagement already confirmed):_", ""]
+                for a in _nb[:6]:
+                    _act = (a.get("action") or a.get("oracle") or "")[:90]
+                    lines.append("- **%s** _(%s)_%s" % (a.get("id", ""), a.get("family", ""),
+                                 (" — " + _act) if _act else ""))
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
@@ -1445,6 +1478,16 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          "prioritized <b>%d</b> technique(s) to test (relevance to this target, CISA-KEV weight, "
                          "and confidence):</p><table class='tbl'><tr><th>Technique</th><th>Score</th><th>Why</th></tr>"
                          "%s</table>" % (len(adv), rows))
+        nb = orchestration.get("next_best") or []
+        if nb:
+            rows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td><td class='sub'>%s</td></tr>"
+                           % (e(a.get("id", "")), e(a.get("family", "")),
+                              e(a.get("action") or a.get("oracle") or "")[:110]) for a in nb[:6])
+            parts.append("<p class='sub'>Deterministic <b>next-best actions</b> from the evidence-driven "
+                         "planner (precondition-gated, KEV-ranked, and aware of what this engagement already "
+                         "confirmed — the ordered path to keep testing):</p>"
+                         "<table class='tbl'><tr><th>Technique</th><th>Class</th><th>Action / oracle</th></tr>"
+                         "%s</table>" % rows)
         if parts:
             orch_html = "<h2 id='orchestration'>Intelligence Orchestration</h2>" + "".join(parts)
 
