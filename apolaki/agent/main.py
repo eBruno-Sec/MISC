@@ -122,6 +122,16 @@ class NoteRequest(BaseModel):
     body: str
 
 
+class ProxyRulesRequest(BaseModel):
+    rules: list = []               # match-and-replace rules the mitm addon applies in flight
+
+
+class ProxyReplayRequest(BaseModel):
+    flow: dict = {}                # a captured flow record (from GET /proxy/flows) to resend
+    mutations: dict = {}           # optional method/url/headers/body overrides (Repeater-style)
+    send: bool = False             # False = build the request spec only; True = actually re-issue it
+
+
 class GenerateWordlistRequest(BaseModel):
     base_url: str
     kind: str = "paths"            # paths | credentials
@@ -1556,6 +1566,59 @@ async def get_capture_har(session_id: str):
         return capture.from_dict((m.get("context") or {}).get("capture", {})).har()
     except Exception:
         return dict(_EMPTY_HAR)
+
+
+# ---------------------------------------------------------------------------- intercept proxy (Burp-core)
+@app.get("/proxy/status")
+async def proxy_status():
+    """Is the intercepting proxy active, and what has it captured? Degrades to a labelled-off result when
+    the mitmproxy sidecar is not running (nothing faked)."""
+    import proxy
+    return proxy.status()
+
+
+@app.get("/proxy/flows")
+async def proxy_flows(limit: int = 200):
+    """The live traffic the intercept proxy has captured (secret-redacted), newest last."""
+    import proxy
+    return proxy.FlowStore.load(limit=limit).to_dict()
+
+
+@app.get("/proxy/flows/har")
+async def proxy_flows_har(limit: int = 500):
+    """Export the proxy's captured traffic as a HAR 1.2 document (opens in Burp/Chrome/any tool)."""
+    import proxy
+    try:
+        return proxy.FlowStore.load(limit=limit).har()
+    except Exception:
+        return {"log": {"version": "1.2", "creator": {"name": "apolaki-proxy", "version": "1"}, "entries": []}}
+
+
+@app.get("/proxy/rules")
+async def proxy_get_rules():
+    """The match-and-replace rules currently in effect (what the addon rewrites in flight)."""
+    import proxy
+    return {"rules": proxy.RuleSet.load().rules}
+
+
+@app.post("/proxy/rules")
+async def proxy_set_rules(req: ProxyRulesRequest):
+    """Install deterministic match-and-replace rules (Burp match-and-replace). Validated then written to
+    the shared file the mitm addon hot-reloads. A malformed rule returns 400 rather than writing junk."""
+    import proxy
+    try:
+        saved = proxy.RuleSet(req.rules).save()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "count": len(saved), "rules": saved}
+
+
+@app.post("/proxy/replay")
+async def proxy_replay(req: ProxyReplayRequest):
+    """Replay a captured flow (Repeater-style), optionally mutated, optionally actually re-issued. Bounded
+    to a single request -- never a loop, so it cannot become a DoS."""
+    import proxy
+    return proxy.replay(req.flow, mutations=req.mutations, send=bool(req.send))
 
 
 def _sanitize_error(e: Exception) -> str:

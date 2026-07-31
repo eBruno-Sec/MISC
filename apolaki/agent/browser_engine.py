@@ -76,9 +76,19 @@ def drive(target_url, js, browser_url=None, timeout=45):
     except Exception:
         return _empty(target_url, "httpx unavailable")
     code = js.replace("%TARGET_JSON%", json.dumps(target_url))
+    # Route the headless browser through the intercept proxy when one is configured, so every request the
+    # browser makes is captured + rule-rewritable (browserless v2 accepts Chrome launch args via ?launch=).
+    params = {}
+    try:
+        import proxy as _proxy
+        args = _proxy.browser_launch_args()
+        if args:
+            params["launch"] = json.dumps({"args": args})
+    except Exception:
+        pass
     try:
         r = httpx.post(browser + "/function", headers={"Content-Type": "application/javascript"},
-                       content=code, timeout=timeout)
+                       content=code, params=params or None, timeout=timeout)
         if r.status_code != 200:
             return _empty(target_url, "headless browser returned %s" % r.status_code)
         data = r.json()

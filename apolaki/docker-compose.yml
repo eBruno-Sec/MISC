@@ -44,6 +44,13 @@ services:
       - TECHNIQUE_STORE_DIR=/app/data/techniques
       # Attack-chain memory: per-target record of what was tried/worked/failed (feeds the planner). Agent-writable.
       - ATTACK_CHAIN_DIR=/app/data/attack_chains
+      # Intercept proxy (proxy.py): the optional mitmproxy sidecar streams captured flows here and reads
+      # the match-and-replace rules the agent writes here. When PROXY_URL is set, the browser engine
+      # auto-routes the headless browser through it. Empty PROXY_URL = proxy features degrade to labelled
+      # empty (the HTTP + browser engines are unaffected). Enable with:
+      #   docker compose --profile proxy up -d mitmproxy
+      - PROXY_URL=${PROXY_URL:-http://mitmproxy:8080}
+      - PROXY_FLOWS_DIR=/app/data/proxy
     ports:
       - "8000:8000"
     volumes:
@@ -51,6 +58,7 @@ services:
       - nuclei_templates:/root/nuclei-templates
       - bbh_data:/app/data
       - intel_feeds_data:/app/data/intel_feeds
+      - proxy_data:/app/data/proxy
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -116,6 +124,32 @@ services:
       - "3000"
     restart: unless-stopped
 
+  # OPTIONAL intercepting proxy (proxy.py) -- Apolaki's Burp/ZAP-core man-in-the-middle. mitmdump loads
+  # the Apolaki addon (mitm_addon.py, mounted read-only from ./agent): it streams every redacted flow to
+  # the shared proxy_data volume and applies the match-and-replace rules file the agent writes there. The
+  # browser engine auto-routes through it (Chrome --proxy-server) when PROXY_URL is set on the agent. NOT
+  # in the default stack. Activate with:
+  #   docker compose --profile proxy up -d mitmproxy
+  # (bring up the browser too for full capture: `--profile browser --profile proxy up -d`)
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    profiles: ["proxy"]
+    # The image entrypoint gosu-drops to the unprivileged `mitmproxy` user, which can't write the
+    # root-owned shared volume (the addon's flow writes would be silently denied). Override the entrypoint
+    # to make /data writable and run mitmdump directly so the addon can stream flows to the shared volume.
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "mkdir -p /data && chmod 0777 /data && exec mitmdump --listen-host 0.0.0.0 -p 8080 -s /addon/mitm_addon.py --set termlog_verbosity=info"
+    environment:
+      - PROXY_FLOWS_DIR=/data
+    volumes:
+      - ./agent/mitm_addon.py:/addon/mitm_addon.py:ro
+      - proxy_data:/data
+    expose:
+      - "8080"
+    restart: unless-stopped
+
   # Offensive intel feeds (Phase 0): an INDEPENDENT deterministic ingestion service. Pulls Tier-A,
   # redistributable sources (CISA KEV + MITRE CAPEC) on a schedule and writes normalized JSON
   # snapshots to a shared volume; the agent reads them to enrich the technique registry with
@@ -137,3 +171,4 @@ volumes:
   bbh_data:
   juiceshop_data:
   intel_feeds_data:
+  proxy_data:
