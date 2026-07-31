@@ -1063,6 +1063,13 @@ async def technique_plan(session_id: str):
     obs = TP.derive_observations(
         surface=[t for t in targets if t], harvest=harvest, findings=findings, leads=leads,
         code_intel=code_intel, authenticated=bool(ctx.get("authenticated")))
+    if base and os.environ.get("CDP_BROWSER_URL"):     # browser-as-sensor folds into the SAME observations
+        try:
+            import browser_engine
+            bobs = await asyncio.to_thread(browser_engine.observe, base)
+            obs |= browser_engine.to_observations(bobs)
+        except Exception:
+            pass
     snaps = _intel_snapshots()
     kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
     p = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
@@ -1084,6 +1091,18 @@ async def technique_plan(session_id: str):
         except Exception:
             pass
     return {"session": session_id, "observations": sorted(obs), "plan": p, "plan_size": len(p)}
+
+
+@app.get("/browser/observe")
+async def browser_observe(url: str = ""):
+    """Browser-as-sensor: drive a real headless Chrome to collect structured observations (forms, inputs,
+    routes, runtime API/WS/GraphQL endpoints, storage, cookies, framework, CSP) that feed the SAME
+    planner + attack graph as HTTP recon. Labelled empty result when no headless browser is configured."""
+    import asyncio
+    import browser_engine
+    if not url:
+        return {"error": "url required (in scope)"}
+    return await asyncio.to_thread(browser_engine.observe, url)
 
 
 @app.get("/intel/learning")
