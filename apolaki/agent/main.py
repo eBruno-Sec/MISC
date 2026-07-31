@@ -978,6 +978,30 @@ async def intel_review(tid: str, req: ReviewRequest):
     return {"ok": True, "id": tid, "status": r.get("status"), "version": r.get("version")}
 
 
+@app.get("/benchmark/targets")
+async def benchmark_targets():
+    """Validation fixtures with expected-vulnerability manifests (ground truth for benchmarking)."""
+    import benchmark
+    return benchmark.list_fixtures()
+
+
+@app.get("/benchmark/{fixture}")
+async def benchmark_fixture(fixture: str, session: str = ""):
+    """Score a scan's findings against a fixture's expected-vulnerability manifest: class coverage,
+    confirmed rate, false negatives, per-class breakdown, and a failed-stage hint per miss. Deterministic
+    and zero-token. Pass ?session=<sid> to evaluate that mission; without it, returns the manifest only."""
+    import benchmark
+    if not session:
+        man = benchmark.MANIFESTS.get(fixture)
+        if not man:
+            return {"error": "unknown fixture %r" % fixture, "fixtures": sorted(benchmark.MANIFESTS)}
+        return {"fixture": fixture, "manifest": man}
+    m = _require_mission(session)
+    findings = db.get_findings(session)
+    leads = (m.get("context") or {}).get("leads", [])
+    return benchmark.evaluate(fixture, findings, leads)
+
+
 @app.get("/codereview")
 async def code_review(path: str = ""):
     """Code Intelligence: static review of a source tree — a path the operator provides, or source
