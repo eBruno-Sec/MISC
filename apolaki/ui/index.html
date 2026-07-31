@@ -1894,15 +1894,17 @@ async function loadIntel(){
   if(!el.dataset.loaded) el.innerHTML=`<div class="empty"><h4>Loading the knowledge model…</h4></div>`;
   try{
     const qs=`limit=80${_intelState.status?`&status=${encodeURIComponent(_intelState.status)}`:""}${_intelState.q?`&q=${encodeURIComponent(_intelState.q)}`:""}`;
-    const [feeds,model]=await Promise.all([
+    const [feeds,model,dedup,learn]=await Promise.all([
       fetch(`${API}/intel/feeds`).then(r=>r.json()),
-      fetch(`${API}/intel/techniques?${qs}`).then(r=>r.json())
+      fetch(`${API}/intel/techniques?${qs}`).then(r=>r.json()),
+      fetch(`${API}/intel/dedup`).then(r=>r.json()).catch(()=>({suggestions:[]})),
+      fetch(`${API}/intel/learning`).then(r=>r.json()).catch(()=>({reliability:{}}))
     ]);
-    el.innerHTML=renderIntel(feeds,model); el.dataset.loaded="1";
+    el.innerHTML=renderIntel(feeds,model,dedup,learn); el.dataset.loaded="1";
   }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
 }
 const _INTEL_STATUSES=["proven","catalogued","experimental","pending_review","conflicting","deprecated","superseded","rejected"];
-function renderIntel(feeds,m){
+function renderIntel(feeds,m,dedup,learn){
   const by=m.by_status||{}, kev=feeds.kev_known_exploited_cwes||0;
   let h=`<div class="in-bar">
     <div class="in-stat"><span class="v">${m.total||0}</span><span class="k">Techniques</span></div>
@@ -1918,6 +1920,26 @@ function renderIntel(feeds,m){
   h+=`<div class="in-chips">`+_INTEL_STATUSES.filter(s=>by[s]).map(s=>
     `<button class="in-fchip ${_intelState.status===s?'on':''}" onclick="intelFilter('${s}')">${esc(s.replace('_',' '))} <b>${by[s]}</b></button>`).join("")
     +(_intelState.status?`<button class="in-fchip" onclick="intelFilter('')">clear</button>`:``)+`</div>`;
+  // Phase 2/3 knowledge hygiene: dedup merge suggestions + learned per-class reliability
+  const sugg=(dedup&&dedup.suggestions)||[], rel=(learn&&learn.reliability)||{};
+  const relChips=Object.entries(rel).sort((a,b)=>(b[1].attempts||0)-(a[1].attempts||0)).slice(0,6)
+    .map(([c,t])=>`<span class="in-chip" title="${t.confirmed}/${t.attempts} confirmed across engagements">${esc(c)} ${Math.round((t.rate||0)*100)}%</span>`).join("");
+  if(sugg.length||relChips){
+    h+=`<div style="border:1px solid var(--border);border-radius:var(--radius);padding:.7rem .9rem;margin-bottom:1rem;background:var(--surface)">
+      <div style="display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
+        <b style="font-size:.82rem">Knowledge hygiene</b>
+        ${sugg.length?`<span class="muted" style="font-size:.76rem">${sugg.length} dedup merge suggestion${sugg.length>1?'s':''}</span>`:''}
+        ${relChips?`<span class="muted" style="font-size:.76rem;margin-left:auto">Learned reliability</span>${relChips}`:''}
+      </div>`;
+    if(sugg.length) h+=`<div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.3rem">`+sugg.slice(0,5).map(s=>{
+      const keep=(s.a_conf>=s.b_conf)?s.a:s.b, drop=(s.a_conf>=s.b_conf)?s.b:s.a;
+      return `<div style="display:flex;gap:.5rem;align-items:center;font-size:.75rem">
+        <span class="in-chip">${esc(s.shared_key)}</span>
+        <span style="color:var(--text-dim)">${esc(s.a_name||s.a)} <b>≈${Math.round(s.similarity*100)}%</b> ${esc(s.b_name||s.b)}</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="intelMerge('${esc(keep)}','${esc(drop)}')">Merge →</button></div>`;
+    }).join("")+`</div>`;
+    h+=`</div>`;
+  }
   // prose extractor (sandboxed LLM / deterministic degrade)
   h+=`<div class="in-tools"><div class="in-prose">
       <textarea id="intelProseDoc" placeholder="Paste a trusted advisory / research excerpt. Sandboxed extractor turns it into a pending-review candidate (deterministic-only when no LLM is set)."></textarea>
@@ -1959,6 +1981,11 @@ function renderIntelTech(t){
 async function intelReview(id,action){
   try{ await fetch(`${API}/intel/techniques/${encodeURIComponent(id)}/review`,{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify({action,by:"operator"})}); }catch(e){}
+  loadIntel();
+}
+async function intelMerge(keep,drop){
+  try{ await fetch(`${API}/intel/techniques/${encodeURIComponent(drop)}/review`,{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"merge",keep,by:"operator"})}); }catch(e){}
   loadIntel();
 }
 async function intelExtractCapec(btn){ if(btn){btn.disabled=true;btn.textContent="Extracting…";}
@@ -2372,7 +2399,7 @@ Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,re
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
   loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest,
-  loadIntel,intelReview,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch,
+  loadIntel,intelReview,intelMerge,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch,
   setFindFilter,confirmLead,dismissLead,showAddFinding,submitAddFinding});
 
 /* land on the Launch view */
