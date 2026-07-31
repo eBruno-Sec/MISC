@@ -65,6 +65,19 @@ def test_transition_and_merge_never_delete():
     assert TS.get(store, "capec_7")["superseded_by"] == "capec_66"
 
 
+def test_dedup_suggestions_pairs_similar_candidates():
+    store = {"techniques": {
+        "a": {"id": "a", "name": "SQL Injection in login", "summary": "sql injection login bypass",
+              "cwe": ["CWE-89"], "status": "catalogued", "confidence": {"score": 30}},
+        "b": {"id": "b", "name": "SQL Injection login", "summary": "sql injection login",
+              "cwe": ["CWE-89"], "status": "catalogued", "confidence": {"score": 22}},
+        "c": {"id": "c", "name": "XSS reflected", "summary": "reflected xss",
+              "cwe": ["CWE-79"], "status": "catalogued", "confidence": {"score": 20}}}}
+    s = TS.dedup_suggestions(store, threshold=0.4)
+    assert any({x["a"], x["b"]} == {"a", "b"} for x in s)      # same CWE + similar names -> suggested
+    assert not any("c" in (x["a"], x["b"]) for x in s)         # different CWE -> never paired
+
+
 def test_dedup_key_is_deterministic():
     assert TS.dedup_key({"capec": ["CAPEC-9", "CAPEC-1"]}) == "capec:CAPEC-1"
     assert TS.dedup_key({"cwe": ["CWE-89"], "name": "SQL Injection"}) == "cwe:CWE-89|name:sql injection"

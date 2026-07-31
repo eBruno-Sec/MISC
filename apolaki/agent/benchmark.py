@@ -33,6 +33,40 @@ MANIFESTS = {
         "expected": ["sqli", "xss", "template_injection", "open_redirect", "xxe", "header_injection",
                      "vulnerable_component", "path_traversal"],
     },
+    "bwapp": {
+        "name": "bWAPP", "url_hint": "bwapp",
+        "expected": ["sqli", "xss", "command_injection", "xxe", "ssrf", "path_traversal", "csrf",
+                     "broken_auth", "sensitive_exposure", "open_redirect", "deserialization"],
+    },
+    "webgoat": {
+        "name": "OWASP WebGoat", "url_hint": "webgoat",
+        "expected": ["sqli", "xss", "access_control", "broken_auth", "xxe", "deserialization",
+                     "path_traversal", "csrf", "vulnerable_component", "sensitive_exposure"],
+    },
+    "crapi": {
+        "name": "OWASP crAPI (API Top 10)", "url_hint": "crapi",
+        "expected": ["access_control", "broken_auth", "mass_assignment", "ssrf", "sensitive_exposure",
+                     "business_logic"],
+    },
+    "mutillidae": {
+        "name": "OWASP Mutillidae II", "url_hint": "mutillidae",
+        "expected": ["sqli", "xss", "command_injection", "path_traversal", "csrf", "broken_auth",
+                     "sensitive_exposure", "xxe", "open_redirect"],
+    },
+    "dvna": {
+        "name": "Damn Vulnerable NodeJS Application", "url_hint": "dvna",
+        "expected": ["sqli", "xss", "command_injection", "deserialization", "broken_auth",
+                     "access_control", "vulnerable_component", "path_traversal"],
+    },
+    "gruyere": {
+        "name": "Google Gruyere", "url_hint": "gruyere",
+        "expected": ["xss", "sqli", "csrf", "path_traversal", "access_control", "sensitive_exposure"],
+    },
+    "securityshepherd": {
+        "name": "OWASP Security Shepherd", "url_hint": "shepherd",
+        "expected": ["sqli", "xss", "csrf", "broken_auth", "access_control", "sensitive_exposure",
+                     "crypto", "command_injection"],
+    },
 }
 
 # Map the many tool-emitted finding families onto the benchmark's canonical classes.
@@ -52,7 +86,8 @@ _CLASS_MAP = {
     "vulnerable_component": "vulnerable_component", "prototype_pollution": "vulnerable_component",
     "business_logic": "business_logic", "race": "business_logic",
     "jwt": "broken_auth", "oauth": "broken_auth", "weak_password_reset": "broken_auth", "broken_auth": "broken_auth",
-    "deserialization": "deserialization", "crypto": "crypto", "open_redirect": "open_redirect",
+    "deserialization": "deserialization", "crypto": "crypto", "weak_crypto": "crypto",
+    "crypto_authz": "crypto", "open_redirect": "open_redirect",
     "misconfig": "misconfig", "security_misconfig": "misconfig", "cors": "misconfig",
     "path_traversal": "path_traversal", "lfi": "path_traversal", "upload": "upload",
 }

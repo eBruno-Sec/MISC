@@ -19,6 +19,20 @@ def test_target_key_normalizes():
     assert AC.target_key("juice-shop:3000") == "juice-shop:3000"
 
 
+def test_learning_reliability_and_weight(tmp_path):
+    import learning
+    d = str(tmp_path)
+    AC.record("t1", "sqli", "confirmed", d=d)
+    AC.record("t2", "sqli", "confirmed", d=d)         # sqli confirms across 2 targets
+    AC.record("t1", "xxe", "failed", d=d)
+    AC.record("t2", "xxe", "failed", d=d)             # xxe never pans out
+    rel = learning.reliability(d=d)
+    assert rel["sqli"]["rate"] == 1.0 and rel["xxe"]["rate"] == 0.0
+    assert learning.class_weight("sql_injection", rel, d=d) > 0     # canon match + reliable -> boost
+    assert learning.class_weight("xxe", rel, d=d) < 0              # always failed -> penalty
+    assert learning.class_weight("sqli", {"sqli": {"attempts": 1, "confirmed": 1, "rate": 1.0}}) == 0.0  # <2 attempts = no move
+
+
 def test_annotate_plan_uses_prior_outcomes(tmp_path):
     d = str(tmp_path)
     AC.record("t:3000", "xxe", "failed", d=d)

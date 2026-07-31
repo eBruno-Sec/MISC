@@ -180,3 +180,43 @@ def stats(store):
         by[s] = by.get(s, 0) + 1
     return {"total": len(store.get("techniques") or {}), "by_status": by,
             "updated_at": store.get("updated_at")}
+
+
+# ---------------------------------------------------------------------------- Phase 2: semantic dedup (pure)
+def _tokens(t):
+    import re
+    return set(re.findall(r"[a-z0-9]+", (str(t.get("name", "")) + " " + str(t.get("summary", ""))).lower()))
+
+
+def dedup_suggestions(store, threshold=0.5, limit=40):
+    """Deterministic semantic dedup: SUGGEST merges for candidate pairs that share a primary CWE/CAPEC
+    key AND have high lexical (Jaccard) overlap on name+summary. Deterministic keys decide identity;
+    similarity only proposes a human-reviewed merge -- never auto-merges. Zero embeddings, zero tokens."""
+    techs = [t for t in (store.get("techniques") or {}).values()
+             if t.get("status") not in ("rejected", "superseded", "deprecated")]
+    buckets = {}
+    for t in techs:
+        for k in (set(t.get("cwe") or []) | set(t.get("capec") or [])):
+            buckets.setdefault(k, []).append(t)
+    seen, out = set(), []
+    for k, group in buckets.items():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                a, b = group[i], group[j]
+                if a["id"] == b["id"]:
+                    continue
+                pair = tuple(sorted((a["id"], b["id"])))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                ta, tb = _tokens(a), _tokens(b)
+                if not ta or not tb:
+                    continue
+                jac = len(ta & tb) / len(ta | tb)
+                if jac >= threshold:
+                    out.append({"a": a["id"], "b": b["id"], "shared_key": k, "similarity": round(jac, 2),
+                                "a_name": a.get("name"), "b_name": b.get("name"),
+                                "a_conf": (a.get("confidence") or {}).get("score", 0),
+                                "b_conf": (b.get("confidence") or {}).get("score", 0)})
+    out.sort(key=lambda x: x["similarity"], reverse=True)
+    return out[:limit]

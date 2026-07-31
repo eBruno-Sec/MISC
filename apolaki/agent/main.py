@@ -860,6 +860,12 @@ class ReviewRequest(BaseModel):
     keep: str = ""             # target id when action == merge
 
 
+class BulkReviewRequest(BaseModel):
+    action: str                # promote | prove | reject | deprecate | conflict
+    ids: list
+    by: str = "operator"
+
+
 _TECH_STORE_CACHE = {"mtime": None, "store": None}
 
 
@@ -978,6 +984,33 @@ async def intel_review(tid: str, req: ReviewRequest):
     return {"ok": True, "id": tid, "status": r.get("status"), "version": r.get("version")}
 
 
+@app.get("/intel/dedup")
+async def intel_dedup():
+    """Phase 2 semantic dedup: deterministic merge SUGGESTIONS (shared CWE/CAPEC + lexical similarity).
+    The human decides -- apply with POST /intel/techniques/{keep}/review action=merge keep=<other>."""
+    import technique_store
+    return {"suggestions": technique_store.dedup_suggestions(_tech_store())}
+
+
+@app.post("/intel/techniques/bulk")
+async def intel_bulk_review(req: BulkReviewRequest):
+    """Bulk lifecycle action across many stored candidates (CHAD's bulk promote / archive). Audited;
+    nothing deleted -- each is a versioned transition."""
+    import technique_store
+    _ACT = {"promote": "experimental", "prove": "proven", "reject": "rejected",
+            "deprecate": "deprecated", "conflict": "conflicting"}
+    if req.action not in _ACT:
+        return {"error": "unknown action %r" % req.action}
+    store = technique_store.load()
+    done = 0
+    for tid in (req.ids or [])[:300]:
+        if technique_store.transition(store, tid, _ACT[req.action], req.by, "bulk"):
+            done += 1
+    technique_store.save(store)
+    _TECH_STORE_CACHE["store"] = None
+    return {"ok": True, "action": req.action, "updated": done}
+
+
 @app.get("/benchmark/targets")
 async def benchmark_targets():
     """Validation fixtures with expected-vulnerability manifests (ground truth for benchmarking)."""
@@ -1033,13 +1066,32 @@ async def technique_plan(session_id: str):
     snaps = _intel_snapshots()
     kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
     p = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
-    if base:                               # fold in what prior engagements on this target already learned
+    try:                                   # Phase 3: reweight by LEARNED per-class reliability (all targets)
+        import learning
+        rel = learning.reliability()
+        for a in p:
+            w = learning.class_weight(a.get("family"), rel)
+            if w:
+                a["score"] = round(a["score"] + w, 1)
+                a["learned"] = {"weight": w}
+        p.sort(key=lambda x: x.get("score", 0), reverse=True)
+    except Exception:
+        pass
+    if base:                               # fold in what prior engagements on THIS target already learned
         try:
             import attack_chain
             p = attack_chain.annotate_plan(base, p)
         except Exception:
             pass
     return {"session": session_id, "observations": sorted(obs), "plan": p, "plan_size": len(p)}
+
+
+@app.get("/intel/learning")
+async def intel_learning():
+    """Continuous-learning view: per-vuln-class reliability rolled up from oracle-confirmed outcomes
+    across ALL engagements. Deterministic, zero-token; feeds the planner's ranking."""
+    import learning
+    return {"reliability": learning.reliability()}
 
 
 @app.get("/chain/{target}")
