@@ -87,6 +87,28 @@ def drive(target_url, js, browser_url=None, timeout=45):
         return _empty(target_url, "headless browser unreachable: %s" % str(e)[:80])
 
 
+def screenshot(target_url, browser_url=None, full=False, timeout=45):
+    """Capture a PNG screenshot (base64) of the target via headless Chrome -- a PoC asset to attach to a
+    finding. Labelled-empty dict when no browser is configured; never raises."""
+    browser = _browser_url(browser_url)
+    if not browser:
+        return {"browser": False, "note": "no headless browser configured", "png_b64": ""}
+    try:
+        import base64
+        import httpx
+    except Exception:
+        return {"browser": False, "note": "httpx unavailable", "png_b64": ""}
+    try:
+        r = httpx.post(browser + "/screenshot", json={"url": target_url, "options": {"fullPage": bool(full)}},
+                       timeout=timeout)
+        if r.status_code != 200:
+            return {"browser": False, "note": "screenshot returned %s" % r.status_code, "png_b64": ""}
+        return {"browser": True, "png_b64": base64.b64encode(r.content).decode(), "bytes": len(r.content),
+                "target": target_url}
+    except Exception as e:
+        return {"browser": False, "note": "unreachable: %s" % str(e)[:60], "png_b64": ""}
+
+
 def observe(target_url, browser_url=None):
     """Browser-as-sensor: navigate and return the structured observation set. Falls back to a labelled
     empty result when no browser is available."""

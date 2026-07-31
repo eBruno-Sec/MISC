@@ -24,3 +24,9 @@ def test_to_observations_maps_browser_sensor_to_planner():
 def test_to_observations_empty_when_degraded():
     assert BE.to_observations({"browser": False}) == set()
     assert BE.to_observations(None) == set()
+
+
+def test_screenshot_degrades_without_browser(monkeypatch):
+    monkeypatch.delenv("CDP_BROWSER_URL", raising=False)
+    r = BE.screenshot("http://x.io")
+    assert r["browser"] is False and r["png_b64"] == ""      # labelled empty, never raises

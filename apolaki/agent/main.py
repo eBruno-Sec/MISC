@@ -1093,6 +1093,16 @@ async def technique_plan(session_id: str):
     return {"session": session_id, "observations": sorted(obs), "plan": p, "plan_size": len(p)}
 
 
+@app.get("/mutate")
+async def mutate(vuln_class: str = "", base: str = "", limit: int = 30):
+    """Payload mutation: ordered payload variants for a vuln class (deterministic families + encodings +
+    bypass tricks) plus the bounded retry policy. Feeds the execution engines when a first payload is
+    filtered -- systematic alternatives without an LLM."""
+    import mutation
+    return {"vuln_class": vuln_class, "variants": mutation.variants(vuln_class, base or None, limit),
+            "retry_policy": mutation.retry_policy(vuln_class)}
+
+
 @app.get("/browser/observe")
 async def browser_observe(url: str = ""):
     """Browser-as-sensor: drive a real headless Chrome to collect structured observations (forms, inputs,
@@ -1813,6 +1823,29 @@ async def update_finding(session_id: str, fid: str, finding: dict):
 async def delete_finding(session_id: str, fid: str):
     db.delete_finding(fid)
     return {"ok": True}
+
+
+@app.post("/findings/{session_id}/{fid}/poc")
+async def capture_finding_poc(session_id: str, fid: str):
+    """Capture a browser PoC (screenshot of the finding's URL) and attach it to the finding as evidence
+    (CHAD's PoC assets). Needs the headless-chrome sidecar; returns a labelled note when unavailable."""
+    import asyncio
+    import browser_engine
+    _require_mission(session_id)
+    finding = next((f for f in db.get_findings(session_id) if str(f.get("id")) == fid), None)
+    if not finding:
+        raise HTTPException(404, "finding not found")
+    url = finding.get("url") or finding.get("target") or ""
+    if not str(url).startswith("http"):
+        return {"ok": False, "note": "finding has no http URL to screenshot"}
+    shot = await asyncio.to_thread(browser_engine.screenshot, url)
+    if not shot.get("browser"):
+        return {"ok": False, "note": shot.get("note")}
+    merged = dict(finding)
+    merged["poc_screenshot"] = shot["png_b64"][:1200000]
+    merged["poc_url"] = url
+    db.update_finding(fid, merged)
+    return {"ok": True, "bytes": shot.get("bytes"), "attached_to": fid}
 
 
 # ── lead confirmation workflow: leads are UNCONFIRMED; a human confirms (or dismisses) them ──
