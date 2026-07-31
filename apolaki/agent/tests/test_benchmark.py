@@ -34,3 +34,21 @@ def test_unknown_fixture_is_handled():
 def test_list_fixtures():
     ids = {f["id"] for f in benchmark.list_fixtures()["fixtures"]}
     assert {"juiceshop", "dvwa", "ginandjuice"} <= ids
+
+
+def test_prototype_pollution_is_not_collapsed_into_vulnerable_component():
+    # regression: prototype_pollution (CWE-1321) and vulnerable_component (CWE-1035) are DISTINCT classes.
+    assert benchmark._canon_class({"family": "prototype_pollution"}) == "prototype_pollution"
+    assert benchmark._canon_class({"cwe": "CWE-1321"}) == "prototype_pollution"
+    assert benchmark._canon_class({"family": "vulnerable_component"}) == "vulnerable_component"
+    assert benchmark._canon_class({"cwe": "CWE-1035"}) == "vulnerable_component"
+
+
+def test_ginandjuice_absorption_confirms_scanned_classes_no_false_positive():
+    # the three classes Apolaki actually confirmed against ginandjuice.shop, tagged as the live scan tags them.
+    findings = [{"family": "vulnerable_component", "cwe": "CWE-1035", "confidence": "confirmed"},
+                {"family": "template_injection", "cwe": "CWE-1336", "confidence": "confirmed"},
+                {"family": "prototype_pollution", "cwe": "CWE-1321", "confidence": "confirmed"}]
+    r = benchmark.evaluate("ginandjuice", findings)
+    assert {"template_injection", "vulnerable_component", "prototype_pollution"} <= set(r["confirmed"])
+    assert r["unexpected"] == []                                      # zero false positives holds

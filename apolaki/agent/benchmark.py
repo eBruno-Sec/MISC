@@ -31,7 +31,7 @@ MANIFESTS = {
         "name": "PortSwigger Gin & Juice Shop", "url_hint": "ginandjuice.shop",
         # from PortSwigger's published vulnerability list at ginandjuice.shop/vulnerabilities
         "expected": ["sqli", "xss", "template_injection", "open_redirect", "xxe", "header_injection",
-                     "vulnerable_component", "path_traversal"],
+                     "vulnerable_component", "path_traversal", "prototype_pollution"],
     },
     "bwapp": {
         "name": "bWAPP", "url_hint": "bwapp",
@@ -83,7 +83,8 @@ _CLASS_MAP = {
     "info_disclosure": "sensitive_exposure", "credential_exposure": "sensitive_exposure",
     "config_exposure": "sensitive_exposure", "sensitive_exposure": "sensitive_exposure",
     "jsonp_info_leak": "sensitive_exposure",
-    "vulnerable_component": "vulnerable_component", "prototype_pollution": "vulnerable_component",
+    "vulnerable_component": "vulnerable_component", "vuln_component": "vulnerable_component",
+    "prototype_pollution": "prototype_pollution",
     "business_logic": "business_logic", "race": "business_logic",
     "jwt": "broken_auth", "oauth": "broken_auth", "weak_password_reset": "broken_auth", "broken_auth": "broken_auth",
     "deserialization": "deserialization", "crypto": "crypto", "weak_crypto": "crypto",
@@ -96,7 +97,8 @@ _CLASS_MAP = {
 _CWE_CLASS = {
     "cwe-89": "sqli", "cwe-79": "xss", "cwe-78": "command_injection", "cwe-22": "path_traversal",
     "cwe-352": "csrf", "cwe-611": "xxe", "cwe-918": "ssrf", "cwe-601": "open_redirect",
-    "cwe-502": "deserialization", "cwe-1321": "vulnerable_component", "cwe-434": "upload",
+    "cwe-502": "deserialization", "cwe-1321": "prototype_pollution", "cwe-1035": "vulnerable_component",
+    "cwe-1336": "template_injection", "cwe-94": "template_injection", "cwe-434": "upload",
     "cwe-639": "access_control", "cwe-285": "access_control", "cwe-287": "broken_auth", "cwe-347": "broken_auth",
 }
 

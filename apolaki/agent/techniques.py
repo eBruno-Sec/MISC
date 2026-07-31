@@ -155,8 +155,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Template expression evaluated client-side (e.g. {{ }} interpolation).",
        exploit="Inject a template expression that the client framework evaluates.",
        oracle="Framework evaluates the expression (arithmetic/constructor proof).",
-       validated_on=["juiceshop"],
-       maps_to={"juiceshop": ["CSTI"]}),
+       validated_on=["juiceshop", "ginandjuice"],
+       maps_to={"juiceshop": ["CSTI"], "ginandjuice": ["Client-side template injection (search)"]}),
 
     _t(id="ssti", vuln_class="template_injection", cwe="CWE-94", owasp="A03:2021",
        permission=ACTIVE, transferable=True,
@@ -209,7 +209,9 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        summary="Prototype pollution via __proto__/constructor keys.",
        detect="Merge/assign of user object reaches Object.prototype.",
        exploit="Send a payload polluting a prototype key and observe a gadget effect.",
-       oracle="A previously-absent property appears on unrelated objects post-injection."),
+       oracle="A previously-absent property appears on unrelated objects post-injection.",
+       validated_on=["ginandjuice"],
+       maps_to={"ginandjuice": ["Client-side prototype pollution (DOM, query)"]}),
 
     _t(id="insecure_deser", vuln_class="deserialization", cwe="CWE-502", owasp="A08:2021",
        permission=INTRUSIVE, transferable=True,
@@ -233,8 +235,9 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Exact version -> CVE mapping (dependency_intel), severity capped pending reachability.",
        exploit="Advisory lead; escalated only if a reachable sink is confirmed.",
        oracle="Version-pinned CVE match; NOT a confirmed exploit unless reachability proven.",
-       validated_on=["juiceshop"],
-       maps_to={"juiceshop": ["Vulnerable Library", "Legacy Typosquatting"]}),
+       validated_on=["juiceshop", "ginandjuice"],
+       maps_to={"juiceshop": ["Vulnerable Library", "Legacy Typosquatting"],
+                "ginandjuice": ["Vulnerable JavaScript dependency (angular@1.7.7 / CVE-2023-26118)"]}),
 
     _t(id="weak_password_reset", vuln_class="broken_auth", cwe="CWE-640", owasp="A07:2021",
        permission=ACTIVE, transferable=True,
