@@ -851,6 +851,10 @@ class ToolRegistry:
         import intel as _intel
         self.intel = _intel.IntelStore()
         self._intel_mod = _intel
+        # Traffic capture: a unified Burp/ZAP-style ledger of every request/response (HTTP + browser),
+        # persisted at finalize and exportable as HAR. Bounded + secret-redacted.
+        import capture as _capture
+        self.capture = _capture.CaptureStore()
         # set by the agent so long ZAP polls can honor a user stop
         self.stop_event = None
         # Shared recon accumulator consumed by guidance + surface.
@@ -1256,6 +1260,12 @@ class ToolRegistry:
                 content = body if isinstance(body, (bytes, str)) else json.dumps(body)
             r = await c.request(method, url, content=content if isinstance(content, (bytes, str)) else None)
             self._harvest_response(url, r)
+            try:
+                self.capture.add(method, url, r.status_code, req_headers=h, resp_headers=dict(r.headers),
+                                 resp_len=len(r.content), ms=(time.perf_counter() - t0) * 1000, engine="http",
+                                 resp_ct=r.headers.get("content-type", ""))
+            except Exception:
+                pass
             return r, time.perf_counter() - t0
 
     def _harvest_body(self, source: str, headers, body) -> None:
@@ -1834,6 +1844,12 @@ class ToolRegistry:
                 resp = {"status": r.status_code, "headers": dict(r.headers), "body": text,
                         "length": len(r.content), "final_url": str(r.url)}
                 self._harvest_body(resp["final_url"] or url, resp["headers"], text)
+                try:
+                    self.capture.add(method, url, resp["status"], req_headers=req_headers,
+                                     resp_headers=resp["headers"], resp_len=resp["length"], engine="http",
+                                     resp_ct=resp["headers"].get("content-type", ""))
+                except Exception:
+                    pass
         except Exception as e:
             return {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0, "final_url": url}
 

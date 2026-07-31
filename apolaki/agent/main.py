@@ -1417,6 +1417,7 @@ def _finalize_mission(session_id: str) -> None:
     _record_memory(session_id)
     _record_intel(session_id)
     _record_orchestration(session_id)
+    _record_capture(session_id)
 
 
 def _record_intel(session_id: str) -> None:
@@ -1456,6 +1457,49 @@ def _record_orchestration(session_id: str) -> None:
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
+
+
+def _record_capture(session_id: str) -> None:
+    """At mission end: snapshot the traffic-capture ledger (redacted) into the mission context so the
+    report/UI can show the whole request/response trail and export HAR. Best-effort."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        store = getattr(sessions[session_id]["tools"], "capture", None)
+        if store is None:
+            return
+        ctx = dict(m["context"])
+        ctx["capture"] = store.to_dict()
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+
+
+@app.get("/capture/{session_id}")
+async def get_capture(session_id: str):
+    """The engagement's traffic-capture ledger (every request/response, secret-redacted). Live from the
+    running tools when active, else the persisted snapshot."""
+    if session_id in sessions:
+        store = getattr(sessions[session_id]["tools"], "capture", None)
+        if store is not None:
+            return store.to_dict()
+    m = _require_mission(session_id)
+    return (m.get("context") or {}).get("capture", {"count": 0, "entries": []})
+
+
+@app.get("/capture/{session_id}/har")
+async def get_capture_har(session_id: str):
+    """Export the engagement's captured traffic as a HAR 1.2 document (opens in Burp/Chrome/any tool)."""
+    import capture
+    if session_id in sessions:
+        store = getattr(sessions[session_id]["tools"], "capture", None)
+        if store is not None:
+            return store.har()
+    m = _require_mission(session_id)
+    return capture.from_dict((m.get("context") or {}).get("capture", {})).har()
 
 
 def _sanitize_error(e: Exception) -> str:
