@@ -311,6 +311,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
   <button class="navbtn" data-view="intel" onclick="showView('intel')">Intel</button>
   <button class="navbtn" data-view="codereview" onclick="showView('codereview')">Code Review</button>
+  <button class="navbtn" data-view="proxy" onclick="showView('proxy')">Proxy</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
   <button class="navbtn" data-view="help" onclick="showView('help')">Help</button>
@@ -803,6 +804,66 @@ X-Requested-With: </textarea>
       </details>
     </section>
 
+    <section class="panel" id="p-proxy">
+      <style>
+        .px-status{margin:.2rem 0 1rem;font-size:.86rem}
+        .px-on{color:#3ad17a;font-weight:600}.px-idle{color:#e0b23a;font-weight:600}.px-off{color:var(--text-dim);font-weight:600}
+        .px-hint{margin-top:.4rem;font-size:.76rem;color:var(--text-dim)}
+        .px-cols{display:grid;grid-template-columns:minmax(280px,1fr) minmax(360px,1.4fr);gap:1.2rem}
+        @media(max-width:820px){.px-cols{grid-template-columns:1fr}}
+        .sec2{font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin:0 0 .5rem}
+        .px-form{display:flex;flex-direction:column;gap:.4rem}
+        .px-form input{background:var(--bg-soft,#12161c);border:1px solid var(--border,#2a3038);color:var(--text,#e8eef5);border-radius:6px;padding:.42rem .55rem;font-size:.8rem}
+        .px-form .btn{margin-top:.2rem}
+        .px-rulelist{margin-top:.8rem;display:flex;flex-direction:column;gap:.5rem}
+        .px-rule{border:1px solid var(--border,#2a3038);border-radius:7px;padding:.5rem .6rem;font-size:.78rem}
+        .px-acts{margin-top:.3rem;display:flex;flex-wrap:wrap;gap:.35rem}
+        .px-acts span{background:rgba(120,140,255,.12);border:1px solid rgba(120,140,255,.25);border-radius:5px;padding:.08rem .4rem;font-family:var(--mono,monospace);font-size:.72rem}
+        .px-norule{font-size:.78rem;padding:.4rem 0}
+        .px-flowhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem}
+        .px-table{width:100%;border-collapse:collapse;font-size:.76rem}
+        .px-table th{text-align:left;color:var(--text-dim);font-weight:600;padding:.3rem .4rem;border-bottom:1px solid var(--border,#2a3038)}
+        .px-table td{padding:.3rem .4rem;border-bottom:1px solid rgba(120,130,150,.12);vertical-align:top}
+        .px-m{font-family:var(--mono,monospace);color:#8fb8ff}
+        .px-url{font-family:var(--mono,monospace);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .px-table .s2{color:#3ad17a}.px-table .s3{color:#5aa9e6}.px-table .s4{color:#e0b23a}.px-table .s5{color:#e0553a}
+        .px-rulehit{background:rgba(120,140,255,.15);border-radius:5px;padding:.05rem .35rem;font-family:var(--mono,monospace);font-size:.7rem}
+        .btn.xs{padding:.12rem .4rem;font-size:.72rem}
+      </style>
+      <div class="view-head"><h3 class="sec">Intercept Proxy</h3>
+        <span class="muted">Burp-style MITM — capture, rewrite in flight, replay. The browser routes through it automatically.</span></div>
+      <div class="cr-intro">A real intercepting proxy (<b>mitmproxy</b>) sits between Apolaki's headless browser and every target: it captures <b>every request/response</b> in one ledger and can <b>rewrite traffic in flight</b> with deterministic match-and-replace rules (Burp's match-and-replace, but reproducible). Start it with <code>docker compose --profile proxy up -d mitmproxy</code> — no manual proxy config, no CA import. Off by default; the HTTP + browser engines work fine without it.</div>
+
+      <div id="proxyStatus" class="px-status">…</div>
+
+      <div class="px-cols">
+        <div class="px-rules">
+          <h4 class="sec2">Match &amp; replace rules</h4>
+          <div class="px-form">
+            <input id="pxHost" placeholder="host contains (e.g. juice-shop)">
+            <input id="pxPath" placeholder="path contains (e.g. /rest/)">
+            <input id="pxHdrName" placeholder="set request header — name (optional)">
+            <input id="pxHdrVal" placeholder="header value">
+            <input id="pxFind" placeholder="response body — find (optional)">
+            <input id="pxRepl" placeholder="replace with">
+            <button class="btn" onclick="addProxyRule()">+ Add rule</button>
+            <button class="btn ghost" onclick="clearProxyRules()">Clear all rules</button>
+          </div>
+          <div id="proxyRules" class="px-rulelist"></div>
+        </div>
+        <div class="px-flowswrap">
+          <div class="px-flowhead">
+            <h4 class="sec2" style="margin:0">Live flows <span id="pxFlowCount" class="muted"></span></h4>
+            <span>
+              <button class="btn ghost sm" onclick="loadProxy()">↻ Refresh</button>
+              <button class="btn ghost sm" onclick="exportProxyHar()">⭳ HAR</button>
+            </span>
+          </div>
+          <div id="proxyFlows"><div class="empty"><h4>No traffic yet</h4><p>Start the proxy, then browse or scan through it.</p></div></div>
+        </div>
+      </div>
+    </section>
+
   </div>
 </main>
 
@@ -864,6 +925,7 @@ const VIEWS={
   taxonomy: [["taxonomy","Technique Taxonomy"]],
   intel:    [["intel","Knowledge Model"]],
   codereview:[["codereview","Code Review"]],
+  proxy:    [["proxy","Intercept Proxy"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
   help:     [["help","How to use"]],
@@ -893,6 +955,7 @@ function switchTab(name){
   if(name==="taxonomy")loadTaxonomy();
   if(name==="intel")loadIntel();
   if(name==="codereview")loadCodeReview();
+  if(name==="proxy")loadProxy();
 }
 
 /* ── phase bar ── */
@@ -2005,6 +2068,87 @@ function intelSearch(v){ _intelState.q=v; clearTimeout(window._intelT); window._
 
 /* ── Code Review: static Code Intelligence over a source tree ── */
 function loadCodeReview(){ runHarvest(); }   /* black-box harvest is fast — auto-run on open */
+
+/* ── Intercept Proxy ── */
+function pxEsc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function pxVal(id){const el=document.getElementById(id);return el?el.value.trim():"";}
+async function loadProxy(){
+  try{
+    const [st,fl,ru]=await Promise.all([
+      fetch(`${API}/proxy/status`).then(r=>r.json()),
+      fetch(`${API}/proxy/flows?limit=200`).then(r=>r.json()),
+      fetch(`${API}/proxy/rules`).then(r=>r.json()),
+    ]);
+    renderProxyStatus(st); renderProxyFlows(fl); renderProxyRules(ru.rules||[]);
+  }catch(e){ const el=document.getElementById("proxyStatus"); if(el)el.innerHTML='<span class="px-off">Proxy endpoint unreachable</span>'; }
+}
+function renderProxyStatus(s){
+  const el=document.getElementById("proxyStatus"); if(!el)return;
+  const on=s.active, cfg=s.configured;
+  const cls=on?"px-on":(cfg?"px-idle":"px-off");
+  const txt=on?`● Active · ${s.flows_captured} flow${s.flows_captured===1?"":"s"} captured`:(cfg?"● Configured · waiting for traffic":"○ Off — start the mitmproxy sidecar");
+  el.innerHTML=`<span class="${cls}">${txt}</span>`+(s.proxy_url?`<span class="muted"> · ${pxEsc(s.proxy_url)}</span>`:"")+
+    (!cfg?`<div class="px-hint">Enable: <code>docker compose --profile proxy up -d mitmproxy</code> (add <code>--profile browser</code> to capture browser traffic too).</div>`:"");
+}
+function renderProxyFlows(fl){
+  const cnt=document.getElementById("pxFlowCount"); if(cnt)cnt.textContent=fl.count?`(${fl.count})`:"";
+  const wrap=document.getElementById("proxyFlows"); if(!wrap)return;
+  const rows=(fl.flows||[]).slice().reverse();
+  if(!rows.length){wrap.innerHTML='<div class="empty"><h4>No traffic yet</h4><p>Start the proxy, then browse or scan through it.</p></div>';return;}
+  const body=rows.map(f=>{
+    const sc=f.status||0, scls=sc>=500?"s5":sc>=400?"s4":sc>=300?"s3":"s2";
+    const rule=f.matched_rule?`<span class="px-rulehit">${pxEsc(f.matched_rule)}</span>`:"";
+    return `<tr><td class="px-m">${pxEsc(f.method)}</td><td class="px-url" title="${pxEsc(f.url)}">${pxEsc(f.host)}${pxEsc(f.path)}</td><td class="${scls}">${sc||""}</td><td>${rule}</td><td><button class="btn ghost xs" title="Replay this request" onclick='replayFlow(${JSON.stringify(f).replace(/'/g,"&#39;")})'>↻</button></td></tr>`;
+  }).join("");
+  wrap.innerHTML=`<div style="overflow-x:auto"><table class="px-table"><thead><tr><th>Method</th><th>URL</th><th>Status</th><th>Rule</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function renderProxyRules(rules){
+  const el=document.getElementById("proxyRules"); if(!el)return;
+  if(!rules.length){el.innerHTML='<div class="muted px-norule">No rules — traffic passes through untouched.</div>';return;}
+  el.innerHTML=rules.map(r=>{
+    const m=r.match||{}, bits=[];
+    if(m.host)bits.push(`host~${pxEsc(m.host)}`); if(m.path_contains)bits.push(`path~${pxEsc(m.path_contains)}`); if(m.method)bits.push(pxEsc(m.method));
+    const acts=[];
+    if(r.set_request_headers)Object.entries(r.set_request_headers).forEach(([k,v])=>acts.push(`set ${pxEsc(k)}: ${pxEsc(v)}`));
+    (r.replace_response_body||[]).forEach(p=>acts.push(`resp "${pxEsc(p.find)}"→"${pxEsc(p.replace)}"`));
+    (r.replace_request_body||[]).forEach(p=>acts.push(`req "${pxEsc(p.find)}"→"${pxEsc(p.replace)}"`));
+    if(r.set_response_status)acts.push(`status→${r.set_response_status}`);
+    if(r.block)acts.push(`block ${r.block_status||403}`);
+    return `<div class="px-rule"><b>${pxEsc(r.id)}</b> <span class="muted">${bits.join(" · ")||"any"}</span><div class="px-acts">${acts.map(a=>`<span>${a}</span>`).join("")}</div></div>`;
+  }).join("");
+}
+async function addProxyRule(){
+  const host=pxVal("pxHost"),path=pxVal("pxPath"),hn=pxVal("pxHdrName"),hv=pxVal("pxHdrVal"),find=pxVal("pxFind"),repl=pxVal("pxRepl");
+  if(!host&&!path){alert("A rule needs at least a host or path to match on.");return;}
+  const cur=await fetch(`${API}/proxy/rules`).then(r=>r.json()).then(x=>x.rules||[]).catch(()=>[]);
+  const rule={match:{}}; if(host)rule.match.host=host; if(path)rule.match.path_contains=path;
+  if(hn)rule.set_request_headers={[hn]:hv};
+  if(find)rule.replace_response_body=[{find:find,replace:repl}];
+  cur.push(rule);
+  const res=await fetch(`${API}/proxy/rules`,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:cur})});
+  if(!res.ok){const e=await res.json().catch(()=>({}));alert("Rule rejected: "+(e.detail||res.status));return;}
+  ["pxHost","pxPath","pxHdrName","pxHdrVal","pxFind","pxRepl"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+  loadProxy();
+}
+async function clearProxyRules(){
+  await fetch(`${API}/proxy/rules`,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:[]})}).catch(()=>{});
+  loadProxy();
+}
+async function exportProxyHar(){
+  try{
+    const har=await fetch(`${API}/proxy/flows/har?limit=500`).then(r=>r.json());
+    const blob=new Blob([JSON.stringify(har,null,2)],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="apolaki-proxy.har"; a.click(); URL.revokeObjectURL(a.href);
+  }catch(e){alert("HAR export failed");}
+}
+async function replayFlow(f){
+  try{
+    const d=await fetch(`${API}/proxy/replay`,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({flow:f,send:true})}).then(r=>r.json());
+    if(d.sent&&d.response)alert(`Replay → ${d.response.status} · ${d.response.len}b · ${d.response.ms}ms`);
+    else alert("Replay: "+(d.note||"not sent"));
+    loadProxy();
+  }catch(e){alert("Replay failed");}
+}
 async function runHarvest(){
   const url=(document.getElementById("crUrl").value||"").trim();
   const el=document.getElementById("codereviewBody");
