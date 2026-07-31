@@ -37,6 +37,13 @@ def _bwapp_completion(base_url: str) -> dict:
             "confirmed": r.get("confirmed", []), "probes": r.get("probes", {})}
 
 
+def _mutillidae_completion(base_url: str) -> dict:
+    import mutillidae_solvers
+    r = mutillidae_solvers.prove(base_url)
+    return {"lab": "mutillidae", "note": "Mutillidae has no scoreboard API; scored via per-class response oracles",
+            "confirmed": r.get("confirmed", []), "probes": r.get("probes", {})}
+
+
 def _dvwa_completion(base_url: str) -> dict:
     # DVWA has no machine-readable scoreboard; completion is per-module + manual.
     return {"lab": "dvwa", "note": "DVWA has no scoreboard API; score via per-module oracles/manual"}
@@ -49,6 +56,8 @@ LABS = {
              "completion": _dvwa_completion},
     "bwapp": {"fingerprint": ["bWAPP", "an extremely buggy web app"],
               "completion": _bwapp_completion},
+    "mutillidae": {"fingerprint": ["Mutillidae", "OWASP Mutillidae", "NOWASP"],
+                   "completion": _mutillidae_completion},
 }
 
 
@@ -81,7 +90,11 @@ def solve(lab_id: str, base_url: str) -> dict:
     if lab_id == "bwapp":
         import bwapp_solvers
         return bwapp_solvers.prove(base_url)
-    return {"error": "no solver pack for lab '%s'" % lab_id, "available": ["juiceshop", "bwapp"]}
+    if lab_id == "mutillidae":
+        import mutillidae_solvers
+        return mutillidae_solvers.prove(base_url)
+    return {"error": "no solver pack for lab '%s'" % lab_id,
+            "available": ["juiceshop", "bwapp", "mutillidae"]}
 
 
 def conquest(lab_id: str, base_url: str) -> dict:

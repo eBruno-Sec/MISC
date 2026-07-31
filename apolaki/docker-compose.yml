@@ -119,6 +119,15 @@ services:
       - "127.0.0.1:42088:80"
     restart: unless-stopped
 
+  # Mutillidae (NOWASP) -- a FOURTH lab, reachable at http://mutillidae on the compose network. Its
+  # oracle confirms open_redirect on a 2nd lab (Juice Shop was the 1st) -> generalized. One-time setup
+  # after `up`: GET http://localhost:42089/set-up-database.php (builds the MySQL schema).
+  mutillidae:
+    image: citizenstig/nowasp:latest
+    ports:
+      - "127.0.0.1:42089:80"
+    restart: unless-stopped
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:

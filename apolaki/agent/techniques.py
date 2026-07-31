@@ -514,6 +514,24 @@ for _tid, _chs in _BWAPP_PROVEN.items():
         _m["bwapp"] = sorted(set(_m.get("bwapp", []) + _chs))
         _rec["maps_to"] = _m
 
+# Fourth lab: techniques whose EXACT oracle fired on Mutillidae (NOWASP), proven live via response
+# signatures (LFI file contents / command output / verbatim reflection / client redirect to attacker host).
+# open_redirect was Juice-Shop-only -> Mutillidae is its 2nd lab -> it flips to GENERALIZED.
+_MUTILLIDAE_PROVEN = {
+    "open_redirect": ["Open Redirect (redirectandlog.php)"],
+    "path_traversal": ["Local File Inclusion (page param)"],
+    "command_injection": ["OS Command Injection (DNS Lookup)"],
+    "reflected_xss": ["Reflected XSS (DNS Lookup)"],
+}
+for _tid, _chs in _MUTILLIDAE_PROVEN.items():
+    _rec = TECHNIQUES.get(_tid)
+    if _rec:
+        if "mutillidae" not in _rec["validated_on"]:
+            _rec["validated_on"] = _rec["validated_on"] + ["mutillidae"]
+        _m = dict(_rec.get("maps_to") or {})
+        _m["mutillidae"] = sorted(set(_m.get("mutillidae", []) + _chs))
+        _rec["maps_to"] = _m
+
 # Taxonomy-lens codes (best-effort; high-confidence mappings only, None where no clean fit).
 _WSTG = {
     "sqli_auth_bypass": "WSTG-INPV-05", "sqli_union_extract": "WSTG-INPV-05",
