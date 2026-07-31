@@ -1539,16 +1539,23 @@ async def get_capture(session_id: str):
     return (m.get("context") or {}).get("capture", {"count": 0, "entries": []})
 
 
+_EMPTY_HAR = {"log": {"version": "1.2", "creator": {"name": "apolaki", "version": "1"}, "entries": []}}
+
+
 @app.get("/capture/{session_id}/har")
 async def get_capture_har(session_id: str):
-    """Export the engagement's captured traffic as a HAR 1.2 document (opens in Burp/Chrome/any tool)."""
-    import capture
-    if session_id in sessions:
-        store = getattr(sessions[session_id]["tools"], "capture", None)
-        if store is not None:
-            return store.har()
-    m = _require_mission(session_id)
-    return capture.from_dict((m.get("context") or {}).get("capture", {})).har()
+    """Export the engagement's captured traffic as a HAR 1.2 document (opens in Burp/Chrome/any tool).
+    Always returns a valid HAR: an empty log when nothing was captured, never a 500."""
+    m = _require_mission(session_id)   # 404 only if the session truly does not exist
+    try:
+        if session_id in sessions:
+            store = getattr(sessions[session_id]["tools"], "capture", None)
+            if store is not None:
+                return store.har()
+        import capture
+        return capture.from_dict((m.get("context") or {}).get("capture", {})).har()
+    except Exception:
+        return dict(_EMPTY_HAR)
 
 
 def _sanitize_error(e: Exception) -> str:
