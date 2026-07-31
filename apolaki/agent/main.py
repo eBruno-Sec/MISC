@@ -43,6 +43,9 @@ class EngageRequest(BaseModel):
     # authenticated scanning: raw session headers and/or an auto-login
     auth_headers: dict = {}        # e.g. {"Cookie": "session=..."} or {"Authorization": "Bearer ..."}
     login: Optional[dict] = None   # {"url": ..., "username": ..., "password": ...}
+    # opt-in: reuse credentials a PRIOR scan of this target DISCOVERED to run authenticated. The UI offers
+    # this (via GET /auth/available) only when a prior scan gathered creds. Off = discover + report, scan out.
+    authenticated_scan: bool = False
     parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
     recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
     strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: deterministic)
@@ -130,6 +133,11 @@ class ProxyReplayRequest(BaseModel):
     flow: dict = {}                # a captured flow record (from GET /proxy/flows) to resend
     mutations: dict = {}           # optional method/url/headers/body overrides (Repeater-style)
     send: bool = False             # False = build the request spec only; True = actually re-issue it
+
+
+class AuthAvailableRequest(BaseModel):
+    in_scope: list = []            # the scope being configured; checked against prior-scan target memory
+    out_of_scope: list = []
 
 
 class GenerateWordlistRequest(BaseModel):
@@ -354,7 +362,8 @@ async def engage(req: EngageRequest):
                      strategy=strategy, max_ai_calls=req.max_ai_calls,
                      enable_zap=enable_zap, zap_policy=req.zap_policy,
                      zap_speed=req.zap_speed, zap_aggression=req.zap_aggression,
-                     enable_nmap_vuln=req.enable_nmap_vuln, enable_nuclei_heavy=req.enable_nuclei_heavy)
+                     enable_nmap_vuln=req.enable_nmap_vuln, enable_nuclei_heavy=req.enable_nuclei_heavy,
+                     authenticated_scan=req.authenticated_scan)
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
@@ -1585,6 +1594,26 @@ async def get_capture_har(session_id: str):
         return capture.from_dict((m.get("context") or {}).get("capture", {})).har()
     except Exception:
         return dict(_EMPTY_HAR)
+
+
+@app.post("/auth/available")
+async def auth_available(req: AuthAvailableRequest):
+    """Does a PRIOR scan of this target already have DISCOVERED credentials? The Launch UI calls this as
+    the scope is entered; when available it offers an 'authenticated scan' (reuse the prior creds). Only the
+    username + login URL are returned -- never the password."""
+    try:
+        eng = ScopeEngine()
+        eng.load_manual(req.in_scope, req.out_of_scope, "auth-check")
+        tkey = memory_mod.target_key(eng.to_dict())
+        snap = db.get_prior_snapshot(tkey) or {}
+        sa = snap.get("scan_auth")
+        if sa and ":" in sa:
+            user = sa.split(":", 1)[0]
+            return {"available": True, "username": user, "login_url": snap.get("scan_login_url") or "",
+                    "target": tkey}
+    except Exception:
+        pass
+    return {"available": False}
 
 
 # ---------------------------------------------------------------------------- intercept proxy (Burp-core)

@@ -182,8 +182,13 @@ class BBHAgent:
                  recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
                  enable_zap: bool = False, zap_policy: str = "safe_active",
                  zap_speed: str = "normal", zap_aggression: str = "normal",
-                 enable_nmap_vuln: bool = False, enable_nuclei_heavy: bool = False):
+                 enable_nmap_vuln: bool = False, enable_nuclei_heavy: bool = False,
+                 authenticated_scan: bool = False):
         self.scope = scope
+        # opt-in: reuse credentials the scan/prior-scan DISCOVERED to run authenticated (HITL — the UI
+        # prompts for this on the next scan once a prior scan has gathered creds). Off = discover + report
+        # the exposed creds, but scan unauthenticated.
+        self.authenticated_scan = bool(authenticated_scan)
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
@@ -773,7 +778,7 @@ class BBHAgent:
             return events
         # 1) discovered creds: this engagement's harvest -> a prior engagement's memory -> a bounded probe.
         creds = list((intel.with_sources("credential") or {}).keys())
-        prior_login = None
+        prior_login, from_prior = None, False
         if not creds:
             try:
                 import memory as _mem
@@ -781,8 +786,7 @@ class BBHAgent:
                 if prior.get("scan_auth"):
                     creds = [prior["scan_auth"]]
                     prior_login = prior.get("scan_login_url")
-                    events.append({"type": "info", "content": "Reusing credentials discovered by a PRIOR scan "
-                                   "of this target (cross-engagement intel) to authenticate."})
+                    from_prior = True
             except Exception:
                 pass
         if not creds:
@@ -791,31 +795,19 @@ class BBHAgent:
                  and "<redacted>" not in c]
         if not creds:
             return events
-        # 2) an in-scope login endpoint (harvested or common default).
-        login_url = prior_login or self._discover_login_url(base)
-        if not login_url:
-            return events
-        # 3) log in ONCE (single credential; acquire_session is hard-capped against iteration).
         user, pw = creds[0].split(":", 1)
-        await self.tools.execute("acquire_session",
-                                 {"login_url": login_url, "username": user, "password": pw,
-                                  "role": "__scan__"}, session_id)
-        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
-        if not sess:
-            events.append({"type": "info", "content": "Discovered a credential for '%s' but the login did not "
-                           "yield a session (form/flow mismatch) — continuing unauthenticated." % user})
-            return events
-        self.tools.session_headers = {**sh, **sess}
+        login_url = prior_login or self._discover_login_url(base) or base.rstrip("/") + "/login"
+        # 2) DISCOVERY is unconditional: exposed creds are a FINDING (password redacted) and are stashed to
+        #    target memory so the NEXT scan can OFFER an authenticated run. Authenticating is a separate,
+        #    opted-in step (HITL) -- a scan never silently logs in.
         self._scan_credential = "%s:%s" % (user, pw)     # reuse channel (persisted to target memory; redacted in reports)
         self._scan_login_url = login_url
-        # 4) exposed credentials are themselves a confirmed FINDING (password redacted in the report).
         f = {"title": "Exposed application credentials for '%s'" % user, "severity": "medium",
              "family": "sensitive_exposure", "confidence": "confirmed", "target": login_url,
-             "description": "The target itself exposes working account credentials (a published or leaked "
-                            "login). Apolaki discovered them during recon and used them to authenticate, so "
-                            "the remainder of the assessment ran as a logged-in user.",
-             "evidence": "Discovered credential %s:<redacted>; a login to %s returned a valid session and an "
-                         "authenticated page loaded." % (user, login_url),
+             "description": "The target exposes working account credentials (a published or leaked login), "
+                            "discovered during recon %s." % ("(inherited from a prior scan)" if from_prior
+                                                             else "of the target's own surface"),
+             "evidence": "Discovered credential %s:<redacted> for the login at %s." % (user, login_url),
              "remediation": "Remove default/published credentials and rotate the account; never expose real "
                             "logins in client-reachable content."}
         if self.mission_id:
@@ -825,8 +817,25 @@ class BBHAgent:
                 pass
         self.findings.append(f)
         events.append({"type": "finding", "finding": f})
-        events.append({"type": "info", "content": "Authenticated as '%s' from discovered credentials — the "
-                       "remaining probes run logged-in (session applied across all probe types)." % user})
+        # 3) authenticate ONLY when the operator opted in (the UI offers this on a scan whose target has
+        #    prior discovered creds). Otherwise report + save and scan unauthenticated.
+        if not self.authenticated_scan:
+            events.append({"type": "info", "content": "Discovered credentials for '%s' — recorded as a finding "
+                           "and saved. This scan runs UNAUTHENTICATED; re-run with 'authenticated scan' to "
+                           "test the logged-in surface with these credentials." % user})
+            return events
+        await self.tools.execute("acquire_session",
+                                 {"login_url": login_url, "username": user, "password": pw,
+                                  "role": "__scan__"}, session_id)
+        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
+        if not sess:
+            events.append({"type": "info", "content": "Tried to authenticate as '%s' but the login did not "
+                           "yield a session (form/flow mismatch) — continuing unauthenticated." % user})
+            return events
+        self.tools.session_headers = {**sh, **sess}
+        events.append({"type": "info", "content": "Authenticated as '%s' from %s credentials — the remaining "
+                       "probes run logged-in (session applied across all probe types)."
+                       % (user, "prior-scan" if from_prior else "discovered")})
         return events
 
     def _discover_login_url(self, base: str):
