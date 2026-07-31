@@ -96,6 +96,23 @@ def test_status_degrades_without_proxy(monkeypatch):
     assert s["configured"] is False and s["active"] is False and "no intercept proxy" in s["note"]
 
 
+def test_to_observations_maps_proxy_traffic_to_planner_vocab(tmp_path):
+    _write_flows(str(tmp_path), [
+        {"host": "h", "method": "POST", "url": "http://h/rest/user/login", "path": "/rest/user/login",
+         "status": 200, "resp_ct": "application/json"},
+        {"host": "h", "method": "GET", "url": "http://h/main.js", "path": "/main.js", "status": 200,
+         "resp_ct": "application/javascript"},
+        {"host": "h", "method": "GET", "url": "http://h/api/products?q=x", "path": "/api/products",
+         "status": 200, "resp_ct": "application/json"},
+    ])
+    obs = proxy.to_observations(proxy.FlowStore.load(str(tmp_path)))
+    assert {"serves_js", "has_api", "has_login", "has_search_param"} <= obs   # proxy feeds the planner vocab
+
+
+def test_to_observations_empty_when_no_flows():
+    assert proxy.to_observations(proxy.FlowStore([])) == set()
+
+
 def test_browser_launch_args_toggle(monkeypatch):
     monkeypatch.delenv("PROXY_URL", raising=False)
     assert proxy.browser_launch_args() == []

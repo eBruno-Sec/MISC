@@ -1080,6 +1080,11 @@ async def technique_plan(session_id: str):
             obs |= browser_engine.to_observations(bobs)
         except Exception:
             pass
+    try:                                               # intercept-proxy traffic feeds the SAME observations
+        import proxy as _proxy
+        obs |= _proxy.to_observations()
+    except Exception:
+        pass
     snaps = _intel_snapshots()
     kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
     p = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
@@ -1176,6 +1181,11 @@ async def attack_graph_view(session_id: str):
             obs |= browser_engine.to_observations(await asyncio.to_thread(browser_engine.observe, base))
         except Exception:
             pass
+    try:                                               # intercept-proxy traffic feeds the unified graph too
+        import proxy as _proxy
+        obs |= _proxy.to_observations()
+    except Exception:
+        pass
     snaps = _intel_snapshots()
     kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
     plan = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)

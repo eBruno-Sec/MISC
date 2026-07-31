@@ -245,6 +245,34 @@ def replay(flow, mutations=None, send=False, timeout=20, verify=False):
         return {"sent": False, "note": "replay send failed: %s" % str(e)[:120], "request": spec}
 
 
+# ------------------------------------------------------------------------------------ proxy -> planner sensor
+def to_observations(flowstore=None, d=None):
+    """Map captured proxy traffic onto the deterministic planner vocabulary, so everything the intercept
+    proxy sees (especially browser-only traffic HTTP recon misses) feeds the SAME technique planner + attack
+    graph as HTTP recon -- one shared observation model, the proxy is not an island. Pure."""
+    fs = flowstore if flowstore is not None else FlowStore.load(d)
+    out = set()
+    if not fs.flows:
+        return out
+    paths = " ".join((f.get("path") or "").lower() + " " + (f.get("url") or "").lower() for f in fs.flows)
+    cts = " ".join((f.get("resp_ct") or "").lower() for f in fs.flows)
+    if "javascript" in cts or ".js" in paths:
+        out.add("serves_js")
+    if any(t in paths for t in ("/api/", "/rest/", "/v1/", "/v2/", "graphql")):
+        out.add("has_api")
+    if any(t in paths for t in ("login", "signin", "/session", "/auth", "/oauth")):
+        out.add("has_login")
+    if any(t in paths for t in ("search", "q=", "query=")):
+        out.add("has_search_param")
+    if any(t in paths for t in ("redirect", "returnurl", "return_to", "next=", "url=", "to=")):
+        out.add("has_redirect_param")
+    if any(t in paths for t in ("id=", "/id/", "userid", "orderid", "productid", "/basket/")):
+        out.add("has_object_id")
+    if any(t in paths for t in ("upload", "file=")):
+        out.add("has_file_upload")
+    return out
+
+
 # ------------------------------------------------------------------------------------ browser launch args
 def browser_launch_args(url=None):
     """Chrome launch args that route the headless browser through the intercept proxy (empty when no proxy
