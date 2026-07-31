@@ -1123,6 +1123,45 @@ async def attack_chain_view(target: str):
             "outcomes": attack_chain.summary(target)}
 
 
+@app.get("/graph/attack/{session_id}")
+async def attack_graph_view(session_id: str):
+    """The UNIFIED attack graph for an engagement: host -> observations -> techniques -> findings/leads,
+    one model every subsystem publishes into (recon, harvest, code-intel, browser sensor, planner,
+    findings). Deterministic, zero-token -- composes the shared state, does not invent a new one."""
+    import asyncio
+    from urllib.parse import urlparse
+    import technique_planner as TP
+    import intel_feeds
+    import codeintel
+    import attack_graph
+    m = _require_mission(session_id)
+    ctx = m.get("context") or {}
+    findings = db.get_findings(session_id)
+    leads = ctx.get("leads", [])
+    harvest = ctx.get("intel") or {}
+    targets = [f.get("target") or f.get("url") for f in findings] + [l.get("target") for l in leads]
+    base = next((u for u in targets if isinstance(u, str) and u.startswith("http")), "")
+    host = urlparse(base).netloc if base else ""
+    code_intel = {}
+    if base:
+        try:
+            code_intel = await asyncio.to_thread(codeintel.harvest, "%s://%s" % (urlparse(base).scheme, host))
+        except Exception:
+            code_intel = {}
+    obs = TP.derive_observations(surface=[t for t in targets if t], harvest=harvest, findings=findings,
+                                 leads=leads, code_intel=code_intel)
+    if base and os.environ.get("CDP_BROWSER_URL"):
+        try:
+            import browser_engine
+            obs |= browser_engine.to_observations(await asyncio.to_thread(browser_engine.observe, base))
+        except Exception:
+            pass
+    snaps = _intel_snapshots()
+    kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
+    plan = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
+    return attack_graph.build(findings=findings, leads=leads, observations=obs, plan=plan, host=host)
+
+
 @app.get("/codereview")
 async def code_review(path: str = ""):
     """Code Intelligence: static review of a source tree — a path the operator provides, or source
