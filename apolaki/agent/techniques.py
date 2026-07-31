@@ -163,7 +163,9 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        summary="Server-side template injection.",
        detect="Server-side evaluation of a template expression in a response.",
        exploit="Inject an expression the server template engine evaluates.",
-       oracle="Server response reflects evaluated (not literal) expression output."),
+       oracle="Server response reflects evaluated (not literal) expression output.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["SSTi"]}),
 
     _t(id="xxe_file_ssrf", vuln_class="xxe", cwe="CWE-611", owasp="A05:2021",
        permission=INTRUSIVE, transferable=True,
