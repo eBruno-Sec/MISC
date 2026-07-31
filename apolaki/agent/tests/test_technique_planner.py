@@ -36,3 +36,16 @@ def test_empty_plan_when_no_evidence_and_ranks_when_present():
     p = TP.plan({"has_object_id"}, techs, kev_cwes={"CWE-639"})
     assert p and p[0]["preconditions_met"] == ["has_object_id"] and p[0]["score"] > 0
     assert p[0]["action"] == "payload" and "oracle" in p[0]
+
+
+def test_registry_seed_projects_a_planner_ready_registry():
+    seed = TP.registry_seed()
+    assert len(seed) >= 30
+    by_id = {t["id"]: t for t in seed}
+    s = by_id["sqli_auth_bypass"]
+    # generalized (>=2 labs) -> proven + top confidence; shape is exactly what plan() consumes
+    assert s["status"] == "proven" and s["confidence"]["score"] == 60
+    assert isinstance(s["cwe"], list) and s["vuln_class"] == "sql_injection"
+    # the seed actually drives a gated plan
+    p = TP.plan({"has_login", "has_object_id"}, seed)
+    assert any(a["id"] == "sqli_auth_bypass" for a in p)

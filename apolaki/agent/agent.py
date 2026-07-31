@@ -664,6 +664,89 @@ class BBHAgent:
         yield {"type": "info", "content": "Technique advisor: %d techniques recommended from the "
                "knowledge model (relevance + KEV + confidence ranked)." % len(recs)}
 
+    async def _close_autonomy_loop(self, session_id: str):
+        """Close CHAD's deterministic autonomy loop (Execution -> Evidence -> State -> Next-Best-Action).
+        Records THIS engagement's confirmed findings (and attempted lead classes) into the per-target
+        attack-chain memory, then runs the SAME evidence-driven technique planner that powers /plan --
+        precondition-gated, KEV-ranked, learning-reweighted, chain-annotated -- to emit the ranked
+        next-best actions. So real scans FEED the autonomy memory (not just manual confirm/dismiss), and
+        the planner + learning get smarter every engagement. Zero-token, fully best-effort (never breaks a
+        scan). This is the missing wire: the autonomy engine was a dashboard; now the scan drives + feeds it."""
+        base = self._primary_base()
+        if not base:
+            return
+        recorded, nxt = 0, []
+        try:
+            import attack_chain
+            import technique_planner as TP
+            # 1) Evidence -> State: confirmed findings + attempted lead classes into per-target memory.
+            for f in (self.findings or []):
+                fam = str(f.get("family") or f.get("vuln_class") or f.get("type") or "").strip()
+                if not fam:
+                    continue
+                try:
+                    attack_chain.record(f.get("target") or base, fam, "confirmed",
+                                        evidence=str(f.get("title", ""))[:200], session=session_id)
+                    recorded += 1
+                except Exception:
+                    pass
+            for l in (self.leads or []):
+                fam = str(l.get("family") or "").strip()
+                if fam:
+                    try:
+                        attack_chain.record(l.get("target") or base, fam, "attempted",
+                                            evidence=str(l.get("title", ""))[:120], session=session_id)
+                    except Exception:
+                        pass
+            # 2) Next-Best-Action: the SAME planner /plan uses, now fed by the memory this scan just wrote.
+            try:
+                harvest = self.tools.intel.to_dict(redact_secrets=True) if getattr(self.tools, "intel", None) else {}
+            except Exception:
+                harvest = {}
+            kev = set()
+            try:
+                import intel_feeds
+                snaps = intel_feeds.load()
+                kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
+            except Exception:
+                pass
+            obs = TP.derive_observations(surface=list(self.tools.urls or []), harvest=harvest,
+                                         findings=self.findings, leads=self.leads,
+                                         authenticated=bool(getattr(self.tools, "_sessions", None)))
+            try:
+                import proxy as _proxy
+                obs |= _proxy.to_observations()
+            except Exception:
+                pass
+            p = TP.plan(obs, TP.registry_seed(), kev_cwes=kev)
+            try:
+                import learning
+                rel = learning.reliability()
+                for a in p:
+                    w = learning.class_weight(a.get("family"), rel)
+                    if w:
+                        a["score"] = round(a["score"] + w, 1)
+                p.sort(key=lambda x: x.get("score", 0), reverse=True)
+            except Exception:
+                pass
+            try:
+                p = attack_chain.annotate_plan(base, p)
+            except Exception:
+                pass
+            nxt = p[:6]
+            self._next_best = nxt
+        except Exception:
+            return
+        if recorded or nxt:
+            try:
+                import attack_chain
+                key = attack_chain.target_key(base)
+            except Exception:
+                key = base
+            top = ", ".join(a.get("id", "") for a in nxt[:3]) or "none (evidence exhausts the gated techniques)"
+            yield {"type": "info", "content": "Autonomy loop closed — %d confirmed finding(s) recorded to "
+                   "engagement memory for %s; next-best actions: %s." % (recorded, key, top)}
+
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:
         return bool(self.client) and self._has_key
@@ -769,6 +852,10 @@ class BBHAgent:
         # Deterministic technique advisor: consult the knowledge model for the top applicable
         # techniques given the surface + confirmed findings, raised as prioritized leads (every strategy).
         async for ev in self._technique_advisor(session_id):
+            yield ev
+        # Close CHAD's deterministic autonomy loop: record this engagement's evidence into per-target
+        # memory and emit the ranked next-best-action from the SAME planner that powers /plan (every strategy).
+        async for ev in self._close_autonomy_loop(session_id):
             yield ev
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():

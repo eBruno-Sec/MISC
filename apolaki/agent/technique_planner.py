@@ -100,6 +100,27 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
     return obs
 
 
+def registry_seed(enrich=None):
+    """Project the techniques.py registry into the minimal canonical shape plan() consumes (id / name /
+    vuln_class / cwe list / status / confidence.score / try_it / detection_logic), so the SAME deterministic
+    planner can run INSIDE a scan without the heavy technique_model projection the /plan endpoint uses.
+    Confidence rides the transferability ladder: generalized(>=2 labs) > lab-proven > catalogued. Pure."""
+    import techniques as T
+    enrich = enrich or {}
+    out = []
+    for r in T.TECHNIQUES.values():
+        vo = list(dict.fromkeys(r.get("validated_on") or []))
+        score = 60 if len(vo) >= 2 else (40 if vo else 20)
+        cwe = r.get("cwe")
+        cwes = [cwe] if cwe else []
+        cwes += [c for c in (enrich.get(r["id"], {}).get("kev_cwes") or []) if c not in cwes]
+        out.append({"id": r["id"], "name": r["id"], "vuln_class": r.get("vuln_class", ""),
+                    "cwe": cwes, "status": "proven" if vo else "catalogued",
+                    "confidence": {"score": score}, "try_it": r.get("detect", ""),
+                    "payloads": [], "detection_logic": [r.get("oracle", "")]})
+    return out
+
+
 def plan(observations, techniques, kev_cwes=None):
     """Ordered plan: only techniques whose preconditions ALL hold, ranked by confidence x KEV x proven.
     Deterministic and explainable -- each entry says which preconditions matched. Returns [] if the
