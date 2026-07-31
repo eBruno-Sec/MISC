@@ -45,26 +45,21 @@ then `docker restart apolaki-agent-1` (module cache needs the restart). CI runs 
   generalized. Never fake it: the oracle must actually fire on this lab.
 - Report the generalized count delta honestly.
 
-## Phase 4 -- orchestration check (mandatory after ANY change)
-Verify the new knowledge actually composes, no island of state:
-- New techniques appear in `GET /techniques` and carry KEV/CAPEC enrichment.
-- `technique_planner._PRECONDITIONS` has an entry for each new technique so the deterministic planner
-  gates + ranks it from real recon evidence (`GET /plan/{session}` shows it when its observation holds).
-- The advisor recommends it; recon/harvest/code-intel still feed the SAME observation model.
-- Nothing new bypasses scope / HITL / no-DoS / no-brute.
-
-## Phase 5 -- QA the whole platform (mandatory after ANY change)
-- Full test suite on 3.11 (all green; note the exact passed/skipped count, never inflate).
-- Endpoint sweep (health + every major GET/POST returns 200 with a real payload).
-- If the UI changed: every nav tab renders, 0 console errors, the changed control works in the real
-  browser (drive it, don't assume).
-- Rebuild the agent image (`docker compose build agent`) so the change is BAKED, not just `docker cp`'d
-  (a `compose up`/recreate discards cp'd files -> silently tests old code).
-
-## Phase 6 -- commit + push, then update memory
-- One focused commit per coherent unit, with the honest reproducible number + the Co-Authored-By trailer.
-- Record the absorption in the optest-loop memory: what solved, the reproducible count, the new/generalized
-  techniques, any target-specific gotcha, and the honest ceiling.
+## Phases 4-6 -- run the `apolaki-ship` gate (the shared definition-of-done)
+Orchestration check, absorption verification, UI verification, QA, bake, commit, and memory are the
+SAME gates every Apolaki change runs -- they live in the **`apolaki-ship`** skill (one source of truth,
+so a lab absorption and a plain feature build are held to the identical bar). Run it now and satisfy all
+five gates. In brief, for a lab absorption that means:
+- **Orchestration**: the new techniques appear in `GET /techniques` (KEV/CAPEC-enriched), each has a
+  `technique_planner._PRECONDITIONS` entry + derived observation so the planner gates/ranks it and the
+  advisor recommends it; recon/harvest/code-intel feed the SAME observation model; nothing bypasses
+  scope/HITL/no-DoS/no-brute.
+- **Absorption**: every solve is recorded -- add this lab to `validated_on` + `maps_to` for each
+  technique whose oracle fired here (a solve you didn't record is a miss); new class -> benchmark manifest.
+- **UI**: drive the changed control (the ▶ Solve button, the new tab) in the real browser, 0 console errors.
+- **QA + bake + commit + memory**: full pytest green on 3.11, endpoint sweep, `docker compose build agent`,
+  one focused commit, and record the absorption in the optest-loop memory (what solved, reproducible
+  count, new/generalized techniques, target-specific gotcha, honest ceiling).
 
 ## Guardrails (always)
 Deterministic-first + zero-token by default. No DoS. No credential brute-force loops. Scope + HITL stay
