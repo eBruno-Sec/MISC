@@ -38,6 +38,8 @@ services:
       # Offensive intel feeds (Phase 0): the intel-feeds sidecar writes KEV/CAPEC snapshots here and
       # the agent reads them to enrich the technique registry (known-exploited flags, CAPEC patterns).
       - INTEL_FEEDS_DIR=/app/data/intel_feeds
+      # Phase 1 first-class Technique store (ingested candidates + human-review decisions). Agent-writable.
+      - TECHNIQUE_STORE_DIR=/app/data/techniques
     ports:
       - "8000:8000"
     volumes:

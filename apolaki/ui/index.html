@@ -309,6 +309,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
   <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
   <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
+  <button class="navbtn" data-view="intel" onclick="showView('intel')">Intel</button>
   <button class="navbtn" data-view="codereview" onclick="showView('codereview')">Code Review</button>
   <button class="navbtn" data-view="playbooks" onclick="showView('playbooks')">Playbooks</button>
   <button class="navbtn" data-view="tools" onclick="showView('tools')">Tools</button>
@@ -689,6 +690,54 @@ X-Requested-With: </textarea>
       <div id="taxonomyBody"><div class="empty"><h4>Loading the taxonomy…</h4></div></div>
     </section>
 
+    <!-- INTEL: first-class Technique knowledge model + human review -->
+    <section class="panel" id="p-intel">
+      <div class="view-head"><h3 class="sec">Offensive Knowledge Model</h3>
+        <span class="muted">Every source normalizes into first-class Techniques. Scanners, planning and reporting query these, not articles.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadIntel()">Refresh</button>
+      </div>
+      <div id="intelBody"><div class="empty"><h4>Loading the knowledge model…</h4></div></div>
+    </section>
+    <style>
+    #p-intel .in-bar{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;border:1px solid var(--border);
+      background:var(--surface);border-radius:var(--radius);padding:.85rem 1.2rem;margin-bottom:1rem}
+    #p-intel .in-stat .v{font-size:1.35rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+    #p-intel .in-stat .k{font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:.2rem}
+    #p-intel .in-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem}
+    #p-intel .in-fchip{font-family:var(--sans);font-size:.72rem;font-weight:700;color:var(--text-dim);cursor:pointer;
+      border:1px solid var(--border2);border-radius:999px;padding:.3rem .7rem;background:none}
+    #p-intel .in-fchip.on{color:var(--primary-ink);background:var(--primary);border-color:var(--primary)}
+    :root[data-theme="light"] #p-intel .in-fchip.on{color:#fff}
+    #p-intel .in-tools{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-start;margin-bottom:1rem}
+    #p-intel .in-prose{flex:1;min-width:280px;display:flex;flex-direction:column;gap:.4rem}
+    #p-intel .in-prose textarea{font-family:var(--mono);font-size:.76rem;min-height:64px;padding:.5rem .7rem;resize:vertical;
+      background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text)}
+    #p-intel .in-prose input,#p-intel .in-search{font-size:.8rem;padding:.45rem .7rem;background:var(--surface);
+      border:1px solid var(--border2);border-radius:var(--radius);color:var(--text)}
+    #p-intel .in-search{width:100%;margin-bottom:.9rem;font-family:var(--mono)}
+    #p-intel .in-tech{border:1px solid var(--border);border-left:3px solid var(--tc,var(--border2));border-radius:var(--radius);
+      padding:.7rem .9rem;margin-bottom:.55rem;background:var(--surface)}
+    #p-intel .in-thead{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+    #p-intel .in-tname{font-weight:700;font-size:.9rem;color:var(--text-bright)}
+    #p-intel .in-badge{font-size:.6rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:.12rem .5rem;border-radius:999px;border:1px solid var(--border2);color:var(--text-dim)}
+    #p-intel .in-badge.proven{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+    #p-intel .in-badge.experimental{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+    #p-intel .in-badge.pending_review{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+    #p-intel .in-badge.rejected,#p-intel .in-badge.deprecated,#p-intel .in-badge.superseded{color:var(--text-dim)}
+    #p-intel .in-conf{margin-left:auto;display:flex;align-items:center;gap:.45rem;font-size:.7rem;color:var(--text-dim);font-variant-numeric:tabular-nums}
+    #p-intel .in-cbar{width:64px;height:6px;border-radius:3px;background:var(--border2);overflow:hidden}
+    #p-intel .in-cfill{height:100%;display:block}
+    #p-intel .in-cfill.high{background:var(--ok)} #p-intel .in-cfill.medium{background:var(--warn)} #p-intel .in-cfill.low{background:var(--text-dim)}
+    #p-intel .in-tags{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.45rem}
+    #p-intel .in-chip{font-family:var(--mono);font-size:.66rem;color:var(--text-dim);border:1px solid var(--border2);border-radius:4px;padding:.06rem .35rem}
+    #p-intel .in-chip.kev{color:#fff;background:var(--danger);border-color:var(--danger)}
+    #p-intel .in-acts{display:flex;gap:.4rem;margin-top:.5rem}
+    #p-intel .in-acts button{font-size:.7rem;font-weight:700;padding:.25rem .6rem;border-radius:var(--radius);cursor:pointer;border:1px solid var(--border2);background:none;color:var(--text-dim)}
+    #p-intel .in-acts button.promote{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+    #p-intel .in-acts button.reject{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+    #p-intel .in-prov{font-size:.66rem;color:var(--text-dim);margin-top:.35rem}
+    </style>
+
     <style>
     #p-codereview .cr-intro{font-size:.82rem;color:var(--text-dim);line-height:1.6;margin-bottom:1rem;max-width:80ch}
     #p-codereview .cr-intro b{color:var(--text)}
@@ -794,6 +843,7 @@ const VIEWS={
   reports:  [["report","Report & export"]],
   conquest: [["conquest","Juice Shop Conquest"]],
   taxonomy: [["taxonomy","Technique Taxonomy"]],
+  intel:    [["intel","Knowledge Model"]],
   codereview:[["codereview","Code Review"]],
   playbooks:[["playbooks","Playbooks"]],
   tools:    [["curl","cURL Console"],["workbench","Workbench"],["access","Access check"],["archive","Archive"]],
@@ -822,6 +872,7 @@ function switchTab(name){
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
   if(name==="conquest")loadConquest();
   if(name==="taxonomy")loadTaxonomy();
+  if(name==="intel")loadIntel();
   if(name==="codereview")loadCodeReview();
 }
 
@@ -1757,6 +1808,95 @@ function renderTaxonomy(d){
   return h;
 }
 
+/* ── Intel: first-class Technique knowledge model + human review workflow ── */
+let _intelState={status:"",q:""};
+async function loadIntel(){
+  const el=document.getElementById("intelBody");
+  if(!el.dataset.loaded) el.innerHTML=`<div class="empty"><h4>Loading the knowledge model…</h4></div>`;
+  try{
+    const qs=`limit=80${_intelState.status?`&status=${encodeURIComponent(_intelState.status)}`:""}${_intelState.q?`&q=${encodeURIComponent(_intelState.q)}`:""}`;
+    const [feeds,model]=await Promise.all([
+      fetch(`${API}/intel/feeds`).then(r=>r.json()),
+      fetch(`${API}/intel/techniques?${qs}`).then(r=>r.json())
+    ]);
+    el.innerHTML=renderIntel(feeds,model); el.dataset.loaded="1";
+  }catch(e){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(String(e))}</p></div>`;}
+}
+const _INTEL_STATUSES=["proven","catalogued","experimental","pending_review","conflicting","deprecated","superseded","rejected"];
+function renderIntel(feeds,m){
+  const by=m.by_status||{}, kev=feeds.kev_known_exploited_cwes||0;
+  let h=`<div class="in-bar">
+    <div class="in-stat"><span class="v">${m.total||0}</span><span class="k">Techniques</span></div>
+    <div class="in-stat"><span class="v" style="color:var(--ok)">${by.proven||0}</span><span class="k">Proven</span></div>
+    <div class="in-stat"><span class="v">${by.catalogued||0}</span><span class="k">Catalogued</span></div>
+    <div class="in-stat"><span class="v" style="color:var(--warn)">${by.pending_review||0}</span><span class="k">Pending review</span></div>
+    <div class="in-stat"><span class="v" style="color:var(--danger)">${kev}</span><span class="k">KEV CWEs · ${esc(feeds.kev_catalog_version||'—')}</span></div>
+    <div style="margin-left:auto;display:flex;gap:.5rem">
+      <button class="btn ghost sm" onclick="intelRefreshFeeds(this)">↻ Refresh feeds</button>
+      <button class="btn ghost sm" onclick="intelExtractCapec(this)">⚙ Extract CAPEC → candidates</button>
+    </div></div>`;
+  // status filter chips
+  h+=`<div class="in-chips">`+_INTEL_STATUSES.filter(s=>by[s]).map(s=>
+    `<button class="in-fchip ${_intelState.status===s?'on':''}" onclick="intelFilter('${s}')">${esc(s.replace('_',' '))} <b>${by[s]}</b></button>`).join("")
+    +(_intelState.status?`<button class="in-fchip" onclick="intelFilter('')">clear</button>`:``)+`</div>`;
+  // prose extractor (sandboxed LLM / deterministic degrade)
+  h+=`<div class="in-tools"><div class="in-prose">
+      <textarea id="intelProseDoc" placeholder="Paste a trusted advisory / research excerpt. Sandboxed extractor turns it into a pending-review candidate (deterministic-only when no LLM is set)."></textarea>
+      <div style="display:flex;gap:.5rem"><input id="intelProseSrc" placeholder="source (e.g. portswigger)" style="flex:1">
+      <button class="btn sm" onclick="intelExtractProse(this)">Extract → pending review</button></div>
+    </div></div>`;
+  h+=`<input class="in-search" placeholder="search techniques (name, CWE, CAPEC)…" value="${esc(_intelState.q)}" oninput="intelSearch(this.value)">`;
+  const items=m.techniques||[];
+  if(!items.length) h+=`<div class="empty"><h4>No techniques match</h4><p>Adjust the filter or extract from CAPEC.</p></div>`;
+  items.forEach(t=>{ h+=renderIntelTech(t); });
+  if((m.shown||0)<(m.total||0)) h+=`<div class="muted" style="text-align:center;margin-top:.6rem">Showing ${m.shown} of ${m.total} — refine with search/filter.</div>`;
+  return h;
+}
+function renderIntelTech(t){
+  const c=t.confidence||{score:0,tier:"low"};
+  const tc=t.status==="proven"?"var(--ok)":t.status==="experimental"?"var(--accent)":t.status==="pending_review"?"var(--warn)":"var(--border2)";
+  const ke=(t.provenance||[]).some(p=>p&&p.known_exploited);
+  const tags=[...(t.cwe||[]).slice(0,3),...(t.capec||[]).slice(0,2)].map(x=>`<span class="in-chip">${esc(x)}</span>`).join("")
+    +(ke?`<span class="in-chip kev" title="CWE is in CISA KEV">KEV</span>`:"");
+  const prov=(t.provenance||[]).map(p=>esc(p.source||"")).filter(Boolean).join(", ");
+  // review actions only for mutable store candidates (proven registry seed is read-only)
+  const isStore=/^(capec_|ext_)/.test(t.id);
+  const acts=isStore?`<div class="in-acts">
+      ${t.status!=="proven"?`<button class="promote" onclick="intelReview('${esc(t.id)}','promote')">Promote</button>`:""}
+      ${t.status!=="rejected"?`<button class="reject" onclick="intelReview('${esc(t.id)}','reject')">Reject</button>`:""}
+      <button onclick="intelReview('${esc(t.id)}','deprecate')">Deprecate</button>
+    </div>`:"";
+  return `<div class="in-tech" style="--tc:${tc}">
+    <div class="in-thead"><span class="in-tname">${esc(t.name||t.id)}</span>
+      <span class="in-badge ${esc(t.status)}">${esc((t.status||'').replace('_',' '))}</span>
+      <span class="in-conf" title="${(c.factors||[]).map(f=>esc(f.name+' +'+f.points)).join(' · ')}">
+        <span class="in-cbar"><span class="in-cfill ${esc(c.tier)}" style="width:${c.score}%"></span></span>${c.score} ${esc(c.tier)}</span>
+    </div>
+    ${t.summary?`<div class="muted" style="font-size:.8rem;margin-top:.3rem">${esc(t.summary).slice(0,200)}</div>`:""}
+    <div class="in-tags">${tags}</div>
+    ${prov?`<div class="in-prov">source: ${prov}${t.version?` · v${t.version}`:""}</div>`:""}
+    ${acts}</div>`;
+}
+async function intelReview(id,action){
+  try{ await fetch(`${API}/intel/techniques/${encodeURIComponent(id)}/review`,{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({action,by:"operator"})}); }catch(e){}
+  loadIntel();
+}
+async function intelExtractCapec(btn){ if(btn){btn.disabled=true;btn.textContent="Extracting…";}
+  try{ await fetch(`${API}/intel/extract/capec`,{method:"POST"}); }catch(e){} loadIntel(); }
+async function intelRefreshFeeds(btn){ if(btn){btn.disabled=true;btn.textContent="Refreshing…";}
+  try{ await fetch(`${API}/intel/feeds/refresh`,{method:"POST"}); }catch(e){} loadIntel(); }
+async function intelExtractProse(btn){
+  const doc=(document.getElementById("intelProseDoc").value||"").trim();
+  if(!doc)return; const src=(document.getElementById("intelProseSrc").value||"manual").trim();
+  if(btn){btn.disabled=true;btn.textContent="Extracting…";}
+  try{ await fetch(`${API}/intel/extract/prose`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({document:doc,source:src})}); }catch(e){}
+  _intelState.status="pending_review"; loadIntel();
+}
+function intelFilter(s){ _intelState.status=(_intelState.status===s?"":s); loadIntel(); }
+function intelSearch(v){ _intelState.q=v; clearTimeout(window._intelT); window._intelT=setTimeout(loadIntel,300); }
+
 /* ── Code Review: static Code Intelligence over a source tree ── */
 function loadCodeReview(){ runHarvest(); }   /* black-box harvest is fast — auto-run on open */
 async function runHarvest(){
@@ -2152,7 +2292,8 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest});
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest,
+  loadIntel,intelReview,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch});
 
 /* land on the Launch view */
 showView("launch");

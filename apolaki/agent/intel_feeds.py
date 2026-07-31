@@ -81,13 +81,24 @@ def parse_kev(raw):
 
 
 def parse_capec(raw):
-    """CAPEC STIX -> {patterns: {CAPEC-id: {...}}, cwes: {CWE: [CAPEC-id,...]}, count}."""
+    """CAPEC STIX -> {patterns: {CAPEC-id: {name, severity, likelihood, abstraction, cwes, attack,
+    prerequisites, parents, children}}, cwes: {CWE: [CAPEC-id,...]}, count}. Rich enough that the
+    deterministic extractor can mint a candidate Technique straight from a pattern -- no LLM."""
     d = json.loads(raw)
+    objs = d.get("objects", [])
+    # pass 1: STIX object id -> CAPEC id, so parent/child refs (which are STIX ids) resolve to CAPEC ids
+    stix2capec = {}
+    for o in objs:
+        if o.get("type") == "attack-pattern":
+            for r in o.get("external_references", []):
+                if r.get("source_name") == "capec" and r.get("external_id"):
+                    stix2capec[o.get("id")] = r["external_id"]
+                    break
     patterns, by_cwe = {}, {}
-    for o in d.get("objects", []):
+    for o in objs:
         if o.get("type") != "attack-pattern" or o.get("x_capec_status") == "Deprecated":
             continue
-        capec_id, cwes = "", []
+        capec_id, cwes, attack = "", [], []
         for r in o.get("external_references", []):
             sn, ex = r.get("source_name"), r.get("external_id")
             if sn == "capec" and ex:
@@ -96,13 +107,20 @@ def parse_capec(raw):
                 nc = _norm_cwe(ex)
                 if nc:
                     cwes.append(nc)
+            elif sn == "ATTACK" and ex:
+                attack.append(ex)
         if not capec_id:
             continue
         cwes = sorted(set(cwes))
+        parents = sorted({stix2capec[r] for r in (o.get("x_capec_child_of_refs") or []) if r in stix2capec})
+        children = sorted({stix2capec[r] for r in (o.get("x_capec_parent_of_refs") or []) if r in stix2capec})
         patterns[capec_id] = {"name": o.get("name", ""),
                               "severity": o.get("x_capec_typical_severity", ""),
                               "likelihood": o.get("x_capec_likelihood_of_attack", ""),
-                              "abstraction": o.get("x_capec_abstraction", ""), "cwes": cwes}
+                              "abstraction": o.get("x_capec_abstraction", ""), "cwes": cwes,
+                              "attack": sorted(set(attack)),
+                              "prerequisites": list(o.get("x_capec_prerequisites") or []),
+                              "parents": parents, "children": children}
         for c in cwes:
             by_cwe.setdefault(c, []).append(capec_id)
     return {"source": "capec", "tier": "A", "count": len(patterns),

@@ -845,6 +845,139 @@ async def intel_feeds_refresh():
         return {"error": str(e)}
 
 
+# --- First-class Technique knowledge model: unified view + human review workflow (Phase 1) ---
+class ProseExtractRequest(BaseModel):
+    document: str
+    source: str = "manual"
+    ref: str = ""
+    tier: str = "B"
+
+
+class ReviewRequest(BaseModel):
+    action: str                # promote | prove | reject | deprecate | conflict | merge
+    by: str = "operator"
+    note: str = ""
+    keep: str = ""             # target id when action == merge
+
+
+_TECH_STORE_CACHE = {"mtime": None, "store": None}
+
+
+def _tech_store():
+    """Load the candidate store, re-reading only when the file changes on disk."""
+    import technique_store
+    p = technique_store._path()
+    try:
+        mtime = os.path.getmtime(p)
+    except OSError:
+        mtime = None
+    if _TECH_STORE_CACHE["store"] is None or _TECH_STORE_CACHE["mtime"] != mtime:
+        _TECH_STORE_CACHE["store"] = technique_store.load()
+        _TECH_STORE_CACHE["mtime"] = mtime
+    return _TECH_STORE_CACHE["store"]
+
+
+def _registry_as_canonical():
+    """Project the proven techniques.py seed into the first-class Technique shape, enriched with KEV/CAPEC."""
+    import techniques as T, technique_model, intel_feeds
+    snaps = _intel_snapshots()
+    enr = {}
+    if snaps:
+        enr = intel_feeds.enrich_techniques(
+            [{"id": t["id"], "cwe": t.get("cwe")} for t in T.TECHNIQUES.values()], snaps)
+    try_map = getattr(T, "_TRY", {})
+    out = []
+    for rec in T.TECHNIQUES.values():
+        e = enr.get(rec["id"], {})
+        out.append(technique_model.from_registry(
+            rec, try_it=try_map.get(rec["id"]), known_exploited=e.get("known_exploited", False),
+            kev_cves=e.get("kev_cves"), capec=e.get("capec")))
+    return out
+
+
+@app.get("/intel/techniques")
+async def intel_techniques(status: str = "", q: str = "", limit: int = 200, source: str = ""):
+    """Unified first-class Technique view: the proven registry seed + ingested candidates, ONE shape.
+    This is what consumers query -- techniques, not articles. Filter by status / source / free text."""
+    import technique_store
+    reg = _registry_as_canonical()
+    cand = technique_store.listing(_tech_store())
+    allitems = reg + cand
+    by = {}
+    for t in allitems:
+        by[t.get("status", "?")] = by.get(t.get("status", "?"), 0) + 1
+    items = reg if source == "registry" else (cand if source == "store" else allitems)
+    if status:
+        items = [t for t in items if t.get("status") == status]
+    if q:
+        ql = q.lower()
+        items = [t for t in items if ql in (t.get("name", "") + " " + t.get("summary", "") + " "
+                 + " ".join(t.get("cwe", [])) + " " + " ".join(t.get("capec", []))).lower()]
+    items = sorted(items, key=lambda t: (t.get("confidence") or {}).get("score", 0), reverse=True)
+    return {"total": len(allitems), "by_status": by, "shown": min(len(items), limit),
+            "techniques": items[:limit]}
+
+
+@app.get("/intel/techniques/{tid}")
+async def intel_technique_detail(tid: str):
+    """Full technique record: provenance, confidence factors, version history, parent/child."""
+    import technique_store
+    for t in _registry_as_canonical():
+        if t["id"] == tid:
+            return t
+    return technique_store.get(_tech_store(), tid) or {"error": "not found", "id": tid}
+
+
+@app.post("/intel/extract/capec")
+async def intel_extract_capec():
+    """Deterministically mint candidate Techniques from the CAPEC feed into the store. No LLM."""
+    import intel_extractor, technique_store
+    snaps = _intel_snapshots()
+    if not (snaps or {}).get("capec"):
+        return {"error": "no CAPEC feed loaded; refresh /intel/feeds first"}
+    store = technique_store.load()
+    summ = intel_extractor.run_capec_extraction(snaps, store)
+    technique_store.save(store)
+    _TECH_STORE_CACHE["store"] = None
+    return summ
+
+
+@app.post("/intel/extract/prose")
+async def intel_extract_prose(req: ProseExtractRequest):
+    """Sandboxed LLM extraction of a candidate Technique from a trusted document (lands pending_review).
+    Degrades to deterministic-only when no LLM is configured. Never auto-active."""
+    import intel_extractor, technique_store
+    if not (req.document or "").strip():
+        return {"error": "empty document"}
+    t = intel_extractor.extract_prose(req.document, source=req.source or "manual", ref=req.ref, tier=req.tier)
+    store = technique_store.load()
+    action = technique_store.upsert(store, t, by="prose-extractor")
+    technique_store.save(store)
+    _TECH_STORE_CACHE["store"] = None
+    return {"action": action, "technique": t}
+
+
+@app.post("/intel/techniques/{tid}/review")
+async def intel_review(tid: str, req: ReviewRequest):
+    """Human review action on a stored candidate: promote / prove / reject / deprecate / conflict /
+    merge. Every action is versioned and audit-logged; nothing is ever deleted."""
+    import technique_store
+    _ACT = {"promote": "experimental", "prove": "proven", "reject": "rejected",
+            "deprecate": "deprecated", "conflict": "conflicting"}
+    store = technique_store.load()
+    if req.action == "merge":
+        r = technique_store.merge(store, req.keep, tid, req.by)
+    elif req.action in _ACT:
+        r = technique_store.transition(store, tid, _ACT[req.action], req.by, req.note)
+    else:
+        return {"error": "unknown action %r" % req.action}
+    if r is None:
+        return {"error": "technique not found or invalid target", "id": tid}
+    technique_store.save(store)
+    _TECH_STORE_CACHE["store"] = None
+    return {"ok": True, "id": tid, "status": r.get("status"), "version": r.get("version")}
+
+
 @app.get("/codereview")
 async def code_review(path: str = ""):
     """Code Intelligence: static review of a source tree — a path the operator provides, or source
