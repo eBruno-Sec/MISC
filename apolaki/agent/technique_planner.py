@@ -115,7 +115,7 @@ def plan(observations, techniques, kev_cwes=None):
         tcwes = {str(c).upper() for c in (t.get("cwe") or [])}
         score = conf * 0.5 + (15 if tcwes & kev_cwes else 0) + (10 if t.get("status") == "proven" else 0)
         out.append({"id": t.get("id"), "name": t.get("name") or t.get("id"), "score": round(score, 1),
-                    "preconditions_met": pre,
+                    "family": t.get("vuln_class", ""), "preconditions_met": pre,
                     "action": t.get("try_it") or ((t.get("payloads") or [{}])[0].get("payload", "")),
                     "oracle": (t.get("detection_logic") or [""])[0]})
     out.sort(key=lambda x: x["score"], reverse=True)

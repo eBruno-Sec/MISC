@@ -40,6 +40,8 @@ services:
       - INTEL_FEEDS_DIR=/app/data/intel_feeds
       # Phase 1 first-class Technique store (ingested candidates + human-review decisions). Agent-writable.
       - TECHNIQUE_STORE_DIR=/app/data/techniques
+      # Attack-chain memory: per-target record of what was tried/worked/failed (feeds the planner). Agent-writable.
+      - ATTACK_CHAIN_DIR=/app/data/attack_chains
     ports:
       - "8000:8000"
     volumes:

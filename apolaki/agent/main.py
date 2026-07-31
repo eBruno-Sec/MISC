@@ -1033,7 +1033,23 @@ async def technique_plan(session_id: str):
     snaps = _intel_snapshots()
     kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
     p = TP.plan(obs, _registry_as_canonical(), kev_cwes=kev)
+    if base:                               # fold in what prior engagements on this target already learned
+        try:
+            import attack_chain
+            p = attack_chain.annotate_plan(base, p)
+        except Exception:
+            pass
     return {"session": session_id, "observations": sorted(obs), "plan": p, "plan_size": len(p)}
+
+
+@app.get("/chain/{target}")
+async def attack_chain_view(target: str):
+    """Attack-chain memory for a target: what was tried / confirmed / failed across ALL engagements, so
+    the next run (and the planner) starts smarter. Deterministic, append-only."""
+    import attack_chain
+    ch = attack_chain.load(target)
+    return {"target": ch.get("target"), "steps": ch.get("steps", []),
+            "outcomes": attack_chain.summary(target)}
 
 
 @app.get("/codereview")
@@ -1675,6 +1691,12 @@ async def confirm_lead(session_id: str, lid: str):
     fid = db.add_finding(session_id, finding)
     ctx["leads"] = [l for l in leads if l.get("_lid") != lid]
     db.update_mission(session_id, context=ctx)
+    try:                                   # attack-chain memory: this class WORKED here
+        import attack_chain
+        attack_chain.record(lead.get("target"), lead.get("family") or lead.get("title", "")[:40],
+                            "confirmed", evidence=lead.get("title", ""), session=session_id, name=lead.get("title", ""))
+    except Exception:
+        pass
     return {"ok": True, "finding_id": fid, "promoted": lead.get("title", "")}
 
 
@@ -1692,6 +1714,12 @@ async def dismiss_lead(session_id: str, lid: str):
     dm.append(lead.get("title", ""))
     ctx["dismissed_leads"] = dm[:100]
     db.update_mission(session_id, context=ctx)
+    try:                                   # attack-chain memory: this class did NOT pan out here
+        import attack_chain
+        attack_chain.record(lead.get("target"), lead.get("family") or lead.get("title", "")[:40],
+                            "dismissed", session=session_id, name=lead.get("title", ""))
+    except Exception:
+        pass
     return {"ok": True, "dismissed": lead.get("title", "")}
 
 
