@@ -29,7 +29,7 @@ import re
 
 # Candidate kinds the store tracks.
 KINDS = ("email", "username", "object_id", "route", "endpoint", "url", "encoded",
-         "decoded", "secret", "version", "coupon", "numeric", "hint")
+         "decoded", "secret", "version", "coupon", "numeric", "hint", "credential")
 
 _MAX_PER_KIND = 500      # keep the store bounded on large bundles
 _MAX_VALUE_LEN = 400
@@ -103,6 +103,9 @@ class IntelStore:
             keys = sorted(bucket.keys())
             if redact_secrets and kind == "secret":
                 return ["<redacted:%d>" % len(k) for k in keys]
+            if redact_secrets and kind == "credential":
+                # keep the username (useful intel) but never expose a password at rest / in a report
+                return [(k.split(":", 1)[0] + ":<redacted>") for k in keys]
             return keys
         return {"total": self.count(),
                 "by_kind": {k: len(v) for k, v in self.data.items() if v},
@@ -164,9 +167,49 @@ def decode_candidate(blob: str):
     return None
 
 
+# Credential DISCOVERY: pairs the target itself publishes/leaks (e.g. a demo app's documented test
+# account, a leaked "user: x pass: y" in a comment/page). Zero-width chars are stripped first because
+# apps (Gin & Juice Shop) obfuscate published creds with them. This is DISCOVERY of exposed creds, never
+# guessing — the auth step uses a single discovered value and never iterates passwords.
+_ZW = re.compile(r"[​‌‍⁠﻿­⁣‎‏]")
+_TAG = re.compile(r"<[^>]+>")
+# username <val> password <val> — the values may be zero-width/space obfuscated (published test creds),
+# so capture a bounded window then strip whitespace out of the value (keeps special chars in real passwords).
+_CRED = re.compile(r"(?i)\buser(?:name)?\b[\s:=]{0,4}(.{1,100}?)\bpass(?:word)?\b[\s:=]{0,4}(.{1,100}?)"
+                   r"(?=\b(?:path|technolog|difficult|vulnerab|host|url|email|account)\b|[\r\n]|$)")
+_CRED_STOP = {"username", "user", "password", "pass", "the", "your", "and", "login", "details", "a",
+              "can", "may", "will", "must", "should", "cannot", "by", "with", "for", "reset"}
+_HWS = re.compile(r"[^\S\r\n]+")   # horizontal whitespace runs (spaces/tabs) — NOT newlines (they terminate)
+# a credential-disclosure CONTEXT keyword must sit just before the pair (avoids matching prose like
+# "the user can reset a password by email"); the label alone is not enough.
+_CRED_CTX = re.compile(r"(?i)\b(log[\s\-]?in|logon|log[\s\-]?on|sign[\s\-]?in|account|credential|"
+                       r"default cred|test account|demo account|auth)")
+_CRED_SEP = re.compile(r"(?i)\buser(?:name)?\b\s*[:=]|\bpass(?:word)?\b\s*[:=]")
+
+
+def harvest_credentials(text: str, source: str, store: IntelStore) -> None:
+    """Extract published/leaked username+password pairs (de-obfuscating zero-width tricks + HTML tags +
+    the per-letter space padding some demo apps use to hide their documented test account). DISCOVERY of
+    exposed creds only -- a single value the auth step reuses, never guessed. Gated on a credential
+    context keyword or an explicit key:value separator so prose does not produce phantom creds."""
+    if not text:
+        return
+    t = _HWS.sub(" ", _ZW.sub("", _TAG.sub(" ", text)))   # collapse padding, keep newlines as terminators
+    for m in _CRED.finditer(t):
+        # require a credential context nearby OR an explicit separator in the matched span
+        pre = t[max(0, m.start() - 140):m.start()]
+        if not _CRED_CTX.search(pre) and not _CRED_SEP.search(m.group(0)):
+            continue
+        u = re.sub(r"\s+", "", m.group(1))
+        p = re.sub(r"\s+", "", m.group(2))
+        if 2 <= len(u) <= 40 and 2 <= len(p) <= 60 and u.lower() not in _CRED_STOP and u != p:
+            store.add("credential", "%s:%s" % (u, p), source)
+
+
 def harvest_text(text: str, source: str, store: IntelStore) -> None:
     if not text:
         return
+    harvest_credentials(text, source, store)
     for m in _EMAIL.findall(text):
         store.add("email", m, source)
         store.add("username", m.split("@")[0], source)

@@ -125,6 +125,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                               "Forgotten Developer Backup", "Misplaced Signature File",
                               "Poison Null Byte", "Access Log"]}),
 
+    _t(id="exposed_credentials", vuln_class="sensitive_exposure", cwe="CWE-522", owasp="A07:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Credentials the target itself exposes (published/leaked login) reused to authenticate.",
+       detect="A username+password pair harvested from the target's OWN surface (page/JS/comment/help/docs).",
+       exploit="Log in ONCE with the discovered credential (never brute-forced) to reach authenticated surface.",
+       oracle="The discovered credential yields a valid session and an authenticated-only page loads.",
+       validated_on=["ginandjuice"],
+       maps_to={"ginandjuice": ["Published test account (carlos) -> authenticated scan"]}),
+
     _t(id="dom_xss", vuln_class="xss", cwe="CWE-79", owasp="A03:2021",
        permission=ACTIVE, transferable=True,
        summary="DOM-based XSS via an unsanitized client-side sink.",

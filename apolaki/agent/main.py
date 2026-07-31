@@ -1398,6 +1398,12 @@ def _record_memory(session_id: str) -> None:
         findings = db.get_findings(session_id)
         tkey = memory_mod.target_key(m["scope"])
         snap = memory_mod.snapshot(tools.recon, tools.urls, findings)
+        # stash a credential the scan DISCOVERED (target-exposed) so the NEXT scan of this target can
+        # authenticate itself from prior intel. Not rendered in reports (which show it redacted).
+        ag = sessions[session_id].get("agent")
+        if getattr(ag, "_scan_credential", None):
+            snap["scan_auth"] = ag._scan_credential
+            snap["scan_login_url"] = getattr(ag, "_scan_login_url", None)
         db.record_memory(tkey, session_id, snap)
         ctx = dict(m["context"])
         ctx["graph_data"] = {

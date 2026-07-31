@@ -19,7 +19,7 @@ from __future__ import annotations
 OBSERVATIONS = (
     "serves_js", "has_api", "has_search_param", "has_login", "has_object_id", "has_file_upload",
     "has_xml_input", "has_redirect_param", "has_versions", "has_coupon", "reflects_input",
-    "sql_error_seen", "authenticated", "has_sensitive_route", "has_workflow",
+    "sql_error_seen", "authenticated", "has_sensitive_route", "has_workflow", "credentials_exposed",
 )
 
 # technique_id -> observations that must ALL hold for the technique to be applicable (the precondition gate).
@@ -48,6 +48,7 @@ _PRECONDITIONS = {
     "jwt_forge":               ["authenticated"],
     "weak_2fa_bypass":         ["authenticated"],
     "weak_password_reset":     ["has_login"],
+    "exposed_credentials":     ["credentials_exposed"],
 }
 
 
@@ -87,6 +88,8 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         obs.add("has_versions")
     if by_kind.get("coupon"):
         obs.add("has_coupon")
+    if by_kind.get("credential"):
+        obs.add("credentials_exposed")
 
     fams = {str(x.get("family", "")).lower() for x in ((findings or []) + (leads or []))}
     if fams & {"xss", "reflected_xss", "stored_xss", "dom_xss"}:

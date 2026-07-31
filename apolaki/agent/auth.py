@@ -95,6 +95,35 @@ def _cookie_header(set_cookie_values) -> str:
     return "; ".join(dict((p.split("=", 1)[0], p) for p in pairs).values())
 
 
+def _hidden_and_action(html: str, page_url: str, login_url: str):
+    """Extract the hidden fields (CSRF etc.) + action of the LOGIN form on a page whose password field is
+    JS-driven / not parseable. Scores each form so the login form (not the register form) wins -- they
+    often both carry a CSRF token, and picking the wrong one fails the submit."""
+    import re
+    from urllib.parse import urljoin
+    best_hidden, best_action, best_score = {}, login_url, -1
+    for fm in re.finditer(r"<form\b[^>]*>.*?</form>", html, re.I | re.S):
+        block = fm.group(0)
+        am = re.search(r'action=["\']([^"\']*)["\']', block, re.I)
+        action = urljoin(page_url, am.group(1)) if (am and am.group(1)) else login_url
+        hidden = {}
+        for im in re.finditer(r'<input\b[^>]*type=["\']?hidden["\']?[^>]*>', block, re.I):
+            n = re.search(r'name=["\']?([^"\'\s>]+)', im.group(0))
+            v = re.search(r'value=(?:"([^"]*)"|\'([^\']*)\'|([^"\'>\s]*))', im.group(0))
+            if n:
+                hidden[n.group(1)] = (v.group(1) or v.group(2) or v.group(3) or "") if v else ""
+        score = 0
+        if re.search(r"login|signin|auth|session", action, re.I):
+            score += 2
+        if re.search(r'name=["\']?(?:username|user|email|login)\b', block, re.I):
+            score += 1
+        if re.search(r"register|signup|sign-up|create", action, re.I):
+            score -= 2
+        if score > best_score:
+            best_hidden, best_action, best_score = hidden, action, score
+    return best_hidden, best_action
+
+
 async def login(login_url: str, username: str, password: str, timeout: int = 15) -> dict:
     """Fetch a login form, submit credentials, return session headers.
 
@@ -105,16 +134,23 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
         async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=timeout) as c:
             page = await c.get(login_url)
             form = parse_login_form(page.text, str(page.url))
-            if not form or not form["pass_field"]:
-                return {"headers": {}, "verified": False, "note": "no login form with a password field found"}
-            data = dict(form["hidden"])
-            if form["user_field"]:
-                data[form["user_field"]] = username
-            data[form["pass_field"]] = password
-            if form["method"] == "get":
-                resp = await c.get(form["action"], params=data)
+            if form and form["pass_field"]:
+                data = dict(form["hidden"])
+                if form["user_field"]:
+                    data[form["user_field"]] = username
+                data[form["pass_field"]] = password
+                action, method = form["action"], form["method"]
             else:
-                resp = await c.post(form["action"], data=data)
+                # Fallback: the password field is JS-driven / not in the parsed form (e.g. Gin & Juice).
+                # Carry the page's hidden fields (CSRF) and POST the standard field names to the form action.
+                hidden, action = _hidden_and_action(page.text, str(page.url), login_url)
+                data = dict(hidden)
+                data.update({"username": username, "email": username, "password": password})
+                method = "post"
+            if method == "get":
+                resp = await c.get(action, params=data)
+            else:
+                resp = await c.post(action, data=data)
             # collect cookies from the client jar (survives redirects)
             cookie = "; ".join(f"{k}={v}" for k, v in c.cookies.items())
             if not cookie:
