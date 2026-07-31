@@ -464,6 +464,7 @@ def techniques_for_lab(lab_id: str) -> list[dict]:
 # merged, never overwritten. This keeps the honesty metric honest in the *right* direction.
 # --------------------------------------------------------------------------------------------
 _JUICESHOP_PROVEN = {
+    "ssrf": ["SSRF"],
     "reflected_xss": ["Reflected XSS", "HTTP-Header XSS"],
     "stored_xss": ["API-only XSS", "Server-side XSS Protection"],
     "nosql_injection": ["NoSQL Manipulation", "NoSQL Exfiltration"],
