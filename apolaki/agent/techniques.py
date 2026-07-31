@@ -495,6 +495,25 @@ for _tid, _chs in _DVWA_PROVEN.items():
         _m["dvwa"] = sorted(set(_m.get("dvwa", []) + _chs))
         _rec["maps_to"] = _m
 
+# Third lab: techniques whose EXACT oracle fired on bWAPP (bee/bug, low security), proven live via direct
+# HTTP response signatures (command output / file contents / verbatim reflection). Flips command_injection
+# and path_traversal (previously DVWA-only) to GENERALIZED. SQLi is confirmed at the CLASS level in the
+# bwapp prover/benchmark (error-based injection) but not added here -- neither the auth-bypass nor the
+# UNION-extract oracle was reproduced, so the specific sqli techniques stay honestly unclaimed on bWAPP.
+_BWAPP_PROVEN = {
+    "command_injection": ["OS Command Injection"],
+    "path_traversal": ["Directory Traversal - Files"],
+    "reflected_xss": ["XSS - Reflected (GET)"],
+}
+for _tid, _chs in _BWAPP_PROVEN.items():
+    _rec = TECHNIQUES.get(_tid)
+    if _rec:
+        if "bwapp" not in _rec["validated_on"]:
+            _rec["validated_on"] = _rec["validated_on"] + ["bwapp"]
+        _m = dict(_rec.get("maps_to") or {})
+        _m["bwapp"] = sorted(set(_m.get("bwapp", []) + _chs))
+        _rec["maps_to"] = _m
+
 # Taxonomy-lens codes (best-effort; high-confidence mappings only, None where no clean fit).
 _WSTG = {
     "sqli_auth_bypass": "WSTG-INPV-05", "sqli_union_extract": "WSTG-INPV-05",

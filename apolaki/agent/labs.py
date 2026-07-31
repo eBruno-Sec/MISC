@@ -30,6 +30,13 @@ def _juiceshop_completion(base_url: str) -> dict:
         return {"lab": "juiceshop", "error": str(e)}
 
 
+def _bwapp_completion(base_url: str) -> dict:
+    import bwapp_solvers
+    r = bwapp_solvers.prove(base_url)
+    return {"lab": "bwapp", "note": "bWAPP has no scoreboard API; scored via per-class response oracles",
+            "confirmed": r.get("confirmed", []), "probes": r.get("probes", {})}
+
+
 def _dvwa_completion(base_url: str) -> dict:
     # DVWA has no machine-readable scoreboard; completion is per-module + manual.
     return {"lab": "dvwa", "note": "DVWA has no scoreboard API; score via per-module oracles/manual"}
@@ -40,6 +47,8 @@ LABS = {
                   "completion": _juiceshop_completion},
     "dvwa": {"fingerprint": ["Damn Vulnerable Web Application", "DVWA"],
              "completion": _dvwa_completion},
+    "bwapp": {"fingerprint": ["bWAPP", "an extremely buggy web app"],
+              "completion": _bwapp_completion},
 }
 
 
@@ -69,7 +78,10 @@ def solve(lab_id: str, base_url: str) -> dict:
     if lab_id == "juiceshop":
         import juiceshop_solvers
         return juiceshop_solvers.solve(base_url)
-    return {"error": "no solver pack for lab '%s'" % lab_id, "available": ["juiceshop"]}
+    if lab_id == "bwapp":
+        import bwapp_solvers
+        return bwapp_solvers.prove(base_url)
+    return {"error": "no solver pack for lab '%s'" % lab_id, "available": ["juiceshop", "bwapp"]}
 
 
 def conquest(lab_id: str, base_url: str) -> dict:
