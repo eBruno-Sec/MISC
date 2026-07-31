@@ -16,10 +16,13 @@ def _norm(s):
     return str(s or "").strip().lower()
 
 
-def recommend(findings, techniques, kev_cwes=None, top=8):
+def recommend(findings, techniques, kev_cwes=None, signals=None, top=8):
     """Rank canonical Technique dicts for the current scan. Returns [{technique, score, reasons}],
-    most relevant first. Deterministic and explainable."""
+    most relevant first. Deterministic and explainable. `signals` = vuln-class hints derived from ALL
+    gathered intel (harvested object-ids/versions/coupons, code-intel routes, leads) so the advisor is
+    driven by everything recon collected, not just confirmed findings -- the orchestration contract."""
     kev_cwes = {str(c).upper() for c in (kev_cwes or [])}
+    signals = {_norm(s) for s in (signals or set())}
     found_families = {_norm(f.get("family")) for f in (findings or []) if f.get("family")}
     found_cwes = {str(f.get("cwe") or "").upper() for f in (findings or []) if f.get("cwe")}
     out = []
@@ -38,6 +41,11 @@ def recommend(findings, techniques, kev_cwes=None, top=8):
         if tcwes & found_cwes:
             score += 25
             reasons.append("same CWE as a confirmed finding")
+        # relevance to GATHERED INTEL (harvest + code-intel): weaker than a confirmed finding, but this
+        # is how "all gathered info becomes intel for the next phase" -- recon evidence steers technique choice
+        if fam and fam in signals:
+            score += 12
+            reasons.append("matches gathered-intel signal (%s)" % fam)
         # real-world weight
         if tcwes & kev_cwes:
             score += 15

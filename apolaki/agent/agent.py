@@ -635,7 +635,24 @@ class BBHAgent:
             canon.append(technique_model.from_registry(
                 rec, try_it=try_map.get(rec["id"]), known_exploited=e.get("known_exploited", False),
                 kev_cves=e.get("kev_cves"), capec=e.get("capec")))
-        recs = adv.recommend(self.findings, canon, kev_cwes=kev, top=8)
+        # Build vuln-class SIGNALS from EVERYTHING recon gathered, so the advisor is driven by all
+        # intel (not just confirmed findings). This is the orchestration contract: gathered info -> intel.
+        signals = set()
+        for l in (self.leads or []):                       # code-intel + harvest-derived leads
+            f = str(l.get("family") or "").strip().lower()
+            if f:
+                signals.add(f)
+        try:                                               # the harvested intel store (versions/ids/coupons/...)
+            by_kind = (self.tools.intel.to_dict(redact_secrets=True) or {}).get("by_kind", {})
+            _K = {"object_id": "access_control", "version": "vulnerable_component", "coupon": "business_logic",
+                  "email": "broken_auth", "username": "broken_auth", "secret": "sensitive_exposure",
+                  "encoded": "crypto", "route": "access_control"}
+            for kind, family in _K.items():
+                if by_kind.get(kind):
+                    signals.add(family)
+        except Exception:
+            pass
+        recs = adv.recommend(self.findings, canon, kev_cwes=kev, signals=signals, top=8)
         if not recs:
             return
         base = self._primary_base()

@@ -102,6 +102,16 @@ def test_advisor_ranks_by_relevance_kev_and_confidence():
     assert leads[0]["reproduction_steps"]                          # carries a concrete payload/discovery step
 
 
+def test_advisor_uses_gathered_intel_signals():
+    # orchestration: with NO confirmed findings, a signal derived from gathered intel (e.g. recon found
+    # object-ids -> access_control) still steers the advisor toward the matching technique.
+    ssrf = TM.from_registry({"id": "ssrf", "vuln_class": "ssrf", "cwe": "CWE-918", "validated_on": []})
+    xss = TM.from_registry({"id": "xss", "vuln_class": "xss", "cwe": "CWE-79", "validated_on": []})
+    recs = ADV.recommend([], [ssrf, xss], signals={"ssrf"}, top=2)
+    assert recs[0]["technique"]["id"] == "ssrf"
+    assert any("gathered-intel signal" in r for r in recs[0]["reasons"])
+
+
 def test_advisor_skips_rejected_and_deprecated():
     ok = TM.from_registry({"id": "a", "vuln_class": "sqli", "cwe": "CWE-89", "validated_on": []})
     dead = TM.from_registry({"id": "b", "vuln_class": "xss", "cwe": "CWE-79", "validated_on": []})
