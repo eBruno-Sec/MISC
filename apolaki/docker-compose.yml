@@ -109,6 +109,16 @@ services:
       - "127.0.0.1:42080:80"
     restart: unless-stopped
 
+  # bWAPP -- a THIRD lab, reachable at http://bwapp on the compose network. Cross-validates
+  # command_injection + path_traversal + reflected_xss (the >=2-lab "generalized" bar). One-time setup
+  # after `up`: GET http://localhost:42088/install.php?install=yes (creates the MySQL schema), then the
+  # prover logs in bee/bug at low security. Scored via per-class response oracles (no scoreboard API).
+  bwapp:
+    image: raesene/bwapp:latest
+    ports:
+      - "127.0.0.1:42088:80"
+    restart: unless-stopped
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:
