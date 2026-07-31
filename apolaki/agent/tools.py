@@ -1284,6 +1284,10 @@ class ToolRegistry:
                 material["json"] = body
             elif "javascript" in ct or "ecmascript" in ct or u.endswith(".js"):
                 material["js"] = body
+            elif "text/css" in ct or u.endswith(".css"):
+                material["css"] = body
+            elif "html" in ct or u.endswith((".html", ".htm")) or (not ct and "<" in body[:200]):
+                material["html"] = body          # structured HTML mining: forms/params, links, comments, redirects
             else:
                 material["text"] = body
             self._intel_mod.harvest(material, self.intel)

@@ -90,6 +90,17 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         obs.add("has_coupon")
     if by_kind.get("credential"):
         obs.add("credentials_exposed")
+    # parameters mined from HTML forms / links / query strings become attack-surface observations:
+    # redirect-ish params -> open_redirect, search/q -> injection surface, id/object -> IDOR.
+    hk = harvest if isinstance(harvest, dict) else {}
+    params = [str(p).lower() for p in (hk.get("candidates", {}) or {}).get("param", [])]
+    pj = " ".join(params)
+    if any(t in pj for t in ("redirect", "return", "returnurl", "next", "goto", "dest", "url", "continue", "callback")):
+        obs.add("has_redirect_param")
+    if any(p in ("q", "query", "search", "s", "keyword", "term") for p in params) or "search" in pj:
+        obs.add("has_search_param")
+    if any(t in pj for t in ("id", "userid", "orderid", "productid", "uid", "account")):
+        obs.add("has_object_id")
 
     fams = {str(x.get("family", "")).lower() for x in ((findings or []) + (leads or []))}
     if fams & {"xss", "reflected_xss", "stored_xss", "dom_xss"}:

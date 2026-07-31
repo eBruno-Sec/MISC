@@ -113,3 +113,36 @@ def test_harvest_is_bounded():
     big = " ".join("user%d@ex.com" % i for i in range(2000))
     intel.harvest_text(big, "big", s)
     assert len(s.get("email")) <= intel._MAX_PER_KIND
+
+
+def test_harvest_html_mines_forms_params_comments_redirects():
+    import intel
+    s = intel.IntelStore()
+    html = ('<form action="/search?src=nav"><input name="q"><input name="redirect_url">'
+            '<input type=hidden name=csrf_token value=x></form>'
+            '<a href="/admin/panel?id=5">x</a><meta http-equiv=refresh content="0;url=/login">'
+            '<meta name=generator content="WordPress 6.1">'
+            '<!-- api at /internal/v2/users, test admin / Passw0rd! -->')
+    intel.harvest_html(html, "http://t/", s)
+    c = s.to_dict()["candidates"]
+    assert {"q", "redirect_url", "csrf_token", "id", "src"} <= set(c.get("param", []))
+    assert "/search" in c.get("endpoint", [])
+    assert "/admin/panel" in c.get("route", []) and "/login" in c.get("route", [])
+    assert "WordPress 6.1" in c.get("version", [])
+    assert "field:csrf_token" in c.get("secret", [])
+    assert any("api at /internal" in x for x in c.get("comment", []))    # dev comment captured
+
+
+def test_harvest_css_mines_url_and_import():
+    import intel
+    s = intel.IntelStore()
+    intel.harvest_css("body{background:url('/assets/bg.png')} @import url('https://f/x.css');", "http://t/x.css", s)
+    c = s.to_dict()["candidates"]
+    assert "/assets/bg.png" in c.get("route", []) and "https://f/x.css" in c.get("url", [])
+
+
+def test_params_feed_the_planner_observations():
+    import technique_planner as TP
+    harvest = {"candidates": {"param": ["redirect_url", "q", "userid"]}, "by_kind": {"param": 3}}
+    obs = TP.derive_observations(harvest=harvest)
+    assert {"has_redirect_param", "has_search_param", "has_object_id"} <= obs

@@ -211,8 +211,9 @@ def generate_report(program: str, findings: list, scope: dict,
     # the raw material a general technique consumes as fixtures. Noisy 'encoded' bucket omitted.
     if intel and (intel.get("candidates") or {}):
         _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
-                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
-                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("endpoint", "Endpoints"),
+                 ("param", "Parameters"), ("url", "External URLs"), ("coupon", "Coupons"),
+                 ("version", "Versions"), ("secret", "Secrets (redacted)"), ("comment", "Dev comments"),
                  ("hint", "Hints")]
         _cand = intel.get("candidates", {})
         _ilines = []
@@ -1165,8 +1166,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
     intel_html = ""
     if intel and (intel.get("candidates") or {}):
         _SHOW = [("decoded", "Decoded values"), ("email", "Emails"), ("username", "Usernames"),
-                 ("object_id", "Object IDs"), ("route", "Routes"), ("url", "External URLs"),
-                 ("coupon", "Coupons"), ("version", "Versions"), ("secret", "Secrets (redacted)"),
+                 ("object_id", "Object IDs"), ("route", "Routes"), ("endpoint", "Endpoints"),
+                 ("param", "Parameters"), ("url", "External URLs"), ("coupon", "Coupons"),
+                 ("version", "Versions"), ("secret", "Secrets (redacted)"), ("comment", "Dev comments"),
                  ("hint", "Hints")]
         _cand = intel.get("candidates", {})
         _rows = ""

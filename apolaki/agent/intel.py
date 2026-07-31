@@ -29,7 +29,7 @@ import re
 
 # Candidate kinds the store tracks.
 KINDS = ("email", "username", "object_id", "route", "endpoint", "url", "encoded",
-         "decoded", "secret", "version", "coupon", "numeric", "hint", "credential")
+         "decoded", "secret", "version", "coupon", "numeric", "hint", "credential", "param", "comment")
 
 _MAX_PER_KIND = 500      # keep the store bounded on large bundles
 _MAX_VALUE_LEN = 400
@@ -221,6 +221,7 @@ def harvest_text(text: str, source: str, store: IntelStore) -> None:
         store.add("version", m, source)
     for m in _URL.findall(text):
         store.add("url", m, source)
+        _params_from_url(m, source, store)
     for m in _PATH.findall(text):
         store.add("route", m, source)
     for m in _SECRET_KV.findall(text):
@@ -283,6 +284,82 @@ def harvest_js(js: str, source: str, store: IntelStore) -> None:
             store.add("route", "/" + m.lstrip("/"), source)
 
 
+# ---- front-facing HTML/CSS mining: forms/params, links, redirects, meta, comments, css url() ----
+_FORM = re.compile(r"(?is)<form\b([^>]*)>(.*?)</form>")
+_ACTION = re.compile(r'(?i)\baction\s*=\s*["\']([^"\']+)')
+_INPUT_NAME = re.compile(r'(?i)<(?:input|select|textarea)\b[^>]*\bname\s*=\s*["\']?([\w\[\].\-]{1,40})')
+_HREF_SRC = re.compile(r'(?i)\b(?:href|src|data-url|data-src|action|formaction)\s*=\s*["\']([^"\'\s>]{2,300})')
+_META_REFRESH = re.compile(r'(?is)<meta[^>]+http-equiv\s*=\s*["\']?refresh["\']?[^>]*content\s*=\s*["\'][^"\']*url\s*=\s*([^"\';]+)')
+_META_GEN = re.compile(r'(?is)<meta[^>]+name\s*=\s*["\']?generator["\']?[^>]*content\s*=\s*["\']([^"\']+)')
+_COMMENT = re.compile(r"(?s)<!--(.*?)-->")
+_CSS_URL = re.compile(r'(?i)url\(\s*["\']?([^"\')]+)')
+_CSS_IMPORT = re.compile(r'(?i)@import\s+(?:url\()?["\']([^"\']+)')
+_PARAM_STOP = {"submit", "button", "", "csrfmiddlewaretoken"}
+
+
+def _add_ref(ref: str, source: str, store: IntelStore) -> None:
+    """Classify a URL/href/src reference as an external url or an internal route, and mine its params."""
+    ref = ref.strip()
+    if not ref or ref.startswith(("#", "javascript:", "mailto:", "data:", "tel:")):
+        return
+    base = ref.split("?", 1)[0].split("#", 1)[0]
+    if ref.startswith(("http://", "https://")):
+        store.add("url", base, source)
+    elif ref.startswith("/"):
+        store.add("route", "/" + base.lstrip("/"), source)
+    _params_from_url(ref, source, store)
+
+
+def _params_from_url(u: str, source: str, store: IntelStore) -> None:
+    if "?" not in u:
+        return
+    for pair in u.split("?", 1)[1].split("&"):
+        name = pair.split("=", 1)[0].strip()
+        if name and name.lower() not in _PARAM_STOP and len(name) <= 40:
+            store.add("param", name, source)
+
+
+def harvest_html(html: str, source: str, store: IntelStore) -> None:
+    """Mine structured intel from a front-facing HTML page: form endpoints + input parameters, hidden
+    tokens, links/script sources + their params, meta redirects/generator, and dev comments (which often
+    leak credentials, endpoints, and notes). Regex-based, bounded, best-effort."""
+    if not html:
+        return
+    for attrs, inner in _FORM.findall(html):
+        am = _ACTION.search(attrs)
+        if am:
+            store.add("endpoint", am.group(1).strip().split("?", 1)[0], source)
+            _params_from_url(am.group(1), source, store)
+        for nm in _INPUT_NAME.findall(inner):
+            n = nm.strip().strip("[]")
+            if n and n.lower() not in _PARAM_STOP:
+                store.add("param", n, source)
+                if any(t in n.lower() for t in ("csrf", "token", "auth", "nonce", "session")):
+                    store.add("secret", "field:" + n, source)
+    for ref in _HREF_SRC.findall(html):
+        _add_ref(ref, source, store)
+    for t in _META_REFRESH.findall(html):
+        _add_ref(t.strip(), source + " (meta-refresh)", store)
+    for g in _META_GEN.findall(html):
+        store.add("version", g.strip(), source)
+    for c in _COMMENT.findall(html):
+        cc = c.strip()
+        if cc:
+            store.add("comment", cc[:180], source)
+            harvest_text(cc, source + " (html-comment)", store)   # creds/urls/secrets hidden in dev comments
+
+
+def harvest_css(css: str, source: str, store: IntelStore) -> None:
+    """Mine a CSS file: url()/@import references (assets, sometimes internal paths) and /* comments */."""
+    if not css:
+        return
+    for u in _CSS_URL.findall(css) + _CSS_IMPORT.findall(css):
+        _add_ref(u, source, store)
+    for c in re.findall(r"/\*(.*?)\*/", css, re.S):
+        if c.strip():
+            harvest_text(c, source + " (css-comment)", store)
+
+
 def harvest_headers(headers, source: str, store: IntelStore) -> None:
     try:
         items = headers.items() if hasattr(headers, "items") else headers
@@ -309,7 +386,11 @@ def harvest(material: dict, store: IntelStore | None = None) -> IntelStore:
     if material.get("text"):
         harvest_text(material["text"], source, store)
     if material.get("html"):
+        harvest_html(material["html"], source, store)
         harvest_text(material["html"], source, store)
+    if material.get("css"):
+        harvest_css(material["css"], source, store)
+        harvest_text(material["css"], source, store)
     if material.get("js"):
         harvest_js(material["js"], source, store)
     if material.get("headers"):
