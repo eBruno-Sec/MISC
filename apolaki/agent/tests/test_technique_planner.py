@@ -49,3 +49,14 @@ def test_registry_seed_projects_a_planner_ready_registry():
     # the seed actually drives a gated plan
     p = TP.plan({"has_login", "has_object_id"}, seed)
     assert any(a["id"] == "sqli_auth_bypass" for a in p)
+
+
+def test_plan_attaches_filter_bypass_ladder_for_injection_classes():
+    # the mutation engine is no longer an island: injection-class plan entries carry a bypass ladder
+    p = TP.plan({"has_login", "has_object_id"}, TP.registry_seed())
+    sqli = next((a for a in p if a["id"] == "sqli_auth_bypass"), None)
+    assert sqli and sqli.get("bypass_ladder")
+    assert any("%27" in v for v in sqli["bypass_ladder"])        # a url-encoded bypass variant is present
+    # a non-injection class (e.g. idor/access_control) carries no payload ladder
+    idor = next((a for a in p if a["id"] == "idor_bola_read"), None)
+    assert idor and not idor.get("bypass_ladder")

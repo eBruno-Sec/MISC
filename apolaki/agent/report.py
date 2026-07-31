@@ -95,9 +95,11 @@ def generate_report(program: str, findings: list, scope: dict,
         nb_block = ""
         _nb = (orchestration or {}).get("next_best") or []
         if _nb:
-            _rows = "\n".join("- **%s** _(%s)_%s" % (a.get("id", ""), a.get("family", ""),
+            _rows = "\n".join("- **%s** _(%s)_%s%s" % (a.get("id", ""), a.get("family", ""),
                               ((" — " + (a.get("action") or a.get("oracle") or "")[:90])
-                               if (a.get("action") or a.get("oracle")) else "")) for a in _nb[:6])
+                               if (a.get("action") or a.get("oracle")) else ""),
+                              (("  \n  ↳ filter-bypass: " + ", ".join("`%s`" % v for v in (a.get("bypass_ladder") or [])[:3]))
+                               if a.get("bypass_ladder") else "")) for a in _nb[:6])
             nb_block = ("\n\n## Recommended Next Actions\n\n_Deterministic, evidence-driven planner "
                         "(precondition-gated, KEV-ranked) — where to keep testing next:_\n\n" + _rows + "\n")
         return (
@@ -249,8 +251,10 @@ def generate_report(program: str, findings: list, scope: dict,
                           "KEV-ranked, aware of what this engagement already confirmed):_", ""]
                 for a in _nb[:6]:
                     _act = (a.get("action") or a.get("oracle") or "")[:90]
-                    lines.append("- **%s** _(%s)_%s" % (a.get("id", ""), a.get("family", ""),
-                                 (" — " + _act) if _act else ""))
+                    _bl = a.get("bypass_ladder") or []
+                    _byp = ("  \n  ↳ filter-bypass: " + ", ".join("`%s`" % v for v in _bl[:3])) if _bl else ""
+                    lines.append("- **%s** _(%s)_%s%s" % (a.get("id", ""), a.get("family", ""),
+                                 (" — " + _act) if _act else "", _byp))
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)

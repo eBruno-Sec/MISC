@@ -137,9 +137,37 @@ def plan(observations, techniques, kev_cwes=None):
         conf = (t.get("confidence") or {}).get("score", 0)
         tcwes = {str(c).upper() for c in (t.get("cwe") or [])}
         score = conf * 0.5 + (15 if tcwes & kev_cwes else 0) + (10 if t.get("status") == "proven" else 0)
-        out.append({"id": t.get("id"), "name": t.get("name") or t.get("id"), "score": round(score, 1),
-                    "family": t.get("vuln_class", ""), "preconditions_met": pre,
-                    "action": t.get("try_it") or ((t.get("payloads") or [{}])[0].get("payload", "")),
-                    "oracle": (t.get("detection_logic") or [""])[0]})
+        entry = {"id": t.get("id"), "name": t.get("name") or t.get("id"), "score": round(score, 1),
+                 "family": t.get("vuln_class", ""), "preconditions_met": pre,
+                 "action": t.get("try_it") or ((t.get("payloads") or [{}])[0].get("payload", "")),
+                 "oracle": (t.get("detection_logic") or [""])[0]}
+        # Retire the mutation-engine island: attach the concrete filter/WAF-bypass ladder for injection
+        # classes, so every planner consumer (the /plan dashboard, the scan's next-best-action, the report,
+        # the workbench) hands the operator the exact ordered payloads to try -- not just "test SQLi here".
+        bl = _bypass_ladder(entry["family"])
+        if bl:
+            entry["bypass_ladder"] = bl
+        out.append(entry)
     out.sort(key=lambda x: x["score"], reverse=True)
     return out
+
+
+# class -> mutation family (the payload-mutation engine keys on these)
+_MUT_FAMILY = {
+    "sql_injection": "sqli", "sqli": "sqli", "nosql_injection": "nosqli", "xss": "xss",
+    "template_injection": "ssti", "command_injection": "command_injection",
+    "path_traversal": "path_traversal", "redirect": "open_redirect", "xxe": "xxe", "injection": "crlf",
+}
+
+
+def _bypass_ladder(vuln_class, limit=6):
+    """Ordered filter/WAF-bypass payloads for an injection class, from the deterministic mutation engine
+    (encodings, case toggles, comment/whitespace tricks). Empty for non-injection classes. Pure."""
+    fam = _MUT_FAMILY.get(str(vuln_class or "").lower())
+    if not fam:
+        return []
+    try:
+        import mutation
+        return mutation.variants(fam, limit=limit)
+    except Exception:
+        return []
