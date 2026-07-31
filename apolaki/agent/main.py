@@ -1118,7 +1118,8 @@ async def get_report_html(session_id: str, download: bool = False):
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
-        intel=m["context"].get("intel"), kev_cwes=_kev_cwes())
+        intel=m["context"].get("intel"), kev_cwes=_kev_cwes(),
+        orchestration=m["context"].get("orchestration"))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
@@ -1262,6 +1263,7 @@ def _finalize_mission(session_id: str) -> None:
     _record_execution(session_id)
     _record_memory(session_id)
     _record_intel(session_id)
+    _record_orchestration(session_id)
 
 
 def _record_intel(session_id: str) -> None:
@@ -1279,6 +1281,25 @@ def _record_intel(session_id: str) -> None:
             return
         ctx = dict(m["context"])
         ctx["intel"] = store.to_dict(redact_secrets=True)
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+
+
+def _record_orchestration(session_id: str) -> None:
+    """At mission end: snapshot how the knowledge model + code intelligence DROVE this scan (technique
+    advisor picks + the code-intelligence recon summary) into the mission context, so the report/UI can
+    show the intelligence was actually consumed, not just displayed. Best-effort — never breaks teardown."""
+    try:
+        if session_id not in sessions:
+            return
+        m = db.get_mission(session_id)
+        if not m:
+            return
+        ag = sessions[session_id].get("agent")
+        ctx = dict(m["context"])
+        ctx["orchestration"] = {"code_intel": getattr(ag, "_codeintel_summary", {}) or {},
+                                "advisor": getattr(ag, "_advisor_recs", []) or []}
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass

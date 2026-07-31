@@ -218,6 +218,8 @@ class BBHAgent:
         self.memory_note = ""
         self.findings: list = []
         self.leads: list = []           # unconfirmed candidate/static signals (not report findings)
+        self._advisor_recs: list = []   # technique-advisor picks for this run (report orchestration view)
+        self._codeintel_summary: dict = {}   # what code-intelligence recon fed the scan (orchestration view)
         self._stored_fps: set = set()   # fingerprints already stored (auto-store dedup)
         # share the dedup set with the tool registry so the model's store_finding tool
         # deduplicates against what auto-store already recorded (AI stays additive).
@@ -540,6 +542,111 @@ class BBHAgent:
             if n >= 8:
                 break
 
+    def _primary_base(self) -> str:
+        try:
+            b = self.scope.base_urls()
+            return b[0] if b else ""
+        except Exception:
+            return ""
+
+    async def _recon_code_intelligence(self, session_id: str):
+        """Deterministic code-intelligence recon. Black-box harvest the primary target's served JS,
+        fold the mined API endpoints into the scan SURFACE (so the planner actually probes them), and
+        raise the unlinked/sensitive routes + business-logic hypotheses as LEADS. Runs for EVERY
+        strategy, before the scan, so the harvest drives the run instead of sitting in a dashboard."""
+        import asyncio
+        import codeintel
+        base = self._primary_base()
+        if not base:
+            return
+        try:
+            h = await asyncio.to_thread(codeintel.harvest, base)
+        except Exception:
+            return
+        if not isinstance(h, dict):
+            return
+        # 1) fold mined endpoints into the surface the planner probes
+        existing = set(getattr(self.tools, "urls", []) or [])
+        added = 0
+        for ep in (h.get("endpoints") or []):
+            u = base.rstrip("/") + ep if str(ep).startswith("/") else str(ep)
+            if u not in existing:
+                self.tools.urls.append(u)
+                existing.add(u)
+                added += 1
+        # 2) sensitive / unlinked routes -> attack-surface leads
+        ns = 0
+        for r in (h.get("sensitive_routes") or [])[:12]:
+            lead = {"severity": "info", "confidence": "candidate", "family": "attack_surface",
+                    "tags": ["code-intel", "unlinked-route"], "cwe": "CWE-200", "target": base,
+                    "title": "Unlinked/sensitive route mined from JS — %s" % str(r)[:80],
+                    "evidence": "Code-intelligence harvest found client route '%s' in a served JS bundle." % r,
+                    "reproduction_steps": ["Probe '%s' on %s for privileged functionality or missing authorization." % (r, base)],
+                    "analyst_notes": "Code-intelligence recon lead — sensitive surface to test for access control."}
+            self.leads.append(lead)
+            yield {"type": "lead", "lead": lead}
+            ns += 1
+        # 3) business-logic hypotheses (derived from the mined routes) -> leads
+        nl = 0
+        for wf in ((h.get("logic") or {}).get("detail") or []):
+            for t in (wf.get("tests") or []):
+                lead = {"severity": "info", "confidence": "candidate", "family": "business_logic",
+                        "tags": ["code-intel", "business-logic", t.get("kind", "logic")], "cwe": "CWE-840",
+                        "target": base,
+                        "title": "Business-logic hypothesis (%s) — %s" % (wf.get("workflow", "flow"), t.get("kind", "")),
+                        "evidence": t.get("test", ""),
+                        "reproduction_steps": [t.get("test", "")] if t.get("test") else [],
+                        "analyst_notes": (t.get("rationale", "") + " Derived from routes mined by code intelligence; verify manually.").strip()}
+                self.leads.append(lead)
+                yield {"type": "lead", "lead": lead}
+                nl += 1
+                if nl >= 12:
+                    break
+            if nl >= 12:
+                break
+        self._codeintel_summary = {"endpoints": len(h.get("endpoints") or []), "added_to_surface": added,
+                                   "sensitive_routes": ns, "logic_hypotheses": nl}
+        yield {"type": "info", "content": "Code intelligence: mined %d endpoints (%d new to surface), "
+               "raised %d sensitive-route + %d business-logic leads." % (len(h.get("endpoints") or []), added, ns, nl)}
+
+    async def _technique_advisor(self, session_id: str):
+        """Consult the first-class Technique knowledge model for the highest-priority techniques to
+        test given the surface + confirmed findings, and raise them as prioritized (relevance + KEV +
+        confidence ranked) leads. Deterministic; makes the technique registry a test GENERATOR rather
+        than a static library. Runs for every strategy."""
+        try:
+            import techniques as T
+            import technique_model
+            import technique_advisor as adv
+            import intel_feeds
+        except Exception:
+            return
+        try:
+            snaps = intel_feeds.load()
+            kev = intel_feeds.known_exploited_cwes(snaps)
+            enr = intel_feeds.enrich_techniques(
+                [{"id": t["id"], "cwe": t.get("cwe")} for t in T.TECHNIQUES.values()], snaps) if snaps else {}
+        except Exception:
+            kev, enr = set(), {}
+        try_map = getattr(T, "_TRY", {})
+        canon = []
+        for rec in T.TECHNIQUES.values():
+            e = enr.get(rec["id"], {})
+            canon.append(technique_model.from_registry(
+                rec, try_it=try_map.get(rec["id"]), known_exploited=e.get("known_exploited", False),
+                kev_cves=e.get("kev_cves"), capec=e.get("capec")))
+        recs = adv.recommend(self.findings, canon, kev_cwes=kev, top=8)
+        if not recs:
+            return
+        base = self._primary_base()
+        self._advisor_recs = [{"id": r["technique"]["id"], "name": r["technique"].get("name"),
+                               "score": r["score"], "reasons": r["reasons"]} for r in recs]
+        for lead in adv.as_leads(recs, base):
+            self.leads.append(lead)
+            yield {"type": "lead", "lead": lead}
+        yield {"type": "info", "content": "Technique advisor: %d techniques recommended from the "
+               "knowledge model (relevance + KEV + confidence ranked)." % len(recs)}
+
     # ── AI-call budget helpers ───────────────────────────────────
     def _ai_usable(self) -> bool:
         return bool(self.client) and self._has_key
@@ -577,6 +684,11 @@ class BBHAgent:
             yield {"type": "info", "content": "Headless-browser XSS confirmer unavailable — reflected XSS in "
                    "script/DOM contexts will stay advisory leads (HTML/attribute-context reflections still confirm)."}
         yield self._budget_event()
+
+        # Deterministic code-intelligence recon: mine the target's served JS, seed the scan surface,
+        # and raise sensitive-route + business-logic leads BEFORE the scan runs (every strategy).
+        async for ev in self._recon_code_intelligence(session_id):
+            yield ev
 
         strat = self.strategy
         # Degrade to deterministic when AI is needed but unusable (missing key /
@@ -637,6 +749,10 @@ class BBHAgent:
                        " — the deterministic coverage floor already completed for this run."}
                 yield {"type": "complete", "content": f"Agentic run completed on the deterministic "
                        f"coverage floor ({floor_steps} step(s)). See Playbooks and the report."}
+        # Deterministic technique advisor: consult the knowledge model for the top applicable
+        # techniques given the surface + confirmed findings, raised as prioritized leads (every strategy).
+        async for ev in self._technique_advisor(session_id):
+            yield ev
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev

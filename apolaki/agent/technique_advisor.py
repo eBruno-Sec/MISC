@@ -1,0 +1,75 @@
+"""
+Technique advisor -- turns the first-class Technique knowledge model into scan-time recommendations.
+
+Given what recon established and what the scan confirmed (findings), it ranks the applicable techniques
+and returns the highest-priority ones to test next. This is how a scan CONSUMES the technique registry
+instead of it sitting there as a static library: proven techniques become prioritized, parameterized
+leads that flow into the same leads pipeline the report and operator already use.
+
+Pure + deterministic: the ranking is an explainable score (relevance to THIS target x real-world weight
+x actionability), each contribution attributed to a named reason.
+"""
+from __future__ import annotations
+
+
+def _norm(s):
+    return str(s or "").strip().lower()
+
+
+def recommend(findings, techniques, kev_cwes=None, top=8):
+    """Rank canonical Technique dicts for the current scan. Returns [{technique, score, reasons}],
+    most relevant first. Deterministic and explainable."""
+    kev_cwes = {str(c).upper() for c in (kev_cwes or [])}
+    found_families = {_norm(f.get("family")) for f in (findings or []) if f.get("family")}
+    found_cwes = {str(f.get("cwe") or "").upper() for f in (findings or []) if f.get("cwe")}
+    out = []
+    for t in techniques:
+        if t.get("status") in ("rejected", "deprecated") or not t.get("transferable", True):
+            continue
+        reasons, score = [], 0.0
+        conf = (t.get("confidence") or {}).get("score", 0)
+        score += conf * 0.4
+        fam = _norm(t.get("vuln_class"))
+        tcwes = {str(c).upper() for c in (t.get("cwe") or [])}
+        # relevance to what the scan already CONFIRMED: same class/CWE means "go deeper right here"
+        if fam and fam in found_families:
+            score += 30
+            reasons.append("matches a confirmed %s finding" % fam)
+        if tcwes & found_cwes:
+            score += 25
+            reasons.append("same CWE as a confirmed finding")
+        # real-world weight
+        if tcwes & kev_cwes:
+            score += 15
+            reasons.append("CISA KEV known-exploited")
+        # actionability + demonstrated reliability
+        if t.get("payloads") or t.get("try_it"):
+            score += 5
+        if t.get("status") == "proven":
+            score += 10
+            reasons.append("proven on a lab")
+        if conf:
+            reasons.append("confidence %d" % conf)
+        out.append({"technique": t, "score": round(score, 1), "reasons": reasons})
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out[:top]
+
+
+def as_leads(recs, target):
+    """Project advisor recommendations into the scan's lead schema (candidate leads, never findings)."""
+    leads = []
+    for r in recs:
+        t = r["technique"]
+        payload = t.get("try_it") or ((t.get("payloads") or [{}])[0].get("payload", ""))
+        steps = [x for x in [(t.get("discovery_methods") or [""])[0], payload] if x]
+        leads.append({
+            "severity": "info", "confidence": "candidate", "family": t.get("vuln_class") or "technique",
+            "tags": ["technique-advisor"] + (["kev"] if any("KEV" in x for x in r["reasons"]) else []),
+            "cwe": (t.get("cwe") or [""])[0], "target": target,
+            "title": "Technique to test — %s" % (t.get("name") or t.get("id")),
+            "evidence": "; ".join(r["reasons"]) or (t.get("summary") or ""),
+            "reproduction_steps": steps,
+            "analyst_notes": "Advisor pick (score %s). %s" % (
+                r["score"], (t.get("detection_logic") or [""])[0] or "Confirm with the technique's oracle."),
+        })
+    return leads

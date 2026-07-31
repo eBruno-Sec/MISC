@@ -31,6 +31,20 @@ def test_root_cause_covers_real_emitted_families():
     assert len(g) == 1 and g[0]["count"] == 2
 
 
+def test_report_shows_intelligence_orchestration():
+    # the report must make the orchestration VISIBLE: code-intel recon + technique-advisor picks that
+    # drove the scan, so "was the intel actually used" is answerable from the report itself.
+    orch = {"code_intel": {"endpoints": 21, "added_to_surface": 8, "sensitive_routes": 5, "logic_hypotheses": 6},
+            "advisor": [{"id": "sqli_auth_bypass", "name": "Sqli Auth Bypass", "score": 88.0,
+                         "reasons": ["matches a confirmed sqli finding", "CISA KEV known-exploited"]}]}
+    html = report.generate_html_report("P", [{"title": "x", "severity": "high", "family": "sqli", "cwe": "CWE-89"}],
+                                       {"in_scope": ["t"]}, orchestration=orch)
+    assert "Intelligence Orchestration" in html
+    assert "mined <b>21</b>" in html and "Sqli Auth Bypass" in html
+    # backward compatible: no orchestration -> no section, no crash
+    assert "Intelligence Orchestration" not in report.generate_html_report("P", [], {"in_scope": ["t"]})
+
+
 def test_coverage_gaps_is_honest():
     gaps = report.coverage_gaps(mode="active", execution={"strategy": "deterministic"},
                                 tool_ledger={"authenticated": False}, authenticated=False)

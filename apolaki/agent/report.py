@@ -983,7 +983,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
-                         security_headers: list = None, intel: dict = None, kev_cwes: set = None) -> str:
+                         security_headers: list = None, intel: dict = None, kev_cwes: set = None,
+                         orchestration: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -1423,6 +1424,30 @@ def generate_html_report(program: str, findings: list, scope: dict,
                         "raises real-world urgency independent of this assessment's own scoring.</p>"
                         "<table class='tbl'><tr><th>CWE</th><th>Confirmed finding</th></tr>%s</table>" % (len(_kev_hits), _krows))
 
+    # Intelligence orchestration: show that the code-intelligence recon + the first-class technique
+    # knowledge model actually DROVE this scan (not decorative dashboards). Answers "was the intel used".
+    orch_html = ""
+    if orchestration:
+        ci = orchestration.get("code_intel") or {}
+        adv = orchestration.get("advisor") or []
+        parts = []
+        if ci:
+            parts.append("<p class='sub'>Code-intelligence recon mined <b>%d</b> API endpoint(s) from the "
+                         "target's served JavaScript (<b>%d</b> folded into the scan surface), and raised "
+                         "<b>%d</b> unlinked/sensitive-route and <b>%d</b> business-logic lead(s) that guided "
+                         "this run.</p>" % (ci.get("endpoints", 0), ci.get("added_to_surface", 0),
+                                            ci.get("sensitive_routes", 0), ci.get("logic_hypotheses", 0)))
+        if adv:
+            rows = "".join("<tr><td><b>%s</b></td><td>%s</td><td class='sub'>%s</td></tr>"
+                           % (e(a.get("name") or a.get("id", "")), e(str(a.get("score", ""))),
+                              e(", ".join(a.get("reasons", []))[:120])) for a in adv[:8])
+            parts.append("<p class='sub'>The scan consulted the first-class technique knowledge model and "
+                         "prioritized <b>%d</b> technique(s) to test (relevance to this target, CISA-KEV weight, "
+                         "and confidence):</p><table class='tbl'><tr><th>Technique</th><th>Score</th><th>Why</th></tr>"
+                         "%s</table>" % (len(adv), rows))
+        if parts:
+            orch_html = "<h2 id='orchestration'>Intelligence Orchestration</h2>" + "".join(parts)
+
     # coverage & limitations — the honest inverse of coverage: what could NOT be tested, and why
     gaps_html = ""
     _auth = bool(tool_ledger and tool_ledger.get("authenticated"))
@@ -1702,6 +1727,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {intel_html}
 {rootcause_html}
 {kev_html}
+{orch_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}

@@ -323,6 +323,9 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
     <!-- LAUNCH / CONFIGURE -->
     <section class="panel active" id="p-launch">
       <div class="view-head"><h3 class="sec">Launch a mission</h3><span class="muted">Configure scope and start, or rescan a past run.</span></div>
+      <div class="callout" style="display:flex;gap:.6rem;align-items:flex-start;border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface);border-radius:var(--radius);padding:.7rem .9rem;margin-bottom:1rem;font-size:.8rem;color:var(--text-dim);line-height:1.55">
+        <span style="font-size:1rem">🧠</span><span><b style="color:var(--text)">Intelligence runs automatically.</b> Every scan opens with <b>code-intelligence recon</b> (mines the target's served JS for endpoints and sensitive routes, folds them into the surface, raises business-logic leads), and closes by consulting the <b>technique knowledge model</b> to recommend the highest-priority techniques to test (KEV and confidence ranked). No separate pre-step needed — it is part of recon. The <a href="#" onclick="showView('codereview');return false" style="color:var(--accent)">Code Review</a> and <a href="#" onclick="showView('intel');return false" style="color:var(--accent)">Intel</a> tabs let you run these by hand too.</span>
+      </div>
       <div class="launch-grid">
         <div>
           <div class="block">

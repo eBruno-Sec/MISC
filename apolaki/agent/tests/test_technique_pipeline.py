@@ -4,6 +4,7 @@ from __future__ import annotations
 import technique_model as TM
 import technique_store as TS
 import intel_extractor as EX
+import technique_advisor as ADV
 
 
 # ---------------------------------------------------------------------------- model
@@ -84,6 +85,29 @@ def test_preprocess_pulls_identifiers():
     pre = EX.preprocess("Affects Foo 2.1.0. See CVE-2021-1675 and CVE-2016-2386 (CWE-89, CAPEC-66).")
     assert pre["cves"] == ["CVE-2016-2386", "CVE-2021-1675"]
     assert pre["cwes"] == ["CWE-89"] and pre["capec"] == ["CAPEC-66"] and "2.1.0" in pre["versions"]
+
+
+def test_advisor_ranks_by_relevance_kev_and_confidence():
+    sqli = TM.from_registry({"id": "sqli_auth_bypass", "vuln_class": "sqli", "cwe": "CWE-89",
+                             "validated_on": ["juiceshop"]}, try_it="' or 1=1--")
+    xss = TM.from_registry({"id": "reflected_xss", "vuln_class": "xss", "cwe": "CWE-79", "validated_on": []})
+    ssrf = TM.from_registry({"id": "ssrf", "vuln_class": "ssrf", "cwe": "CWE-918", "validated_on": []})
+    findings = [{"family": "sqli", "cwe": "CWE-89", "title": "SQLi in login"}]
+    recs = ADV.recommend(findings, [sqli, xss, ssrf], kev_cwes={"CWE-89"}, top=3)
+    assert recs[0]["technique"]["id"] == "sqli_auth_bypass"          # matches a confirmed finding -> top
+    assert any("confirmed sqli" in r for r in recs[0]["reasons"])
+    assert any("KEV" in r for r in recs[0]["reasons"])              # CWE-89 in KEV boosts it
+    leads = ADV.as_leads(recs[:1], "http://t")
+    assert leads[0]["tags"][0] == "technique-advisor" and "kev" in leads[0]["tags"]
+    assert leads[0]["reproduction_steps"]                          # carries a concrete payload/discovery step
+
+
+def test_advisor_skips_rejected_and_deprecated():
+    ok = TM.from_registry({"id": "a", "vuln_class": "sqli", "cwe": "CWE-89", "validated_on": []})
+    dead = TM.from_registry({"id": "b", "vuln_class": "xss", "cwe": "CWE-79", "validated_on": []})
+    dead["status"] = "deprecated"
+    recs = ADV.recommend([], [ok, dead], top=5)
+    assert [r["technique"]["id"] for r in recs] == ["a"]            # deprecated is never recommended
 
 
 def test_extract_prose_degrades_without_llm(monkeypatch):
