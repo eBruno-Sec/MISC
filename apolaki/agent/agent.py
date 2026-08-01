@@ -791,9 +791,10 @@ class BBHAgent:
             try:
                 import memory as _mem
                 prior = db.get_prior_snapshot(_mem.target_key(self.scope.to_dict()), self.mission_id) or {}
-                if prior.get("scan_auth"):
-                    creds = [prior["scan_auth"]]
-                    prior_login = prior.get("scan_login_url")
+                pc, plogin = self._creds_from_prior(prior)
+                if pc:
+                    creds = [pc]
+                    prior_login = plogin
                     from_prior = True
             except Exception:
                 pass
@@ -863,6 +864,27 @@ class BBHAgent:
             events.append({"type": "info", "content": "Discovered a credential lead for '%s' (could not verify) — "
                            "recorded and saved." % user})
         return events
+
+    def _creds_from_prior(self, prior: dict):
+        """Recover a discovered credential from a prior scan's snapshot for reacquisition. Prefers the
+        encrypted vault reference (scan_auth_ref); falls back to a legacy plaintext scan_auth for
+        snapshots written before the vault. Returns (user:pw or None, login_url or None) — this is the
+        'load the login recipe, acquire a fresh session' step of the session lifecycle."""
+        prior = prior or {}
+        ref = prior.get("scan_auth_ref")
+        if ref:
+            try:
+                import vault as _vault
+                sec = _vault.default().get(ref) or {}
+                if sec.get("username") and sec.get("password"):
+                    login = (sec.get("recipe") or {}).get("login_url") or prior.get("scan_login_url")
+                    return "%s:%s" % (sec["username"], sec["password"]), login
+            except Exception:
+                pass
+        sa = prior.get("scan_auth")   # legacy plaintext snapshot (pre-vault)
+        if sa and ":" in sa:
+            return sa, prior.get("scan_login_url")
+        return None, None
 
     def _discover_register_url(self, base: str):
         """Pick an in-scope registration/signup endpoint from the harvested surface, else a common

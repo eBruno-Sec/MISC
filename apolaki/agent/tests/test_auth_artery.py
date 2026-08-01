@@ -91,6 +91,23 @@ def test_full_auth_artery_trace(tmp_path, monkeypatch):
     assert stored["password"] == _SECRET_PW          # retrievable server-side only
 
 
+def test_scan_credential_reacquire_from_vault(tmp_path):
+    # session lifecycle: a prior scan vaulted the discovered credential + login recipe; the next scan
+    # recovers it from the vault reference (no plaintext in the snapshot) to acquire a fresh session.
+    a, t = _build_agent(tmp_path)
+    ref = vault.default().put("prior_mission", "__scan__",
+                              {"username": "admin", "password": _SECRET_PW,
+                               "recipe": {"login_url": "http://target.tld/rest/user/login"}})
+    cred, login = a._creds_from_prior({"scan_auth_ref": ref, "scan_login_url": "http://ignored"})
+    assert cred == f"admin:{_SECRET_PW}"
+    assert login == "http://target.tld/rest/user/login"      # recipe login_url wins
+    # legacy plaintext snapshots still work (backward compat)
+    cred2, login2 = a._creds_from_prior({"scan_auth": "bob:legacypw", "scan_login_url": "http://t/login"})
+    assert cred2 == "bob:legacypw" and login2 == "http://t/login"
+    # nothing recorded -> nothing recovered
+    assert a._creds_from_prior({}) == (None, None)
+
+
 def test_artery_noop_without_optin(tmp_path, monkeypatch):
     # authenticated_scan off -> the persona phase does nothing (safe default; no accounts created)
     a, t = _build_agent(tmp_path)

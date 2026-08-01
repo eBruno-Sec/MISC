@@ -1408,11 +1408,24 @@ def _record_memory(session_id: str) -> None:
         tkey = memory_mod.target_key(m["scope"])
         snap = memory_mod.snapshot(tools.recon, tools.urls, findings)
         # stash a credential the scan DISCOVERED (target-exposed) so the NEXT scan of this target can
-        # authenticate itself from prior intel. Not rendered in reports (which show it redacted).
+        # authenticate itself from prior intel. The raw secret goes to the ENCRYPTED VAULT; the snapshot
+        # keeps only the username + login recipe reference (no plaintext credential — CHAD section 8).
         ag = sessions[session_id].get("agent")
-        if getattr(ag, "_scan_credential", None):
-            snap["scan_auth"] = ag._scan_credential
-            snap["scan_login_url"] = getattr(ag, "_scan_login_url", None)
+        cred = getattr(ag, "_scan_credential", None)
+        if cred and ":" in cred:
+            user, pw = cred.split(":", 1)
+            login_url = getattr(ag, "_scan_login_url", None)
+            try:
+                import vault as _vault
+                snap["scan_auth_ref"] = _vault.default().put(
+                    session_id, "__scan__",
+                    {"username": user, "password": pw,
+                     "recipe": {"login_url": login_url, "mode": "discovered-credential",
+                                "success_oracle": "session-token-present"}})
+            except Exception:
+                pass
+            snap["scan_auth_user"] = user            # username only (non-secret) for the rescan offer
+            snap["scan_login_url"] = login_url
         db.record_memory(tkey, session_id, snap)
         ctx = dict(m["context"])
         ctx["graph_data"] = {
@@ -1606,9 +1619,11 @@ async def auth_available(req: AuthAvailableRequest):
         eng.load_manual(req.in_scope, req.out_of_scope, "auth-check")
         tkey = memory_mod.target_key(eng.to_dict())
         snap = db.get_prior_snapshot(tkey) or {}
-        sa = snap.get("scan_auth")
-        if sa and ":" in sa:
-            user = sa.split(":", 1)[0]
+        user = snap.get("scan_auth_user")
+        if not user:
+            sa = snap.get("scan_auth")            # legacy plaintext snapshot (pre-vault)
+            user = sa.split(":", 1)[0] if (sa and ":" in sa) else None
+        if user:
             return {"available": True, "username": user, "login_url": snap.get("scan_login_url") or "",
                     "target": tkey}
     except Exception:
