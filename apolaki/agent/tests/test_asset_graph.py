@@ -82,6 +82,27 @@ def test_build_from_engagement_projection():
     assert "password" not in str(g.to_dict())
 
 
+def test_next_best_actions_ranks_the_worklist():
+    g = AG.build_from_engagement(
+        "m1",
+        urls=["http://h/api/orders/1"],
+        findings=[{"title": "SQLi login", "family": "sql_injection", "confidence": "confirmed",
+                   "target": "http://h/login"}],
+        services=[{"host": "h", "port": 6379}],  # redis
+        capabilities=[])                          # database_read NOT yet achieved
+    acts = g.next_best_actions()
+    kinds = [a["action"] for a in acts]
+    # a confirmed SQLi enables database_read (unrealized) -> chase it, ranked first
+    assert acts[0]["action"] == "chase_capability" and acts[0]["capability"] == "database_read"
+    assert "run_service_pack" in kinds            # untested redis service
+    assert "cross_user_test" in kinds             # untested object endpoint
+    # once the capability exists, it's no longer suggested
+    g2 = AG.build_from_engagement("m1", findings=[{"title": "SQLi", "family": "sql_injection",
+                                  "confidence": "confirmed", "target": "http://h/login"}],
+                                  capabilities=["database_read"])
+    assert not any(a.get("capability") == "database_read" for a in g2.next_best_actions())
+
+
 def test_services_routed_into_graph():
     # beyond-web: a discovered non-web service becomes a graph node with what its checks unlock;
     # a web port is excluded (the web engine owns it).

@@ -1820,6 +1820,7 @@ async def get_canonical_graph(session_id: str):
                                   scope_asset=memory_mod.target_key(m["scope"]))
     d = g.to_dict()
     d["stats"] = g.stats()
+    d["next_best_actions"] = g.next_best_actions()   # the planner querying the world model
     return d
 
 

@@ -142,6 +142,34 @@ class AssetGraph:
         """Nodes whose provenance says they could unlock a given capability/technique."""
         return [n for n in self._nodes.values() if capability in (n.get("enables") or [])]
 
+    def next_best_actions(self, limit: int = 10) -> list:
+        """Deterministic next-best-action list — the planner querying the world model. Ranks
+        unrealized capability chains (a confirmed finding enables X, but X isn't achieved yet) above
+        untested services above untested object endpoints. Pure; drives the autonomy loop."""
+        have = {n["key"] for n in self.nodes("capability")}
+        out = []
+        for f in self.nodes("finding"):
+            for cap in (f.get("enables") or []):
+                if cap not in have:
+                    out.append({"score": 8, "action": "chase_capability", "capability": cap,
+                                "target": f["label"],
+                                "rationale": "a confirmed finding enables '%s' — chase it" % cap})
+        for s in self.untested("service"):
+            out.append({"score": 6, "action": "run_service_pack", "service": s["label"],
+                        "target": s["key"], "enables": s.get("enables", []),
+                        "rationale": "a %s service was discovered but its technique pack has not run" % s["label"]})
+        for o in self.untested("object"):
+            out.append({"score": 4, "action": "cross_user_test", "target": o["label"],
+                        "rationale": "object endpoint not yet compared across personas (IDOR/BOLA)"})
+        seen, uniq = set(), []
+        for a in sorted(out, key=lambda x: -x["score"]):
+            k = (a["action"], a.get("target"), a.get("capability"))
+            if k in seen:
+                continue
+            seen.add(k)
+            uniq.append(a)
+        return uniq[:limit]
+
     # ── persistence ──
     def to_dict(self) -> dict:
         return {"mission_id": self.mission_id,
