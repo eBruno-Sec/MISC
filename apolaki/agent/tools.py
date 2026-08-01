@@ -819,6 +819,35 @@ CLAUDE_TOOLS = [
 ]
 
 
+def _valid_jwt(tok: str) -> bool:
+    """True if tok is a structurally-valid, decodable JWT (eyJ header.payload.sig with a non-empty
+    JSON payload) — so a browser login promotes a REAL token, not any random storage value."""
+    import base64
+    parts = (tok or "").split(".")
+    if len(parts) != 3 or not tok.startswith("eyJ"):
+        return False
+    try:
+        pad = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(pad.encode()).decode("utf-8", "replace"))
+        return isinstance(payload, dict) and bool(payload)
+    except Exception:
+        return False
+
+
+def _pick_session_token(storage_values, xhr_auth):
+    """Pick the best auth token for a browser-promoted session: a Bearer token OBSERVED on a real
+    XHR/fetch wins (it is what the app actually sends), else a structurally-valid JWT from web
+    storage. Returns None if neither yields a valid token (CHAD review #4 — not just first-JWT)."""
+    for a in (xhr_auth or []):
+        t = a[7:].strip() if str(a).lower().startswith("bearer ") else str(a).strip()
+        if _valid_jwt(t):
+            return t
+    for v in (storage_values or []):
+        if _valid_jwt(str(v)):
+            return str(v)
+    return None
+
+
 class ToolRegistry:
     def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False,
                  session_headers: dict = None, intensity: str = "standard"):
@@ -1902,7 +1931,7 @@ class ToolRegistry:
         if start and not self.scope.validate(start)[0]:
             return ToolResult("browser_navigate", start, False, "", [], "SCOPE BLOCK: off-scope URL")
         hdrs = self._resolve_headers(inp)
-        api_calls, step_log, findings = [], [], []
+        api_calls, step_log, findings, xhr_auth = [], [], [], []
         try:
             from playwright.async_api import async_playwright
             os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
@@ -1916,8 +1945,16 @@ class ToolRegistry:
                     except Exception:
                         pass
                 page = await ctx.new_page()
-                page.on("request", lambda r: api_calls.append(r.method + " " + r.url)
-                        if r.resource_type in ("xhr", "fetch") else None)
+                def _on_req(r):
+                    if r.resource_type in ("xhr", "fetch"):
+                        api_calls.append(r.method + " " + r.url)
+                        try:
+                            a = r.headers.get("authorization")
+                            if a:
+                                xhr_auth.append(a)          # the token the app REALLY sends
+                        except Exception:
+                            pass
+                page.on("request", _on_req)
 
                 async def _nav(u):
                     if not u or not self.scope.validate(u)[0]:
@@ -1996,15 +2033,10 @@ class ToolRegistry:
         promoted = None
         if inp.get("promote_session"):
             role = inp["promote_session"]
-            tok = None
-            for bag in (storage.get("local", {}), storage.get("session", {})):
-                for v in (bag or {}).values():
-                    vv = str(v)
-                    if vv[:3] == "eyJ" and vv.count(".") == 2:
-                        tok = vv
-                        break
-                if tok:
-                    break
+            # prefer the Bearer token OBSERVED on real XHR/fetch (what the app actually sends), else a
+            # structurally-valid JWT from web storage — not just the first eyJ-looking value (CHAD #4).
+            store_vals = list((storage.get("local") or {}).values()) + list((storage.get("session") or {}).values())
+            tok = _pick_session_token(store_vals, xhr_auth)
             if tok:
                 self._sessions[role] = {"Authorization": "Bearer " + tok}
             elif cookies:
