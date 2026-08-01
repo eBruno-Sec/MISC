@@ -906,10 +906,19 @@ class ToolRegistry:
             return ToolResult(tool_name, "", False, "", [], f"Unknown tool: {tool_name}")
         return await method(tool_input)
 
+    # external security tools make many requests internally; charge them against the mission budget
+    # by a per-tool weight so the budget is MISSION-WIDE (not just Apolaki's own HTTP transport).
+    _TOOL_WEIGHT = {"nuclei": 100, "ffuf": 100, "sqlmap": 100, "katana": 50, "nmap": 50, "dalfox": 50,
+                    "dirb": 50, "subfinder": 30, "httpx": 30, "whatweb": 10, "nikto": 100, "wpscan": 100}
+
     # ── helpers ──────────────────────────────────────────────────
     async def _cmd(self, cmd: list, timeout: int = 180) -> tuple:
         if not shutil.which(cmd[0]):
             return "", f"__MISSING__{cmd[0]}"
+        weight = self._TOOL_WEIGHT.get(os.path.basename(str(cmd[0])), 25)
+        if not self.budget.charge(weight):
+            return "", (f"__BUDGET__ mission request budget exhausted "
+                        f"(external tool '{os.path.basename(str(cmd[0]))}' costs {weight})")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
