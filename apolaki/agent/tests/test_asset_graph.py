@@ -55,6 +55,33 @@ def test_persona_stores_vault_ref_not_secret():
     assert "password" not in str(n)
 
 
+def test_build_from_engagement_projection():
+    urls = ["http://juice-shop:3000/rest/basket/1", "http://juice-shop:3000/rest/products?q=x"]
+    findings = [{"title": "IDOR cross-user", "family": "idor", "confidence": "confirmed",
+                 "cwe": "CWE-639", "target": "http://juice-shop:3000/rest/basket/1"}]
+    personas = {"personas": [
+        {"role": "user_a", "rank": 1, "method": "registered", "has_session": True, "identity": "a@t"},
+        {"role": "anonymous", "rank": 0, "has_session": False}]}
+    caps = ["second_persona_available", "foreign_object_read"]
+    g = AG.build_from_engagement("m1", urls=urls, findings=findings, personas=personas,
+                                 capabilities=caps, scope_asset="juice-shop")
+    kinds = g.stats()["by_kind"]
+    assert kinds.get("host") == 1
+    assert kinds.get("object", 0) >= 1                    # /rest/basket/1 is object-bearing
+    assert kinds.get("finding") == 1
+    assert kinds.get("persona") == 2
+    assert kinds.get("capability") == 2
+    # the object endpoint + the confirmed IDOR finding both flag they unlock foreign_object_read
+    assert "foreign_object_read" in g.nodes("object")[0]["enables"]
+    fnode = g.nodes("finding")[0]
+    assert "foreign_object_read" in fnode["enables"] and fnode["tested"] is True
+    # a finding -> capability "enables" edge exists (the graph knows what the bug unlocked)
+    assert any(e["rel"] == "enables" for e in g.edges())
+    # a persona with a session has an authenticated_as edge to a session node (vault ref, no secret)
+    assert "session:user_a" in g.neighbors("persona:user_a", rel="authenticated_as")
+    assert "password" not in str(g.to_dict())
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

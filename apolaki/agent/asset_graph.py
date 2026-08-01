@@ -187,3 +187,89 @@ class AssetGraph:
                 return cls.from_dict(json.load(f))
         except Exception:
             return cls(mission_id)
+
+
+# finding family/class -> the capability it typically UNLOCKS (advisory provenance, not a hardcoded
+# exploit). Lets the planner ask "which fact could give me database_read / a foreign object read?"
+_FINDING_ENABLES = {
+    "sql_injection": ["database_read"], "sqli": ["database_read"],
+    "nosql_injection": ["database_read"],
+    "idor": ["foreign_object_read"], "access_control": ["foreign_object_read"],
+    "sensitive_exposure": ["credential_material"], "xxe": ["internal_request", "arbitrary_file_read"],
+    "ssrf": ["internal_request"], "file_upload": ["file_upload"],
+}
+
+
+def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = None,
+                          findings: list = None, personas: dict = None, capabilities: list = None,
+                          scope_asset: str = "") -> "AssetGraph":
+    """Project the engagement's gathered intelligence into the canonical graph WITH provenance —
+    hosts, endpoints, object endpoints, params, findings (+ what they enable), personas (vault refs
+    only), and confirmed capabilities. Deterministic; reuses surface.build_inventory. Every phase's
+    output lands as connected, provenance-tagged nodes instead of a flat list."""
+    import surface as _surface
+    import authz_matrix as _am
+    from urllib.parse import urlparse as _up
+    g = AssetGraph(mission_id)
+    recon, urls, findings = recon or {}, urls or [], findings or []
+
+    def _host(u):
+        try:
+            return _up(u).netloc
+        except Exception:
+            return ""
+
+    # hosts + endpoints + object endpoints + params
+    for inv in _surface.build_inventory(urls):
+        host = inv.get("host") or ""
+        path = inv.get("path") or "/"
+        hid = g.observe("host", host, source="recon", scope_asset=scope_asset or host) if host else None
+        eid = g.observe("endpoint", (host + path) if host else path, label=path, source="recon",
+                        scope_asset=scope_asset)
+        if hid:
+            g.link(hid, eid, "serves", source="recon")
+        if _am.is_object_path(path):
+            oid = g.observe("object", (host + path) if host else path, label=path, source="recon",
+                            scope_asset=scope_asset, enables=["foreign_object_read"])
+            g.link(eid, oid, "exposes", source="recon")
+        for p in (inv.get("params") or []):
+            pid = g.observe("param", (host + path + "?" + str(p)), label=str(p), source="recon")
+            g.link(eid, pid, "has_param", source="recon")
+
+    # findings + what they unlock
+    for f in findings:
+        key = f.get("id") or (f.get("title", "")[:40] + "@" + (f.get("target", "") or ""))
+        fam = (f.get("family") or "").lower()
+        fid = g.observe("finding", key, label=f.get("title", "Finding"), source="scan",
+                        confidence=CONFIRMED if f.get("confidence") == "confirmed" else MEDIUM,
+                        scope_asset=scope_asset, enables=_FINDING_ENABLES.get(fam, []),
+                        severity=(f.get("severity") or "info"), cwe=f.get("cwe", ""), family=fam)
+        g.mark_tested(fid, ok=(f.get("confidence") == "confirmed"))
+        tgt = f.get("target", "")
+        th = _host(tgt)
+        tp = (_up(tgt).path or "/") if tgt else ""
+        ep = g.node(_nid("endpoint", th + tp))
+        if ep:
+            g.link(ep["id"], fid, "found_on", source="scan")
+        elif th and g.node(_nid("host", th)):
+            g.link(_nid("host", th), fid, "found_on", source="scan")
+
+    # personas (vault refs only — never secrets)
+    for p in ((personas or {}).get("personas") or []):
+        role = p.get("role")
+        if not role:
+            continue
+        pid = g.observe("persona", role, label=role, source="registration",
+                        rank=p.get("rank"), method=p.get("method"), has_session=p.get("has_session"),
+                        identity=p.get("identity"))
+        if p.get("has_session"):
+            g.observe("session", role, label="session:" + role, source="acquire_session")
+            g.link(pid, _nid("session", role), "authenticated_as", source="acquire_session")
+
+    # confirmed capabilities
+    for cap in (capabilities or []):
+        cid = g.observe("capability", cap, label=cap, source="engagement", confidence=CONFIRMED, tested=True)
+        for fn in g.nodes("finding"):
+            if cap in (fn.get("enables") or []):
+                g.link(fn["id"], cid, "enables", source="scan")
+    return g
