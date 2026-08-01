@@ -1003,6 +1003,28 @@ class BBHAgent:
                     if hdr:
                         login_url = lu
                         break
+            if not hdr and acct.get("password"):
+                # browser-driven fallback (CHAD 1): API/form login didn't yield a session (SPA login,
+                # client-side token, JS-gated form) — drive a real headless login through the UI and
+                # promote the token from web storage / cookies into the persona's session.
+                login_page = self._discover_login_url(base) or base
+                steps = [
+                    {"action": "goto", "url": login_page},
+                    {"action": "fill", "selector": "input[type=email], input[name=email], input[name=username], #email",
+                     "value": acct.get("email") or acct.get("username")},
+                    {"action": "fill", "selector": "input[type=password], input[name=password], #password",
+                     "value": acct.get("password")},
+                    {"action": "click", "selector": "button[type=submit], button#loginButton, button, input[type=submit]"},
+                    {"action": "wait", "ms": 1500},
+                ]
+                try:
+                    await self.tools.execute("browser_navigate",
+                                             {"url": login_page, "steps": steps, "promote_session": role}, session_id)
+                except Exception:
+                    pass
+                hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                if hdr:
+                    login_url = login_page
             if not hdr:
                 continue  # created but no session — cannot test as this persona
             ref = vlt.put(mid, role, {"username": acct.get("username"), "email": acct.get("email"),

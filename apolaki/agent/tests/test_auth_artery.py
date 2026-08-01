@@ -108,6 +108,34 @@ def test_scan_credential_reacquire_from_vault(tmp_path):
     assert a._creds_from_prior({}) == (None, None)
 
 
+def test_browser_login_fallback_mints_persona(tmp_path, monkeypatch):
+    # #55: API/form login yields no session (SPA login) -> the browser-driven fallback promotes a
+    # token from web storage into the persona's session, and the persona is still minted.
+    a, t = _build_agent(tmp_path)
+
+    async def fake_register(reg_url, label="user", account=None, timeout=15):
+        return {"created": True, "headers": {}, "identity": f"{label}@t.local",
+                "account": {"username": f"u_{label}", "email": f"{label}@t.local", "password": _SECRET_PW},
+                "blocked": [], "verified": False, "note": "json signup (no session)"}
+    monkeypatch.setattr(R, "register", fake_register)
+
+    class _TR:
+        def __init__(self):
+            self.findings, self.output, self.success = [], "{}", True
+
+    async def stub_execute(tool, inp, sid):
+        if tool == "browser_navigate":                    # the browser login promotes a token
+            t._sessions[inp["promote_session"]] = {"Authorization": "Bearer eyJhbGc.payload.sig"}
+        return _TR()                                      # acquire_session/http_read/matrix -> noop
+    t.execute = stub_execute
+
+    events = asyncio.new_event_loop().run_until_complete(a._do_persona_authz("sess"))
+    trace = " || ".join(e.get("content", "") for e in events if e.get("type") == "info")
+    assert "Created test persona 'user_a'" in trace       # minted via the browser fallback
+    assert "Created test persona 'user_b'" in trace
+    assert _SECRET_PW not in str(events) and "eyJhbGc" not in str(events)   # secrets never leak
+
+
 def test_artery_noop_without_optin(tmp_path, monkeypatch):
     # authenticated_scan off -> the persona phase does nothing (safe default; no accounts created)
     a, t = _build_agent(tmp_path)
