@@ -1439,6 +1439,11 @@ def _record_memory(session_id: str) -> None:
                 pass
             snap["scan_auth_user"] = user            # username only (non-secret) for the rescan offer
             snap["scan_login_url"] = login_url
+        # persona vault refs (role -> vault://...) so the NEXT scan reacquires FULL personas from their
+        # stored login recipes, not just the single discovered credential. Refs only — no secrets.
+        prefs = getattr(ag, "_persona_refs", None)
+        if prefs:
+            snap["persona_refs"] = prefs
         db.record_memory(tkey, session_id, snap)
         # canonical asset/intelligence graph — project everything gathered (surface, findings,
         # personas, capabilities) into one provenance store and persist it so a later scan resumes

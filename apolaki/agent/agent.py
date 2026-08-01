@@ -966,6 +966,37 @@ class BBHAgent:
                 pass
         return [u for u in (self.tools.urls or []) if u not in before]
 
+    async def _reacquire_personas(self, prior, pm, session_id) -> list:
+        """Restore personas from a PRIOR scan: load each persona's vaulted account + login recipe and
+        re-login to obtain a FRESH session (CHAD review #5 — reacquire complete persona recipes, not
+        just the single discovered credential). Returns the roles restored. Best-effort."""
+        import vault as _vault
+        refs = (prior or {}).get("persona_refs") or {}
+        restored = []
+        for role, ref in refs.items():
+            try:
+                sec = _vault.default().get(ref) or {}
+            except Exception:
+                sec = {}
+            recipe = sec.get("recipe") or {}
+            login_url = recipe.get("login_url")
+            user = sec.get("email") or sec.get("username")
+            pw = sec.get("password")
+            if not (login_url and user and pw):
+                continue
+            try:
+                await self.tools.execute("acquire_session",
+                                         {"login_url": login_url, "username": user, "password": pw,
+                                          "role": role}, session_id)
+            except Exception:
+                pass
+            hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+            if hdr:
+                pm.add(role, identity=user, method="reacquired", headers=hdr, account={"identity_ref": ref})
+                self._persona_refs[role] = ref
+                restored.append(role)
+        return restored
+
     async def _do_persona_authz(self, session_id: str) -> list:
         """The artery's second half: mint TWO same-privilege personas via the target's own signup,
         re-crawl authenticated, then run the two-user AUTHORIZATION MATRIX and record confirmed
@@ -987,15 +1018,30 @@ class BBHAgent:
         pm = _p.PersonaManager()
         vlt = _vault.default()
         mid = self.mission_id or "default"
+        self._persona_refs = {}
 
-        # 1) mint two same-privilege personas through the signup flow (bounded: 2 accounts). Probe an
+        # 0) reacquire personas from a PRIOR scan (fresh sessions from vaulted login recipes) before
+        #    minting new ones — so future scans restore full personas, not just the scan credential.
+        try:
+            import memory as _mem
+            prior = db.get_prior_snapshot(_mem.target_key(self.scope.to_dict()), self.mission_id) or {}
+        except Exception:
+            prior = {}
+        restored = await self._reacquire_personas(prior, pm, session_id)
+        if restored:
+            pm.bind(self.tools)
+            events.append({"type": "info", "content": "Reacquired %d persona(s) from a prior scan "
+                           "(fresh sessions from vaulted login recipes): %s."
+                           % (len(restored), ", ".join(restored))})
+
+        # 1) mint any MISSING same-privilege personas through the signup flow (bounded). Probe an
         #    API-first candidate list so a real registration API (e.g. Juice Shop /api/Users) wins over
         #    an SPA /register route that would 200 without creating anything.
         reg_cands = self._register_candidates(base)
-        minted, stop = [], False
+        minted, stop = list(restored), False
         for label, role in (("user_a", _p.USER_A), ("user_b", _p.USER_B)):
-            if stop:
-                break
+            if stop or role in minted:      # already restored from a prior scan — don't re-register
+                continue
             res, reg_url = None, None
             for cand in reg_cands:
                 try:
@@ -1063,6 +1109,7 @@ class BBHAgent:
             pm.add(role, identity=res.get("identity") or acct.get("email", ""), method="registered",
                    headers=hdr, account={"identity_ref": ref})
             minted.append(role)
+            self._persona_refs[role] = ref     # so the NEXT scan can reacquire this persona
             try:
                 import audit as _audit
                 _audit.record("account_created", actor="apolaki", mission=mid, target=role,

@@ -159,6 +159,35 @@ def test_authenticated_recrawl_crawls_as_each_persona(tmp_path):
     assert any(c[0] == "browser_navigate" for c in calls)         # + an authed browser pass per persona
 
 
+def test_reacquire_personas_from_prior_vault(tmp_path):
+    # CHAD review #5: a future scan restores FULL personas from their vaulted login recipes.
+    import personas as P
+    a, t = _build_agent(tmp_path)
+    a._persona_refs = {}
+    ref_a = vault.default().put("prior", "user_a", {"email": "a@t.local", "password": _SECRET_PW,
+                                "recipe": {"login_url": "http://target.tld/rest/user/login"}})
+    ref_b = vault.default().put("prior", "user_b", {"email": "b@t.local", "password": _SECRET_PW,
+                                "recipe": {"login_url": "http://target.tld/rest/user/login"}})
+
+    async def stub_execute(tool, inp, sid):
+        if tool == "acquire_session":
+            t._sessions[inp["role"]] = {"Cookie": "s=" + inp["role"]}     # recipe login -> fresh session
+
+        class _TR:
+            def __init__(self):
+                self.findings, self.output, self.success = [], "{}", True
+        return _TR()
+    t.execute = stub_execute
+
+    pm = P.PersonaManager()
+    restored = asyncio.new_event_loop().run_until_complete(
+        a._reacquire_personas({"persona_refs": {"user_a": ref_a, "user_b": ref_b}}, pm, "s"))
+    assert set(restored) == {"user_a", "user_b"}
+    assert pm.get("user_a").has_session() and pm.get("user_b").has_session()
+    assert pm.same_privilege_pair() == ("user_a", "user_b")
+    assert _SECRET_PW not in str(pm.to_dict())            # secret stays server-side
+
+
 def test_artery_noop_without_optin(tmp_path, monkeypatch):
     # authenticated_scan off -> the persona phase does nothing (safe default; no accounts created)
     a, t = _build_agent(tmp_path)
