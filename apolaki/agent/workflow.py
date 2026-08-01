@@ -139,7 +139,15 @@ async def run(reg, wf: dict) -> dict:
         if res.error:
             entry["error"] = res.error
         if step.get("extract"):
-            got = _extract(last_out, {}, step["extract"])
+            # Response headers live at the top level of the shaped step output (see
+            # ToolRegistry._shape_response -> {"headers": ...}); feed them to _extract so a
+            # `header` rule can pull a Location/ETag/X-* value. Was hardcoded {} — the header
+            # extractor could never fire (registration/redirect flows need this).
+            try:
+                _rh = json.loads(last_out).get("headers") or {}
+            except Exception:
+                _rh = {}
+            got = _extract(last_out, _rh if isinstance(_rh, dict) else {}, step["extract"])
             for k, v in got.items():
                 variables[k] = v
                 reg.state.set_var(k, v)

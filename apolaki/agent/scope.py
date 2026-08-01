@@ -10,6 +10,7 @@ structured-rules view for web_security.is_url_in_scope.
 import csv
 import io
 import json
+import posixpath
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +30,37 @@ class ScopeEntry:
     asset_type: str
     base: Optional[str] = None   # explicit scheme://host:port when the operator gave one
     port: str = ""        # explicit non-default port the operator pinned ("" = any port)
+    path: str = ""        # explicit path-prefix the operator pinned ("" = whole host)
+
+
+def _scope_path(d: str) -> str:
+    """Normalized path-prefix from a scope entry that pins one, e.g.
+    `https://example.com/api/*` or `example.com/api` -> `/api`. Returns '' for a
+    host-level entry (no path, bare '/', or a wildcard host) so nothing is enforced.
+    Path scope keeps a path-restricted bug-bounty asset from bleeding into the whole host."""
+    d = (d or "").strip().lower()
+    if not d or d.startswith("*"):
+        return ""
+    if "://" in d:
+        raw = urlparse(d).path
+    else:
+        parts = d.split("/", 1)
+        raw = "/" + parts[1] if len(parts) > 1 else ""
+    raw = (raw or "").split("?")[0].split("#")[0].rstrip("*")
+    if not raw or raw == "/":
+        return ""
+    norm = posixpath.normpath("/" + raw.lstrip("/"))
+    return "" if norm in ("", ".", "/") else norm
+
+
+def _path_prefix_match(req_path: str, scope_path: str) -> bool:
+    """True when a concrete request path falls under the pinned scope prefix
+    (exact, or a `/prefix/...` descendant). Normalized to defeat `/api/../admin`."""
+    a = posixpath.normpath("/" + (req_path or "/").lstrip("/"))
+    b = posixpath.normpath("/" + (scope_path or "/").lstrip("/"))
+    if b in ("", ".", "/"):
+        return True
+    return a == b or a.startswith(b.rstrip("/") + "/")
 
 
 def _split_scope_entry(d: str):
@@ -76,7 +108,10 @@ class ScopeEngine:
                 port = ""
                 if base and ":" in urlparse(base).netloc:
                     port = urlparse(base).netloc.rsplit(":", 1)[1]
-                self.in_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain", base, port))
+                # SEC-2: capture the path-prefix (if pinned) so a path-restricted asset
+                # (https://host/api/*) doesn't silently widen to the whole host.
+                path = "" if host.startswith("*") else _scope_path(d)
+                self.in_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain", base, port, path))
         for d in out_of_scope:
             host, _ = _split_scope_entry(d)
             if host:
@@ -86,10 +121,11 @@ class ScopeEngine:
         host, port, is_request = self._parse_target(target)
         if not host:
             return False, "Invalid target"
+        req_path = self._target_path(target)
         for entry in self.out_of_scope:
             if self._matches(host, entry.value):
                 return False, f"{host} is explicitly out of scope"
-        host_in_scope = False
+        host_in_scope, path_pinned = False, False
         for entry in self.in_scope:
             if self._matches(host, entry.value):
                 host_in_scope = True
@@ -99,12 +135,34 @@ class ScopeEngine:
                 # is_request=False) stays host-level so domain recon isn't broken.
                 if entry.port and is_request and port != entry.port:
                     continue
+                # SEC-2: same for a pinned path-prefix — a concrete request outside the
+                # authorized path is out of scope; bare-host recon (is_request=False) is
+                # never blocked by path. Another in-scope entry can still allow the host.
+                if entry.path and is_request:
+                    path_pinned = True
+                    if not _path_prefix_match(req_path, entry.path):
+                        continue
                 suffix = f":{entry.port}" if entry.port else ""
-                return True, f"In scope via {entry.value}{suffix}"
+                psuffix = entry.path if entry.path else ""
+                return True, f"In scope via {entry.value}{suffix}{psuffix}"
         if host_in_scope:
+            if path_pinned:
+                return False, (f"{host}{req_path} not in scope "
+                               "(host is in scope, but the request path is outside the pinned scope path)")
             return False, (f"{host}:{port or '?'} not in scope "
                            "(host is in scope, but the operator pinned a different port)")
         return False, f"{host} not in scope"
+
+    def _target_path(self, target: str) -> str:
+        """Path of a concrete request target ('/' when none). Scheme-less host:port/path
+        is handled too so validate() can enforce a pinned path-prefix."""
+        t = (target or "").strip()
+        if "://" in t:
+            p = urlparse(t).path or "/"
+        else:
+            after = t.split("?")[0].split("#")[0].split("/", 1)
+            p = "/" + after[1] if len(after) > 1 else "/"
+        return (p.split("?")[0].split("#")[0]) or "/"
 
     def _extract_host(self, target: str) -> str:
         if "://" in target:
@@ -147,9 +205,19 @@ class ScopeEngine:
 
     def to_rules(self) -> dict:
         """Structured rules view consumed by web_security.is_url_in_scope
-        (host/path aware). Every domain/wildcard becomes an identifier rule."""
+        (host/path aware). Every domain/wildcard becomes an identifier rule; a
+        path-pinned host is emitted as a full scheme://host/path URL identifier so
+        _rule_matches_url binds host AND path together (no cross-host path bleed)."""
+        def _ident(e):
+            if e.path and e.asset_type != "wildcard":
+                base = (e.base or f"https://{e.value}").rstrip("/")
+                return base + e.path
+            return e.value
+
+        def _type(e):
+            return "url" if (e.path and e.asset_type != "wildcard") else e.asset_type
         return {
-            "in_scope": [{"identifier": e.value, "type": e.asset_type} for e in self.in_scope],
+            "in_scope": [{"identifier": _ident(e), "type": _type(e)} for e in self.in_scope],
             "out_of_scope": [{"identifier": e.value, "type": e.asset_type} for e in self.out_of_scope],
         }
 
