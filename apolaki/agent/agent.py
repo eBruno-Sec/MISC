@@ -956,16 +956,21 @@ class BBHAgent:
                     login_url = None
                     if not hdr and acct.get("password"):
                         # API-style signup (e.g. Juice Shop /api/Users) doesn't auto-login — log in
-                        # with the freshly-created account to capture the session.
-                        login_url = self._discover_login_url(base) or base.rstrip("/") + "/rest/user/login"
-                        try:
-                            await self.tools.execute("acquire_session",
-                                                     {"login_url": login_url,
-                                                      "username": acct.get("email") or acct.get("username"),
-                                                      "password": acct.get("password"), "role": role}, session_id)
-                        except Exception:
-                            pass
-                        hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                        # with the freshly-created account. Probe a short ordered candidate list
+                        # (one KNOWN credential, never a password list) and stop at the first that
+                        # yields a session, so the right API login endpoint is found autonomously.
+                        for lu in self._login_candidates(base):
+                            try:
+                                await self.tools.execute("acquire_session",
+                                                         {"login_url": lu,
+                                                          "username": acct.get("email") or acct.get("username"),
+                                                          "password": acct.get("password"), "role": role}, session_id)
+                            except Exception:
+                                pass
+                            hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                            if hdr:
+                                login_url = lu
+                                break
                     if not hdr:
                         continue  # created but no session — cannot test as this persona
                     ref = vlt.put(mid, role, {"username": acct.get("username"), "email": acct.get("email"),
@@ -1096,6 +1101,30 @@ class BBHAgent:
             except Exception:
                 pass
         return None
+
+    def _login_candidates(self, base: str) -> list:
+        """Ordered login-endpoint candidates for logging in a freshly-created account. API/JSON login
+        paths first (so a real token login wins before an SPA /login route can hand back a bare
+        tracking cookie), then the discovered login URL, then form defaults. Deduped + scope-valid.
+        One KNOWN credential is tried against each until a session is obtained — endpoint discovery,
+        never a password list."""
+        b = base.rstrip("/")
+        cands = [b + p for p in ("/rest/user/login", "/api/login", "/api/auth/login", "/auth/login")]
+        d = self._discover_login_url(base)
+        if d:
+            cands.append(d)
+        cands += [b + p for p in ("/login", "/user/login", "/api/sessions")]
+        seen, out = set(), []
+        for u in cands:
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                if self.scope.validate(u)[0]:
+                    out.append(u)
+            except Exception:
+                pass
+        return out[:6]   # bounded — stays under the acquire_session anti-brute cap
 
     async def _probe_for_creds(self, base: str) -> list:
         """Bounded, polite fetch of the login page + common credential-disclosure pages, harvesting any
