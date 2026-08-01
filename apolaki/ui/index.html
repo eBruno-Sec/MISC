@@ -904,6 +904,29 @@ X-Requested-With: </textarea>
 </div>
 
 <script>
+// Platform token (opt-in): when APOLAKI_API_TOKEN is set server-side, the UI must present it. Supply
+// it once via ?token=... (saved to localStorage) or set localStorage['apolaki_token']. No stored
+// token => no-op, so the local-only default is unchanged. Covers every fetch() + the SSE stream.
+window.__APOLAKI_TK = (function(){
+  try{
+    var q = new URLSearchParams(location.search).get('token');
+    if(q){ localStorage.setItem('apolaki_token', q); }
+    var TK = localStorage.getItem('apolaki_token');
+    if(TK){
+      var _f = window.fetch.bind(window);
+      window.fetch = function(input, init){
+        init = init || {};
+        var h = new Headers(init.headers || {});
+        if(!h.has('X-Apolaki-Token')) h.set('X-Apolaki-Token', TK);
+        init.headers = h;
+        return _f(input, init);
+      };
+    }
+    return TK || '';
+  }catch(e){ return ''; }
+})();
+// EventSource can't set headers — carry the token as a query param on SSE URLs when one is stored.
+function sseUrl(u){ return window.__APOLAKI_TK ? (u + (u.indexOf('?')<0?'?':'&') + 'token=' + encodeURIComponent(window.__APOLAKI_TK)) : u; }
 const API = window.location.origin;
 let sessionId=null, es=null, running=false, reportMd="", pendingApproval=null;
 let aiReady=true, pendingParent=null, pbData=[], autoScrollOn=true;
@@ -1183,7 +1206,7 @@ async function startHunt(){
     setStatus("s-run","Running");
     setBudget(eng.strategy||strategy, 0, eng.max_ai_calls);
     log("info",`Session <strong>${sessionId}</strong> started · mode <strong>${body.mode}</strong> · <strong>${esc(STRAT_LABEL[eng.strategy||strategy]||eng.strategy||strategy)}</strong> · scope: ${esc(inScope.join(", "))}`);
-    es=new EventSource(`${API}/stream/${sessionId}`);
+    es=new EventSource(sseUrl(`${API}/stream/${sessionId}`));
     es.onmessage=e=>handleEvent(JSON.parse(e.data));
     es.onerror=()=>{if(running){log("error","Stream connection lost.");finishHunt("s-err","Error");}};
   }catch(err){log("error",esc(err.message));setStatus("s-err","Error");}

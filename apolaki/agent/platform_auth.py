@@ -50,9 +50,10 @@ def token_from_headers(headers) -> str:
     return ""
 
 
-def authorize(path: str, headers) -> bool:
+def authorize(path: str, headers, query_token: str = None) -> bool:
     """The whole decision for one request: allowed if the platform is open, the path is exempt, or a
-    valid token was presented."""
+    valid token was presented (via header, or a `token` query param for EventSource which cannot set
+    headers)."""
     if not required() or is_exempt(path):
         return True
-    return check(token_from_headers(headers))
+    return check(token_from_headers(headers) or (query_token or ""))

@@ -33,7 +33,7 @@ async def _platform_auth_mw(request, call_next):
     """Local-only by default (no-op). When APOLAKI_API_TOKEN is set, every non-exempt request must
     present a matching X-Apolaki-Token / Bearer token (platform hardening for external/multi-user)."""
     import platform_auth as _pa
-    if not _pa.authorize(request.url.path, request.headers):
+    if not _pa.authorize(request.url.path, request.headers, request.query_params.get("token")):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "platform token required (set X-Apolaki-Token)"}, status_code=401)
     return await call_next(request)

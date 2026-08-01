@@ -32,3 +32,11 @@ def test_exempt_paths_stay_open(monkeypatch):
 def test_wrong_token_denied(monkeypatch):
     monkeypatch.setenv("APOLAKI_API_TOKEN", "s3cret")
     assert PA.authorize("/graph/abc", {"x-apolaki-token": "nope"}) is False
+
+
+def test_query_token_accepted_for_sse(monkeypatch):
+    # EventSource can't set headers, so a `token` query param is accepted for streaming endpoints.
+    monkeypatch.setenv("APOLAKI_API_TOKEN", "s3cret")
+    assert PA.authorize("/stream/abc", {}, query_token="s3cret") is True
+    assert PA.authorize("/stream/abc", {}, query_token="nope") is False
+    assert PA.authorize("/stream/abc", {}) is False
