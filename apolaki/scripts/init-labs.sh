@@ -34,7 +34,23 @@ if wait_http "http://localhost:42080/setup.php" "DVWA" 30; then
     curl -fsS -o /dev/null -b "$jar" --max-time 25 \
       --data "create_db=Create+%2F+Reset+Database&user_token=${token}" \
       "http://localhost:42080/setup.php" 2>/dev/null \
-      && echo "[init-labs] DVWA database created (login admin/password, set DVWA Security=Low)"
+      && echo "[init-labs] DVWA database created"
+    # auto-set DVWA Security = Low (log in admin/password, then POST the security level)
+    lt=$(curl -fsS -c "$jar" --max-time 10 "http://localhost:42080/login.php" 2>/dev/null \
+         | grep -oE "user_token'[^>]*value='[a-f0-9]+" | grep -oE "[a-f0-9]+$" | head -1)
+    if [ -n "${lt:-}" ]; then
+      curl -fsS -o /dev/null -b "$jar" -c "$jar" --max-time 10 \
+        --data "username=admin&password=password&Login=Login&user_token=${lt}" \
+        "http://localhost:42080/login.php" 2>/dev/null
+      st=$(curl -fsS -b "$jar" --max-time 10 "http://localhost:42080/security.php" 2>/dev/null \
+           | grep -oE "user_token'[^>]*value='[a-f0-9]+" | grep -oE "[a-f0-9]+$" | head -1)
+      if [ -n "${st:-}" ]; then
+        curl -fsS -o /dev/null -b "$jar" --max-time 10 \
+          --data "security=low&seclev_submit=Submit&user_token=${st}" \
+          "http://localhost:42080/security.php" 2>/dev/null \
+          && echo "[init-labs] DVWA security set to Low"
+      fi
+    fi
   else
     echo "[init-labs] WARN: could not read DVWA user_token — open http://localhost:42080/setup.php and click 'Create / Reset Database'"
   fi
