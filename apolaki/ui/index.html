@@ -1943,7 +1943,7 @@ function renderTaxonomy(d){
     <div class="tx-stat"><span class="v">${d.transferable}</span><span class="k">Transferable</span></div>
     <div class="tx-stat"><span class="v">${d.generalized}</span><span class="k">Generalized ≥2 labs</span></div>
     ${d.intel&&d.intel.loaded?`<div class="tx-stat"><span class="v" style="color:var(--danger)">${d.intel.known_exploited_techniques}</span><span class="k">Known-exploited (CISA KEV ${esc(d.intel.kev_catalog_version||'')})</span></div>`:``}
-    <div class="tx-note"><b>Proven</b> = oracle-confirmed on a lab. <b>Catalogued</b> = known, not yet demonstrated. <b>Generalized</b> needs ≥2 labs — everything's Juice-Shop-only for now, so <b>0</b> is the honest number until a 2nd corpus lands.</div>
+    <div class="tx-note"><b>Proven</b> = oracle-confirmed on a lab. <b>Catalogued</b> = known, not yet demonstrated. <b>Generalized</b> needs ≥2 independent labs — cross-validated across Juice Shop, DVWA, Gin &amp; Juice, bWAPP and Mutillidae. The count is the honest number: only techniques an oracle actually confirmed on ≥2 labs.</div>
   </div>`;
   h+=`<div class="tx-lenses">`+ (d.lenses||[]).map(l=>`<button class="tx-lens ${l.id===d.lens?"active":""}" onclick="txLens('${l.id}')">${esc(l.label)}</button>`).join("") +`</div>`;
   (d.groups||[]).forEach(g=>{
