@@ -1797,6 +1797,93 @@ class ToolRegistry:
                           json.dumps({"confirmed": bool(changed), "write_method": wrote, "restored": restored}),
                           findings)
 
+    async def _run_service_pack(self, inp: dict) -> ToolResult:
+        """ACTIVE (beyond web): actually RUN a discovered non-web service's technique pack and apply its
+        deterministic oracle — HTTP-exposed control planes (docker/kubelet/elasticsearch) over the
+        scoped+captured transport, raw services (redis/ftp) via a bounded socket probe. A confirmed
+        exposure becomes a finding + a live-graph node. No credential brute-force. This is the wiring
+        that turns service_router's plans into real execution."""
+        import service_router as _sr
+        host = (inp.get("host") or "").strip()
+        port = inp.get("port")
+        service = inp.get("service") or _sr.fingerprint(port, inp.get("banner", ""))
+        pack = _sr.pack_for(service)
+        if not host or not port or not pack:
+            return ToolResult("service_pack", host, True,
+                              json.dumps({"ran": False, "service": service, "note": "no pack / missing host:port"}), [])
+        findings = []
+        chk = pack["checks"][0]
+        _HTTP_PROBE = {"docker": "/version", "kubelet": "/pods", "elasticsearch": "/_cat/indices"}
+        if service in _HTTP_PROBE:
+            url = "http://%s:%s%s" % (host, port, _HTTP_PROBE[service])
+            if self.scope.validate(url)[0]:
+                try:
+                    r, _ = await self._http_send("GET", url, {}, None, True)
+                    if r.status_code == 200 and len(r.text) > 2:
+                        findings.append(self._service_finding(service, chk, url,
+                                        "GET %s -> 200 (%db) with no authentication; oracle: %s"
+                                        % (url, len(r.text), chk["oracle"]),
+                                        critical=service in ("docker", "kubelet")))
+                except Exception:
+                    pass
+        elif service in ("redis", "ftp"):
+            probe = await self._socket_service_probe(service, host, int(port))
+            if probe.get("confirmed"):
+                findings.append(self._service_finding(service, chk, "%s:%s" % (host, port),
+                                probe.get("evidence", ""), critical=False))
+        # record into the LIVE graph (service node + any confirmed finding)
+        try:
+            svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
+                                        source="service_pack", scope_asset=host)
+            self.graph.mark_tested(svc_id, ok=bool(findings))
+            for f in findings:
+                fid = self.graph.observe("finding", f["title"] + "@" + f["target"], label=f["title"],
+                                         source="service_pack", confidence=1.0, tested=True)
+                self.graph.link(svc_id, fid, "found_on", source="service_pack")
+        except Exception:
+            pass
+        return ToolResult("service_pack", host, True,
+                          json.dumps({"ran": True, "service": service, "confirmed": len(findings)}), findings)
+
+    def _service_finding(self, service: str, chk: dict, target: str, evidence: str, critical: bool) -> dict:
+        return {"title": "%s service exposed without authentication" % service,
+                "severity": "critical" if critical else "high", "family": "access_control",
+                "confidence": "confirmed", "cwe": chk.get("cwe", "CWE-306"), "target": target,
+                "tags": ["beyond-web", service, "no-auth", "access-control"],
+                "description": "A %s service is reachable without authentication." % service,
+                "evidence": evidence,
+                "remediation": "Require authentication and restrict network exposure of this service."}
+
+    async def _socket_service_probe(self, service: str, host: str, port: int) -> dict:
+        """Bounded raw-socket exposure probe (no credential guessing). redis: unauth PING -> +PONG;
+        ftp: USER anonymous -> 230. Best-effort — any failure is a clean negative."""
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=4)
+        except Exception:
+            return {"confirmed": False}
+        try:
+            if service == "redis":
+                writer.write(b"PING\r\n")
+                await writer.drain()
+                data = await asyncio.wait_for(reader.read(64), timeout=3)
+                return {"confirmed": b"+PONG" in data,
+                        "evidence": "redis PING -> %r with no AUTH (open data store)" % data[:32]}
+            if service == "ftp":
+                await asyncio.wait_for(reader.read(128), timeout=3)          # banner
+                writer.write(b"USER anonymous\r\n")
+                await writer.drain()
+                resp = await asyncio.wait_for(reader.read(128), timeout=3)
+                return {"confirmed": b"230" in resp,
+                        "evidence": "FTP USER anonymous -> %r (anonymous access)" % resp[:48]}
+        except Exception:
+            return {"confirmed": False}
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+        return {"confirmed": False}
+
     async def _browser_navigate(self, inp: dict) -> ToolResult:
         """ACTIVE: drive a real headless browser through a DECLARATIVE step list (goto / click /
         fill / press / wait — NEVER arbitrary JS from the model) and capture what a DevTools
