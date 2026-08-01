@@ -137,6 +137,28 @@ def test_browser_login_fallback_mints_persona(tmp_path, monkeypatch):
     assert _SECRET_PW not in str(events) and "eyJhbGc" not in str(events)   # secrets never leak
 
 
+def test_authenticated_recrawl_crawls_as_each_persona(tmp_path):
+    # CHAD review #1: the recrawl must crawl AS EACH persona over many authed routes, not GET-root once.
+    a, t = _build_agent(tmp_path)
+    calls = []
+
+    async def stub_execute(tool, inp, sid):
+        calls.append((tool, inp.get("session"), inp.get("url")))
+
+        class _TR:
+            def __init__(self):
+                self.findings, self.output, self.success = [], "{}", True
+        return _TR()
+    t.execute = stub_execute
+
+    asyncio.new_event_loop().run_until_complete(
+        a._authenticated_recrawl(["user_a", "user_b"], "https://target.tld", "s"))
+    http_reads = [c for c in calls if c[0] == "http_read"]
+    assert {c[1] for c in http_reads} == {"user_a", "user_b"}     # crawled as BOTH personas
+    assert len(http_reads) >= 8                                    # many routes per persona (not one)
+    assert any(c[0] == "browser_navigate" for c in calls)         # + an authed browser pass per persona
+
+
 def test_artery_noop_without_optin(tmp_path, monkeypatch):
     # authenticated_scan off -> the persona phase does nothing (safe default; no accounts created)
     a, t = _build_agent(tmp_path)

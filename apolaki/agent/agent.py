@@ -938,6 +938,34 @@ class BBHAgent:
                 pass
         return out[:6]
 
+    async def _authenticated_recrawl(self, roles, base, session_id) -> list:
+        """Real per-persona authenticated crawl. For EACH session persona, GET a set of common authed
+        routes (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a
+        headless browser is available, drive an authenticated browser pass that captures SPA routes +
+        XHR/fetch APIs (which seed the surface too). Returns the newly-discovered in-scope URLs.
+        Bounded + best-effort; degrades to a no-op on error."""
+        before = set(self.tools.urls or [])
+        routes = ["", "/profile", "/account", "/me", "/dashboard", "/settings", "/api/users",
+                  "/rest/user/whoami", "/api/orders", "/rest/basket", "/api/basket", "/orders",
+                  "/api/user", "/graphql"]
+        b = base.rstrip("/")
+        for role in (roles or []):
+            for r in routes:
+                url = b + r
+                try:
+                    if self.scope.validate(url)[0]:
+                        await self.tools.execute("http_read", {"url": url, "session": role}, session_id)
+                except Exception:
+                    pass
+            # authenticated browser pass AS this persona: captures SPA routes + XHR APIs (seed _add_urls)
+            try:
+                await self.tools.execute("browser_navigate",
+                                         {"url": base, "session": role,
+                                          "steps": [{"action": "wait", "ms": 1200}]}, session_id)
+            except Exception:
+                pass
+        return [u for u in (self.tools.urls or []) if u not in before]
+
     async def _do_persona_authz(self, session_id: str) -> list:
         """The artery's second half: mint TWO same-privilege personas via the target's own signup,
         re-crawl authenticated, then run the two-user AUTHORIZATION MATRIX and record confirmed
@@ -1053,15 +1081,13 @@ class BBHAgent:
             return events
         pm.bind(self.tools)   # project persona sessions onto the live registry (_sessions + identities)
 
-        # 3) authenticated re-crawl (light): fetch the base as the first persona so authed object ids
-        #    are harvested into the surface/intel before we build the operation set.
-        first = pm.session_roles()[0]
-        try:
-            await self.tools.execute("http_read", {"url": base, "session": first}, session_id)
-        except Exception:
-            pass
-        events.append({"type": "info", "content": "Authenticated re-crawl as '%s' — merging the logged-in "
-                       "surface into the inventory before the authorization matrix." % first})
+        # 3) REAL per-persona authenticated re-crawl: crawl authed routes AS EACH persona (not a single
+        #    GET-root) so the logged-in surface — object ids, authed-only endpoints, SPA XHR APIs —
+        #    enters the inventory + LIVE graph, which the planner now reads (CHAD review #1/#7).
+        new_urls = await self._authenticated_recrawl(pm.session_roles(), base, session_id)
+        events.append({"type": "info", "content": "Authenticated re-crawl as %s — %d new endpoint(s) "
+                       "merged into the surface + live graph before the authorization matrix."
+                       % (", ".join(pm.session_roles()), len(new_urls))})
 
         # 4) build the operation set from the (now authenticated) surface + intel
         urls = [str(u) for u in (self.tools.urls or [])]
