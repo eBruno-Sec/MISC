@@ -1570,6 +1570,100 @@ class ToolRegistry:
                           "evidence": f"accessible ids: {accessible[:30]}"})
         return ToolResult("enumerate_ids", tmpl, True, json.dumps(out), leads)
 
+    async def _run_authz_matrix(self, inp: dict) -> ToolResult:
+        """ACTIVE: the two-user AUTHORIZATION MATRIX. Replays each discovered operation as every
+        persona (anonymous, user_a, user_b, [privileged]) through the scoped + captured transport,
+        then reads the DIFFERENCES deterministically:
+          - missing_authentication : anon got the same protected data an authed role did
+          - bfla (vertical)        : a normal user reached a privileged-looking function
+          - bola_idor (horizontal) : user_b read the SAME protected object user_a holds while the
+            ANONYMOUS control is denied — the anon-denied control proves the object is owned/
+            protected, so two different users reading identical bytes is confirmed cross-user access.
+        A genuinely PUBLIC endpoint (anon + A + B all see it) yields NO finding. Read-only (GET);
+        write/vertical state-change proofs are separate bounded oracles. Roles are referenced by
+        NAME — the raw session token is resolved server-side from the session store, never passed in
+        or shown to the model."""
+        import difflib
+        import authz as _authz
+        import authz_matrix as _am
+        base = (inp.get("base_url") or "").strip()
+        roles = inp.get("roles") or []            # [{role, rank, tenant}] — NO secrets here
+        operations = inp.get("operations") or []  # [{request, path}]
+        pair = inp.get("pair")                    # (owner_role, attacker_role) for horizontal read
+        if not roles or not operations:
+            return ToolResult("authz_matrix", base, True,
+                              json.dumps({"ran": False, "note": "need >=1 role and >=1 operation"}), [])
+        anon_role = next((r["role"] for r in roles if r.get("rank", 1) == 0), None)
+
+        def _headers_for(role, rank):
+            return {} if rank == 0 else dict(self._sessions.get(role, {}))
+
+        async def _fetch(path, role, rank):
+            url = path if path.startswith("http") else base.rstrip("/") + "/" + path.lstrip("/")
+            if not self.scope.validate(url)[0]:
+                return 0, ""
+            try:
+                r, _ = await self._http_send("GET", url, _headers_for(role, rank), None, True)
+                return r.status_code, r.text[:8000]
+            except Exception:
+                return 0, ""
+
+        cells, resp = [], {}
+        for op in operations[:40]:
+            req = op.get("request") or op.get("path") or ""
+            path = op.get("path") or req
+            for r in roles:
+                status, body = await _fetch(path, r["role"], r.get("rank", 1))
+                resp[(req, r["role"])] = (status, body)
+                cells.append({"request": req, "role": r["role"], "rank": r.get("rank", 1),
+                              "status": status, "body": body, "tenant": r.get("tenant")})
+        result = _authz.build_matrix(cells)
+        findings = _am.gaps_to_findings(result, base_url=base)   # missing_auth + bfla (+ cross_tenant)
+
+        # ── horizontal IDOR: ownership-proven similarity oracle ──
+        if pair and anon_role:
+            owner, attacker = pair[0], pair[1]
+            for op in operations[:40]:
+                req = op.get("request") or op.get("path") or ""
+                if not _am.is_object_path(req):
+                    continue
+                so, bo = resp.get((req, owner), (0, ""))
+                sa, ba = resp.get((req, attacker), (0, ""))
+                sn, bn = resp.get((req, anon_role), (0, ""))
+                if _authz._accessed(so, bo) and _authz._accessed(sa, ba) and not _authz._accessed(sn, bn):
+                    sim = difflib.SequenceMatcher(None, bo, ba).ratio()
+                    if sim >= 0.9:
+                        target = req if req.startswith("http") else base.rstrip("/") + req
+                        findings.append({
+                            "title": "IDOR / BOLA — cross-user object access confirmed",
+                            "severity": "high", "family": "idor", "confidence": "confirmed",
+                            "cwe": "CWE-639", "target": target,
+                            "tags": ["idor", "bola", "access-control", "horizontal"],
+                            "description": ("A protected, user-owned object was read by a DIFFERENT authenticated "
+                                            "user. The anonymous control was denied (object is protected); '%s' "
+                                            "(owner) and '%s' (a different user) both read the SAME object."
+                                            % (owner, attacker)),
+                            "impact": "Read other users' data by changing the object id; bulk exfiltration by walking ids.",
+                            "evidence": ("anon %s -> %s (denied); owner '%s' -> 200 (%db); attacker '%s' -> 200 "
+                                         "(%db); owner/attacker similarity %.3f (>=0.9 = same object)"
+                                         % (req, sn, owner, len(bo), attacker, len(ba), sim)),
+                            "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
+                        try:
+                            self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
+                                                      "cross-user read of %s" % target)
+                        except Exception:
+                            pass
+
+        seen, uniq = set(), []
+        for f in findings:
+            k = (f["title"], f.get("target"))
+            if k not in seen:
+                seen.add(k)
+                uniq.append(f)
+        summary = {"ran": True, "roles": [r["role"] for r in roles], "operations": len(operations),
+                   "gaps": len(result.get("gaps", [])), "confirmed": len(uniq)}
+        return ToolResult("authz_matrix", base, True, json.dumps(summary), uniq)
+
     async def _browser_navigate(self, inp: dict) -> ToolResult:
         """ACTIVE: drive a real headless browser through a DECLARATIVE step list (goto / click /
         fill / press / wait — NEVER arbitrary JS from the model) and capture what a DevTools

@@ -766,6 +766,14 @@ class BBHAgent:
             events = []
         for e in (events or []):
             yield e
+        # Second half of the artery: mint same-privilege personas + run the two-user authorization
+        # matrix. Best-effort; a failure here never breaks the scan.
+        try:
+            pevents = await self._do_persona_authz(session_id)
+        except Exception:
+            pevents = []
+        for e in (pevents or []):
+            yield e
 
     async def _do_scan_auth(self, session_id: str) -> list:
         events: list = []
@@ -854,6 +862,169 @@ class BBHAgent:
         else:
             events.append({"type": "info", "content": "Discovered a credential lead for '%s' (could not verify) — "
                            "recorded and saved." % user})
+        return events
+
+    def _discover_register_url(self, base: str):
+        """Pick an in-scope registration/signup endpoint from the harvested surface, else a common
+        default. Mirrors _discover_login_url but hunts register/signup/join surfaces."""
+        import re as _re
+        cands = []
+        try:
+            for u in (self.tools.urls or []):
+                if _re.search(r"/(register|signup|sign-up|join|create-account|users?)\b", str(u), _re.I):
+                    cands.append(str(u))
+        except Exception:
+            pass
+        for kind in ("route", "endpoint", "url"):
+            try:
+                for v in self.tools.intel.get(kind):
+                    s = str(v)
+                    if _re.search(r"regist|signup|sign-up|create.?account", s, _re.I):
+                        cands.append(s if s.startswith("http") else base.rstrip("/") + "/" + s.lstrip("/"))
+            except Exception:
+                pass
+        cands += [base.rstrip("/") + "/register", base.rstrip("/") + "/api/Users"]  # Juice-Shop-style default
+        for u in cands:
+            try:
+                if self.scope.validate(u)[0]:
+                    return u
+            except Exception:
+                pass
+        return None
+
+    async def _do_persona_authz(self, session_id: str) -> list:
+        """The artery's second half: mint TWO same-privilege personas via the target's own signup,
+        re-crawl authenticated, then run the two-user AUTHORIZATION MATRIX and record confirmed
+        access-control findings. Account creation is state-changing, so this is gated on an explicit
+        authenticated_scan opt-in (active/full only). Secrets go to the encrypted vault; only role
+        names and vault refs travel further. Best-effort — any error degrades to a no-op."""
+        events: list = []
+        if not self.authenticated_scan or self.mode == "passive":
+            return events
+        base = self._primary_base()
+        if not base:
+            return events
+        import personas as _p
+        import register as _reg
+        import vault as _vault
+        import authz as _authz
+        import authz_matrix as _am
+        from urllib.parse import urlparse as _up
+        pm = _p.PersonaManager()
+        vlt = _vault.default()
+        mid = self.mission_id or "default"
+
+        # 1) mint two same-privilege personas through the signup flow (bounded: 2 accounts)
+        reg_url = self._discover_register_url(base)
+        minted = []
+        if reg_url:
+            for label, role in (("user_a", _p.USER_A), ("user_b", _p.USER_B)):
+                try:
+                    res = await _reg.register(reg_url, label=label)
+                except Exception:
+                    res = {"created": False, "headers": {}, "blocked": []}
+                if res.get("blocked"):
+                    events.append({"type": "info", "content": "Registration needs a manual step (%s) at %s — "
+                                   "skipping autonomous account creation; supply operator accounts to test "
+                                   "access control." % (", ".join(res["blocked"]), reg_url)})
+                    break
+                if res.get("created"):
+                    acct = res.get("account") or {}
+                    hdr = res.get("headers") or {}
+                    login_url = None
+                    if not hdr and acct.get("password"):
+                        # API-style signup (e.g. Juice Shop /api/Users) doesn't auto-login — log in
+                        # with the freshly-created account to capture the session.
+                        login_url = self._discover_login_url(base) or base.rstrip("/") + "/rest/user/login"
+                        try:
+                            await self.tools.execute("acquire_session",
+                                                     {"login_url": login_url,
+                                                      "username": acct.get("email") or acct.get("username"),
+                                                      "password": acct.get("password"), "role": role}, session_id)
+                        except Exception:
+                            pass
+                        hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                    if not hdr:
+                        continue  # created but no session — cannot test as this persona
+                    ref = vlt.put(mid, role, {"username": acct.get("username"), "email": acct.get("email"),
+                                              "password": acct.get("password"), "headers": hdr,
+                                              "recipe": {"register_url": reg_url, "login_url": login_url,
+                                                         "mode": "registration",
+                                                         "success_oracle": "session-cookie-present"}})
+                    pm.add(role, identity=res.get("identity") or acct.get("email", ""), method="registered",
+                           headers=hdr, account={"identity_ref": ref})
+                    minted.append(role)
+                    events.append({"type": "info", "content": "Created test persona '%s' (%s) via signup — session "
+                                   "captured, secret vaulted (%s)." % (role, res.get("identity"), ref)})
+
+        # 2) fall back to the verified single discovered credential as one persona
+        scan_sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
+        if scan_sess and _p.USER_A not in minted:
+            pm.add(_p.USER_A, identity="(discovered credential)", method="discovered", headers=scan_sess)
+            minted.append(_p.USER_A)
+        if not pm.session_roles():
+            return events
+        pm.bind(self.tools)   # project persona sessions onto the live registry (_sessions + identities)
+
+        # 3) authenticated re-crawl (light): fetch the base as the first persona so authed object ids
+        #    are harvested into the surface/intel before we build the operation set.
+        first = pm.session_roles()[0]
+        try:
+            await self.tools.execute("http_read", {"url": base, "session": first}, session_id)
+        except Exception:
+            pass
+        events.append({"type": "info", "content": "Authenticated re-crawl as '%s' — merging the logged-in "
+                       "surface into the inventory before the authorization matrix." % first})
+
+        # 4) build the operation set from the (now authenticated) surface + intel
+        urls = [str(u) for u in (self.tools.urls or [])]
+        for kind in ("endpoint", "route", "url"):
+            try:
+                for v in self.tools.intel.get(kind):
+                    s = str(v)
+                    urls.append(s if s.startswith("http") else base.rstrip("/") + "/" + s.lstrip("/"))
+            except Exception:
+                pass
+        operations = _am.candidate_operations(urls)
+        for u in urls:                                  # + privileged-looking paths for the vertical (BFLA) check
+            try:
+                p = _up(u).path
+            except Exception:
+                p = ""
+            if p and _authz._looks_privileged(p) and not any(o["path"] == p for o in operations):
+                operations.append({"request": p, "path": p})
+        if not operations:
+            events.append({"type": "info", "content": "Authorization matrix: no object-bearing endpoints "
+                           "discovered to compare across personas."})
+            return events
+
+        # 5) run the matrix through the scoped + captured transport
+        roles = [{"role": r["role"], "rank": r["rank"], "tenant": r["tenant"]} for r in pm.matrix_roles()]
+        pair = pm.same_privilege_pair()
+        res = await self.tools.execute("run_authz_matrix",
+                                       {"base_url": base, "roles": roles, "operations": operations,
+                                        "pair": list(pair) if pair else None}, session_id)
+        for f in (res.findings or []):
+            if self.mission_id:
+                try:
+                    f["id"] = db.add_finding(self.mission_id, f)
+                except Exception:
+                    pass
+            self.findings.append(f)
+            events.append({"type": "finding", "finding": f})
+
+        # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
+        caps = pm.capabilities() + (["authenticated_surface_mapped"] if pm.session_roles() else [])
+        for cap in caps:
+            try:
+                self.tools.state.add_capability(cap, "persona authz phase")
+            except Exception:
+                pass
+        events.append({"type": "info", "content": "Authorization matrix complete: %d persona(s), %d "
+                       "operation(s), %d confirmed access-control finding(s). Capabilities: %s."
+                       % (len(pm.session_roles()), len(operations), len(res.findings or []),
+                          ", ".join(caps) or "none")})
+        self._persona_manager = pm
         return events
 
     def _discover_login_url(self, base: str):
