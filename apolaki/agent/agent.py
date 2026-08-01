@@ -717,7 +717,8 @@ class BBHAgent:
                 pass
             obs = TP.derive_observations(surface=list(self.tools.urls or []), harvest=harvest,
                                          findings=self.findings, leads=self.leads,
-                                         authenticated=bool(getattr(self.tools, "_sessions", None)))
+                                         authenticated=bool(getattr(self.tools, "_sessions", None)),
+                                         graph=getattr(self.tools, "graph", None))   # planner reads the LIVE graph
             try:
                 import proxy as _proxy
                 obs |= _proxy.to_observations()

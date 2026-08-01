@@ -12,6 +12,20 @@ def _tech(tid, cwe, status="proven", conf=80):
     return t
 
 
+def test_planner_reads_live_graph():
+    # CHAD review #7: the planner must read the LIVE canonical graph, not only flat recon lists.
+    import asset_graph as AG
+    g = AG.AssetGraph("m")
+    g.observe("object", "h/api/orders/1", source="live")
+    g.observe("endpoint", "h/rest/user/login", label="/rest/user/login", source="live")
+    g.observe("capability", "session_acquired", source="scan")
+    projected = g.to_observations()
+    assert {"has_object_id", "has_login", "has_api", "authenticated"} <= projected
+    # derive_observations merges the graph's observations even with EMPTY flat inputs
+    obs = TP.derive_observations(surface=[], harvest={}, graph=g)
+    assert "has_object_id" in obs and "authenticated" in obs
+
+
 def test_derive_observations_from_code_intel_and_harvest():
     ci = {"endpoints": ["/rest/user/login", "/api/products/search"], "sensitive_routes": ["administration"],
           "bundles": [1], "logic": {"detail": [{"tests": [1]}]}}

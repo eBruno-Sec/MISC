@@ -1094,7 +1094,8 @@ async def technique_plan(session_id: str):
             code_intel = {}
     obs = TP.derive_observations(
         surface=[t for t in targets if t], harvest=harvest, findings=findings, leads=leads,
-        code_intel=code_intel, authenticated=bool(ctx.get("authenticated")))
+        code_intel=code_intel, authenticated=bool(ctx.get("authenticated")),
+        graph=getattr((sessions.get(session_id) or {}).get("tools"), "graph", None))
     if base and os.environ.get("CDP_BROWSER_URL"):     # browser-as-sensor folds into the SAME observations
         try:
             import browser_engine
@@ -1196,7 +1197,8 @@ async def attack_graph_view(session_id: str):
         except Exception:
             code_intel = {}
     obs = TP.derive_observations(surface=[t for t in targets if t], harvest=harvest, findings=findings,
-                                 leads=leads, code_intel=code_intel)
+                                 leads=leads, code_intel=code_intel,
+                                 graph=getattr((sessions.get(session_id) or {}).get("tools"), "graph", None))
     if base and os.environ.get("CDP_BROWSER_URL"):
         try:
             import browser_engine

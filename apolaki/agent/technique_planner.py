@@ -53,8 +53,10 @@ _PRECONDITIONS = {
 
 
 def derive_observations(surface=None, harvest=None, findings=None, leads=None, code_intel=None,
-                        authenticated=False):
-    """Deterministically compute the observation set from everything recon gathered. Pure, no LLM."""
+                        authenticated=False, graph=None):
+    """Deterministically compute the observation set from everything recon gathered. Pure, no LLM.
+    When a live canonical asset graph is supplied, its projected observations are merged in, so the
+    planner reads the world model directly (CHAD review #7 — planner-authoritative graph)."""
     obs = set()
     urls = [str(u).lower() for u in (surface or [])]
     ci = code_intel or {}
@@ -111,6 +113,12 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         obs.add("has_sensitive_route")
     if authenticated:
         obs.add("authenticated")
+    # merge observations projected straight from the LIVE canonical graph (planner-authoritative)
+    if graph is not None:
+        try:
+            obs |= graph.to_observations()
+        except Exception:
+            pass
     return obs
 
 

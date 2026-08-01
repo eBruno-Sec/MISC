@@ -142,6 +142,26 @@ class AssetGraph:
         """Nodes whose provenance says they could unlock a given capability/technique."""
         return [n for n in self._nodes.values() if capability in (n.get("enables") or [])]
 
+    def to_observations(self) -> set:
+        """Project the graph to the planner's observation vocabulary, so the deterministic planner
+        reads the world model directly (not just flat recon lists). Returns a set of observation
+        strings that gate techniques (see technique_planner.OBSERVATIONS)."""
+        obs = set()
+        if self.nodes("object"):
+            obs.add("has_object_id")
+        caps = {n["key"] for n in self.nodes("capability")}
+        if self.nodes("credential") or "credentials_exposed" in caps:
+            obs.add("credentials_exposed")
+        if "session_acquired" in caps:
+            obs.add("authenticated")
+        for e in self.nodes("endpoint"):
+            low = (e.get("label") or e.get("key") or "").lower()
+            if any(k in low for k in ("/login", "/signin", "/sign-in", "/auth", "/session")):
+                obs.add("has_login")
+            if "/api" in low or "/rest" in low or "/graphql" in low:
+                obs.add("has_api")
+        return obs
+
     def next_best_actions(self, limit: int = 10) -> list:
         """Deterministic next-best-action list — the planner querying the world model. Ranks
         unrealized capability chains (a confirmed finding enables X, but X isn't achieved yet) above
