@@ -39,3 +39,17 @@ def test_tampering_is_detected(tmp_path):
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     ok, idx = audit.AuditLog(str(p)).verify_chain()
     assert ok is False and idx == 1                      # the exact tampered record is flagged
+
+
+def test_truncation_is_detected(tmp_path):
+    p = tmp_path / "audit.jsonl"
+    log = audit.AuditLog(str(p))
+    for a in ("a", "b", "c"):
+        log.record(a, mission="m1")
+    assert log.verify_chain()[0] is True
+    # delete the LAST record: the surviving chain is internally valid, but the signed head checkpoint
+    # remembers 3 records -> truncation is caught (the classic "delete the incriminating tail" attack).
+    rows = [ln for ln in p.read_text().splitlines() if ln.strip()]
+    p.write_text("\n".join(rows[:-1]) + "\n")
+    ok, _ = audit.AuditLog(str(p)).verify_chain()
+    assert ok is False

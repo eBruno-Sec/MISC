@@ -12,6 +12,7 @@ Pure logic (hashing/chaining) is unit-tested; the only side effect is appending 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import threading
@@ -39,6 +40,50 @@ class AuditLog:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
         except Exception:
             pass
+        self._key = self._load_key()
+
+    # ── signed head checkpoint (detects TRUNCATION — deleting tail records) ──
+    def _load_key(self) -> bytes:
+        env = os.environ.get("APOLAKI_AUDIT_KEY")
+        if env:
+            return env.encode()
+        kp = self.path + ".key"
+        try:
+            if os.path.exists(kp):
+                with open(kp, "rb") as f:
+                    return f.read().strip()
+            k = hashlib.sha256(os.urandom(32)).hexdigest().encode()
+            with open(kp, "wb") as f:
+                f.write(k)
+            os.chmod(kp, 0o600)
+            return k
+        except Exception:
+            return b"apolaki-audit-ephemeral"
+
+    def _sign(self, msg: str) -> str:
+        return hmac.new(self._key, msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _checkpoint_path(self) -> str:
+        return self.path + ".head"
+
+    def _write_checkpoint(self, count: int, last_hash: str) -> None:
+        cp = {"count": count, "last_hash": last_hash, "ts": _now()}
+        cp["sig"] = self._sign("%d:%s" % (count, last_hash))
+        try:
+            with open(self._checkpoint_path(), "w", encoding="utf-8") as f:
+                json.dump(cp, f)
+        except Exception:
+            pass
+
+    def _read_checkpoint(self):
+        try:
+            with open(self._checkpoint_path(), "r", encoding="utf-8") as f:
+                cp = json.load(f)
+            if cp.get("sig") == self._sign("%d:%s" % (cp.get("count", -1), cp.get("last_hash", ""))):
+                return cp
+            return "TAMPERED"      # signature mismatch — the checkpoint itself was altered
+        except Exception:
+            return None
 
     def _read_lines(self) -> list:
         try:
@@ -64,6 +109,7 @@ class AuditLog:
                     f.write(json.dumps(entry) + "\n")
             except Exception:
                 pass
+            self._write_checkpoint(len(self._read_lines()), entry["hash"])
             return entry
 
     def entries(self, mission: str = None, action: str = None, limit: int = 500) -> list:
@@ -75,15 +121,26 @@ class AuditLog:
         return rows[-limit:]
 
     def verify_chain(self) -> tuple:
-        """(ok, first_bad_index). Recompute each record's hash and confirm it links to the previous —
-        detects any tampering with the history. ok=True + index -1 when intact."""
+        """(ok, first_bad_index). Recompute each record's hash + confirm it links to the previous
+        (detects edits/reorders), THEN check the signed head checkpoint (detects TRUNCATION — deleting
+        tail records leaves an otherwise-valid short chain — and tampering with the checkpoint itself).
+        ok=True + index -1 when intact; index -2 = checkpoint forged/altered."""
+        lines = self._read_lines()
         prev = _GENESIS
-        for i, r in enumerate(self._read_lines()):
+        for i, r in enumerate(lines):
             if r.get("prev") != prev:
                 return False, i
             if _digest(r) != r.get("hash"):
                 return False, i
             prev = r["hash"]
+        cp = self._read_checkpoint()
+        if cp == "TAMPERED":
+            return False, -2
+        if isinstance(cp, dict):
+            if len(lines) < cp.get("count", 0):
+                return False, len(lines)                     # tail records were deleted
+            if len(lines) == cp.get("count") and prev != cp.get("last_hash"):
+                return False, max(0, len(lines) - 1)
         return True, -1
 
 
