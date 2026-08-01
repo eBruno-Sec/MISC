@@ -1427,6 +1427,17 @@ def _record_memory(session_id: str) -> None:
             snap["scan_auth_user"] = user            # username only (non-secret) for the rescan offer
             snap["scan_login_url"] = login_url
         db.record_memory(tkey, session_id, snap)
+        # canonical asset/intelligence graph — project everything gathered (surface, findings,
+        # personas, capabilities) into one provenance store and persist it so a later scan resumes
+        # the world model and the planner can query it. Best-effort.
+        try:
+            import asset_graph as _ag
+            personas = ag._persona_manager.to_dict() if getattr(ag, "_persona_manager", None) else None
+            caps = [c["capability"] for c in tools.state.to_dict().get("capabilities", [])]
+            _ag.build_from_engagement(session_id, recon=tools.recon, urls=tools.urls, findings=findings,
+                                      personas=personas, capabilities=caps, scope_asset=tkey).save()
+        except Exception:
+            pass
         ctx = dict(m["context"])
         ctx["graph_data"] = {
             "recon": {"live_hosts": tools.recon.get("live_hosts", []),
@@ -1781,6 +1792,35 @@ async def get_graph(session_id: str):
     _require_mission(session_id)
     recon, urls, findings = _graph_inputs(session_id)
     return graph_model.build_graph(recon, urls, findings)
+
+
+@app.get("/graph/canonical/{session_id}")
+async def get_canonical_graph(session_id: str):
+    """The CANONICAL asset/intelligence graph: one provenance store projected from everything the
+    engagement gathered (surface, findings, personas, capabilities). Each fact carries its source,
+    confidence, scope asset, what it may unlock, and whether it was tested — the planner's world
+    model. Built on-demand here; also persisted at mission end so a later scan resumes it."""
+    m = _require_mission(session_id)
+    import asset_graph as _ag
+    recon, urls, findings = _graph_inputs(session_id)
+    personas, caps = None, []
+    sess = sessions.get(session_id) or {}
+    ag = sess.get("agent")
+    if ag is not None:
+        try:
+            if getattr(ag, "_persona_manager", None):
+                personas = ag._persona_manager.to_dict()
+            tl = sess.get("tools")
+            if tl is not None:
+                caps = [c["capability"] for c in tl.state.to_dict().get("capabilities", [])]
+        except Exception:
+            pass
+    g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
+                                  personas=personas, capabilities=caps,
+                                  scope_asset=memory_mod.target_key(m["scope"]))
+    d = g.to_dict()
+    d["stats"] = g.stats()
+    return d
 
 
 @app.get("/memory/{session_id}/diff")
