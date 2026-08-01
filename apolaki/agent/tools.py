@@ -834,6 +834,10 @@ class ToolRegistry:
         # Authenticated scanning: headers (Cookie/Authorization) shared with every
         # HTTP request the tools make, so scans reach the post-login surface.
         self.session_headers = session_headers or {}
+        # Mission request budget — off by default (limit 0 = unlimited); set BBH_REQUEST_BUDGET to
+        # cap how many HTTP requests one mission may make, so a runaway scan can't hammer a target.
+        import budget as _budget
+        self.budget = _budget.MissionBudget(int(os.environ.get("BBH_REQUEST_BUDGET", "0") or 0))
         # Named sessions acquired at runtime by the investigative loop (role -> auth
         # headers). The raw token is stored here and injected server-side; it is NEVER
         # returned to the model. _login_attempts caps acquire_session to preserve the
@@ -1252,6 +1256,8 @@ class ToolRegistry:
     async def _http_send(self, method: str, url: str, headers: dict, body, follow: bool):
         import time
         import httpx
+        if not self.budget.charge():
+            raise RuntimeError("mission request budget exhausted (%d requests)" % self.budget.limit)
         h = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
         t0 = time.perf_counter()
         async with httpx.AsyncClient(verify=False, follow_redirects=follow, headers=h, timeout=20) as c:
