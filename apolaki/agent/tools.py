@@ -871,6 +871,10 @@ class ToolRegistry:
             "http": {}, "nmap": {"open_ports": []},
         }
         self.urls: list = []
+        # LIVE canonical asset/intelligence graph — grown as observations arrive (see _graph_add_url),
+        # so the planner reads a current world model instead of a graph rebuilt only at finalize.
+        import asset_graph as _asset_graph
+        self.graph = _asset_graph.AssetGraph(mission_id or "default")
 
     # ── tool schema exposure ─────────────────────────────────────
     def get_claude_tools(self) -> list:
@@ -2042,6 +2046,25 @@ class ToolRegistry:
                               json.dumps({"note": "no known lab detected", "available": labs.list_labs()}), [])
         return ToolResult("benchmark_lab", base, True, json.dumps(labs.benchmark(lab, base)), [])
 
+    def _graph_add_url(self, u: str) -> None:
+        """Grow the LIVE canonical graph as URLs are discovered: host -> endpoint (-> object) nodes
+        with provenance. Best-effort; never raises. This is what makes the graph a live world model."""
+        try:
+            import authz_matrix as _am
+            p = urlparse(u)
+            host, path = p.netloc, (p.path or "/")
+            eid = self.graph.observe("endpoint", (host + path) if host else path, label=path,
+                                     source="live-recon")
+            if host:
+                hid = self.graph.observe("host", host, source="live-recon")
+                self.graph.link(hid, eid, "serves", source="live-recon")
+            if _am.is_object_path(path):
+                oid = self.graph.observe("object", (host + path) if host else path, label=path,
+                                         source="live-recon", enables=["foreign_object_read"])
+                self.graph.link(eid, oid, "exposes", source="live-recon")
+        except Exception:
+            pass
+
     def _add_urls(self, urls) -> None:
         for u in urls:
             if not u or u in self.urls:
@@ -2054,6 +2077,7 @@ class ToolRegistry:
                 continue
             if surface_mod.clean_url(u) and self.scope.validate(u)[0]:
                 self.urls.append(u)
+                self._graph_add_url(u)     # grow the live world model as the surface is discovered
 
     async def _http(self, url: str, method: str = "GET", headers: dict = None,
                     body: str = None, capture: bool = True, finding_id: str = None):
