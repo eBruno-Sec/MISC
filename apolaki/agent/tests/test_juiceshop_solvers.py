@@ -51,3 +51,11 @@ def test_labs_solve_dispatch():
     assert callable(labs.solve)
     unknown = labs.solve("nope", "http://x")
     assert "error" in unknown and "juiceshop" in unknown.get("available", [])
+
+
+def test_forged_coupon_url_encodes_the_z85_coupon():
+    # regression: the z85 coupon contains #{}/ etc.; it MUST be url-encoded in the PUT path or the
+    # '#' truncates it as a fragment -> "Invalid coupon" -> the challenge never solves.
+    import inspect
+    src = inspect.getsource(js._forged_coupon)
+    assert "urllib.parse.quote(coupon" in src and "/coupon/%s" in src
