@@ -1846,6 +1846,17 @@ async def export_mission(session_id: str):
                             graph={**g.to_dict(), "stats": g.stats()}, capabilities=caps)
 
 
+@app.get("/audit")
+async def get_audit(mission: str = None, limit: int = 200):
+    """The tamper-evident audit log (hash-chained): recent security-relevant, state-changing actions
+    plus a chain-integrity check (chain_intact=false + first_bad_index pinpoints any tampering)."""
+    import audit as _audit
+    log = _audit.default()
+    ok, bad = log.verify_chain()
+    return {"chain_intact": ok, "first_bad_index": bad,
+            "entries": log.entries(mission=mission, limit=max(1, min(int(limit), 1000)))}
+
+
 @app.get("/memory/{session_id}/diff")
 async def get_memory_diff(session_id: str):
     """'Since last scan' — diff this mission's surface against the most recent

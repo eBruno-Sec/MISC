@@ -1034,6 +1034,12 @@ class BBHAgent:
             pm.add(role, identity=res.get("identity") or acct.get("email", ""), method="registered",
                    headers=hdr, account={"identity_ref": ref})
             minted.append(role)
+            try:
+                import audit as _audit
+                _audit.record("account_created", actor="apolaki", mission=mid, target=role,
+                              method="registered", identity_ref=ref)
+            except Exception:
+                pass
             events.append({"type": "info", "content": "Created test persona '%s' (%s) via signup — session "
                            "captured, secret vaulted (%s)." % (role, res.get("identity"), ref)})
 
