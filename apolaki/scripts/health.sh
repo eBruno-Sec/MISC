@@ -21,6 +21,7 @@ check "http://localhost:42000/"          "juice-shop" core
 check "http://localhost:42080/login.php" "dvwa"       opt
 check "http://localhost:42088/"          "bwapp"      opt
 check "http://localhost:42089/"          "mutillidae" opt
+check "http://localhost:42084/WebGoat"   "webgoat"    opt
 
 echo "[health] containers restart-looping (should be none):"
 loops=$(docker compose --profile labs --profile browser --profile proxy --profile dast ps 2>/dev/null | grep -i 'restarting')

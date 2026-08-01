@@ -51,7 +51,15 @@ services:
       - PROXY_URL=${PROXY_URL:-http://mitmproxy:8080}
       - PROXY_FLOWS_DIR=/app/data/proxy
     ports:
-      - "8000:8000"
+      # LOCAL-ONLY by default (matches the platform_auth local-only default). Expose externally only
+      # by explicit opt-in: APOLAKI_BIND=0.0.0.0 (and set APOLAKI_API_TOKEN when you do).
+      - "${APOLAKI_BIND:-127.0.0.1}:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./ui:/app/ui:ro
       - nuclei_templates:/root/nuclei-templates
@@ -128,6 +136,15 @@ services:
     profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42089:80"
+    restart: unless-stopped
+
+  # WebGoat (OWASP) -- a FIFTH lab (Java training app). Opt-in. Reachable at http://webgoat:8080 on
+  # the compose network; host http://localhost:42084/WebGoat. Local-only bind. No manual setup.
+  webgoat:
+    image: webgoat/webgoat:latest
+    profiles: ["labs"]
+    ports:
+      - "127.0.0.1:42084:8080"
     restart: unless-stopped
 
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
