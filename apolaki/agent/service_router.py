@@ -145,6 +145,23 @@ def route(services: list) -> list:
     return out
 
 
+def plan(services: list, full_mode: bool = False) -> list:
+    """Concrete ordered test plan from discovered services. Web services are excluded (the web engine
+    owns them); intrusive checks are included ONLY in Full mode. Each item is ready for a per-service
+    driver to execute and record against its oracle."""
+    out = []
+    for r in route(services):
+        if r["is_web"] or r["service"] == "unknown":
+            continue
+        for c in r["checks"]:
+            if c.get("intrusive") and not full_mode:
+                continue
+            out.append({"host": r["host"], "port": r["port"], "service": r["service"],
+                        "check": c["id"], "cwe": c["cwe"], "oracle": c["oracle"],
+                        "enables": c.get("enables", []), "intrusive": bool(c.get("intrusive"))})
+    return out
+
+
 def known_services() -> list:
     """Service types Apolaki has a technique pack for (for the UI/report coverage view)."""
     return sorted(_PACKS.keys())

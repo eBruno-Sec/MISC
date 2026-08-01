@@ -202,11 +202,11 @@ _FINDING_ENABLES = {
 
 def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = None,
                           findings: list = None, personas: dict = None, capabilities: list = None,
-                          scope_asset: str = "") -> "AssetGraph":
+                          services: list = None, scope_asset: str = "") -> "AssetGraph":
     """Project the engagement's gathered intelligence into the canonical graph WITH provenance —
     hosts, endpoints, object endpoints, params, findings (+ what they enable), personas (vault refs
-    only), and confirmed capabilities. Deterministic; reuses surface.build_inventory. Every phase's
-    output lands as connected, provenance-tagged nodes instead of a flat list."""
+    only), confirmed capabilities, and non-web services (beyond-web routing). Deterministic; reuses
+    surface.build_inventory. Every phase's output lands as connected, provenance-tagged nodes."""
     import surface as _surface
     import authz_matrix as _am
     from urllib.parse import urlparse as _up
@@ -265,6 +265,22 @@ def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = N
         if p.get("has_session"):
             g.observe("session", role, label="session:" + role, source="acquire_session")
             g.link(pid, _nid("session", role), "authenticated_as", source="acquire_session")
+
+    # non-web services (beyond-web routing) -> service nodes + what their checks could unlock
+    try:
+        import service_router as _sr
+        for r in _sr.route(services or []):
+            if r["is_web"] or r["service"] == "unknown":
+                continue
+            key = "%s:%s" % (r.get("host", ""), r.get("port"))
+            enables = sorted({e for c in r["checks"] for e in c.get("enables", [])})
+            sid = g.observe("service", key, label=r["service"], source="service_router",
+                            scope_asset=scope_asset, enables=enables, service=r["service"], port=r.get("port"))
+            if r.get("host"):
+                hid = g.observe("host", r["host"], source="recon", scope_asset=scope_asset or r["host"])
+                g.link(hid, sid, "runs", source="service_router")
+    except Exception:
+        pass
 
     # confirmed capabilities
     for cap in (capabilities or []):

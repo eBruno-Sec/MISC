@@ -82,6 +82,17 @@ def test_build_from_engagement_projection():
     assert "password" not in str(g.to_dict())
 
 
+def test_services_routed_into_graph():
+    # beyond-web: a discovered non-web service becomes a graph node with what its checks unlock;
+    # a web port is excluded (the web engine owns it).
+    services = [{"host": "box", "port": 6379}, {"host": "box", "port": 443}]
+    g = AG.build_from_engagement("m1", services=services, scope_asset="box")
+    svc = g.nodes("service")
+    assert len(svc) == 1 and svc[0]["label"] == "redis"
+    assert "database_read" in svc[0]["enables"]
+    assert "service:box:6379" in g.neighbors("host:box", rel="runs")
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

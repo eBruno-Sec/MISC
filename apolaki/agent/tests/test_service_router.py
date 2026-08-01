@@ -50,6 +50,16 @@ def test_known_services_listed():
     assert "http" not in ks                    # not a pack — web engine owns it
 
 
+def test_plan_gates_intrusive_to_full_mode():
+    services = [{"host": "t", "port": 25, "banner": "220 ESMTP"}, {"host": "t", "port": 443}]
+    active = SR.plan(services, full_mode=False)
+    full = SR.plan(services, full_mode=True)
+    assert not any(p["check"] == "smtp_open_relay" for p in active)   # intrusive -> Full only
+    assert any(p["check"] == "smtp_open_relay" for p in full)
+    assert any(p["check"] == "smtp_user_enum" for p in active)        # non-intrusive -> both
+    assert all(p["service"] != "https" for p in full)                # web excluded from the plan
+
+
 def test_no_check_brute_forces_credentials():
     # guardrail: no pack check should be a credential-guessing loop
     for svc in SR.known_services():
