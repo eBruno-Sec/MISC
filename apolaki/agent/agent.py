@@ -914,6 +914,29 @@ class BBHAgent:
                 pass
         return None
 
+    def _register_candidates(self, base: str) -> list:
+        """Ordered registration-endpoint candidates. API/JSON registration paths first (so a real
+        signup API like Juice Shop /api/Users wins before an SPA /register route that returns 200
+        index.html without creating anything), then the discovered URL, then form defaults. Deduped
+        + scope-valid."""
+        b = base.rstrip("/")
+        cands = [b + p for p in ("/api/Users", "/api/register", "/api/auth/register", "/api/signup", "/api/users")]
+        d = self._discover_register_url(base)
+        if d:
+            cands.append(d)
+        cands += [b + p for p in ("/register", "/signup", "/users")]
+        seen, out = set(), []
+        for u in cands:
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                if self.scope.validate(u)[0]:
+                    out.append(u)
+            except Exception:
+                pass
+        return out[:6]
+
     async def _do_persona_authz(self, session_id: str) -> list:
         """The artery's second half: mint TWO same-privilege personas via the target's own signup,
         re-crawl authenticated, then run the two-user AUTHORIZATION MATRIX and record confirmed
@@ -936,53 +959,61 @@ class BBHAgent:
         vlt = _vault.default()
         mid = self.mission_id or "default"
 
-        # 1) mint two same-privilege personas through the signup flow (bounded: 2 accounts)
-        reg_url = self._discover_register_url(base)
-        minted = []
-        if reg_url:
-            for label, role in (("user_a", _p.USER_A), ("user_b", _p.USER_B)):
+        # 1) mint two same-privilege personas through the signup flow (bounded: 2 accounts). Probe an
+        #    API-first candidate list so a real registration API (e.g. Juice Shop /api/Users) wins over
+        #    an SPA /register route that would 200 without creating anything.
+        reg_cands = self._register_candidates(base)
+        minted, stop = [], False
+        for label, role in (("user_a", _p.USER_A), ("user_b", _p.USER_B)):
+            if stop:
+                break
+            res, reg_url = None, None
+            for cand in reg_cands:
                 try:
-                    res = await _reg.register(reg_url, label=label)
+                    r = await _reg.register(cand, label=label)
                 except Exception:
-                    res = {"created": False, "headers": {}, "blocked": []}
-                if res.get("blocked"):
+                    r = {"created": False, "headers": {}, "blocked": []}
+                if r.get("blocked"):
                     events.append({"type": "info", "content": "Registration needs a manual step (%s) at %s — "
                                    "skipping autonomous account creation; supply operator accounts to test "
-                                   "access control." % (", ".join(res["blocked"]), reg_url)})
+                                   "access control." % (", ".join(r["blocked"]), cand)})
+                    stop = True
                     break
-                if res.get("created"):
-                    acct = res.get("account") or {}
-                    hdr = res.get("headers") or {}
-                    login_url = None
-                    if not hdr and acct.get("password"):
-                        # API-style signup (e.g. Juice Shop /api/Users) doesn't auto-login — log in
-                        # with the freshly-created account. Probe a short ordered candidate list
-                        # (one KNOWN credential, never a password list) and stop at the first that
-                        # yields a session, so the right API login endpoint is found autonomously.
-                        for lu in self._login_candidates(base):
-                            try:
-                                await self.tools.execute("acquire_session",
-                                                         {"login_url": lu,
-                                                          "username": acct.get("email") or acct.get("username"),
-                                                          "password": acct.get("password"), "role": role}, session_id)
-                            except Exception:
-                                pass
-                            hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
-                            if hdr:
-                                login_url = lu
-                                break
-                    if not hdr:
-                        continue  # created but no session — cannot test as this persona
-                    ref = vlt.put(mid, role, {"username": acct.get("username"), "email": acct.get("email"),
-                                              "password": acct.get("password"), "headers": hdr,
-                                              "recipe": {"register_url": reg_url, "login_url": login_url,
-                                                         "mode": "registration",
-                                                         "success_oracle": "session-cookie-present"}})
-                    pm.add(role, identity=res.get("identity") or acct.get("email", ""), method="registered",
-                           headers=hdr, account={"identity_ref": ref})
-                    minted.append(role)
-                    events.append({"type": "info", "content": "Created test persona '%s' (%s) via signup — session "
-                                   "captured, secret vaulted (%s)." % (role, res.get("identity"), ref)})
+                if r.get("created"):
+                    res, reg_url = r, cand
+                    break
+            if res is None:
+                continue
+            acct = res.get("account") or {}
+            hdr = res.get("headers") or {}
+            login_url = None
+            if not hdr and acct.get("password"):
+                # API-style signup doesn't auto-login — log in with the freshly-created account.
+                # Probe a short ordered candidate list (one KNOWN credential, never a password list)
+                # and stop at the first that yields a session.
+                for lu in self._login_candidates(base):
+                    try:
+                        await self.tools.execute("acquire_session",
+                                                 {"login_url": lu,
+                                                  "username": acct.get("email") or acct.get("username"),
+                                                  "password": acct.get("password"), "role": role}, session_id)
+                    except Exception:
+                        pass
+                    hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                    if hdr:
+                        login_url = lu
+                        break
+            if not hdr:
+                continue  # created but no session — cannot test as this persona
+            ref = vlt.put(mid, role, {"username": acct.get("username"), "email": acct.get("email"),
+                                      "password": acct.get("password"), "headers": hdr,
+                                      "recipe": {"register_url": reg_url, "login_url": login_url,
+                                                 "mode": "registration", "success_oracle": "session-cookie-present"}})
+            pm.add(role, identity=res.get("identity") or acct.get("email", ""), method="registered",
+                   headers=hdr, account={"identity_ref": ref})
+            minted.append(role)
+            events.append({"type": "info", "content": "Created test persona '%s' (%s) via signup — session "
+                           "captured, secret vaulted (%s)." % (role, res.get("identity"), ref)})
 
         # 2) fall back to the verified single discovered credential as one persona
         scan_sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")

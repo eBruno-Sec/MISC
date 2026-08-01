@@ -198,7 +198,10 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                 created = resp.status_code < 400
                 note = f"form signup -> {resp.status_code}"
             else:
-                # JSON API fallback (SPA/REST): POST the common field shapes.
+                # JSON API fallback (SPA/REST): POST the common field shapes. A real registration API
+                # returns JSON (the created user); an SPA catch-all route returns 200 index.html for
+                # ANY path, so require a JSON body — otherwise /register on an Angular app would look
+                # "created" without creating anything.
                 resp, created = None, False
                 for body in ({"email": acct["email"], "password": acct["password"],
                               "passwordRepeat": acct["password"], "username": acct["username"]},
@@ -208,8 +211,16 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                     except Exception:
                         continue
                     if resp.status_code < 400:
-                        created = True
-                        break
+                        ct = (resp.headers.get("content-type") or "").lower()
+                        is_json = "json" in ct
+                        if not is_json:
+                            try:
+                                is_json = isinstance(resp.json(), (dict, list))
+                            except Exception:
+                                is_json = False
+                        if is_json:
+                            created = True
+                            break
                 note = f"json signup -> {resp.status_code if resp is not None else 'n/a'}"
             # capture any session the signup established
             cookie = "; ".join(f"{k}={v}" for k, v in c.cookies.items())
