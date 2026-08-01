@@ -1,2 +1,6 @@
 .env
 *.env
+
+# runtime / mission data written by the agent (vault, attack-chains, intel-feed snapshots,
+# techniques store). Created when tests or scans mount agent/ into the container. Never source.
+agent/data/
