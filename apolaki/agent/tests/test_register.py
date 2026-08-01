@@ -47,6 +47,16 @@ def test_login_only_page_is_not_a_register_form():
     assert R.parse_register_form(login_only, "https://t.example") is None
 
 
+def test_registration_rejection_markers():
+    # a sub-400 response is not proof of creation — 200 validation-error pages are rejected
+    assert R._registration_rejected("The e-mail is already registered.")
+    assert R._registration_rejected("Password must be at least 8 characters")
+    assert R._registration_rejected("Passwords do not match")
+    assert R._registration_rejected("Invalid email address")
+    assert not R._registration_rejected("Welcome! Your account has been created.")
+    assert not R._registration_rejected("")
+
+
 def test_detect_blockers():
     assert "captcha" in R.detect_blockers('<div class="g-recaptcha"></div>')
     assert "mfa" in R.detect_blockers("Enter your verification code from the authenticator app")

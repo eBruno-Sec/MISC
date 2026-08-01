@@ -47,6 +47,21 @@ def detect_blockers(html: str) -> list:
     return out
 
 
+# validation/rejection markers — many apps return HTTP 200 with an error page on a FAILED signup, so
+# a sub-400 status alone is not proof the account was created (CHAD review #3).
+_REG_FAIL_MARKERS = (
+    "already exist", "already registered", "already in use", "already taken", "must be unique",
+    "e-mail is already", "email is already", "is required", "must be at least", "password is too",
+    "passwords do not match", "password does not match", "invalid email", "not a valid",
+    "please correct", "registration failed", "could not create", "validation error",
+)
+
+
+def _registration_rejected(text: str) -> bool:
+    low = (text or "").lower()[:4000]
+    return any(m in low for m in _REG_FAIL_MARKERS)
+
+
 def _is_register_form(form: dict) -> int:
     """Score a parsed form for how much it looks like REGISTRATION (vs login). Higher = more likely
     a signup form. A register form typically has a password field plus a second password/confirm
@@ -195,8 +210,9 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                     resp = await c.get(form["action"], params=data)
                 else:
                     resp = await c.post(form["action"], data=data)
-                created = resp.status_code < 400
-                note = f"form signup -> {resp.status_code}"
+                # sub-400 is not enough: a 200 validation-error page is not a created account.
+                created = resp.status_code < 400 and not _registration_rejected(resp.text)
+                note = f"form signup -> {resp.status_code}" + (" (rejected page)" if not created else "")
             else:
                 # JSON API fallback (SPA/REST): POST the common field shapes. A real registration API
                 # returns JSON (the created user); an SPA catch-all route returns 200 index.html for
@@ -218,7 +234,7 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                                 is_json = isinstance(resp.json(), (dict, list))
                             except Exception:
                                 is_json = False
-                        if is_json:
+                        if is_json and not _registration_rejected(resp.text):
                             created = True
                             break
                 note = f"json signup -> {resp.status_code if resp is not None else 'n/a'}"
