@@ -93,9 +93,12 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
     _t(id="idor_bola_read", vuln_class="access_control", cwe="CWE-639", owasp="A01:2021",
        permission=ACTIVE, transferable=True, pack="idor_read",
        summary="IDOR/BOLA: one identity reads another identity's object.",
-       detect="Object reference in a URL/param + a second identity to compare against.",
-       exploit="Acquire two sessions; request the victim's object id from the attacker session.",
-       oracle="confirm_idor two-identity oracle: attacker receives the victim's populated object (distinct owner).",
+       detect="Object reference in a URL/param + a second same-privilege persona to compare against.",
+       exploit="Mint two same-privilege personas (autonomous signup, or operator-supplied); read the "
+               "owner's object id from the second persona.",
+       oracle="Two-user authorization matrix: the ANONYMOUS control is denied (object is protected) and a "
+              "DIFFERENT authenticated persona reads the SAME object as the owner (>=0.9 similarity) — "
+              "ownership-proven cross-user access. A public endpoint (anon also reads it) is never reported.",
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
@@ -103,9 +106,20 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        permission=ACTIVE, transferable=True, pack="bfla_privileged_action",
        summary="Broken function-level authz: low-privilege session reaches a privileged function.",
        detect="Privileged endpoint referenced in client code but not gated server-side.",
-       exploit="From a low-priv session, invoke the admin/privileged endpoint directly.",
-       oracle="Privileged endpoint returns 200 + privileged effect for a non-privileged session.",
+       exploit="From a low-priv persona, invoke the admin/privileged endpoint directly.",
+       oracle="Authorization matrix: a privileged-looking function returns 200 + privileged effect for a "
+              "non-privileged persona (rank < privileged).",
        maps_to={"juiceshop": ["Admin Section", "GDPR Data Export"]}),
+
+    _t(id="missing_authentication", vuln_class="access_control", cwe="CWE-306", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, pack="idor_read",
+       summary="Broken access control: a protected object endpoint is reachable with no authentication.",
+       detect="An object-bearing endpoint compared across the anonymous persona and an authenticated one.",
+       exploit="Request the object endpoint with NO session; receive the same protected data an authed user sees.",
+       oracle="Authorization matrix: the anonymous persona receives the SAME object data an authenticated "
+              "persona does — the endpoint does not require a session (only fires on object endpoints, so a "
+              "genuinely public page is never flagged).",
+       validated_on=["juiceshop"]),
 
     _t(id="mass_assignment", vuln_class="access_control", cwe="CWE-915", owasp="A01:2021",
        permission=ACTIVE, transferable=True,
