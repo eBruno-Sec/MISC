@@ -1640,25 +1640,48 @@ class ToolRegistry:
                     sim = difflib.SequenceMatcher(None, bo, ba).ratio()
                     if sim >= 0.9:
                         target = req if req.startswith("http") else base.rstrip("/") + req
-                        findings.append({
-                            "title": "IDOR / BOLA — cross-user object access confirmed",
-                            "severity": "high", "family": "idor", "confidence": "confirmed",
-                            "cwe": "CWE-639", "target": target,
-                            "tags": ["idor", "bola", "access-control", "horizontal"],
-                            "description": ("A protected, user-owned object was read by a DIFFERENT authenticated "
-                                            "user. The anonymous control was denied (object is protected); '%s' "
-                                            "(owner) and '%s' (a different user) both read the SAME object."
-                                            % (owner, attacker)),
-                            "impact": "Read other users' data by changing the object id; bulk exfiltration by walking ids.",
-                            "evidence": ("anon %s -> %s (denied); owner '%s' -> 200 (%db); attacker '%s' -> 200 "
-                                         "(%db); owner/attacker similarity %.3f (>=0.9 = same object)"
-                                         % (req, sn, owner, len(bo), attacker, len(ba), sim)),
-                            "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
-                        try:
-                            self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
-                                                      "cross-user read of %s" % target)
-                        except Exception:
-                            pass
+                        # OWNERSHIP PROOF (truth-first): two authed users seeing the same protected
+                        # object is only IDOR if the object is OWNED by one of them — otherwise it may
+                        # be a legitimately SHARED resource. We 'confirm' only with positive ownership
+                        # evidence: the object body carries the OWNER's identity (email local-part /
+                        # username) that a shared object would not. Otherwise it is a LEAD, not a finding.
+                        marker = str(inp.get("owner_identity") or "").strip().lower().split("@")[0]
+                        owned = len(marker) >= 3 and marker in bo.lower()
+                        if owned:
+                            findings.append({
+                                "title": "IDOR / BOLA — cross-user object access confirmed",
+                                "severity": "high", "family": "idor", "confidence": "confirmed",
+                                "cwe": "CWE-639", "target": target,
+                                "tags": ["idor", "bola", "access-control", "horizontal"],
+                                "description": ("A protected, user-owned object was read by a DIFFERENT authenticated "
+                                                "user. The anonymous control was denied (object is protected); the "
+                                                "object carries owner '%s' identity, and '%s' (a different user) read "
+                                                "the SAME object." % (owner, attacker)),
+                                "impact": "Read other users' data by changing the object id; bulk exfiltration by walking ids.",
+                                "evidence": ("anon %s -> %s (denied); owner '%s' -> 200 (%db, carries owner identity "
+                                             "'%s'); attacker '%s' -> 200 (%db); similarity %.3f (same object)"
+                                             % (req, sn, owner, len(bo), marker, attacker, len(ba), sim)),
+                                "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
+                            try:
+                                self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
+                                                          "cross-user read of %s" % target)
+                            except Exception:
+                                pass
+                        else:
+                            findings.append({
+                                "title": "Possible IDOR / BOLA — cross-user read (ownership unproven)",
+                                "severity": "medium", "family": "idor", "confidence": "lead",
+                                "cwe": "CWE-639", "target": target,
+                                "tags": ["idor", "bola", "access-control", "horizontal", "needs-ownership-proof"],
+                                "description": ("Two DIFFERENT authenticated users read the SAME protected object "
+                                                "(anonymous denied). This is an IDOR SIGNAL, not proof — the object "
+                                                "may be a legitimately SHARED resource. CONFIRM by proving one user "
+                                                "uniquely owns it (create the object as '%s' and re-read as '%s', or "
+                                                "match the owner's identity in the body)." % (owner, attacker)),
+                                "impact": "If the object is user-owned, any user can read others' records by id.",
+                                "evidence": ("anon %s -> %s (denied); '%s' and '%s' both read identical bytes "
+                                             "(similarity %.3f); owner identity not present in the object, so "
+                                             "ownership is UNPROVEN." % (req, sn, owner, attacker, sim))})
 
         seen, uniq = set(), []
         for f in findings:

@@ -1087,9 +1087,14 @@ class BBHAgent:
         # 5) run the matrix through the scoped + captured transport
         roles = [{"role": r["role"], "rank": r["rank"], "tenant": r["tenant"]} for r in pm.matrix_roles()]
         pair = pm.same_privilege_pair()
+        owner_identity = ""
+        if pair and pm.get(pair[0]):
+            p0 = pm.get(pair[0])
+            owner_identity = p0.identity or (p0.account or {}).get("email", "")
         res = await self.tools.execute("run_authz_matrix",
                                        {"base_url": base, "roles": roles, "operations": operations,
-                                        "pair": list(pair) if pair else None}, session_id)
+                                        "pair": list(pair) if pair else None,
+                                        "owner_identity": owner_identity}, session_id)
         for f in (res.findings or []):
             if self.mission_id:
                 try:

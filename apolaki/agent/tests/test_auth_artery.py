@@ -55,7 +55,8 @@ def test_full_auth_artery_trace(tmp_path, monkeypatch):
     async def transport(method, url, headers, body, follow):
         if not headers.get("Cookie"):
             return _R(401, "unauthorized"), 0.01
-        return _R(200, "victim basket: apples, juice, receipt #2"), 0.01
+        # the object carries the owner persona's identity -> ownership PROVEN -> confirmed IDOR
+        return _R(200, "order for apolaki_user_a@t.local: apples, juice, receipt #2"), 0.01
     t._http_send = transport
 
     events = asyncio.new_event_loop().run_until_complete(a._do_persona_authz("sess"))

@@ -28,26 +28,43 @@ def _reg():
 
 _ROLES = [{"role": "anonymous", "rank": 0}, {"role": "user_a", "rank": 1}, {"role": "user_b", "rank": 1}]
 _OPS = [{"request": "/basket/2", "path": "/basket/2"}]
-_INP = {"base_url": "http://target.tld", "roles": _ROLES, "operations": _OPS, "pair": ("user_a", "user_b")}
+_INP = {"base_url": "http://target.tld", "roles": _ROLES, "operations": _OPS,
+        "pair": ("user_a", "user_b"), "owner_identity": "carlos@t.local"}
 
 
 def _run(reg):
     return asyncio.new_event_loop().run_until_complete(reg._run_authz_matrix(_INP))
 
 
-def test_protected_cross_user_read_is_confirmed_idor():
+def test_owned_object_read_cross_user_is_confirmed_idor():
     reg = _reg()
 
     async def protected(method, url, headers, body, follow):
         if not headers.get("Cookie"):            # anonymous -> denied
             return _R(401, "unauthorized"), 0.01
-        return _R(200, "victim basket: apples, juice, receipt #2"), 0.01
+        # object carries the OWNER's identity -> ownership is PROVEN
+        return _R(200, "order for carlos@t.local: apples, juice, receipt #2"), 0.01
 
     reg._http_send = protected
     r = _run(reg)
-    idor = [f for f in r.findings if "IDOR" in f["title"]]
-    assert len(idor) == 1
-    assert idor[0]["confidence"] == "confirmed" and idor[0]["cwe"] == "CWE-639"
+    idor = [f for f in r.findings if f["confidence"] == "confirmed" and "IDOR" in f["title"]]
+    assert len(idor) == 1 and idor[0]["cwe"] == "CWE-639"
+
+
+def test_shared_object_without_ownership_is_lead_not_confirmed():
+    reg = _reg()
+
+    async def protected(method, url, headers, body, follow):
+        if not headers.get("Cookie"):
+            return _R(401, "unauthorized"), 0.01
+        # same protected object for both users, but NO owner identity in it -> could be shared
+        return _R(200, "team dashboard: shared widgets and counters"), 0.01
+
+    reg._http_send = protected
+    r = _run(reg)
+    assert not any(f["confidence"] == "confirmed" for f in r.findings)   # never over-claims
+    leads = [f for f in r.findings if f["confidence"] == "lead" and "IDOR" in f["title"]]
+    assert len(leads) == 1 and "needs-ownership-proof" in leads[0]["tags"]
 
 
 def test_anon_accessible_object_is_missing_auth_not_idor():
