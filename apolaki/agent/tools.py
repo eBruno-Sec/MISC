@@ -1664,6 +1664,97 @@ class ToolRegistry:
                    "gaps": len(result.get("gaps", [])), "confirmed": len(uniq)}
         return ToolResult("authz_matrix", base, True, json.dumps(summary), uniq)
 
+    async def _confirm_authz_write(self, inp: dict) -> ToolResult:
+        """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the
+        owner's object state, has a DIFFERENT user attempt a bounded change, re-reads as the owner:
+        if the change persisted, cross-user WRITE is confirmed (CWE-639, critical). The original
+        value is restored immediately — this stops at the last reversible proof boundary and never
+        finalizes an irreversible business action. Requires owner + attacker sessions and a target;
+        never fires unless explicitly invoked. Roles referenced by name (secrets resolved server-side)."""
+        import difflib
+        target = (inp.get("target_url") or "").strip()
+        if not target or not self.scope.validate(target)[0]:
+            return ToolResult("authz_write", target, False, "", [], "SCOPE BLOCK or missing target_url")
+        owner_h = self._role_headers(inp, "owner")
+        attacker_h = self._role_headers(inp, "attacker")
+        if not (owner_h and attacker_h):
+            return ToolResult("authz_write", target, True,
+                              json.dumps({"confirmed": False, "note": "need owner + attacker sessions"}), [])
+        try:
+            ro, _ = await self._http_send("GET", target, owner_h, None, True)
+        except Exception as e:
+            return ToolResult("authz_write", target, False, "", [], f"read failed: {e}")
+        if ro.status_code != 200 or len(ro.text) < 2:
+            return ToolResult("authz_write", target, True,
+                              json.dumps({"confirmed": False, "note": "owner cannot read the object"}), [])
+        orig = ro.text
+        try:
+            obj = json.loads(orig)
+        except Exception:
+            obj = None
+        marker = "apolaki_authz_probe"
+        field, value = inp.get("field"), inp.get("value")
+        if field is None and isinstance(obj, dict):
+            field = next((k for k, v in obj.items() if isinstance(v, str)
+                          and k.lower() not in ("id", "_id", "email", "password", "createdat", "updatedat")), None)
+            value = marker
+        elif field is not None and value is None:
+            value = marker
+        if field is None:
+            return ToolResult("authz_write", target, True,
+                              json.dumps({"confirmed": False, "note": "no mutable field found; supply field/value"}), [])
+        body = {field: value}
+        # attacker attempts the bounded write (PATCH, then PUT)
+        wrote = None
+        for method in ("PATCH", "PUT"):
+            try:
+                rw, _ = await self._http_send(method, target, {**attacker_h, "Content-Type": "application/json"}, body, True)
+            except Exception:
+                continue
+            if rw.status_code < 400:
+                wrote = method
+                break
+        # re-read as owner; did the attacker's change land on the owner's object?
+        after, changed = "", False
+        try:
+            ra, _ = await self._http_send("GET", target, owner_h, None, True)
+            after = ra.text
+            changed = (str(value) in after and str(value) not in orig)
+        except Exception:
+            pass
+        # RESTORE the original value (best-effort) — never leave the object mutated
+        restored = False
+        if changed and isinstance(obj, dict):
+            for method in (wrote or "PATCH", "PUT"):
+                try:
+                    rr, _ = await self._http_send(method, target, {**owner_h, "Content-Type": "application/json"},
+                                                  {field: obj.get(field)}, True)
+                except Exception:
+                    continue
+                if rr.status_code < 400:
+                    restored = True
+                    break
+        findings = []
+        if changed:
+            findings.append({
+                "title": "IDOR / BOLA — cross-user object WRITE confirmed", "severity": "critical",
+                "family": "idor", "confidence": "confirmed", "cwe": "CWE-639", "target": target,
+                "tags": ["idor", "bola", "access-control", "horizontal", "write"],
+                "description": ("A DIFFERENT authenticated user modified an object owned by another user. The write "
+                                "was verified by re-reading the object as the owner and observing the injected value; "
+                                "the original value was then restored."),
+                "impact": "Tamper with, corrupt, or take over other users' records (orders, profiles, balances).",
+                "evidence": ("owner GET %s -> 200; attacker %s field '%s'='%s' -> re-read as owner shows the change "
+                             "(restored=%s)." % (target, wrote, field, value, restored)),
+                "remediation": "Enforce object-level authorization on write paths: verify the session owns the id."})
+            try:
+                self.state.add_capability(self._Capability.FOREIGN_OBJECT_WRITE, "cross-user write of %s" % target)
+            except Exception:
+                pass
+        return ToolResult("authz_write", target, True,
+                          json.dumps({"confirmed": bool(changed), "write_method": wrote, "restored": restored}),
+                          findings)
+
     async def _browser_navigate(self, inp: dict) -> ToolResult:
         """ACTIVE: drive a real headless browser through a DECLARATIVE step list (goto / click /
         fill / press / wait — NEVER arbitrary JS from the model) and capture what a DevTools

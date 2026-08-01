@@ -90,3 +90,49 @@ def test_summary_shape():
     d = json.loads(r.output)
     assert d["ran"] is True and d["confirmed"] >= 1
     assert set(d["roles"]) == {"anonymous", "user_a", "user_b"}
+
+
+# ── horizontal WRITE oracle (with restore) ──
+def _run_write(reg):
+    return asyncio.new_event_loop().run_until_complete(reg._confirm_authz_write(
+        {"target_url": "http://target.tld/api/profile/1", "owner_session": "user_a",
+         "attacker_session": "user_b"}))
+
+
+def test_horizontal_write_confirmed_then_restored():
+    reg = _reg()
+    obj = {"name": "original-name"}
+
+    async def stateful(method, url, headers, body, follow):
+        if method == "GET":
+            return _R(200, json.dumps(obj)), 0.01
+        b = body if isinstance(body, dict) else json.loads(body or "{}")
+        obj.update(b)                                    # write persists (vulnerable app)
+        return _R(200, "ok"), 0.01
+
+    reg._http_send = stateful
+    r = _run_write(reg)
+    d = json.loads(r.output)
+    assert d["confirmed"] is True and d["restored"] is True
+    assert obj["name"] == "original-name"                # restored to the last reversible boundary
+    assert r.findings and r.findings[0]["cwe"] == "CWE-639" and r.findings[0]["severity"] == "critical"
+
+
+def test_horizontal_write_denied_is_not_confirmed():
+    reg = _reg()
+    obj = {"name": "original-name"}
+
+    async def enforced(method, url, headers, body, follow):
+        if method == "GET":
+            return _R(200, json.dumps(obj)), 0.01
+        if headers.get("Cookie") == "s=B":               # attacker write is properly denied
+            return _R(403, "forbidden"), 0.01
+        b = body if isinstance(body, dict) else json.loads(body or "{}")
+        obj.update(b)
+        return _R(200, "ok"), 0.01
+
+    reg._http_send = enforced
+    r = _run_write(reg)
+    assert json.loads(r.output)["confirmed"] is False
+    assert not r.findings
+    assert obj["name"] == "original-name"                # never mutated

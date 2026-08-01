@@ -1013,6 +1013,27 @@ class BBHAgent:
             self.findings.append(f)
             events.append({"type": "finding", "finding": f})
 
+        # 5b) horizontal WRITE test — Full mode only (state-changing), on objects already proven
+        #     cross-user READABLE, using the same persona pair. Bounded + restore-capable.
+        if self.mode == "full" and pair:
+            read_idor = [f["target"] for f in (res.findings or [])
+                         if f.get("family") == "idor" and "write" not in (f.get("tags") or [])]
+            for tgt in read_idor[:5]:
+                try:
+                    wr = await self.tools.execute("confirm_authz_write",
+                                                  {"target_url": tgt, "owner_session": pair[0],
+                                                   "attacker_session": pair[1]}, session_id)
+                except Exception:
+                    continue
+                for f in (wr.findings or []):
+                    if self.mission_id:
+                        try:
+                            f["id"] = db.add_finding(self.mission_id, f)
+                        except Exception:
+                            pass
+                    self.findings.append(f)
+                    events.append({"type": "finding", "finding": f})
+
         # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
         caps = pm.capabilities() + (["authenticated_surface_mapped"] if pm.session_roles() else [])
         for cap in caps:
