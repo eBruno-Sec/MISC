@@ -802,12 +802,31 @@ class BBHAgent:
         #    opted-in step (HITL) -- a scan never silently logs in.
         self._scan_credential = "%s:%s" % (user, pw)     # reuse channel (persisted to target memory; redacted in reports)
         self._scan_login_url = login_url
-        f = {"title": "Exposed application credentials for '%s'" % user, "severity": "medium",
-             "family": "sensitive_exposure", "confidence": "confirmed", "target": login_url,
-             "description": "The target exposes working account credentials (a published or leaked login), "
-                            "discovered during recon %s." % ("(inherited from a prior scan)" if from_prior
-                                                             else "of the target's own surface"),
-             "evidence": "Discovered credential %s:<redacted> for the login at %s." % (user, login_url),
+        # 2) VERIFY the discovered credential ACTUALLY WORKS with a single login (anti-brute capped) --
+        #    a found credential is only a real finding once it authenticates. This does NOT run the scan
+        #    authenticated; it just confirms validity + obtains a session. The FULL authenticated scan
+        #    stays opt-in (the rescan prompt).
+        try:
+            await self.tools.execute("acquire_session",
+                                     {"login_url": login_url, "username": user, "password": pw,
+                                      "role": "__scan__"}, session_id)
+        except Exception:
+            pass
+        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
+        verified = bool(sess)
+        self._creds_verified = verified
+        f = {"title": "%s application credentials for '%s'" % ("Confirmed working" if verified else "Exposed", user),
+             "severity": "high" if verified else "medium", "family": "sensitive_exposure",
+             "confidence": "confirmed" if verified else "candidate", "target": login_url,
+             "description": "The target exposes account credentials (a published or leaked login), discovered "
+                            "during recon %s.%s" % ("(inherited from a prior scan)" if from_prior
+                                                    else "of the target's own surface",
+                                                    " Apolaki verified they work by logging in and obtaining a "
+                                                    "valid session." if verified else ""),
+             "evidence": ("CONFIRMED working: a valid session was obtained by logging in to %s with %s:<redacted>."
+                          % (login_url, user)) if verified else
+                         ("Discovered %s:<redacted> for the login at %s, but a verification login did not yield a "
+                          "session (form/flow mismatch) -- treat as a lead." % (user, login_url)),
              "remediation": "Remove default/published credentials and rotate the account; never expose real "
                             "logins in client-reachable content."}
         if self.mission_id:
@@ -817,25 +836,24 @@ class BBHAgent:
                 pass
         self.findings.append(f)
         events.append({"type": "finding", "finding": f})
-        # 3) authenticate ONLY when the operator opted in (the UI offers this on a scan whose target has
-        #    prior discovered creds). Otherwise report + save and scan unauthenticated.
-        if not self.authenticated_scan:
-            events.append({"type": "info", "content": "Discovered credentials for '%s' — recorded as a finding "
-                           "and saved. This scan runs UNAUTHENTICATED; re-run with 'authenticated scan' to "
-                           "test the logged-in surface with these credentials." % user})
-            return events
-        await self.tools.execute("acquire_session",
-                                 {"login_url": login_url, "username": user, "password": pw,
-                                  "role": "__scan__"}, session_id)
-        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
-        if not sess:
-            events.append({"type": "info", "content": "Tried to authenticate as '%s' but the login did not "
-                           "yield a session (form/flow mismatch) — continuing unauthenticated." % user})
-            return events
-        self.tools.session_headers = {**sh, **sess}
-        events.append({"type": "info", "content": "Authenticated as '%s' from %s credentials — the remaining "
-                       "probes run logged-in (session applied across all probe types)."
-                       % (user, "prior-scan" if from_prior else "discovered")})
+        # 3) APPLY the session (whole scan runs authenticated) ONLY when the operator opted in -- the UI
+        #    offers this on a rescan whose target has prior discovered creds. Otherwise: verified + saved,
+        #    but the scan stays unauthenticated until the user chooses.
+        if self.authenticated_scan and verified:
+            self.tools.session_headers = {**sh, **sess}
+            events.append({"type": "info", "content": "Authenticated as '%s' from %s credentials — the remaining "
+                           "probes run logged-in (session applied across all probe types)."
+                           % (user, "prior-scan" if from_prior else "discovered")})
+        elif self.authenticated_scan and not verified:
+            events.append({"type": "info", "content": "Could not authenticate as '%s' — the verification login "
+                           "did not yield a session (form/flow mismatch); continuing unauthenticated." % user})
+        elif verified:
+            events.append({"type": "info", "content": "Verified WORKING credentials for '%s' (a valid session was "
+                           "obtained) — recorded as a finding and saved. This scan runs UNAUTHENTICATED; re-run "
+                           "with 'authenticated scan' to test the logged-in surface with these credentials." % user})
+        else:
+            events.append({"type": "info", "content": "Discovered a credential lead for '%s' (could not verify) — "
+                           "recorded and saved." % user})
         return events
 
     def _discover_login_url(self, base: str):
