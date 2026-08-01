@@ -1824,6 +1824,28 @@ async def get_canonical_graph(session_id: str):
     return d
 
 
+@app.get("/mission/{session_id}/export")
+async def export_mission(session_id: str):
+    """Portable, redacted mission bundle: metadata + findings + surface + canonical graph +
+    capabilities. The archival / hand-off / diagnostic artifact — safe to share (secrets scrubbed)."""
+    m = _require_mission(session_id)
+    import mission_export as _me
+    import asset_graph as _ag
+    recon, urls, findings = _graph_inputs(session_id)
+    snap = memory_mod.snapshot(recon, urls, findings)
+    caps = []
+    tl = (sessions.get(session_id) or {}).get("tools")
+    if tl is not None:
+        try:
+            caps = [c["capability"] for c in tl.state.to_dict().get("capabilities", [])]
+        except Exception:
+            caps = []
+    g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
+                                  capabilities=caps, scope_asset=memory_mod.target_key(m["scope"]))
+    return _me.build_bundle(mission=m, findings=findings, snapshot=snap,
+                            graph={**g.to_dict(), "stats": g.stats()}, capabilities=caps)
+
+
 @app.get("/memory/{session_id}/diff")
 async def get_memory_diff(session_id: str):
     """'Since last scan' — diff this mission's surface against the most recent
