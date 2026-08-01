@@ -23,11 +23,10 @@ services:
       # GitHub recon: YOUR OWN read-only PAT (no scopes needed), only to lift the
       # code-search rate limit. Empty = run_github_recon skips cleanly.
       - BBH_GITHUB_TOKEN=${BBH_GITHUB_TOKEN:-}
-      # OWASP ZAP DAST. The zap service below starts by default, so ZAP is AVAILABLE
-      # at deployment and the agent auto-detects it here (no manual ZAP_ADDR editing).
-      # ZAP is only USED when the user ticks "Enable ZAP" in the scan setup — so a
-      # default scan costs nothing extra. To run WITHOUT the ZAP container, disable
-      # the 'zap' service below (or `docker compose up -d --scale zap=0`).
+      # OWASP ZAP DAST. The zap service is OPT-IN (profile "dast", ~1GB idle) — start it with
+      # `docker compose --profile dast up -d zap` and the agent auto-detects it here. ZAP only
+      # actually RUNS when the user also ticks "Enable ZAP" in the scan setup; if the profile
+      # isn't up, an enabled-ZAP scan degrades gracefully (or blocks if require_zap).
       - ZAP_ADDR=${ZAP_ADDR:-http://zap:8090}
       - ZAP_API_KEY=${ZAP_API_KEY:-bbh-zap}
       # OAST for blind/OOB vulns (SSRF/XXE/RCE). Empty = off. e.g. BOAST or Interactsh
@@ -63,12 +62,12 @@ services:
       - NET_RAW
       - NET_ADMIN
 
-  # OWASP ZAP daemon for the run_zap DAST tool. Starts by default so ZAP is
-  # available at deployment; the agent only USES it when a scan enables ZAP.
-  # To run a lighter stack without ZAP: `docker compose up -d --scale zap=0`
-  # (or comment out this service). ~1GB RAM, ~40s first-boot while add-ons load.
+  # OWASP ZAP daemon for the run_zap DAST tool. OPT-IN (profile "dast") — ~1GB RAM, ~40s
+  # first-boot while add-ons load, so it no longer runs by default. Bring it up only when you
+  # want DAST: `docker compose --profile dast up -d zap`; the agent then auto-detects it.
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
+    profiles: ["dast"]              # ~1GB idle; opt-in. Enable with: docker compose --profile dast up -d zap
     command: >
       zap.sh -daemon -host 0.0.0.0 -port 8090
       -config api.key=${ZAP_API_KEY:-bbh-zap}
@@ -105,6 +104,7 @@ services:
   # compose network.
   dvwa:
     image: vulnerables/web-dvwa:latest
+    profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42080:80"
     restart: unless-stopped
@@ -115,6 +115,7 @@ services:
   # prover logs in bee/bug at low security. Scored via per-class response oracles (no scoreboard API).
   bwapp:
     image: raesene/bwapp:latest
+    profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42088:80"
     restart: unless-stopped
@@ -124,6 +125,7 @@ services:
   # after `up`: GET http://localhost:42089/set-up-database.php (builds the MySQL schema).
   mutillidae:
     image: citizenstig/nowasp:latest
+    profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42089:80"
     restart: unless-stopped
