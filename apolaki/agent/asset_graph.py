@@ -1,0 +1,189 @@
+"""
+Canonical asset & intelligence graph.
+
+ONE node/edge store that every phase reads AND writes. Where graph_model.py renders a tidy
+topology TREE for the UI, this is the durable brain: each fact is a node or edge that carries
+PROVENANCE — where it came from, when, how confident, which scope asset owns it, what it might
+unlock, and whether it has been tested yet. The planner queries it ("what do I know, what is
+untested, what could it enable?") instead of re-deriving from flat lists.
+
+Pure + deterministic: no AI, no network. Persists to JSON per mission so a later scan resumes the
+world model. Secrets never live here — a credential/persona node stores a vault reference, never the
+raw secret (see vault.py).
+
+Node kinds (open set): org, scope_rule, domain, subdomain, host, ip, cidr, asn, port, service,
+webapp, api, endpoint, param, object, credential, persona, session, cloud_account, repo, commit,
+component, finding, capability, technique, mission.
+Edge rels (open set): has_host, resolves_to, exposes, serves, has_param, owns, authenticated_as,
+enables, confirms, references, belongs_to, runs, found_on.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+
+# confidence rungs — a fact's strength, raised (never silently lowered) as evidence accrues.
+LOW, MEDIUM, HIGH, CONFIRMED = 0.3, 0.6, 0.9, 1.0
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _nid(kind: str, key: str) -> str:
+    return f"{kind}:{key}"
+
+
+class AssetGraph:
+    def __init__(self, mission_id: str = "default"):
+        self.mission_id = mission_id
+        self._nodes: dict = {}
+        self._edges: dict = {}   # (src, dst, rel) -> edge
+
+    # ── writing facts ──
+    def observe(self, kind: str, key: str, *, label: str = None, source: str = "",
+                confidence: float = MEDIUM, scope_asset: str = "", enables=None,
+                tested: bool = None, **props) -> str:
+        """Add or MERGE a fact. Idempotent by (kind, key). Appends the source to provenance, raises
+        confidence to the max seen, refreshes last_seen, and merges props. Returns the node id."""
+        nid = _nid(kind, key)
+        n = self._nodes.get(nid)
+        now = _now()
+        if n is None:
+            n = {"id": nid, "kind": kind, "key": key, "label": label or key,
+                 "confidence": float(confidence), "scope_asset": scope_asset,
+                 "sources": [], "enables": [], "consumed_by": [],
+                 "tested": bool(tested) if tested is not None else False,
+                 "tested_ts": None, "first_seen": now, "last_seen": now, "props": {}}
+            self._nodes[nid] = n
+        else:
+            n["confidence"] = max(n["confidence"], float(confidence))
+            n["last_seen"] = now
+            if label:
+                n["label"] = label
+            if scope_asset and not n.get("scope_asset"):
+                n["scope_asset"] = scope_asset
+            if tested is not None:
+                n["tested"] = n["tested"] or bool(tested)
+        if source and source not in [s["source"] for s in n["sources"]]:
+            n["sources"].append({"source": source, "ts": now})
+        for cap in (enables or []):
+            if cap not in n["enables"]:
+                n["enables"].append(cap)
+        for k, v in props.items():
+            if v is not None:
+                n["props"][k] = v
+        return nid
+
+    def link(self, src_id: str, dst_id: str, rel: str, *, source: str = "",
+             confidence: float = MEDIUM) -> bool:
+        """Add a typed edge (idempotent). Both endpoints must already be nodes."""
+        if src_id not in self._nodes or dst_id not in self._nodes:
+            return False
+        k = (src_id, dst_id, rel)
+        e = self._edges.get(k)
+        now = _now()
+        if e is None:
+            self._edges[k] = {"source": src_id, "target": dst_id, "rel": rel,
+                              "provenance": source, "confidence": float(confidence),
+                              "first_seen": now, "last_seen": now}
+        else:
+            e["last_seen"] = now
+            e["confidence"] = max(e["confidence"], float(confidence))
+        return True
+
+    def mark_tested(self, node_id: str, ok: bool = True) -> None:
+        n = self._nodes.get(node_id)
+        if n:
+            n["tested"] = True
+            n["tested_ts"] = _now()
+            n["props"]["test_result"] = "confirmed" if ok else "negative"
+
+    def mark_consumed(self, node_id: str, tool: str) -> None:
+        n = self._nodes.get(node_id)
+        if n and tool and tool not in n["consumed_by"]:
+            n["consumed_by"].append(tool)
+
+    def add_enable(self, node_id: str, capability: str) -> None:
+        n = self._nodes.get(node_id)
+        if n and capability and capability not in n["enables"]:
+            n["enables"].append(capability)
+
+    # ── reading facts ──
+    def node(self, node_id: str):
+        return self._nodes.get(node_id)
+
+    def nodes(self, kind: str = None) -> list:
+        return [n for n in self._nodes.values() if kind is None or n["kind"] == kind]
+
+    def edges(self, rel: str = None) -> list:
+        return [e for e in self._edges.values() if rel is None or e["rel"] == rel]
+
+    def neighbors(self, node_id: str, rel: str = None) -> list:
+        out = []
+        for e in self._edges.values():
+            if rel is not None and e["rel"] != rel:
+                continue
+            if e["source"] == node_id:
+                out.append(e["target"])
+            elif e["target"] == node_id:
+                out.append(e["source"])
+        return list(dict.fromkeys(out))
+
+    def untested(self, kind: str = None) -> list:
+        """Nodes not yet tested — the planner's worklist ('what might this unlock, was it tested?')."""
+        return [n for n in self.nodes(kind) if not n.get("tested")]
+
+    def in_scope(self, scope_asset: str) -> list:
+        return [n for n in self._nodes.values() if n.get("scope_asset") == scope_asset]
+
+    def enabling(self, capability: str) -> list:
+        """Nodes whose provenance says they could unlock a given capability/technique."""
+        return [n for n in self._nodes.values() if capability in (n.get("enables") or [])]
+
+    # ── persistence ──
+    def to_dict(self) -> dict:
+        return {"mission_id": self.mission_id,
+                "nodes": list(self._nodes.values()),
+                "edges": list(self._edges.values())}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AssetGraph":
+        g = cls((data or {}).get("mission_id", "default"))
+        for n in (data or {}).get("nodes", []):
+            g._nodes[n["id"]] = n
+        for e in (data or {}).get("edges", []):
+            g._edges[(e["source"], e["target"], e["rel"])] = e
+        return g
+
+    def stats(self) -> dict:
+        by_kind: dict = {}
+        for n in self._nodes.values():
+            by_kind[n["kind"]] = by_kind.get(n["kind"], 0) + 1
+        return {"nodes": len(self._nodes), "edges": len(self._edges),
+                "by_kind": by_kind, "untested": len(self.untested())}
+
+    def save(self, base_dir: str = None) -> str:
+        base = base_dir or os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "graph")
+        try:
+            os.makedirs(base, exist_ok=True)
+            safe = "".join(c for c in str(self.mission_id) if c.isalnum() or c in "-_") or "default"
+            path = os.path.join(base, f"{safe}.json")
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f)
+            os.replace(tmp, path)
+            return path
+        except Exception:
+            return ""
+
+    @classmethod
+    def load(cls, mission_id: str, base_dir: str = None) -> "AssetGraph":
+        base = base_dir or os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "graph")
+        safe = "".join(c for c in str(mission_id) if c.isalnum() or c in "-_") or "default"
+        try:
+            with open(os.path.join(base, f"{safe}.json"), "r", encoding="utf-8") as f:
+                return cls.from_dict(json.load(f))
+        except Exception:
+            return cls(mission_id)
