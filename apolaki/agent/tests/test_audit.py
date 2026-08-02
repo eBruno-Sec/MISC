@@ -53,3 +53,17 @@ def test_truncation_is_detected(tmp_path):
     p.write_text("\n".join(rows[:-1]) + "\n")
     ok, _ = audit.AuditLog(str(p)).verify_chain()
     assert ok is False
+
+
+def test_checkpoint_deletion_is_detected(tmp_path):
+    import os
+    p = tmp_path / "audit.jsonl"
+    log = audit.AuditLog(str(p))
+    log.record("a", mission="m1")
+    log.record("b", mission="m1")
+    assert log.verify_chain()[0] is True
+    # delete the checkpoint but leave the log records -> a legit log always has a checkpoint, so this
+    # is flagged (partial defence — a full wipe of BOTH log and checkpoint still can't be detected).
+    os.remove(str(p) + ".head")
+    ok, idx = audit.AuditLog(str(p)).verify_chain()
+    assert ok is False and idx == -3

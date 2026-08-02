@@ -1,8 +1,10 @@
 """
-Mission request budget — a simple, deterministic cap on how many HTTP requests one mission may
-make. Off by default (limit 0 = unlimited, no behaviour change); set BBH_REQUEST_BUDGET (or pass a
-limit) to bound a mission so a runaway scan can't hammer a target. Charged at the transport
-chokepoint (_http_send); when exhausted, further requests fail gracefully as normal tool errors.
+Mission WEIGHTED-WORK budget — a deterministic cap on how much request-work one mission may do. It
+is NOT an exact request counter: Apolaki's own HTTP calls cost 1 each (charged at _http_send), while
+an external tool run costs a fixed WEIGHT estimate (nuclei/ffuf/sqlmap = 100, etc. — an external
+tool may actually make anywhere from a handful to tens of thousands of requests, so treat the number
+as bounded work, not a precise request count; CHAD re-audit #9). Off by default (limit 0 = unlimited);
+set BBH_REQUEST_BUDGET to bound a runaway scan. When exhausted, further work fails as normal errors.
 
 Pure + thread-safe; unit-tested.
 """

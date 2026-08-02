@@ -1,11 +1,15 @@
 """
 Structured, tamper-evident audit log.
 
-Append-only JSONL where each record carries the SHA-256 of the previous record — a hash chain — so
-any edit, reorder, or deletion of history is detectable (verify_chain). It records the
-security-relevant, state-changing actions of an engagement: scans launched, credentials discovered,
-sessions acquired, accounts created, intrusive checks run, mission exports. No secrets are stored —
-metadata is passed through vault.redact, so only labels + vault references land in the log.
+Append-only JSONL where each record carries the SHA-256 of the previous record — a hash chain — plus
+an HMAC-signed head checkpoint. This detects EDITS, REORDERS, and tail-TRUNCATION (deleting the last
+records) as long as the checkpoint survives. HONEST SCOPE (CHAD re-audit #8): it is tamper-EVIDENT
+against accidental/casual mutation, NOT independent tamper-PROOF — the checkpoint key lives beside the
+data by default, so anyone with write access to the data volume can delete BOTH the log tail and the
+checkpoint and pass verification, or re-sign a forged checkpoint if they read the key. True
+independence needs an EXTERNAL anchor (remote log sink / notary), which is future work. It records
+the security-relevant, state-changing actions of an engagement. No secrets are stored — metadata goes
+through vault.redact, so only labels + vault references land in the log.
 
 Pure logic (hashing/chaining) is unit-tested; the only side effect is appending a line to a file.
 """
@@ -135,7 +139,9 @@ class AuditLog:
             prev = r["hash"]
         cp = self._read_checkpoint()
         if cp == "TAMPERED":
-            return False, -2
+            return False, -2                                 # checkpoint signature forged/altered
+        if cp is None and lines:
+            return False, -3                                 # records exist but the checkpoint is gone (deleted)
         if isinstance(cp, dict):
             if len(lines) < cp.get("count", 0):
                 return False, len(lines)                     # tail records were deleted

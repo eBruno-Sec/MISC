@@ -55,8 +55,10 @@ _PRECONDITIONS = {
 def derive_observations(surface=None, harvest=None, findings=None, leads=None, code_intel=None,
                         authenticated=False, graph=None):
     """Deterministically compute the observation set from everything recon gathered. Pure, no LLM.
-    When a live canonical asset graph is supplied, its projected observations are merged in, so the
-    planner reads the world model directly (CHAD review #7 — planner-authoritative graph)."""
+    When a live canonical asset graph is supplied, its projected observations are ALSO merged in —
+    so the planner reads the graph too. HONEST SCOPE (CHAD re-audit #5): this is ADDITIVE; the flat
+    recon/surface state is still the primary input. The graph is not yet the sole 'brain' — making
+    the planner query the graph as its authoritative source is a larger refactor still pending."""
     obs = set()
     urls = [str(u).lower() for u in (surface or [])]
     ci = code_intel or {}
