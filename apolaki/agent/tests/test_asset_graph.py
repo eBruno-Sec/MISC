@@ -171,6 +171,30 @@ def test_provenance_summary_shows_where_intel_came_from():
     assert g.provenance_summary()["needs_validation_count"] == 3
 
 
+def test_graph_as_brain_replans_when_graph_changes():
+    # graph-as-brain slice 2: the planner queries the graph for its NEXT action, folds the result
+    # back in, and REPLANS — a graph change must alter the next decision (not a fixed script).
+    g = AG.build_from_engagement(
+        "m", urls=["http://h/api/orders/1"],
+        findings=[{"title": "SQLi login", "family": "sql_injection", "confidence": "confirmed",
+                   "target": "http://h/login"}],
+        services=[{"host": "h", "port": 6379}], capabilities=[])
+    a1 = g.plan_next()
+    assert a1 and a1["action"] == "chase_capability" and a1["capability"] == "database_read"
+    # realize the capability -> the SAME graph must now recommend a DIFFERENT action
+    g.apply_result(a1, gained_capability="database_read")
+    a2 = g.plan_next()
+    assert a2 != a1
+    assert a2 is None or a2.get("capability") != "database_read"
+    # exhaust the remaining actions by folding each result back; plan_next eventually drains to None
+    for _ in range(10):
+        a = g.plan_next()
+        if a is None:
+            break
+        g.apply_result(a, tested_ok=True, gained_capability=a.get("capability"))
+    assert g.plan_next() is None            # a fully-consumed world model has no next action
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

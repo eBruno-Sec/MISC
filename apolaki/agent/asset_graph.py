@@ -246,6 +246,29 @@ class AssetGraph:
             uniq.append(a)
         return uniq[:limit]
 
+    def plan_next(self):
+        """The SINGLE next action the graph recommends (top of next_best_actions), or None when the
+        world model has nothing left to pursue. This is the planner querying the graph as its brain —
+        the action is chosen from graph state (unrealized capabilities, untested services/objects),
+        not from a flat script."""
+        acts = self.next_best_actions(limit=1)
+        return acts[0] if acts else None
+
+    def apply_result(self, action: dict, *, tested_ok=None, gained_capability=None) -> None:
+        """Fold an executed action's RESULT back into the graph so the NEXT plan_next() reflects it —
+        the close-the-loop step that makes the graph the source of truth (plan -> act -> update ->
+        REPLAN), not a one-shot read. Marks the action's target node tested and/or records a newly
+        gained capability node so a satisfied precondition stops being suggested."""
+        tgt = (action or {}).get("target")
+        if tgt and tested_ok is not None:
+            # mark EVERY node matching the target (an endpoint and its object may share a label); a
+            # single-match break could mark the wrong kind and leave the intended node forever untested.
+            for n in list(self._nodes.values()):
+                if n.get("key") == tgt or n.get("label") == tgt:
+                    self.mark_tested(n["id"], ok=tested_ok)
+        if gained_capability:
+            self.observe("capability", gained_capability, source="planner")
+
     # ── persistence ──
     def to_dict(self) -> dict:
         return {"mission_id": self.mission_id,
