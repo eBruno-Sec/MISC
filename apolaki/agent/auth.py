@@ -133,6 +133,16 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
     try:
         async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=timeout) as c:
             page = await c.get(login_url)
+            # don't mint a false session when the login is gated by CAPTCHA / MFA / magic-link — those
+            # are manual steps; surface a PAUSE rather than a bogus header (CHAD review #4).
+            try:
+                import register as _reg
+                blk = [b for b in _reg.detect_blockers(page.text) if b in ("captcha", "mfa", "email_verification")]
+            except Exception:
+                blk = []
+            if blk:
+                return {"headers": {}, "verified": False, "blocked": blk,
+                        "note": "login needs a manual step (%s) — cannot authenticate head-lessly" % ", ".join(blk)}
             form = parse_login_form(page.text, str(page.url))
             if form and form["pass_field"]:
                 data = dict(form["hidden"])
