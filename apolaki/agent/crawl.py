@@ -23,6 +23,33 @@ def same_origin(u: str, base: str) -> bool:
     return pu.scheme in ("http", "https") and bool(pu.netloc) and pu.netloc == pb.netloc
 
 
+_FORM_RE = re.compile(r"<form\b[^>]*>(.*?)</form>", re.I | re.S)
+_ACTION_RE = re.compile(r"""\baction\s*=\s*["']?([^"'\s>]+)""", re.I)
+_METHOD_RE = re.compile(r"""\bmethod\s*=\s*["']?([a-zA-Z]+)""", re.I)
+_FIELD_RE = re.compile(r"""<(?:input|textarea|select)\b[^>]*\bname\s*=\s*["']?([^"'\s>]+)""", re.I)
+
+
+def extract_forms(html: str, base: str) -> list:
+    """Parse HTML forms into {action(absolute), method, fields[]} — the authenticated crawl's form
+    discovery (CHAD capability D). Deterministic, dependency-free (regex, not a live browser). An
+    empty/missing action resolves to `base`. Fields are input/textarea/select names. Pure + testable."""
+    from urllib.parse import urljoin
+    out = []
+    for m in _FORM_RE.finditer(html or ""):
+        head = (html[m.start():m.start() + 400])
+        inner = m.group(1) or ""
+        am = _ACTION_RE.search(head)
+        action = urljoin(base, am.group(1)) if am and am.group(1) else base
+        mm = _METHOD_RE.search(head)
+        method = (mm.group(1).upper() if mm else "GET")
+        fields = []
+        for fm in _FIELD_RE.finditer(inner):
+            if fm.group(1) not in fields:
+                fields.append(fm.group(1))
+        out.append({"action": action, "method": method, "fields": fields})
+    return out
+
+
 def bfs_frontier(candidates, base: str, seen, limit: int = 40) -> list:
     """The next-depth frontier: from `candidates`, keep URLs that are new (not in `seen`), same-origin
     as `base`, and not static assets — de-duplicated and capped at `limit`. Deterministic order (first

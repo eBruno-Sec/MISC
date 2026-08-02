@@ -1050,14 +1050,29 @@ class BBHAgent:
         # fixed list. Pure crawl.bfs_frontier picks the frontier; the visits are scope-gated + budgeted.
         try:
             import crawl as _crawl
-            seen = set(before)
-            discovered = [u for u in (self.tools.urls or []) if u not in before]
-            frontier = _crawl.bfs_frontier(discovered, base, seen, limit=30)
+            import os as _os
+            # configurable recursion depth (CHAD capability D): default 2, capped at 4. Each round
+            # follows the newly-discovered authed frontier one level deeper AND extracts FORMS from
+            # the fetched pages (action + method + fields), feeding form targets back into the surface.
+            max_depth = max(1, min(int(_os.environ.get("BBH_CRAWL_DEPTH", "2") or 2), 4))
             deep_role = (roles or [None])[0]
-            for u in frontier:
-                if self.scope.validate(u)[0]:
+            seen = set(before)
+            for _round in range(max_depth - 1):     # depth-1 (routes + browser) already done above
+                discovered = [u for u in (self.tools.urls or []) if u not in seen]
+                frontier = _crawl.bfs_frontier(discovered, base, seen, limit=30)
+                if not frontier:
+                    break
+                for u in frontier:
+                    seen.add(u)
+                    if not self.scope.validate(u)[0]:
+                        continue
                     try:
-                        await self.tools.execute("http_read", {"url": u, "session": deep_role}, session_id)
+                        res = await self.tools.execute("http_read", {"url": u, "session": deep_role}, session_id)
+                        body = getattr(res, "output", "") if isinstance(getattr(res, "output", None), str) else ""
+                        if "<form" in body.lower():
+                            for fm in _crawl.extract_forms(body, u):
+                                if fm.get("action") and self.scope.validate(fm["action"])[0]:
+                                    self.tools._add_urls([fm["action"]])
                     except Exception:
                         pass
         except Exception:

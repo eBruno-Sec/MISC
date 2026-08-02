@@ -24,3 +24,20 @@ def test_frontier_is_bounded_and_ordered():
     cands = ["http://h/p%d" % i for i in range(100)]
     fr = crawl.bfs_frontier(cands, base, set(), limit=10)
     assert len(fr) == 10 and fr[0] == "http://h/p0"     # first-occurrence order, capped
+
+
+def test_extract_forms_parses_action_method_fields():
+    html = ('<html><body>'
+            '<form action="/login" method="POST"><input name="email"><input name="password"></form>'
+            '<form><input name="q"><textarea name="comment"></textarea></form>'
+            '</body></html>')
+    forms = crawl.extract_forms(html, "http://h/page")
+    assert forms[0]["action"] == "http://h/login" and forms[0]["method"] == "POST"
+    assert forms[0]["fields"] == ["email", "password"]
+    # a form with no action resolves to the page URL, default method GET
+    assert forms[1]["action"] == "http://h/page" and forms[1]["method"] == "GET"
+    assert set(forms[1]["fields"]) == {"q", "comment"}
+
+
+def test_extract_forms_empty_when_no_forms():
+    assert crawl.extract_forms("<html><p>no forms here</p></html>", "http://h/") == []
