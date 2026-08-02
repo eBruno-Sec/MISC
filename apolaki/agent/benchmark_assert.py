@@ -96,9 +96,13 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
        "auth_success=%s" % artery.get("auth_success"))
     ck("authz_matrix_ran", bool(matrix.get("ran")) and (matrix.get("operations") or 0) >= f["min_matrix_operations"],
        "ran=%s operations=%s" % (matrix.get("ran"), matrix.get("operations")))
-    # matrix operations ARE authenticated requests (each replayed as every persona)
-    ck("authenticated_requests_made", (matrix.get("operations") or 0) * max(1, len(personas)) > 0,
-       "ops*personas=%s" % ((matrix.get("operations") or 0) * max(1, len(personas))))
+    # REAL transport proof (CHAD re-audit #2): counted at the wire, NOT matrix_ops*personas arithmetic.
+    areq = artery.get("authenticated_requests") or {}
+    ck("authenticated_requests_attempted", (areq.get("attempted") or 0) > 0, "attempted=%s" % areq.get("attempted"))
+    ck("authenticated_requests_succeeded", (areq.get("succeeded") or 0) > 0,
+       "succeeded=%s status_dist=%s" % (areq.get("succeeded"), areq.get("status_dist")))
+    ck("both_personas_authenticated", bool(areq.get("both_personas_succeeded")),
+       "by_role=%s" % areq.get("by_role"))
     # personas must never carry secrets
     ck("personas_carry_no_secret", "password" not in json.dumps(artery).lower(), "")
 
@@ -174,7 +178,8 @@ def signature(base: str, sid: str) -> dict:
         "graph_kinds": (graph.get("stats") or {}).get("by_kind") or {},
         "auth": {"personas": len(artery.get("personas") or []),
                  "auth_success": artery.get("auth_success") or 0,
-                 "matrix_operations": matrix.get("operations") or 0},
+                 "matrix_operations": matrix.get("operations") or 0,
+                 "auth_requests_succeeded": (artery.get("authenticated_requests") or {}).get("succeeded") or 0},
     }
 
 
@@ -201,6 +206,9 @@ def compare_signatures(base_sig: dict, new_sig: dict, variance: float = 0.15) ->
        "base=%s new=%s" % (ba.get("auth_success"), na.get("auth_success")))
     ck("determinism_matrix_ops_within_variance", within(ba.get("matrix_operations", 0), na.get("matrix_operations", 0)),
        "base=%s new=%s" % (ba.get("matrix_operations"), na.get("matrix_operations")))
+    ck("determinism_auth_requests_within_variance",
+       within(ba.get("auth_requests_succeeded", 0), na.get("auth_requests_succeeded", 0)),
+       "base=%s new=%s" % (ba.get("auth_requests_succeeded"), na.get("auth_requests_succeeded")))
     bc, nc = base_sig.get("counts", {}), new_sig.get("counts", {})
     for k in ("findings", "leads", "confirmed"):
         ck("determinism_%s_within_variance" % k, within(bc.get(k, 0), nc.get(k, 0)),

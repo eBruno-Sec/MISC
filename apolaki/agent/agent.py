@@ -1239,6 +1239,12 @@ class BBHAgent:
                                        {"base_url": base, "roles": roles, "operations": operations,
                                         "pair": list(pair) if pair else None,
                                         "owner_identity": owner_identity}, session_id)
+        # real per-persona transport counters from the matrix (CHAD #2) — attempted/succeeded auth
+        # requests, status distribution, endpoints touched. Stored in _auth_artery below as PROOF.
+        try:
+            self._authz_request_stats = json.loads(res.output or "{}").get("auth_requests", {})
+        except Exception:
+            self._authz_request_stats = {}
         for f in (res.findings or []):
             if self.mission_id:
                 try:
@@ -1287,6 +1293,11 @@ class BBHAgent:
         # is what a correctness benchmark asserts on (auth_success>=2, matrix ran) instead of a smoke test.
         try:
             plist = (pm.to_dict() or {}).get("personas", [])
+            areq = getattr(self, "_authz_request_stats", {}) or {}
+            by_role = areq.get("by_role", {}) or {}
+            # PROOF (not inference): real authenticated requests happened AND succeeded from BOTH
+            # same-privilege personas — the strongest evidence the sessions are genuinely usable.
+            both_ok = bool(pair) and all((by_role.get(r, {}).get("succeeded", 0) > 0) for r in (pair or []))
             self._auth_artery = {
                 "ran": True,
                 "personas": plist,
@@ -1298,6 +1309,15 @@ class BBHAgent:
                            "findings": len(res.findings or []),
                            "pair": list(pair) if pair else None,
                            "ran": True},
+                # REAL transport evidence (CHAD #2): counted at the wire, not matrix_ops*personas
+                "authenticated_requests": {
+                    "attempted": areq.get("attempted", 0),
+                    "succeeded": areq.get("succeeded", 0),
+                    "by_role": by_role,
+                    "status_dist": areq.get("status_dist", {}),
+                    "endpoints_touched": areq.get("endpoints_touched", 0),
+                    "both_personas_succeeded": both_ok,
+                },
                 "capabilities": caps,
             }
         except Exception:

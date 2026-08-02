@@ -1670,13 +1670,29 @@ class ToolRegistry:
         def _headers_for(role, rank):
             return {} if rank == 0 else dict(self._sessions.get(role, {}))
 
+        # REAL transport counters (CHAD re-audit #2): PROVE authenticated requests actually happened
+        # per persona, instead of inferring matrix_ops*personas. attempted = a request that carried
+        # this role's real session; succeeded = the server accepted + served it (2xx/3xx). status_dist
+        # + endpoints_touched are durable evidence the requests hit the wire and passed the auth layer.
+        tc = {"attempted": 0, "succeeded": 0, "by_role": {}, "status_dist": {}, "_endpoints": set()}
+
         async def _fetch(path, role, rank):
             url = path if path.startswith("http") else base.rstrip("/") + "/" + path.lstrip("/")
             if not self.scope.validate(url)[0]:
                 return 0, ""
+            authed = rank > 0
+            if authed:
+                tc["attempted"] += 1
+                tc["by_role"].setdefault(role, {"attempted": 0, "succeeded": 0})["attempted"] += 1
             try:
                 r, _ = await self._http_send("GET", url, _headers_for(role, rank), None, True)
-                return r.status_code, r.text[:8000]
+                st = r.status_code
+                tc["status_dist"][str(st)] = tc["status_dist"].get(str(st), 0) + 1
+                tc["_endpoints"].add(path)
+                if authed and 200 <= (st or 0) < 400:
+                    tc["succeeded"] += 1
+                    tc["by_role"][role]["succeeded"] += 1
+                return st, r.text[:8000]
             except Exception:
                 return 0, ""
 
@@ -1797,8 +1813,12 @@ class ToolRegistry:
             if k not in seen:
                 seen.add(k)
                 uniq.append(f)
+        auth_requests = {"attempted": tc["attempted"], "succeeded": tc["succeeded"],
+                         "by_role": tc["by_role"], "status_dist": tc["status_dist"],
+                         "endpoints_touched": len(tc["_endpoints"])}
         summary = {"ran": True, "roles": [r["role"] for r in roles], "operations": len(operations),
-                   "gaps": len(result.get("gaps", [])), "confirmed": len(uniq)}
+                   "gaps": len(result.get("gaps", [])), "confirmed": len(uniq),
+                   "auth_requests": auth_requests}
         return ToolResult("authz_matrix", base, True, json.dumps(summary), uniq)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:

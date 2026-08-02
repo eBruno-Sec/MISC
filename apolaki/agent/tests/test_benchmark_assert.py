@@ -14,7 +14,12 @@ def _healthy():
         "auth_artery": {"ran": True, "auth_success": 2,
                         "personas": [{"role": "user_a", "rank": 1, "method": "registered"},
                                      {"role": "user_b", "rank": 1, "method": "registered"}],
-                        "matrix": {"ran": True, "operations": 39, "findings": 34}},
+                        "matrix": {"ran": True, "operations": 39, "findings": 34},
+                        "authenticated_requests": {"attempted": 78, "succeeded": 70,
+                                                   "by_role": {"user_a": {"attempted": 39, "succeeded": 35},
+                                                               "user_b": {"attempted": 39, "succeeded": 35}},
+                                                   "status_dist": {"200": 60, "404": 8, "401": 8, "500": 2},
+                                                   "endpoints_touched": 39, "both_personas_succeeded": True}},
         "findings": [{"title": "BOLA basket", "family": "access_control", "confidence": "lead"}],
         "leads": [{"title": "reflected marker", "family": "xss", "confidence": "candidate"}],
     }
@@ -71,6 +76,22 @@ def test_lost_auth_artery_is_caught(monkeypatch):
     assert "authz_matrix_ran" in fails
 
 
+def test_one_persona_session_silently_failing_is_caught(monkeypatch):
+    # CHAD #2: the artery "ran" and the matrix executed, but user_b's session never actually worked
+    # (0 successful authed responses). Inference (matrix_ops*personas) would miss this; real transport
+    # counters catch it — both_personas_succeeded is False and succeeded-from-user_b is 0.
+    sid, jmap, dmap = _healthy()
+    ar = jmap["/report/%s/json" % sid]["auth_artery"]["authenticated_requests"]
+    ar["by_role"]["user_b"] = {"attempted": 39, "succeeded": 0}   # user_b session dead
+    ar["both_personas_succeeded"] = False
+    _install(monkeypatch, jmap, dmap)
+    fails = _fails(BA.run_checks("http://x", sid))
+    assert "both_personas_authenticated" in fails
+    # the aggregate attempted/succeeded can still be >0 (user_a worked), so those alone would NOT
+    # have caught it — the both-personas invariant is what does.
+    assert "authenticated_requests_attempted" not in fails
+
+
 def test_degenerate_one_node_graph_is_caught(monkeypatch):
     sid, jmap, dmap = _healthy()
     jmap["/graph/canonical/%s" % sid]["stats"] = {"nodes": 1, "edges": 0, "by_kind": {"host": 1}}
@@ -108,7 +129,8 @@ def test_signature_captures_deterministic_facts(monkeypatch):
     sig = BA.signature("http://x", sid)
     assert sig["families"] == ["access_control", "xss"]           # sorted, deduped
     assert sig["counts"] == {"findings": 1, "leads": 1, "confirmed": 0}
-    assert sig["auth"] == {"personas": 2, "auth_success": 2, "matrix_operations": 39}
+    assert sig["auth"] == {"personas": 2, "auth_success": 2, "matrix_operations": 39,
+                           "auth_requests_succeeded": 70}
     assert sig["graph_kinds"]["endpoint"] == 120
 
 
