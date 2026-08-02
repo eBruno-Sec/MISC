@@ -40,11 +40,11 @@ def test_gaps_to_findings_maps_types():
          "roles": ["tenant_b_user"], "evidence": "tenant B read tenant A data"},
     ]}
     fs = AM.gaps_to_findings(result, base_url="https://t")
-    by_family_cwe = {(f["family"], f["cwe"]) for f in fs}
-    assert ("access_control", "CWE-306") in by_family_cwe   # missing auth
-    assert ("access_control", "CWE-285") in by_family_cwe   # bfla / vertical
-    assert ("access_control", "CWE-639") in by_family_cwe   # cross-tenant
-    assert all(f["confidence"] == "confirmed" for f in fs)
+    conf_by_cwe = {f["cwe"]: f["confidence"] for f in fs}
+    # heuristic signals are LEADS (CHAD #2/#4); only tenant/ownership-evidenced gaps are confirmed
+    assert conf_by_cwe["CWE-306"] == "lead"          # missing-auth: may be public by design
+    assert conf_by_cwe["CWE-285"] == "lead"          # bfla: may be the user's own resource
+    assert conf_by_cwe["CWE-639"] == "confirmed"     # cross-tenant: carries tenant evidence
     assert all(f["target"].startswith("https://t/") for f in fs)
 
 
@@ -58,8 +58,9 @@ def test_public_endpoint_is_not_a_finding():
     assert AM.gaps_to_findings(result) == []
 
 
-def test_missing_auth_only_when_authed_also_accesses():
-    # anon AND an authed user both get the same protected data -> missing_authentication gap -> finding
+def test_missing_auth_is_a_lead_not_a_confirmed_high():
+    # anon + an authed user get the SAME data — but identical data could be a legitimately PUBLIC
+    # resource, so this is a LEAD needing data-comparison confirmation, NOT a confirmed High (CHAD #2).
     cells = [
         {"request": "/api/orders/1", "role": "anonymous", "rank": 0, "status": 200, "body": "ORDER#1 data"},
         {"request": "/api/orders/1", "role": "user_a", "rank": 1, "status": 200, "body": "ORDER#1 data"},
@@ -67,3 +68,4 @@ def test_missing_auth_only_when_authed_also_accesses():
     result = authz.build_matrix(cells)
     fs = AM.gaps_to_findings(result, base_url="https://t")
     assert len(fs) == 1 and fs[0]["cwe"] == "CWE-306"
+    assert fs[0]["confidence"] == "lead" and fs[0]["severity"] == "medium"

@@ -939,16 +939,37 @@ class BBHAgent:
         return out[:6]
 
     async def _run_service_packs(self, session_id: str) -> list:
-        """Bridge the port scan -> service classification -> service-pack EXECUTION. Parses nmap open
-        ports, routes each to its technique pack, and RUNS the pack for every discovered non-web
-        service, recording confirmed exposures. Best-effort; no-op when there are no non-web services."""
+        """Beyond-web: DISCOVER non-web services on the target, classify them, and RUN each matching
+        technique pack. Self-contained — it does a bounded socket port-scan of common service ports
+        ITSELF (so it no longer depends on the model having run nmap first; CHAD review #1), in
+        addition to any ports a prior nmap already reported. Scope-gated, bounded, best-effort."""
+        import asyncio as _aio
         import service_router as _sr
+        from urllib.parse import urlparse as _up
         events = []
         recon = getattr(self.tools, "recon", {}) or {}
-        host = recon.get("target") or recon.get("domain") or ""
-        ports = (recon.get("nmap") or {}).get("open_ports") or []
+        base = self._primary_base()
+        host = (_up(base).hostname if base else "") or recon.get("target") or recon.get("domain") or ""
+        if not host or not self.scope.validate(host)[0]:
+            return events
+        services = _sr.parse_nmap_ports((recon.get("nmap") or {}).get("open_ports") or [], host)
+        known = {s["port"] for s in services}
+        probe = [p for p in (21, 22, 23, 25, 53, 110, 143, 389, 445, 873, 1433, 1521, 2049, 2375,
+                             3306, 3389, 5432, 5900, 5985, 6379, 9200, 11211, 27017) if p not in known]
+
+        async def _open(p):
+            try:
+                r, w = await _aio.wait_for(_aio.open_connection(host, p), timeout=1.5)
+                w.close()
+                return p
+            except Exception:
+                return None
+        for p in [x for x in await _aio.gather(*[_open(p) for p in probe]) if x]:
+            svc = _sr.fingerprint(p)
+            services.append({"host": host, "port": p, "service": svc, "banner": ""})
+            self.tools.recon.setdefault("nmap", {}).setdefault("open_ports", []).append("%d/tcp open %s" % (p, svc))
         ran = 0
-        for s in _sr.parse_nmap_ports(ports, host):
+        for s in services:
             if _sr.is_web(s["service"]) or s["service"] == "unknown" or not s.get("host"):
                 continue
             try:

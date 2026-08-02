@@ -82,22 +82,37 @@ def candidate_operations(urls, max_ops: int = 25) -> list:
     return ops
 
 
+# These gap TYPES are heuristic SIGNALS, not proof, so they are emitted as LEADS (truth-first):
+#  - missing_authentication: the anon-reachable object may be a legitimately PUBLIC resource; build_matrix
+#    does not compare the returned data, so a public catalog would otherwise become a false High.
+#  - bfla: a privileged-LOOKING path reached by a user may just be the user's OWN resource (/settings,
+#    /users/<self>) — confirming needs a proven privileged control persona + a denied-action proof.
+# bola_idor / cross_tenant carry ownership/tenant evidence, so they stay confirmed. (The driver's
+# own-object-differential IDOR path is separate and emits its own confirmed/lead finding.)
+_GAP_CONFIDENCE = {"missing_authentication": "lead", "bfla": "lead",
+                   "bola_idor": "confirmed", "cross_tenant": "confirmed"}
+
+
 def _describe(gap: dict) -> str:
     t = gap.get("type")
     roles = ", ".join(gap.get("roles", []) or [])
     base = {
-        "missing_authentication": "An endpoint returned protected data to an unauthenticated request.",
+        "missing_authentication": ("An object endpoint returned data to an UNAUTHENTICATED request. This is a "
+                                   "SIGNAL, not proof — confirm it is not a legitimately public resource by "
+                                   "comparing the anonymous response to a per-user one."),
         "bola_idor": "A user received an object owned by a different user — object-level authorization is missing.",
-        "bfla": "A privileged function was reached by a non-privileged role — function-level authorization is missing.",
+        "bfla": ("A privileged-LOOKING path was reached by a non-privileged authenticated role. This is a "
+                 "SIGNAL — confirm with a PROVEN privileged persona that it is actually a privileged function "
+                 "(not the user's own resource, e.g. /settings or /users/<self>)."),
         "cross_tenant": "A user in one tenant received data belonging to another tenant.",
     }.get(t, "Authorization gap detected by the differential matrix.")
     return f"{base} Roles involved: {roles}." if roles else base
 
 
 def gaps_to_findings(matrix_result: dict, base_url: str = "") -> list:
-    """Map build_matrix gaps to Apolaki finding dicts. Public endpoints do not appear here — a
-    missing_authentication gap only fires when an anonymous role got the SAME data an authed role
-    did (authz.build_matrix), so a genuinely public page is never reported as an access-control bug."""
+    """Map build_matrix gaps to Apolaki finding dicts. missing_authentication and bfla are emitted as
+    LEADS (heuristic signals — see _GAP_CONFIDENCE); only ownership/tenant-evidenced gaps are confirmed.
+    This avoids marking a public catalog or a user's own resource as a High access-control finding."""
     findings = []
     for g in (matrix_result or {}).get("gaps", []) or []:
         meta = _GAP_META.get(g.get("type"))
@@ -111,14 +126,15 @@ def gaps_to_findings(matrix_result: dict, base_url: str = "") -> list:
             target = base_url.rstrip("/") + "/" + req.lstrip("/")
         else:
             target = req
+        conf = _GAP_CONFIDENCE.get(g.get("type"), "lead")
         findings.append({
-            "title": title,
-            "severity": g.get("severity", sev),
+            "title": ("Possible " + title) if conf == "lead" else title,
+            "severity": "medium" if conf == "lead" else g.get("severity", sev),
             "family": family,
-            "confidence": "confirmed",
+            "confidence": conf,
             "cwe": cwe,
             "target": target,
-            "tags": tags,
+            "tags": tags + (["needs-confirmation"] if conf == "lead" else []),
             "description": _describe(g),
             "evidence": g.get("evidence", ""),
             "remediation": _REMEDIATION.get(g.get("type"), ""),
