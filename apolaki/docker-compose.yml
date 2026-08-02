@@ -74,7 +74,7 @@ services:
   # first-boot while add-ons load, so it no longer runs by default. Bring it up only when you
   # want DAST: `docker compose --profile dast up -d zap`; the agent then auto-detects it.
   zap:
-    image: ghcr.io/zaproxy/zaproxy:stable
+    image: ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2
     profiles: ["dast"]              # ~1GB idle; opt-in. Enable with: docker compose --profile dast up -d zap
     command: >
       zap.sh -daemon -host 0.0.0.0 -port 8090
@@ -96,7 +96,7 @@ services:
   # is disabled so the full XSS/NoSQL challenge set is reachable. No source is vendored: this
   # just runs the public image.
   juice-shop:
-    image: bkimminich/juice-shop:latest
+    image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
     environment:
       - 'NODE_CONFIG={"challenges":{"safetyMode":"disabled"}}'
     ports:
@@ -111,7 +111,7 @@ services:
   # Database", log in admin/password, set DVWA Security = low. Reachable at http://dvwa on the
   # compose network.
   dvwa:
-    image: vulnerables/web-dvwa:latest
+    image: vulnerables/web-dvwa@sha256:dae203fe11646a86937bf04db0079adef295f426da68a92b40e3b181f337daa7
     profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42080:80"
@@ -122,7 +122,7 @@ services:
   # after `up`: GET http://localhost:42088/install.php?install=yes (creates the MySQL schema), then the
   # prover logs in bee/bug at low security. Scored via per-class response oracles (no scoreboard API).
   bwapp:
-    image: raesene/bwapp:latest
+    image: raesene/bwapp@sha256:2f41183ea9f9e8fb36678d7a2a0c8a9db9a59f4569cee02fe6664b419b2600ee
     profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42088:80"
@@ -132,7 +132,7 @@ services:
   # oracle confirms open_redirect on a 2nd lab (Juice Shop was the 1st) -> generalized. One-time setup
   # after `up`: GET http://localhost:42089/set-up-database.php (builds the MySQL schema).
   mutillidae:
-    image: citizenstig/nowasp:latest
+    image: citizenstig/nowasp@sha256:8bf6f283163bbc269ccfff513e4a06776325cb4957f683df9edd4ab98c6966de
     profiles: ["labs"]             # secondary cross-validation lab; opt-in via: docker compose --profile labs up -d
     ports:
       - "127.0.0.1:42089:80"
@@ -153,7 +153,7 @@ services:
   #   docker compose --profile browser up -d headless-chrome
   #   (and set CDP_BROWSER_URL=http://headless-chrome:3000 for the agent)
   headless-chrome:
-    image: ghcr.io/browserless/chromium:latest
+    image: ghcr.io/browserless/chromium@sha256:07f6561d607b80312cc9b2500e98e40cf1eb0276fb647984fa074c96b9dd41dc
     profiles: ["browser"]
     environment:
       - CONCURRENT=2
@@ -170,7 +170,7 @@ services:
   #   docker compose --profile proxy up -d mitmproxy
   # (bring up the browser too for full capture: `--profile browser --profile proxy up -d`)
   mitmproxy:
-    image: mitmproxy/mitmproxy:latest
+    image: mitmproxy/mitmproxy@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f
     profiles: ["proxy"]
     # The image entrypoint gosu-drops to the unprivileged `mitmproxy` user, which can't write the
     # root-owned shared volume (the addon's flow writes would be silently denied). Override the entrypoint
