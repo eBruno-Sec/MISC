@@ -46,8 +46,11 @@ test:
 	$(COMPOSE) build agent
 	docker run --rm -v "$(CURDIR)/agent:/app" -w /app apolaki-agent:latest python -m pytest tests/ -q
 
-benchmark:            ## end-to-end NO-MOCKS proof: artery -> confirmed IDOR -> restart survives
+benchmark:            ## artery-mechanism NO-MOCKS proof: register -> IDOR signal -> restart survives
 	@sh scripts/benchmark.sh
+
+benchmark-full:       ## FULL-MISSION NO-MOCKS proof: /engage -> /run -> /report + /graph via the real API
+	@sh scripts/benchmark_full.sh
 
 down:
 	$(COMPOSE) $(FULL) down
