@@ -89,13 +89,18 @@ def build_matrix(cells: list) -> dict:
                              "evidence": ("role '%s' (tenant %s) received data belonging to tenant %s — "
                                           "cross-tenant isolation is broken." % (r, ten, oten))})
 
-        # 4) BFLA — a privileged-looking function reached by a non-privileged role
+        # 4) BFLA — a privileged-looking function reached by an AUTHENTICATED non-privileged user.
+        # Anonymous access to it is NOT bfla (that's missing_authentication / a public endpoint), so
+        # exclude anon and only fire when the endpoint is not anon-reachable — otherwise a public
+        # endpoint whose path merely looks privileged is a false positive.
         if _looks_privileged(req):
-            lowpriv_in = [r for r, c in got if c.get("rank", 1) < 2]
-            if lowpriv_in:
-                gaps.append({"type": "bfla", "request": req, "severity": "high", "roles": lowpriv_in,
-                             "evidence": ("privileged function reached by non-privileged role(s) %s — "
-                                          "function-level authorization is not enforced." % lowpriv_in)})
+            anon_got = any(c.get("rank", 1) == 0 for _, c in got)
+            authed_lowpriv = [r for r, c in got if c.get("rank", 1) == 1]
+            if authed_lowpriv and not anon_got:
+                gaps.append({"type": "bfla", "request": req, "severity": "high", "roles": authed_lowpriv,
+                             "evidence": ("privileged function reached by authenticated non-privileged role(s) %s "
+                                          "(anonymous is denied) — function-level authorization is not enforced."
+                                          % authed_lowpriv)})
 
     # dedup identical gaps (same type+request+roles)
     seen, uniq = set(), []

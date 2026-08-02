@@ -33,6 +33,18 @@ def test_bfla_detected_on_privileged_route():
     assert any(g["type"] == "bfla" and "userA" in g["roles"] for g in r["gaps"])
 
 
+def test_bfla_not_flagged_when_anonymous_can_access():
+    # a public endpoint whose path merely LOOKS privileged (anonymous can reach it) must NOT be
+    # reported as BFLA — it's missing_authentication. (Regression from a live Juice Shop run.)
+    cells = [
+        {"request": "GET /admin/stats", "role": "anon", "rank": 0, "status": 200, "body": "public stats"},
+        {"request": "GET /admin/stats", "role": "userA", "rank": 1, "status": 200, "body": "public stats"},
+    ]
+    r = authz.build_matrix(cells)
+    assert not any(g["type"] == "bfla" for g in r["gaps"])                    # not a privilege bug
+    assert any(g["type"] == "missing_authentication" for g in r["gaps"])      # it's missing-auth
+
+
 def test_cross_tenant_detected():
     cells = [
         {"request": "GET /doc/9", "role": "tAuser", "rank": 1, "owner": "tBuser", "tenant": "A",
