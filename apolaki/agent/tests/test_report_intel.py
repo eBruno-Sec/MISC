@@ -62,6 +62,22 @@ def test_findings_json_carries_intel_provenance():
     assert pkg2["intel_provenance"] == {}
 
 
+def test_html_report_renders_authentication_assurance_panel():
+    aa = {"ran": True, "auth_success": 2,
+          "personas": [{"role": "user_a"}, {"role": "user_b"}],
+          "matrix": {"operations": 39, "findings": 34},
+          "authenticated_requests": {"attempted": 78, "succeeded": 70, "both_personas_succeeded": True,
+                                     "status_dist": {"200": 60, "401": 10}}}
+    prov = {"by_source": {"wayback": 12, "recon": 40}, "needs_validation_count": 12}
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, auth_artery=aa, intel_provenance=prov)
+    assert "Authentication &amp; Assurance" in html
+    assert "attempted <b>78</b>" in html and "succeeded <b>70</b>" in html
+    assert "both personas succeeded: <b>yes</b>" in html
+    assert "wayback=12" in html
+    # no auth artery + no provenance -> panel absent (never fabricated)
+    assert "Authentication &amp; Assurance" not in report.generate_html_report("P", [], {"in_scope": ["x"]})
+
+
 def test_findings_json_carries_auth_artery_proof():
     # the report exposes whether the autonomous auth artery actually fired, so "authenticated scan"
     # is PROVABLE (personas, auth_success, matrix ops) — not merely requested in the payload.

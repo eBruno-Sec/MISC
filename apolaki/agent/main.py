@@ -1399,7 +1399,8 @@ async def get_report_html(session_id: str, download: bool = False):
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
         intel=m["context"].get("intel"), kev_cwes=_kev_cwes(),
-        orchestration=m["context"].get("orchestration"))
+        orchestration=m["context"].get("orchestration"),
+        auth_artery=_auth_artery_evidence(session_id, m), intel_provenance=_intel_provenance(session_id))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)

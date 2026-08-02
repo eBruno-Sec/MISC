@@ -1022,7 +1022,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
                          security_headers: list = None, intel: dict = None, kev_cwes: set = None,
-                         orchestration: dict = None) -> str:
+                         orchestration: dict = None, auth_artery: dict = None,
+                         intel_provenance: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -1631,6 +1632,43 @@ def generate_html_report(program: str, findings: list, scope: dict,
         toc_items.append(("playbook", "Manual Testing Playbook"))
     if method_html:
         toc_items.append(("methodology", "Methodology & Tool Ledger"))
+    # Authentication & Assurance panel (CHAD capability E): surface the auth-artery PROOF (personas,
+    # auth_success, REAL request counters, both-personas), the confirmed-vs-lead split, and the intel
+    # provenance feeds + needs-validation worklist — the evidence a reviewer needs to trust the run.
+    assurance_html = ""
+    aa = auth_artery or {}
+    prov = intel_provenance or {}
+    if aa.get("ran") or prov.get("by_source"):
+        n_conf = sum(1 for f in (findings or []) if str(f.get("confidence")) == "confirmed")
+        n_lead = len(findings or []) - n_conf + len(leads or [])
+        rows = []
+        if aa.get("ran"):
+            areq = aa.get("authenticated_requests") or {}
+            personas = ", ".join(e(p.get("role", "")) for p in (aa.get("personas") or []) if p.get("role"))
+            mtx = aa.get("matrix") or {}
+            rows += [
+                ("Personas established", "%s (auth_success=%s)" % (e(personas) or "—", e(str(aa.get("auth_success", 0))))),
+                ("Authenticated requests", "attempted <b>%s</b>, succeeded <b>%s</b>; both personas succeeded: <b>%s</b>"
+                 % (e(str(areq.get("attempted", 0))), e(str(areq.get("succeeded", 0))),
+                    "yes" if areq.get("both_personas_succeeded") else "no")),
+                ("Authorization matrix", "%s operation(s), %s finding(s)"
+                 % (e(str(mtx.get("operations", 0))), e(str(mtx.get("findings", 0))))),
+                ("Auth request status mix", e(str(areq.get("status_dist") or {}))),
+            ]
+        rows.append(("Findings posture", "<b>%d</b> confirmed &middot; <b>%d</b> unconfirmed lead(s) "
+                     "(truth-first: only proof-backed findings are confirmed)" % (n_conf, n_lead)))
+        if prov.get("by_source"):
+            feeds = ", ".join("%s=%s" % (e(k), e(str(v))) for k, v in list((prov.get("by_source") or {}).items())[:8])
+            rows.append(("Intel provenance (per source)", e(feeds)))
+            rows.append(("Needs-validation worklist", "%s recovered fact(s) awaiting a live check"
+                         % e(str(prov.get("needs_validation_count", 0)))))
+        body_rows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td></tr>" % (k, v) for k, v in rows)
+        assurance_html = ("<h2 id='assurance'>Authentication &amp; Assurance</h2>"
+                          "<p class='sub'>Proof the engagement did what it claims — the authentication artery "
+                          "actually fired (real per-persona requests), findings are separated confirmed-vs-lead, "
+                          "and every recovered intelligence fact carries its source + validation state.</p>"
+                          "<table class='tbl'>" + body_rows + "</table>")
+        toc_items.append(("assurance", "Authentication & Assurance"))
     toc_items.append(("integrity", "Report Integrity"))
     toc_items.append(("appendix", "Appendix"))
     toc = "".join(f"<li><a href='#{i}'>{lbl}</a></li>" for i, lbl in toc_items)
@@ -1777,6 +1815,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {rootcause_html}
 {kev_html}
 {orch_html}
+{assurance_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}
