@@ -43,6 +43,36 @@ def test_non_cloud_is_noop_on_graph():
     assert g.stats()["nodes"] == 0
 
 
+def test_storage_exposure_oracle():
+    exp, ev = CI.storage_exposure(200, "<?xml v><ListBucketResult><Contents><Key>db.sql</Key></Contents>")
+    assert exp and "signature" in ev
+    assert CI.storage_exposure(403, "<Error>AccessDenied</Error>")[0] is False   # denied != exposed
+    assert CI.storage_exposure(200, "<html>a normal page</html>")[0] is False    # no listing sig
+
+
+def test_cloud_probe_driver_confirms_public_bucket():
+    import asyncio
+    import scope
+    import tools
+    sc = scope.ScopeEngine()
+    sc.load_manual(["data.s3.amazonaws.com"], [], "T")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    class _R:
+        def __init__(self, status, text):
+            self.status_code, self.text = status, text
+            self.headers = type("H", (), {"items": lambda self: []})()
+
+    async def listing(method, url, headers, body, follow):
+        return _R(200, "<ListBucketResult><Contents><Key>db.sql</Key></Contents></ListBucketResult>"), 0.01
+
+    reg._http_send = listing
+    r = asyncio.new_event_loop().run_until_complete(
+        reg._run_cloud_probe({"url": "https://data.s3.amazonaws.com/"}))
+    assert r.findings and r.findings[0]["confidence"] == "confirmed" and "cloud" in r.findings[0]["tags"]
+    assert reg.graph.nodes("object")                       # exposure recorded in the live graph
+
+
 def test_cloud_fingerprint_runs_during_harvest():
     # cloud_intel is actually WIRED: a harvested response with cloud headers records a cloud asset
     # into the registry's live graph (not just a standalone module).

@@ -71,6 +71,23 @@ def analyze(url: str = "", headers: dict = None, cname: str = "", ip_org: str = 
             "signals": [s for s in ("headers" if headers else "", "cname" if cname else "") if s]}
 
 
+def storage_exposure(status, body: str = "") -> tuple:
+    """Deterministic public-storage-listing oracle: a 200 carrying a bucket-listing XML signature
+    (S3 ListBucketResult / Azure EnumerationResults / GCS) means the bucket is publicly LISTABLE
+    without auth. Returns (exposed, evidence). Read-only signal — no credentials, no writes."""
+    try:
+        code = int(status or 0)
+    except Exception:
+        code = 0
+    if code != 200:
+        return False, ""
+    b = (body or "")[:4000]
+    for sig in ("<ListBucketResult", "<EnumerationResults", "<Contents>", "<Blob>", "<Blob "):
+        if sig in b:
+            return True, "public bucket-listing signature '%s' returned with HTTP 200 (no auth)" % sig
+    return False, ""
+
+
 def to_graph_facts(graph, host: str, verdict: dict, source: str = "cloud_intel") -> None:
     """Record a cloud verdict into the canonical asset graph: a cloud_account node (provider) linked
     to the host, and a public storage bucket node when found (flagged as exposure to investigate)."""

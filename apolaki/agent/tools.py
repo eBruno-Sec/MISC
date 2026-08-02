@@ -1859,6 +1859,35 @@ class ToolRegistry:
                           json.dumps({"confirmed": bool(changed), "write_method": wrote, "restored": restored}),
                           findings)
 
+    async def _run_cloud_probe(self, inp: dict) -> ToolResult:
+        """ACTIVE (cloud): probe a discovered object-storage bucket for PUBLIC listing (S3 / Azure Blob
+        / GCS). Scope-gated, read-only GET, no credentials. A public listing is a confirmed exposure
+        finding + a live-graph node. This turns cloud fingerprinting into real cloud technique execution."""
+        import cloud_intel as _ci
+        url = (inp.get("url") or "").strip()
+        if not url or not self.scope.validate(url)[0]:
+            return ToolResult("cloud_probe", url, False, "", [], "SCOPE BLOCK or missing url")
+        try:
+            r, _ = await self._http_send("GET", url, {}, None, True)
+        except Exception as e:
+            return ToolResult("cloud_probe", url, False, "", [], "fetch failed: %s" % e)
+        exposed, ev = _ci.storage_exposure(r.status_code, r.text)
+        findings = []
+        if exposed:
+            findings.append({
+                "title": "Public cloud storage bucket — listable without authentication",
+                "severity": "high", "family": "sensitive_exposure", "confidence": "confirmed",
+                "cwe": "CWE-264", "target": url, "tags": ["cloud", "storage", "exposure", "no-auth"],
+                "description": "A cloud object-storage bucket is publicly listable without authentication.",
+                "evidence": "GET %s -> %s; %s" % (url, r.status_code, ev),
+                "remediation": "Make the bucket private; block public ACLs and anonymous listing."})
+            try:
+                self.graph.observe("object", url, label="cloud-storage", source="cloud_probe",
+                                   tested=True, enables=["arbitrary_file_read"])
+            except Exception:
+                pass
+        return ToolResult("cloud_probe", url, True, json.dumps({"exposed": exposed}), findings)
+
     async def _run_service_pack(self, inp: dict) -> ToolResult:
         """ACTIVE (beyond web): actually RUN a discovered non-web service's technique pack and apply its
         deterministic oracle — HTTP-exposed control planes (docker/kubelet/elasticsearch) over the
