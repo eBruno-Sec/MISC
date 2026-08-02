@@ -1937,6 +1937,24 @@ async def export_mission(session_id: str):
                             graph={**g.to_dict(), "stats": g.stats()}, capabilities=caps)
 
 
+@app.get("/cloud/posture/{provider}")
+async def cloud_posture(provider: str):
+    """READ-ONLY cloud posture review of the operator's OWN account. For `linode` it uses the
+    LINODE_TOKEN env (a read-only Linode API token) to enumerate users/firewalls/buckets/databases/
+    instances and flag misconfigs (public buckets, firewalls open to 0.0.0.0/0 on SSH/DB ports,
+    over-broad users, exposed DBs, admin-without-2FA). No writes, no exploitation. The token is used
+    for auth only and is NEVER returned. AWS/Azure/GCP report blocked until their SDK wiring is enabled."""
+    import cloud_iam as _ci
+    res = _ci.collect(provider)
+    findings = res.get("findings", []) or []
+    return {"provider": provider, "blocked": bool(res.get("blocked")), "reason": res.get("reason", ""),
+            "counts": res.get("counts", {}),
+            "summary": {"findings": len(findings),
+                        "by_severity": {s: sum(1 for f in findings if f.get("severity") == s)
+                                        for s in ("critical", "high", "medium", "low")}},
+            "findings": findings}
+
+
 @app.get("/audit")
 async def get_audit(mission: str = None, limit: int = 200):
     """The tamper-evident audit log (hash-chained): recent security-relevant, state-changing actions

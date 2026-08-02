@@ -109,3 +109,50 @@ def test_collect_live_is_blocked_without_credentials(monkeypatch):
     for prov in ("aws", "azure", "gcp"):
         res = CI.collect(prov)
         assert res["blocked"] is True and "credential" in res["reason"].lower()
+
+
+_LINODE = {
+  "users": [{"username": "student", "tfa_enabled": False}],
+  "grants": {"student": {"global": {"account_access": "read_write", "add_linodes": True}}},
+  "firewalls": [{"id": 1, "label": "web-fw", "rules": {"inbound": [
+      {"action": "ACCEPT", "ports": "22", "addresses": {"ipv4": ["0.0.0.0/0"]}},
+      {"action": "ACCEPT", "ports": "443", "addresses": {"ipv4": ["0.0.0.0/0"]}}]}}],
+  "buckets": [{"label": "backups", "acl": "public-read"}],
+  "databases": [{"label": "appdb", "engine": "mysql", "allow_list": ["0.0.0.0/0"]}],
+  "instances": [{"label": "web-1", "ipv4": ["203.0.113.9"]}],
+}
+
+
+def test_linode_normalize_and_misconfig_findings():
+    model = CI.normalize_linode(_LINODE)
+    assert model["provider"] == "linode"
+    findings = CI.analyze(model)
+    cats = {t for f in findings for t in f["tags"]}
+    assert "cloud_firewall_open_to_internet" in cats   # SSH 22 open to 0.0.0.0/0
+    assert "cloud_public_resource" in cats             # public bucket + public db
+    assert "cloud_admin_without_2fa" in cats           # read_write account access, tfa off
+    # port 443 open to the world is NOT flagged (not a sensitive/admin port)
+    fw = next(f for f in findings if "cloud_firewall_open_to_internet" in f["tags"])
+    assert "22" in fw["evidence"] and "443" not in fw["title"]
+    # every finding carries proof + a fix
+    assert all(f.get("evidence") and f.get("remediation") for f in findings)
+
+
+def test_linode_collect_fixture_and_blocked_without_token(monkeypatch):
+    res = CI.collect("linode", fixture=_LINODE)
+    assert res["blocked"] is False and res["provider"] == "linode" and res["findings"]
+    monkeypatch.delenv("LINODE_TOKEN", raising=False)
+    blocked = CI.collect("linode")
+    assert blocked["blocked"] is True and "LINODE_TOKEN" in blocked["reason"]
+
+
+def test_linode_token_never_appears_in_output():
+    # the token is auth-only; a fixture collect carries no token, and the model/findings never store it
+    res = CI.collect("linode", fixture=_LINODE)
+    assert "secrettoken" not in str(res).lower() and "authorization" not in str(res).lower()
+
+
+def test_linode_is_a_ready_provider_with_env_token(monkeypatch):
+    monkeypatch.setenv("LINODE_TOKEN", "x")
+    st = CI.live_enumeration_supported()
+    assert "linode" in st["providers_ready"] and "linode" in st["live_collector_implemented"]

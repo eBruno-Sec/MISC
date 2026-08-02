@@ -38,12 +38,14 @@ def live_enumeration_supported() -> dict:
     """Whether a LIVE cloud collector can run. False here: no operator cloud credentials/scope in this
     environment. The analysis engine below runs on IaC regardless. Honest, machine-readable blocker."""
     import os
-    have = any(os.environ.get(k) for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"))
-    return {"supported": bool(have),
-            "reason": "" if have else "no operator cloud credentials in scope — live account/role "
-                                      "enumeration is credential-gated; IaC analysis runs regardless",
-            "providers_ready": [p for p, k in (("aws", "AWS_ACCESS_KEY_ID"), ("azure", "AZURE_CLIENT_ID"),
-                                               ("gcp", "GOOGLE_APPLICATION_CREDENTIALS")) if os.environ.get(k)]}
+    _providers = (("aws", "AWS_ACCESS_KEY_ID"), ("azure", "AZURE_CLIENT_ID"),
+                  ("gcp", "GOOGLE_APPLICATION_CREDENTIALS"), ("linode", "LINODE_TOKEN"))
+    ready = [p for p, k in _providers if os.environ.get(k)]
+    # linode has a real live read-only collector; aws/azure/gcp live SDK wiring is still gated.
+    return {"supported": bool(ready),
+            "reason": "" if ready else "no operator cloud credentials in scope — live account/role "
+                                       "enumeration is credential-gated; IaC analysis runs regardless",
+            "providers_ready": ready, "live_collector_implemented": ["linode"]}
 
 
 def _stmt_list(policy: dict) -> list:
@@ -150,6 +152,63 @@ def normalize_gcp(doc: dict) -> dict:
     return {"roles": roles, "resources": resources, "provider": "gcp"}
 
 
+# Ports that must NOT be reachable from the whole internet (0.0.0.0/0). SSH/RDP + database/admin.
+_SENSITIVE_PORTS = {22, 23, 3389, 3306, 5432, 6379, 27017, 9200, 5601, 11211, 1433, 5900, 2375, 2379}
+_ANY_CIDR = ("0.0.0.0/0", "::/0", "0.0.0.0", "*")
+
+
+def _ports_in(spec) -> set:
+    """Parse a Linode firewall port spec ('22', '80,443', '8000-8080') into a set of ints."""
+    out = set()
+    for part in str(spec or "").split(","):
+        part = part.strip()
+        if "-" in part:
+            try:
+                a, b = part.split("-", 1)
+                out |= set(range(int(a), min(int(b), int(a) + 1024) + 1))
+            except Exception:
+                pass
+        elif part.isdigit():
+            out.add(int(part))
+    return out
+
+
+def normalize_linode(doc: dict) -> dict:
+    """Normalize Linode (Akamai Connected Cloud) API v4 read-only responses into the common model.
+    Accepts {users:[{username,tfa_enabled}], grants:{user:{global:{...}}}, firewalls:[{label,rules}],
+    buckets:[{label,acl}], instances:[{label,ipv4}], databases:[{label,allow_list,engine}]}. Maps
+    account users+grants -> roles, storage/db/instances -> resources (public flags), and keeps
+    firewalls for the open-to-internet check. Tolerant of missing keys."""
+    doc = doc or {}
+    roles, resources = [], []
+    grants = doc.get("grants") or {}
+    for u in (doc.get("users") or []):
+        uname = u.get("username") or u.get("email") or "linode-user"
+        g = (grants.get(uname) or {}).get("global") or {}
+        acts = []
+        if str(g.get("account_access") or "").lower() in ("read_write", "readwrite"):
+            acts.append("*")            # full account read/write == broad admin
+        for k, v in g.items():
+            if k != "account_access" and v:
+                acts.append(("linode:%s" % k).lower())
+        roles.append({"name": uname, "assume": {"tfa": u.get("tfa_enabled")},
+                      "policies": [{"effect": "Allow", "actions": acts or ["linode:read"], "resources": ["*"]}]})
+    for b in (doc.get("buckets") or []):
+        acl = str(b.get("acl") or b.get("acl_type") or "").lower()
+        resources.append({"type": "linode_object_storage_bucket", "name": b.get("label", "bucket"),
+                          "public": acl in ("public-read", "public-read-write", "authenticated-read") or bool(b.get("public"))})
+    for d in (doc.get("databases") or []):
+        allow = [str(a) for a in (d.get("allow_list") or [])]
+        resources.append({"type": "linode_managed_database:%s" % (d.get("engine") or "db"),
+                          "name": d.get("label", "database"),
+                          "public": any(a in _ANY_CIDR for a in allow)})
+    for i in (doc.get("instances") or []):
+        resources.append({"type": "linode_instance", "name": i.get("label", "instance"),
+                          "public": False, "ipv4": i.get("ipv4") or []})
+    return {"roles": roles, "resources": resources, "firewalls": doc.get("firewalls") or [],
+            "provider": "linode"}
+
+
 def normalize(provider: str, doc: dict) -> dict:
     """Provider-dispatched normalization into the common IAM model."""
     p = (provider or "").lower()
@@ -157,30 +216,85 @@ def normalize(provider: str, doc: dict) -> dict:
         return normalize_azure(doc)
     if p == "gcp":
         return normalize_gcp(doc)
+    if p == "linode":
+        return normalize_linode(doc)
     return normalize_iac(doc)
 
 
-def collect(provider: str, *, fixture: dict = None) -> dict:
-    """Provider collector. With a `fixture` (a raw provider IAM doc) it normalizes + analyzes it —
-    the credential-independent path, unit-testable now. A LIVE collect (fixture=None) requires cloud
-    credentials and returns a BLOCKED result rather than pretending: the SDK wiring (boto3 / azure-
-    identity / google-auth) is the only piece gated on external access. Returns
-    {provider, blocked, reason?, model?, findings?}."""
+def _linode_get(path: str, token: str, timeout: int = 20):
+    """One READ-ONLY GET against the Linode API v4. The token is sent in the Authorization header and
+    is NEVER logged or returned. Raises on transport/HTTP error so the caller can degrade."""
+    import json as _j
+    import urllib.request
+    req = urllib.request.Request("https://api.linode.com/v4" + path,
+                                 headers={"Authorization": "Bearer " + token, "User-Agent": "apolaki-cloud"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return _j.loads(r.read().decode("utf-8", "replace"))
+
+
+def collect_linode_live(token: str) -> dict:
+    """LIVE, strictly READ-ONLY Linode (Akamai Connected Cloud) posture collection. Performs only GET
+    requests against the account's own resources (users+grants, cloud firewalls + rules, object-storage
+    buckets, managed databases, instances) and feeds them to the deterministic analyzer. No writes, no
+    exploitation — a hardening review of the operator's OWN account. The token is used for auth only and
+    never stored in the model/findings/graph."""
+    doc = {"users": [], "grants": {}, "firewalls": [], "buckets": [], "instances": [], "databases": []}
+    try:
+        doc["users"] = (_linode_get("/account/users", token) or {}).get("data", [])
+        for u in doc["users"]:
+            un = u.get("username")
+            if un:
+                try:
+                    doc["grants"][un] = _linode_get("/account/users/%s/grants" % un, token)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    for key, path in (("firewalls", "/networking/firewalls"), ("buckets", "/object-storage/buckets"),
+                      ("instances", "/linode/instances"), ("databases", "/databases/instances")):
+        try:
+            doc[key] = (_linode_get(path, token) or {}).get("data", [])
+        except Exception:
+            doc[key] = []
+    # firewalls: fetch each firewall's rules (the inbound rule set the analyzer needs)
+    for fw in doc["firewalls"]:
+        if fw.get("id") and "rules" not in fw:
+            try:
+                fw["rules"] = _linode_get("/networking/firewalls/%s/rules" % fw["id"], token)
+            except Exception:
+                pass
+    model = normalize_linode(doc)
+    return {"provider": "linode", "blocked": False, "model": model, "findings": analyze(model),
+            "counts": {k: len(v) for k, v in doc.items() if isinstance(v, list)}}
+
+
+def collect(provider: str, *, fixture: dict = None, token: str = None) -> dict:
+    """Provider collector. With a `fixture` it normalizes + analyzes offline (unit-testable). For
+    `linode` with a token (arg or LINODE_TOKEN env) it runs a LIVE, read-only posture collection. AWS/
+    Azure/GCP live SDK wiring stays credential-gated. Returns {provider, blocked, model?, findings?}."""
+    import os
     p = (provider or "").lower()
     if fixture is not None:
         model = normalize(p, fixture)
         return {"provider": p, "blocked": False, "model": model, "findings": analyze(model)}
+    if p == "linode":
+        tok = token or os.environ.get("LINODE_TOKEN", "")
+        if not tok:
+            return {"provider": p, "blocked": True,
+                    "reason": "set LINODE_TOKEN (a READ-ONLY Linode API token) to run the live posture review",
+                    "model": {"roles": [], "resources": []}, "findings": []}
+        try:
+            return collect_linode_live(tok)
+        except Exception as e:
+            return {"provider": p, "blocked": True, "reason": "live linode collect failed: %s" % e,
+                    "model": {"roles": [], "resources": []}, "findings": []}
     st = live_enumeration_supported()
-    ready = p in st.get("providers_ready", [])
-    if not ready:
+    if p not in st.get("providers_ready", []):
         return {"provider": p, "blocked": True,
                 "reason": "live %s enumeration needs credentials in scope (%s)" % (p, st["reason"]),
                 "model": {"roles": [], "resources": []}, "findings": []}
-    # Credentials ARE present -> a real collector would run here. Kept explicit so enabling it is a
-    # single, reviewable step (import the SDK, list roles/policies/resources, feed normalize()).
     return {"provider": p, "blocked": True,
-            "reason": "live collector SDK wiring intentionally not enabled in this build — "
-                      "credentials present; enable in collect() to go live",
+            "reason": "live %s SDK wiring not enabled in this build — credentials present; enable in collect()" % p,
             "model": {"roles": [], "resources": []}, "findings": []}
 
 
@@ -233,6 +347,29 @@ def analyze(model: dict) -> list:
                 "Resource '%s' (%s) is publicly accessible" % (r.get("name"), r.get("type")),
                 "IaC declares this %s public" % r.get("type"),
                 "Make the resource private; block public ACLs/exposure."))
+    # Cloud firewalls open to the whole internet on a sensitive port (SSH/RDP/DB/admin) — the single
+    # most common cloud-infra misconfig. Deterministic from the firewall's own inbound rules.
+    for fw in (model or {}).get("firewalls", []):
+        label = fw.get("label", "firewall")
+        for rule in ((fw.get("rules") or {}).get("inbound") or []):
+            if str(rule.get("action", "ACCEPT")).upper() != "ACCEPT":
+                continue
+            addrs = (rule.get("addresses") or {})
+            wide = any(a in _ANY_CIDR for a in (list(addrs.get("ipv4") or []) + list(addrs.get("ipv6") or [])))
+            hit = _ports_in(rule.get("ports")) & _SENSITIVE_PORTS
+            if wide and hit:
+                findings.append(_f(label, "high", "confirmed", "cloud_firewall_open_to_internet",
+                    "Firewall '%s' allows the whole internet (0.0.0.0/0) to sensitive port(s) %s"
+                    % (label, sorted(hit)),
+                    "inbound ACCEPT ports=%s addresses=%s" % (rule.get("ports"), addrs),
+                    "Restrict the inbound rule to known admin IPs / a bastion; never expose SSH/RDP/DB to 0.0.0.0/0."))
+    # A user without 2FA who holds broad account access is an account-takeover risk.
+    for role in (model or {}).get("roles", []):
+        if role.get("assume", {}).get("tfa") is False and "*" in {a for p in role.get("policies", []) for a in p.get("actions", [])}:
+            findings.append(_f(role.get("name", ""), "high", "lead", "cloud_admin_without_2fa",
+                "Account-admin user '%s' has no 2FA enabled" % role.get("name"),
+                "user holds full account access and tfa_enabled=false",
+                "Enforce 2FA for every user with account write access."))
     return findings
 
 
