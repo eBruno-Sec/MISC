@@ -15,10 +15,11 @@ sid=$(curl -s -X POST "$A/engage" -H 'Content-Type: application/json' \
 if [ -z "$sid" ]; then ck "engage returned a session" FAIL; echo "[full-mission] cannot continue"; exit 1; fi
 ck "engage returned a session ($sid)" PASS
 
-echo "[full-mission] 2. start the run + poll /status (a full deterministic scan takes ~6 min)"
+echo "[full-mission] 2. start the run + poll /status (a full AUTHENTICATED scan takes ~10 min:"
+echo "                  base crawl + register 2 personas + authz matrix + authenticated recrawl)"
 curl -s -X POST "$A/run/$sid" >/dev/null 2>&1
 status=""; i=0
-while [ "$i" -lt 240 ]; do          # up to ~8 min
+while [ "$i" -lt 540 ]; do          # up to ~18 min — measured ~9.5 min on reference hw, 2x margin
   status=$(curl -s "$A/status/$sid" | grep -oE '"status":"[a-z_]+"' | head -1 | cut -d'"' -f4)
   case "$status" in complete | stopped | failed) break ;; esac
   i=$((i + 1)); sleep 2
