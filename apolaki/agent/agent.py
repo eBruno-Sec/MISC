@@ -715,10 +715,21 @@ class BBHAgent:
                 kev = intel_feeds.known_exploited_cwes(snaps) if snaps else set()
             except Exception:
                 pass
+            # feed ALL gathered intel + findings INTO the live graph first, so the planner reads a
+            # complete world model FROM the graph (graph-as-brain), not just flat lists.
+            _g = getattr(self.tools, "graph", None)
+            if _g is not None:
+                try:
+                    _g.ingest_intel(self.tools.intel.to_dict() if hasattr(self.tools.intel, "to_dict") else {})
+                    for _f in self.findings:
+                        _g.observe("finding", str(_f.get("id") or _f.get("title", "")[:40]),
+                                   label=_f.get("title", "finding"), source="scan", family=(_f.get("family") or ""))
+                except Exception:
+                    pass
             obs = TP.derive_observations(surface=list(self.tools.urls or []), harvest=harvest,
                                          findings=self.findings, leads=self.leads,
                                          authenticated=bool(getattr(self.tools, "_sessions", None)),
-                                         graph=getattr(self.tools, "graph", None))   # planner reads the LIVE graph
+                                         graph=_g)   # planner reads the LIVE graph (now intel-complete)
             try:
                 import proxy as _proxy
                 obs |= _proxy.to_observations()

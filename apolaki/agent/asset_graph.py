@@ -142,24 +142,80 @@ class AssetGraph:
         """Nodes whose provenance says they could unlock a given capability/technique."""
         return [n for n in self._nodes.values() if capability in (n.get("enables") or [])]
 
+    _REDIRECT_HINTS = ("redirect", "return", "returnurl", "next", "goto", "dest", "url", "continue", "callback")
+    _SEARCH_HINTS = ("q", "query", "search", "s", "keyword", "term")
+    _UPLOAD_HINTS = ("file", "upload", "filename", "path", "dir")
+
+    def ingest_intel(self, intel: dict, source: str = "harvest") -> int:
+        """Project the intel HARVEST (candidates by kind) into the graph as typed nodes so the planner
+        reads the FULL observation vocabulary from the graph, not from flat lists. Secrets are never
+        stored raw — a credential is hashed. Returns the number of nodes added. Pure."""
+        import hashlib
+        cands = (intel or {}).get("candidates") or {}
+        n0 = len(self._nodes)
+        for oid in cands.get("object_id", []) or []:
+            self.observe("object", str(oid), label=str(oid), source=source, enables=["foreign_object_read"])
+        for pm in cands.get("param", []) or []:
+            name = str(pm).lower()
+            role = ("redirect" if any(h in name for h in self._REDIRECT_HINTS)
+                    else "search" if name in self._SEARCH_HINTS or "search" in name
+                    else "upload" if any(h in name for h in self._UPLOAD_HINTS)
+                    else "generic")
+            self.observe("param", str(pm), label=str(pm), source=source, role=role)
+        for v in cands.get("version", []) or []:
+            self.observe("component", str(v), label=str(v), source=source)
+        for c in cands.get("credential", []) or []:
+            self.observe("credential", hashlib.sha256(str(c).encode("utf-8")).hexdigest()[:12],
+                         label="exposed-credential", source=source)
+        for cp in cands.get("coupon", []) or []:
+            self.observe("coupon", str(cp)[:24], label="coupon-code", source=source)
+        for r in (cands.get("route", []) or []) + (cands.get("endpoint", []) or []):
+            self.observe("endpoint", str(r), label=str(r), source=source)
+        return len(self._nodes) - n0
+
     def to_observations(self) -> set:
-        """Project the graph to the planner's observation vocabulary, so the deterministic planner
-        reads the world model directly (not just flat recon lists). Returns a set of observation
-        strings that gate techniques (see technique_planner.OBSERVATIONS)."""
+        """Project the graph to the planner's observation vocabulary (technique_planner.OBSERVATIONS)
+        so the deterministic planner reads the WORLD MODEL directly. With ingest_intel() feeding it,
+        this now covers most of the vocabulary the flat recon path derives (the flat path remains a
+        fallback for serves_js / has_workflow, which come from code-intelligence)."""
         obs = set()
         if self.nodes("object"):
             obs.add("has_object_id")
+        if self.nodes("component"):
+            obs.add("has_versions")
+        if self.nodes("coupon"):
+            obs.add("has_coupon")
         caps = {n["key"] for n in self.nodes("capability")}
         if self.nodes("credential") or "credentials_exposed" in caps:
             obs.add("credentials_exposed")
         if "session_acquired" in caps:
             obs.add("authenticated")
+        for pnode in self.nodes("param"):
+            role = (pnode.get("props") or {}).get("role")
+            if role == "redirect":
+                obs.add("has_redirect_param")
+            elif role == "search":
+                obs.add("has_search_param")
+            elif role == "upload":
+                obs.add("has_file_upload")
         for e in self.nodes("endpoint"):
             low = (e.get("label") or e.get("key") or "").lower()
             if any(k in low for k in ("/login", "/signin", "/sign-in", "/auth", "/session")):
                 obs.add("has_login")
             if "/api" in low or "/rest" in low or "/graphql" in low:
                 obs.add("has_api")
+            if "upload" in low or "/file" in low:
+                obs.add("has_file_upload")
+            if any(k in low for k in ("xml", "soap", "xxe")):
+                obs.add("has_xml_input")
+            if any(k in low for k in ("/admin", "/manage", "/internal", "/config", "/settings", "/debug", "/audit")):
+                obs.add("has_sensitive_route")
+        for f in self.nodes("finding"):
+            fam = ((f.get("props") or {}).get("family") or "").lower()
+            if fam in ("xss", "reflected_xss", "stored_xss", "dom_xss"):
+                obs.add("reflects_input")
+            if fam in ("sqli", "sql_injection", "nosqli", "nosql_injection"):
+                obs.add("sql_error_seen")
         return obs
 
     def next_best_actions(self, limit: int = 10) -> list:

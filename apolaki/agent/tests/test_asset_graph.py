@@ -103,6 +103,31 @@ def test_next_best_actions_ranks_the_worklist():
     assert not any(a.get("capability") == "database_read" for a in g2.next_best_actions())
 
 
+def test_ingest_intel_gives_graph_the_full_planner_vocabulary():
+    import technique_planner as TP
+    g = AG.AssetGraph("m")
+    intel = {"candidates": {
+        "object_id": ["1", "42"],
+        "param": ["redirect_url", "q", "filename"],
+        "version": ["angular@1.7.7"],
+        "credential": ["admin:secretpw"],
+        "coupon": ["WMNSDY2023"],
+        "endpoint": ["/rest/user/login", "/api/orders", "/admin/config"],
+    }}
+    assert g.ingest_intel(intel) > 0
+    obs = g.to_observations()
+    assert {"has_object_id", "has_redirect_param", "has_search_param", "has_file_upload",
+            "has_versions", "credentials_exposed", "has_coupon", "has_login", "has_api",
+            "has_sensitive_route"} <= obs
+    assert "secretpw" not in str(g.to_dict())                 # credential hashed, never raw
+    # finding families project to injection observations
+    g.observe("finding", "x", label="XSS", source="scan", family="xss")
+    assert "reflects_input" in g.to_observations()
+    # the planner now reads the FULL vocabulary FROM the graph alone (empty flat inputs)
+    pobs = TP.derive_observations(surface=[], harvest={}, graph=g)
+    assert {"has_redirect_param", "has_versions", "has_coupon", "has_sensitive_route"} <= pobs
+
+
 def test_services_routed_into_graph():
     # beyond-web: a discovered non-web service becomes a graph node with what its checks unlock;
     # a web port is excluded (the web engine owns it).
