@@ -55,10 +55,10 @@ _PRECONDITIONS = {
 def derive_observations(surface=None, harvest=None, findings=None, leads=None, code_intel=None,
                         authenticated=False, graph=None):
     """Deterministically compute the observation set from everything recon gathered. Pure, no LLM.
-    When a live canonical asset graph is supplied, its projected observations are ALSO merged in —
-    so the planner reads the graph too. HONEST SCOPE (CHAD re-audit #5): this is ADDITIVE; the flat
-    recon/surface state is still the primary input. The graph is not yet the sole 'brain' — making
-    the planner query the graph as its authoritative source is a larger refactor still pending."""
+    When a live canonical asset graph is supplied, its projected observations are ALSO merged in.
+    NOTE: the mission planner now leads with plan_graph_authoritative() (the graph IS the authority,
+    since all recon/intel is projected into it); this flat path is retained as a compatibility
+    projection and for callers without a graph. Keep both in sync via the graph's to_observations()."""
     obs = set()
     urls = [str(u).lower() for u in (surface or [])]
     ci = code_intel or {}
@@ -122,6 +122,22 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         except Exception:
             pass
     return obs
+
+
+def plan_graph_authoritative(graph, techniques=None, kev_cwes=None):
+    """Plan with the canonical asset graph as the SOLE authority (CHAD capability B). Observations
+    come ONLY from graph.to_observations(); the ranked action list ONLY from graph.next_best_actions().
+    This entry point takes NO surface/harvest argument, so flat recon CANNOT independently drive it —
+    an empty graph yields an empty plan no matter what recon found elsewhere. That is the proof the
+    graph is the brain: facts must be projected INTO the graph to influence the plan. The flat-recon
+    derive_observations() path remains as a compatibility projection, not the authority."""
+    if graph is None:
+        return {"observations": [], "techniques": [], "next_best_actions": [], "graph_authoritative": True}
+    techniques = techniques if techniques is not None else registry_seed()
+    obs = set(graph.to_observations())
+    techs = plan(obs, techniques, kev_cwes=kev_cwes)
+    return {"observations": sorted(obs), "techniques": techs,
+            "next_best_actions": graph.next_best_actions(), "graph_authoritative": True}
 
 
 def registry_seed(enrich=None):

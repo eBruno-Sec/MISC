@@ -730,16 +730,25 @@ class BBHAgent:
                                    label=_f.get("title", "finding"), source="scan", family=(_f.get("family") or ""))
                 except Exception:
                     pass
-            obs = TP.derive_observations(surface=list(self.tools.urls or []), harvest=harvest,
-                                         findings=self.findings, leads=self.leads,
-                                         authenticated=bool(getattr(self.tools, "_sessions", None)),
-                                         graph=_g)   # planner reads the LIVE graph (now intel-complete)
+            # GRAPH-AUTHORITATIVE planning (CHAD capability B): the live graph already ingested ALL
+            # recon/intel/findings (graph-as-brain slice 1), so the graph — not flat recon — is the
+            # authority. plan_graph_authoritative derives observations SOLELY from the graph; an empty
+            # graph could not be driven by recon alone. Flat derive_observations is merged only as a
+            # backward-compat projection (a subset of what the graph already holds).
+            _seed = TP.registry_seed()
+            gplan = TP.plan_graph_authoritative(_g, _seed, kev_cwes=kev)
+            self._graph_plan = gplan
+            obs = set(gplan["observations"])
+            obs |= TP.derive_observations(surface=list(self.tools.urls or []), harvest=harvest,
+                                          findings=self.findings, leads=self.leads,
+                                          authenticated=bool(getattr(self.tools, "_sessions", None)),
+                                          graph=_g)   # compatibility projection
             try:
                 import proxy as _proxy
                 obs |= _proxy.to_observations()
             except Exception:
                 pass
-            p = TP.plan(obs, TP.registry_seed(), kev_cwes=kev)
+            p = TP.plan(obs, _seed, kev_cwes=kev)
             try:
                 import learning
                 rel = learning.reliability()

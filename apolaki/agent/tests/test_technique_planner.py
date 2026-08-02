@@ -74,3 +74,23 @@ def test_plan_attaches_filter_bypass_ladder_for_injection_classes():
     # a non-injection class (e.g. idor/access_control) carries no payload ladder
     idor = next((a for a in p if a["id"] == "idor_bola_read"), None)
     assert idor and not idor.get("bypass_ladder")
+
+
+def test_planner_is_graph_authoritative_flat_recon_cannot_drive_it():
+    # CHAD capability B: the graph is the AUTHORITY. plan_graph_authoritative takes no surface/harvest
+    # argument, so flat recon cannot independently drive it — the facts must live in the GRAPH.
+    import asset_graph as AG
+    seed = TP.registry_seed()
+    # a populated graph (object id + search param + login) yields real observations + a plan
+    g = AG.AssetGraph("m")
+    g.ingest_intel({"candidates": {"object_id": ["1"], "param": ["q"], "endpoint": ["/rest/user/login"]}})
+    out = TP.plan_graph_authoritative(g, seed)
+    assert out["graph_authoritative"] is True
+    assert out["observations"]                       # the graph drove observations
+    assert {"has_object_id", "has_search_param", "has_login"} <= set(out["observations"])
+    # an EMPTY graph yields an EMPTY plan — no flat-recon backdoor can populate it
+    empty = AG.AssetGraph("m2")
+    out2 = TP.plan_graph_authoritative(empty, seed)
+    assert out2["observations"] == [] and out2["techniques"] == [] and out2["next_best_actions"] == []
+    # None graph is tolerated (compat callers), still no plan
+    assert TP.plan_graph_authoritative(None, seed)["observations"] == []
