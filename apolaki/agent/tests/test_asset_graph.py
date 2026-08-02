@@ -139,6 +139,38 @@ def test_services_routed_into_graph():
     assert "service:box:6379" in g.neighbors("host:box", rel="runs")
 
 
+def test_provenance_summary_shows_where_intel_came_from():
+    # cloud/github/wayback intel enters the graph with provenance; provenance_summary() is what
+    # makes that VISIBLE to the operator (per-source counts + the needs-validation worklist).
+    import archive_intel as AI
+    g = AG.AssetGraph("m")
+    g.observe("host", "acme.tld", source="recon", confidence=AG.CONFIRMED)
+    AI.ingest_archived_endpoints(g, "acme.tld", ["http://acme.tld/old/admin", "http://acme.tld/legacy"],
+                                 source="wayback")
+    AI.ingest_repo_findings(g, "acme/app", [
+        {"kind": "route", "value": "/internal/debug"},
+        {"kind": "secret", "value": "AKIAsupersecretvalue", "ref": "vault://mission/m/repo-0"}],
+        source="github")
+    ps = g.provenance_summary()
+    # per-source contribution is counted
+    assert ps["by_source"].get("wayback") == 2
+    assert ps["by_source"].get("github") == 2
+    assert ps["by_source"].get("recon") == 1
+    # passive feeds are broken out from live recon
+    assert set(ps["passive_intel"]) == {"wayback", "github"}
+    assert "recon" not in ps["passive_intel"]
+    # archive/repo facts land on the needs-validation queue (never auto-trusted as live)
+    assert ps["needs_validation_count"] == 4
+    labels = {n["label"] for n in ps["needs_validation"]}
+    assert "/old/admin" in labels and "/internal/debug" in labels
+    # a repo SECRET is provenance too — but only its hash/vault ref, never the raw value
+    assert "supersecretvalue" not in str(ps)
+    # once validated against the current target, it leaves the worklist
+    gone_id = ps["needs_validation"][0]["id"]
+    AI.mark_validated(g, gone_id, present=True)
+    assert g.provenance_summary()["needs_validation_count"] == 3
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

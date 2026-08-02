@@ -44,3 +44,19 @@ def test_report_without_intel_has_no_section():
 def test_report_with_empty_intel_has_no_section():
     html = report.generate_html_report("P", [], {"in_scope": ["x"]}, intel={"candidates": {}})
     assert "Target Intelligence" not in html
+
+
+def test_findings_json_carries_intel_provenance():
+    # the JSON data package surfaces WHERE the world model came from (feed counts + worklist), so a
+    # consumer can see the wayback/github/cloud contribution and what still needs live validation.
+    import json
+    prov = {"by_source": {"recon": 40, "wayback": 12, "github": 3},
+            "passive_intel": {"wayback": 12, "github": 3},
+            "needs_validation": [{"id": "endpoint:acme/old", "label": "/old", "provenance": "archive"}],
+            "needs_validation_count": 1}
+    pkg = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}, intel_provenance=prov))
+    assert pkg["intel_provenance"]["passive_intel"]["wayback"] == 12
+    assert pkg["intel_provenance"]["needs_validation_count"] == 1
+    # additive + backwards-compatible: absent provenance is an empty dict, never a crash
+    pkg2 = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}))
+    assert pkg2["intel_provenance"] == {}

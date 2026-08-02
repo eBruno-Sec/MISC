@@ -552,6 +552,22 @@ def _leads(m) -> list:
     return (m.get("context", {}) or {}).get("leads", [])
 
 
+def _intel_provenance(session_id: str) -> dict:
+    """Where the world model came from (per-source counts + needs-validation worklist). Prefer the
+    LIVE graph — it holds the wayback/github/cloud feed nodes with provenance; fall back to the
+    snapshot persisted at mission end so archived views still show it. Never raises."""
+    try:
+        sess = sessions.get(session_id)
+        if sess is not None:
+            g = getattr(sess.get("tools"), "graph", None)
+            if g is not None:
+                return g.provenance_summary()
+        m = db.get_mission(session_id)
+        return ((m or {}).get("context", {}) or {}).get("graph_data", {}).get("provenance", {}) or {}
+    except Exception:
+        return {}
+
+
 def _attack_surface(session_id: str) -> dict:
     """Attack-surface metrics for the report (works live or archived, via the same
     recon/urls source the graph uses)."""
@@ -1377,7 +1393,8 @@ async def get_report_json(session_id: str):
             m["program"], findings, scope, coverage, chains, leads=_leads(m),
             config=_scan_config(m), attack_surface=_attack_surface(session_id),
             playbook=m["context"].get("playbook", []), tool_ledger=_tool_ledger(session_id),
-            delta=_delta(session_id), execution=_execution(m), report_id=session_id),
+            delta=_delta(session_id), execution=_execution(m), report_id=session_id,
+            intel_provenance=_intel_provenance(session_id)),
         media_type="application/json")
 
 
@@ -1462,6 +1479,15 @@ def _record_memory(session_id: str) -> None:
                       "subdomains": tools.recon.get("subdomains", [])},
             "urls": tools.urls[:1000],
         }
+        # Snapshot intel PROVENANCE from the LIVE graph (which carries the wayback/github/cloud
+        # feed nodes the rebuilt projection would drop) so the report/UI can show WHERE the world
+        # model came from and what still needs current validation — after teardown too. Redacted
+        # by construction (secrets are already hashes/vault refs). Best-effort.
+        try:
+            if getattr(tools, "graph", None) is not None:
+                ctx["graph_data"]["provenance"] = tools.graph.provenance_summary()
+        except Exception:
+            pass
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
@@ -1839,6 +1865,7 @@ async def get_canonical_graph(session_id: str):
     d = g.to_dict()
     d["stats"] = g.stats()
     d["next_best_actions"] = g.next_best_actions()   # the planner querying the world model
+    d["provenance"] = _intel_provenance(session_id)  # WHERE the world model came from (feeds + worklist)
     return d
 
 

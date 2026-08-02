@@ -268,6 +268,35 @@ class AssetGraph:
         return {"nodes": len(self._nodes), "edges": len(self._edges),
                 "by_kind": by_kind, "untested": len(self.untested())}
 
+    # intel feeds whose facts are RECOVERED (historical / external), not observed live on the
+    # target — every one of these carries a needs-current-validation obligation before its facts
+    # may be treated as present. Kept in one place so the report and the planner agree.
+    _PASSIVE_SOURCES = ("wayback", "github", "cloud_intel", "cloud_probe")
+
+    def provenance_summary(self) -> dict:
+        """WHERE the world model came from: per-source node contribution, the passive-intel feeds
+        (wayback / github / cloud) broken out, and the needs-validation worklist — archive/repo
+        facts not yet checked against the CURRENT target, which must NOT be reported as live
+        findings until validated. Pure; credentials are already hashes/vault refs, so nothing raw
+        leaks here. This is what turns provenance from a decoration into something the operator sees."""
+        by_source: dict = {}
+        passive: dict = {}
+        needs_val = []
+        for n in self._nodes.values():
+            srcs = [s.get("source") for s in (n.get("sources") or []) if s.get("source")]
+            for s in srcs:
+                by_source[s] = by_source.get(s, 0) + 1
+                if s in self._PASSIVE_SOURCES:
+                    passive[s] = passive.get(s, 0) + 1
+            pk = (n.get("props") or {}).get("provenance_kind")
+            if pk in ("archive", "repo") and not n.get("tested"):
+                needs_val.append({"id": n["id"], "kind": n["kind"], "label": n["label"],
+                                  "source": (srcs[0] if srcs else None), "provenance": pk})
+        return {"by_source": dict(sorted(by_source.items(), key=lambda kv: -kv[1])),
+                "passive_intel": passive,
+                "needs_validation": needs_val,
+                "needs_validation_count": len(needs_val)}
+
     def save(self, base_dir: str = None) -> str:
         base = base_dir or os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "graph")
         try:

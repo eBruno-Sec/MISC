@@ -2410,6 +2410,16 @@ class ToolRegistry:
             return ToolResult("wayback", domain, False, "", [], str(e))
         urls = list(dict.fromkeys(urls))
         self._add_urls(urls)
+        # Provenance: archived endpoints enter the canonical graph tagged (source=wayback,
+        # archived=True, tested=False, LOW conf) so they carry WHERE-they-came-from and land on
+        # the needs-validation queue — an archived path is a hint to check against the CURRENT
+        # target, never a live finding. Mirrors what github_recon already does for repo facts.
+        try:
+            if getattr(self, "graph", None) is not None:
+                import archive_intel as _ai
+                _ai.ingest_archived_endpoints(self.graph, domain, urls, source="wayback")
+        except Exception:
+            pass
         return ToolResult("wayback", domain, True, f"{len(urls)} archived URLs", [{"url": u} for u in urls[:50]])
 
     async def _run_dns(self, inp: dict) -> ToolResult:
