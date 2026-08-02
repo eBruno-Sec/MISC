@@ -1011,9 +1011,10 @@ class BBHAgent:
         """Per-persona authenticated pass. For EACH session persona, GET a set of common authed routes
         (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a headless
         browser is available, load the base page to capture SPA routes + XHR/fetch APIs. Returns the
-        newly-discovered in-scope URLs. HONEST SCOPE (CHAD re-audit #6): this is a BREADTH-LIMITED
-        pass — a fixed common-route GET list + a base-page browser load — NOT a full recursive crawl;
-        real per-persona link/form/workflow navigation is still pending. Bounded + best-effort."""
+        newly-discovered in-scope URLs. Now a bounded DEPTH-2 BFS (CHAD capability D): the fixed-route +
+        browser pass seeds depth-1, then crawl.bfs_frontier follows the newly-discovered authed
+        links/XHR one level deeper. HONEST SCOPE: depth is capped at 2 and the frontier at 30 URLs;
+        deeper recursion, form submission, and CSRF/MFA-resume recipes remain. Bounded + best-effort."""
         before = set(self.tools.urls or [])
         routes = ["", "/profile", "/account", "/me", "/dashboard", "/settings", "/api/users",
                   "/rest/user/whoami", "/api/orders", "/rest/basket", "/api/basket", "/orders",
@@ -1034,6 +1035,24 @@ class BBHAgent:
                                           "steps": [{"action": "wait", "ms": 1200}]}, session_id)
             except Exception:
                 pass
+        # Depth-2 BFS (CHAD capability D): the fixed-route + browser pass just discovered new authed
+        # links/XHR endpoints. Follow that frontier ONE more level AS the first persona (bounded) so
+        # authenticated-only deep endpoints enter the surface + graph — a real recursive step, not a
+        # fixed list. Pure crawl.bfs_frontier picks the frontier; the visits are scope-gated + budgeted.
+        try:
+            import crawl as _crawl
+            seen = set(before)
+            discovered = [u for u in (self.tools.urls or []) if u not in before]
+            frontier = _crawl.bfs_frontier(discovered, base, seen, limit=30)
+            deep_role = (roles or [None])[0]
+            for u in frontier:
+                if self.scope.validate(u)[0]:
+                    try:
+                        await self.tools.execute("http_read", {"url": u, "session": deep_role}, session_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         return [u for u in (self.tools.urls or []) if u not in before]
 
     async def _reacquire_personas(self, prior, pm, session_id) -> list:
