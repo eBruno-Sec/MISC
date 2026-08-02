@@ -109,6 +109,7 @@ TOOL_PERMISSIONS = {
     "http_request": PermissionLevel.INTRUSIVE,     # scope-guarded ANY-method request (write atom, gated)
     "confirm_idor": PermissionLevel.ACTIVE,        # deterministic IDOR/BOLA oracle-helper (auto-confirms)
     "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
+    "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
     "acquire_session": PermissionLevel.ACTIVE,     # single authorized login → reusable named session (anti-brute-force capped)
     "browser_navigate": PermissionLevel.ACTIVE,    # declarative headless-browser drive + client-state capture
     "test_numeric_abuse": PermissionLevel.INTRUSIVE,  # business-logic numeric boundary probing (gated, never finalizes)
@@ -747,6 +748,15 @@ CLAUDE_TOOLS = [
          "owned_url": {"type": "string", "description": "single-identity fallback (lead only)"},
          "session": {"type": "string"}, "headers": {"type": "object"}},
          "required": ["target_url"]}},
+    {"name": "confirm_create_object_idor",
+     "description": ("INTRUSIVE (bounded + self-cleaning): CONFIRM an IDOR/BOLA by definitive ownership — "
+                     "create a uniquely-owned object as the owner persona, then read (Full: also delete) it "
+                     "as the attacker persona. A cross-persona hit on the marked object is a confirmed "
+                     "access-control break. Needs two acquired sessions (owner + attacker)."),
+     "input_schema": {"type": "object", "properties": {
+         "base_url": {"type": "string"}, "owner": {"type": "string"}, "attacker": {"type": "string"},
+         "app": {"type": "string"}, "specs": {"type": "array", "items": {"type": "object"}}},
+         "required": ["base_url", "owner", "attacker"]}},
     {"name": "enumerate_ids",
      "description": ("INTRUSIVE: bounded object-id enumeration on a templated URL (contains {id}). Give a numeric "
                      "start/end (hard-capped at 50) and optional session; returns which ids are distinct "
@@ -1820,6 +1830,85 @@ class ToolRegistry:
                    "gaps": len(result.get("gaps", [])), "confirmed": len(uniq),
                    "auth_requests": auth_requests}
         return ToolResult("authz_matrix", base, True, json.dumps(summary), uniq)
+
+    # Built-in owned-object CREATE specs for known REST apps. Each: a create endpoint (body carries a
+    # {marker}) + how to read/delete the returned id. Juice Shop's address book + card store are
+    # per-user owned, so a cross-persona hit on a freshly-created one is a real BOLA.
+    _CREATE_IDOR_SPECS = {
+        "juiceshop": [
+            {"create": {"method": "POST", "path": "/api/Addresss",
+                        "body": '{"fullName":"apolaki","mobileNr":"1234567","zipCode":"12345",'
+                                '"streetAddress":"{marker}","city":"T","state":"T","country":"T"}'},
+             "read": "/api/Addresss/{id}", "delete": "/api/Addresss/{id}"},
+            {"create": {"method": "POST", "path": "/api/Cards",
+                        "body": '{"fullName":"apolaki {marker}","cardNum":"4111111111111111",'
+                                '"expMonth":1,"expYear":2099}'},
+             "read": "/api/Cards/{id}", "delete": "/api/Cards/{id}"},
+        ],
+    }
+
+    async def _confirm_create_object_idor(self, inp: dict) -> ToolResult:
+        """ACTIVE: CREATE-OBJECT IDOR (CHAD C). Create a uniquely-owned object as the OWNER persona,
+        then try to READ (and, in Full mode only, DELETE) it as the ATTACKER persona. Because WE
+        created the object with a private marker, ownership is DEFINITIVE — a cross-persona hit is a
+        CONFIRMED access-control break (no similarity guessing). Bounded, scope-gated, and cleans up
+        the object it created. Roles are referenced by name; the session token is resolved server-side."""
+        import create_object_idor as _co
+        base = (inp.get("base_url") or "").strip().rstrip("/")
+        owner, attacker = inp.get("owner"), inp.get("attacker")
+        specs = inp.get("specs") or self._CREATE_IDOR_SPECS.get(inp.get("app", ""), [])
+        owner_h = dict(self._sessions.get(owner, {}))
+        atk_h = dict(self._sessions.get(attacker, {}))
+        if not base or not owner_h or not atk_h or not specs:
+            return ToolResult("create_object_idor", base, True,
+                              json.dumps({"ran": False, "note": "need base, two sessions, and specs"}), [])
+        allow_write = getattr(self, "mode", "active") == "full"
+        findings, attempts = [], 0
+        for spec in specs[:6]:
+            cs = spec["create"]
+            url = base + cs["path"]
+            if not self.scope.validate(url)[0]:
+                continue
+            marker = _co.new_marker()
+            body = cs["body"].replace("{marker}", marker)
+            try:
+                cr, _ = await self._http_send(cs["method"], url,
+                                              {**owner_h, "Content-Type": "application/json"}, body, True)
+            except Exception:
+                continue
+            attempts += 1
+            oid = _co.extract_id(cr.status_code, cr.text, (dict(cr.headers or {})).get("Location", ""))
+            read_s, read_b, del_s = None, "", None
+            if oid and spec.get("read"):
+                rurl = base + spec["read"].replace("{id}", oid)
+                if self.scope.validate(rurl)[0]:
+                    try:
+                        rr, _ = await self._http_send("GET", rurl, atk_h, None, True)
+                        read_s, read_b = rr.status_code, (rr.text or "")[:8000]
+                    except Exception:
+                        pass
+            if allow_write and oid and spec.get("delete"):
+                durl = base + spec["delete"].replace("{id}", oid)
+                if self.scope.validate(durl)[0]:
+                    try:
+                        dr, _ = await self._http_send("DELETE", durl, atk_h, None, True)
+                        del_s = dr.status_code
+                    except Exception:
+                        pass
+            v = _co.verdict(marker=marker, create_status=cr.status_code, create_body=cr.text or "",
+                            object_id=oid, read_status=read_s, read_body=read_b, delete_status=del_s)
+            tgt = base + (spec.get("read") or cs["path"]).replace("{id}", oid or "")
+            f = _co.to_finding(v, target=tgt, owner_role=owner, attacker_role=attacker)
+            if f:
+                findings.append(f)
+            # cleanup: the OWNER removes the object we created (best-effort; harmless if already gone)
+            if oid and spec.get("delete"):
+                try:
+                    await self._http_send("DELETE", base + spec["delete"].replace("{id}", oid), owner_h, None, True)
+                except Exception:
+                    pass
+        return ToolResult("create_object_idor", base, True,
+                          json.dumps({"ran": True, "attempts": attempts, "confirmed": len(findings)}), findings)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:
         """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the

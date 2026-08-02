@@ -32,12 +32,15 @@ _FAMILY = {
     # access-control classes: an ownership/authorization proof is mandatory (CHAD: "Confirmed
     # access-control findings need ownership or authorization proof").
     "idor": {"impact": True, "signals": [
-        ["owner", "ownership", "cross-user", "identical", "same object"],       # the cross-user access
-        ["denied", "401", "403", "anon", "different data", "object-specific"],  # the control that proves it
+        ["owner", "ownership", "cross-user", "identical", "same object", "owner-created"],   # the cross-user access
+        # the control that proves it isn't a benign/shared resource: an anon-denied control, an
+        # id+1 differential, OR definitive ownership by creation (we created it with our marker).
+        ["denied", "401", "403", "anon", "different data", "object-specific",
+         "owner-created", "created object", "our marker", "marker"],
     ]},
     "access_control": {"impact": True, "signals": [
-        ["owner", "ownership", "role", "persona", "privileg", "cross-user", "unauthor"],
-        ["denied", "401", "403", "200", "anon", "differ"],
+        ["owner", "ownership", "role", "persona", "privileg", "cross-user", "unauthor", "owner-created"],
+        ["denied", "401", "403", "200", "anon", "differ", "owner-created", "created object", "marker"],
     ]},
     "missing_authentication": {"impact": True, "signals": [
         ["anon", "unauthenticated", "without auth", "no session"],

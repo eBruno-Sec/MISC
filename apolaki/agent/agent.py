@@ -1275,6 +1275,29 @@ class BBHAgent:
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
 
+        # 5c) CREATE-OBJECT IDOR (CHAD C): the strongest cross-user proof — create a uniquely-owned
+        #     object as the owner persona, then access it as the attacker. Ownership is definitive
+        #     (we made it with a private marker). Bounded + self-cleaning; runs on the same pair.
+        if pair:
+            app = "juiceshop" if "juice" in base.lower() else ""
+            try:
+                cres = await self.tools.execute("confirm_create_object_idor",
+                                                {"base_url": base, "owner": pair[0], "attacker": pair[1],
+                                                 "app": app}, session_id)
+                for f in (cres.findings or []):
+                    if self.mission_id:
+                        try:
+                            f["id"] = db.add_finding(self.mission_id, f)
+                        except Exception:
+                            pass
+                    self.findings.append(f)
+                    events.append({"type": "finding", "finding": f})
+                if cres.findings:
+                    events.append({"type": "info", "content": "Create-object IDOR: %d confirmed cross-user "
+                                   "object access(es) proven via owned-object creation." % len(cres.findings)})
+            except Exception:
+                pass
+
         # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
         caps = pm.capabilities() + (["authenticated_surface_mapped"] if pm.session_roles() else [])
         for cap in caps:
