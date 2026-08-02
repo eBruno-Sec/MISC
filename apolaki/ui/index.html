@@ -306,6 +306,7 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
   <button class="navbtn active" data-view="launch" onclick="showView('launch')">Launch</button>
   <button class="navbtn" data-view="run" onclick="showView('run')">Live Run</button>
   <button class="navbtn" data-view="findings" onclick="showView('findings')">Findings<span class="navbadge" id="findBadge" style="display:none">0</span></button>
+  <button class="navbtn" data-view="assurance" onclick="showView('assurance')">Assurance</button>
   <button class="navbtn" data-view="reports" onclick="showView('reports')">Reports</button>
   <button class="navbtn" data-view="conquest" onclick="showView('conquest')">Conquest</button>
   <button class="navbtn" data-view="taxonomy" onclick="showView('taxonomy')">Taxonomy</button>
@@ -497,6 +498,13 @@ X-Requested-With: </textarea>
     #p-findings .add-grid textarea{grid-column:1/3;min-height:52px;resize:vertical;font-family:var(--mono);font-size:.76rem}
     #p-findings .add-acts{display:flex;gap:.5rem}
     </style>
+
+    <!-- ASSURANCE — live persona/artery/planner/provenance/benchmark evidence -->
+    <section class="panel" id="p-assurance">
+      <div class="view-head"><h3 class="sec">Assurance</h3><button class="btn ghost sm" onclick="loadAssurance()">Refresh</button></div>
+      <p class="muted" style="margin:-.3rem 0 1rem">Proof this engagement did what it claims — authentication artery, per-persona request counters, create-object IDOR, graph connectivity, planner decisions, and intelligence provenance. Live from the mission.</p>
+      <div id="assuranceBody"><div class="empty"><h4>No mission selected</h4><p>Start or open a mission, then refresh.</p></div></div>
+    </section>
 
     <!-- SURFACE -->
     <section class="panel" id="p-surface">
@@ -949,6 +957,7 @@ const VIEWS={
   launch:   [["launch","Configure"]],
   run:      [["feed","Activity feed"]],
   findings: [["findings","Findings"],["surface","Surface"],["topology","Topology"]],
+  assurance:[["assurance","Assurance"]],
   reports:  [["report","Report & export"]],
   conquest: [["conquest","Juice Shop Conquest"]],
   taxonomy: [["taxonomy","Technique Taxonomy"]],
@@ -983,8 +992,57 @@ function switchTab(name){
   if(name==="conquest")loadConquest();
   if(name==="taxonomy")loadTaxonomy();
   if(name==="intel")loadIntel();
+  if(name==="assurance")loadAssurance();
   if(name==="codereview")loadCodeReview();
   if(name==="proxy")loadProxy();
+}
+
+/* ── Assurance panel: live persona/artery/planner/provenance evidence (CHAD capability E) ── */
+async function loadAssurance(){
+  const box=document.getElementById("assuranceBody"); if(!box)return;
+  if(!sessionId){box.innerHTML=`<div class="empty"><h4>No mission selected</h4><p>Start or open a mission, then refresh.</p></div>`;return;}
+  const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  box.innerHTML=`<div class="muted">Loading assurance evidence…</div>`;
+  let rep={},graph={};
+  try{rep=await(await fetch(`${API}/report/${sessionId}/json`)).json();}catch(e){}
+  try{graph=await(await fetch(`${API}/graph/canonical/${sessionId}`)).json();}catch(e){}
+  const aa=rep.auth_artery||{ran:false}, areq=aa.authenticated_requests||{}, mtx=aa.matrix||{}, co=aa.create_object_idor||{};
+  const findings=rep.findings||[], leads=rep.leads||[];
+  const nConf=findings.filter(f=>f.confidence==="confirmed").length, nLead=(findings.length-nConf)+leads.length;
+  const st=(graph.stats||{}), bk=(st.by_kind||{}), prov=graph.provenance||{}, nba=graph.next_best_actions||[];
+  const yn=b=>b?`<span style="color:var(--ok)">yes</span>`:`<span style="color:var(--text-dim)">no</span>`;
+  const card=(title,rows)=>`<div class="topo-panel" style="margin-bottom:1rem"><h4>${esc(title)}</h4><table class="tbl" style="width:100%">${rows}</table></div>`;
+  const row=(k,v)=>`<tr><td style="color:var(--text-dim);width:44%">${esc(k)}</td><td>${v}</td></tr>`;
+  let html="";
+  html+=card("Authentication artery",[
+    row("Ran", yn(aa.ran)),
+    row("Personas", esc((aa.personas||[]).map(p=>p.role).filter(Boolean).join(", ")||"—")+` (auth_success=${esc(aa.auth_success||0)})`),
+    row("Authenticated requests", `attempted <b>${esc(areq.attempted||0)}</b>, succeeded <b>${esc(areq.succeeded||0)}</b>, with session material <b>${esc(areq.with_auth_material||0)}</b>`),
+    row("Both personas succeeded", yn(areq.both_personas_succeeded)),
+    row("Authorization matrix", `${esc(mtx.operations||0)} operation(s), ${esc(mtx.findings||0)} finding(s)`),
+    row("Create-object IDOR", `ran ${yn(co.ran)}, ${esc(co.attempts||0)} created, ${esc(co.confirmed||0)} confirmed`),
+  ].join(""));
+  html+=card("Findings posture",[
+    row("Confirmed", `<b>${nConf}</b> (proof-backed only)`),
+    row("Unconfirmed leads", `<b>${nLead}</b>`),
+  ].join(""));
+  html+=card("Graph connectivity",[
+    row("Nodes / edges", `${esc(st.nodes||0)} / ${esc(st.edges||0)}`),
+    row("Endpoints / findings / params", `${esc(bk.endpoint||0)} / ${esc(bk.finding||0)} / ${esc(bk.param||0)}`),
+    row("Personas / sessions", `${esc(bk.persona||0)} / ${esc(bk.session||0)}`),
+  ].join(""));
+  if(nba.length){
+    html+=card("Planner decisions (graph-authoritative next actions)",
+      nba.slice(0,6).map(a=>row(esc(a.action||""),esc(a.target||a.capability||"")+(a.rationale?` — ${esc(a.rationale)}`:""))).join(""));
+  }
+  const bySrc=prov.by_source||{};
+  if(Object.keys(bySrc).length||prov.needs_validation_count){
+    html+=card("Intelligence provenance",[
+      row("Feeds", esc(Object.entries(bySrc).slice(0,8).map(([k,v])=>`${k}=${v}`).join(", ")||"—")),
+      row("Needs-validation worklist", `${esc(prov.needs_validation_count||0)} recovered fact(s) awaiting a live check`),
+    ].join(""));
+  }
+  box.innerHTML=html||`<div class="empty"><h4>No assurance data yet</h4><p>The mission has not produced auth-artery or graph evidence yet.</p></div>`;
 }
 
 /* ── phase bar ── */
