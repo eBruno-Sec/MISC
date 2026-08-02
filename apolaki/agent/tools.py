@@ -2470,6 +2470,16 @@ class ToolRegistry:
                     await asyncio.sleep(delay)
         self.recon.setdefault("github", []).append(
             {"domain": domain, "dorks": len(dorks), "hits": hits_total, "findings": len(findings)})
+        # provenance: repo secret-leaks -> canonical-graph credential nodes (hash fingerprint + flagged
+        # for bounded validation; the raw secret is NEVER stored). Makes archive_intel part of recon.
+        try:
+            import archive_intel as _ai
+            secrets = [{"kind": "secret", "value": f.get("evidence", ""), "ref": None}
+                       for f in findings if "secret-leak" in (f.get("tags") or [])]
+            if secrets:
+                _ai.ingest_repo_findings(self.graph, domain, secrets, source="github")
+        except Exception:
+            pass
         note = " (rate-limited, partial)" if rate_limited else ""
         return ToolResult("github_recon", domain, True,
                           f"{len(dorks)} dorks, {hits_total} hits, {len(findings)} secret/lead finding(s){note}",
