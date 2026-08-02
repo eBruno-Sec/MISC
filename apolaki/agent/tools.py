@@ -1348,6 +1348,16 @@ class ToolRegistry:
             self._harvest_body(url, r.headers, r.text)
         except Exception:
             pass
+        # cloud fingerprint: identify AWS/Azure/GCP/Cloudflare from this response + record cloud assets
+        # into the LIVE graph, so cloud is a real recon signal (not a report decoration).
+        try:
+            import cloud_intel as _ci
+            from urllib.parse import urlparse as _up
+            verdict = _ci.analyze(url=url, headers=dict(r.headers))
+            if verdict.get("is_cloud"):
+                _ci.to_graph_facts(self.graph, _up(url).netloc, verdict)
+        except Exception:
+            pass
 
     def _resolve_headers(self, inp: dict) -> dict:
         """Merge explicit headers with a named acquired session (inp['session'] → role).

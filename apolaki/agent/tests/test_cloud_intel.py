@@ -41,3 +41,21 @@ def test_non_cloud_is_noop_on_graph():
     g = AG.AssetGraph("m")
     CI.to_graph_facts(g, "host", CI.analyze(headers={"Server": "nginx"}))
     assert g.stats()["nodes"] == 0
+
+
+def test_cloud_fingerprint_runs_during_harvest():
+    # cloud_intel is actually WIRED: a harvested response with cloud headers records a cloud asset
+    # into the registry's live graph (not just a standalone module).
+    import scope
+    import tools
+    sc = scope.ScopeEngine()
+    sc.load_manual(["app.example"], [], "T")
+    reg = tools.ToolRegistry(sc, lab_mode=True)
+
+    class _R:
+        headers = {"CF-Ray": "abc123", "Server": "cloudflare"}
+        text = "ok"
+
+    reg._harvest_response("https://app.example/page", _R())
+    assert reg.graph.node("cloud_account:cloudflare") is not None
+    assert "cloud_account:cloudflare" in reg.graph.neighbors("host:app.example", rel="belongs_to")
