@@ -1595,11 +1595,59 @@ class BBHAgent:
             yield ev
 
     # ── deterministic executor (planner-driven, no AI) ───────────
+    def _seed_and_project_graph(self, g) -> None:
+        """Project ALL current engagement state into the mission graph so the graph is the single
+        source the primary planner reads (CHAD: graph-authoritative execution). Seeds the in-scope
+        roots as host nodes (bootstrap) and folds recon subdomains/live-hosts, discovered URLs, and
+        findings into the graph. Idempotent (observe merges); best-effort."""
+        try:
+            for e in self.scope.in_scope:
+                v = (getattr(e, "value", "") or "").lower().lstrip("*.")
+                if v:
+                    g.observe("host", v, label=v, source="scope")
+            for s in (self.tools.recon.get("subdomains") or []):
+                s = str(s).lower()
+                if s:
+                    g.observe("host", s, label=s, source="recon")
+            for h in (self.tools.recon.get("live_hosts") or []):
+                u = h.get("url") if isinstance(h, dict) else str(h)
+                if u:
+                    g.observe("endpoint", u, label=u, source="recon")
+            for u in (self.tools.urls or []):
+                if u:
+                    g.observe("endpoint", str(u), label=str(u), source="recon")
+            for f in (self.findings or []):
+                g.observe("finding", str(f.get("id") or (f.get("title", "")[:40])),
+                          label=f.get("title", "finding"), source="scan", family=(f.get("family") or ""))
+        except Exception:
+            pass
+
+    def _graph_primary_state(self, g):
+        """Derive the planner's ASSET-SELECTION world-state FROM THE GRAPH only. roots = graph host
+        labels; urls = graph endpoint labels; live_hosts = the tool-discovered detail for hosts the
+        GRAPH holds. An empty graph yields empty roots+urls, so flat recon can NEVER independently
+        select a primary action (that is the graph-authoritative guarantee). Returns (roots, urls, recon)."""
+        from urllib.parse import urlparse
+        hosts = sorted({n.get("label") for n in g.nodes("host") if n.get("label")})
+        hostset = set(hosts)
+        eps = [n.get("label") for n in g.nodes("endpoint") if n.get("label")]
+
+        def _host_of(u):
+            try:
+                return urlparse(u).netloc or u
+            except Exception:
+                return u
+        live = [h for h in (self.tools.recon.get("live_hosts") or [])
+                if isinstance(h, dict) and (_host_of(h.get("url", "")) in hostset or h.get("url") in eps)]
+        recon = {"subdomains": hosts, "live_hosts": live,
+                 "target": self.tools.recon.get("target"), "domain": self.tools.recon.get("domain")}
+        return hosts, eps, recon
+
     async def _execute_plan(self, session_id: str):
-        """Drive planner.next_batch through the SAME scoped, HITL-gated tool
-        pipeline. recon_cycles are honored: each cycle folds newly discovered
-        subdomains into the root set so recon + discovery deepen, and re-runs the
-        playbook over everything found. Dedup + a hard step cap guarantee it ends."""
+        """Drive the planner through the SAME scoped, HITL-gated tool pipeline — but GRAPH-FIRST
+        (CHAD): each step projects engagement state into the mission graph, then derives the planner's
+        asset-selection world-state FROM the graph and gates on it (empty graph => no primary action).
+        recon_cycles are honored; dedup + a hard step cap guarantee it ends."""
         import planner
         base_roots = [e.value.lower().lstrip("*.") for e in self.scope.in_scope]
         done, steps = set(), 0
@@ -1615,13 +1663,25 @@ class BBHAgent:
             before = self._surface_size()
             # a fresh playbook each cycle reflects everything found so far
             done.discard("generate_playbook")
-            roots = sorted(set(base_roots) | set(self.tools.recon.get("subdomains", [])))
             while steps < MAX_STEPS:
                 if self.stop_event.is_set():
                     self._plan_steps = steps
                     return
-                state = {"mode": self.mode, "roots": roots, "done": done,
-                         "recon": self.tools.recon, "urls": self.tools.urls,
+                # GRAPH-AUTHORITATIVE primary execution (CHAD major #1): project everything into the
+                # mission graph, then derive the planner's asset-selection world-state FROM the graph.
+                # Flat recon populates the graph but never selects actions directly; an EMPTY graph
+                # yields no roots/urls => no primary action.
+                g = getattr(self.tools, "graph", None)
+                if g is not None:
+                    self._seed_and_project_graph(g)
+                    g_roots, g_urls, g_recon = self._graph_primary_state(g)
+                    if not g_roots and not g_urls:
+                        break
+                else:
+                    g_roots = sorted(set(base_roots) | set(self.tools.recon.get("subdomains", [])))
+                    g_urls, g_recon = list(self.tools.urls), self.tools.recon
+                state = {"mode": self.mode, "roots": g_roots, "done": done,
+                         "recon": g_recon, "urls": g_urls,
                          "bases": self.scope.base_map(),
                          # ZAP runs only when the user enabled it for this scan (and
                          # a daemon is configured); the planner's INTRUSIVE gate keeps
