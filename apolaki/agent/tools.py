@@ -1635,6 +1635,13 @@ class ToolRegistry:
                           "evidence": f"accessible ids: {accessible[:30]}"})
         return ToolResult("enumerate_ids", tmpl, True, json.dumps(out), leads)
 
+    async def _enumerate_ids(self, inp: dict) -> ToolResult:
+        """Top-level dispatch alias. The CLAUDE_TOOLS spec is named `enumerate_ids`, so execute()'s
+        getattr(self, "_" + name) resolves here; inside logic playbooks the same verb is mapped
+        explicitly (workflow.py) to _run_enumerate_ids. Without this the model could call the
+        advertised enumerate_ids tool top-level and get 'Unknown tool' — a broken IDOR-at-scale path."""
+        return await self._run_enumerate_ids(inp)
+
     async def _run_authz_matrix(self, inp: dict) -> ToolResult:
         """ACTIVE: the two-user AUTHORIZATION MATRIX. Replays each discovered operation as every
         persona (anonymous, user_a, user_b, [privileged]) through the scoped + captured transport,

@@ -4142,3 +4142,22 @@ def test_labs_benchmark_and_browser_promote_registration():
     # browser_navigate advertises promote_session
     spec = next(s for s in tools.CLAUDE_TOOLS if s["name"] == "browser_navigate")
     assert "promote_session" in spec["input_schema"]["properties"]
+
+
+def test_every_advertised_tool_is_dispatchable():
+    """CONTRACT: every model-visible tool in CLAUDE_TOOLS must resolve to a dispatch method, because
+    execute() routes via getattr(self, '_' + name). A spec without its method is a tool the model is
+    told it can call but that returns 'Unknown tool' at runtime — this guard caught enumerate_ids
+    (spec name) missing its _enumerate_ids dispatch target (the method was _run_enumerate_ids)."""
+    import tools
+    missing = [s["name"] for s in tools.CLAUDE_TOOLS
+               if not hasattr(tools.ToolRegistry, "_" + s["name"])]
+    assert missing == [], f"advertised but undispatchable: {missing}"
+
+
+def test_every_advertised_tool_has_a_permission_level():
+    """Companion contract: an advertised tool with no TOOL_PERMISSIONS entry would default its gate,
+    silently running at ACTIVE regardless of how intrusive it is. Keep the two tables in lockstep."""
+    import tools
+    missing = [s["name"] for s in tools.CLAUDE_TOOLS if s["name"] not in tools.TOOL_PERMISSIONS]
+    assert missing == [], f"advertised but ungated: {missing}"
