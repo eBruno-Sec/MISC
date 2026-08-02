@@ -149,6 +149,20 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     ck("create_object_idor_executed", bool(co.get("ran")),
        "ran=%s attempts=%s created=%s confirmed=%s" % (co.get("ran"), co.get("attempts"),
                                                         co.get("created"), co.get("confirmed")))
+    if co.get("ran"):
+        det = co.get("details") or []
+        # ran=True alone is too weak (CHAD): at least one object was actually CREATED (creation works),
+        # every created object carries an id, the attacker attempt got a real authorization response
+        # (not a 0/5xx), and cleanup succeeded for every object we created.
+        ck("create_object_created_at_least_one", (co.get("created") or 0) >= 1, "created=%s" % co.get("created"))
+        no_id = [d for d in det if d.get("object_created") and not d.get("object_id")]
+        ck("create_object_created_have_ids", not no_id, "created_without_id=%d" % len(no_id))
+        bad_attacker = [d for d in det if d.get("object_created")
+                        and (d.get("attacker_read_status") in (None, 0) or (d.get("attacker_read_status") or 0) >= 500)]
+        ck("create_object_attacker_got_authz_response", not bad_attacker, "bad=%d" % len(bad_attacker))
+        bad_cleanup = [d for d in det if d.get("object_created") and d.get("cleanup_status") is not None
+                       and not (200 <= (d.get("cleanup_status") or 0) < 400)]
+        ck("create_object_cleanup_succeeded", not bad_cleanup, "failed_cleanup=%d" % len(bad_cleanup))
     # personas must never carry secrets
     ck("personas_carry_no_secret", "password" not in json.dumps(artery).lower(), "")
 

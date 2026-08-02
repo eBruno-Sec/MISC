@@ -3258,8 +3258,12 @@ def test_agentic_runs_deterministic_floor_then_augments():
 class _PlanTools:
     """Tool stand-in for a deterministic run: no network, records executed tools."""
     def __init__(self):
+        import asset_graph as _ag
         self.recon = {"target": "example.com", "domain": "example.com", "subdomains": [], "live_hosts": []}
         self.urls = []
+        # the real ToolRegistry always carries a mission graph; the graph-authoritative executor
+        # seeds it from scope + projects recon into it, so the stub must have one too.
+        self.graph = _ag.AssetGraph("test")
 
     async def execute(self, name, inp, sid):
         from tools import ToolResult

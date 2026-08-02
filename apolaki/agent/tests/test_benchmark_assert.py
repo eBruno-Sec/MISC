@@ -20,7 +20,12 @@ def _healthy():
                                                                "user_b": {"attempted": 39, "succeeded": 35, "with_auth_material": 39}},
                                                    "status_dist": {"200": 60, "404": 8, "401": 8, "500": 2},
                                                    "endpoints_touched": 39, "both_personas_succeeded": True},
-                        "create_object_idor": {"ran": True, "attempts": 2, "created": 2, "confirmed": 0}},
+                        "create_object_idor": {"ran": True, "attempts": 2, "created": 2, "confirmed": 0,
+                                               "details": [
+            {"endpoint": "/api/Addresss", "create_status": 201, "object_created": True, "object_id": "7",
+             "attacker_read_status": 401, "attacker_delete_status": None, "cleanup_status": 200},
+            {"endpoint": "/api/Cards", "create_status": 201, "object_created": True, "object_id": "3",
+             "attacker_read_status": 403, "attacker_delete_status": None, "cleanup_status": 200}]}},
         "findings": [{"title": "BOLA basket", "family": "access_control", "confidence": "lead"}],
         "leads": [{"title": "reflected marker", "family": "xss", "confidence": "candidate"}],
     }

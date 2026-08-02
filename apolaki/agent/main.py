@@ -1908,10 +1908,20 @@ async def get_canonical_graph(session_id: str):
     g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
                                   personas=personas, capabilities=caps,
                                   scope_asset=memory_mod.target_key(m["scope"]))
+    # rebuild cloud-posture graph nodes from persisted context so an ARCHIVED mission keeps its cloud
+    # account/resource/role graph (CHAD: projection must not be live-session-only).
+    cp = (m.get("context", {}) or {}).get("cloud_posture") or {}
+    if cp.get("model"):
+        try:
+            import cloud_iam as _ci
+            _ci.to_graph(g, cp["model"], account=cp.get("account", "cloud"), source=cp.get("provider", "cloud"))
+        except Exception:
+            pass
     d = g.to_dict()
     d["stats"] = g.stats()
     d["next_best_actions"] = g.next_best_actions()   # the planner querying the world model
     d["provenance"] = _intel_provenance(session_id)  # WHERE the world model came from (feeds + worklist)
+    d["cloud_posture"] = {k: cp.get(k) for k in ("provider", "account", "partial", "posture")} if cp else {}
     return d
 
 
@@ -1937,16 +1947,8 @@ async def export_mission(session_id: str):
                             graph={**g.to_dict(), "stats": g.stats()}, capabilities=caps)
 
 
-@app.get("/cloud/posture/{provider}")
-async def cloud_posture(provider: str, session_id: str = None):
-    """READ-ONLY cloud posture review of the operator's OWN account. For `linode` it uses LINODE_TOKEN
-    (a read-only token) to enumerate users/firewalls/buckets/databases/instances (ALL pages) and flag
-    misconfigs. No writes, no exploitation; the token is auth-only and NEVER returned.
-
-    COMPLETENESS (CHAD #2): an incomplete/failed collection is NEVER reported as clean — `partial`/
-    `blocked` + a `manifest` of what was/wasn't collected are returned, and the posture verdict is
-    'incomplete' rather than 'clean' whenever collection was not complete. Pass ?session_id=<mission>
-    to INGEST the cloud model+findings into that mission's canonical graph + report (CHAD #7)."""
+def _cloud_posture_run(provider: str) -> dict:
+    """Collect + analyze a provider's posture (READ-ONLY) and shape the response. No state change."""
     import cloud_iam as _ci
     res = _ci.collect(provider)
     findings = res.get("findings", []) or []
@@ -1959,35 +1961,79 @@ async def cloud_posture(provider: str, session_id: str = None):
         posture = "issues_found"
     else:
         posture = "clean"                          # complete collection AND zero findings
-    ingested = None
-    if session_id and provider.lower() == "linode" and not res.get("blocked"):
-        try:
-            m = db.get_mission(session_id)
-            if m:
-                # project into the mission's canonical graph with provenance, and persist findings
-                if session_id in sessions:
-                    g = getattr(sessions[session_id]["tools"], "graph", None)
-                    if g is not None:
-                        _ci.to_graph(g, res.get("model", {}), account="linode", source="linode")
-                stored = 0
-                for f in findings:
-                    try:
-                        f["provenance"] = "linode-posture"
-                        db.add_finding(session_id, f)
-                        stored += 1
-                    except Exception:
-                        pass
-                ingested = {"mission": session_id, "findings_persisted": stored}
-        except Exception:
-            ingested = None
-    return {"provider": provider, "blocked": bool(res.get("blocked")), "partial": partial,
-            "posture": posture, "reason": res.get("reason", ""),
-            "counts": res.get("counts", {}), "manifest": res.get("manifest", {}),
+    return {"res": res, "findings": findings, "partial": partial, "posture": posture,
+            "provider": provider, "blocked": bool(res.get("blocked")),
+            "reason": res.get("reason", ""), "counts": res.get("counts", {}),
+            "manifest": res.get("manifest", {}),
             "summary": {"findings": len(findings),
                         "by_severity": {s: sum(1 for f in findings if f.get("severity") == s)
                                         for s in ("critical", "high", "medium", "low")},
-                        "collection_complete": not partial},
-            "ingested": ingested, "findings": findings}
+                        "collection_complete": not partial}}
+
+
+@app.get("/cloud/posture/{provider}")
+async def cloud_posture(provider: str):
+    """READ-ONLY PREVIEW of the operator's OWN cloud account (CHAD: a GET must not change state). For
+    `linode` it uses LINODE_TOKEN to enumerate users/firewalls/buckets/databases/instances (ALL pages)
+    and flag misconfigs; token is auth-only and NEVER returned. An incomplete/failed collection is
+    NEVER reported clean (partial/blocked + manifest). This endpoint does NOT persist anything — use
+    POST /cloud/posture/{provider}/ingest to record a review into a mission."""
+    p = _cloud_posture_run(provider)
+    return {k: p[k] for k in ("provider", "blocked", "partial", "posture", "reason", "counts",
+                              "manifest", "summary")} | {"findings": p["findings"]}
+
+
+@app.post("/cloud/posture/{provider}/ingest")
+async def cloud_posture_ingest(provider: str, session_id: str, account: str = "linode"):
+    """EXPLICIT ingestion of a cloud posture review into a mission (state-changing => POST, CHAD).
+    Requires an explicit session_id (mission association) + an account label recorded on every finding
+    (CHAD: no account-wide findings landing on an unrelated mission implicitly). Findings are DEDUPED
+    by (title, target, account) so re-ingesting the same posture does not duplicate. The normalized
+    model + PARTIAL status are persisted to mission context so the canonical graph is rebuilt even when
+    archived, and partial stays visibly partial. A blocked/failed collection is NOT ingested."""
+    import cloud_iam as _ci
+    m = _require_mission(session_id)
+    p = _cloud_posture_run(provider)
+    if p["blocked"]:
+        return {"ingested": False, "reason": p["reason"] or "collection blocked — nothing ingested",
+                "posture": p["posture"], "partial": p["partial"], "manifest": p["manifest"]}
+    findings = p["findings"]
+    prov = "%s-posture" % provider.lower()
+    existing = {(x.get("title"), x.get("target")) for x in (db.get_findings(session_id) or [])
+                if str(x.get("provenance", "")).startswith(provider.lower())}
+    stored, deduped = 0, 0
+    for f in findings:
+        key = (f.get("title"), f.get("target"))
+        f["provenance"] = prov
+        f["cloud_account"] = account
+        if key in existing:
+            deduped += 1
+            continue
+        try:
+            db.add_finding(session_id, f)
+            existing.add(key)
+            stored += 1
+        except Exception:
+            pass
+    # persist the normalized model + partial status so the graph rebuilds from context even when the
+    # session is evicted, and partial remains visible in the report.
+    try:
+        ctx = dict(m["context"])
+        ctx["cloud_posture"] = {"provider": provider, "account": account, "partial": p["partial"],
+                                "posture": p["posture"], "manifest": p["manifest"],
+                                "model": p["res"].get("model", {}), "findings_total": len(findings)}
+        db.update_mission(session_id, context=ctx)
+    except Exception:
+        pass
+    # also project into the LIVE graph if the mission is in memory
+    if session_id in sessions:
+        g = getattr(sessions[session_id]["tools"], "graph", None)
+        if g is not None:
+            _ci.to_graph(g, p["res"].get("model", {}), account=account, source=provider.lower())
+    return {"ingested": True, "mission": session_id, "account": account, "provider": provider,
+            "partial": p["partial"], "posture": p["posture"],
+            "findings_persisted": stored, "findings_deduped": deduped,
+            "manifest": p["manifest"], "summary": p["summary"]}
 
 
 @app.get("/audit")
