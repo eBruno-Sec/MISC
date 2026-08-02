@@ -16,7 +16,7 @@ import re
 
 # well-known TCP/UDP port -> service type (the fallback when no banner is available)
 _PORT_SVC = {
-    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 69: "tftp", 110: "pop3",
+    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 69: "tftp", 80: "http", 110: "pop3",
     111: "rpcbind", 135: "msrpc", 137: "netbios", 139: "netbios", 143: "imap", 161: "snmp",
     389: "ldap", 443: "https", 445: "smb", 465: "smtp", 512: "rexec", 513: "rlogin",
     514: "syslog", 587: "smtp", 623: "ipmi", 636: "ldap", 873: "rsync", 993: "imap",
@@ -159,6 +159,38 @@ def plan(services: list, full_mode: bool = False) -> list:
             out.append({"host": r["host"], "port": r["port"], "service": r["service"],
                         "check": c["id"], "cwe": c["cwe"], "oracle": c["oracle"],
                         "enables": c.get("enables", []), "intrusive": bool(c.get("intrusive"))})
+    return out
+
+
+_NMAP_RX = re.compile(r"\s*(\d+)/(tcp|udp)\s+open\s+(\S+)?\s*(.*)", re.I)
+
+# nmap's own service NAME is authoritative — map it to our service types as a fallback.
+_NMAP_NAME_MAP = {
+    "http": "http", "https": "https", "ssl/http": "https", "http-proxy": "http", "domain": "dns",
+    "microsoft-ds": "smb", "netbios-ssn": "smb", "ms-wbt-server": "rdp", "ms-sql-s": "mssql",
+    "mysql": "mysql", "postgresql": "postgres", "redis": "redis", "ftp": "ftp", "ssh": "ssh",
+    "smtp": "smtp", "snmp": "snmp", "imap": "imap", "pop3": "pop3", "telnet": "telnet",
+    "mongodb": "mongodb", "docker": "docker", "rpcbind": "rpcbind", "ldap": "ldap",
+    "elasticsearch": "elasticsearch", "memcached": "memcached",
+}
+
+
+def parse_nmap_ports(open_ports, host: str = "") -> list:
+    """Parse nmap open-port lines ('6379/tcp open redis 7.0.0') into routed service dicts
+    [{host, port, service, banner}] — the bridge from a port scan to service-pack execution.
+    Uses banner > port > nmap's own service NAME (authoritative fallback)."""
+    out = []
+    for line in (open_ports or []):
+        m = _NMAP_RX.match(str(line))
+        if not m:
+            continue
+        port = int(m.group(1))
+        name = (m.group(3) or "").lower()
+        banner = (name + " " + (m.group(4) or "")).strip()
+        svc = fingerprint(port, banner)
+        if svc == "unknown":
+            svc = _NMAP_NAME_MAP.get(name, "unknown")
+        out.append({"host": host, "port": port, "service": svc, "banner": banner})
     return out
 
 

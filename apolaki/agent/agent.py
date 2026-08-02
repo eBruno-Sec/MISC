@@ -938,6 +938,39 @@ class BBHAgent:
                 pass
         return out[:6]
 
+    async def _run_service_packs(self, session_id: str) -> list:
+        """Bridge the port scan -> service classification -> service-pack EXECUTION. Parses nmap open
+        ports, routes each to its technique pack, and RUNS the pack for every discovered non-web
+        service, recording confirmed exposures. Best-effort; no-op when there are no non-web services."""
+        import service_router as _sr
+        events = []
+        recon = getattr(self.tools, "recon", {}) or {}
+        host = recon.get("target") or recon.get("domain") or ""
+        ports = (recon.get("nmap") or {}).get("open_ports") or []
+        ran = 0
+        for s in _sr.parse_nmap_ports(ports, host):
+            if _sr.is_web(s["service"]) or s["service"] == "unknown" or not s.get("host"):
+                continue
+            try:
+                res = await self.tools.execute("run_service_pack",
+                                               {"host": s["host"], "port": s["port"],
+                                                "service": s["service"]}, session_id)
+            except Exception:
+                continue
+            ran += 1
+            for f in (res.findings or []):
+                if self.mission_id:
+                    try:
+                        f["id"] = db.add_finding(self.mission_id, f)
+                    except Exception:
+                        pass
+                self.findings.append(f)
+                events.append({"type": "finding", "finding": f})
+        if ran:
+            events.append({"type": "info", "content": "Ran %d network service pack(s) from the port "
+                           "scan (beyond-web execution)." % ran})
+        return events
+
     async def _authenticated_recrawl(self, roles, base, session_id) -> list:
         """Real per-persona authenticated crawl. For EACH session persona, GET a set of common authed
         routes (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a
@@ -1322,6 +1355,13 @@ class BBHAgent:
         # and raise sensitive-route + business-logic leads BEFORE the scan runs (every strategy).
         async for ev in self._recon_code_intelligence(session_id):
             yield ev
+
+        # Beyond-web: turn the port scan into service-pack EXECUTION (nmap -> classify -> run pack).
+        try:
+            for ev in await self._run_service_packs(session_id):
+                yield ev
+        except Exception:
+            pass
 
         # Authenticated scanning: discover credentials the target exposes (or inherit them from a prior
         # scan) and log in, so the whole assessment runs as a real user (every strategy, active/full only).
