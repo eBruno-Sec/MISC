@@ -106,6 +106,22 @@ services:
     restart: unless-stopped
     mem_limit: 3g
 
+  # ISOLATED Juice Shop for the full-mission benchmark's --fresh-lab. Same image, but a DEDICATED
+  # volume the benchmark recreates for a genuinely fresh DB (no accounts/state bleed) WITHOUT ever
+  # touching the normal `juice-shop` / juiceshop_data a user works against. Opt-in via `--profile
+  # bench`; reachable at http://juice-shop-bench:3000 on the compose network. See scripts/fresh_lab.sh.
+  juice-shop-bench:
+    profiles: ["bench"]
+    image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
+    environment:
+      - 'NODE_CONFIG={"challenges":{"safetyMode":"disabled"}}'
+    ports:
+      - "127.0.0.1:42001:3000"
+    volumes:
+      - juiceshop_bench_data:/juice-shop/data
+    restart: "no"
+    mem_limit: 3g
+
   # DVWA — a SECOND lab so techniques can be validated on >=2 labs (the "generalized" bar in
   # the Taxonomy tab). One-time setup after `up`: open http://localhost:42080, click "Create
   # Database", log in admin/password, set DVWA Security = low. Reachable at http://dvwa on the
@@ -208,5 +224,6 @@ volumes:
   nuclei_templates:
   bbh_data:
   juiceshop_data:
+  juiceshop_bench_data:      # dedicated to juice-shop-bench; recreated by --fresh-lab, never the user's data
   intel_feeds_data:
   proxy_data:

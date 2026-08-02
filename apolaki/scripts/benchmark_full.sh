@@ -22,21 +22,23 @@ esac; done
 pass=0; fail=0
 ck() { if [ "$2" = "PASS" ]; then echo "  PASS  $1"; pass=$((pass + 1)); else echo "  FAIL  $1"; fail=$((fail + 1)); fi; }
 
-# ── 0. optional isolated lab state (CHAD #6) ──
+# ── 0. optional GENUINELY isolated lab state (CHAD #1) ──
+# Default target is the shared juice-shop; --fresh-lab targets a DEDICATED juice-shop-bench that is
+# recreated with its OWN volume (no account/state bleed) and never touches the user's normal lab.
+TARGET="http://juice-shop:3000"
 if [ "$FRESH_LAB" = "1" ]; then
-  echo "[full-mission] 0. --fresh-lab: recreate juice-shop for isolated state"
-  $COMPOSE restart juice-shop >/dev/null 2>&1 || $COMPOSE up -d juice-shop >/dev/null 2>&1
-  ready=0
-  for i in $(seq 1 60); do
-    curl -sf http://localhost:42000/ >/dev/null 2>&1 && { ready=1; break; }
-    sleep 2
-  done
-  [ "$ready" = 1 ] && ck "juice-shop recreated + ready (isolated state)" PASS || ck "juice-shop ready after reset" FAIL
+  echo "[full-mission] 0. --fresh-lab: provision an ISOLATED fresh juice-shop-bench"
+  if sh scripts/fresh_lab.sh; then
+    TARGET="http://juice-shop-bench:3000"
+    ck "isolated fresh juice-shop-bench provisioned (normal lab untouched)" PASS
+  else
+    ck "isolated fresh lab provisioned" FAIL
+  fi
 fi
 
-echo "[full-mission] 1. engage a deterministic AUTHENTICATED scan of Juice Shop"
+echo "[full-mission] 1. engage a deterministic AUTHENTICATED scan of $TARGET"
 sid=$(curl -s -X POST "$A/engage" -H 'Content-Type: application/json' \
-  -d '{"program_name":"benchmark","in_scope":["http://juice-shop:3000"],"mode":"active","strategy":"deterministic","authenticated_scan":true}' \
+  -d "{\"program_name\":\"benchmark\",\"in_scope\":[\"$TARGET\"],\"mode\":\"active\",\"strategy\":\"deterministic\",\"authenticated_scan\":true}" \
   | grep -oE '"session_id":"[a-f0-9]+"' | head -1 | cut -d'"' -f4)
 if [ -z "$sid" ]; then ck "engage returned a session" FAIL; echo "[full-mission] cannot continue"; exit 1; fi
 ck "engage returned a session ($sid)" PASS
