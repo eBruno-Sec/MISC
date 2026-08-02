@@ -153,12 +153,95 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     return checks
 
 
+def signature(base: str, sid: str) -> dict:
+    """A COMPACT, order-stable fingerprint of a mission's outcome — the deterministic-engine facts
+    that should reproduce run-to-run: which technique families surfaced, the confirmed/lead counts,
+    the graph's node-kind census, and the auth-artery shape. Used to enforce determinism (CHAD #5):
+    two runs of the same deterministic scan must agree on families/auth exactly and on counts within
+    a documented variance. Structural facts only — never per-run ids/timestamps/payloads."""
+    _, rep = _get_json(base, "/report/%s/json" % sid)
+    _, graph = _get_json(base, "/graph/canonical/%s" % sid)
+    rep, graph = rep or {}, graph or {}
+    findings, leads = rep.get("findings") or [], rep.get("leads") or []
+    fams = sorted({(x.get("family") or "").strip().lower()
+                   for x in list(findings) + list(leads) if x.get("family")})
+    artery = rep.get("auth_artery") or {}
+    matrix = artery.get("matrix") or {}
+    return {
+        "families": fams,
+        "counts": {"findings": len(findings), "leads": len(leads),
+                   "confirmed": sum(1 for x in findings if x.get("confidence") == "confirmed")},
+        "graph_kinds": (graph.get("stats") or {}).get("by_kind") or {},
+        "auth": {"personas": len(artery.get("personas") or []),
+                 "auth_success": artery.get("auth_success") or 0,
+                 "matrix_operations": matrix.get("operations") or 0},
+    }
+
+
+def compare_signatures(base_sig: dict, new_sig: dict, variance: float = 0.15) -> list:
+    """(name, ok, detail) per invariant. EXACT agreement is required on the deterministic facts
+    (technique families, persona count, auth_success); numeric counts may differ within `variance`
+    to tolerate benign timing jitter (an endpoint discovered a beat later). Drift beyond that is a
+    determinism regression, not noise."""
+    out = []
+
+    def ck(name, ok, detail=""):
+        out.append((name, bool(ok), detail))
+
+    def within(a, b):
+        hi = max(abs(a), abs(b))
+        return hi == 0 or abs(a - b) <= variance * hi
+
+    ck("determinism_families_stable", base_sig.get("families") == new_sig.get("families"),
+       "base=%s new=%s" % (base_sig.get("families"), new_sig.get("families")))
+    ba, na = base_sig.get("auth", {}), new_sig.get("auth", {})
+    ck("determinism_personas_stable", ba.get("personas") == na.get("personas"),
+       "base=%s new=%s" % (ba.get("personas"), na.get("personas")))
+    ck("determinism_auth_success_stable", ba.get("auth_success") == na.get("auth_success"),
+       "base=%s new=%s" % (ba.get("auth_success"), na.get("auth_success")))
+    ck("determinism_matrix_ops_within_variance", within(ba.get("matrix_operations", 0), na.get("matrix_operations", 0)),
+       "base=%s new=%s" % (ba.get("matrix_operations"), na.get("matrix_operations")))
+    bc, nc = base_sig.get("counts", {}), new_sig.get("counts", {})
+    for k in ("findings", "leads", "confirmed"):
+        ck("determinism_%s_within_variance" % k, within(bc.get(k, 0), nc.get(k, 0)),
+           "base=%s new=%s" % (bc.get(k), nc.get(k)))
+    bk, nk = base_sig.get("graph_kinds", {}), new_sig.get("graph_kinds", {})
+    for k in sorted(set(bk) | set(nk)):
+        ck("determinism_graph_%s_within_variance" % k, within(bk.get(k, 0), nk.get(k, 0)),
+           "base=%s new=%s" % (bk.get(k), nk.get(k)))
+    return out
+
+
 def main(argv):
     if len(argv) < 3:
-        print("usage: python benchmark_assert.py <base_url> <session_id>")
+        print("usage: python benchmark_assert.py <base_url> <session_id> [--signature | --baseline FILE]")
         return 2
     base, sid = argv[1], argv[2]
+
+    # --signature: just print the compact deterministic fingerprint (to seed/inspect a baseline)
+    if "--signature" in argv:
+        print(json.dumps(signature(base, sid), indent=2, sort_keys=True))
+        return 0
+
     checks = run_checks(base, sid)
+
+    # --baseline FILE: also enforce determinism vs a stored golden signature (write it if absent)
+    if "--baseline" in argv:
+        try:
+            path = argv[argv.index("--baseline") + 1]
+        except Exception:
+            print("[assert] --baseline requires a file path")
+            return 2
+        import os
+        sig = signature(base, sid)
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(sig, fh, indent=2, sort_keys=True)
+            print("[assert] wrote new determinism baseline -> %s (compare on the next run)" % path)
+        else:
+            with open(path, "r", encoding="utf-8") as fh:
+                base_sig = json.load(fh)
+            checks = checks + compare_signatures(base_sig, sig)
     npass = sum(1 for _, ok, _ in checks if ok)
     for name, ok, detail in checks:
         print("  %s  %-32s %s" % ("PASS" if ok else "FAIL", name, detail))

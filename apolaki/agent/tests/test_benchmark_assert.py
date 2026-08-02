@@ -102,6 +102,42 @@ def test_session_id_mismatch_is_caught(monkeypatch):
     assert "graph_session_id_matches" in fails
 
 
+def test_signature_captures_deterministic_facts(monkeypatch):
+    sid, jmap, dmap = _healthy()
+    _install(monkeypatch, jmap, dmap)
+    sig = BA.signature("http://x", sid)
+    assert sig["families"] == ["access_control", "xss"]           # sorted, deduped
+    assert sig["counts"] == {"findings": 1, "leads": 1, "confirmed": 0}
+    assert sig["auth"] == {"personas": 2, "auth_success": 2, "matrix_operations": 39}
+    assert sig["graph_kinds"]["endpoint"] == 120
+
+
+def test_determinism_identical_runs_pass():
+    sig = {"families": ["access_control", "xss"], "counts": {"findings": 3, "leads": 5, "confirmed": 0},
+           "graph_kinds": {"host": 1, "endpoint": 120}, "auth": {"personas": 2, "auth_success": 2, "matrix_operations": 39}}
+    fails = [n for n, ok, _ in BA.compare_signatures(sig, dict(sig)) if not ok]
+    assert fails == []
+
+
+def test_determinism_family_drift_is_caught():
+    a = {"families": ["access_control", "xss"], "counts": {}, "graph_kinds": {}, "auth": {}}
+    b = {"families": ["access_control"], "counts": {}, "graph_kinds": {}, "auth": {}}   # xss vanished
+    fails = [n for n, ok, _ in BA.compare_signatures(a, b) if not ok]
+    assert "determinism_families_stable" in fails
+
+
+def test_determinism_count_within_variance_but_big_drift_caught():
+    base = {"families": [], "counts": {"findings": 100, "leads": 0, "confirmed": 0},
+            "graph_kinds": {"endpoint": 100}, "auth": {"personas": 2, "auth_success": 2, "matrix_operations": 40}}
+    # +10% findings and endpoints = within 15% variance -> OK
+    near = {"families": [], "counts": {"findings": 110, "leads": 0, "confirmed": 0},
+            "graph_kinds": {"endpoint": 110}, "auth": {"personas": 2, "auth_success": 2, "matrix_operations": 40}}
+    assert [n for n, ok, _ in BA.compare_signatures(base, near) if not ok] == []
+    # personas changed 2 -> 1 = exact-match invariant broken, always caught regardless of variance
+    drift = dict(near); drift["auth"] = {"personas": 1, "auth_success": 2, "matrix_operations": 40}
+    assert "determinism_personas_stable" in [n for n, ok, _ in BA.compare_signatures(base, drift) if not ok]
+
+
 def test_401_on_endpoint_is_caught(monkeypatch):
     # "no 5xx" was too weak — a 401/404 must FAIL, not pass
     sid, jmap, dmap = _healthy()

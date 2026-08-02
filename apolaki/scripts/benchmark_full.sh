@@ -12,8 +12,13 @@ set -u
 A="http://localhost:8000"
 COMPOSE="${COMPOSE:-docker compose}"
 MAX_RUNTIME="${BENCH_MAX_RUNTIME:-1200}"   # seconds; a run beyond this is flagged as a perf regression
-FRESH_LAB=0
-for arg in "$@"; do case "$arg" in --fresh-lab) FRESH_LAB=1 ;; esac; done
+FRESH_LAB=0; BASELINE=""
+# --baseline enforces determinism vs a stored golden signature (first run writes it, later runs
+# compare within a documented variance). Kept on the agent's persistent data volume across runs.
+for arg in "$@"; do case "$arg" in
+  --fresh-lab) FRESH_LAB=1 ;;
+  --baseline)  BASELINE="/app/data/benchmark_baseline.json" ;;
+esac; done
 pass=0; fail=0
 ck() { if [ "$2" = "PASS" ]; then echo "  PASS  $1"; pass=$((pass + 1)); else echo "  FAIL  $1"; fail=$((fail + 1)); fi; }
 
@@ -58,7 +63,9 @@ fi
 # ── 3. DEEP correctness assertions over the real report/graph surfaces (the actual proof) ──
 if [ "$status" = "complete" ]; then
   echo "[full-mission] 3. deep correctness assertions (benchmark_assert.py, in-container)"
-  if $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid"; then
+  bflag=""
+  [ -n "$BASELINE" ] && bflag="--baseline $BASELINE"
+  if $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid" $bflag; then
     ck "deep correctness assertions all passed" PASS
   else
     ck "deep correctness assertions" FAIL
