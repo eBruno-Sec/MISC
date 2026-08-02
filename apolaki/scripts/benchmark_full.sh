@@ -69,7 +69,7 @@ if [ "$status" = "complete" ]; then
   [ -n "$BASELINE" ] && bflag="--baseline $BASELINE"
   # Provenance the artifact/baseline are BOUND to (CHAD #4/#7): the host can see git + docker, so it
   # gathers the code + lab identity and passes it into the container as env.
-  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+  GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")   # FULL hash (CHAD #4)
   IMG_DIGEST=$(docker image inspect apolaki-agent:latest --format '{{.Id}}' 2>/dev/null || echo "")
   JS_DIGEST=$(docker inspect "$($COMPOSE ps -q juice-shop 2>/dev/null | head -1)" \
               --format '{{index .Image}}' 2>/dev/null || echo "")

@@ -143,6 +143,11 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
        "succeeded=%s status_dist=%s" % (areq.get("succeeded"), areq.get("status_dist")))
     ck("both_personas_authenticated", bool(areq.get("both_personas_succeeded")),
        "by_role=%s" % areq.get("by_role"))
+    # create-object IDOR (capability C) actually EXECUTED live (owner-create -> attacker-access);
+    # 0 confirmed is fine (correct authz = no false positive), but the test must have RUN.
+    co = artery.get("create_object_idor") or {}
+    ck("create_object_idor_executed", bool(co.get("ran")),
+       "ran=%s attempts=%s confirmed=%s" % (co.get("ran"), co.get("attempts"), co.get("confirmed")))
     # personas must never carry secrets
     ck("personas_carry_no_secret", "password" not in json.dumps(artery).lower(), "")
 

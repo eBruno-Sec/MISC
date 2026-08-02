@@ -12,7 +12,7 @@ COMPOSE="${COMPOSE:-docker compose}"
 pass=0; fail=0
 ck() { if [ "$2" = "PASS" ]; then echo "  PASS  $1"; pass=$((pass + 1)); else echo "  FAIL  $1"; fail=$((fail + 1)); fi; }
 
-GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")   # FULL hash (CHAD #4)
 IMG_DIGEST=$(docker image inspect apolaki-agent:latest --format '{{.Id}}' 2>/dev/null || echo "")
 
 # Provision a fresh isolated bench, engage + run + poll ONE authenticated mission. Progress goes to

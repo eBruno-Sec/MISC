@@ -1314,6 +1314,14 @@ class BBHAgent:
                 if cres.findings:
                     events.append({"type": "info", "content": "Create-object IDOR: %d confirmed cross-user "
                                    "object access(es) proven via owned-object creation." % len(cres.findings)})
+                # record that C actually FIRED (attempts + confirmed), so the artifact proves the
+                # owner-create -> attacker-access flow ran live, even when the target enforces authz
+                # correctly (0 confirmed = no false positive, still a real executed test).
+                try:
+                    self._create_object_result = {**json.loads(cres.output or "{}"),
+                                                  "confirmed": len(cres.findings)}
+                except Exception:
+                    self._create_object_result = {"ran": True, "confirmed": len(cres.findings)}
             except Exception:
                 pass
 
@@ -1358,8 +1366,11 @@ class BBHAgent:
                     "by_role": by_role,
                     "status_dist": areq.get("status_dist", {}),
                     "endpoints_touched": areq.get("endpoints_touched", 0),
+                    "with_auth_material": areq.get("with_auth_material", 0),
                     "both_personas_succeeded": both_ok,
                 },
+                # PROOF capability C (create-object IDOR) executed live: {ran, attempts, confirmed}
+                "create_object_idor": getattr(self, "_create_object_result", {"ran": False}),
                 "capabilities": caps,
             }
         except Exception:
