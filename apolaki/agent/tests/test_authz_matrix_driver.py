@@ -51,9 +51,10 @@ def test_owned_object_read_cross_user_is_confirmed_idor():
     assert len(idor) == 1 and idor[0]["cwe"] == "CWE-639"
 
 
-def test_object_specific_idor_confirmed_via_differential_control():
-    # no owner identity in the body, but a DIFFERENT id returns DIFFERENT data (object-specific),
-    # so the same-id cross-user read is a real IDOR -> confirmed (the basket case).
+def test_object_specific_differential_is_a_strong_lead_not_confirmed():
+    # no owner identity in the body; a different id returns different data (object-specific). That's a
+    # STRONG signal but NOT proof of ownership (a shared-but-protected paginated resource looks the
+    # same), so it must be a LEAD, not confirmed (CHAD re-audit #3).
     reg = _reg()
 
     async def per_object(method, url, headers, body, follow):
@@ -66,8 +67,9 @@ def test_object_specific_idor_confirmed_via_differential_control():
     reg._http_send = per_object
     r = asyncio.new_event_loop().run_until_complete(
         reg._run_authz_matrix({**_INP, "owner_identity": ""}))
-    idor = [f for f in r.findings if f["confidence"] == "confirmed" and "IDOR" in f["title"]]
-    assert len(idor) == 1 and "object-specific" in idor[0]["evidence"]
+    assert not any(f["confidence"] == "confirmed" for f in r.findings)     # never over-claims
+    idor = [f for f in r.findings if f["family"] == "idor" and "object-specific" in f["evidence"]]
+    assert len(idor) == 1 and idor[0]["confidence"] == "lead" and "needs-ownership-proof" in idor[0]["tags"]
 
 
 def test_shared_object_without_ownership_is_lead_not_confirmed():

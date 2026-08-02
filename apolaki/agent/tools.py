@@ -1722,26 +1722,45 @@ class ToolRegistry:
                                                          "(similarity %.3f) — endpoint is object-specific" % (ctrl_req, csim))
                             except Exception:
                                 pass
-                        if owned or object_specific:
-                            proof = ("object carries owner '%s' identity" % marker) if owned else ctrl_note
+                        if owned:
+                            # CONFIRMED only with positive ownership evidence: the object carries the
+                            # owner's identity, which a shared resource would not.
                             findings.append({
                                 "title": "IDOR / BOLA — cross-user object access confirmed",
                                 "severity": "high", "family": "idor", "confidence": "confirmed",
                                 "cwe": "CWE-639", "target": target,
                                 "tags": ["idor", "bola", "access-control", "horizontal"],
-                                "description": ("A protected, user-specific object was read by a DIFFERENT authenticated "
-                                                "user. Anonymous was denied (object is protected); '%s' and '%s' read the "
-                                                "SAME object, and the object is proven user-specific (not shared)."
-                                                % (owner, attacker)),
+                                "description": ("A protected, user-owned object was read by a DIFFERENT authenticated "
+                                                "user. Anonymous was denied (protected); the object carries owner '%s' "
+                                                "identity, and '%s' read the SAME object." % (owner, attacker)),
                                 "impact": "Read other users' data by changing the object id; bulk exfiltration by walking ids.",
                                 "evidence": ("anon %s -> %s (denied); '%s' and '%s' -> 200 identical (similarity %.3f); "
-                                             "ownership proof: %s" % (req, sn, owner, attacker, sim, proof)),
+                                             "ownership proof: object carries owner identity '%s'"
+                                             % (req, sn, owner, attacker, sim, marker)),
                                 "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
                             try:
                                 self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
                                                           "cross-user read of %s" % target)
                             except Exception:
                                 pass
+                        elif object_specific:
+                            # STRONG signal but NOT proof of ownership: an object-specific endpoint that
+                            # two users read identically could still be a shared-but-protected resource
+                            # (e.g. a paginated team feed). Emit a strong LEAD, not a confirmed finding
+                            # (CHAD re-audit #3 — id+1 differing does not prove ownership).
+                            findings.append({
+                                "title": "Possible IDOR / BOLA — object-specific cross-user read (ownership unproven)",
+                                "severity": "medium", "family": "idor", "confidence": "lead",
+                                "cwe": "CWE-639", "target": target,
+                                "tags": ["idor", "bola", "access-control", "horizontal", "needs-ownership-proof"],
+                                "description": ("Two DIFFERENT authenticated users read the SAME protected object, and a "
+                                                "different id returns different data (object-specific). Strong IDOR signal, "
+                                                "but NOT proof of ownership — a shared-but-protected resource could look "
+                                                "identical. CONFIRM by creating the object as '%s' and re-reading it as '%s'."
+                                                % (owner, attacker)),
+                                "impact": "If the object is user-owned, any user can read others' records by id.",
+                                "evidence": ("anon %s -> %s (denied); '%s' and '%s' -> 200 identical (similarity %.3f); %s "
+                                             "— object-specific but OWNERSHIP UNPROVEN" % (req, sn, owner, attacker, sim, ctrl_note))})
                         else:
                             findings.append({
                                 "title": "Possible IDOR / BOLA — cross-user read (ownership unproven)",
