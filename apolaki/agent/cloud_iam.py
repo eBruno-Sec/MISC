@@ -249,12 +249,17 @@ def _linode_get(path: str, token: str, timeout: int = 20, retries: int = 3):
     return False, None, 0
 
 
+_PAGE_CAP = 100
+
+
 def _linode_paged(path: str, token: str, manifest: dict):
-    """Fetch ALL pages of a Linode collection (CHAD #2: no more first-page-only). Records every request
-    in the manifest and returns (items, complete). complete=False if any page failed — the caller must
-    then treat the collection as PARTIAL, never clean."""
-    items, page, pages = [], 1, 1
-    while page <= pages and page <= 100:            # hard cap so a huge/looping account can't run away
+    """Fetch ALL pages of a Linode collection. Records every request in the manifest and returns
+    (items, complete). complete=False if any page FAILED, if the API advertised MORE pages than the
+    cap (truncated — CHAD edge bug: must NOT be marked complete), or if the collected count does not
+    match the advertised total (inconsistent collection). Truncation/mismatch is recorded explicitly
+    so a truncated collection is never mistaken for a full one."""
+    items, page, pages, advertised = [], 1, 1, None
+    while page <= pages and page <= _PAGE_CAP:
         sep = "&" if "?" in path else "?"
         ok, data, status = _linode_get("%s%spage=%d&page_size=100" % (path, sep, page), token)
         manifest["requests"] += 1
@@ -264,8 +269,18 @@ def _linode_paged(path: str, token: str, manifest: dict):
         manifest["succeeded"] += 1
         items += data.get("data", []) or []
         pages = int(data.get("pages", 1) or 1)
-        manifest["advertised"][path] = int(data.get("results", len(items)) or len(items))
+        advertised = int(data.get("results", len(items)) or len(items))
+        manifest["advertised"][path] = advertised
         page += 1
+    # The API advertised MORE pages than we fetched -> the collection is TRUNCATED, not complete.
+    if pages > _PAGE_CAP:
+        manifest["truncated"].append({"path": path, "advertised_pages": pages, "page_cap": _PAGE_CAP})
+        return items, False
+    # Collected count must reconcile with the advertised total (else the account changed mid-collection
+    # or a page was short) -> treat as incomplete rather than silently under-report.
+    if advertised is not None and len(items) != advertised:
+        manifest["truncated"].append({"path": path, "collected": len(items), "advertised": advertised})
+        return items, False
     return items, True
 
 
@@ -279,7 +294,8 @@ def collect_linode_live(token: str) -> dict:
     required endpoint fails, the result is marked partial/blocked with a manifest of what was and was
     not collected, so zero findings on a broken collection cannot be mistaken for a secure account."""
     from urllib.parse import quote
-    manifest = {"requests": 0, "succeeded": 0, "failed": [], "advertised": {}, "counts": {}, "complete": True}
+    manifest = {"requests": 0, "succeeded": 0, "failed": [], "truncated": [], "advertised": {},
+                "counts": {}, "complete": True}
     doc = {"users": [], "grants": {}, "firewalls": [], "buckets": [], "instances": [], "databases": []}
     required = {"users": "/account/users", "firewalls": "/networking/firewalls",
                 "buckets": "/object-storage/buckets", "instances": "/linode/instances",

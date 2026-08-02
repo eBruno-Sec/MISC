@@ -12,18 +12,34 @@ COMPOSE="${COMPOSE:-docker compose}"
 BENCH_HOST_PORT="${BENCH_HOST_PORT:-42001}"
 t0=$(date +%s)
 
-# Ground-truth the Compose project name (CHAD #3): prefer an explicit COMPOSE_PROJECT_NAME, else the
-# project label of ANY currently-running compose container in this project (not only juice-shop, which
-# may be down), else the sanitized dir name. The bench container's OWN project label is re-verified
-# AFTER creation below, so a wrong guess can never lead to touching another project's volume.
-PROJECT="${COMPOSE_PROJECT_NAME:-}"
-if [ -z "$PROJECT" ]; then
+# Resolve the Compose project identity AUTHORITATIVELY before we delete anything (CHAD re-audit):
+# a GUESSED project name must NEVER be used to delete a volume. Sources, in order of authority:
+#   1) explicit COMPOSE_PROJECT_NAME env
+#   2) `docker compose config` (computes the effective project name, honoring -p, even with nothing running)
+#   3) the project label of any currently-running compose container
+# If NONE prove it, we FAIL (and delete nothing) rather than fall back to the directory name.
+PROJECT="${COMPOSE_PROJECT_NAME:-}"; PROVEN=0
+[ -n "$PROJECT" ] && PROVEN=1
+if [ "$PROVEN" != 1 ]; then
+  PROJECT=$($COMPOSE config 2>/dev/null | grep -E '^name:' | head -1 | sed 's/^name:[[:space:]]*//' | tr -d '"' | tr -d "'")
+  [ -n "$PROJECT" ] && PROVEN=1
+fi
+if [ "$PROVEN" != 1 ]; then
   for _svc in agent juice-shop juice-shop-bench; do
     _c=$($COMPOSE ps -q "$_svc" 2>/dev/null | head -1)
-    [ -n "$_c" ] && PROJECT=$(docker inspect "$_c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null) && [ -n "$PROJECT" ] && break
+    if [ -n "$_c" ]; then
+      PROJECT=$(docker inspect "$_c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+      [ -n "$PROJECT" ] && { PROVEN=1; break; }
+    fi
   done
 fi
-[ -z "$PROJECT" ] && PROJECT="$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+if [ "$PROVEN" != 1 ] || [ -z "$PROJECT" ]; then
+  echo "[fresh-lab] FAILED: cannot PROVE the Compose project identity (no COMPOSE_PROJECT_NAME, no"
+  echo "                    'docker compose config' name, no running compose container). Set"
+  echo "                    COMPOSE_PROJECT_NAME to run --fresh-lab safely — refusing to delete a"
+  echo "                    volume by a guessed project name."
+  exit 1
+fi
 
 # The dedicated bench volume, identified by Compose's own labels — unambiguous, project-scoped.
 _bench_vol() {
@@ -70,8 +86,9 @@ cid=$($COMPOSE --profile bench ps -q juice-shop-bench 2>/dev/null | head -1)
 # Verify the created container's OWN project label matches the project we resolved (CHAD #3) — a
 # mismatch means our project identity was wrong and we could have targeted the wrong volume: FATAL.
 cproj=$(docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
-if [ -n "$cproj" ] && [ "$cproj" != "$PROJECT" ]; then
-  echo "[fresh-lab] FAILED: bench container project label '$cproj' != resolved project '$PROJECT' — aborting"
+if [ -z "$cproj" ] || [ "$cproj" != "$PROJECT" ]; then
+  echo "[fresh-lab] FAILED: bench container project label '${cproj:-<empty>}' must be non-empty and"
+  echo "                    exactly equal to the resolved project '$PROJECT' — aborting"
   exit 1
 fi
 cont_started=$(docker inspect "$cid" --format '{{.State.StartedAt}}' 2>/dev/null)

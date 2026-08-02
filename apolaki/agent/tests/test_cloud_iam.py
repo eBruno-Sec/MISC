@@ -217,3 +217,32 @@ def test_linode_pagination_follows_all_pages(monkeypatch):
     res = CI.collect_linode_live("tok")
     # two instance pages collected (extra-1 + extra-2)
     assert res["counts"]["instances"] == 2 and res["blocked"] is False
+
+
+def test_linode_over_100_pages_is_not_complete(monkeypatch):
+    # the API advertises 101 pages -> the cap is hit and the collection MUST be marked truncated,
+    # never complete (CHAD edge bug).
+    def _get(path, token, timeout=20, retries=3):
+        base = path.split("?")[0]
+        if base == "/linode/instances":
+            return (True, {"data": [{"label": "i"}], "pages": 101, "results": 200}, 200)
+        return (True, {"data": [], "pages": 1, "results": 0}, 200)
+    monkeypatch.setattr(CI, "_linode_get", _get)
+    res = CI.collect_linode_live("tok")
+    assert res["partial"] is True and res["manifest"]["complete"] is False
+    assert any(t.get("path") == "/linode/instances" and t.get("advertised_pages") == 101
+               for t in res["manifest"]["truncated"])
+
+
+def test_linode_advertised_count_mismatch_is_not_complete(monkeypatch):
+    # API says results=5 for buckets but returns only 1 -> inconsistent -> NOT complete.
+    def _get(path, token, timeout=20, retries=3):
+        base = path.split("?")[0]
+        if base == "/object-storage/buckets":
+            return (True, {"data": [{"label": "b", "acl": "private"}], "pages": 1, "results": 5}, 200)
+        return (True, {"data": [], "pages": 1, "results": 0}, 200)
+    monkeypatch.setattr(CI, "_linode_get", _get)
+    res = CI.collect_linode_live("tok")
+    assert res["partial"] is True
+    assert any(t.get("path") == "/object-storage/buckets" and t.get("advertised") == 5
+               for t in res["manifest"]["truncated"])

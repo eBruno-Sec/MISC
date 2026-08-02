@@ -193,6 +193,7 @@ class BBHAgent:
         # actually mints/reacquires personas + runs the matrix. Lets a correctness check tell
         # "artery did not run" apart from "ran and produced no personas" (both differ from a smoke test).
         self._auth_artery = {"ran": False}
+        self._graph_projection_error = None
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
@@ -1619,8 +1620,11 @@ class BBHAgent:
             for f in (self.findings or []):
                 g.observe("finding", str(f.get("id") or (f.get("title", "")[:40])),
                           label=f.get("title", "finding"), source="scan", family=(f.get("family") or ""))
-        except Exception:
-            pass
+            self._graph_projection_error = None
+        except Exception as e:
+            # do NOT swallow silently (CHAD): a projection failure means the graph is stale, which
+            # directly affects primary action selection — record it so the executor can surface it.
+            self._graph_projection_error = str(e)
 
     def _graph_primary_state(self, g):
         """Derive the planner's ASSET-SELECTION world-state FROM THE GRAPH only. roots = graph host
@@ -1672,14 +1676,19 @@ class BBHAgent:
                 # Flat recon populates the graph but never selects actions directly; an EMPTY graph
                 # yields no roots/urls => no primary action.
                 g = getattr(self.tools, "graph", None)
-                if g is not None:
-                    self._seed_and_project_graph(g)
-                    g_roots, g_urls, g_recon = self._graph_primary_state(g)
-                    if not g_roots and not g_urls:
-                        break
-                else:
-                    g_roots = sorted(set(base_roots) | set(self.tools.recon.get("subdomains", [])))
-                    g_urls, g_recon = list(self.tools.urls), self.tools.recon
+                if g is None:
+                    # FAIL-CLOSED (CHAD): with no mission graph there is no asset-selection authority —
+                    # halt primary execution rather than silently falling back to flat recon.
+                    yield {"type": "info", "content": "No mission graph — primary execution halted "
+                           "(the graph is the asset-selection authority; no flat-recon fallback)."}
+                    break
+                self._seed_and_project_graph(g)
+                if getattr(self, "_graph_projection_error", None):
+                    yield {"type": "info", "content": "Graph projection error (surfaced, not swallowed): "
+                           "%s" % self._graph_projection_error}
+                g_roots, g_urls, g_recon = self._graph_primary_state(g)
+                if not g_roots and not g_urls:
+                    break
                 state = {"mode": self.mode, "roots": g_roots, "done": done,
                          "recon": g_recon, "urls": g_urls,
                          "bases": self.scope.base_map(),
