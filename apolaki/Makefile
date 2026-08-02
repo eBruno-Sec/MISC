@@ -49,8 +49,14 @@ test:
 benchmark:            ## artery-mechanism NO-MOCKS proof: register -> IDOR signal -> restart survives
 	@sh scripts/benchmark.sh
 
-benchmark-full:       ## FULL-MISSION NO-MOCKS proof: /engage -> /run -> /report + /graph via the real API
+benchmark-full:       ## FULL-MISSION NO-MOCKS proof: /engage -> /run -> deep correctness asserter
 	@sh scripts/benchmark_full.sh
+
+benchmark-fresh:      ## FULL-MISSION on a GENUINELY isolated fresh juice-shop-bench (never the user's lab)
+	@sh scripts/benchmark_full.sh --fresh-lab --baseline
+
+benchmark-repeat:     ## DETERMINISM: two independent fresh missions, deep-assert both, fail on drift
+	@sh scripts/benchmark_repeat.sh
 
 down:
 	$(COMPOSE) $(FULL) down
