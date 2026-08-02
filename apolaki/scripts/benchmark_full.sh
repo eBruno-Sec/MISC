@@ -27,17 +27,24 @@ echo "    final status: ${status:-timeout}"
 [ "$status" = "complete" ] && ck "mission ran to completion through the API" PASS || ck "mission completion (status=${status:-timeout})" FAIL
 
 echo "[full-mission] 3. report + graph consistency"
-# retry the report fetch a few times to ride out the finalize write
-rep=""; fcount=0
+# Count confirmed vs unconfirmed SEPARATELY — never conflate the two (truth-first). A
+# confirmed finding is a proven bug; a lead/candidate is an advisory signal. Reporting one
+# blended number is exactly the overclaim Apolaki exists to avoid, so the harness models it.
+# Retry the fetch a few times to ride out the finalize write.
+rep=""; confirmed=0; unconf=0
 j=0; while [ "$j" -lt 5 ]; do
   rep=$(curl -s "$A/report/$sid/json")
-  fcount=$(echo "$rep" | grep -oE '"cwe": *"CWE-[0-9]+"' | wc -l | tr -d ' ')
-  [ "${fcount:-0}" -ge 1 ] && break
+  confirmed=$(echo "$rep" | grep -oE '"confidence": *"confirmed"' | wc -l | tr -d ' ')
+  unconf=$(echo "$rep" | grep -oE '"confidence": *"(lead|candidate)"' | wc -l | tr -d ' ')
+  [ "$((confirmed + unconf))" -ge 1 ] && break
   j=$((j + 1)); sleep 2
 done
 echo "$rep" | grep -q '"findings"' && ck "report JSON generated (no 500)" PASS || ck "report JSON generated" FAIL
-echo "    findings rendered in report: $fcount"
-[ "${fcount:-0}" -ge 1 ] && ck "report renders the mission's findings (>=1)" PASS || ck "report renders findings" FAIL
+echo "    report entries -> confirmed: $confirmed | unconfirmed (leads/candidates): $unconf"
+# Non-empty is the smoke test; we do NOT assert a confirmed count — a deterministic Juice
+# Shop pass legitimately confirms little, and asserting >0 confirmed would reward false
+# positives. What must hold: the mission produced SOME rendered signal end-to-end.
+[ "$((confirmed + unconf))" -ge 1 ] && ck "report renders the mission's signal (confirmed+leads >=1)" PASS || ck "report renders signal" FAIL
 gnodes=$(curl -s "$A/graph/canonical/$sid" | grep -oE '"nodes":[0-9]+' | head -1 | cut -d: -f2)
 echo "    canonical graph nodes: ${gnodes:-0}"
 [ "${gnodes:-0}" -ge 1 ] && ck "canonical graph populated from the mission" PASS || ck "canonical graph populated" FAIL
