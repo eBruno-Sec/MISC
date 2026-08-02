@@ -360,7 +360,7 @@ def main(argv):
         body = {
             "kind": "apolaki_full_mission_benchmark",
             "schema_version": SCHEMA_VERSION,
-            "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
             "env": env,
             "mission_id": sid,
             "summary": {"passed": npass, "failed": nfail},

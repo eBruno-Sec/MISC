@@ -1,0 +1,235 @@
+{
+  "baseline": {
+    "env": {
+      "agent_image": "sha256:5c6dd7561680e6f78d43a9aee27b46fd1c8caf7081fd0310ee8bed51a68fb7dd",
+      "config_fingerprint": "5a514aa632feab38",
+      "git_commit": "416cfe7",
+      "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
+      "schema_version": "1.0"
+    },
+    "path": "/app/data/benchmark_baseline.json",
+    "written": true
+  },
+  "checks": [
+    {
+      "detail": "http=200 status=complete",
+      "name": "status_complete",
+      "ok": true
+    },
+    {
+      "detail": "http=200 parsed=True",
+      "name": "report_json_200_valid",
+      "ok": true
+    },
+    {
+      "detail": "report_id=02b5c7b3",
+      "name": "report_session_id_matches",
+      "ok": true
+    },
+    {
+      "detail": "ran=True",
+      "name": "auth_artery_ran",
+      "ok": true
+    },
+    {
+      "detail": "personas=3",
+      "name": "auth_personas_minted",
+      "ok": true
+    },
+    {
+      "detail": "auth_success=2",
+      "name": "auth_success",
+      "ok": true
+    },
+    {
+      "detail": "ran=True operations=11",
+      "name": "authz_matrix_ran",
+      "ok": true
+    },
+    {
+      "detail": "attempted=22",
+      "name": "authenticated_requests_attempted",
+      "ok": true
+    },
+    {
+      "detail": "succeeded=12 status_dist={'200': 16, '500': 12, '401': 5}",
+      "name": "authenticated_requests_succeeded",
+      "ok": true
+    },
+    {
+      "detail": "by_role={'user_a': {'attempted': 11, 'succeeded': 6}, 'user_b': {'attempted': 11, 'succeeded': 6}}",
+      "name": "both_personas_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "",
+      "name": "personas_carry_no_secret",
+      "ok": true
+    },
+    {
+      "detail": "findings=1 leads=23",
+      "name": "report_signal_present",
+      "ok": true
+    },
+    {
+      "detail": "families=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'sensitive_exposure']",
+      "name": "report_family_breadth",
+      "ok": true
+    },
+    {
+      "detail": "missing=[] have=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'sensitive_exposure']",
+      "name": "report_required_families",
+      "ok": true
+    },
+    {
+      "detail": "weak=[]",
+      "name": "confirmed_findings_have_family_proof",
+      "ok": true
+    },
+    {
+      "detail": "http=200",
+      "name": "graph_json_200_valid",
+      "ok": true
+    },
+    {
+      "detail": "mission_id=02b5c7b3",
+      "name": "graph_session_id_matches",
+      "ok": true
+    },
+    {
+      "detail": "nodes=134",
+      "name": "graph_nodes_floor",
+      "ok": true
+    },
+    {
+      "detail": "edges=126",
+      "name": "graph_edges_floor",
+      "ok": true
+    },
+    {
+      "detail": "host=1",
+      "name": "graph_has_host",
+      "ok": true
+    },
+    {
+      "detail": "endpoint=103",
+      "name": "graph_has_endpoints",
+      "ok": true
+    },
+    {
+      "detail": "finding=6",
+      "name": "graph_has_findings",
+      "ok": true
+    },
+    {
+      "detail": "count=103",
+      "name": "edge_host_serves_endpoint",
+      "ok": true
+    },
+    {
+      "detail": "count=12",
+      "name": "edge_endpoint_has_param",
+      "ok": true
+    },
+    {
+      "detail": "count=6",
+      "name": "edge_finding_on_asset",
+      "ok": true
+    },
+    {
+      "detail": "count=2 auth_success=2",
+      "name": "edge_persona_authenticated_as_session",
+      "ok": true
+    },
+    {
+      "detail": "keys=['by_source', 'needs_validation', 'needs_validation_count', 'passive_intel']",
+      "name": "provenance_schema_valid",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /report/02b5c7b3/json",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /graph/canonical/02b5c7b3",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /status/02b5c7b3",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /graph/02b5c7b3",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /missions/02b5c7b3",
+      "ok": true
+    },
+    {
+      "detail": "http=200 len=22591",
+      "name": "endpoint_200_doc /report/02b5c7b3/md",
+      "ok": true
+    },
+    {
+      "detail": "http=200 len=55856",
+      "name": "endpoint_200_doc /report/02b5c7b3/html",
+      "ok": true
+    }
+  ],
+  "env": {
+    "agent_image": "sha256:5c6dd7561680e6f78d43a9aee27b46fd1c8caf7081fd0310ee8bed51a68fb7dd",
+    "config_fingerprint": "5a514aa632feab38",
+    "git_commit": "416cfe7",
+    "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
+    "schema_version": "1.0"
+  },
+  "generated_at": "2026-08-02T14:11:17.344698Z",
+  "integrity": {
+    "algo": "sha256",
+    "hash": "842f7a4a2b59b41b1964e695aaed04a89e93f27dd29224738ea7bde6bada7317"
+  },
+  "kind": "apolaki_full_mission_benchmark",
+  "mission_id": "02b5c7b3",
+  "schema_version": "1.0",
+  "signature": {
+    "auth": {
+      "auth_requests_succeeded": 12,
+      "auth_success": 2,
+      "matrix_operations": 11,
+      "personas": 3
+    },
+    "counts": {
+      "confirmed": 0,
+      "findings": 1,
+      "leads": 23
+    },
+    "families": [
+      "access_control",
+      "attack_surface",
+      "broken_auth",
+      "business_logic",
+      "sensitive_exposure"
+    ],
+    "graph_kinds": {
+      "capability": 4,
+      "endpoint": 103,
+      "finding": 6,
+      "host": 1,
+      "object": 3,
+      "param": 12,
+      "persona": 3,
+      "session": 2
+    },
+    "schema_version": "1.0"
+  },
+  "summary": {
+    "failed": 0,
+    "passed": 34
+  }
+}
