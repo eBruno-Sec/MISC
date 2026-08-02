@@ -1302,7 +1302,7 @@ class BBHAgent:
             try:
                 cres = await self.tools.execute("confirm_create_object_idor",
                                                 {"base_url": base, "owner": pair[0], "attacker": pair[1],
-                                                 "app": app}, session_id)
+                                                 "app": app, "allow_write": self.mode == "full"}, session_id)
                 for f in (cres.findings or []):
                     if self.mission_id:
                         try:

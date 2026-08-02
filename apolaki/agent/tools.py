@@ -1862,7 +1862,9 @@ class ToolRegistry:
         if not base or not owner_h or not atk_h or not specs:
             return ToolResult("create_object_idor", base, True,
                               json.dumps({"ran": False, "note": "need base, two sessions, and specs"}), [])
-        allow_write = getattr(self, "mode", "active") == "full"
+        # write/delete of another user's object is state-changing — enabled only when the caller
+        # explicitly opts in (the agent passes allow_write=True only in Full mode). Read is always safe.
+        allow_write = bool(inp.get("allow_write"))
         findings, attempts = [], 0
         for spec in specs[:6]:
             cs = spec["create"]
