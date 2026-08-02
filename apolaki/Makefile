@@ -14,7 +14,7 @@
 COMPOSE ?= docker compose
 FULL    := --profile labs --profile browser --profile proxy --profile dast
 
-.PHONY: up full-lab init-labs reset-labs health versions test down logs ps help
+.PHONY: up full-lab init-labs reset-labs health versions test benchmark down logs ps help
 
 help:
 	@echo "targets: up full-lab init-labs reset-labs health versions test down logs ps"
@@ -45,6 +45,9 @@ versions:
 test:
 	$(COMPOSE) build agent
 	docker run --rm -v "$(CURDIR)/agent:/app" -w /app apolaki-agent:latest python -m pytest tests/ -q
+
+benchmark:            ## end-to-end NO-MOCKS proof: artery -> confirmed IDOR -> restart survives
+	@sh scripts/benchmark.sh
 
 down:
 	$(COMPOSE) $(FULL) down
