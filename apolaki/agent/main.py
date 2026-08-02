@@ -552,6 +552,23 @@ def _leads(m) -> list:
     return (m.get("context", {}) or {}).get("leads", [])
 
 
+def _auth_artery_evidence(session_id: str, m=None) -> dict:
+    """Structured proof the authentication artery fired (personas/auth_success/matrix). Prefer the
+    LIVE agent (freshest), fall back to what was persisted to mission context at teardown. Never
+    raises; {"ran": False} when the artery did not run (unauthenticated scan)."""
+    try:
+        sess = sessions.get(session_id)
+        if sess is not None:
+            ag = sess.get("agent")
+            a = getattr(ag, "_auth_artery", None)
+            if a:
+                return a
+        m = m or db.get_mission(session_id)
+        return ((m or {}).get("context", {}) or {}).get("auth_artery", {"ran": False}) or {"ran": False}
+    except Exception:
+        return {"ran": False}
+
+
 def _intel_provenance(session_id: str) -> dict:
     """Where the world model came from (per-source counts + needs-validation worklist). Prefer the
     LIVE graph — it holds the wayback/github/cloud feed nodes with provenance; fall back to the
@@ -1394,7 +1411,8 @@ async def get_report_json(session_id: str):
             config=_scan_config(m), attack_surface=_attack_surface(session_id),
             playbook=m["context"].get("playbook", []), tool_ledger=_tool_ledger(session_id),
             delta=_delta(session_id), execution=_execution(m), report_id=session_id,
-            intel_provenance=_intel_provenance(session_id)),
+            intel_provenance=_intel_provenance(session_id),
+            auth_artery=_auth_artery_evidence(session_id, m)),
         media_type="application/json")
 
 
@@ -1609,6 +1627,14 @@ def _record_orchestration(session_id: str) -> None:
         ctx["orchestration"] = {"code_intel": getattr(ag, "_codeintel_summary", {}) or {},
                                 "advisor": getattr(ag, "_advisor_recs", []) or [],
                                 "next_best": getattr(ag, "_next_best", []) or []}
+        # Persist structured PROOF the auth artery fired (personas, auth_success, matrix), so it is
+        # queryable from the report/API instead of only in the event stream. Also reconcile the
+        # top-level `authenticated` flag: it previously tracked raw-header/login ONLY, reading False
+        # even when the autonomous artery bound live persona sessions and ran an authenticated matrix.
+        artery = getattr(ag, "_auth_artery", {"ran": False}) or {"ran": False}
+        ctx["auth_artery"] = artery
+        if artery.get("ran") and artery.get("auth_success", 0) >= 1:
+            ctx["authenticated"] = True
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass

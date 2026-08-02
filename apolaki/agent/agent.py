@@ -189,6 +189,10 @@ class BBHAgent:
         # prompts for this on the next scan once a prior scan has gathered creds). Off = discover + report
         # the exposed creds, but scan unauthenticated.
         self.authenticated_scan = bool(authenticated_scan)
+        # structured proof of the authentication artery — {"ran": False} until _do_persona_authz
+        # actually mints/reacquires personas + runs the matrix. Lets a correctness check tell
+        # "artery did not run" apart from "ran and produced no personas" (both differ from a smoke test).
+        self._auth_artery = {"ran": False}
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
@@ -1277,6 +1281,27 @@ class BBHAgent:
                        % (len(pm.session_roles()), len(operations), len(res.findings or []),
                           ", ".join(caps) or "none")})
         self._persona_manager = pm
+        # Structured PROOF the artery actually fired — persisted to mission context + report so it is
+        # queryable, not trapped in the event stream. Personas carry role/rank/method/identity only
+        # (pm.to_dict() never emits secrets). auth_success = personas that obtained a live session. This
+        # is what a correctness benchmark asserts on (auth_success>=2, matrix ran) instead of a smoke test.
+        try:
+            plist = (pm.to_dict() or {}).get("personas", [])
+            self._auth_artery = {
+                "ran": True,
+                "personas": plist,
+                "persona_count": len(pm.session_roles()),
+                "auth_success": sum(1 for r in pm.session_roles() if pm.get(r) and pm.get(r).has_session()),
+                "reacquired": list(restored),
+                "recrawl_new_endpoints": len(new_urls),
+                "matrix": {"operations": len(operations),
+                           "findings": len(res.findings or []),
+                           "pair": list(pair) if pair else None,
+                           "ran": True},
+                "capabilities": caps,
+            }
+        except Exception:
+            self._auth_artery = {"ran": True, "note": "artery ran; evidence capture degraded"}
         return events
 
     def _discover_login_url(self, base: str):

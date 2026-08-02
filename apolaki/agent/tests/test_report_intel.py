@@ -60,3 +60,21 @@ def test_findings_json_carries_intel_provenance():
     # additive + backwards-compatible: absent provenance is an empty dict, never a crash
     pkg2 = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}))
     assert pkg2["intel_provenance"] == {}
+
+
+def test_findings_json_carries_auth_artery_proof():
+    # the report exposes whether the autonomous auth artery actually fired, so "authenticated scan"
+    # is PROVABLE (personas, auth_success, matrix ops) — not merely requested in the payload.
+    import json
+    artery = {"ran": True, "persona_count": 2, "auth_success": 2,
+              "personas": [{"role": "user_a", "rank": 1, "method": "registered", "identity": "a@t"},
+                           {"role": "user_b", "rank": 1, "method": "registered", "identity": "b@t"}],
+              "matrix": {"operations": 39, "findings": 34, "ran": True}}
+    pkg = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}, auth_artery=artery))
+    assert pkg["auth_artery"]["ran"] is True
+    assert pkg["auth_artery"]["auth_success"] == 2
+    assert pkg["auth_artery"]["matrix"]["operations"] == 39
+    assert "password" not in str(pkg["auth_artery"])   # personas carry labels/refs, never secrets
+    # an unauthenticated scan is distinguishable, never silently "looks authenticated"
+    pkg0 = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}))
+    assert pkg0["auth_artery"] == {"ran": False}

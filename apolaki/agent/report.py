@@ -1819,7 +1819,8 @@ def findings_json(program: str, findings: list, scope: dict,
                   coverage: dict = None, chains: list = None, leads: list = None,
                   config: dict = None, attack_surface: dict = None, playbook: list = None,
                   tool_ledger: dict = None, delta: dict = None, execution: dict = None,
-                  report_id: str = None, intel_provenance: dict = None) -> str:
+                  report_id: str = None, intel_provenance: dict = None,
+                  auth_artery: dict = None) -> str:
     """Native JSON data package. The original keys (program, generated, scope, counts,
     lead_counts, coverage, chains, findings, leads) are always present and unchanged;
     the richer sections below are additive so existing consumers never break."""
@@ -1851,6 +1852,10 @@ def findings_json(program: str, findings: list, scope: dict,
         # the needs-validation worklist (wayback/github/cloud facts not yet checked live). Making
         # provenance visible is the truth-first counterpart to never trusting recovered intel blind.
         "intel_provenance": intel_provenance or {},
+        # ── authentication artery proof: did the autonomous two-persona auth + authz matrix actually
+        # fire (personas minted/reacquired, sessions obtained, matrix operations run)? Queryable
+        # evidence so an "authenticated scan" is provable, not asserted. {"ran": False} when it didn't.
+        "auth_artery": auth_artery or {"ran": False},
         # ── results ──
         "chains": chains or [],
         "findings": findings,
