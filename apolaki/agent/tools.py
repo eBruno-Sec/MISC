@@ -1689,20 +1689,43 @@ class ToolRegistry:
                         # username) that a shared object would not. Otherwise it is a LEAD, not a finding.
                         marker = str(inp.get("owner_identity") or "").strip().lower().split("@")[0]
                         owned = len(marker) >= 3 and marker in bo.lower()
-                        if owned:
+                        # own-object DIFFERENTIAL control (proves object-specific, not a shared/global
+                        # blob): if the ATTACKER session gets DIFFERENT data at a DIFFERENT id of this
+                        # endpoint, the endpoint returns per-object data — so two users reading the SAME
+                        # id identically is genuine cross-user access. Confirms real IDORs (e.g. a basket)
+                        # that don't embed the owner's identity, WITHOUT confirming a shared resource.
+                        object_specific, ctrl_note = False, ""
+                        if not owned:
+                            try:
+                                ctrl_req = re.sub(r"/(\d+)(?=/|$|\?)",
+                                                  lambda m: "/" + str(int(m.group(1)) + 1), req, count=1)
+                                if ctrl_req != req:
+                                    ctrl_url = ctrl_req if ctrl_req.startswith("http") else base.rstrip("/") + ctrl_req
+                                    if self.scope.validate(ctrl_url)[0]:
+                                        rc, _ = await self._http_send("GET", ctrl_url,
+                                                                      dict(self._sessions.get(attacker, {})), None, True)
+                                        cb = (rc.text or "")[:8000]
+                                        if _authz._accessed(rc.status_code, cb):
+                                            csim = difflib.SequenceMatcher(None, ba, cb).ratio()
+                                            object_specific = csim < 0.9
+                                            ctrl_note = ("attacker also read %s -> 200 with DIFFERENT data "
+                                                         "(similarity %.3f) — endpoint is object-specific" % (ctrl_req, csim))
+                            except Exception:
+                                pass
+                        if owned or object_specific:
+                            proof = ("object carries owner '%s' identity" % marker) if owned else ctrl_note
                             findings.append({
                                 "title": "IDOR / BOLA — cross-user object access confirmed",
                                 "severity": "high", "family": "idor", "confidence": "confirmed",
                                 "cwe": "CWE-639", "target": target,
                                 "tags": ["idor", "bola", "access-control", "horizontal"],
-                                "description": ("A protected, user-owned object was read by a DIFFERENT authenticated "
-                                                "user. The anonymous control was denied (object is protected); the "
-                                                "object carries owner '%s' identity, and '%s' (a different user) read "
-                                                "the SAME object." % (owner, attacker)),
+                                "description": ("A protected, user-specific object was read by a DIFFERENT authenticated "
+                                                "user. Anonymous was denied (object is protected); '%s' and '%s' read the "
+                                                "SAME object, and the object is proven user-specific (not shared)."
+                                                % (owner, attacker)),
                                 "impact": "Read other users' data by changing the object id; bulk exfiltration by walking ids.",
-                                "evidence": ("anon %s -> %s (denied); owner '%s' -> 200 (%db, carries owner identity "
-                                             "'%s'); attacker '%s' -> 200 (%db); similarity %.3f (same object)"
-                                             % (req, sn, owner, len(bo), marker, attacker, len(ba), sim)),
+                                "evidence": ("anon %s -> %s (denied); '%s' and '%s' -> 200 identical (similarity %.3f); "
+                                             "ownership proof: %s" % (req, sn, owner, attacker, sim, proof)),
                                 "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
                             try:
                                 self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,

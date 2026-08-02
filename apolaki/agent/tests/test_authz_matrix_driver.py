@@ -51,6 +51,25 @@ def test_owned_object_read_cross_user_is_confirmed_idor():
     assert len(idor) == 1 and idor[0]["cwe"] == "CWE-639"
 
 
+def test_object_specific_idor_confirmed_via_differential_control():
+    # no owner identity in the body, but a DIFFERENT id returns DIFFERENT data (object-specific),
+    # so the same-id cross-user read is a real IDOR -> confirmed (the basket case).
+    reg = _reg()
+
+    async def per_object(method, url, headers, body, follow):
+        if not headers.get("Cookie"):
+            return _R(401, "unauthorized"), 0.01
+        if url.endswith("/basket/2"):
+            return _R(200, "victim basket 2: apples, juice, receipt"), 0.01
+        return _R(200, "different basket 3: batteries and cables"), 0.01   # control id -> different
+
+    reg._http_send = per_object
+    r = asyncio.new_event_loop().run_until_complete(
+        reg._run_authz_matrix({**_INP, "owner_identity": ""}))
+    idor = [f for f in r.findings if f["confidence"] == "confirmed" and "IDOR" in f["title"]]
+    assert len(idor) == 1 and "object-specific" in idor[0]["evidence"]
+
+
 def test_shared_object_without_ownership_is_lead_not_confirmed():
     reg = _reg()
 
