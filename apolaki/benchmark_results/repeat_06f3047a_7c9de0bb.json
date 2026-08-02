@@ -1,0 +1,414 @@
+{
+  "baseline": {
+    "comparison": [
+      {
+        "detail": "base=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure'] new=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure']",
+        "name": "determinism_families_stable",
+        "ok": true
+      },
+      {
+        "detail": "base=3 new=3",
+        "name": "determinism_personas_stable",
+        "ok": true
+      },
+      {
+        "detail": "base=2 new=2",
+        "name": "determinism_auth_success_stable",
+        "ok": true
+      },
+      {
+        "detail": "base=14 new=14",
+        "name": "determinism_matrix_ops_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=14 new=14",
+        "name": "determinism_auth_requests_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=2 new=2",
+        "name": "determinism_findings_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=23 new=23",
+        "name": "determinism_leads_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=0 new=0",
+        "name": "determinism_confirmed_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=4 new=4",
+        "name": "determinism_graph_capability_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=104 new=104",
+        "name": "determinism_graph_endpoint_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=7 new=7",
+        "name": "determinism_graph_finding_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=1 new=1",
+        "name": "determinism_graph_host_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=3 new=3",
+        "name": "determinism_graph_object_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=12 new=12",
+        "name": "determinism_graph_param_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=3 new=3",
+        "name": "determinism_graph_persona_within_variance",
+        "ok": true
+      },
+      {
+        "detail": "base=2 new=2",
+        "name": "determinism_graph_session_within_variance",
+        "ok": true
+      }
+    ],
+    "env": {
+      "agent_image": "sha256:0a33caed37af16ab55bde821112b55de3b2919d19e3810852ff7d065c25c4507",
+      "config_fingerprint": "5a514aa632feab38",
+      "git_commit": "1011ac3d0dc4735c63787ee52a90386472adc043",
+      "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
+      "schema_version": "1.0"
+    },
+    "path": "/app/data/repeat_baseline.json",
+    "written": false
+  },
+  "checks": [
+    {
+      "detail": "http=200 status=complete",
+      "name": "status_complete",
+      "ok": true
+    },
+    {
+      "detail": "http=200 parsed=True",
+      "name": "report_json_200_valid",
+      "ok": true
+    },
+    {
+      "detail": "report_id=7c9de0bb",
+      "name": "report_session_id_matches",
+      "ok": true
+    },
+    {
+      "detail": "ran=True",
+      "name": "auth_artery_ran",
+      "ok": true
+    },
+    {
+      "detail": "personas=3",
+      "name": "auth_personas_minted",
+      "ok": true
+    },
+    {
+      "detail": "auth_success=2",
+      "name": "auth_success",
+      "ok": true
+    },
+    {
+      "detail": "ran=True operations=14",
+      "name": "authz_matrix_ran",
+      "ok": true
+    },
+    {
+      "detail": "attempted=28",
+      "name": "authenticated_requests_attempted",
+      "ok": true
+    },
+    {
+      "detail": "with_auth_material=28",
+      "name": "auth_material_attached",
+      "ok": true
+    },
+    {
+      "detail": "succeeded=14 status_dist={'401': 8, '200': 18, '500': 16}",
+      "name": "authenticated_requests_succeeded",
+      "ok": true
+    },
+    {
+      "detail": "by_role={'user_a': {'attempted': 14, 'succeeded': 7, 'with_auth_material': 14}, 'user_b': {'attempted': 14, 'succeeded': 7, 'with_auth_material': 14}}",
+      "name": "both_personas_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "ran=True attempts=2 confirmed=0",
+      "name": "create_object_idor_executed",
+      "ok": true
+    },
+    {
+      "detail": "",
+      "name": "personas_carry_no_secret",
+      "ok": true
+    },
+    {
+      "detail": "findings=2 leads=23",
+      "name": "report_signal_present",
+      "ok": true
+    },
+    {
+      "detail": "families=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure']",
+      "name": "report_family_breadth",
+      "ok": true
+    },
+    {
+      "detail": "missing=[] have=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure']",
+      "name": "report_required_families",
+      "ok": true
+    },
+    {
+      "detail": "weak=[]",
+      "name": "confirmed_findings_have_family_proof",
+      "ok": true
+    },
+    {
+      "detail": "http=200",
+      "name": "graph_json_200_valid",
+      "ok": true
+    },
+    {
+      "detail": "mission_id=7c9de0bb",
+      "name": "graph_session_id_matches",
+      "ok": true
+    },
+    {
+      "detail": "nodes=136",
+      "name": "graph_nodes_floor",
+      "ok": true
+    },
+    {
+      "detail": "edges=128",
+      "name": "graph_edges_floor",
+      "ok": true
+    },
+    {
+      "detail": "host=1",
+      "name": "graph_has_host",
+      "ok": true
+    },
+    {
+      "detail": "endpoint=104",
+      "name": "graph_has_endpoints",
+      "ok": true
+    },
+    {
+      "detail": "finding=7",
+      "name": "graph_has_findings",
+      "ok": true
+    },
+    {
+      "detail": "count=104",
+      "name": "edge_host_serves_endpoint",
+      "ok": true
+    },
+    {
+      "detail": "count=12",
+      "name": "edge_endpoint_has_param",
+      "ok": true
+    },
+    {
+      "detail": "count=7",
+      "name": "edge_finding_on_asset",
+      "ok": true
+    },
+    {
+      "detail": "count=2 auth_success=2",
+      "name": "edge_persona_authenticated_as_session",
+      "ok": true
+    },
+    {
+      "detail": "keys=['by_source', 'needs_validation', 'needs_validation_count', 'passive_intel']",
+      "name": "provenance_schema_valid",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /report/7c9de0bb/json",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /graph/canonical/7c9de0bb",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /status/7c9de0bb",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /graph/7c9de0bb",
+      "ok": true
+    },
+    {
+      "detail": "http=200 json=True",
+      "name": "endpoint_200_json /missions/7c9de0bb",
+      "ok": true
+    },
+    {
+      "detail": "http=200 len=23890",
+      "name": "endpoint_200_doc /report/7c9de0bb/md",
+      "ok": true
+    },
+    {
+      "detail": "http=200 len=60146",
+      "name": "endpoint_200_doc /report/7c9de0bb/html",
+      "ok": true
+    },
+    {
+      "detail": "compatible",
+      "name": "baseline_env_compatible",
+      "ok": true
+    },
+    {
+      "detail": "base=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure'] new=['access_control', 'attack_surface', 'broken_auth', 'business_logic', 'idor', 'sensitive_exposure']",
+      "name": "determinism_families_stable",
+      "ok": true
+    },
+    {
+      "detail": "base=3 new=3",
+      "name": "determinism_personas_stable",
+      "ok": true
+    },
+    {
+      "detail": "base=2 new=2",
+      "name": "determinism_auth_success_stable",
+      "ok": true
+    },
+    {
+      "detail": "base=14 new=14",
+      "name": "determinism_matrix_ops_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=14 new=14",
+      "name": "determinism_auth_requests_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=2 new=2",
+      "name": "determinism_findings_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=23 new=23",
+      "name": "determinism_leads_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=0 new=0",
+      "name": "determinism_confirmed_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=4 new=4",
+      "name": "determinism_graph_capability_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=104 new=104",
+      "name": "determinism_graph_endpoint_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=7 new=7",
+      "name": "determinism_graph_finding_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=1 new=1",
+      "name": "determinism_graph_host_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=3 new=3",
+      "name": "determinism_graph_object_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=12 new=12",
+      "name": "determinism_graph_param_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=3 new=3",
+      "name": "determinism_graph_persona_within_variance",
+      "ok": true
+    },
+    {
+      "detail": "base=2 new=2",
+      "name": "determinism_graph_session_within_variance",
+      "ok": true
+    }
+  ],
+  "env": {
+    "agent_image": "sha256:0a33caed37af16ab55bde821112b55de3b2919d19e3810852ff7d065c25c4507",
+    "config_fingerprint": "5a514aa632feab38",
+    "git_commit": "1011ac3d0dc4735c63787ee52a90386472adc043",
+    "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
+    "schema_version": "1.0"
+  },
+  "generated_at": "2026-08-02T17:57:17.163567+00:00",
+  "integrity": {
+    "algo": "sha256-checksum",
+    "hash": "fc7d4920454a37f49d775c265c6c8c6038968fd33cd156348a48211d05b3b653",
+    "note": "plain SHA-256 checksum \u2014 detects corruption, NOT deliberate tampering; set APOLAKI_BENCH_HMAC_KEY or anchor the hash externally (git/CI) for tamper-evidence"
+  },
+  "kind": "apolaki_full_mission_benchmark",
+  "mission_id": "7c9de0bb",
+  "schema_version": "1.0",
+  "signature": {
+    "auth": {
+      "auth_requests_succeeded": 14,
+      "auth_success": 2,
+      "matrix_operations": 14,
+      "personas": 3
+    },
+    "counts": {
+      "confirmed": 0,
+      "findings": 2,
+      "leads": 23
+    },
+    "families": [
+      "access_control",
+      "attack_surface",
+      "broken_auth",
+      "business_logic",
+      "idor",
+      "sensitive_exposure"
+    ],
+    "graph_kinds": {
+      "capability": 4,
+      "endpoint": 104,
+      "finding": 7,
+      "host": 1,
+      "object": 3,
+      "param": 12,
+      "persona": 3,
+      "session": 2
+    },
+    "schema_version": "1.0"
+  },
+  "summary": {
+    "failed": 0,
+    "passed": 53
+  }
+}
