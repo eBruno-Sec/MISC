@@ -233,15 +233,20 @@ def main(argv):
             print("[assert] --baseline requires a file path")
             return 2
         import os
-        sig = signature(base, sid)
-        if not os.path.exists(path):
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(sig, fh, indent=2, sort_keys=True)
-            print("[assert] wrote new determinism baseline -> %s (compare on the next run)" % path)
-        else:
-            with open(path, "r", encoding="utf-8") as fh:
-                base_sig = json.load(fh)
-            checks = checks + compare_signatures(base_sig, sig)
+        # A baseline IO/parse error must NOT crash the whole asserter and lose the correctness
+        # results that DID run — surface it as a visible failing check instead (honest, not silent).
+        try:
+            sig = signature(base, sid)
+            if not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(sig, fh, indent=2, sort_keys=True)
+                print("[assert] wrote new determinism baseline -> %s (compare on the next run)" % path)
+            else:
+                with open(path, "r", encoding="utf-8") as fh:
+                    base_sig = json.load(fh)
+                checks = checks + compare_signatures(base_sig, sig)
+        except Exception as e:
+            checks = checks + [("determinism_baseline_io", False, "%s" % e)]
     npass = sum(1 for _, ok, _ in checks if ok)
     for name, ok, detail in checks:
         print("  %s  %-32s %s" % ("PASS" if ok else "FAIL", name, detail))

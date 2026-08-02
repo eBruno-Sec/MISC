@@ -1885,6 +1885,16 @@ async def get_canonical_graph(session_id: str):
                 caps = [c["capability"] for c in tl.state.to_dict().get("capabilities", [])]
         except Exception:
             pass
+    # Liveness-independent fallback: once the session is evicted the live agent is gone, but the auth
+    # artery persisted its personas (with has_session) + capabilities to context. Use them so the
+    # canonical graph is IDENTICAL whether or not the session is still in RAM — a canonical graph must
+    # not depend on process memory (the determinism benchmark caught persona/session nodes vanishing
+    # after eviction). Personas carry role/rank/method/identity-label only, never secrets.
+    aa = (m.get("context") or {}).get("auth_artery") or {}
+    if personas is None and aa.get("personas"):
+        personas = {"personas": aa["personas"]}
+    if not caps and aa.get("capabilities"):
+        caps = list(aa["capabilities"])
     g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
                                   personas=personas, capabilities=caps,
                                   scope_asset=memory_mod.target_key(m["scope"]))

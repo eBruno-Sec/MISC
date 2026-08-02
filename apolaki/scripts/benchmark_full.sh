@@ -65,7 +65,9 @@ if [ "$status" = "complete" ]; then
   echo "[full-mission] 3. deep correctness assertions (benchmark_assert.py, in-container)"
   bflag=""
   [ -n "$BASELINE" ] && bflag="--baseline $BASELINE"
-  if $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid" $bflag; then
+  # MSYS_NO_PATHCONV=1 stops Git Bash (Windows) from rewriting the CONTAINER path /app/data/... into
+  # a host path before it reaches the container; harmless no-op on Linux/macOS.
+  if MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid" $bflag; then
     ck "deep correctness assertions all passed" PASS
   else
     ck "deep correctness assertions" FAIL
