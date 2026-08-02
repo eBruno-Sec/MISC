@@ -23,6 +23,10 @@ services:
       # GitHub recon: YOUR OWN read-only PAT (no scopes needed), only to lift the
       # code-search rate limit. Empty = run_github_recon skips cleanly.
       - BBH_GITHUB_TOKEN=${BBH_GITHUB_TOKEN:-}
+      # LINODE_TOKEN: a READ-ONLY Linode (Akamai Connected Cloud) API token enables the live cloud
+      # posture review at GET /cloud/posture/linode. Put it in a gitignored .env, never commit it.
+      # Empty = the endpoint reports blocked cleanly.
+      - LINODE_TOKEN=${LINODE_TOKEN:-}
       # OWASP ZAP DAST. The zap service is OPT-IN (profile "dast", ~1GB idle) — start it with
       # `docker compose --profile dast up -d zap` and the agent auto-detects it here. ZAP only
       # actually RUNS when the user also ticks "Enable ZAP" in the scan setup; if the profile
