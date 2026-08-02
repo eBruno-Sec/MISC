@@ -1,5 +1,10 @@
 #!/bin/sh
-# End-to-end benchmark (NO MOCKS): proves the auth artery + graph + persistence against a live stack.
+# NO-MOCKS benchmark of the auth-artery MECHANISMS against a live stack: registration -> login ->
+# authorization matrix -> live graph -> vault persistence across restart.
+# HONEST SCOPE (CHAD re-audit #7): this exercises the artery directly (it calls _do_persona_authz),
+# NOT the full mission API / recon / planner / report / UI workflow, and the restart check uses a
+# synthetic vaulted secret to prove persistence (not a full end-to-end login reacquisition). A true
+# full-mission benchmark driven through the HTTP API + report is still pending.
 # Requires: `make up` (agent + Juice Shop running). Exits non-zero if any assertion fails.
 set -u
 pass=0; fail=0

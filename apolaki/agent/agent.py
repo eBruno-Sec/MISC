@@ -993,11 +993,12 @@ class BBHAgent:
         return events
 
     async def _authenticated_recrawl(self, roles, base, session_id) -> list:
-        """Real per-persona authenticated crawl. For EACH session persona, GET a set of common authed
-        routes (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a
-        headless browser is available, drive an authenticated browser pass that captures SPA routes +
-        XHR/fetch APIs (which seed the surface too). Returns the newly-discovered in-scope URLs.
-        Bounded + best-effort; degrades to a no-op on error."""
+        """Per-persona authenticated pass. For EACH session persona, GET a set of common authed routes
+        (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a headless
+        browser is available, load the base page to capture SPA routes + XHR/fetch APIs. Returns the
+        newly-discovered in-scope URLs. HONEST SCOPE (CHAD re-audit #6): this is a BREADTH-LIMITED
+        pass — a fixed common-route GET list + a base-page browser load — NOT a full recursive crawl;
+        real per-persona link/form/workflow navigation is still pending. Bounded + best-effort."""
         before = set(self.tools.urls or [])
         routes = ["", "/profile", "/account", "/me", "/dashboard", "/settings", "/api/users",
                   "/rest/user/whoami", "/api/orders", "/rest/basket", "/api/basket", "/orders",
