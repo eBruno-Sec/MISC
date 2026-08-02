@@ -1,14 +1,35 @@
 #!/bin/sh
 # FULL-MISSION benchmark (NO MOCKS, the REAL path): POST /engage -> POST /run -> poll /status ->
-# GET /report + /graph. Exercises recon -> planner -> oracles -> auth artery -> finalize -> report
-# through the ACTUAL HTTP API (not _do_persona_authz directly), so it catches phase-handoff seams
-# that the mechanism-level benchmark cannot (CHAD re-audit #7). Requires: make up (agent + juice-shop).
+# then a DEEP CORRECTNESS asserter over the real /report + /graph surfaces. The smoke legs here only
+# prove the mission RAN; benchmark_assert.py proves it ran CORRECTLY — the auth artery actually fired
+# (personas>=2, matrix ran), the graph carries the expected node kinds, the report has family breadth,
+# every endpoint is 200 + schema-valid (401/404 fail), session ids match, and no confirmed finding
+# lacks proof. This closes the gap CHAD's audit named: 6/6 was a smoke test, not a correctness proof.
+#
+# Usage: sh scripts/benchmark_full.sh [--fresh-lab]
+#   --fresh-lab   recreate juice-shop first so prior accounts/state never bleed into results (CHAD #6)
 set -u
 A="http://localhost:8000"
+COMPOSE="${COMPOSE:-docker compose}"
+MAX_RUNTIME="${BENCH_MAX_RUNTIME:-1200}"   # seconds; a run beyond this is flagged as a perf regression
+FRESH_LAB=0
+for arg in "$@"; do case "$arg" in --fresh-lab) FRESH_LAB=1 ;; esac; done
 pass=0; fail=0
 ck() { if [ "$2" = "PASS" ]; then echo "  PASS  $1"; pass=$((pass + 1)); else echo "  FAIL  $1"; fail=$((fail + 1)); fi; }
 
-echo "[full-mission] 1. engage a deterministic authenticated scan of Juice Shop"
+# ── 0. optional isolated lab state (CHAD #6) ──
+if [ "$FRESH_LAB" = "1" ]; then
+  echo "[full-mission] 0. --fresh-lab: recreate juice-shop for isolated state"
+  $COMPOSE restart juice-shop >/dev/null 2>&1 || $COMPOSE up -d juice-shop >/dev/null 2>&1
+  ready=0
+  for i in $(seq 1 60); do
+    curl -sf http://localhost:42000/ >/dev/null 2>&1 && { ready=1; break; }
+    sleep 2
+  done
+  [ "$ready" = 1 ] && ck "juice-shop recreated + ready (isolated state)" PASS || ck "juice-shop ready after reset" FAIL
+fi
+
+echo "[full-mission] 1. engage a deterministic AUTHENTICATED scan of Juice Shop"
 sid=$(curl -s -X POST "$A/engage" -H 'Content-Type: application/json' \
   -d '{"program_name":"benchmark","in_scope":["http://juice-shop:3000"],"mode":"active","strategy":"deterministic","authenticated_scan":true}' \
   | grep -oE '"session_id":"[a-f0-9]+"' | head -1 | cut -d'"' -f4)
@@ -17,6 +38,7 @@ ck "engage returned a session ($sid)" PASS
 
 echo "[full-mission] 2. start the run + poll /status (a full AUTHENTICATED scan takes ~10 min:"
 echo "                  base crawl + register 2 personas + authz matrix + authenticated recrawl)"
+t0=$(date +%s)
 curl -s -X POST "$A/run/$sid" >/dev/null 2>&1
 status=""; i=0
 while [ "$i" -lt 540 ]; do          # up to ~18 min — measured ~9.5 min on reference hw, 2x margin
@@ -24,39 +46,24 @@ while [ "$i" -lt 540 ]; do          # up to ~18 min — measured ~9.5 min on ref
   case "$status" in complete | stopped | failed) break ;; esac
   i=$((i + 1)); sleep 2
 done
-echo "    final status: ${status:-timeout}"
+t1=$(date +%s); elapsed=$((t1 - t0))
+echo "    final status: ${status:-timeout}   (elapsed ${elapsed}s)"
 [ "$status" = "complete" ] && ck "mission ran to completion through the API" PASS || ck "mission completion (status=${status:-timeout})" FAIL
+# runtime regression signal (CHAD #7): the scan completed but took longer than expected
+if [ "$status" = "complete" ]; then
+  [ "$elapsed" -le "$MAX_RUNTIME" ] && ck "runtime within budget (${elapsed}s <= ${MAX_RUNTIME}s)" PASS \
+    || ck "RUNTIME REGRESSION (${elapsed}s > ${MAX_RUNTIME}s)" FAIL
+fi
 
-echo "[full-mission] 3. report + graph consistency"
-# Count confirmed vs unconfirmed SEPARATELY — never conflate the two (truth-first). A
-# confirmed finding is a proven bug; a lead/candidate is an advisory signal. Reporting one
-# blended number is exactly the overclaim Apolaki exists to avoid, so the harness models it.
-# Retry the fetch a few times to ride out the finalize write.
-rep=""; confirmed=0; unconf=0
-j=0; while [ "$j" -lt 5 ]; do
-  rep=$(curl -s "$A/report/$sid/json")
-  confirmed=$(echo "$rep" | grep -oE '"confidence": *"confirmed"' | wc -l | tr -d ' ')
-  unconf=$(echo "$rep" | grep -oE '"confidence": *"(lead|candidate)"' | wc -l | tr -d ' ')
-  [ "$((confirmed + unconf))" -ge 1 ] && break
-  j=$((j + 1)); sleep 2
-done
-echo "$rep" | grep -q '"findings"' && ck "report JSON generated (no 500)" PASS || ck "report JSON generated" FAIL
-echo "    report entries -> confirmed: $confirmed | unconfirmed (leads/candidates): $unconf"
-# Non-empty is the smoke test; we do NOT assert a confirmed count — a deterministic Juice
-# Shop pass legitimately confirms little, and asserting >0 confirmed would reward false
-# positives. What must hold: the mission produced SOME rendered signal end-to-end.
-[ "$((confirmed + unconf))" -ge 1 ] && ck "report renders the mission's signal (confirmed+leads >=1)" PASS || ck "report renders signal" FAIL
-gnodes=$(curl -s "$A/graph/canonical/$sid" | grep -oE '"nodes":[0-9]+' | head -1 | cut -d: -f2)
-echo "    canonical graph nodes: ${gnodes:-0}"
-[ "${gnodes:-0}" -ge 1 ] && ck "canonical graph populated from the mission" PASS || ck "canonical graph populated" FAIL
-
-echo "[full-mission] 4. no 5xx on the mission's report/graph endpoints"
-sweep_ok=1
-for ep in "report/$sid" "report/$sid/md" "report/$sid/html" "graph/$sid" "graph/canonical/$sid" "missions/$sid"; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$A/$ep")
-  if [ "$code" -ge 500 ]; then echo "    5xx on /$ep ($code)"; sweep_ok=0; fi
-done
-[ "$sweep_ok" = "1" ] && ck "no 5xx across report/graph/mission endpoints" PASS || ck "no 5xx across endpoints" FAIL
+# ── 3. DEEP correctness assertions over the real report/graph surfaces (the actual proof) ──
+if [ "$status" = "complete" ]; then
+  echo "[full-mission] 3. deep correctness assertions (benchmark_assert.py, in-container)"
+  if $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid"; then
+    ck "deep correctness assertions all passed" PASS
+  else
+    ck "deep correctness assertions" FAIL
+  fi
+fi
 
 echo "[full-mission] ==== $pass passed, $fail failed ===="
 [ "$fail" -eq 0 ]

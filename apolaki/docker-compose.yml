@@ -141,7 +141,7 @@ services:
   # WebGoat (OWASP) -- a FIFTH lab (Java training app). Opt-in. Reachable at http://webgoat:8080 on
   # the compose network; host http://localhost:42084/WebGoat. Local-only bind. No manual setup.
   webgoat:
-    image: webgoat/webgoat:latest
+    image: webgoat/webgoat@sha256:3101bd9e7bcfe122d7ef91e690ef3720de36cc4e86b3d06763a1ddf2e2751a4b
     profiles: ["labs"]
     ports:
       - "127.0.0.1:42084:8080"
