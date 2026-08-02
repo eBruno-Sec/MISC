@@ -105,6 +105,85 @@ def normalize_iac(doc: dict) -> dict:
     return {"roles": roles, "resources": resources}
 
 
+def normalize_azure(doc: dict) -> dict:
+    """Normalize Azure role-assignment / ARM-ish JSON into the common IAM model. Accepts
+    {roleAssignments:[{principalId, roleName, permissions:[{actions[],notActions[]}], scope}],
+    resources:[{type, name, properties}]}. Azure wildcard action is '*'."""
+    roles, resources = [], []
+    doc = doc or {}
+    for ra in (doc.get("roleAssignments") or []):
+        pols = []
+        for perm in _as_list(ra.get("permissions")):
+            pols.append({"effect": "Allow",
+                         "actions": [a.lower() for a in _as_list(perm.get("actions"))],
+                         "resources": _as_list(ra.get("scope") or "*")})
+        roles.append({"name": ra.get("roleName") or ra.get("principalId", "azure-role"),
+                      "assume": {"principal": ra.get("principalId")}, "policies": pols})
+    for r in (doc.get("resources") or []):
+        props = r.get("properties", r) or {}
+        pub = str(props.get("allowBlobPublicAccess") or props.get("publicNetworkAccess") or "").lower() in ("true", "enabled")
+        resources.append({"type": r.get("type", ""), "name": r.get("name", ""), "public": pub})
+    return {"roles": roles, "resources": resources, "provider": "azure"}
+
+
+def normalize_gcp(doc: dict) -> dict:
+    """Normalize a GCP IAM policy (getIamPolicy shape) into the common model:
+    {bindings:[{role, members[]}], resources:[{type,name,public}]}. A binding to allUsers /
+    allAuthenticatedUsers marks the bound resource PUBLIC; primitive roles (owner/editor) are broad."""
+    roles, resources = [], []
+    doc = doc or {}
+    public_via_iam = False
+    for b in (doc.get("bindings") or []):
+        role = b.get("role", "")
+        members = _as_list(b.get("members"))
+        if any(m in ("allUsers", "allAuthenticatedUsers") for m in members):
+            public_via_iam = True
+        # GCP primitive roles map to broad action grants in the common model
+        acts = ["*"] if role in ("roles/owner", "roles/editor") else [role.lower()]
+        roles.append({"name": role or "gcp-binding", "assume": {"members": members},
+                      "policies": [{"effect": "Allow", "actions": acts, "resources": ["*"]}]})
+    for r in (doc.get("resources") or []):
+        resources.append({"type": r.get("type", ""), "name": r.get("name", ""),
+                          "public": bool(r.get("public")) or public_via_iam})
+    if public_via_iam and not resources:
+        resources.append({"type": "gcp_iam_policy", "name": doc.get("resource", "policy"), "public": True})
+    return {"roles": roles, "resources": resources, "provider": "gcp"}
+
+
+def normalize(provider: str, doc: dict) -> dict:
+    """Provider-dispatched normalization into the common IAM model."""
+    p = (provider or "").lower()
+    if p == "azure":
+        return normalize_azure(doc)
+    if p == "gcp":
+        return normalize_gcp(doc)
+    return normalize_iac(doc)
+
+
+def collect(provider: str, *, fixture: dict = None) -> dict:
+    """Provider collector. With a `fixture` (a raw provider IAM doc) it normalizes + analyzes it —
+    the credential-independent path, unit-testable now. A LIVE collect (fixture=None) requires cloud
+    credentials and returns a BLOCKED result rather than pretending: the SDK wiring (boto3 / azure-
+    identity / google-auth) is the only piece gated on external access. Returns
+    {provider, blocked, reason?, model?, findings?}."""
+    p = (provider or "").lower()
+    if fixture is not None:
+        model = normalize(p, fixture)
+        return {"provider": p, "blocked": False, "model": model, "findings": analyze(model)}
+    st = live_enumeration_supported()
+    ready = p in st.get("providers_ready", [])
+    if not ready:
+        return {"provider": p, "blocked": True,
+                "reason": "live %s enumeration needs credentials in scope (%s)" % (p, st["reason"]),
+                "model": {"roles": [], "resources": []}, "findings": []}
+    # Credentials ARE present -> a real collector would run here. Kept explicit so enabling it is a
+    # single, reviewable step (import the SDK, list roles/policies/resources, feed normalize()).
+    return {"provider": p, "blocked": True,
+            "reason": "live collector SDK wiring intentionally not enabled in this build — "
+                      "credentials present; enable in collect() to go live",
+            "model": {"roles": [], "resources": []}, "findings": []}
+
+
 def _detect_public(rtype: str, props: dict) -> bool:
     rt = (rtype or "").lower()
     props = props or {}

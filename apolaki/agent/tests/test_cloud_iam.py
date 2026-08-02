@@ -65,3 +65,47 @@ def test_iam_model_projects_into_asset_graph():
 def test_unknown_iac_shape_is_tolerated():
     assert CI.normalize_iac({}) == {"roles": [], "resources": []}
     assert CI.analyze({"roles": [], "resources": []}) == []
+
+
+_AZURE = {"roleAssignments": [
+    {"principalId": "p1", "roleName": "Owner", "scope": "/sub/x",
+     "permissions": [{"actions": ["*"], "notActions": []}]}],
+    "resources": [{"type": "Microsoft.Storage/storageAccounts", "name": "stor1",
+                   "properties": {"allowBlobPublicAccess": "true"}}]}
+
+_GCP = {"bindings": [
+    {"role": "roles/owner", "members": ["user:admin@x"]},
+    {"role": "roles/storage.objectViewer", "members": ["allUsers"]}],
+    "resources": [{"type": "storage.bucket", "name": "b1"}]}
+
+
+def test_azure_wildcard_and_public_storage():
+    model = CI.normalize_azure(_AZURE)
+    assert model["provider"] == "azure"
+    findings = CI.analyze(model)
+    cats = {t for f in findings for t in f["tags"]}
+    assert "cloud_iam_wildcard_action" in cats and "cloud_public_resource" in cats
+
+
+def test_gcp_allusers_binding_is_public_and_owner_is_wildcard():
+    model = CI.normalize_gcp(_GCP)
+    assert model["provider"] == "gcp"
+    findings = CI.analyze(model)
+    cats = {t for f in findings for t in f["tags"]}
+    assert "cloud_public_resource" in cats     # allUsers binding -> public
+    assert "cloud_iam_wildcard_action" in cats  # roles/owner -> broad
+
+
+def test_collect_with_fixture_analyzes_each_provider():
+    for prov, doc in (("aws", _CFN), ("azure", _AZURE), ("gcp", _GCP)):
+        res = CI.collect(prov, fixture=doc)
+        assert res["provider"] == prov and res["blocked"] is False
+        assert res["model"]["roles"] and isinstance(res["findings"], list)
+
+
+def test_collect_live_is_blocked_without_credentials(monkeypatch):
+    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"):
+        monkeypatch.delenv(k, raising=False)
+    for prov in ("aws", "azure", "gcp"):
+        res = CI.collect(prov)
+        assert res["blocked"] is True and "credential" in res["reason"].lower()
