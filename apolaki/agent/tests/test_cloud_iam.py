@@ -156,3 +156,64 @@ def test_linode_is_a_ready_provider_with_env_token(monkeypatch):
     monkeypatch.setenv("LINODE_TOKEN", "x")
     st = CI.live_enumeration_supported()
     assert "linode" in st["providers_ready"] and "linode" in st["live_collector_implemented"]
+
+
+def _linode_router(fail=(), pages2=()):
+    """Fake cloud_iam._linode_get: (ok,data,status) keyed by base path; `fail` paths error 500,
+    `pages2` paths return two pages to exercise pagination."""
+    responses = {
+        "/account/users": {"data": [{"username": "student", "tfa_enabled": False}], "pages": 1, "results": 1},
+        "/account/users/student/grants": {"global": {"account_access": "read_write"}},
+        "/networking/firewalls": {"data": [{"id": 1, "label": "fw"}], "pages": 1, "results": 1},
+        "/networking/firewalls/1/rules": {"inbound": [
+            {"action": "ACCEPT", "ports": "22", "addresses": {"ipv4": ["0.0.0.0/0"]}}]},
+        "/object-storage/buckets": {"data": [{"label": "b", "acl": "public-read"}], "pages": 1, "results": 1},
+        "/linode/instances": {"data": [{"label": "web", "ipv4": ["203.0.113.9"]}], "pages": 1, "results": 1},
+        "/databases/instances": {"data": [], "pages": 1, "results": 0},
+    }
+
+    def _get(path, token, timeout=20, retries=3):
+        base = path.split("?")[0]
+        if base in fail:
+            return (False, None, 500)
+        if base in pages2:
+            page = 1
+            if "page=2" in path:
+                page = 2
+            return (True, {"data": [{"label": "extra-%d" % page}], "pages": 2, "results": 2}, 200)
+        return (True, responses.get(base, {"data": [], "pages": 1, "results": 0}), 200)
+    return _get
+
+
+def test_linode_live_complete_collection_reports_findings(monkeypatch):
+    monkeypatch.setattr(CI, "_linode_get", _linode_router())
+    res = CI.collect_linode_live("tok")
+    assert res["blocked"] is False and res["partial"] is False
+    assert res["manifest"]["complete"] is True and not res["manifest"]["failed"]
+    cats = {t for f in res["findings"] for t in f["tags"]}
+    assert "cloud_firewall_open_to_internet" in cats and "cloud_public_resource" in cats
+
+
+def test_linode_partial_collection_is_never_reported_clean(monkeypatch):
+    # a required endpoint fails -> the collection is PARTIAL; 0-or-fewer findings must not read as clean
+    monkeypatch.setattr(CI, "_linode_get", _linode_router(fail=("/databases/instances",)))
+    res = CI.collect_linode_live("tok")
+    assert res["blocked"] is False and res["partial"] is True
+    assert any(x["path"] == "/databases/instances" for x in res["manifest"]["failed"])
+    assert "PARTIAL" in res["reason"] and "NOT be read as secure" in res["reason"]
+
+
+def test_linode_total_failure_is_blocked_not_clean(monkeypatch):
+    allreq = ("/account/users", "/networking/firewalls", "/object-storage/buckets",
+              "/linode/instances", "/databases/instances")
+    monkeypatch.setattr(CI, "_linode_get", _linode_router(fail=allreq))
+    res = CI.collect_linode_live("tok")
+    assert res["blocked"] is True and res["partial"] is True
+    assert "NOT a clean posture" in res["reason"] and res["manifest"]["succeeded"] == 0
+
+
+def test_linode_pagination_follows_all_pages(monkeypatch):
+    monkeypatch.setattr(CI, "_linode_get", _linode_router(pages2=("/linode/instances",)))
+    res = CI.collect_linode_live("tok")
+    # two instance pages collected (extra-1 + extra-2)
+    assert res["counts"]["instances"] == 2 and res["blocked"] is False

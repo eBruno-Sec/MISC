@@ -1938,21 +1938,56 @@ async def export_mission(session_id: str):
 
 
 @app.get("/cloud/posture/{provider}")
-async def cloud_posture(provider: str):
-    """READ-ONLY cloud posture review of the operator's OWN account. For `linode` it uses the
-    LINODE_TOKEN env (a read-only Linode API token) to enumerate users/firewalls/buckets/databases/
-    instances and flag misconfigs (public buckets, firewalls open to 0.0.0.0/0 on SSH/DB ports,
-    over-broad users, exposed DBs, admin-without-2FA). No writes, no exploitation. The token is used
-    for auth only and is NEVER returned. AWS/Azure/GCP report blocked until their SDK wiring is enabled."""
+async def cloud_posture(provider: str, session_id: str = None):
+    """READ-ONLY cloud posture review of the operator's OWN account. For `linode` it uses LINODE_TOKEN
+    (a read-only token) to enumerate users/firewalls/buckets/databases/instances (ALL pages) and flag
+    misconfigs. No writes, no exploitation; the token is auth-only and NEVER returned.
+
+    COMPLETENESS (CHAD #2): an incomplete/failed collection is NEVER reported as clean — `partial`/
+    `blocked` + a `manifest` of what was/wasn't collected are returned, and the posture verdict is
+    'incomplete' rather than 'clean' whenever collection was not complete. Pass ?session_id=<mission>
+    to INGEST the cloud model+findings into that mission's canonical graph + report (CHAD #7)."""
     import cloud_iam as _ci
     res = _ci.collect(provider)
     findings = res.get("findings", []) or []
-    return {"provider": provider, "blocked": bool(res.get("blocked")), "reason": res.get("reason", ""),
-            "counts": res.get("counts", {}),
+    partial = bool(res.get("partial")) or bool(res.get("blocked"))
+    if res.get("blocked"):
+        posture = "blocked"
+    elif partial:
+        posture = "incomplete"                     # some endpoints failed — 0 findings is NOT "clean"
+    elif findings:
+        posture = "issues_found"
+    else:
+        posture = "clean"                          # complete collection AND zero findings
+    ingested = None
+    if session_id and provider.lower() == "linode" and not res.get("blocked"):
+        try:
+            m = db.get_mission(session_id)
+            if m:
+                # project into the mission's canonical graph with provenance, and persist findings
+                if session_id in sessions:
+                    g = getattr(sessions[session_id]["tools"], "graph", None)
+                    if g is not None:
+                        _ci.to_graph(g, res.get("model", {}), account="linode", source="linode")
+                stored = 0
+                for f in findings:
+                    try:
+                        f["provenance"] = "linode-posture"
+                        db.add_finding(session_id, f)
+                        stored += 1
+                    except Exception:
+                        pass
+                ingested = {"mission": session_id, "findings_persisted": stored}
+        except Exception:
+            ingested = None
+    return {"provider": provider, "blocked": bool(res.get("blocked")), "partial": partial,
+            "posture": posture, "reason": res.get("reason", ""),
+            "counts": res.get("counts", {}), "manifest": res.get("manifest", {}),
             "summary": {"findings": len(findings),
                         "by_severity": {s: sum(1 for f in findings if f.get("severity") == s)
-                                        for s in ("critical", "high", "medium", "low")}},
-            "findings": findings}
+                                        for s in ("critical", "high", "medium", "low")},
+                        "collection_complete": not partial},
+            "ingested": ingested, "findings": findings}
 
 
 @app.get("/audit")

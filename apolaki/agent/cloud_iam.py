@@ -221,51 +221,114 @@ def normalize(provider: str, doc: dict) -> dict:
     return normalize_iac(doc)
 
 
-def _linode_get(path: str, token: str, timeout: int = 20):
-    """One READ-ONLY GET against the Linode API v4. The token is sent in the Authorization header and
-    is NEVER logged or returned. Raises on transport/HTTP error so the caller can degrade."""
+def _linode_get(path: str, token: str, timeout: int = 20, retries: int = 3):
+    """One READ-ONLY GET vs the Linode API v4 with bounded retry/backoff on 429 + transient 5xx.
+    Returns (ok, json_or_None, status). The token is sent in the Authorization header only and is
+    NEVER logged or returned. Never raises — the caller records completeness from the (ok,status)."""
     import json as _j
+    import time
+    import urllib.error
     import urllib.request
-    req = urllib.request.Request("https://api.linode.com/v4" + path,
-                                 headers={"Authorization": "Bearer " + token, "User-Agent": "apolaki-cloud"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return _j.loads(r.read().decode("utf-8", "replace"))
+    url = "https://api.linode.com/v4" + path
+    for attempt in range(max(1, retries)):
+        try:
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token,
+                                                       "User-Agent": "apolaki-cloud"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return True, _j.loads(r.read().decode("utf-8", "replace")), r.getcode()
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < retries - 1:
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            return False, None, e.code
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            return False, None, 0
+    return False, None, 0
+
+
+def _linode_paged(path: str, token: str, manifest: dict):
+    """Fetch ALL pages of a Linode collection (CHAD #2: no more first-page-only). Records every request
+    in the manifest and returns (items, complete). complete=False if any page failed — the caller must
+    then treat the collection as PARTIAL, never clean."""
+    items, page, pages = [], 1, 1
+    while page <= pages and page <= 100:            # hard cap so a huge/looping account can't run away
+        sep = "&" if "?" in path else "?"
+        ok, data, status = _linode_get("%s%spage=%d&page_size=100" % (path, sep, page), token)
+        manifest["requests"] += 1
+        if not ok or not isinstance(data, dict):
+            manifest["failed"].append({"path": path, "page": page, "status": status})
+            return items, False
+        manifest["succeeded"] += 1
+        items += data.get("data", []) or []
+        pages = int(data.get("pages", 1) or 1)
+        manifest["advertised"][path] = int(data.get("results", len(items)) or len(items))
+        page += 1
+    return items, True
 
 
 def collect_linode_live(token: str) -> dict:
-    """LIVE, strictly READ-ONLY Linode (Akamai Connected Cloud) posture collection. Performs only GET
-    requests against the account's own resources (users+grants, cloud firewalls + rules, object-storage
-    buckets, managed databases, instances) and feeds them to the deterministic analyzer. No writes, no
-    exploitation — a hardening review of the operator's OWN account. The token is used for auth only and
-    never stored in the model/findings/graph."""
+    """LIVE, strictly READ-ONLY Linode (Akamai Connected Cloud) posture collection with COMPLETENESS
+    tracking. GET-only over users+grants, cloud firewalls+rules, object-storage buckets, managed
+    databases, instances (all pages), then the deterministic analyzer. A hardening review of the
+    operator's OWN account — no writes/exploitation. Token is auth-only, never stored.
+
+    CRITICAL (CHAD #2): an incomplete or failed collection is NEVER reported as a clean posture. If a
+    required endpoint fails, the result is marked partial/blocked with a manifest of what was and was
+    not collected, so zero findings on a broken collection cannot be mistaken for a secure account."""
+    from urllib.parse import quote
+    manifest = {"requests": 0, "succeeded": 0, "failed": [], "advertised": {}, "counts": {}, "complete": True}
     doc = {"users": [], "grants": {}, "firewalls": [], "buckets": [], "instances": [], "databases": []}
-    try:
-        doc["users"] = (_linode_get("/account/users", token) or {}).get("data", [])
-        for u in doc["users"]:
-            un = u.get("username")
-            if un:
-                try:
-                    doc["grants"][un] = _linode_get("/account/users/%s/grants" % un, token)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    for key, path in (("firewalls", "/networking/firewalls"), ("buckets", "/object-storage/buckets"),
-                      ("instances", "/linode/instances"), ("databases", "/databases/instances")):
-        try:
-            doc[key] = (_linode_get(path, token) or {}).get("data", [])
-        except Exception:
-            doc[key] = []
-    # firewalls: fetch each firewall's rules (the inbound rule set the analyzer needs)
+    required = {"users": "/account/users", "firewalls": "/networking/firewalls",
+                "buckets": "/object-storage/buckets", "instances": "/linode/instances",
+                "databases": "/databases/instances"}
+    for key, path in required.items():
+        items, ok = _linode_paged(path, token, manifest)
+        doc[key] = items
+        if not ok:
+            manifest["complete"] = False
+    # per-user grants — username URL-encoded (CHAD #6) so odd characters can't break the path
+    for u in doc["users"]:
+        un = u.get("username")
+        if not un:
+            continue
+        ok, data, status = _linode_get("/account/users/%s/grants" % quote(str(un), safe=""), token)
+        manifest["requests"] += 1
+        if ok:
+            manifest["succeeded"] += 1
+            doc["grants"][un] = data
+        else:
+            manifest["failed"].append({"path": "grants:%s" % un, "status": status})
+            manifest["complete"] = False
+    # each firewall's inbound rule set
     for fw in doc["firewalls"]:
         if fw.get("id") and "rules" not in fw:
-            try:
-                fw["rules"] = _linode_get("/networking/firewalls/%s/rules" % fw["id"], token)
-            except Exception:
-                pass
+            ok, data, status = _linode_get("/networking/firewalls/%s/rules" % quote(str(fw["id"]), safe=""), token)
+            manifest["requests"] += 1
+            if ok:
+                manifest["succeeded"] += 1
+                fw["rules"] = data
+            else:
+                manifest["failed"].append({"path": "fwrules:%s" % fw["id"], "status": status})
+                manifest["complete"] = False
+    manifest["counts"] = {k: len(v) for k, v in doc.items() if isinstance(v, list)}
     model = normalize_linode(doc)
-    return {"provider": "linode", "blocked": False, "model": model, "findings": analyze(model),
-            "counts": {k: len(v) for k, v in doc.items() if isinstance(v, list)}}
+    findings = analyze(model)
+    complete = manifest["complete"]
+    # A collection that got NOTHING usable (e.g. a bad/expired token or every required endpoint failing)
+    # is BLOCKED, not clean. Any partial failure is surfaced so 0 findings is never read as "secure".
+    total_failed_required = manifest["succeeded"] == 0
+    if total_failed_required:
+        return {"provider": "linode", "blocked": True, "partial": True,
+                "reason": "Linode collection FAILED (bad token or all required endpoints errored) — "
+                          "this is NOT a clean posture; check the token/scope and retry",
+                "manifest": manifest, "model": model, "findings": findings, "counts": manifest["counts"]}
+    return {"provider": "linode", "blocked": False, "partial": not complete,
+            "reason": "" if complete else "collection PARTIAL — some endpoints failed (see manifest.failed); "
+                                          "findings are INCOMPLETE and 0 findings must NOT be read as secure",
+            "manifest": manifest, "model": model, "findings": findings, "counts": manifest["counts"]}
 
 
 def collect(provider: str, *, fixture: dict = None, token: str = None) -> dict:
