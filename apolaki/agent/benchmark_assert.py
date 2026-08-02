@@ -44,6 +44,43 @@ DEFAULTS = {
 }
 
 
+# Bump when the assertion set / signature shape changes so a baseline written by an older schema is
+# rejected rather than silently compared against different semantics (CHAD re-audit #4).
+SCHEMA_VERSION = "1.0"
+
+
+def _env_metadata(floors: dict) -> dict:
+    """Provenance the benchmark output must be bound to (CHAD #4): the exact code + lab it ran
+    against, so a stored baseline can never silently compare across different code/image/lab/config.
+    git commit + image digests are supplied by the host runner via env (it can see docker/git);
+    schema_version + config_fingerprint are computed here."""
+    import os
+    import hashlib
+    cfg = json.dumps(floors or {}, sort_keys=True)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "git_commit": os.environ.get("APOLAKI_GIT_COMMIT", ""),
+        "agent_image": os.environ.get("APOLAKI_IMAGE_DIGEST", ""),
+        "juice_shop_image": os.environ.get("APOLAKI_JUICESHOP_DIGEST", ""),
+        "config_fingerprint": hashlib.sha256(cfg.encode("utf-8")).hexdigest()[:16],
+    }
+
+
+def baseline_compatible(stored_env: dict, cur_env: dict) -> tuple:
+    """(ok, reason). A baseline is only comparable against a run on the SAME schema, SAME agent +
+    juice-shop image digests, and SAME assertion config. Any drift => reject (re-seed), never compare
+    stale. git_commit is recorded for humans but the image digest is the real code identity."""
+    stored_env, cur_env = stored_env or {}, cur_env or {}
+    for k in ("schema_version", "config_fingerprint"):
+        if stored_env.get(k) != cur_env.get(k):
+            return False, "%s mismatch (baseline=%s current=%s)" % (k, stored_env.get(k), cur_env.get(k))
+    for k in ("agent_image", "juice_shop_image"):
+        # only enforce when BOTH sides recorded it (host runner may omit in a bare invocation)
+        if stored_env.get(k) and cur_env.get(k) and stored_env.get(k) != cur_env.get(k):
+            return False, "%s mismatch (baseline=%s current=%s)" % (k, stored_env.get(k), cur_env.get(k))
+    return True, "compatible"
+
+
 def _get(base: str, path: str, timeout: int = 30):
     """(status_code, raw_text). A transport error is status 0 — a hard fail, never silently ok."""
     url = base.rstrip("/") + path
@@ -137,6 +174,29 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     ck("graph_has_endpoints", by_kind.get("endpoint", 0) >= f["min_endpoints"], "endpoint=%s" % by_kind.get("endpoint"))
     ck("graph_has_findings", by_kind.get("finding", 0) >= 1, "finding=%s" % by_kind.get("finding"))
 
+    # ── EDGE assertions, not just a node census (CHAD re-audit #6): a graph can be full of nodes
+    # with broken relationships. Assert the critical connectivity a real world-model must carry. ──
+    nodes_by_id = {n.get("id"): n.get("kind") for n in (graph.get("nodes") or [])}
+    typed = {}   # (src_kind, rel, dst_kind) -> count
+    for e in (graph.get("edges") or []):
+        key = (nodes_by_id.get(e.get("source")), e.get("rel"), nodes_by_id.get(e.get("target")))
+        typed[key] = typed.get(key, 0) + 1
+
+    def edges(src, rel, dst):
+        return typed.get((src, rel, dst), 0)
+
+    ck("edge_host_serves_endpoint", edges("host", "serves", "endpoint") >= f["min_endpoints"],
+       "count=%s" % edges("host", "serves", "endpoint"))
+    ck("edge_endpoint_has_param", edges("endpoint", "has_param", "param") >= 1,
+       "count=%s" % edges("endpoint", "has_param", "param"))
+    ck("edge_finding_on_asset",
+       edges("endpoint", "found_on", "finding") + edges("host", "found_on", "finding") >= 1,
+       "count=%s" % (edges("endpoint", "found_on", "finding") + edges("host", "found_on", "finding")))
+    # persona->session connectivity must match the auth artery's authenticated personas (both users)
+    ck("edge_persona_authenticated_as_session",
+       edges("persona", "authenticated_as", "session") >= max(1, (artery.get("auth_success") or 0)),
+       "count=%s auth_success=%s" % (edges("persona", "authenticated_as", "session"), artery.get("auth_success")))
+
     # ── intel provenance schema valid (even if empty on a lab with no wayback/github footprint) ──
     prov = graph.get("provenance") or {}
     prov_ok = (isinstance(prov.get("by_source"), dict)
@@ -172,6 +232,7 @@ def signature(base: str, sid: str) -> dict:
     artery = rep.get("auth_artery") or {}
     matrix = artery.get("matrix") or {}
     return {
+        "schema_version": SCHEMA_VERSION,
         "families": fams,
         "counts": {"findings": len(findings), "leads": len(leads),
                    "confirmed": sum(1 for x in findings if x.get("confidence") == "confirmed")},
@@ -220,46 +281,93 @@ def compare_signatures(base_sig: dict, new_sig: dict, variance: float = 0.15) ->
     return out
 
 
+def _arg(argv, flag):
+    return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
+
+
+def _seal(obj: dict) -> str:
+    """Tamper-evident integrity seal: sha256 over the canonical JSON of the artifact body. Reuses the
+    same tamper-EVIDENT posture as audit.py (a hash, not a secret-key signature) — anyone can re-hash
+    the retained artifact and detect edits."""
+    import hashlib
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
 def main(argv):
     if len(argv) < 3:
-        print("usage: python benchmark_assert.py <base_url> <session_id> [--signature | --baseline FILE]")
+        print("usage: python benchmark_assert.py <base_url> <session_id> "
+              "[--signature | --baseline FILE | --artifact FILE]")
         return 2
     base, sid = argv[1], argv[2]
+    floors = dict(DEFAULTS)
+    env = _env_metadata(floors)
 
-    # --signature: just print the compact deterministic fingerprint (to seed/inspect a baseline)
     if "--signature" in argv:
         print(json.dumps(signature(base, sid), indent=2, sort_keys=True))
         return 0
 
-    checks = run_checks(base, sid)
+    checks = run_checks(base, sid, floors)
+    sig = signature(base, sid)
+    baseline_record = None
 
-    # --baseline FILE: also enforce determinism vs a stored golden signature (write it if absent)
-    if "--baseline" in argv:
-        try:
-            path = argv[argv.index("--baseline") + 1]
-        except Exception:
-            print("[assert] --baseline requires a file path")
-            return 2
+    # --baseline FILE: enforce determinism vs a stored golden — but ONLY across a compatible env
+    # (same schema/image/config). Incompatible or missing => (re)write, never compare stale (CHAD #4).
+    path = _arg(argv, "--baseline")
+    if path is not None:
         import os
-        # A baseline IO/parse error must NOT crash the whole asserter and lose the correctness
-        # results that DID run — surface it as a visible failing check instead (honest, not silent).
         try:
-            sig = signature(base, sid)
             if not os.path.exists(path):
                 with open(path, "w", encoding="utf-8") as fh:
-                    json.dump(sig, fh, indent=2, sort_keys=True)
-                print("[assert] wrote new determinism baseline -> %s (compare on the next run)" % path)
+                    json.dump({"env": env, "signature": sig}, fh, indent=2, sort_keys=True)
+                print("[assert] wrote new determinism baseline -> %s (compare on the next compatible run)" % path)
+                baseline_record = {"path": path, "written": True, "env": env}
             else:
                 with open(path, "r", encoding="utf-8") as fh:
-                    base_sig = json.load(fh)
-                checks = checks + compare_signatures(base_sig, sig)
+                    stored = json.load(fh)
+                stored_env = stored.get("env", {}) if isinstance(stored, dict) else {}
+                stored_sig = stored.get("signature", stored) if isinstance(stored, dict) else stored
+                compat, reason = baseline_compatible(stored_env, env)
+                checks.append(("baseline_env_compatible", compat, reason))
+                if compat:
+                    cmp_checks = compare_signatures(stored_sig, sig)
+                    checks = checks + cmp_checks
+                    baseline_record = {"path": path, "written": False, "env": stored_env,
+                                       "comparison": [{"name": n, "ok": ok, "detail": d} for n, ok, d in cmp_checks]}
+                else:
+                    baseline_record = {"path": path, "written": False, "env": stored_env, "incompatible": reason}
         except Exception as e:
             checks = checks + [("determinism_baseline_io", False, "%s" % e)]
+
     npass = sum(1 for _, ok, _ in checks if ok)
     for name, ok, detail in checks:
-        print("  %s  %-32s %s" % ("PASS" if ok else "FAIL", name, detail))
+        print("  %s  %-34s %s" % ("PASS" if ok else "FAIL", name, detail))
     nfail = len(checks) - npass
     print("[assert] ==== %d passed, %d failed ====" % (npass, nfail))
+
+    # --artifact FILE: durable, sanitized, integrity-sealed evidence (CHAD #7). No secrets — checks
+    # carry only names/booleans/short details, signature is structural counts, env is digests.
+    apath = _arg(argv, "--artifact")
+    if apath is not None:
+        body = {
+            "kind": "apolaki_full_mission_benchmark",
+            "schema_version": SCHEMA_VERSION,
+            "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "env": env,
+            "mission_id": sid,
+            "summary": {"passed": npass, "failed": nfail},
+            "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks],
+            "signature": sig,
+            "baseline": baseline_record,
+        }
+        artifact = {**body, "integrity": {"algo": "sha256", "hash": _seal(body)}}
+        try:
+            with open(apath, "w", encoding="utf-8") as fh:
+                json.dump(artifact, fh, indent=2, sort_keys=True)
+            print("[assert] wrote sealed benchmark artifact -> %s (sha256 %s)" % (apath, artifact["integrity"]["hash"][:16]))
+        except Exception as e:
+            print("[assert] artifact write failed: %s" % e)
+            return 1
+
     return 0 if nfail == 0 else 1
 
 

@@ -67,13 +67,29 @@ if [ "$status" = "complete" ]; then
   echo "[full-mission] 3. deep correctness assertions (benchmark_assert.py, in-container)"
   bflag=""
   [ -n "$BASELINE" ] && bflag="--baseline $BASELINE"
-  # MSYS_NO_PATHCONV=1 stops Git Bash (Windows) from rewriting the CONTAINER path /app/data/... into
-  # a host path before it reaches the container; harmless no-op on Linux/macOS.
-  if MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent python benchmark_assert.py "$A" "$sid" $bflag; then
+  # Provenance the artifact/baseline are BOUND to (CHAD #4/#7): the host can see git + docker, so it
+  # gathers the code + lab identity and passes it into the container as env.
+  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+  IMG_DIGEST=$(docker image inspect apolaki-agent:latest --format '{{.Id}}' 2>/dev/null || echo "")
+  JS_DIGEST=$(docker inspect "$($COMPOSE ps -q juice-shop 2>/dev/null | head -1)" \
+              --format '{{index .Image}}' 2>/dev/null || echo "")
+  [ "$FRESH_LAB" = "1" ] && JS_DIGEST=$(docker inspect "$($COMPOSE --profile bench ps -q juice-shop-bench 2>/dev/null | head -1)" --format '{{index .Image}}' 2>/dev/null || echo "$JS_DIGEST")
+  ART="/app/data/benchmark_artifacts/${sid}.json"
+  MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent sh -c 'mkdir -p /app/data/benchmark_artifacts' >/dev/null 2>&1
+  # MSYS_NO_PATHCONV=1 stops Git Bash (Windows) rewriting the CONTAINER paths into host paths.
+  if MSYS_NO_PATHCONV=1 $COMPOSE exec -T \
+       -e APOLAKI_GIT_COMMIT="$GIT_COMMIT" -e APOLAKI_IMAGE_DIGEST="$IMG_DIGEST" \
+       -e APOLAKI_JUICESHOP_DIGEST="$JS_DIGEST" \
+       agent python benchmark_assert.py "$A" "$sid" $bflag --artifact "$ART"; then
     ck "deep correctness assertions all passed" PASS
   else
     ck "deep correctness assertions" FAIL
   fi
+  # copy the sealed artifact out of the container to the repo's benchmark_results/ for retention
+  mkdir -p benchmark_results 2>/dev/null
+  MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent cat "$ART" > "benchmark_results/${sid}.json" 2>/dev/null \
+    && ck "sealed benchmark artifact retained (benchmark_results/${sid}.json)" PASS \
+    || ck "benchmark artifact retained" FAIL
 fi
 
 echo "[full-mission] ==== $pass passed, $fail failed ===="

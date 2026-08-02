@@ -23,8 +23,27 @@ def _healthy():
         "findings": [{"title": "BOLA basket", "family": "access_control", "confidence": "lead"}],
         "leads": [{"title": "reflected marker", "family": "xss", "confidence": "candidate"}],
     }
-    graph = {"mission_id": sid, "stats": {"nodes": 990, "edges": 500,
-             "by_kind": {"host": 1, "endpoint": 120, "finding": 34, "object": 40}},
+    # a connected graph: host serves many endpoints, endpoints carry params + findings, personas
+    # authenticated_as sessions — the relationships the edge assertions require (not just a census).
+    nodes = [{"id": "host:h", "kind": "host"}]
+    edges = []
+    for i in range(120):
+        eid = "endpoint:/e%d" % i
+        nodes.append({"id": eid, "kind": "endpoint"})
+        edges.append({"source": "host:h", "target": eid, "rel": "serves"})
+    for i in range(13):
+        nodes.append({"id": "param:p%d" % i, "kind": "param"})
+        edges.append({"source": "endpoint:/e%d" % i, "target": "param:p%d" % i, "rel": "has_param"})
+    for i in range(34):
+        nodes.append({"id": "finding:f%d" % i, "kind": "finding"})
+        edges.append({"source": "endpoint:/e%d" % i, "target": "finding:f%d" % i, "rel": "found_on"})
+    for role in ("user_a", "user_b"):
+        nodes += [{"id": "persona:%s" % role, "kind": "persona"}, {"id": "session:%s" % role, "kind": "session"}]
+        edges.append({"source": "persona:%s" % role, "target": "session:%s" % role, "rel": "authenticated_as"})
+    graph = {"mission_id": sid, "nodes": nodes, "edges": edges,
+             "stats": {"nodes": len(nodes), "edges": len(edges),
+                       "by_kind": {"host": 1, "endpoint": 120, "finding": 34, "param": 13,
+                                   "persona": 2, "session": 2}},
              "provenance": {"by_source": {"live-recon": 900}, "needs_validation": [],
                             "needs_validation_count": 0}}
     j = {"/status/%s" % sid: {"status": "complete"},
@@ -102,6 +121,20 @@ def test_degenerate_one_node_graph_is_caught(monkeypatch):
     assert "graph_has_findings" in fails
 
 
+def test_broken_graph_relationships_caught(monkeypatch):
+    # CHAD #6: a graph can be FULL of nodes with BROKEN relationships. Same node census, zero edges
+    # -> the edge assertions must fail even though every census check still passes.
+    sid, jmap, dmap = _healthy()
+    jmap["/graph/canonical/%s" % sid]["edges"] = []
+    _install(monkeypatch, jmap, dmap)
+    fails = _fails(BA.run_checks("http://x", sid))
+    assert "edge_host_serves_endpoint" in fails
+    assert "edge_persona_authenticated_as_session" in fails
+    assert "edge_finding_on_asset" in fails
+    # census checks still pass (nodes intact) — proving edges add coverage the census can't
+    assert "graph_has_endpoints" not in fails
+
+
 def test_naked_confirmed_finding_is_caught(monkeypatch):
     # a CONFIRMED finding with no evidence/reproduction violates the truth-first invariant
     sid, jmap, dmap = _healthy()
@@ -158,6 +191,30 @@ def test_determinism_count_within_variance_but_big_drift_caught():
     # personas changed 2 -> 1 = exact-match invariant broken, always caught regardless of variance
     drift = dict(near); drift["auth"] = {"personas": 1, "auth_success": 2, "matrix_operations": 40}
     assert "determinism_personas_stable" in [n for n, ok, _ in BA.compare_signatures(base, drift) if not ok]
+
+
+def test_baseline_compatibility_binds_to_env(monkeypatch):
+    # CHAD #4: a stored baseline must not silently compare across different schema/image/config.
+    cur = {"schema_version": "1.0", "config_fingerprint": "abc", "agent_image": "sha256:AA", "juice_shop_image": "sha256:JJ"}
+    assert BA.baseline_compatible(dict(cur), dict(cur))[0] is True
+    # schema drift -> reject
+    assert BA.baseline_compatible({**cur, "schema_version": "0.9"}, cur)[0] is False
+    # agent image drift -> reject (different code identity)
+    assert BA.baseline_compatible({**cur, "agent_image": "sha256:BB"}, cur)[0] is False
+    # juice-shop image drift -> reject
+    assert BA.baseline_compatible({**cur, "juice_shop_image": "sha256:KK"}, cur)[0] is False
+    # config fingerprint drift -> reject
+    assert BA.baseline_compatible({**cur, "config_fingerprint": "xyz"}, cur)[0] is False
+    # a side that omits an image digest is not enforced on that field (bare invocation tolerated)
+    assert BA.baseline_compatible({**cur, "agent_image": ""}, cur)[0] is True
+
+
+def test_artifact_seal_detects_tampering():
+    body = {"mission_id": "m", "summary": {"passed": 28, "failed": 0}}
+    h = BA._seal(body)
+    assert h == BA._seal(dict(body))                 # stable over equal content
+    tampered = {**body, "summary": {"passed": 42, "failed": 0}}
+    assert BA._seal(tampered) != h                   # any edit changes the seal
 
 
 def test_401_on_endpoint_is_caught(monkeypatch):
