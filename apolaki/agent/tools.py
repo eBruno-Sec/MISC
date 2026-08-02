@@ -50,6 +50,7 @@ TOOL_PERMISSIONS = {
     "generate_playbook": PermissionLevel.PASSIVE,
     "store_finding": PermissionLevel.PASSIVE,
     "run_httpx": PermissionLevel.ACTIVE,
+    "run_cloud_probe": PermissionLevel.ACTIVE,
     "run_whatweb": PermissionLevel.ACTIVE,
     "run_fingerprint": PermissionLevel.ACTIVE,
     "run_nmap": PermissionLevel.ACTIVE,
@@ -287,6 +288,12 @@ CLAUDE_TOOLS = [
     {"name": "run_dns",
      "description": "PASSIVE: DNS intelligence via DNS-over-HTTPS — A/NS/MX/TXT/CAA records, SPF + DMARC policy (email-spoofing exposure), and vendor fingerprints from TXT. No target contact. Run on each in-scope root domain to enrich the playbook.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "run_cloud_probe",
+     "description": ("ACTIVE (cloud): probe ONE discovered object-storage bucket URL (S3 / Azure Blob / GCS) for "
+                     "PUBLIC listing without credentials. Scope-gated, read-only GET. A public listing is a "
+                     "confirmed exposure finding. Use it on a candidate storage URL surfaced by crawl or by "
+                     "github cloud-name recon — not on the app root."),
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_asn",
      "description": ("PASSIVE: IP + ASN + BGP prefix (CIDR range) + AS/org name for a domain, via DNS-over-HTTPS "
                      "and Team Cymru. Reveals the organization's dedicated IP range for scope expansion. No target "
