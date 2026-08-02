@@ -109,3 +109,21 @@ def test_projection_error_is_surfaced_not_swallowed():
             return []
     a._seed_and_project_graph(_Boom())
     assert a._graph_projection_error and "graph down" in a._graph_projection_error
+
+
+def test_execute_plan_halts_on_projection_failure():
+    # CHAD final #3: if graph projection FAILS, the primary cycle must HALT (no selecting off stale
+    # graph state) and record a structured degraded state. Production-real: the real _seed_and_project
+    # runs and fails because the graph raises.
+    class _BadGraph:
+        def observe(self, *a, **k):
+            raise RuntimeError("graph down")
+
+        def nodes(self, *a, **k):
+            return []
+    tools = _Tools()
+    tools.graph = _BadGraph()
+    a = _agent(tools, in_scope=["*.example.com"])
+    calls = _drive(a)
+    assert calls == [], "primary tool ran after a graph projection failure: %s" % calls
+    assert a._degraded and a._degraded.get("reason") == "graph_projection_failed"

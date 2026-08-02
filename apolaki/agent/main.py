@@ -561,6 +561,30 @@ def _leads(m) -> list:
     return (m.get("context", {}) or {}).get("leads", [])
 
 
+def _project_cloud_postures(g, m) -> list:
+    """Rebuild EVERY persisted cloud account's model into the graph `g` (CHAD #2/#5) — used by both the
+    canonical graph and the portable export so archived missions keep all cloud provider/account nodes.
+    Reads ctx['cloud_postures'] (multi-account) with a fallback to the legacy single 'cloud_posture'.
+    Returns a compact summary list [{provider, account, account_id, partial, posture}]."""
+    ctx = (m or {}).get("context", {}) or {}
+    postures = dict(ctx.get("cloud_postures") or {})
+    legacy = ctx.get("cloud_posture")
+    if legacy and not postures:                       # back-compat with the pre-multi-account shape
+        postures["%s:%s" % (legacy.get("provider", "cloud"), legacy.get("account", "cloud"))] = legacy
+    summary = []
+    for _key, cp in postures.items():
+        if not cp.get("model"):
+            continue
+        try:
+            import cloud_iam as _ci
+            _ci.to_graph(g, cp["model"], account=(cp.get("account_id") or cp.get("account") or "cloud"),
+                         source=cp.get("provider", "cloud"))
+        except Exception:
+            pass
+        summary.append({k: cp.get(k) for k in ("provider", "account", "account_id", "partial", "posture")})
+    return summary
+
+
 def _auth_artery_evidence(session_id: str, m=None) -> dict:
     """Structured proof the authentication artery fired (personas/auth_success/matrix). Prefer the
     LIVE agent (freshest), fall back to what was persisted to mission context at teardown. Never
@@ -1645,6 +1669,10 @@ def _record_orchestration(session_id: str) -> None:
         ctx["auth_artery"] = artery
         if artery.get("ran") and artery.get("auth_success", 0) >= 1:
             ctx["authenticated"] = True
+        # structured degraded/failure state (e.g. a halted primary cycle) so it shows in status/report
+        deg = getattr(ag, "_degraded", None)
+        if deg:
+            ctx["degraded"] = deg
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass
@@ -1908,20 +1936,14 @@ async def get_canonical_graph(session_id: str):
     g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
                                   personas=personas, capabilities=caps,
                                   scope_asset=memory_mod.target_key(m["scope"]))
-    # rebuild cloud-posture graph nodes from persisted context so an ARCHIVED mission keeps its cloud
-    # account/resource/role graph (CHAD: projection must not be live-session-only).
-    cp = (m.get("context", {}) or {}).get("cloud_posture") or {}
-    if cp.get("model"):
-        try:
-            import cloud_iam as _ci
-            _ci.to_graph(g, cp["model"], account=cp.get("account", "cloud"), source=cp.get("provider", "cloud"))
-        except Exception:
-            pass
+    # rebuild EVERY persisted cloud account's graph so an ARCHIVED mission keeps its cloud
+    # account/resource/role nodes (CHAD #2/#5) — shared with the portable export.
+    cloud_summary = _project_cloud_postures(g, m)
     d = g.to_dict()
     d["stats"] = g.stats()
     d["next_best_actions"] = g.next_best_actions()   # the planner querying the world model
     d["provenance"] = _intel_provenance(session_id)  # WHERE the world model came from (feeds + worklist)
-    d["cloud_posture"] = {k: cp.get(k) for k in ("provider", "account", "partial", "posture")} if cp else {}
+    d["cloud_postures"] = cloud_summary
     return d
 
 
@@ -1943,8 +1965,12 @@ async def export_mission(session_id: str):
             caps = []
     g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
                                   capabilities=caps, scope_asset=memory_mod.target_key(m["scope"]))
+    # include EVERY persisted cloud account in the portable export too (CHAD #5) — same rebuild the
+    # canonical graph uses, so an archived export never loses cloud graph state.
+    cloud_summary = _project_cloud_postures(g, m)
     return _me.build_bundle(mission=m, findings=findings, snapshot=snap,
-                            graph={**g.to_dict(), "stats": g.stats()}, capabilities=caps)
+                            graph={**g.to_dict(), "stats": g.stats(), "cloud_postures": cloud_summary},
+                            capabilities=caps)
 
 
 def _cloud_posture_run(provider: str) -> dict:
@@ -1997,15 +2023,22 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
     if p["blocked"]:
         return {"ingested": False, "reason": p["reason"] or "collection blocked — nothing ingested",
                 "posture": p["posture"], "partial": p["partial"], "manifest": p["manifest"]}
+    res = p["res"]
     findings = p["findings"]
-    prov = "%s-posture" % provider.lower()
+    prov = provider.lower()
+    prov_tag = "%s-posture" % prov
+    # the REAL collected account identity (CHAD #6) — dedup/context are keyed by this, not the label.
+    account_id = str(res.get("account_id") or "").strip() or ("label:%s" % account)
+    acct_key = "%s:%s" % (prov, account_id)
+    # DEDUP by (provider, account_id, title, target) so account A never suppresses account B (CHAD #1).
     existing = {(x.get("title"), x.get("target")) for x in (db.get_findings(session_id) or [])
-                if str(x.get("provenance", "")).startswith(provider.lower())}
-    stored, deduped = 0, 0
+                if str(x.get("provenance", "")).startswith(prov) and x.get("cloud_account_id") == account_id}
+    attempted, stored, deduped, failed = len(findings), 0, 0, 0
     for f in findings:
         key = (f.get("title"), f.get("target"))
-        f["provenance"] = prov
-        f["cloud_account"] = account
+        f["provenance"] = prov_tag
+        f["cloud_account"] = account            # operator label
+        f["cloud_account_id"] = account_id      # real collected identity
         if key in existing:
             deduped += 1
             continue
@@ -2014,25 +2047,38 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
             existing.add(key)
             stored += 1
         except Exception:
-            pass
-    # persist the normalized model + partial status so the graph rebuilds from context even when the
-    # session is evicted, and partial remains visible in the report.
+            failed += 1
+    # MULTI-ACCOUNT context (CHAD #2): keyed by provider:account_id, preserving every other account.
+    context_persisted = False
     try:
         ctx = dict(m["context"])
-        ctx["cloud_posture"] = {"provider": provider, "account": account, "partial": p["partial"],
-                                "posture": p["posture"], "manifest": p["manifest"],
-                                "model": p["res"].get("model", {}), "findings_total": len(findings)}
+        postures = dict(ctx.get("cloud_postures") or {})
+        postures[acct_key] = {"provider": provider, "account": account, "account_id": account_id,
+                              "partial": p["partial"], "posture": p["posture"], "manifest": p["manifest"],
+                              "model": res.get("model", {}), "findings_total": len(findings)}
+        ctx["cloud_postures"] = postures
         db.update_mission(session_id, context=ctx)
+        context_persisted = True
     except Exception:
-        pass
-    # also project into the LIVE graph if the mission is in memory
+        context_persisted = False
+    live_graph_projected = False
     if session_id in sessions:
         g = getattr(sessions[session_id]["tools"], "graph", None)
         if g is not None:
-            _ci.to_graph(g, p["res"].get("model", {}), account=account, source=provider.lower())
-    return {"ingested": True, "mission": session_id, "account": account, "provider": provider,
-            "partial": p["partial"], "posture": p["posture"],
-            "findings_persisted": stored, "findings_deduped": deduped,
+            try:
+                _ci.to_graph(g, res.get("model", {}), account=account_id, source=prov)
+                live_graph_projected = True
+            except Exception:
+                live_graph_projected = False
+    # HONEST verdict (CHAD #4): ingested is True only when required persistence (context) succeeded and
+    # no finding write failed. Otherwise partial/false — never claim success on swallowed exceptions.
+    ok = context_persisted and failed == 0
+    return {"ingested": bool(ok), "partial": (not ok) or bool(p["partial"]),
+            "mission": session_id, "provider": provider, "account": account, "account_id": account_id,
+            "posture": p["posture"],
+            "results": {"findings_attempted": attempted, "findings_stored": stored,
+                        "findings_deduped": deduped, "findings_failed": failed,
+                        "context_persisted": context_persisted, "live_graph_projected": live_graph_projected},
             "manifest": p["manifest"], "summary": p["summary"]}
 
 

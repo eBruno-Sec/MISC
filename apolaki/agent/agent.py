@@ -194,6 +194,7 @@ class BBHAgent:
         # "artery did not run" apart from "ran and produced no personas" (both differ from a smoke test).
         self._auth_artery = {"ran": False}
         self._graph_projection_error = None
+        self._degraded = None                # structured degraded/failure state (e.g. graph projection halt)
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
@@ -1684,8 +1685,16 @@ class BBHAgent:
                     break
                 self._seed_and_project_graph(g)
                 if getattr(self, "_graph_projection_error", None):
-                    yield {"type": "info", "content": "Graph projection error (surfaced, not swallowed): "
-                           "%s" % self._graph_projection_error}
+                    # HALT the primary planning cycle (CHAD): a projection failure means the graph is
+                    # stale/partial, so the planner must NOT keep selecting actions off it. Emit + persist
+                    # a structured degraded event so it shows in mission status + report.
+                    self._degraded = {"reason": "graph_projection_failed",
+                                      "detail": str(self._graph_projection_error)}
+                    yield {"type": "degraded", "reason": "graph_projection_failed",
+                           "content": "Primary execution HALTED — mission graph projection failed: %s"
+                                      % self._graph_projection_error}
+                    self._plan_steps = steps
+                    return
                 g_roots, g_urls, g_recon = self._graph_primary_state(g)
                 if not g_roots and not g_urls:
                     break

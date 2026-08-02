@@ -297,14 +297,28 @@ def collect_linode_live(token: str) -> dict:
     manifest = {"requests": 0, "succeeded": 0, "failed": [], "truncated": [], "advertised": {},
                 "counts": {}, "complete": True}
     doc = {"users": [], "grants": {}, "firewalls": [], "buckets": [], "instances": [], "databases": []}
+    # Real account identity (CHAD #6): GET /account -> a stable id (euuid, else email) so ingestion is
+    # keyed/deduped by the ACTUAL account, not just an operator-supplied label. Never fatal if missing.
+    account_id, account_label = "", ""
+    ok, adata, astatus = _linode_get("/account", token)
+    manifest["requests"] += 1
+    if ok and isinstance(adata, dict):
+        manifest["succeeded"] += 1
+        account_id = str(adata.get("euuid") or adata.get("email") or "").strip()
+        account_label = str(adata.get("company") or adata.get("email") or "").strip()
+    else:
+        manifest["failed"].append({"path": "/account", "status": astatus})
+        manifest["complete"] = False
     required = {"users": "/account/users", "firewalls": "/networking/firewalls",
                 "buckets": "/object-storage/buckets", "instances": "/linode/instances",
                 "databases": "/databases/instances"}
+    required_failed = 0
     for key, path in required.items():
         items, ok = _linode_paged(path, token, manifest)
         doc[key] = items
         if not ok:
             manifest["complete"] = False
+            required_failed += 1
     # per-user grants — username URL-encoded (CHAD #6) so odd characters can't break the path
     for u in doc["users"]:
         un = u.get("username")
@@ -333,15 +347,18 @@ def collect_linode_live(token: str) -> dict:
     model = normalize_linode(doc)
     findings = analyze(model)
     complete = manifest["complete"]
-    # A collection that got NOTHING usable (e.g. a bad/expired token or every required endpoint failing)
-    # is BLOCKED, not clean. Any partial failure is surfaced so 0 findings is never read as "secure".
-    total_failed_required = manifest["succeeded"] == 0
+    # A collection where EVERY required endpoint failed (e.g. a bad/expired token) is BLOCKED, not clean
+    # — the auxiliary /account fetch succeeding does not make it usable. Any partial failure is surfaced
+    # so 0 findings is never read as "secure".
+    total_failed_required = required_failed == len(required)
     if total_failed_required:
         return {"provider": "linode", "blocked": True, "partial": True,
+                "account_id": account_id, "account_label": account_label,
                 "reason": "Linode collection FAILED (bad token or all required endpoints errored) — "
                           "this is NOT a clean posture; check the token/scope and retry",
                 "manifest": manifest, "model": model, "findings": findings, "counts": manifest["counts"]}
     return {"provider": "linode", "blocked": False, "partial": not complete,
+            "account_id": account_id, "account_label": account_label,
             "reason": "" if complete else "collection PARTIAL — some endpoints failed (see manifest.failed); "
                                           "findings are INCOMPLETE and 0 findings must NOT be read as secure",
             "manifest": manifest, "model": model, "findings": findings, "counts": manifest["counts"]}

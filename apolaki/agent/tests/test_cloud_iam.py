@@ -209,7 +209,9 @@ def test_linode_total_failure_is_blocked_not_clean(monkeypatch):
     monkeypatch.setattr(CI, "_linode_get", _linode_router(fail=allreq))
     res = CI.collect_linode_live("tok")
     assert res["blocked"] is True and res["partial"] is True
-    assert "NOT a clean posture" in res["reason"] and res["manifest"]["succeeded"] == 0
+    # every REQUIRED endpoint failed -> blocked, regardless of the auxiliary /account fetch
+    assert "NOT a clean posture" in res["reason"]
+    assert len(res["manifest"]["failed"]) >= 5
 
 
 def test_linode_pagination_follows_all_pages(monkeypatch):
@@ -246,3 +248,15 @@ def test_linode_advertised_count_mismatch_is_not_complete(monkeypatch):
     assert res["partial"] is True
     assert any(t.get("path") == "/object-storage/buckets" and t.get("advertised") == 5
                for t in res["manifest"]["truncated"])
+
+
+def test_linode_collects_real_account_identity(monkeypatch):
+    def _get(path, token, timeout=20, retries=3):
+        base = path.split("?")[0]
+        if base == "/account":
+            return (True, {"euuid": "ABC-123-EUUID", "email": "s@school.edu", "company": "School"}, 200)
+        return (True, {"data": [], "pages": 1, "results": 0}, 200)
+    monkeypatch.setattr(CI, "_linode_get", _get)
+    res = CI.collect_linode_live("tok")
+    assert res["account_id"] == "ABC-123-EUUID" and res["account_label"] == "School"
+    assert "tok" not in str(res)          # token never surfaces
