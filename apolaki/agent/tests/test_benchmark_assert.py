@@ -20,7 +20,7 @@ def _healthy():
                                                                "user_b": {"attempted": 39, "succeeded": 35, "with_auth_material": 39}},
                                                    "status_dist": {"200": 60, "404": 8, "401": 8, "500": 2},
                                                    "endpoints_touched": 39, "both_personas_succeeded": True},
-                        "create_object_idor": {"ran": True, "attempts": 2, "confirmed": 0}},
+                        "create_object_idor": {"ran": True, "attempts": 2, "created": 2, "confirmed": 0}},
         "findings": [{"title": "BOLA basket", "family": "access_control", "confidence": "lead"}],
         "leads": [{"title": "reflected marker", "family": "xss", "confidence": "candidate"}],
     }

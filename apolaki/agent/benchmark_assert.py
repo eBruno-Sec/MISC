@@ -147,7 +147,8 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     # 0 confirmed is fine (correct authz = no false positive), but the test must have RUN.
     co = artery.get("create_object_idor") or {}
     ck("create_object_idor_executed", bool(co.get("ran")),
-       "ran=%s attempts=%s confirmed=%s" % (co.get("ran"), co.get("attempts"), co.get("confirmed")))
+       "ran=%s attempts=%s created=%s confirmed=%s" % (co.get("ran"), co.get("attempts"),
+                                                        co.get("created"), co.get("confirmed")))
     # personas must never carry secrets
     ck("personas_carry_no_secret", "password" not in json.dumps(artery).lower(), "")
 

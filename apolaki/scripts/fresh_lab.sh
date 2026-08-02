@@ -12,11 +12,18 @@ COMPOSE="${COMPOSE:-docker compose}"
 BENCH_HOST_PORT="${BENCH_HOST_PORT:-42001}"
 t0=$(date +%s)
 
-# Ground-truth the Compose project name from a currently-running service (never a guess), so the
-# volume label filter cannot select another project's volume.
-_running=$($COMPOSE ps -q juice-shop 2>/dev/null | head -1)
-PROJECT=$(docker inspect "$_running" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
-[ -z "$PROJECT" ] && PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')}"
+# Ground-truth the Compose project name (CHAD #3): prefer an explicit COMPOSE_PROJECT_NAME, else the
+# project label of ANY currently-running compose container in this project (not only juice-shop, which
+# may be down), else the sanitized dir name. The bench container's OWN project label is re-verified
+# AFTER creation below, so a wrong guess can never lead to touching another project's volume.
+PROJECT="${COMPOSE_PROJECT_NAME:-}"
+if [ -z "$PROJECT" ]; then
+  for _svc in agent juice-shop juice-shop-bench; do
+    _c=$($COMPOSE ps -q "$_svc" 2>/dev/null | head -1)
+    [ -n "$_c" ] && PROJECT=$(docker inspect "$_c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null) && [ -n "$PROJECT" ] && break
+  done
+fi
+[ -z "$PROJECT" ] && PROJECT="$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
 
 # The dedicated bench volume, identified by Compose's own labels — unambiguous, project-scoped.
 _bench_vol() {
@@ -60,6 +67,13 @@ if [ "$ready" != 1 ]; then echo "[fresh-lab] FAILED: juice-shop-bench not ready 
 # Enforce freshness: the dedicated volume must now EXIST and have been created after t0, and the
 # container must have started after t0. Printing alone is not proof — these are hard gates.
 cid=$($COMPOSE --profile bench ps -q juice-shop-bench 2>/dev/null | head -1)
+# Verify the created container's OWN project label matches the project we resolved (CHAD #3) — a
+# mismatch means our project identity was wrong and we could have targeted the wrong volume: FATAL.
+cproj=$(docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+if [ -n "$cproj" ] && [ "$cproj" != "$PROJECT" ]; then
+  echo "[fresh-lab] FAILED: bench container project label '$cproj' != resolved project '$PROJECT' — aborting"
+  exit 1
+fi
 cont_started=$(docker inspect "$cid" --format '{{.State.StartedAt}}' 2>/dev/null)
 newvol=$(_bench_vol)
 vol_created=$(docker volume inspect "$newvol" --format '{{.CreatedAt}}' 2>/dev/null)

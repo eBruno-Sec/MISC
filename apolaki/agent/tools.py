@@ -1876,7 +1876,7 @@ class ToolRegistry:
         # write/delete of another user's object is state-changing — enabled only when the caller
         # explicitly opts in (the agent passes allow_write=True only in Full mode). Read is always safe.
         allow_write = bool(inp.get("allow_write"))
-        findings, attempts = [], 0
+        findings, attempts, created, details = [], 0, 0, []
         for spec in specs[:6]:
             cs = spec["create"]
             url = base + cs["path"]
@@ -1910,18 +1910,30 @@ class ToolRegistry:
                         pass
             v = _co.verdict(marker=marker, create_status=cr.status_code, create_body=cr.text or "",
                             object_id=oid, read_status=read_s, read_body=read_b, delete_status=del_s)
+            if v.get("created"):
+                created += 1
             tgt = base + (spec.get("read") or cs["path"]).replace("{id}", oid or "")
             f = _co.to_finding(v, target=tgt, owner_role=owner, attacker_role=attacker)
             if f:
                 findings.append(f)
             # cleanup: the OWNER removes the object we created (best-effort; harmless if already gone)
+            cleaned = None
             if oid and spec.get("delete"):
                 try:
-                    await self._http_send("DELETE", base + spec["delete"].replace("{id}", oid), owner_h, None, True)
+                    cd, _ = await self._http_send("DELETE", base + spec["delete"].replace("{id}", oid), owner_h, None, True)
+                    cleaned = cd.status_code
                 except Exception:
-                    pass
+                    cleaned = 0
+            # Per-attempt evidence so ran/attempts/created/confirmed distinguish "created but attacker
+            # DENIED" from "creation FAILED" (CHAD #6): endpoint, create status, object id, attacker
+            # read/delete status, cleanup status. No secrets — statuses + the object id only.
+            details.append({"endpoint": cs["path"], "create_status": cr.status_code,
+                            "object_created": bool(v.get("created")), "object_id": oid or None,
+                            "attacker_read_status": read_s, "attacker_delete_status": del_s,
+                            "cleanup_status": cleaned})
         return ToolResult("create_object_idor", base, True,
-                          json.dumps({"ran": True, "attempts": attempts, "confirmed": len(findings)}), findings)
+                          json.dumps({"ran": True, "attempts": attempts, "created": created,
+                                      "confirmed": len(findings), "details": details}), findings)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:
         """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the
