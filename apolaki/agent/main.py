@@ -535,6 +535,15 @@ async def delete_mission(session_id: str):
 def _report_bundle(session_id: str):
     m = _require_mission(session_id)
     findings = db.get_findings(session_id)
+    # truth-first proof gate (CHAD #5): a confirmed access-control finding without ownership/authz
+    # proof is demoted to a lead before it can reach ANY report format. Default enforces the
+    # access-control classes (where a false confirm is most damaging + producers are audited);
+    # APOLAKI_ENFORCE_PROOF=all extends it to every family.
+    try:
+        import proof_schema as _ps
+        findings = _ps.demote_unproven(findings)
+    except Exception:
+        pass
     ctx = m["context"]
     coverage = _coverage(session_id)
     return m, findings, m["scope"], coverage, ctx.get("chains", [])

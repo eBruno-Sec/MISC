@@ -156,10 +156,19 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     ck("report_family_breadth", len(fams) >= f["min_families"], "families=%s" % sorted(fams))
     missing_req = [r for r in f["require_families"] if r not in fams]
     ck("report_required_families", not missing_req, "missing=%s have=%s" % (missing_req, sorted(fams)))
-    # truth-first: a CONFIRMED finding must carry proof (evidence or reproduction) — no naked confirms
-    naked = [x.get("title") for x in findings
-             if (x.get("confidence") == "confirmed") and not (x.get("evidence") or x.get("reproduction_steps"))]
-    ck("no_confirmed_without_proof", not naked, "naked_confirmed=%s" % naked[:3])
+    # truth-first: a CONFIRMED finding must carry FAMILY-SPECIFIC proof, not just any text (CHAD #5).
+    # A confirmed access-control finding without ownership/authorization proof fails here.
+    try:
+        import proof_schema as _ps
+        weak = []
+        for x in findings:
+            if x.get("confidence") == "confirmed":
+                ok_p, missing = _ps.validate_confirmed(x)
+                if not ok_p:
+                    weak.append((x.get("title"), missing))
+        ck("confirmed_findings_have_family_proof", not weak, "weak=%s" % weak[:3])
+    except Exception as e:
+        ck("confirmed_findings_have_family_proof", False, "proof_schema error: %s" % e)
 
     # ── canonical graph: real world-model, not a single node ──
     gcode, graph = _get_json(base, "/graph/canonical/%s" % sid)

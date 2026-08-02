@@ -142,7 +142,19 @@ def test_naked_confirmed_finding_is_caught(monkeypatch):
         {"title": "SQLi", "family": "sql_injection", "confidence": "confirmed"}]   # no proof fields
     _install(monkeypatch, jmap, dmap)
     fails = _fails(BA.run_checks("http://x", sid))
-    assert "no_confirmed_without_proof" in fails
+    assert "confirmed_findings_have_family_proof" in fails
+
+
+def test_confirmed_access_control_without_ownership_proof_is_caught(monkeypatch):
+    # CHAD #5: a confirmed access-control finding whose evidence lacks ownership/authorization proof
+    # (just says "returned 200") is a false confirm — must be caught.
+    sid, jmap, dmap = _healthy()
+    jmap["/report/%s/json" % sid]["findings"] = [
+        {"title": "IDOR", "family": "idor", "confidence": "confirmed",
+         "impact": "read others' data", "evidence": "GET /api/orders/2 -> 200 returned some data"}]
+    _install(monkeypatch, jmap, dmap)
+    fails = _fails(BA.run_checks("http://x", sid))
+    assert "confirmed_findings_have_family_proof" in fails
 
 
 def test_session_id_mismatch_is_caught(monkeypatch):

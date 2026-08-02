@@ -1,0 +1,143 @@
+"""
+Family-specific PROOF requirements for a CONFIRMED finding (CHAD re-audit #5).
+
+The old rule — "any text in `evidence` makes a confirmed finding pass" — does not prove
+exploitability. A finding may only be labelled `confirmed` when it carries the structured proof
+its vulnerability class actually requires:
+
+  - request + response evidence (the oracle saw the real exchange, not a guess)
+  - the identity / session role under which it was observed (for auth classes)
+  - a CONTROL request that rules out the benign explanation (anon-denied, id+1 differs, ...)
+  - an observed security impact
+  - reproducible steps (or an evidence string a human can replay)
+
+This is the truth-first gate: if the family's proof is absent, the finding is a LEAD, not a
+confirmation. `validate_confirmed` returns (ok, missing[]) so callers can (a) refuse to store a
+weak confirm, (b) fail a benchmark that produced one, and (c) demote it to a lead. Pure; no I/O.
+"""
+from __future__ import annotations
+
+# CWE -> family fallback so a finding that carries only a CWE still gets the right proof rules.
+_CWE_FAMILY = {
+    "CWE-639": "idor", "CWE-566": "idor", "CWE-284": "access_control", "CWE-285": "access_control",
+    "CWE-862": "access_control", "CWE-863": "access_control", "CWE-306": "missing_authentication",
+    "CWE-89": "sql_injection", "CWE-79": "xss", "CWE-200": "sensitive_exposure",
+    "CWE-201": "sensitive_exposure", "CWE-264": "sensitive_exposure", "CWE-918": "ssrf",
+}
+
+# Per-family proof contract. `signals` = groups of interchangeable substrings; the evidence must
+# contain at least one substring FROM EACH group (AND across groups, OR within a group). This encodes
+# "you must show BOTH an accepted request AND the control that rules out the benign case", etc.
+_FAMILY = {
+    # access-control classes: an ownership/authorization proof is mandatory (CHAD: "Confirmed
+    # access-control findings need ownership or authorization proof").
+    "idor": {"impact": True, "signals": [
+        ["owner", "ownership", "cross-user", "identical", "same object"],       # the cross-user access
+        ["denied", "401", "403", "anon", "different data", "object-specific"],  # the control that proves it
+    ]},
+    "access_control": {"impact": True, "signals": [
+        ["owner", "ownership", "role", "persona", "privileg", "cross-user", "unauthor"],
+        ["denied", "401", "403", "200", "anon", "differ"],
+    ]},
+    "missing_authentication": {"impact": True, "signals": [
+        ["anon", "unauthenticated", "without auth", "no session"],
+        ["200", "same", "identical", "protected", "authed"],
+    ]},
+    "sql_injection": {"impact": True, "signals": [
+        ["union", "extracted", "sql", "sqlstate", "ora-", "syntax", "database"],
+        ["payload", "'", "injected", "boolean", "time-based", "error-based"],
+    ]},
+    "xss": {"impact": True, "signals": [
+        ["reflect", "executed", "alert", "script", "marker", "dom"],
+        ["<", "payload", "context", "unencoded", "injected"],
+    ]},
+    "ssrf": {"impact": True, "signals": [
+        ["ssrf", "internal", "metadata", "169.254", "localhost", "oob", "callback"],
+        ["request", "fetched", "response", "reached"],
+    ]},
+    "sensitive_exposure": {"impact": True, "signals": [
+        ["exposed", "leak", "listing", "public", "disclosed", "readable"],
+        ["200", "bucket", "file", "key", "token", "data", "response"],
+    ]},
+}
+
+# Default for any other family: still require a non-trivial evidence string + an impact.
+_DEFAULT = {"impact": True, "signals": [["->", "http", "200", "request", "response", "payload", "status"]]}
+
+_MIN_EVIDENCE_LEN = 20
+
+
+# Normalize the family names Apolaki's various tools emit to the canonical proof-rule keys.
+_ALIAS = {"sqli": "sql_injection", "nosqli": "sql_injection", "bola_idor": "idor", "bola": "idor",
+          "broken_auth": "access_control", "broken_access_control": "access_control",
+          "information_disclosure": "sensitive_exposure", "info_disclosure": "sensitive_exposure"}
+
+
+def family_of(finding: dict) -> str:
+    fam = str((finding or {}).get("family") or "").strip().lower()
+    if not fam:
+        fam = _CWE_FAMILY.get(str((finding or {}).get("cwe") or "").upper().strip(), "")
+    return _ALIAS.get(fam, fam)
+
+
+def validate_confirmed(finding: dict) -> tuple:
+    """(ok, missing[]). A non-confirmed finding is vacuously ok (leads carry no proof burden).
+    A confirmed finding must have a substantive evidence string, an impact (when the family needs
+    one), reproducible steps or replayable evidence, and the family's required proof signals."""
+    f = finding or {}
+    if str(f.get("confidence") or "").lower() != "confirmed":
+        return True, []
+    missing = []
+    ev = str(f.get("evidence") or "")
+    evl = ev.lower()
+    if len(ev.strip()) < _MIN_EVIDENCE_LEN:
+        missing.append("evidence(substantive)")
+    # reproducible steps OR an evidence string a human can replay (an exchange, a payload, a verb)
+    import re as _re
+    has_repro = (bool(str(f.get("reproduction_steps") or "").strip())
+                 or "->" in ev or "http" in evl or "payload" in evl
+                 or bool(_re.search(r"\b(get|post|put|delete|select|union|curl)\b", evl)))
+    if not has_repro:
+        missing.append("reproduction_or_request_response")
+
+    rules = _FAMILY.get(family_of(f), _DEFAULT)
+    if rules.get("impact") and not str(f.get("impact") or "").strip():
+        missing.append("impact")
+    for group in rules.get("signals", []):
+        if not any(tok in evl for tok in group):
+            missing.append("evidence_signal:%s" % group[0])
+    return (len(missing) == 0), missing
+
+
+# The access-control classes CHAD named explicitly ("Confirmed access-control findings need ownership
+# or authorization proof") — enforced live BY DEFAULT because a false cross-user/privilege confirm is
+# the most damaging, and Apolaki's real producers for these already emit the required proof. Other
+# families are validated by the benchmark asserter but only demoted live when APOLAKI_ENFORCE_PROOF=all,
+# so a producer whose evidence phrasing isn't yet audited can't be silently downgraded (no new FN bug).
+_DEFAULT_ENFORCE = ("idor", "access_control", "missing_authentication", "bola_idor", "bfla")
+
+
+def demote_unproven(findings: list, enforce_families=None) -> list:
+    """Return findings with any confirmed-but-unproven item demoted to a lead + tagged, so a weak
+    'confirmed' can never reach a report. Non-destructive: copies, never drops. `enforce_families`
+    limits which families are enforced ('all' or None = the default access-control set; the string
+    'all' enforces every family)."""
+    import os
+    mode = enforce_families if enforce_families is not None else os.environ.get("APOLAKI_ENFORCE_PROOF", "")
+    out = []
+    for f in findings or []:
+        fam = family_of(f)
+        enforce = (mode == "all") or (fam in _DEFAULT_ENFORCE)
+        if not enforce:
+            out.append(f)
+            continue
+        ok, missing = validate_confirmed(f)
+        if not ok:
+            g = dict(f)
+            g["confidence"] = "lead"
+            g["tags"] = list(dict.fromkeys((g.get("tags") or []) + ["needs-confirmation", "proof-incomplete"]))
+            g["proof_gap"] = missing
+            out.append(g)
+        else:
+            out.append(f)
+    return out
