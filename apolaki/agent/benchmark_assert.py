@@ -136,6 +136,9 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     # REAL transport proof (CHAD re-audit #2): counted at the wire, NOT matrix_ops*personas arithmetic.
     areq = artery.get("authenticated_requests") or {}
     ck("authenticated_requests_attempted", (areq.get("attempted") or 0) > 0, "attempted=%s" % areq.get("attempted"))
+    # session material actually ATTACHED (Bearer/Cookie), not a bare public 2xx (CHAD #10)
+    ck("auth_material_attached", (areq.get("with_auth_material") or 0) > 0,
+       "with_auth_material=%s" % areq.get("with_auth_material"))
     ck("authenticated_requests_succeeded", (areq.get("succeeded") or 0) > 0,
        "succeeded=%s status_dist=%s" % (areq.get("succeeded"), areq.get("status_dist")))
     ck("both_personas_authenticated", bool(areq.get("both_personas_succeeded")),
@@ -294,12 +297,21 @@ def _arg(argv, flag):
     return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
 
 
-def _seal(obj: dict) -> str:
-    """Tamper-evident integrity seal: sha256 over the canonical JSON of the artifact body. Reuses the
-    same tamper-EVIDENT posture as audit.py (a hash, not a secret-key signature) — anyone can re-hash
-    the retained artifact and detect edits."""
+def _seal(obj: dict) -> tuple:
+    """(algo, hash) over the canonical JSON of the artifact body. Honest about strength (CHAD #3):
+      - APOLAKI_BENCH_HMAC_KEY set -> HMAC-SHA256 keyed by an EXTERNALLY-supplied secret: genuinely
+        tamper-EVIDENT (a modifier without the key cannot recompute it).
+      - no key -> a plain SHA-256 CHECKSUM: detects accidental corruption, NOT deliberate tampering
+        (the hash sits beside the data, so anyone can recompute it). Never call this tamper-evident.
+    The artifact records which mode was used so the guarantee is never overstated."""
     import hashlib
-    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    import hmac
+    import os
+    body = json.dumps(obj, sort_keys=True, default=str).encode("utf-8")
+    key = os.environ.get("APOLAKI_BENCH_HMAC_KEY", "")
+    if key:
+        return "hmac-sha256", hmac.new(key.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return "sha256-checksum", hashlib.sha256(body).hexdigest()
 
 
 def main(argv):
@@ -368,11 +380,15 @@ def main(argv):
             "signature": sig,
             "baseline": baseline_record,
         }
-        artifact = {**body, "integrity": {"algo": "sha256", "hash": _seal(body)}}
+        algo, digest = _seal(body)
+        note = ("HMAC-SHA256 keyed by an external secret — tamper-evident" if algo.startswith("hmac")
+                else "plain SHA-256 checksum — detects corruption, NOT deliberate tampering; set "
+                     "APOLAKI_BENCH_HMAC_KEY or anchor the hash externally (git/CI) for tamper-evidence")
+        artifact = {**body, "integrity": {"algo": algo, "hash": digest, "note": note}}
         try:
             with open(apath, "w", encoding="utf-8") as fh:
                 json.dump(artifact, fh, indent=2, sort_keys=True)
-            print("[assert] wrote sealed benchmark artifact -> %s (sha256 %s)" % (apath, artifact["integrity"]["hash"][:16]))
+            print("[assert] wrote benchmark artifact -> %s (%s %s)" % (apath, algo, digest[:16]))
         except Exception as e:
             print("[assert] artifact write failed: %s" % e)
             return 1

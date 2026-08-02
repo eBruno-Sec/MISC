@@ -1684,22 +1684,32 @@ class ToolRegistry:
         # per persona, instead of inferring matrix_ops*personas. attempted = a request that carried
         # this role's real session; succeeded = the server accepted + served it (2xx/3xx). status_dist
         # + endpoints_touched are durable evidence the requests hit the wire and passed the auth layer.
-        tc = {"attempted": 0, "succeeded": 0, "by_role": {}, "status_dist": {}, "_endpoints": set()}
+        tc = {"attempted": 0, "succeeded": 0, "with_auth_material": 0, "by_role": {},
+              "status_dist": {}, "_endpoints": set()}
 
         async def _fetch(path, role, rank):
             url = path if path.startswith("http") else base.rstrip("/") + "/" + path.lstrip("/")
             if not self.scope.validate(url)[0]:
                 return 0, ""
             authed = rank > 0
+            hdrs = _headers_for(role, rank)
+            # CHAD re-audit #10: a bare 2xx can be a public/validation page. Only count a request as a
+            # real authenticated SUCCESS when this persona's session material (Bearer/Cookie) was
+            # actually ATTACHED to the request AND the server accepted+served it (2xx/3xx).
+            auth_material = bool(hdrs.get("Authorization") or hdrs.get("Cookie"))
             if authed:
                 tc["attempted"] += 1
-                tc["by_role"].setdefault(role, {"attempted": 0, "succeeded": 0})["attempted"] += 1
+                br = tc["by_role"].setdefault(role, {"attempted": 0, "succeeded": 0, "with_auth_material": 0})
+                br["attempted"] += 1
+                if auth_material:
+                    tc["with_auth_material"] += 1
+                    br["with_auth_material"] += 1
             try:
-                r, _ = await self._http_send("GET", url, _headers_for(role, rank), None, True)
+                r, _ = await self._http_send("GET", url, hdrs, None, True)
                 st = r.status_code
                 tc["status_dist"][str(st)] = tc["status_dist"].get(str(st), 0) + 1
                 tc["_endpoints"].add(path)
-                if authed and 200 <= (st or 0) < 400:
+                if authed and auth_material and 200 <= (st or 0) < 400:
                     tc["succeeded"] += 1
                     tc["by_role"][role]["succeeded"] += 1
                 return st, r.text[:8000]
@@ -1824,6 +1834,7 @@ class ToolRegistry:
                 seen.add(k)
                 uniq.append(f)
         auth_requests = {"attempted": tc["attempted"], "succeeded": tc["succeeded"],
+                         "with_auth_material": tc["with_auth_material"],
                          "by_role": tc["by_role"], "status_dist": tc["status_dist"],
                          "endpoints_touched": len(tc["_endpoints"])}
         summary = {"ran": True, "roles": [r["role"] for r in roles], "operations": len(operations),

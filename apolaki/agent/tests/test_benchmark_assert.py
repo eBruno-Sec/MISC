@@ -15,9 +15,9 @@ def _healthy():
                         "personas": [{"role": "user_a", "rank": 1, "method": "registered"},
                                      {"role": "user_b", "rank": 1, "method": "registered"}],
                         "matrix": {"ran": True, "operations": 39, "findings": 34},
-                        "authenticated_requests": {"attempted": 78, "succeeded": 70,
-                                                   "by_role": {"user_a": {"attempted": 39, "succeeded": 35},
-                                                               "user_b": {"attempted": 39, "succeeded": 35}},
+                        "authenticated_requests": {"attempted": 78, "succeeded": 70, "with_auth_material": 78,
+                                                   "by_role": {"user_a": {"attempted": 39, "succeeded": 35, "with_auth_material": 39},
+                                                               "user_b": {"attempted": 39, "succeeded": 35, "with_auth_material": 39}},
                                                    "status_dist": {"200": 60, "404": 8, "401": 8, "500": 2},
                                                    "endpoints_touched": 39, "both_personas_succeeded": True}},
         "findings": [{"title": "BOLA basket", "family": "access_control", "confidence": "lead"}],
@@ -221,12 +221,17 @@ def test_baseline_compatibility_binds_to_env(monkeypatch):
     assert BA.baseline_compatible({**cur, "agent_image": ""}, cur)[0] is True
 
 
-def test_artifact_seal_detects_tampering():
+def test_seal_is_checksum_by_default_and_hmac_with_key(monkeypatch):
+    monkeypatch.delenv("APOLAKI_BENCH_HMAC_KEY", raising=False)
     body = {"mission_id": "m", "summary": {"passed": 28, "failed": 0}}
-    h = BA._seal(body)
-    assert h == BA._seal(dict(body))                 # stable over equal content
-    tampered = {**body, "summary": {"passed": 42, "failed": 0}}
-    assert BA._seal(tampered) != h                   # any edit changes the seal
+    algo, h = BA._seal(body)
+    assert algo == "sha256-checksum"                 # honest label: NOT tamper-evident without a key
+    assert (algo, h) == BA._seal(dict(body))         # stable over equal content
+    assert BA._seal({**body, "summary": {"passed": 42}})[1] != h   # any edit changes the digest
+    # with an external key the seal becomes a real keyed HMAC (a different value + labelled honestly)
+    monkeypatch.setenv("APOLAKI_BENCH_HMAC_KEY", "external-secret")
+    algo2, h2 = BA._seal(body)
+    assert algo2 == "hmac-sha256" and h2 != h
 
 
 def test_401_on_endpoint_is_caught(monkeypatch):

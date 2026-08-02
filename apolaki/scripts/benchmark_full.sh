@@ -85,11 +85,18 @@ if [ "$status" = "complete" ]; then
   else
     ck "deep correctness assertions" FAIL
   fi
-  # copy the sealed artifact out of the container to the repo's benchmark_results/ for retention
+  # copy the artifact out to benchmark_results/ for retention — via a temp so a FAILED copy never
+  # leaves a zero-byte file behind (CHAD #2). Only a non-empty artifact is retained.
   mkdir -p benchmark_results 2>/dev/null
-  MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent cat "$ART" > "benchmark_results/${sid}.json" 2>/dev/null \
-    && ck "sealed benchmark artifact retained (benchmark_results/${sid}.json)" PASS \
-    || ck "benchmark artifact retained" FAIL
+  _tmp="benchmark_results/.${sid}.json.part"
+  MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent cat "$ART" > "$_tmp" 2>/dev/null
+  if [ -s "$_tmp" ]; then
+    mv "$_tmp" "benchmark_results/${sid}.json"
+    ck "benchmark artifact retained (benchmark_results/${sid}.json)" PASS
+  else
+    rm -f "$_tmp" "benchmark_results/${sid}.json"
+    ck "benchmark artifact retained" FAIL
+  fi
 fi
 
 echo "[full-mission] ==== $pass passed, $fail failed ===="

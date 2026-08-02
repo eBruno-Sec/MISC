@@ -61,11 +61,18 @@ else
   ck "mission B deep assertions / determinism vs A" FAIL
 fi
 
-# Retain B's sealed artifact (it embeds the A-vs-B comparison + both signatures via the baseline).
+# Retain B's artifact (it embeds the A-vs-B comparison + both signatures via the baseline) — via a
+# temp so a failed copy never leaves a zero-byte file (CHAD #2). Only a non-empty artifact is kept.
 mkdir -p benchmark_results 2>/dev/null
-MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent cat "$ARTB" > "benchmark_results/repeat_${sidA}_${sidB}.json" 2>/dev/null \
-  && ck "repeat artifact retained (benchmark_results/repeat_${sidA}_${sidB}.json)" PASS \
-  || ck "repeat artifact retained" FAIL
+_rt="benchmark_results/.repeat_${sidA}_${sidB}.json.part"
+MSYS_NO_PATHCONV=1 $COMPOSE exec -T agent cat "$ARTB" > "$_rt" 2>/dev/null
+if [ -s "$_rt" ]; then
+  mv "$_rt" "benchmark_results/repeat_${sidA}_${sidB}.json"
+  ck "repeat artifact retained (benchmark_results/repeat_${sidA}_${sidB}.json)" PASS
+else
+  rm -f "$_rt" "benchmark_results/repeat_${sidA}_${sidB}.json"
+  ck "repeat artifact retained" FAIL
+fi
 
 echo "[repeat] missions: A=$sidA  B=$sidB"
 echo "[repeat] ==== $pass passed, $fail failed ===="
