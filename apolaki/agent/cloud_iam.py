@@ -41,11 +41,17 @@ def live_enumeration_supported() -> dict:
     _providers = (("aws", "AWS_ACCESS_KEY_ID"), ("azure", "AZURE_CLIENT_ID"),
                   ("gcp", "GOOGLE_APPLICATION_CREDENTIALS"), ("linode", "LINODE_TOKEN"))
     ready = [p for p, k in _providers if os.environ.get(k)]
-    # linode has a real live read-only collector; aws/azure/gcp live SDK wiring is still gated.
+    # Honest capability map (CHAD final #1):
+    #  - collect_logic_fixture_tested: normalize+analyze+collect_live proven on fixtures for all four.
+    #  - live_collector_implemented: a real end-to-end live collector (SDK/token glue) EXISTS — linode only.
+    #  - aws/azure/gcp live SDK glue is UNFINISHED code (not merely credential-gated).
     return {"supported": bool(ready),
-            "reason": "" if ready else "no operator cloud credentials in scope — live account/role "
-                                       "enumeration is credential-gated; IaC analysis runs regardless",
-            "providers_ready": ready, "live_collector_implemented": ["linode"]}
+            "reason": "" if ready else "no operator cloud credentials in scope; note aws/azure/gcp live "
+                                       "SDK glue is also unfinished — only linode has a live collector",
+            "providers_ready": ready,
+            "collect_logic_fixture_tested": ["aws", "azure", "gcp", "linode"],
+            "live_collector_implemented": ["linode"],
+            "aws_azure_gcp_live_glue": "unfinished"}
 
 
 def _stmt_list(policy: dict) -> list:
@@ -364,6 +370,21 @@ def collect_linode_live(token: str) -> dict:
             "manifest": manifest, "model": model, "findings": findings, "counts": manifest["counts"]}
 
 
+def collect_live(provider: str, client) -> dict:
+    """Provider-agnostic LIVE collector logic (CHAD final #1): `client` is a callable returning the
+    provider's raw IAM/config doc in the shape normalize(provider, ...) accepts. This is the real,
+    fixture-testable collector; the ONLY credential/SDK-gated piece is building a real client. Returns
+    the standard {provider, blocked, model, findings}. (linode has its own token collector.)"""
+    p = (provider or "").lower()
+    try:
+        doc = client()
+    except Exception as e:
+        return {"provider": p, "blocked": True, "reason": "live %s collection failed: %s" % (p, e),
+                "model": {"roles": [], "resources": []}, "findings": []}
+    model = normalize(p, doc)
+    return {"provider": p, "blocked": False, "model": model, "findings": analyze(model)}
+
+
 def collect(provider: str, *, fixture: dict = None, token: str = None) -> dict:
     """Provider collector. With a `fixture` it normalizes + analyzes offline (unit-testable). For
     `linode` with a token (arg or LINODE_TOKEN env) it runs a LIVE, read-only posture collection. AWS/
@@ -384,13 +405,16 @@ def collect(provider: str, *, fixture: dict = None, token: str = None) -> dict:
         except Exception as e:
             return {"provider": p, "blocked": True, "reason": "live linode collect failed: %s" % e,
                     "model": {"roles": [], "resources": []}, "findings": []}
+    # aws/azure/gcp: the collector LOGIC (collect_live + normalize + analyze) is implemented and
+    # fixture-tested, but the SDK GLUE that builds a real read-only client (boto3 / azure-identity /
+    # google-auth enumeration) is NOT written in this build. Report that honestly (CHAD final #1):
+    # this is UNFINISHED CODE, not merely credential-blocked.
     st = live_enumeration_supported()
-    if p not in st.get("providers_ready", []):
-        return {"provider": p, "blocked": True,
-                "reason": "live %s enumeration needs credentials in scope (%s)" % (p, st["reason"]),
-                "model": {"roles": [], "resources": []}, "findings": []}
+    cred = "credentials present" if p in st.get("providers_ready", []) else "no credentials in scope"
     return {"provider": p, "blocked": True,
-            "reason": "live %s SDK wiring not enabled in this build — credentials present; enable in collect()" % p,
+            "reason": "live %s collector UNFINISHED: SDK client glue not implemented in this build "
+                      "(%s). collect_live(provider, client) is implemented + fixture-tested; wire a "
+                      "real read-only SDK client to go live." % (p, cred),
             "model": {"roles": [], "resources": []}, "findings": []}
 
 

@@ -260,3 +260,25 @@ def test_linode_collects_real_account_identity(monkeypatch):
     res = CI.collect_linode_live("tok")
     assert res["account_id"] == "ABC-123-EUUID" and res["account_label"] == "School"
     assert "tok" not in str(res)          # token never surfaces
+
+
+def test_collect_live_is_fixture_testable_for_aws_azure_gcp():
+    # the collector LOGIC (collect_live) works with an injected client for all three providers —
+    # only the real SDK client-building is gated (CHAD final #1).
+    for prov, doc in (("aws", _CFN), ("azure", _AZURE), ("gcp", _GCP)):
+        res = CI.collect_live(prov, lambda d=doc: d)
+        assert res["blocked"] is False and res["findings"]
+    # a client that raises => blocked, not a false clean
+    bad = CI.collect_live("aws", lambda: (_ for _ in ()).throw(RuntimeError("no creds")))
+    assert bad["blocked"] is True and "failed" in bad["reason"]
+
+
+def test_collect_aws_is_classified_unfinished_not_only_credential_blocked(monkeypatch):
+    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"):
+        monkeypatch.delenv(k, raising=False)
+    res = CI.collect("aws")   # no fixture, no SDK glue
+    assert res["blocked"] is True and "UNFINISHED" in res["reason"]
+    st = CI.live_enumeration_supported()
+    assert st["live_collector_implemented"] == ["linode"]
+    assert set(st["collect_logic_fixture_tested"]) == {"aws", "azure", "gcp", "linode"}
+    assert st["aws_azure_gcp_live_glue"] == "unfinished"

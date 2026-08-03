@@ -78,6 +78,19 @@ def test_html_report_renders_authentication_assurance_panel():
     assert "Authentication &amp; Assurance" not in report.generate_html_report("P", [], {"in_scope": ["x"]})
 
 
+def test_degraded_run_is_visible_in_report_json_and_html():
+    # CHAD final #3: a halted primary cycle must be VISIBLE — a degraded run cannot look complete.
+    import json
+    deg = {"reason": "graph_projection_failed", "detail": "graph down"}
+    pkg = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}, degraded=deg))
+    assert pkg["degraded"] == deg
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, degraded=deg)
+    assert "RUN DEGRADED" in html and "graph_projection_failed" in html
+    # a normal run shows no degraded banner
+    assert "RUN DEGRADED" not in report.generate_html_report("P", [], {"in_scope": ["x"]})
+    assert json.loads(report.findings_json("P", [], {"in_scope": ["x"]}))["degraded"] is None
+
+
 def test_findings_json_carries_auth_artery_proof():
     # the report exposes whether the autonomous auth artery actually fired, so "authenticated scan"
     # is PROVABLE (personas, auth_success, matrix ops) — not merely requested in the payload.

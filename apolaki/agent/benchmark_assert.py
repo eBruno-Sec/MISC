@@ -123,6 +123,11 @@ def run_checks(base: str, sid: str, floors: dict = None) -> list:
     # session identity is consistent — the report is FOR this mission, not a stale/other one
     ck("report_session_id_matches", rep.get("report_id") == sid, "report_id=%s" % rep.get("report_id"))
 
+    # a DEGRADED run (halted primary cycle, e.g. graph projection failure) must be VISIBLE and must NOT
+    # pass as a clean complete mission (CHAD final #3).
+    deg = rep.get("degraded")
+    ck("run_not_degraded", not deg, "degraded=%s" % (deg or {}))
+
     # ── AUTH ARTERY actually fired (CHAD #1) ──
     artery = rep.get("auth_artery") or {"ran": False}
     personas = artery.get("personas") or []

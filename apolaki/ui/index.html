@@ -1014,6 +1014,11 @@ async function loadAssurance(){
   const card=(title,rows)=>`<div class="topo-panel" style="margin-bottom:1rem"><h4>${esc(title)}</h4><table class="tbl" style="width:100%">${rows}</table></div>`;
   const row=(k,v)=>`<tr><td style="color:var(--text-dim);width:44%">${esc(k)}</td><td>${v}</td></tr>`;
   let html="";
+  // DEGRADED banner: a halted primary cycle must be visible so the run never looks complete.
+  const deg=rep.degraded;
+  if(deg){
+    html+=`<div style="margin-bottom:1rem;padding:.9rem 1.1rem;border-radius:10px;border:1px solid var(--bad,#ff3d6b);background:color-mix(in srgb,#ff3d6b 12%,transparent)"><b style="color:#ff3d6b">⚠ RUN DEGRADED — coverage INCOMPLETE.</b> Primary planning halted (<code>${esc(deg.reason||'unknown')}</code>). This mission did not complete normally; do not read absence of findings as coverage.</div>`;
+  }
   html+=card("Authentication artery",[
     row("Ran", yn(aa.ran)),
     row("Personas", esc((aa.personas||[]).map(p=>p.role).filter(Boolean).join(", ")||"—")+` (auth_success=${esc(aa.auth_success||0)})`),

@@ -1023,7 +1023,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
                          security_headers: list = None, intel: dict = None, kev_cwes: set = None,
                          orchestration: dict = None, auth_artery: dict = None,
-                         intel_provenance: dict = None) -> str:
+                         intel_provenance: dict = None, degraded: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -1669,6 +1669,19 @@ def generate_html_report(program: str, findings: list, scope: dict,
                           "and every recovered intelligence fact carries its source + validation state.</p>"
                           "<table class='tbl'>" + body_rows + "</table>")
         toc_items.append(("assurance", "Authentication & Assurance"))
+    # DEGRADED banner (CHAD final #3): a halted/failed primary cycle means the run did NOT complete —
+    # the report must SHOW that prominently so it is never read as a full assessment.
+    degraded_html = ""
+    if degraded:
+        _dreason = e(str(degraded.get("reason", "unknown")))
+        _ddetail = (": " + e(str(degraded.get("detail", ""))[:200])) if degraded.get("detail") else ""
+        degraded_html = (
+            "<div id='degraded' style='margin:1rem 0;padding:1rem 1.2rem;border-radius:10px;"
+            "border:1px solid #ff3d6b;background:rgba(255,61,107,0.12)'>"
+            "<b style='color:#ff3d6b'>&#9888; RUN DEGRADED &mdash; coverage is INCOMPLETE.</b> "
+            "The primary planning cycle was halted (<code>" + _dreason + "</code>" + _ddetail + "). This "
+            "report does <b>not</b> represent a full assessment; do not treat absence of findings as coverage.</div>")
+        toc_items.append(("degraded", "Run Degraded"))
     toc_items.append(("integrity", "Report Integrity"))
     toc_items.append(("appendix", "Appendix"))
     toc = "".join(f"<li><a href='#{i}'>{lbl}</a></li>" for i, lbl in toc_items)
@@ -1790,7 +1803,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {exec_html}
 {status_html}
 <div class="toc noprint-keep"><h4 style="margin-top:0">Contents</h4><ol>{toc}</ol></div>
-
+{degraded_html}
 <h2 id="summary">Executive Summary</h2>
 <div class="summary">{summ_paras}</div>
 
@@ -1859,7 +1872,7 @@ def findings_json(program: str, findings: list, scope: dict,
                   config: dict = None, attack_surface: dict = None, playbook: list = None,
                   tool_ledger: dict = None, delta: dict = None, execution: dict = None,
                   report_id: str = None, intel_provenance: dict = None,
-                  auth_artery: dict = None) -> str:
+                  auth_artery: dict = None, degraded: dict = None) -> str:
     """Native JSON data package. The original keys (program, generated, scope, counts,
     lead_counts, coverage, chains, findings, leads) are always present and unchanged;
     the richer sections below are additive so existing consumers never break."""
@@ -1895,6 +1908,10 @@ def findings_json(program: str, findings: list, scope: dict,
         # fire (personas minted/reacquired, sessions obtained, matrix operations run)? Queryable
         # evidence so an "authenticated scan" is provable, not asserted. {"ran": False} when it didn't.
         "auth_artery": auth_artery or {"ran": False},
+        # ── DEGRADED state: a halted/failed primary cycle (e.g. graph projection failure). When present
+        # the run did NOT complete normally and coverage is incomplete — consumers MUST NOT read this
+        # report as a full assessment (CHAD final #3).
+        "degraded": degraded or None,
         # ── results ──
         "chains": chains or [],
         "findings": findings,

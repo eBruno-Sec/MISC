@@ -1424,7 +1424,8 @@ async def get_report_html(session_id: str, download: bool = False):
         report_id=session_id, security_headers=_sec_headers(session_id),
         intel=m["context"].get("intel"), kev_cwes=_kev_cwes(),
         orchestration=m["context"].get("orchestration"),
-        auth_artery=_auth_artery_evidence(session_id, m), intel_provenance=_intel_provenance(session_id))
+        auth_artery=_auth_artery_evidence(session_id, m), intel_provenance=_intel_provenance(session_id),
+        degraded=m["context"].get("degraded"))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
@@ -1446,7 +1447,8 @@ async def get_report_json(session_id: str):
             playbook=m["context"].get("playbook", []), tool_ledger=_tool_ledger(session_id),
             delta=_delta(session_id), execution=_execution(m), report_id=session_id,
             intel_provenance=_intel_provenance(session_id),
-            auth_artery=_auth_artery_evidence(session_id, m)),
+            auth_artery=_auth_artery_evidence(session_id, m),
+            degraded=(m.get("context", {}) or {}).get("degraded")),
         media_type="application/json")
 
 
@@ -2010,13 +2012,14 @@ async def cloud_posture(provider: str):
 
 
 @app.post("/cloud/posture/{provider}/ingest")
-async def cloud_posture_ingest(provider: str, session_id: str, account: str = "linode"):
-    """EXPLICIT ingestion of a cloud posture review into a mission (state-changing => POST, CHAD).
-    Requires an explicit session_id (mission association) + an account label recorded on every finding
-    (CHAD: no account-wide findings landing on an unrelated mission implicitly). Findings are DEDUPED
-    by (title, target, account) so re-ingesting the same posture does not duplicate. The normalized
-    model + PARTIAL status are persisted to mission context so the canonical graph is rebuilt even when
-    archived, and partial stays visibly partial. A blocked/failed collection is NOT ingested."""
+async def cloud_posture_ingest(provider: str, session_id: str, account: str = "linode",
+                               allow_unverified: bool = False):
+    """EXPLICIT ingestion of a cloud posture review into a mission (state-changing => POST). Requires an
+    explicit session_id + a VERIFIED collected account identity (CHAD final #2): if /account did not
+    return an id, ingestion is REFUSED unless the operator passes allow_unverified=true, and then it is
+    keyed under an explicit 'unverified:' namespace — the operator label is NEVER treated as a real id.
+    TRANSACTIONAL (CHAD final #4): mission context is persisted FIRST; if that fails, NO findings are
+    written (no orphaned findings). Findings are then deduped by (provider, account_id, title, target)."""
     import cloud_iam as _ci
     m = _require_mission(session_id)
     p = _cloud_posture_run(provider)
@@ -2027,18 +2030,48 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
     findings = p["findings"]
     prov = provider.lower()
     prov_tag = "%s-posture" % prov
-    # the REAL collected account identity (CHAD #6) — dedup/context are keyed by this, not the label.
-    account_id = str(res.get("account_id") or "").strip() or ("label:%s" % account)
+    account_id_real = str(res.get("account_id") or "").strip()
+    identity_verified = bool(account_id_real)
+    # #2: never treat the operator label as a real identity. Refuse an unverified ingest unless the
+    # operator explicitly opts in, and then namespace it as unverified.
+    if not identity_verified and not allow_unverified:
+        return {"ingested": False, "identity_verified": False, "posture": p["posture"],
+                "reason": "account identity NOT verified (/account returned no id). Use a token that can "
+                          "read /account, or pass allow_unverified=true to ingest under an explicit "
+                          "UNVERIFIED key.", "manifest": p["manifest"]}
+    account_id = account_id_real if identity_verified else ("unverified:%s" % account)
     acct_key = "%s:%s" % (prov, account_id)
-    # DEDUP by (provider, account_id, title, target) so account A never suppresses account B (CHAD #1).
+    # #4 TRANSACTIONAL: persist context FIRST; on failure write NO findings (avoids orphaned findings).
+    context_persisted = False
+    try:
+        ctx = dict(m["context"])
+        postures = dict(ctx.get("cloud_postures") or {})
+        postures[acct_key] = {"provider": provider, "account": account, "account_id": account_id,
+                              "identity_verified": identity_verified, "partial": p["partial"],
+                              "posture": p["posture"], "manifest": p["manifest"],
+                              "model": res.get("model", {}), "findings_total": len(findings)}
+        ctx["cloud_postures"] = postures
+        db.update_mission(session_id, context=ctx)
+        context_persisted = True
+    except Exception:
+        context_persisted = False
+    if not context_persisted:
+        return {"ingested": False, "identity_verified": identity_verified, "account_id": account_id,
+                "posture": p["posture"], "reason": "context persistence FAILED — no findings written "
+                                                   "(transactional abort, no orphaned state)",
+                "results": {"findings_attempted": len(findings), "findings_stored": 0,
+                            "findings_deduped": 0, "findings_failed": 0, "context_persisted": False},
+                "manifest": p["manifest"]}
+    # context OK -> now write findings, deduped by (provider, account_id, title, target) (CHAD #1).
     existing = {(x.get("title"), x.get("target")) for x in (db.get_findings(session_id) or [])
                 if str(x.get("provenance", "")).startswith(prov) and x.get("cloud_account_id") == account_id}
     attempted, stored, deduped, failed = len(findings), 0, 0, 0
     for f in findings:
         key = (f.get("title"), f.get("target"))
         f["provenance"] = prov_tag
-        f["cloud_account"] = account            # operator label
-        f["cloud_account_id"] = account_id      # real collected identity
+        f["cloud_account"] = account
+        f["cloud_account_id"] = account_id
+        f["cloud_identity_verified"] = identity_verified
         if key in existing:
             deduped += 1
             continue
@@ -2048,19 +2081,6 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
             stored += 1
         except Exception:
             failed += 1
-    # MULTI-ACCOUNT context (CHAD #2): keyed by provider:account_id, preserving every other account.
-    context_persisted = False
-    try:
-        ctx = dict(m["context"])
-        postures = dict(ctx.get("cloud_postures") or {})
-        postures[acct_key] = {"provider": provider, "account": account, "account_id": account_id,
-                              "partial": p["partial"], "posture": p["posture"], "manifest": p["manifest"],
-                              "model": res.get("model", {}), "findings_total": len(findings)}
-        ctx["cloud_postures"] = postures
-        db.update_mission(session_id, context=ctx)
-        context_persisted = True
-    except Exception:
-        context_persisted = False
     live_graph_projected = False
     if session_id in sessions:
         g = getattr(sessions[session_id]["tools"], "graph", None)
@@ -2070,15 +2090,14 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
                 live_graph_projected = True
             except Exception:
                 live_graph_projected = False
-    # HONEST verdict (CHAD #4): ingested is True only when required persistence (context) succeeded and
-    # no finding write failed. Otherwise partial/false — never claim success on swallowed exceptions.
-    ok = context_persisted and failed == 0
-    return {"ingested": bool(ok), "partial": (not ok) or bool(p["partial"]),
+    ok = failed == 0                                    # context already guaranteed persisted here
+    return {"ingested": bool(ok), "identity_verified": identity_verified,
+            "partial": (not ok) or bool(p["partial"]) or (not identity_verified),
             "mission": session_id, "provider": provider, "account": account, "account_id": account_id,
             "posture": p["posture"],
             "results": {"findings_attempted": attempted, "findings_stored": stored,
                         "findings_deduped": deduped, "findings_failed": failed,
-                        "context_persisted": context_persisted, "live_graph_projected": live_graph_projected},
+                        "context_persisted": True, "live_graph_projected": live_graph_projected},
             "manifest": p["manifest"], "summary": p["summary"]}
 
 
