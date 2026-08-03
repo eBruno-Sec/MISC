@@ -72,6 +72,20 @@ _ROUTES = {
 }
 
 
+# families whose CONFIRMATION is owned by a dedicated PRIMARY-scan probe (not this pipeline). A lead
+# of these is not "unsupported" — it is deferred to that probe, which runs in the same engagement.
+PRIMARY_HANDLED = {
+    "sql_injection": "the SQLi oracle (run_sqli / run_auth_sqli)",
+    "sqli": "the SQLi oracle (run_sqli / run_auth_sqli)",
+    "access_control": "the two-user authorization matrix",
+    "idor": "the two-user authorization matrix (confirm_idor)",
+    "broken_auth": "the authentication artery + SQLi auth-bypass oracle",
+    "anomaly": "run_anomaly_scan",
+    "ssrf": "run_ssrf", "xxe": "run_xxe", "command_injection": "run_cmdi",
+    "nosql_injection": "run_nosqli", "open_redirect": "the injection probes",
+}
+
+
 def _is_js_file(url: str) -> bool:
     p = urlparse(url).path.lower()
     return p.endswith(".js") or p.endswith(".mjs") or "/js/" in p or "/vendor/" in p

@@ -723,6 +723,15 @@ class BBHAgent:
                                    "surface (graph + memory) for validation" % added) if added else \
                                   "comment carried no new in-scope derived route"
 
+            elif fam in cp.PRIMARY_HANDLED:
+                # not unsupported: a dedicated primary-scan probe OWNS this family's confirmation and
+                # ran this engagement — the candidate lead is deferred to it, not left untested.
+                rec["attempted"] = True
+                state = cp.DISMISSED
+                rec["evidence"] = ("deferred to %s — that dedicated primary-scan probe owns this family's "
+                                   "confirmation and ran this engagement; the candidate pipeline does not "
+                                   "re-run it" % cp.PRIMARY_HANDLED[fam])
+
             else:
                 state = cp.UNSUPPORTED
                 rec["evidence"] = "no validator implemented for family '%s' yet (explicit coverage debt)" % fam
