@@ -2149,6 +2149,17 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
             "manifest": p["manifest"], "summary": p["summary"]}
 
 
+@app.get("/capabilities")
+async def get_capabilities():
+    """Machine-readable capability matrix: every declared capability at its highest achieved state
+    (implemented/wired/exercised/live_proven/blocked/unfinished — never merged), each with evidence.
+    Includes an integrity self-check so the matrix cannot silently overstate."""
+    import capability_matrix as cm
+    m = cm.matrix()
+    m["integrity_violations"] = cm.validate()
+    return m
+
+
 @app.get("/audit")
 async def get_audit(mission: str = None, limit: int = 200):
     """The tamper-evident audit log (hash-chained): recent security-relevant, state-changing actions
