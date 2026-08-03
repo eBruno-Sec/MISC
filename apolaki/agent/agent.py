@@ -567,7 +567,16 @@ class BBHAgent:
                    "target": n["raw_target"], "missing_prerequisite": None}
             state, promoted = None, None
 
-            if fam in ("prototype_pollution", "csti", "dom_xss", "eval_sink"):
+            # dedupe: a generic advisor lead ("Technique to test — X") whose vuln a scan probe
+            # ALREADY confirmed is CONFIRMED-by-dedupe, never re-dismissed.
+            already = next((f for f in self.findings if str(f.get("confidence")) == "confirmed"
+                            and (cp.canonical_family(f) == fam
+                                 or (fam not in ("unknown", "") and fam in str(f.get("family") or "").lower()))), None)
+            if already:
+                rec["attempted"] = True
+                state = cp.CONFIRMED
+                rec["evidence"] = "already confirmed by a scan probe (deduped to: %s)" % str(already.get("title") or "")[:80]
+            elif fam in ("prototype_pollution", "csti", "dom_xss", "eval_sink"):
                 if not browser_ok:
                     state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
                 elif not app_pages:
@@ -1792,6 +1801,13 @@ class BBHAgent:
         # memory and emit the ranked next-best-action from the SAME planner that powers /plan (every strategy).
         async for ev in self._close_autonomy_loop(session_id):
             yield ev
+        # GENERAL candidate-validation pipeline (runs for EVERY strategy, LATE — after the technique
+        # advisor + autonomy loop have contributed their leads). Every remaining testable lead is
+        # normalized, routed to a real validator, and driven to an EXPLICIT terminal state
+        # (confirmed / dismissed / blocked-with-named-prereq / unsupported), with a per-candidate
+        # assurance record. No testable lead is left sitting; "no browser" is a visible BLOCKED row.
+        async for ev in self._validate_candidates(session_id):
+            yield ev
         # advisory triage pass (METIS) over persisted findings
         async for ev in self._triage():
             yield ev
@@ -1932,16 +1948,13 @@ class BBHAgent:
         # promotion pass: re-test high-signal candidate leads with a confirmatory oracle
         async for ev in self._promote_leads(session_id):
             yield ev
-        # GENERAL candidate-validation pipeline: every remaining testable lead is normalized,
-        # routed to a real validator, and driven to an EXPLICIT terminal state (confirmed /
-        # dismissed / blocked / scheduled) with a per-candidate assurance record. No testable
-        # lead is left sitting; "no browser" is visible coverage debt, not a silent skip.
-        async for ev in self._validate_candidates(session_id):
-            yield ev
         # additive AI enhancement: business-logic hypotheses -> leads (no-op unless an AI
         # strategy is selected and usable). The model hunts; deterministic oracles confirm.
         async for ev in self._ai_business_logic_leads(session_id):
             yield ev
+        # NOTE: the general candidate-validation pipeline runs LATE in the main scan flow (after the
+        # technique advisor + autonomy loop have added their leads) so EVERY lead is validated, not
+        # only the ones known at deterministic-pass time. See _run_scan.
         self._plan_steps = steps
 
     async def _run_deterministic(self, session_id: str):
