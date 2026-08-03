@@ -659,11 +659,13 @@ def _tool_ledger(session_id: str) -> dict:
         t = l.get("tool")
         if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error", "scope_block"):
             continue
-        a = agg.setdefault(t, {"calls": 0, "findings": 0, "note": "", "error": ""})
+        a = agg.setdefault(t, {"calls": 0, "findings": 0, "note": "", "error": "",
+                               "ok": 0, "scope_blocks": 0, "scope_note": ""})
         typ = l.get("type")
         if typ == "tool_call":
             a["calls"] += 1
         elif typ == "tool_result":
+            a["ok"] += 1                        # a call that actually returned (not blocked/errored)
             cnt = int(l.get("count") or 0)
             out = str(l.get("output") or "")
             # A no-confirmation pass that still returned a data-carrier (e.g. sqlmap's
@@ -683,7 +685,16 @@ def _tool_ledger(session_id: str) -> dict:
                 elif not a["note"] and not a.get("_locked"):
                     a["note"] = out[:140]
         else:  # tool_error / scope_block
-            a["error"] = str(l.get("error") or "")[:140]
+            # A SCOPE BLOCK is CORRECT enforcement (an out-of-scope target was skipped on
+            # purpose), NOT a tool failure. Track it apart from real errors so a tool that
+            # ran fine on its in-scope targets but skipped one off-scope host (e.g. a
+            # third-party CDN a page loads, or a discovered subdomain on a non-pinned port)
+            # is never mislabeled "failed" — that mislabel is itself a reporting-integrity bug.
+            if typ == "scope_block" or "SCOPE BLOCK" in str(l.get("error") or ""):
+                a["scope_blocks"] += 1
+                a["scope_note"] = str(l.get("error") or "")[:140]
+            else:
+                a["error"] = str(l.get("error") or "")[:140]
     # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
     # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
     _sqli_confirmed = any(
@@ -692,12 +703,27 @@ def _tool_ledger(session_id: str) -> dict:
     tools = []
     for t, a in sorted(agg.items()):
         low = (a["note"] + " " + a["error"]).lower()
-        if a["error"]:
+        # `ok` = calls that actually returned a result. A tool is only "failed" when it
+        # genuinely errored AND never returned anything useful. A tool that returned on
+        # some targets but skipped others as out-of-scope is "executed" (with a skipped
+        # count), not "failed" — and a tool ALL of whose targets were out of scope simply
+        # did not run in-scope, so it is "skipped", not "failed".
+        if a["error"] and not a["ok"]:
             status, note = "failed", a["error"]
         elif any(k in low for k in ("not configured", "skipped", "skip cleanly", "disabled")):
             status, note = "skipped", a["note"]
+        elif not a["ok"] and a["scope_blocks"]:
+            status, note = "skipped", (a["scope_note"] or "every target was out of scope — nothing tested")
         else:
             status, note = "executed", a["note"]
+            extra = []
+            if a["error"]:                      # a real error on one call, others still ran
+                extra.append("1+ call errored")
+            if a["scope_blocks"]:
+                extra.append("%d off-scope target%s skipped" %
+                             (a["scope_blocks"], "" if a["scope_blocks"] == 1 else "s"))
+            if extra:
+                note = (note + " " if note else "") + "(" + "; ".join(extra) + ")"
         # sqlmap is corroboration here — the native SQLi oracle + UNION enrichment do the
         # confirming. Reword its "No SQLi confirmed" so the ledger never reads contradictory
         # next to a confirmed SQLi finding.
