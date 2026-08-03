@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+import dns_recon
 import surface as surface_mod
 from scope import PermissionLevel
 from tools import TOOL_PERMISSIONS
@@ -200,8 +201,10 @@ def next_batch(state: dict) -> list:
     if a:
         return a
 
-    # discovered hosts (registrable + subdomains + live + url hosts), in scope by construction
-    subs = [s for s in (recon.get("subdomains") or []) if s]
+    # discovered hosts (registrable + subdomains + live + url hosts), in scope by construction.
+    # Drop DNS/parsing artifacts (SOA-RNAME hosts like hostmaster.hostmaster.x) so the deep tools
+    # are never scheduled against a non-host that only yields a scope block.
+    subs = [s for s in (recon.get("subdomains") or []) if s and not dns_recon.is_junk_host(s)]
     live_hosts = [h.get("url") for h in (recon.get("live_hosts") or []) if h.get("url")]
     url_hosts = sorted({_host(u) for u in urls if _host(u)})
 

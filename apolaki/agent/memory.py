@@ -104,7 +104,10 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
         for t in (h.get("tech") or []):
             if t:
                 tech.add(str(t))
-    subs = {s for s in (recon.get("subdomains") or []) if s}
+    import dns_recon
+    # Never PERSIST DNS/parsing artifacts (SOA-RNAME hosts) into the target's warm-start memory,
+    # so a later scan does not re-seed junk targets from a prior run's snapshot.
+    subs = {s for s in (recon.get("subdomains") or []) if s and not dns_recon.is_junk_host(s)}
     for u in urls:
         hh = _host_of(u)
         if hh:

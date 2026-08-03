@@ -132,6 +132,24 @@ async def doh(name: str, rtype: str, timeout: int = 12) -> list:
     return [a.get("data", "") for a in (data.get("Answer") or []) if a.get("type") == t]
 
 
+def is_junk_host(host: str) -> bool:
+    """True for hosts that are DNS/parsing ARTIFACTS, not real scan targets: an SOA RNAME
+    (the zone's email contact, e.g. hostmaster.example.com) misread as a subdomain, or a name
+    mangled by re-querying an RNAME as a host (hostmaster.hostmaster.hostmaster.example). These
+    are never real web hosts — targeting them only burns budget and fills the ledger with scope
+    blocks. Conservative on purpose: a plausible real subdomain (www / mail / mx1 / api / admin)
+    is NEVER flagged; only self-repeating labels and the tight SOA-contact label set are."""
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return True
+    labels = h.split(".")
+    for i in range(len(labels) - 1):          # a repeated CONSECUTIVE label = a re-query artifact
+        if labels[i] and labels[i] == labels[i + 1]:
+            return True
+    # a leftmost label that is a DNS SOA-RNAME contact convention (never a served web host)
+    return labels[0] in ("hostmaster", "postmaster", "dnsadmin", "dnsmaster", "dns-admin")
+
+
 async def gather_dns(domain: str) -> dict:
     """Collect A/NS/MX/TXT/CAA + SPF/DMARC + vendors for a registrable domain."""
     domain = (domain or "").lstrip("*.").split(":")[0]
