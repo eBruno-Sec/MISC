@@ -1016,6 +1016,28 @@ def hardening_summary(leads: list) -> list:
                   key=lambda r: (-_rank.get(r[1], 0), -r[2]))
 
 
+def reachability_warning(mode=None, attack_surface=None):
+    """An ACTIVE/FULL scan that reached ZERO live hosts almost certainly never touched the
+    target (a bare host defaults to https on :443; or the target is down / mis-scoped). Such a
+    run must SAY SO: otherwise a clean-looking "complete" report with no findings reads as
+    "target is secure" when it actually means "target was never tested". Returns a message
+    string, or None when the run did reach a host (or was passive, where this does not apply)."""
+    if (mode or "").lower() not in ("active", "full"):
+        return None
+    as_ = attack_surface or {}
+    if "live_hosts" not in as_:
+        return None
+    try:
+        if int(as_.get("live_hosts") or 0) > 0:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return ("TARGET NOT REACHED: 0 live hosts. This active scan could not reach any in-scope host, "
+            "so the results are passive recon plus prior intel only, NOT a live assessment. Check the "
+            "scope carries a scheme and port (e.g. http://host:3000; a bare host defaults to https on "
+            ":443) and that the target is up.")
+
+
 def generate_html_report(program: str, findings: list, scope: dict,
                          coverage: dict = None, chains: list = None, status: str = None,
                          ai_summary: str = None, execution: dict = None, leads: list = None,
@@ -1682,6 +1704,14 @@ def generate_html_report(program: str, findings: list, scope: dict,
             "The primary planning cycle was halted (<code>" + _dreason + "</code>" + _ddetail + "). This "
             "report does <b>not</b> represent a full assessment; do not treat absence of findings as coverage.</div>")
         toc_items.append(("degraded", "Run Degraded"))
+    reach_html = ""
+    _rw = reachability_warning(mode, attack_surface)
+    if _rw:
+        reach_html = (
+            "<div id='reach' style='margin:1rem 0;padding:1rem 1.2rem;border-radius:10px;"
+            "border:1px solid #c98a2b;background:rgba(201,138,43,0.12)'>"
+            "<b style='color:#c98a2b'>&#9888; " + e(_rw) + "</b></div>")
+        toc_items.append(("reach", "Target Not Reached"))
     toc_items.append(("integrity", "Report Integrity"))
     toc_items.append(("appendix", "Appendix"))
     toc = "".join(f"<li><a href='#{i}'>{lbl}</a></li>" for i, lbl in toc_items)
@@ -1804,6 +1834,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {status_html}
 <div class="toc noprint-keep"><h4 style="margin-top:0">Contents</h4><ol>{toc}</ol></div>
 {degraded_html}
+{reach_html}
 <h2 id="summary">Executive Summary</h2>
 <div class="summary">{summ_paras}</div>
 
@@ -1912,6 +1943,10 @@ def findings_json(program: str, findings: list, scope: dict,
         # the run did NOT complete normally and coverage is incomplete — consumers MUST NOT read this
         # report as a full assessment (CHAD final #3).
         "degraded": degraded or None,
+        # ── target reachability: an active/full scan that reached 0 live hosts never touched the
+        # target (mis-scoped bare host on :443, or target down). Surfaced so a "complete" run with
+        # no findings is never mistaken for "target is secure". None when a host was reached.
+        "target_reachability": reachability_warning((config or {}).get("mode"), attack_surface),
         # ── results ──
         "chains": chains or [],
         "findings": findings,

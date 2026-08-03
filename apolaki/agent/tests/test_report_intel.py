@@ -91,6 +91,29 @@ def test_degraded_run_is_visible_in_report_json_and_html():
     assert json.loads(report.findings_json("P", [], {"in_scope": ["x"]}))["degraded"] is None
 
 
+def test_target_not_reached_warning_when_active_scan_reaches_zero_live_hosts():
+    # Optest gap: an active/full scan that reached 0 live hosts never touched the target (a bare
+    # host defaults to https:443, or the target is down). A "complete" run with no findings must
+    # NOT read as "target is secure" — it must loudly say the target was never reached.
+    import json
+    pkg = json.loads(report.findings_json("P", [], {"in_scope": ["x"]},
+                                          config={"mode": "active"}, attack_surface={"live_hosts": 0}))
+    assert pkg["target_reachability"] and "TARGET NOT REACHED" in pkg["target_reachability"]
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, mode="active",
+                                       attack_surface={"live_hosts": 0})
+    assert "TARGET NOT REACHED" in html
+    # a scan that DID reach a host shows no warning (JSON None, no HTML banner)
+    pkg2 = json.loads(report.findings_json("P", [], {"in_scope": ["x"]},
+                                           config={"mode": "active"}, attack_surface={"live_hosts": 5}))
+    assert pkg2["target_reachability"] is None
+    assert "TARGET NOT REACHED" not in report.generate_html_report(
+        "P", [], {"in_scope": ["x"]}, mode="active", attack_surface={"live_hosts": 5})
+    # passive mode never probes hosts, so the warning does not apply (no false alarm)
+    pkg3 = json.loads(report.findings_json("P", [], {"in_scope": ["x"]},
+                                           config={"mode": "passive"}, attack_surface={"live_hosts": 0}))
+    assert pkg3["target_reachability"] is None
+
+
 def test_findings_json_carries_auth_artery_proof():
     # the report exposes whether the autonomous auth artery actually fired, so "authenticated scan"
     # is PROVABLE (personas, auth_success, matrix ops) — not merely requested in the payload.
