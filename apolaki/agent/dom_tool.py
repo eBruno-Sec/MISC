@@ -114,12 +114,24 @@ def confirmed_csti(body: str) -> bool:
     return bool(body) and (f"49{MARK}" in body) and (f"{{{{7*7}}}}{MARK}" not in body)
 
 
+# per-family CVSS v3.1 base (defensible vectors) + the browser oracle each class confirms on.
+_DOM_CVSS = {
+    "xss":                 ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", 6.1),
+    "csti":                ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", 6.1),
+    "prototype_pollution": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L", 4.6),
+    "open_redirect":       ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N", 4.7),
+}
+
+
 # ── finding builders (all CONFIRMED, with evidence) ──────────────
-def _base(url, title, sev, desc, evidence, family, cwe, tags, steps):
+def _base(url, title, sev, desc, evidence, family, cwe, tags, steps, impact=None, oracle=None):
+    vec, score = _DOM_CVSS.get(family, ("", None))
     return {"title": title, "severity": sev, "target": url, "description": desc,
-            "impact": "Client-side code execution / manipulation in victims' browsers.",
+            "impact": impact or "Client-side code execution / manipulation in victims' browsers.",
             "evidence": evidence, "reproduction_steps": steps, "cwe": cwe, "family": family,
-            "tags": tags, "confidence": "confirmed"}
+            "tags": tags, "confidence": "confirmed",
+            "cvss_vector": vec, "cvss_score": score,
+            "success_oracle": oracle or "a unique browser canary fired at runtime (see Evidence)"}
 
 
 def proto_finding(url, nav, src):
@@ -129,7 +141,12 @@ def proto_finding(url, nav, src):
                  f"Loaded {nav} → Object.prototype.{PP_KEY} === \"{MARK}\" after load.",
                  "prototype_pollution", "CWE-1321", ["prototype-pollution", "dom"],
                  [f"Load {nav}", f"In the console, read Object.prototype.{PP_KEY}",
-                  "Observe the attacker-controlled value is now global (pollution confirmed)"])
+                  "Observe the attacker-controlled value is now global (pollution confirmed)"],
+                 impact=("A client-side prototype-pollution gadget lets attacker input set properties on "
+                         "Object.prototype for every object in the victim's page, which can corrupt app logic "
+                         "and, where a downstream sink trusts a polluted property, escalate to DOM XSS. Impact is "
+                         "client-side (victim browser), not server compromise."),
+                 oracle=f"after loading the crafted URL, Object.prototype.{PP_KEY} === the unique marker \"{MARK}\"")
 
 
 def redirect_finding(url, nav, src):
@@ -138,7 +155,10 @@ def redirect_finding(url, nav, src):
                   "the page can be made to send visitors to an attacker-chosen site."),
                  f"Loaded {nav} → the page navigated to https://{EVIL}/.",
                  "open_redirect", "CWE-601", ["open-redirect", "dom"],
-                 [f"Load {nav}", f"Observe the browser navigate to https://{EVIL}/"])
+                 [f"Load {nav}", f"Observe the browser navigate to https://{EVIL}/"],
+                 impact=("An attacker-chosen URL in the %s drives the browser to an external site, enabling "
+                         "convincing phishing and OAuth/token-forwarding abuse from the trusted origin." % src),
+                 oracle=f"the page issues a top-level navigation to the attacker-controlled host {EVIL}")
 
 
 def xss_finding(url, nav, src):
@@ -147,7 +167,11 @@ def xss_finding(url, nav, src):
                   "browser (alert fired) — attacker script runs in the victim's session."),
                  f"Loaded {nav} → alert(\"{MARK}\") executed.",
                  "xss", "CWE-79", ["xss", "dom"],
-                 [f"Load {nav}", "Observe alert() fire (script executed from the DOM source)"])
+                 [f"Load {nav}", "Observe alert() fire (script executed from the DOM source)"],
+                 impact=("Attacker JavaScript runs in the victim's authenticated session from the trusted origin: "
+                         "session/cookie theft, account actions as the victim, keylogging, and phishing. Client-side, "
+                         "not server compromise."),
+                 oracle=f"alert() executed in a real browser carrying the unique marker \"{MARK}\"")
 
 
 def csti_finding(url, nav, src):
@@ -163,6 +187,8 @@ def csti_finding(url, nav, src):
                "Let the AngularJS digest cycle run",
                "Observe 49 rendered in place of {{7*7}} in the live DOM — the expression executed client-side"])
     f["capec"] = "CAPEC-588: DOM-Based Cross-Site Scripting"
+    f["success_oracle"] = (f"after the AngularJS digest, the live DOM contains \"49{MARK}\" (the expression "
+                           "7*7 evaluated in-browser) while the literal {{7*7}} does not remain")
     f["impact"] = ("Attacker-controlled AngularJS expressions execute as JavaScript in the victim's browser "
                    "(client-side code execution / DOM XSS). Realistic impact: session-cookie theft, account "
                    "takeover, keylogging of form input, and convincing phishing served from the trusted domain. "

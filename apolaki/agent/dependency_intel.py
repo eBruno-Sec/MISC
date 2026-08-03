@@ -214,6 +214,9 @@ def vulnerable_component_finding(component, vulns):
                                f"Cross-reference {lead} for the affected range and a safe PoC"],
         "cwe": "CWE-1104", "family": "vulnerable_component", "tags": ["sca", "dependency", comp],
         "confidence": CONFIRMED,
+        "success_oracle": (f"the served response/filename reports the exact version {comp} {ver}, which falls in "
+                           f"the affected range of {lead or 'the referenced CVE'} (presence-confirmed; reachability "
+                           "not proven)."),
     }
 
 

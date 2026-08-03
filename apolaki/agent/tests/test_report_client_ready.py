@@ -35,6 +35,24 @@ def test_integrity_check_flags_unlabelled_chain_and_reused_impact():
     assert any("generic impact" in i for i in report.report_integrity_check([a, b]))
 
 
+def test_real_finding_builders_pass_the_integrity_gate():
+    # the ACTUAL DOM + SCA + credential builders must each carry a CVSS (on high/crit) and a success
+    # oracle, so a real report never trips report_integrity_check.
+    import dom_tool
+    import dependency_intel
+    F = [
+        dom_tool.csti_finding("https://t/s", "https://t/s#x", "search"),
+        dom_tool.proto_finding("https://t/b", "https://t/b?__proto__[x]=1", "query"),
+        dom_tool.xss_finding("https://t/x", "https://t/x#p", "hash"),
+        dependency_intel.vulnerable_component_finding(
+            {"name": "angular", "version": "1.7.7", "source": "js", "location": "https://t/a.js", "evidence": "banner"},
+            [{"severity": "high", "ids": ["CVE-2023-26118"], "summary": "prototype pollution in $sanitize"}]),
+    ]
+    for f in F:
+        f.setdefault("confidence", "confirmed")
+    assert report.report_integrity_check(F) == []
+
+
 def test_kev_matches_exact_cve_only_never_cwe():
     # a finding whose CVE is in KEV -> KEV section names the exact CVE
     f = _good_finding(); f["cve"] = "CVE-2023-26118"; f["title"] = "Vulnerable component: angular@1.7.7"
