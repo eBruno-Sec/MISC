@@ -1047,6 +1047,18 @@ async function loadAssurance(){
       row("Needs-validation worklist", `${esc(prov.needs_validation_count||0)} recovered fact(s) awaiting a live check`),
     ].join(""));
   }
+  const cv=rep.candidate_validation||{}, cvr=cv.records||[], cvc=cv.counts||{};
+  if(cvr.length){
+    const rescol={confirmed:"#1f9d6b",dismissed:"#7d8590",blocked:"#c98a2b",scheduled:"#4493f8",unsupported:"#ff3d6b"};
+    const summ=Object.entries(cvc).filter(([k,v])=>v).map(([k,v])=>`${esc(k)} <b>${esc(v)}</b>`).join(" · ");
+    let t=`<div style="font-size:.82rem;color:var(--muted);margin:.1rem 0 .5rem">${summ}</div>`;
+    t+=`<div style="overflow-x:auto"><table class="tbl" style="width:100%;font-size:.78rem"><tr><th>Candidate</th><th>Validator</th><th>Tried</th><th>Oracle</th><th>Result</th><th>Evidence</th></tr>`;
+    for(const r of cvr.slice(0,60)){
+      const res=String(r.result||""), miss=r.missing_prerequisite?` <i>(needs: ${esc(r.missing_prerequisite)})</i>`:"";
+      t+=`<tr><td>${esc(String(r.candidate||"").slice(0,60))}</td><td>${esc(r.validator||"")}</td><td>${r.attempted?"yes":"no"}</td><td>${esc(String(r.oracle||"").slice(0,48))}</td><td><b style="color:${rescol[res]||'#7d8590'}">${esc(res)}</b></td><td>${esc(String(r.evidence||"").slice(0,140))}${miss}</td></tr>`;
+    }
+    html+=card("Candidate validation (every lead → validator → terminal state)", t+`</table></div>`);
+  }
   box.innerHTML=html||`<div class="empty"><h4>No assurance data yet</h4><p>The mission has not produced auth-artery or graph evidence yet.</p></div>`;
 }
 

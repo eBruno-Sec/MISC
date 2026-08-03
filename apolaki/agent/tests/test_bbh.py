@@ -1460,7 +1460,7 @@ def test_codereview_review_bundles_findings():
     res = cr.review(src, "https://t/app.js")
     titles = {f["title"] for f in res["findings"]}
     assert any("Hardcoded secret" in t for t in titles)
-    assert any("Dangerous sink" in t for t in titles)
+    assert any("Security-sensitive sink" in t for t in titles)
     assert "/api/admin/delete" in res["endpoints"]
 
 

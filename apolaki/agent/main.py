@@ -1451,7 +1451,8 @@ async def get_report_html(session_id: str, download: bool = False):
         intel=m["context"].get("intel"), kev_cwes=_kev_cwes(),
         orchestration=m["context"].get("orchestration"),
         auth_artery=_auth_artery_evidence(session_id, m), intel_provenance=_intel_provenance(session_id),
-        degraded=m["context"].get("degraded"))
+        degraded=m["context"].get("degraded"),
+        candidate_validation=m["context"].get("candidate_validation"))
     _fn = _report_fname(m, scope, "html")
     headers = {"Content-Disposition": f'attachment; filename="{_fn}"'} if download else {}
     return HTMLResponse(html, headers=headers)
@@ -1474,7 +1475,8 @@ async def get_report_json(session_id: str):
             delta=_delta(session_id), execution=_execution(m), report_id=session_id,
             intel_provenance=_intel_provenance(session_id),
             auth_artery=_auth_artery_evidence(session_id, m),
-            degraded=(m.get("context", {}) or {}).get("degraded")),
+            degraded=(m.get("context", {}) or {}).get("degraded"),
+            candidate_validation=(m.get("context", {}) or {}).get("candidate_validation")),
         media_type="application/json")
 
 
@@ -1701,6 +1703,12 @@ def _record_orchestration(session_id: str) -> None:
         deg = getattr(ag, "_degraded", None)
         if deg:
             ctx["degraded"] = deg
+        # candidate-validation ledger: every testable lead -> validator -> terminal state + evidence,
+        # so a reviewer can see nothing was left sitting untested (and "no browser" is visible debt).
+        cval = getattr(ag, "_candidate_assurance", None)
+        if cval:
+            ctx["candidate_validation"] = {"counts": getattr(ag, "_candidate_validation_counts", {}) or {},
+                                           "records": cval[:200]}
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass

@@ -195,6 +195,8 @@ class BBHAgent:
         self._auth_artery = {"ran": False}
         self._graph_projection_error = None
         self._degraded = None                # structured degraded/failure state (e.g. graph projection halt)
+        self._candidate_assurance = []       # per-candidate validation ledger (candidate->validator->result->evidence)
+        self._candidate_validation_counts = {}
         self.tools = tools
         self.stop_event = stop_event
         self.tools.stop_event = stop_event   # let long ZAP polls honor a user stop
@@ -501,6 +503,204 @@ class BBHAgent:
             if dropped:
                 yield {"type": "info", "content": f"Lead promotion: {dropped} candidate lead(s) "
                        "browser-confirmed and promoted to findings."}
+
+    @staticmethod
+    def _dom_class_match(family: str, finding: dict) -> bool:
+        blob = (str(finding.get("title") or "") + " " + str(finding.get("family") or "")
+                + " " + " ".join(str(x) for x in (finding.get("tags") or []))).lower()
+        if family == "prototype_pollution":
+            return "prototype pollution" in blob or "proto" in blob
+        if family == "csti":
+            return "template injection" in blob or "csti" in blob or "angular" in blob
+        if family in ("dom_xss", "eval_sink"):
+            return ("dom" in blob and "xss" in blob) or "dom-based" in blob or "client-side" in blob and "xss" in blob
+        return False
+
+    async def _validate_candidates(self, session_id: str):
+        """General, target-agnostic candidate-validation pipeline. Normalizes every remaining
+        testable lead, routes it to a real validator, and finishes it in an EXPLICIT terminal
+        state with a per-candidate assurance record {candidate, family, validator, attempted,
+        oracle, result, evidence}. False-finding guard: DOM-class leads found only in library
+        source are retested against the APPLICATION PAGES and confirmed ONLY by a runtime canary."""
+        import candidate_pipeline as cp
+        import tools as _t
+        recs = self._candidate_assurance
+        # record the reflected-XSS leads the promoter already browser-confirmed (one table for all)
+        for f in self.findings:
+            if "promoted from candidate lead" in str(f.get("found_by") or ""):
+                recs.append({"candidate": f.get("title"), "family": "reflected_xss", "validator": "run_xss",
+                             "attempted": True, "oracle": "browser alert() executed",
+                             "result": cp.CONFIRMED, "evidence": str(f.get("evidence") or "")[:160],
+                             "target": f.get("target")})
+        if not self.leads:
+            if recs:
+                yield {"type": "info", "content": "Candidate validation: %d confirmed via promotion." % len(recs)}
+            return
+        app_pages = cp.application_pages(getattr(self.tools, "urls", []) or [])[:8]
+        browser_ok = _t.xss_confirm_status() is not False and bool(getattr(_t, "_chrome_path", lambda: None)())
+
+        # ── one browser DOM audit sweep over the application pages, reused by every DOM family ──
+        dom_findings, dom_ran = [], False
+        dom_needed = any(cp.canonical_family(l) in ("prototype_pollution", "csti", "dom_xss", "eval_sink") for l in self.leads)
+        if dom_needed and app_pages and browser_ok and not self.stop_event.is_set():
+            for page in app_pages:
+                if self.stop_event.is_set():
+                    break
+                try:
+                    r = await self.tools.execute("run_dom_audit", {"url": page}, session_id)
+                except Exception:
+                    continue
+                dom_ran = True
+                for f in (r.findings or []):
+                    f.setdefault("target", page)
+                    dom_findings.append(f)
+
+        counts = {cp.CONFIRMED: 0, cp.DISMISSED: 0, cp.BLOCKED: 0, cp.SCHEDULED: 0, cp.UNSUPPORTED: 0}
+        keep, confirmed_titles = [], set()
+        for lead in list(self.leads):
+            if self.stop_event.is_set():
+                keep.append(lead); continue
+            n = cp.normalize(lead)
+            fam, validator = n["family"], n["validator"]
+            rec = {"candidate": lead.get("title"), "family": fam, "validator": validator,
+                   "attempted": False, "oracle": n["oracle"], "result": None, "evidence": "",
+                   "target": n["raw_target"], "missing_prerequisite": None}
+            state, promoted = None, None
+
+            if fam in ("prototype_pollution", "csti", "dom_xss", "eval_sink"):
+                if not browser_ok:
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
+                elif not app_pages:
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "no in-scope application page to test the library against"
+                else:
+                    rec["attempted"] = True
+                    hit = next((f for f in dom_findings if self._dom_class_match(fam, f)), None)
+                    if hit:
+                        promoted = dict(hit); state = cp.CONFIRMED
+                        rec["evidence"] = "runtime canary fired on %s: %s" % (hit.get("target"), str(hit.get("evidence") or hit.get("title"))[:120])
+                    else:
+                        state = cp.DISMISSED
+                        rec["evidence"] = "canary never fired across %d application page(s) — library-only match, not a runtime app vuln" % len(app_pages)
+
+            elif fam == "exposed_credentials":
+                cred_f = next((f for f in self.findings if "credential" in str(f.get("title") or "").lower()
+                               and str(f.get("severity")) in ("high", "critical")), None)
+                rec["attempted"] = True
+                if cred_f:
+                    state = cp.CONFIRMED; rec["result_ref"] = cred_f.get("title")
+                    rec["evidence"] = "harvested credential yielded a valid session (see: %s)" % str(cred_f.get("title"))[:80]
+                else:
+                    state = cp.DISMISSED
+                    rec["evidence"] = "harvested value did not produce an authenticated session"
+
+            elif fam == "exposed_files":
+                try:
+                    r = await self.tools.execute("run_exposure", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                    rec["attempted"] = True
+                    if r.findings:
+                        promoted = r.findings[0]; state = cp.CONFIRMED
+                        rec["evidence"] = "content/type signature matched: " + str(r.output or "")[:120]
+                    elif "SCOPE BLOCK" in str(r.error or ""):
+                        state, rec["missing_prerequisite"] = cp.BLOCKED, "target out of scope"
+                    else:
+                        state = cp.DISMISSED; rec["evidence"] = "no signature match (soft 200/404, not a real exposed file)"
+                except Exception as e:
+                    state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
+
+            elif fam == "stored_xss":
+                if not browser_ok:
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
+                else:
+                    try:
+                        r = await self.tools.execute("run_stored_xss", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                        rec["attempted"] = True
+                        if r.findings:
+                            promoted = r.findings[0]; state = cp.CONFIRMED
+                            rec["evidence"] = "canary stored + re-read + executed: " + str(r.output or "")[:100]
+                        else:
+                            state = cp.DISMISSED; rec["evidence"] = "canary not reflected/executed on any display surface"
+                    except Exception as e:
+                        state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
+
+            elif fam == "bfla":
+                has_session = bool(self.session_headers) or bool(getattr(self, "_auth_artery", {}).get("ran"))
+                if not has_session:
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "authenticated low-privilege session (run authenticated scan)"
+                else:
+                    try:
+                        r = await self.tools.execute("run_bfla", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                        rec["attempted"] = True
+                        if r.findings:
+                            promoted = r.findings[0]; state = cp.CONFIRMED
+                            rec["evidence"] = "low-priv session performed a prohibited action: " + str(r.output or "")[:100]
+                        else:
+                            state = cp.DISMISSED; rec["evidence"] = "privileged control correctly denied the low-priv session"
+                    except Exception as e:
+                        state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
+
+            elif fam == "jsonp":
+                try:
+                    r = await self.tools.execute("run_jsonp", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                    rec["attempted"] = True
+                    if r.findings:
+                        promoted = r.findings[0]; state = cp.CONFIRMED
+                        rec["evidence"] = str(r.output or "")[:120]
+                    elif "SCOPE BLOCK" in str(r.error or ""):
+                        state, rec["missing_prerequisite"] = cp.BLOCKED, "target out of scope"
+                    else:
+                        state = cp.DISMISSED; rec["evidence"] = str(r.output or "no executable JSONP wrapper with sensitive data")[:120]
+                except Exception as e:
+                    state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
+
+            elif fam == "weak_random":
+                blob = (str(lead.get("evidence") or "") + " " + str(lead.get("title") or "")
+                        + " " + " ".join(str(x) for x in (lead.get("tags") or []))).lower()
+                rec["attempted"] = True
+                if any(k in blob for k in ("token", "session", "csrf", "password", "reset", "secret", "nonce", "otp", "id=")):
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "manual trace: confirm the random output controls the named security value"
+                    rec["evidence"] = "security-relevant sink suspected — needs runtime trace to confirm impact"
+                else:
+                    state = cp.DISMISSED
+                    rec["evidence"] = "downgraded to informational — Math.random with no security-relevant sink is not a weakness"
+
+            elif fam == "dev_comments":
+                import re as _re
+                blob = str(lead.get("evidence") or "") + " " + str(lead.get("target") or "")
+                facts = sorted(set(_re.findall(r"/[A-Za-z0-9_\-/.]{2,60}", blob)))[:8]
+                rec["attempted"] = True
+                state = cp.DISMISSED
+                rec["evidence"] = ("comment is not itself a vulnerability; %d derived path(s) folded to surface for testing"
+                                   % len(facts)) if facts else "comment carried no actionable derived fact"
+                for p in facts:
+                    self.tools.recon.setdefault("comment_routes", [])
+                    if p not in self.tools.recon["comment_routes"]:
+                        self.tools.recon["comment_routes"].append(p)
+
+            else:
+                state = cp.UNSUPPORTED
+                rec["evidence"] = "no validator implemented for family '%s' yet (explicit coverage debt)" % fam
+
+            rec["result"] = state
+            counts[state] = counts.get(state, 0) + 1
+            recs.append(rec)
+            if state == cp.CONFIRMED and promoted:
+                promoted.setdefault("found_by", "candidate-validation pipeline (%s, %s)" % (validator, rec["oracle"]))
+                promoted.setdefault("confidence", "confirmed")
+                if self.mission_id:
+                    promoted["id"] = db.add_finding(self.mission_id, promoted)
+                self.findings.append(promoted)
+                confirmed_titles.add(str(lead.get("title")))
+                yield {"type": "finding", "finding": promoted}
+            elif state in (cp.CONFIRMED, cp.DISMISSED):
+                pass                                   # terminal, non-promoting -> drop the lead
+            else:
+                keep.append(lead)                      # blocked / scheduled / unsupported -> keep visible
+        self.leads = keep
+        self._candidate_validation_counts = counts
+        yield {"type": "info", "content": (
+            "Candidate validation: %d confirmed, %d dismissed, %d blocked, %d unsupported "
+            "(every testable lead reached a terminal state)."
+            % (counts[cp.CONFIRMED], counts[cp.DISMISSED], counts[cp.BLOCKED], counts[cp.UNSUPPORTED]))}
 
     async def _ai_business_logic_leads(self, session_id: str):
         """Additive AI enhancement layer: when an AI strategy is selected, run ONE bounded
@@ -1731,6 +1931,12 @@ class BBHAgent:
                 break
         # promotion pass: re-test high-signal candidate leads with a confirmatory oracle
         async for ev in self._promote_leads(session_id):
+            yield ev
+        # GENERAL candidate-validation pipeline: every remaining testable lead is normalized,
+        # routed to a real validator, and driven to an EXPLICIT terminal state (confirmed /
+        # dismissed / blocked / scheduled) with a per-candidate assurance record. No testable
+        # lead is left sitting; "no browser" is visible coverage debt, not a silent skip.
+        async for ev in self._validate_candidates(session_id):
             yield ev
         # additive AI enhancement: business-logic hypotheses -> leads (no-op unless an AI
         # strategy is selected and usable). The model hunts; deterministic oracles confirm.

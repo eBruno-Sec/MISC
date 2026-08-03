@@ -1080,7 +1080,8 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
                          security_headers: list = None, intel: dict = None, kev_cwes: set = None,
                          orchestration: dict = None, auth_artery: dict = None,
-                         intel_provenance: dict = None, degraded: dict = None) -> str:
+                         intel_provenance: dict = None, degraded: dict = None,
+                         candidate_validation: dict = None) -> str:
     e = _html.escape
     leads = leads or []
     raw_findings = _with_capec(findings)
@@ -1728,6 +1729,31 @@ def generate_html_report(program: str, findings: list, scope: dict,
                           "and every recovered intelligence fact carries its source + validation state.</p>"
                           "<table class='tbl'>" + body_rows + "</table>")
         toc_items.append(("assurance", "Authentication & Assurance"))
+    # Candidate-validation ledger table: candidate -> validator -> attempted -> oracle -> result -> evidence.
+    cval_html = ""
+    cv = candidate_validation or {}
+    cv_recs = cv.get("records") or []
+    if cv_recs:
+        cvc = cv.get("counts") or {}
+        _rescol = {"confirmed": "#1f9d6b", "dismissed": "#7d8590", "blocked": "#c98a2b",
+                   "scheduled": "#4493f8", "unsupported": "#ff3d6b"}
+        hdr = ("<tr><th>Candidate</th><th>Family</th><th>Validator</th><th>Attempted</th>"
+               "<th>Oracle</th><th>Result</th><th>Evidence</th></tr>")
+        trs = ""
+        for r in cv_recs[:60]:
+            res = str(r.get("result") or "")
+            miss = r.get("missing_prerequisite")
+            ev = e(str(r.get("evidence") or "")[:170]) + ((" <i>(needs: %s)</i>" % e(str(miss))) if miss else "")
+            trs += ("<tr><td>%s</td><td class='sub'>%s</td><td class='sub'>%s</td><td>%s</td>"
+                    "<td class='sub'>%s</td><td><b style='color:%s'>%s</b></td><td class='sub'>%s</td></tr>"
+                    % (e(str(r.get("candidate") or "")[:70]), e(str(r.get("family") or "")),
+                       e(str(r.get("validator") or "")), "yes" if r.get("attempted") else "no",
+                       e(str(r.get("oracle") or "")[:60]), _rescol.get(res, "#7d8590"), e(res or "?"), ev))
+        summ = " &middot; ".join("%s <b>%s</b>" % (e(k), e(str(v))) for k, v in cvc.items() if v)
+        cval_html = ("<h2 id='candval'>Candidate Validation</h2>"
+                     "<p class='sub'>Every testable lead routed to a validator and driven to a terminal state. "
+                     + summ + "</p><div style='overflow-x:auto'><table class='tbl'>" + hdr + trs + "</table></div>")
+        toc_items.append(("candval", "Candidate Validation"))
     # DEGRADED banner (CHAD final #3): a halted/failed primary cycle means the run did NOT complete —
     # the report must SHOW that prominently so it is never read as a full assessment.
     degraded_html = ""
@@ -1897,6 +1923,7 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 {kev_html}
 {orch_html}
 {assurance_html}
+{cval_html}
 
 <h2 id="findings">Confirmed Findings</h2>
 {findings_html}
@@ -1940,7 +1967,8 @@ def findings_json(program: str, findings: list, scope: dict,
                   config: dict = None, attack_surface: dict = None, playbook: list = None,
                   tool_ledger: dict = None, delta: dict = None, execution: dict = None,
                   report_id: str = None, intel_provenance: dict = None,
-                  auth_artery: dict = None, degraded: dict = None) -> str:
+                  auth_artery: dict = None, degraded: dict = None,
+                  candidate_validation: dict = None) -> str:
     """Native JSON data package. The original keys (program, generated, scope, counts,
     lead_counts, coverage, chains, findings, leads) are always present and unchanged;
     the richer sections below are additive so existing consumers never break."""
@@ -1976,6 +2004,9 @@ def findings_json(program: str, findings: list, scope: dict,
         # fire (personas minted/reacquired, sessions obtained, matrix operations run)? Queryable
         # evidence so an "authenticated scan" is provable, not asserted. {"ran": False} when it didn't.
         "auth_artery": _artery_with_note(auth_artery),
+        # ── candidate-validation ledger: every testable lead -> validator -> terminal state + evidence.
+        # Proof that no testable lead is left sitting; blocked rows name the exact missing prerequisite.
+        "candidate_validation": candidate_validation or {},
         # ── DEGRADED state: a halted/failed primary cycle (e.g. graph projection failure). When present
         # the run did NOT complete normally and coverage is incomplete — consumers MUST NOT read this
         # report as a full assessment (CHAD final #3).

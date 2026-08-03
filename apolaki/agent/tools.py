@@ -85,6 +85,7 @@ TOOL_PERMISSIONS = {
     "run_form_nosqli": PermissionLevel.INTRUSIVE,
     "run_upload_test": PermissionLevel.INTRUSIVE,
     "run_stored_xss": PermissionLevel.INTRUSIVE,
+    "run_jsonp": PermissionLevel.ACTIVE,
     "run_param_mine": PermissionLevel.INTRUSIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
@@ -539,6 +540,14 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "Form action URL that stores user input"},
          "fields": {"type": "array", "items": {"type": "string"}, "description": "Optional form field names"}},
+         "required": ["url"]}},
+    {"name": "run_jsonp",
+     "description": ("JSONP information-leak validator. Probes common callback params (callback/jsonp/cb/...) with a "
+                     "UNIQUE marker and confirms ONLY when the response wraps sensitive data in our exact callback as "
+                     "EXECUTABLE JavaScript that is usable cross-origin (javascript content-type, or sniffable with no "
+                     "X-Content-Type-Options: nosniff). A plain JSON echo or an empty wrapper is NOT confirmed."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "Endpoint to test for a JSONP callback that leaks data"}},
          "required": ["url"]}},
     {"name": "run_anomaly_scan",
      "description": ("ACTIVE: anomaly hunting ('intuition' leads). Fetches a page and flags verbose errors / stack "
@@ -3924,6 +3933,50 @@ class ToolRegistry:
         if self.mission_id:
             await self._http(url, capture=True)
         return ToolResult("injection_probes", url, True, f"{len(findings)} reflection signal(s)", findings)
+
+    async def _run_jsonp(self, inp: dict) -> ToolResult:
+        """JSONP info-leak validator. Probe common callback params with a UNIQUE marker; confirm
+        ONLY when the response wraps a DATA payload in our exact callback as EXECUTABLE JS that a
+        cross-origin <script> could run (javascript content-type, or sniffable with no nosniff).
+        A plain JSON echo, an empty wrapper, or a nosniff'd non-JS response is NOT a JSONP leak."""
+        import httpx
+        import secrets
+        url = inp.get("url") or ""
+        if not url or not self.scope.validate(url)[0]:
+            return ToolResult("jsonp", url, False, "", [], "SCOPE BLOCK: off-scope url")
+        marker = "jp" + secrets.token_hex(4)
+        sep = "&" if "?" in url else "?"
+        try:
+            async with httpx.AsyncClient(verify=True, timeout=15, follow_redirects=True) as c:
+                for cbp in ("callback", "jsonp", "cb", "jsoncallback", "callbackfn", "cbfn", "jsonpcallback"):
+                    probe = "%s%s%s=%s" % (url, sep, cbp, marker)
+                    try:
+                        r = await c.get(probe)
+                    except Exception:
+                        continue
+                    body = r.text or ""
+                    if not re.search(r"(?:^|[^\w.$])" + re.escape(marker) + r"\s*\(", body):
+                        continue                      # our callback name is not used as a function call
+                    has_data = bool(re.search(re.escape(marker) + r"\s*\(\s*[\[{]", body))
+                    ct = (r.headers.get("content-type") or "").lower()
+                    nosniff = "nosniff" in (r.headers.get("x-content-type-options") or "").lower()
+                    js_ct = "javascript" in ct or "ecmascript" in ct
+                    xorig_usable = js_ct or not nosniff
+                    if has_data and xorig_usable:
+                        out = "JSONP confirmed via '%s': executable wrapper + data payload, cross-origin usable" % cbp
+                        return ToolResult("jsonp", url, True, out, [{
+                            "title": "JSONP information leak (%s callback)" % cbp,
+                            "severity": "medium", "family": "sensitive_exposure", "cwe": "CWE-200",
+                            "confidence": "confirmed", "target": probe,
+                            "evidence": "response reflects callback '%s' wrapping a data payload as executable JS "
+                                        "(content-type: %s%s)" % (marker, ct or "?",
+                                        "" if js_ct else "; sniffable, no nosniff"),
+                            "reproduction_steps": ["GET %s" % probe,
+                                "Cross-origin: <script src=\"%s\"></script> with a global %s() defined runs the leaked data" % (probe, marker)],
+                            "analyst_notes": "Sensitive data is returned wrapped in an attacker-named callback and is usable cross-origin."}])
+        except Exception as e:
+            return ToolResult("jsonp", url, True, "jsonp probe error: %s" % str(e)[:80], [])
+        return ToolResult("jsonp", url, True, "no executable JSONP wrapper with sensitive data found", [])
 
     async def _run_bfla(self, inp: dict) -> ToolResult:
         import httpx

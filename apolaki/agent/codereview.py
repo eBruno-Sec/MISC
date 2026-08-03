@@ -218,7 +218,7 @@ def review(text: str, source: str) -> dict:
             "family": "code-review", "tags": ["secrets", "disclosure"], "confidence": "candidate"})
     for s in scan_sinks(text):
         findings.append({
-            "title": f"Dangerous sink: {s['sink']} ({s['vuln']})", "severity": s["severity"],
+            "title": f"Security-sensitive sink: {s['sink']} ({s['vuln']})", "severity": s["severity"],
             "target": source, "description": f"{s['sink']} at line {s['line']} in {source} — potential {s['vuln']} "
                                              "if it reaches user-controlled input.",
             "impact": f"Possible {s['vuln']}.", "reproduction_steps": [f"Review {source} line {s['line']}",
