@@ -83,9 +83,9 @@
       }
     ],
     "env": {
-      "agent_image": "sha256:10ffc5b1e836fd5060b24a9bb6753c3a311c96bcd80dc3ee736103f36232d49d",
+      "agent_image": "sha256:bf04530c772a2fabcf8b749a34d68dca363a80dfd2d8867c791e73ab6e5ac269",
       "config_fingerprint": "5a514aa632feab38",
-      "git_commit": "88277b4fb8799fc1fc5e923df41e56be3a18d660",
+      "git_commit": "cdfe98575d116e0cfa912cc033e8768ba24bae55",
       "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
       "schema_version": "1.0"
     },
@@ -104,8 +104,13 @@
       "ok": true
     },
     {
-      "detail": "report_id=e916daa3",
+      "detail": "report_id=f6f0c89e",
       "name": "report_session_id_matches",
+      "ok": true
+    },
+    {
+      "detail": "degraded={}",
+      "name": "run_not_degraded",
       "ok": true
     },
     {
@@ -204,7 +209,7 @@
       "ok": true
     },
     {
-      "detail": "mission_id=e916daa3",
+      "detail": "mission_id=f6f0c89e",
       "name": "graph_session_id_matches",
       "ok": true
     },
@@ -260,37 +265,37 @@
     },
     {
       "detail": "http=200 json=True",
-      "name": "endpoint_200_json /report/e916daa3/json",
+      "name": "endpoint_200_json /report/f6f0c89e/json",
       "ok": true
     },
     {
       "detail": "http=200 json=True",
-      "name": "endpoint_200_json /graph/canonical/e916daa3",
+      "name": "endpoint_200_json /graph/canonical/f6f0c89e",
       "ok": true
     },
     {
       "detail": "http=200 json=True",
-      "name": "endpoint_200_json /status/e916daa3",
+      "name": "endpoint_200_json /status/f6f0c89e",
       "ok": true
     },
     {
       "detail": "http=200 json=True",
-      "name": "endpoint_200_json /graph/e916daa3",
+      "name": "endpoint_200_json /graph/f6f0c89e",
       "ok": true
     },
     {
       "detail": "http=200 json=True",
-      "name": "endpoint_200_json /missions/e916daa3",
+      "name": "endpoint_200_json /missions/f6f0c89e",
       "ok": true
     },
     {
       "detail": "http=200 len=23792",
-      "name": "endpoint_200_doc /report/e916daa3/md",
+      "name": "endpoint_200_doc /report/f6f0c89e/md",
       "ok": true
     },
     {
       "detail": "http=200 len=60840",
-      "name": "endpoint_200_doc /report/e916daa3/html",
+      "name": "endpoint_200_doc /report/f6f0c89e/html",
       "ok": true
     },
     {
@@ -380,20 +385,20 @@
     }
   ],
   "env": {
-    "agent_image": "sha256:10ffc5b1e836fd5060b24a9bb6753c3a311c96bcd80dc3ee736103f36232d49d",
+    "agent_image": "sha256:bf04530c772a2fabcf8b749a34d68dca363a80dfd2d8867c791e73ab6e5ac269",
     "config_fingerprint": "5a514aa632feab38",
-    "git_commit": "88277b4fb8799fc1fc5e923df41e56be3a18d660",
+    "git_commit": "cdfe98575d116e0cfa912cc033e8768ba24bae55",
     "juice_shop_image": "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a",
     "schema_version": "1.0"
   },
-  "generated_at": "2026-08-02T23:35:09.581247+00:00",
+  "generated_at": "2026-08-03T00:10:32.462143+00:00",
   "integrity": {
     "algo": "sha256-checksum",
-    "hash": "2122b7705d7c1fa79bfd70becaa044543168765e28d04292f80d0131633538a0",
+    "hash": "d166164a50f1ef187567700d95c79f557bcc9cc4a3a41a1b4fc5ea3d68bcc417",
     "note": "plain SHA-256 checksum \u2014 detects corruption, NOT deliberate tampering; set APOLAKI_BENCH_HMAC_KEY or anchor the hash externally (git/CI) for tamper-evidence"
   },
   "kind": "apolaki_full_mission_benchmark",
-  "mission_id": "e916daa3",
+  "mission_id": "f6f0c89e",
   "schema_version": "1.0",
   "signature": {
     "auth": {
@@ -429,6 +434,6 @@
   },
   "summary": {
     "failed": 0,
-    "passed": 57
+    "passed": 58
   }
 }
