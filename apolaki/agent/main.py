@@ -2018,8 +2018,11 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
     explicit session_id + a VERIFIED collected account identity (CHAD final #2): if /account did not
     return an id, ingestion is REFUSED unless the operator passes allow_unverified=true, and then it is
     keyed under an explicit 'unverified:' namespace — the operator label is NEVER treated as a real id.
-    TRANSACTIONAL (CHAD final #4): mission context is persisted FIRST; if that fails, NO findings are
-    written (no orphaned findings). Findings are then deduped by (provider, account_id, title, target)."""
+    CONTEXT-FIRST with honest partial-failure accounting (CHAD final #4): mission context is persisted
+    FIRST; if that fails, NO findings are written (no orphaned findings). This ordering is NOT full ACID
+    atomicity — after context persists, findings are written best-effort per-finding; any that fail are
+    counted in results.findings_failed and set ingested=false, but already-written findings are not rolled
+    back. Findings are deduped by (provider, account_id, title, target)."""
     import cloud_iam as _ci
     m = _require_mission(session_id)
     p = _cloud_posture_run(provider)
@@ -2041,7 +2044,8 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
                           "UNVERIFIED key.", "manifest": p["manifest"]}
     account_id = account_id_real if identity_verified else ("unverified:%s" % account)
     acct_key = "%s:%s" % (prov, account_id)
-    # #4 TRANSACTIONAL: persist context FIRST; on failure write NO findings (avoids orphaned findings).
+    # #4 CONTEXT-FIRST: persist context FIRST; on failure write NO findings (avoids orphaned findings).
+    # NOT full atomicity: the per-finding write loop below is best-effort and surfaces partial failures.
     context_persisted = False
     try:
         ctx = dict(m["context"])
@@ -2058,7 +2062,7 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
     if not context_persisted:
         return {"ingested": False, "identity_verified": identity_verified, "account_id": account_id,
                 "posture": p["posture"], "reason": "context persistence FAILED — no findings written "
-                                                   "(transactional abort, no orphaned state)",
+                                                   "(context-first abort, no orphaned state)",
                 "results": {"findings_attempted": len(findings), "findings_stored": 0,
                             "findings_deduped": 0, "findings_failed": 0, "context_persisted": False},
                 "manifest": p["manifest"]}

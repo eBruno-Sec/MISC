@@ -84,7 +84,7 @@ def test_unverified_identity_is_refused_then_namespaced(monkeypatch):
         assert "linode:unverified:lab" in dbmod.get_mission("cloudm5")["context"]["cloud_postures"]
 
 
-def test_ingestion_is_transactional_context_first(monkeypatch):
+def test_ingestion_is_context_first_no_orphans(monkeypatch):
     # CHAD final #4: if context persistence fails, NO findings are written (no orphaned findings).
     dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
     with TestClient(mainmod.app) as c:
@@ -98,3 +98,29 @@ def test_ingestion_is_transactional_context_first(monkeypatch):
         assert r["ingested"] is False and r["results"]["context_persisted"] is False
         assert r["results"]["findings_stored"] == 0
         assert len(dbmod.get_findings("cloudm6")) == 0        # NO orphaned findings
+
+
+def test_ingestion_is_not_atomic_partial_finding_failure_is_surfaced(monkeypatch):
+    # CHAD sign-off caveat: this is context-first, NOT full ACID atomicity. Context persists, then
+    # findings are written best-effort per-finding; a mid-loop write failure is COUNTED (findings_failed),
+    # sets ingested=false, and does NOT roll back already-written findings — the response tells the truth.
+    dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+    with TestClient(mainmod.app) as c:
+        dbmod.create_mission("cloudm7", "P", "active", "o", {"in_scope": ["x"]}, {})
+        multi = [dict(_F[0], title="F-A"), dict(_F[0], title="F-B"), dict(_F[0], title="F-C")]
+        monkeypatch.setattr(cloud_iam, "collect", lambda p: _res("acctP", multi))
+        real_add = dbmod.add_finding
+        calls = {"n": 0}
+
+        def _flaky(sid, f):                       # 1st write ok, 2nd raises, 3rd ok
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("finding write failed")
+            return real_add(sid, f)
+        monkeypatch.setattr(dbmod, "add_finding", _flaky)
+        r = c.post("/cloud/posture/linode/ingest?session_id=cloudm7&account=p").json()
+        assert r["ingested"] is False                          # any failure => honestly NOT ingested
+        assert r["results"]["context_persisted"] is True       # context DID persist (context-first)
+        assert r["results"]["findings_failed"] == 1            # the failure is surfaced, not hidden
+        assert r["results"]["findings_stored"] == 2            # already-written findings are NOT rolled back
+        assert len(dbmod.get_findings("cloudm7")) == 2         # partial state remains (not atomic)
