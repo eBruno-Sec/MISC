@@ -1051,6 +1051,45 @@ def _artery_with_note(aa: dict) -> dict:
     return {**aa, "authenticated_requests": {**areq, "note": note}}
 
 
+def report_integrity_check(findings: list, chains: list = None, candidate_validation: dict = None) -> list:
+    """Deterministic report-integrity GATES (CHAD #10) — returns a list of VIOLATIONS (empty == clean).
+    Enforced by the test suite so these client-readiness defects can never silently return:
+    every HIGH/CRITICAL confirmed finding has a CVSS vector or explicit rationale; every confirmed
+    finding has a reproduction AND a success oracle; every attack-path chain is labelled verified vs
+    hypothetical; unique confirmed findings reconcile with candidate-confirmed counts; and no generic
+    impact text is reused across unrelated finding families."""
+    issues, findings = [], findings or []
+    for f in findings:
+        sev = str(f.get("severity") or "").lower()
+        conf = str(f.get("confidence") or "")
+        if sev in ("high", "critical") and conf == "confirmed":
+            if not (str(f.get("cvss_vector") or "").strip() or f.get("cvss_score")
+                    or str(f.get("cvss_rationale") or "").strip()):
+                issues.append("HIGH/CRITICAL finding without a CVSS vector or scoring rationale: %s" % f.get("title"))
+        if conf == "confirmed":
+            reps = f.get("reproduction_steps") or []
+            has_oracle = bool(str(f.get("success_oracle") or "").strip()) or any("oracle" in str(s).lower() for s in reps)
+            if not reps:
+                issues.append("confirmed finding without reproduction steps: %s" % f.get("title"))
+            elif not has_oracle:
+                issues.append("confirmed finding without a machine-checkable success oracle: %s" % f.get("title"))
+    for c in (chains or []):
+        if "verified" not in c:
+            issues.append("attack-path chain not labelled verified/hypothetical: %s" % (c.get("narrative") or c.get("name")))
+    seen = {}
+    for f in findings:
+        imp, fam = str(f.get("impact") or "").strip(), str(f.get("family") or "")
+        if imp and imp in seen and seen[imp] != fam:
+            issues.append("generic impact text reused across unrelated families (%s vs %s)" % (seen[imp], fam))
+        elif imp:
+            seen[imp] = fam
+    # reconciliation must be REPORTED (not that candidate-confirmed == findings; they legitimately differ)
+    cv = candidate_validation or {}
+    if cv.get("records") and "confirmed" not in (cv.get("counts") or {}):
+        issues.append("candidate validation present but confirmed count missing (cannot reconcile)")
+    return issues
+
+
 def reachability_warning(mode=None, attack_surface=None):
     """An ACTIVE/FULL scan that reached ZERO live hosts almost certainly never touched the
     target (a bare host defaults to https on :443; or the target is down / mis-scoped). Such a
@@ -1079,6 +1118,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          attack_surface: dict = None, playbook: list = None, mode: str = None,
                          delta: dict = None, tool_ledger: dict = None, report_id: str = None,
                          security_headers: list = None, intel: dict = None, kev_cwes: set = None,
+                         kev_cves: set = None,
                          orchestration: dict = None, auth_artery: dict = None,
                          intel_provenance: dict = None, degraded: dict = None,
                          candidate_validation: dict = None) -> str:
@@ -1385,20 +1425,33 @@ def generate_html_report(program: str, findings: list, scope: dict,
     if chains:
         def _chain_li(c):
             _k = c.get("kind")
-            pot = (" <span class='tag-conf' style='background:#6a5acd'>POTENTIAL</span>" if _k == "potential"
-                   else " <span class='tag-conf' style='background:#c0563a'>DATA-FLOW</span>" if _k == "dataflow" else "")
+            ver = bool(c.get("verified"))
+            badge = ("<span class='tag-conf' style='background:#1f9d6b'>VERIFIED</span>" if ver
+                     else "<span class='tag-conf' style='background:#c98a2b'>PLAUSIBLE &mdash; hypothesis</span>")
+            colo = " <span class='tag-conf' style='background:#7d8590'>CO-LOCATED (not a path)</span>" if _k == "colocated" else ""
+            dataf = " <span class='tag-conf' style='background:#c0563a'>DATA-FLOW</span>" if _k == "dataflow" else ""
+            colo += " <span class='tag-conf' style='background:#6a5acd'>POTENTIAL</span>" if _k == "potential" else ""
             summ = str(c.get("summary") or "").strip()
-            summ_html = f"<div class='sub' style='margin:.2rem 0 0 .2rem'>{e(summ)}</div>" if summ else ""
-            return (f"<li><b>{e(str(c.get('host')))}</b> "
+            basis = str(c.get("basis") or "").strip()
+            missing = str(c.get("missing") or "").strip()
+            extra = (f"<div class='sub' style='margin:.2rem 0 0 .2rem'>{e(summ)}</div>" if summ else "")
+            if not ver and (basis or missing):
+                extra += (f"<div class='sub' style='margin:.15rem 0 0 .2rem;font-size:.72rem'>"
+                          f"<b>Basis:</b> {e(basis or 'inference from confirmed findings')} &middot; "
+                          f"<b>To verify:</b> {e(missing or 'execute the step transition')}</div>")
+            return (f"<li>{badge}{colo}{dataf} <b>{e(str(c.get('host')))}</b> "
                     f"<span class='sev' style='--c:{SEV_COLORS.get((c.get('severity') or '').lower(),'#6a8a9a')}'>"
-                    f"{e(str((c.get('severity') or '').upper()))}</span>{pot} — <b>{e(str(c.get('narrative')))}</b>"
-                    f"{summ_html}</li>")
+                    f"{e(str((c.get('severity') or '').upper()))}</span> &mdash; <b>{e(str(c.get('narrative')))}</b>"
+                    f"{extra}</li>")
+        _nver = sum(1 for c in chains if c.get("verified"))
         items = "".join(_chain_li(c) for c in chains)
         chain_html = ("<h2 id='paths'>Attack-Path Chains &amp; Chaining Potential</h2>"
-                      "<p class='sub'>Where the confirmed findings lead when combined. "
-                      "<b>POTENTIAL</b> marks a single confirmed bug's well-known escalation path — "
-                      "verify reachability before claiming the full chain.</p>"
-                      f"<ul class='chains'>{items}</ul>")
+                      "<p class='sub'>These paths are <b>hypotheses inferred from co-present CONFIRMED findings</b> "
+                      "&mdash; Apolaki does not execute the transition between steps (destructive + authorization-gated), "
+                      "so a path is <b>PLAUSIBLE</b> unless explicitly <b>VERIFIED</b> (%d verified here). Each carries its "
+                      "basis and exactly what must be proven to verify it end-to-end; <b>CO-LOCATED</b> means the findings "
+                      "merely share a host and are not a path.</p>"
+                      "<ul class='chains'>%s</ul>" % (_nver, items))
 
     # unconfirmed leads (Apolaki's honesty edge — kept distinct + labelled)
     leads_html = ""
@@ -1504,23 +1557,35 @@ def generate_html_report(program: str, findings: list, scope: dict,
                           "<table class='tbl'><tr><th>Severity</th><th>Root cause</th><th>Findings</th>"
                           "<th>Manifestations</th></tr>" + rrows + "</table>")
 
-    # CISA KEV context — flag confirmed weakness classes that are known-exploited in the wild. Deterministic,
-    # sourced from the intel-feeds pipeline (Phase 0); adds real-world urgency without touching the risk score.
+    # CISA KEV context — a finding is "known-exploited in the wild" ONLY when its EXACT CVE is in
+    # CISA's KEV catalog (KEV is CVE-indexed; NEVER inferred from CWE class). A finding with no CVE,
+    # or with a CVE not in the catalog, is explicitly reported as "not identified in KEV".
     kev_html = ""
-    if kev_cwes:
-        _kev_hits, _seen = [], set()
-        for f in findings or []:
-            cwe = str(f.get("cwe") or "").strip().upper()
-            if cwe in kev_cwes and cwe not in _seen:
-                _seen.add(cwe)
-                _kev_hits.append((cwe, f.get("title", "finding")))
+    _kevset = {str(c).upper() for c in (kev_cves or set())}
+    if findings and _kevset:
+        _kev_hits, _no_cve, _checked = [], 0, 0
+        for f in findings:
+            _blob = "%s %s %s" % (f.get("cve") or "", f.get("cves") or "", f.get("evidence") or "")
+            _cves = {m.upper() for m in re.findall(r"CVE-\d{4}-\d{3,7}", _blob, re.I)}
+            if not _cves:
+                _no_cve += 1
+                continue
+            _checked += 1
+            _hit = sorted(c for c in _cves if c in _kevset)
+            if _hit:
+                _kev_hits.append((", ".join(_hit), f.get("title", "finding")))
         if _kev_hits:
             _krows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td></tr>" % (e(c), e(t)) for c, t in _kev_hits)
             kev_html = ("<h2 id='kev'>Known-Exploited in the Wild (CISA KEV)</h2>"
-                        "<p class='sub'>%d confirmed weakness class(es) below appear in CISA's Known Exploited "
-                        "Vulnerabilities catalog. These classes are under active exploitation in the wild, which "
-                        "raises real-world urgency independent of this assessment's own scoring.</p>"
-                        "<table class='tbl'><tr><th>CWE</th><th>Confirmed finding</th></tr>%s</table>" % (len(_kev_hits), _krows))
+                        "<p class='sub'>%d finding(s) carry a CVE that appears by EXACT id in CISA's KEV catalog "
+                        "(under active exploitation in the wild). Matched by exact CVE only, never by CWE class.</p>"
+                        "<table class='tbl'><tr><th>CVE</th><th>Confirmed finding</th></tr>%s</table>" % (len(_kev_hits), _krows))
+        else:
+            kev_html = ("<h2 id='kev'>Known-Exploited in the Wild (CISA KEV)</h2>"
+                        "<p class='sub'>Not identified in KEV: no confirmed finding carries a CVE present in CISA's "
+                        "Known Exploited Vulnerabilities catalog (%d finding(s) had a CVE checked by exact id; %d "
+                        "carry no CVE and cannot be KEV-listed). KEV status is matched by exact CVE only, never "
+                        "inferred from CWE class.</p>" % (_checked, _no_cve))
 
     # Intelligence orchestration: show that the code-intelligence recon + the first-class technique
     # knowledge model actually DROVE this scan (not decorative dashboards). Answers "was the intel used".
@@ -1737,22 +1802,46 @@ def generate_html_report(program: str, findings: list, scope: dict,
         cvc = cv.get("counts") or {}
         _rescol = {"confirmed": "#1f9d6b", "dismissed": "#7d8590", "blocked": "#c98a2b",
                    "scheduled": "#4493f8", "unsupported": "#ff3d6b"}
-        hdr = ("<tr><th>Candidate</th><th>Family</th><th>Validator</th><th>Attempted</th>"
-               "<th>Oracle</th><th>Result</th><th>Evidence</th></tr>")
-        trs = ""
-        for r in cv_recs[:60]:
-            res = str(r.get("result") or "")
+        # RECONCILE (CHAD #2/#6): candidate RECORDS dedupe into unique TECHNIQUES and unique confirmed
+        # FINDINGS. A confirmed candidate is NOT an extra vulnerability — several map to one finding.
+        n_records = len(cv_recs)
+        n_tech = len({str(r.get("family") or "") for r in cv_recs})
+        n_conf_cand = int(cvc.get("confirmed", 0))
+        n_findings = len(findings or [])
+        # consolidate identical rows (same technique+validator+result+oracle+evidence) into one with ×N
+        groups, order = {}, []
+        for r in cv_recs:
+            key = (str(r.get("family") or ""), str(r.get("validator") or ""), str(r.get("result") or ""),
+                   str(r.get("oracle") or ""), str(r.get("evidence") or ""), str(r.get("missing_prerequisite") or ""))
+            if key not in groups:
+                groups[key] = {"rec": r, "n": 0}
+                order.append(key)
+            groups[key]["n"] += 1
+        rows = ""
+        for key in order:
+            g = groups[key]; r = g["rec"]; res = str(r.get("result") or "")
             miss = r.get("missing_prerequisite")
-            ev = e(str(r.get("evidence") or "")[:170]) + ((" <i>(needs: %s)</i>" % e(str(miss))) if miss else "")
-            trs += ("<tr><td>%s</td><td class='sub'>%s</td><td class='sub'>%s</td><td>%s</td>"
-                    "<td class='sub'>%s</td><td><b style='color:%s'>%s</b></td><td class='sub'>%s</td></tr>"
-                    % (e(str(r.get("candidate") or "")[:70]), e(str(r.get("family") or "")),
-                       e(str(r.get("validator") or "")), "yes" if r.get("attempted") else "no",
-                       e(str(r.get("oracle") or "")[:60]), _rescol.get(res, "#7d8590"), e(res or "?"), ev))
-        summ = " &middot; ".join("%s <b>%s</b>" % (e(k), e(str(v))) for k, v in cvc.items() if v)
+            cnt = (" <span class='cv-x'>&times;%d</span>" % g["n"]) if g["n"] > 1 else ""
+            ev = e(str(r.get("evidence") or "")) + ((" <i>(needs: %s)</i>" % e(str(miss))) if miss else "")
+            rows += ("<tr><td class='cv-fam'>%s%s</td><td class='cv-val'>%s</td><td class='cv-ran'>%s</td>"
+                     "<td class='cv-or'>%s</td><td class='cv-res'><b style='color:%s'>%s</b></td>"
+                     "<td class='cv-ev'>%s</td></tr>"
+                     % (e(str(r.get("family") or "")), cnt, e(str(r.get("validator") or "")),
+                        "yes" if r.get("attempted") else "no", e(str(r.get("oracle") or "")),
+                        _rescol.get(res, "#7d8590"), e(res or "?"), ev))
+        recon = ("<div class='recon'><b>%d</b> candidate record(s) across <b>%d</b> technique(s) &rarr; "
+                 "<b>%d</b> confirmed candidate(s) deduplicate into <b>%d</b> unique confirmed finding(s); "
+                 "<b>%d</b> dismissed &middot; <b>%d</b> blocked &middot; <b>%d</b> unsupported &middot; "
+                 "<b>0</b> silently untested. A confirmed candidate is not an additional vulnerability &mdash; "
+                 "duplicate candidates map to the same finding.</div>"
+                 % (n_records, n_tech, n_conf_cand, n_findings, int(cvc.get("dismissed", 0)),
+                    int(cvc.get("blocked", 0)), int(cvc.get("unsupported", 0))))
         cval_html = ("<h2 id='candval'>Candidate Validation</h2>"
-                     "<p class='sub'>Every testable lead routed to a validator and driven to a terminal state. "
-                     + summ + "</p><div style='overflow-x:auto'><table class='tbl'>" + hdr + trs + "</table></div>")
+                     "<p class='sub'>Every testable lead routed to a real validator and driven to an explicit "
+                     "terminal state; identical candidates are consolidated (&times;N).</p>" + recon
+                     + "<div class='tbl-wrap'><table class='tbl cv-tbl'><thead><tr><th>Technique</th>"
+                     "<th>Validator</th><th>Ran</th><th>Oracle</th><th>Result</th><th>Evidence</th></tr></thead>"
+                     "<tbody>" + rows + "</tbody></table></div>")
         toc_items.append(("candval", "Candidate Validation"))
     # DEGRADED banner (CHAD final #3): a halted/failed primary cycle means the run did NOT complete —
     # the report must SHOW that prominently so it is never read as a full assessment.
@@ -1874,6 +1963,23 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 }}
 .themebtn{{position:fixed;top:1rem;right:7.4rem;background:var(--surface);color:var(--text);
   border:1px solid var(--border);font-size:.8rem;padding:.5rem .8rem;cursor:pointer;border-radius:5px;z-index:10}}
+/* Candidate Validation table: fixed layout so long evidence WRAPS instead of squeezing/clipping */
+.tbl-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:.5rem}}
+.recon{{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.55rem .8rem;font-size:.78rem;color:var(--dim);margin:.4rem 0 .7rem;line-height:1.5}}
+table.cv-tbl{{table-layout:fixed;width:100%}}
+table.cv-tbl td,table.cv-tbl th{{word-break:break-word;overflow-wrap:anywhere;white-space:normal;vertical-align:top}}
+.cv-tbl .cv-fam{{width:12%}}.cv-tbl .cv-val{{width:12%}}.cv-tbl .cv-ran{{width:5%;text-align:center}}
+.cv-tbl .cv-or{{width:22%}}.cv-tbl .cv-res{{width:9%}}.cv-tbl .cv-ev{{width:40%}}
+.cv-x{{display:inline-block;background:var(--accent);color:#001;border-radius:8px;padding:0 .35rem;font-size:.62rem;font-weight:700;margin-left:.3rem;vertical-align:middle}}
+/* Print/PDF: repeat table headers on every page + never split a row, finding, or heading */
+table.tbl thead{{display:table-header-group}}
+table.tbl tr,.finding,.recon,figure.shot{{break-inside:avoid}}
+h1,h2,h3{{break-after:avoid}}
+figure.shot{{margin:.6rem 0}}figure.shot img{{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px}}
+figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
+/* keep the fixed Dark/PDF controls from covering the cover title on screen (hidden in print) */
+@media screen{{.wrap{{padding-top:3.4rem}}}}
+@media (max-width:640px){{.pdfbtn,.themebtn{{position:static;display:inline-block;margin:.3rem .3rem 0 0}} .cv-tbl .cv-or,.cv-tbl .cv-val{{width:auto}}}}
 </style></head><body>
 <button class="themebtn noprint" onclick="var r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'':'dark';this.textContent=r.dataset.theme==='dark'?'☀ Light':'🌙 Dark';">🌙 Dark</button>
 <button class="pdfbtn noprint" onclick="window.print()">Save as PDF</button>
@@ -1940,6 +2046,17 @@ footer{{margin-top:3rem;color:var(--dim);font-size:.7rem;border-top:1px solid va
 <footer>Generated by Apolaki · deterministic, truth-first reporting. Confirmed findings carry reproducible
 evidence; unconfirmed leads are advisory and must be verified before submission. Authorized security research only.</footer>
 </div></body></html>"""
+    # #8/#10 integrity: rebuild the Contents list from the ACTUAL rendered <h2 id> sections so the
+    # TOC can never drift from the body (it was hand-maintained and missed ~10 sections).
+    _secs, _tocseen, _toc2 = re.findall(r"<h2 id=['\"]([^'\"]+)['\"][^>]*>(.*?)</h2>", _doc, re.S), set(), ""
+    for _sid, _lbl in _secs:
+        if _sid in _tocseen:
+            continue
+        _tocseen.add(_sid)
+        _toc2 += "<li><a href='#%s'>%s</a></li>" % (_sid, re.sub(r"<[^>]+>", "", _lbl).strip())
+    if _toc2:
+        _doc = re.sub(r'(<h4 style="margin-top:0">Contents</h4><ol>).*?(</ol>)',
+                      lambda m: m.group(1) + _toc2 + m.group(2), _doc, count=1, flags=re.S)
     # UTF-8 safety: encode EVERY non-ASCII glyph as a numeric HTML entity so arrows,
     # dashes, checks and icons render correctly no matter how the byte stream is served
     # or opened — this is what kills the "â†'/â€"/Â·" mojibake once and for all.

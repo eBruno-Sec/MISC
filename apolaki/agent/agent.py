@@ -1101,20 +1101,45 @@ class BBHAgent:
         sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
         verified = bool(sess)
         self._creds_verified = verified
+        _src = "inherited from a prior scan of this target" if from_prior else "harvested from the target's own client-reachable surface"
         f = {"title": "%s application credentials for '%s'" % ("Confirmed working" if verified else "Exposed", user),
-             "severity": "high" if verified else "medium", "family": "sensitive_exposure",
-             "confidence": "confirmed" if verified else "candidate", "target": login_url,
-             "description": "The target exposes account credentials (a published or leaked login), discovered "
-                            "during recon %s.%s" % ("(inherited from a prior scan)" if from_prior
-                                                    else "of the target's own surface",
-                                                    " Apolaki verified they work by logging in and obtaining a "
-                                                    "valid session." if verified else ""),
-             "evidence": ("CONFIRMED working: a valid session was obtained by logging in to %s with %s:<redacted>."
-                          % (login_url, user)) if verified else
-                         ("Discovered %s:<redacted> for the login at %s, but a verification login did not yield a "
-                          "session (form/flow mismatch) -- treat as a lead." % (user, login_url)),
-             "remediation": "Remove default/published credentials and rotate the account; never expose real "
-                            "logins in client-reachable content."}
+             "severity": "high" if verified else "medium",
+             "family": "broken_auth", "confidence": "confirmed" if verified else "candidate",
+             "target": login_url,
+             # mappings supported by the actual evidence: a real, usable credential exposed to attackers
+             "cwe": "CWE-522", "capec": "CAPEC-560", "owasp": "A07:2021",
+             # CVSS reflects single-user-account compromise via a no-effort known credential (network,
+             # low complexity, no privileges/interaction). Elevate I to High if the account holds
+             # privileged/admin functions. N/A only if verification could not run — see evidence.
+             "cvss_vector": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N" if verified else ""),
+             "cvss_score": (8.2 if verified else None),
+             "description": ("A valid, working login for the account '%s' is exposed to attackers (%s). Anyone who "
+                             "reads the target's own surface obtains it — no guessing or brute force. Apolaki verified "
+                             "the credential authenticates and issues a live session." % (user, _src)) if verified else
+                            ("A candidate login for '%s' was %s, but a single verification login did not yield a "
+                             "session (form/flow mismatch) — treat as an unconfirmed lead." % (user, _src)),
+             "impact": ("An attacker logs in as '%s' and gains that user's full account access — reads and modifies "
+                        "the account's data and can invoke every function that account is authorised for, and pivot "
+                        "from there. Because the credential is exposed on the target itself, exploitation needs no "
+                        "guessing, brute force, or user interaction." % user) if verified else
+                       ("If valid, an attacker would gain '%s' account access with no brute force." % user),
+             "evidence": ("Verified working: a login to %s as '%s' (password redacted) returned a valid "
+                          "authenticated session (session cookie/token issued). Raw credential stored redacted in "
+                          "the vault, never in this report." % (login_url, user)) if verified else
+                         ("Discovered '%s:<redacted>' for the login at %s; a verification login did not return a "
+                          "session." % (user, login_url)),
+             "reproduction_steps": [
+                 "POST %s  (form/JSON) with username='%s' and password=<the redacted discovered value>" % (login_url, user),
+                 "Success oracle: the response issues a session cookie or bearer token; then a GET to an "
+                 "authenticated-only page/identity endpoint returns 200 as '%s' (not the anonymous/login view)." % user,
+             ] if verified else ["POST %s with '%s' and the discovered value; observe whether a session is issued." % (login_url, user)],
+             "success_oracle": ("A session cookie/token is issued AND a subsequent authenticated-only request "
+                                "loads as '%s'." % user) if verified else "A session is issued for the account.",
+             "remediation": "Rotate/disable the '%s' account credential immediately and remove the exposed value from "
+                            "all client-reachable content; enforce unique, secret, non-published credentials." % user,
+             "validation": "Replay the exact login above with the OLD credential — it MUST now fail (401 / invalid "
+                           "credentials) and issue no session; confirm the value no longer appears in any "
+                           "client-reachable response."}
         if self.mission_id:
             try:
                 f["id"] = db.add_finding(self.mission_id, f)

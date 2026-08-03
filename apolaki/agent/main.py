@@ -910,6 +910,16 @@ def _kev_cwes():
         return set()
 
 
+def _kev_cves():
+    """The set of EXACT CVE ids in CISA's KEV catalog — the only defensible basis for a client-facing
+    'known-exploited in the wild' claim (KEV is CVE-indexed; never inferred from CWE class)."""
+    import intel_feeds
+    try:
+        return intel_feeds.known_exploited_cves(_intel_snapshots())
+    except Exception:
+        return set()
+
+
 def _intel_enrich_view(view):
     """Merge KEV known-exploited flags + CAPEC patterns into each technique of a taxonomy_view.
     Degrades cleanly to {'intel': {'loaded': False}} when no feed snapshots are present."""
@@ -1448,7 +1458,7 @@ async def get_report_html(session_id: str, download: bool = False):
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
-        intel=m["context"].get("intel"), kev_cwes=_kev_cwes(),
+        intel=m["context"].get("intel"), kev_cwes=_kev_cwes(), kev_cves=_kev_cves(),
         orchestration=m["context"].get("orchestration"),
         auth_artery=_auth_artery_evidence(session_id, m), intel_provenance=_intel_provenance(session_id),
         degraded=m["context"].get("degraded"),

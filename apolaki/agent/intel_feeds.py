@@ -208,8 +208,16 @@ def load(dest_dir=None):
 
 # ---------------------------------------------------------------------------- enrichment (pure)
 def known_exploited_cwes(snapshots):
-    """Set of CWE ids CISA lists as known-exploited-in-the-wild."""
+    """Set of CWE ids CISA lists as known-exploited-in-the-wild. NOTE: a CWE appearing here means
+    SOME CVE of that class is in KEV — it does NOT make an arbitrary finding of that class KEV-listed.
+    For a client-facing KEV claim use known_exploited_cves (exact CVE) — never infer KEV from CWE."""
     return set((snapshots.get("kev") or {}).get("cwes") or {})
+
+
+def known_exploited_cves(snapshots):
+    """The authoritative KEV unit: the set of EXACT CVE ids in CISA's Known Exploited Vulnerabilities
+    catalog. A finding is 'known-exploited in the wild' ONLY if its exact CVE is in this set."""
+    return set((snapshots.get("kev") or {}).get("cves_meta") or {})
 
 
 def enrich_techniques(techniques, snapshots):

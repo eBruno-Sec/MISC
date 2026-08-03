@@ -228,13 +228,18 @@ def _generic_host_chains(findings: list, max_chains: int = 6) -> list:
         ordered = sorted(group, key=lambda f: -_SEV_RANK.get((f.get("severity") or "info").lower(), 0))
         titles = [f.get("title", "finding") for f in ordered[:4]]
         top_sev = (ordered[0].get("severity") or "info").lower()
+        # HONEST (CHAD #5): co-location on one host is NOT a proven attack path. Do not invent an
+        # "entry point -> escalation" narrative; label it co-located and state what would prove a path.
         chains.append({
-            "host": host, "severity": top_sev, "kind": "chain",
+            "host": host, "severity": top_sev, "kind": "colocated", "verified": False,
             "finding_ids": [f.get("id") for f in ordered[:4] if f.get("id")],
-            "narrative": " -> ".join(titles),
-            "summary": (f"On {host}, {len(group)} findings compose an attack path: "
-                        f"{titles[0]} provides the entry point"
-                        + (f", then {titles[1]} enables escalation." if len(titles) > 1 else ".")),
+            "narrative": " + ".join(titles),
+            "summary": (f"{len(group)} confirmed finding(s) are CO-LOCATED on {host}. This is NOT a proven "
+                        f"attack path: no data-flow, identity, or privilege transition between them was executed "
+                        f"or observed. Listed so a tester can assess whether they actually chain."),
+            "basis": "co-location on a single host only",
+            "missing": "a proven transition between the findings (shared data-flow, an identity/privilege pivot, "
+                       "or a reachable dependency) — none was executed",
         })
         if len(chains) >= max_chains:
             break
@@ -327,6 +332,15 @@ def build_chains(findings: list, max_chains: int = 8) -> list:
             out.append(c)
         if len(out) >= max_chains:
             break
+    # HONESTY STAMP (CHAD #5): Apolaki INFERS chains from co-present CONFIRMED findings; it does not
+    # execute the transition between steps (that is destructive + authorization-gated). So no chain is
+    # "verified" end-to-end here — every one is a PLAUSIBLE hypothesis carrying what would prove it.
+    for c in out:
+        c.setdefault("verified", False)
+        c.setdefault("basis", "inferred from co-present confirmed findings; the transition between steps "
+                              "was not executed or observed")
+        c.setdefault("missing", "execute/observe the transition between the steps (a shared data-flow, an "
+                                "identity/privilege pivot, or a reachable dependency) to verify the path end-to-end")
     return out[:max_chains]
 
 
