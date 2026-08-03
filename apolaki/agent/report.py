@@ -1016,6 +1016,41 @@ def hardening_summary(leads: list) -> list:
                   key=lambda r: (-_rank.get(r[1], 0), -r[2]))
 
 
+def auth_requests_note(areq: dict) -> str:
+    """Honest read of a 0-success authenticated pass, so 'succeeded 0' is never misread as a
+    broken login. Distinguishes 'the session worked but there was no valid endpoint to test'
+    (every candidate 4xx, e.g. 404 — the target exposes no testable object-endpoint) from a real
+    auth rejection (401/403). Empty when some requests succeeded or none were attempted."""
+    areq = areq or {}
+    att = int(areq.get("attempted") or 0)
+    suc = int(areq.get("succeeded") or 0)
+    if not att or suc:
+        return ""
+    sd = areq.get("status_dist") or {}
+    codes = [int(k) for k in sd.keys() if str(k).isdigit()]
+    if codes and all(400 <= c < 500 for c in codes):
+        if any(c in (401, 403) for c in codes):
+            return ("session was rejected (401/403) on the tested endpoints — the credential may not "
+                    "apply to these paths")
+        return ("session established, but every authorization candidate returned 4xx (e.g. 404): the "
+                "target exposes no testable object-endpoint here. This is NOT an authentication failure.")
+    if not codes:
+        return "no authenticated request reached a candidate endpoint"
+    return ""
+
+
+def _artery_with_note(aa: dict) -> dict:
+    """Copy the auth artery, adding an honest note to authenticated_requests so JSON consumers and
+    the UI Assurance panel can explain a 0-success authed pass rather than showing a bare 'succeeded 0'."""
+    if not aa:
+        return {"ran": False}
+    areq = aa.get("authenticated_requests")
+    note = auth_requests_note(areq) if isinstance(areq, dict) else ""
+    if not note:
+        return aa
+    return {**aa, "authenticated_requests": {**areq, "note": note}}
+
+
 def reachability_warning(mode=None, attack_surface=None):
     """An ACTIVE/FULL scan that reached ZERO live hosts almost certainly never touched the
     target (a bare host defaults to https on :443; or the target is down / mis-scoped). Such a
@@ -1670,9 +1705,11 @@ def generate_html_report(program: str, findings: list, scope: dict,
             mtx = aa.get("matrix") or {}
             rows += [
                 ("Personas established", "%s (auth_success=%s)" % (e(personas) or "—", e(str(aa.get("auth_success", 0))))),
-                ("Authenticated requests", "attempted <b>%s</b>, succeeded <b>%s</b>; both personas succeeded: <b>%s</b>"
+                ("Authenticated requests", ("attempted <b>%s</b>, succeeded <b>%s</b>; both personas succeeded: <b>%s</b>%s"
                  % (e(str(areq.get("attempted", 0))), e(str(areq.get("succeeded", 0))),
-                    "yes" if areq.get("both_personas_succeeded") else "no")),
+                    "yes" if areq.get("both_personas_succeeded") else "no",
+                    ("<br><span style='color:#c98a2b'>&#9888; " + e(auth_requests_note(areq)) + "</span>")
+                    if auth_requests_note(areq) else ""))),
                 ("Authorization matrix", "%s operation(s), %s finding(s)"
                  % (e(str(mtx.get("operations", 0))), e(str(mtx.get("findings", 0))))),
                 ("Auth request status mix", e(str(areq.get("status_dist") or {}))),
@@ -1938,7 +1975,7 @@ def findings_json(program: str, findings: list, scope: dict,
         # ── authentication artery proof: did the autonomous two-persona auth + authz matrix actually
         # fire (personas minted/reacquired, sessions obtained, matrix operations run)? Queryable
         # evidence so an "authenticated scan" is provable, not asserted. {"ran": False} when it didn't.
-        "auth_artery": auth_artery or {"ran": False},
+        "auth_artery": _artery_with_note(auth_artery),
         # ── DEGRADED state: a halted/failed primary cycle (e.g. graph projection failure). When present
         # the run did NOT complete normally and coverage is incomplete — consumers MUST NOT read this
         # report as a full assessment (CHAD final #3).

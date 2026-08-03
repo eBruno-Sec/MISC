@@ -114,6 +114,26 @@ def test_target_not_reached_warning_when_active_scan_reaches_zero_live_hosts():
     assert pkg3["target_reachability"] is None
 
 
+def test_authenticated_requests_note_explains_zero_success_honestly():
+    # A 0-success authenticated pass must NOT read as broken auth. When every authz candidate
+    # 4xx'd (e.g. 404), the note says it is NOT an auth failure; a 401/403 says the session was
+    # rejected. Some success, or nothing attempted, yields no note (no false caveat).
+    import json
+    n404 = report.auth_requests_note({"attempted": 3, "succeeded": 0, "status_dist": {"404": 6}})
+    assert "NOT an authentication failure" in n404 and "404" in n404
+    n401 = report.auth_requests_note({"attempted": 2, "succeeded": 0, "status_dist": {"401": 2}})
+    assert "rejected" in n401.lower()
+    assert report.auth_requests_note({"attempted": 3, "succeeded": 2, "status_dist": {"200": 2, "404": 1}}) == ""
+    assert report.auth_requests_note({"attempted": 0, "succeeded": 0}) == ""
+    # the JSON package surfaces the note on a real 0-success artery so the UI/consumers can render it
+    artery = {"ran": True, "authenticated_requests": {"attempted": 3, "succeeded": 0, "status_dist": {"404": 6}}}
+    pkg = json.loads(report.findings_json("P", [], {"in_scope": ["x"]}, auth_artery=artery))
+    assert "NOT an authentication failure" in pkg["auth_artery"]["authenticated_requests"]["note"]
+    # HTML assurance panel renders the caveat too
+    html = report.generate_html_report("P", [], {"in_scope": ["x"]}, auth_artery=artery)
+    assert "not an authentication failure" in html.lower()
+
+
 def test_findings_json_carries_auth_artery_proof():
     # the report exposes whether the autonomous auth artery actually fired, so "authenticated scan"
     # is PROVABLE (personas, auth_success, matrix ops) — not merely requested in the payload.

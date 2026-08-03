@@ -1022,7 +1022,7 @@ async function loadAssurance(){
   html+=card("Authentication artery",[
     row("Ran", yn(aa.ran)),
     row("Personas", esc((aa.personas||[]).map(p=>p.role).filter(Boolean).join(", ")||"—")+` (auth_success=${esc(aa.auth_success||0)})`),
-    row("Authenticated requests", `attempted <b>${esc(areq.attempted||0)}</b>, succeeded <b>${esc(areq.succeeded||0)}</b>, with session material <b>${esc(areq.with_auth_material||0)}</b>`),
+    row("Authenticated requests", `attempted <b>${esc(areq.attempted||0)}</b>, succeeded <b>${esc(areq.succeeded||0)}</b>, with session material <b>${esc(areq.with_auth_material||0)}</b>`+(areq.note?`<br><span style="color:#c98a2b">⚠ ${esc(areq.note)}</span>`:"")),
     row("Both personas succeeded", yn(areq.both_personas_succeeded)),
     row("Authorization matrix", `${esc(mtx.operations||0)} operation(s), ${esc(mtx.findings||0)} finding(s)`),
     row("Create-object IDOR", `ran ${yn(co.ran)}, ${esc(co.attempts||0)} created, ${esc(co.confirmed||0)} confirmed`),
