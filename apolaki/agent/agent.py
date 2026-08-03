@@ -707,15 +707,21 @@ class BBHAgent:
             elif fam == "dev_comments":
                 import re as _re
                 blob = str(lead.get("evidence") or "") + " " + str(lead.get("target") or "")
-                facts = sorted(set(_re.findall(r"/[A-Za-z0-9_\-/.]{2,60}", blob)))[:8]
+                base = self._primary_base()
+                paths = sorted(set(_re.findall(r"/[A-Za-z0-9_\-/.]{2,60}", blob)))[:8]
                 rec["attempted"] = True
                 state = cp.DISMISSED
-                rec["evidence"] = ("comment is not itself a vulnerability; %d derived path(s) folded to surface for testing"
-                                   % len(facts)) if facts else "comment carried no actionable derived fact"
-                for p in facts:
-                    self.tools.recon.setdefault("comment_routes", [])
-                    if p not in self.tools.recon["comment_routes"]:
-                        self.tools.recon["comment_routes"].append(p)
+                added = 0
+                urls = getattr(self.tools, "urls", None)
+                for p in paths:
+                    if base and isinstance(urls, list):
+                        url = base.rstrip("/") + p
+                        if self.scope.validate(url)[0] and url not in urls:
+                            urls.append(url)       # CONSUMED: folds into surface -> graph/report/memory + next-scan warm-start
+                            added += 1
+                rec["evidence"] = ("comment is not itself a vulnerability; %d derived in-scope route(s) folded into the "
+                                   "surface (graph + memory) for validation" % added) if added else \
+                                  "comment carried no new in-scope derived route"
 
             else:
                 state = cp.UNSUPPORTED
