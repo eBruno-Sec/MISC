@@ -517,6 +517,17 @@ class BBHAgent:
         return False
 
     async def _validate_candidates(self, session_id: str):
+        """Safety wrapper: a validator bug must NEVER fail the mission — candidate validation is a
+        late enhancement pass, so any unexpected error degrades to a visible note and the run
+        completes (findings/leads already gathered are preserved)."""
+        try:
+            async for ev in self._validate_candidates_impl(session_id):
+                yield ev
+        except Exception as _e:
+            yield {"type": "info", "content": "Candidate validation degraded (%s) — mission continues; "
+                   "leads preserved." % str(_e)[:100]}
+
+    async def _validate_candidates_impl(self, session_id: str):
         """General, target-agnostic candidate-validation pipeline. Normalizes every remaining
         testable lead, routes it to a real validator, and finishes it in an EXPLICIT terminal
         state with a per-candidate assurance record {candidate, family, validator, attempted,
@@ -632,7 +643,7 @@ class BBHAgent:
                         state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
 
             elif fam == "bfla":
-                has_session = bool(self.session_headers) or bool(getattr(self, "_auth_artery", {}).get("ran"))
+                has_session = bool(getattr(self.tools, "session_headers", None)) or bool(getattr(self, "_auth_artery", {}).get("ran"))
                 if not has_session:
                     state, rec["missing_prerequisite"] = cp.BLOCKED, "authenticated low-privilege session (run authenticated scan)"
                 else:
@@ -696,7 +707,10 @@ class BBHAgent:
                 promoted.setdefault("found_by", "candidate-validation pipeline (%s, %s)" % (validator, rec["oracle"]))
                 promoted.setdefault("confidence", "confirmed")
                 if self.mission_id:
-                    promoted["id"] = db.add_finding(self.mission_id, promoted)
+                    try:
+                        promoted["id"] = db.add_finding(self.mission_id, promoted)
+                    except Exception:
+                        pass
                 self.findings.append(promoted)
                 confirmed_titles.add(str(lead.get("title")))
                 yield {"type": "finding", "finding": promoted}
