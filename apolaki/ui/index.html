@@ -360,10 +360,10 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
             <div class="field"><label>In-scope domains</label>
               <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com" oninput="refreshEstimate();checkAuthAvailable()"></textarea>
               <div class="hint">One per line. Wildcards allowed: <code class="inline">*.domain.com</code></div>
-              <div id="authOffer" style="display:none;margin-top:.6rem;padding:.6rem .7rem;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent);font-size:.82rem">
+              <div id="authOffer" style="margin-top:.6rem;padding:.6rem .7rem;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent);font-size:.82rem">
                 <label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer;margin:0">
                   <input type="checkbox" id="authScanChk" style="width:auto;margin-top:.15rem">
-                  <span>🔑 <b>Run authenticated?</b> <span id="authOfferText"></span> A prior scan of this target discovered working credentials — tick to log in and scan the authenticated surface (single discovered value, never brute-forced).</span>
+                  <span>🔑 <b>Run authenticated?</b> Apolaki autonomously registers two bounded, scope-controlled test accounts (and uses any credential the scan itself discovers) to run the two-user authorization matrix — the IDOR / BFLA / broken-access-control checks. Accounts are minted on the target, never brute-forced. Active / Full mode only. <span id="authOfferText" style="color:var(--accent);display:block;margin-top:.25rem"></span></span>
                 </label>
               </div>
             </div>
@@ -1205,19 +1205,17 @@ let _authCheckT=null;
 function checkAuthAvailable(){
   clearTimeout(_authCheckT);
   _authCheckT=setTimeout(async ()=>{
-    const offer=document.getElementById("authOffer"); if(!offer)return;
+    // The authenticated toggle is ALWAYS available (ticking it registers bounded test
+    // personas for the authz matrix — that needs no prior creds). This only fills an
+    // ENRICHMENT note when a prior scan also discovered a real credential; it must never
+    // hide the control or silently untick the operator's choice.
+    const note=document.getElementById("authOfferText"); if(!note)return;
     const inScope=document.getElementById("inScope").value.trim().split("\n").map(s=>s.trim()).filter(Boolean);
-    if(!inScope.length){offer.style.display="none";return;}
+    if(!inScope.length){note.textContent="";return;}
     try{
       const r=await fetch(`${API}/auth/available`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({in_scope:inScope})}).then(x=>x.json());
-      if(r.available){
-        document.getElementById("authOfferText").textContent=`Found credentials for '${r.username}'.`;
-        offer.style.display="block";
-      }else{
-        offer.style.display="none";
-        const c=document.getElementById("authScanChk"); if(c)c.checked=false;
-      }
-    }catch(_){offer.style.display="none";}
+      note.textContent = r.available ? `A prior scan also discovered working credentials for '${r.username}' — those will be used alongside the registered personas.` : "";
+    }catch(_){note.textContent="";}
   },450);
 }
 
