@@ -602,6 +602,27 @@ class BBHAgent:
                         state = cp.DISMISSED
                         rec["evidence"] = "canary never fired across %d application page(s) — library-only match, not a runtime app vuln" % len(app_pages)
 
+            elif fam == "reflected_xss":
+                # parameterized reflected XSS is browser-confirmed earlier by _promote_leads; here we
+                # confirm a lead that carries its own parameterized point, else dismiss after that sweep.
+                rec["attempted"] = True
+                if not browser_ok:
+                    state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
+                else:
+                    from urllib.parse import urlparse as _up, parse_qs as _pq
+                    confs = []
+                    if "?" in n["raw_target"]:
+                        try:
+                            confs = await self.tools._xss_execute(n["raw_target"], list(_pq(_up(n["raw_target"]).query).keys()))
+                        except Exception:
+                            confs = []
+                    if confs:
+                        promoted = confs[0]; state = cp.CONFIRMED
+                        rec["evidence"] = "browser alert() executed on " + str(n["raw_target"])[:80]
+                    else:
+                        state = cp.DISMISSED
+                        rec["evidence"] = "browser XSS sweep found no reflected execution on a parameterized point"
+
             elif fam == "exposed_credentials":
                 cred_f = next((f for f in self.findings if "credential" in str(f.get("title") or "").lower()
                                and str(f.get("severity")) in ("high", "critical")), None)
@@ -614,9 +635,9 @@ class BBHAgent:
                     rec["evidence"] = "harvested value did not produce an authenticated session"
 
             elif fam == "exposed_files":
+                rec["attempted"] = True
                 try:
-                    r = await self.tools.execute("run_exposure", {"url": n["raw_target"] or self._primary_base()}, session_id)
-                    rec["attempted"] = True
+                    r = await self.tools.execute("run_exposure", {"base_url": n["raw_target"] or self._primary_base()}, session_id)
                     if r.findings:
                         promoted = r.findings[0]; state = cp.CONFIRMED
                         rec["evidence"] = "content/type signature matched: " + str(r.output or "")[:120]
@@ -631,9 +652,9 @@ class BBHAgent:
                 if not browser_ok:
                     state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
                 else:
+                    rec["attempted"] = True
                     try:
                         r = await self.tools.execute("run_stored_xss", {"url": n["raw_target"] or self._primary_base()}, session_id)
-                        rec["attempted"] = True
                         if r.findings:
                             promoted = r.findings[0]; state = cp.CONFIRMED
                             rec["evidence"] = "canary stored + re-read + executed: " + str(r.output or "")[:100]
@@ -647,9 +668,9 @@ class BBHAgent:
                 if not has_session:
                     state, rec["missing_prerequisite"] = cp.BLOCKED, "authenticated low-privilege session (run authenticated scan)"
                 else:
+                    rec["attempted"] = True
                     try:
                         r = await self.tools.execute("run_bfla", {"url": n["raw_target"] or self._primary_base()}, session_id)
-                        rec["attempted"] = True
                         if r.findings:
                             promoted = r.findings[0]; state = cp.CONFIRMED
                             rec["evidence"] = "low-priv session performed a prohibited action: " + str(r.output or "")[:100]
@@ -659,9 +680,9 @@ class BBHAgent:
                         state = cp.DISMISSED; rec["evidence"] = "validator error: %s" % str(e)[:80]
 
             elif fam == "jsonp":
+                rec["attempted"] = True
                 try:
                     r = await self.tools.execute("run_jsonp", {"url": n["raw_target"] or self._primary_base()}, session_id)
-                    rec["attempted"] = True
                     if r.findings:
                         promoted = r.findings[0]; state = cp.CONFIRMED
                         rec["evidence"] = str(r.output or "")[:120]
