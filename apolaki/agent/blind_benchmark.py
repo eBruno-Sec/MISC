@@ -275,6 +275,15 @@ def _path_match(expected_path: str, found_paths: set) -> bool:
                for fp in found_paths if fp and fp != "/")
 
 
+# XSS sub-taxonomies are matched as a GROUP: a browser-executed XSS on the right path satisfies any XSS
+# expectation there (dom vs reflected vs stored is an often-ambiguous sub-label, not a different bug).
+_FAM_GROUPS = {f: {"reflected_xss", "dom_xss", "stored_xss"} for f in ("reflected_xss", "dom_xss", "stored_xss")}
+
+
+def _equiv(fam: str) -> set:
+    return _FAM_GROUPS.get(fam, {fam})
+
+
 def match(expected: list, findings: list, candidates: list = None) -> dict:
     """Match by PATH + FAMILY + PROOF. Returns per-expected verdicts + the finding/candidate buckets.
     `candidates` = every testable lead the mission surfaced (confirmed or not), for discovery/recall."""
@@ -294,20 +303,23 @@ def match(expected: list, findings: list, candidates: list = None) -> dict:
     used_conf = set()
     for e in expected:
         fam, path = e["family"], e["path"]
-        # confirmed true-positive: family + path + proof
+        # confirmed true-positive: family(-group) + path + proof
         tp = None
-        for i, ps in enumerate(conf_idx.get(fam, [])):
-            if (fam, i) not in used_conf and _path_match(path, ps):
-                tp = i
+        for efam in _equiv(fam):
+            for i, ps in enumerate(conf_idx.get(efam, [])):
+                if (efam, i) not in used_conf and _path_match(path, ps):
+                    tp = (efam, i)
+                    break
+            if tp:
                 break
         if tp is not None:
-            used_conf.add((fam, tp))
+            used_conf.add(tp)
             e2 = dict(e, status="confirmed_true_positive")
             true_pos.append(e2)
             matched_expected.append(e2)
             continue
-        # discovered-but-unconfirmed: a candidate reached the right path+family but no proof
-        disc = any(_path_match(path, ps) for ps in cand_idx.get(fam, []))
+        # discovered-but-unconfirmed: a candidate reached the right path+family(-group) but no proof
+        disc = any(_path_match(path, ps) for efam in _equiv(fam) for ps in cand_idx.get(efam, []))
         e2 = dict(e, status="discovered_unconfirmed" if disc else "missed")
         (discovered_only if disc else missed).append(e2)
         matched_expected.append(e2)
@@ -317,9 +329,8 @@ def match(expected: list, findings: list, candidates: list = None) -> dict:
     for f in conf:
         fam = finding_family(f)
         fps = _finding_paths(f)
-        if fam and not any((fam, ep) in exp_keys and _path_match(ep, fps) for _, ep in exp_keys):
-            if not any(_path_match(ep, fps) for ef, ep in exp_keys if ef == fam):
-                false_pos.append({"family": fam, "paths": sorted(fps), "title": str(f.get("title"))[:80]})
+        if fam and not any(_path_match(ep, fps) for ef, ep in exp_keys if ef in _equiv(fam)):
+            false_pos.append({"family": fam, "paths": sorted(fps), "title": str(f.get("title"))[:80]})
     return {"expected": matched_expected, "true_positives": true_pos, "missed": missed,
             "discovered_unconfirmed": discovered_only, "false_positives": false_pos}
 

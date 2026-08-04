@@ -3595,7 +3595,7 @@ class ToolRegistry:
                         # 3) XSS renders (only where the canary reflects)
                         if reflected:
                             for pl in dt._XSS_PAYLOADS[:4]:
-                                xu = dt.set_param(url, p, pl.replace("%C%", "'" + canary + "'"))
+                                xu = dt.set_param(url, p, pl.replace("%C%", canary))
                                 xs = await _render(xu, canary)
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
