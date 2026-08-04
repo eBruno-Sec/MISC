@@ -1962,6 +1962,23 @@ class BBHAgent:
         hosts = sorted({n.get("label") for n in g.nodes("host") if n.get("label")})
         hostset = set(hosts)
         eps = [n.get("label") for n in g.nodes("endpoint") if n.get("label")]
+        # The graph stores endpoints by PATH (canonical asset identity), which DROPS the query string —
+        # so the planner would probe a bare /catalog with NO parameter to inject, and every query-param
+        # vuln (SQLi/reflected-XSS/header-injection/base64/DOM-data on ?category=/?searchTerm=/?productId=)
+        # is unreachable. Re-attach the live surface's PARAMETERIZED URLs for endpoints the graph already
+        # holds, so the injection probes actually reach the inputs. Graph-faithful (path must be a known
+        # endpoint) and additive (bare-path endpoints stay in the set).
+        _gp = set(eps)
+        _seen = set(eps)
+        for _u in (self.tools.urls or []):
+            if "?" not in _u:
+                continue
+            try:
+                if urlparse(_u).path in _gp and _u not in _seen and self.scope.validate(_u)[0]:
+                    _seen.add(_u)
+                    eps.append(_u)
+            except Exception:
+                pass
 
         def _host_of(u):
             try:
