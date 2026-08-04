@@ -3485,24 +3485,82 @@ class ToolRegistry:
         rendered DOM content (DOM data manipulation). ACTIVE (read-only rendering); one finding per
         (family, param) confirmed only by the runtime canary."""
         import dom_trace as dt
-        import os as _os
         url = inp["url"]
         if not self.scope.validate(url)[0]:
             return ToolResult("dom_trace", url, False, "", [], "SCOPE BLOCK")
-        if not _os.environ.get("CDP_BROWSER_URL"):
-            return ToolResult("dom_trace", url, True, "no headless browser configured — DOM trace skipped", [])
-        params = inp.get("params") or dt.params_of(url)
+        chrome = _chrome_path()
+        if not chrome:
+            return ToolResult("dom_trace", url, True, "no headless browser — DOM trace skipped", [])
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return ToolResult("dom_trace", url, True, "playwright unavailable — DOM trace skipped", [])
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        params = (inp.get("params") or dt.params_of(url))[:6]
         findings, seen = [], set()
-        for p in params[:8]:
+
+        async def _render(u, canary):
+            """Load u in a fresh context; return the runtime signals for `canary`."""
+            sig = {"executed": False, "redirect": "", "in_href": "", "in_src": "", "in_attr": "", "in_text": False}
+            ctx = await browser.new_context(ignore_https_errors=True)
             try:
-                for hit in dt.trace_param(url, p):
-                    key = (hit["family"], hit["param"])
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    findings.append(dt.finding(hit))
-            except Exception:
-                pass
+                if self.session_headers:
+                    hh = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hh:
+                        await ctx.set_extra_http_headers(hh)
+                await self._ctx_add_cookies(ctx)
+                page = await ctx.new_page()
+                page.on("dialog", lambda d: (sig.__setitem__("executed", sig["executed"] or (canary in str(d.message))),
+                                             asyncio.ensure_future(d.dismiss())))
+                page.on("framenavigated", lambda fr: sig.__setitem__("redirect", sig["redirect"] or (fr.url if dt.is_evil_host(fr.url) else "")))
+                page.on("request", lambda r: sig.__setitem__("redirect", sig["redirect"] or (r.url if (dt.is_evil_host(r.url) and r.is_navigation_request()) else "")))
+                try:
+                    await page.goto(u, wait_until="domcontentloaded", timeout=12000)
+                    await page.wait_for_timeout(600)
+                except Exception:
+                    pass
+                try:
+                    dom = await page.evaluate(dt.DOM_SCAN_JS, canary)
+                    sig.update({k: dom.get(k, sig[k]) for k in ("in_href", "in_src", "in_attr", "in_text")})
+                except Exception:
+                    pass
+            finally:
+                await ctx.close()
+            return sig
+
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True, executable_path=chrome,
+                                                   args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                try:
+                    for p in params:
+                        canary = "domtr" + os.urandom(4).hex()
+                        # 1) plain-canary render -> link/data signals
+                        s = await _render(dt.set_param(url, p, canary), canary)
+                        reflected = bool(s["in_href"] or s["in_src"] or s["in_attr"] or s["in_text"])
+                        # 2) redirect render (redirect-ish name or reached a URL sink)
+                        if p.lower() in dt._REDIRECTISH or s["in_href"] or s["in_src"]:
+                            rv = "https://evilc%s.example/" % canary
+                            rs = await _render(dt.set_param(url, p, rv), canary)
+                            if rs["redirect"]:
+                                s["redirect"], s["redir_target"] = rs["redirect"], dt.set_param(url, p, rv)
+                        # 3) XSS renders (only where the canary reflects)
+                        if reflected:
+                            for pl in dt._XSS_PAYLOADS[:4]:
+                                xu = dt.set_param(url, p, pl.replace("%C%", "'" + canary + "'"))
+                                xs = await _render(xu, canary)
+                                if xs["executed"]:
+                                    s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
+                                    break
+                        for hit in dt.classify(url, p, canary, s):
+                            key = (hit["family"], hit["param"])
+                            if key not in seen:
+                                seen.add(key)
+                                findings.append(dt.finding(hit))
+                finally:
+                    await browser.close()
+        except Exception as e:
+            return ToolResult("dom_trace", url, True, "DOM trace error: %s" % str(e)[:80], findings)
         return ToolResult("dom_trace", url, True, "%d DOM source-to-sink finding(s)" % len(findings), findings)
 
     async def _run_dom_audit(self, inp: dict) -> ToolResult:

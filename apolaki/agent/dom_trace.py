@@ -39,8 +39,8 @@ export default async function ({ page }) {
       const op = window.print; window.print = () => { window.__hit = true; };
     } catch(e){}
   }, C);
-  try { await page.goto(TARGET, { waitUntil:"networkidle2", timeout:22000 }); } catch(e){ res.note = "nav:"+String(e).slice(0,40); }
-  try { await page.waitForTimeout(1100); } catch(e){}
+  try { await page.goto(TARGET, { waitUntil:"domcontentloaded", timeout:12000 }); } catch(e){ res.note = "nav:"+String(e).slice(0,40); }
+  try { await page.waitForTimeout(700); } catch(e){}
   try { res.executed = res.executed || !!(await page.evaluate(() => window.__hit)); } catch(e){}
   try {
     const dom = await page.evaluate((c) => {
@@ -81,6 +81,46 @@ def _trace(url: str, canary: str, browser_url=None) -> dict:
     js = _TRACE_JS.replace("%CANARY%", json.dumps(canary)).replace("%URL%", json.dumps(url))
     r = be.drive(url, js, browser_url=browser_url)
     return r if isinstance(r, dict) and r.get("browser") is not False else (r if isinstance(r, dict) else {})
+
+
+# DOM-scan snippet (evaluated in-page by the LOCAL Playwright driver in tools._run_dom_trace) — returns
+# where the canary `c` landed. Kept here so the payloads/classification stay in one module.
+DOM_SCAN_JS = (
+    "(c) => { const o={in_href:'',in_src:'',in_attr:'',in_text:false};"
+    "for (const e of document.querySelectorAll('a[href],area[href],link[href],base[href],form[action]')){"
+    "const h=e.getAttribute('href')||e.getAttribute('action')||''; if(h.indexOf(c)>=0){o.in_href=e.tagName+':'+h.slice(0,140);break;}}"
+    "for (const e of document.querySelectorAll('[src]')){const s=e.getAttribute('src')||''; if(s.indexOf(c)>=0){o.in_src=e.tagName+':'+s.slice(0,140);break;}}"
+    "for (const e of document.querySelectorAll('*')){let hit=false;const at=e.attributes||[];for(let i=0;i<at.length;i++){const a=at[i];if(a.name!=='value'&&a.value&&a.value.indexOf(c)>=0){o.in_attr=e.tagName+'@'+a.name;hit=true;break;}}if(hit)break;}"
+    "try{o.in_text=!!(document.body&&document.body.innerHTML.indexOf(c)>=0);}catch(e){}return o; }"
+)
+
+
+def is_evil_host(u: str) -> bool:
+    try:
+        return bool(re.match(r"^evilc[0-9a-z]+\.example$", urlparse(u).hostname or "", re.I))
+    except Exception:
+        return False
+
+
+def classify(url: str, param: str, canary: str, sig: dict) -> list:
+    """PURE: given the collected runtime signals for a parameter, return the confirmed-family hits.
+    sig = {executed, redirect, in_href, in_src, in_attr, in_text}. Most-severe first."""
+    hits, s = [], sig or {}
+    if s.get("executed"):
+        hits.append({"family": "dom_xss", "param": param, "target": s.get("xss_target") or set_param(url, param, canary),
+                     "canary": canary, "evidence": "browser executed alert(%s) via param '%s' (%s)" % (canary, param, s.get("xss_payload", "breakout"))})
+    if (s.get("redirect") or "").strip():
+        hits.append({"family": "open_redirect", "param": param, "target": s.get("redir_target") or set_param(url, param, canary),
+                     "canary": canary, "evidence": "navigation to attacker host from param '%s': %s" % (param, s["redirect"])})
+    if s.get("in_href") or s.get("in_src"):
+        sink = s.get("in_href") or s.get("in_src")
+        hits.append({"family": "dom_link_manipulation", "param": param, "target": set_param(url, param, canary),
+                     "canary": canary, "evidence": "param '%s' controls a link/resource URL at runtime (%s)" % (param, str(sink)[:120])})
+    if s.get("in_attr") or s.get("in_text"):
+        where = s.get("in_attr") or "DOM text"
+        hits.append({"family": "dom_data_manipulation", "param": param, "target": set_param(url, param, canary),
+                     "canary": canary, "evidence": "param '%s' reflects into rendered DOM content at runtime (%s)" % (param, where)})
+    return hits
 
 
 # XSS breakout payloads: HTML-context + JS-string-context (plain + backslash bypass). %C% -> canary.
