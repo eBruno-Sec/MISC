@@ -1169,6 +1169,77 @@ async def benchmark_fixture(fixture: str, session: str = ""):
     return benchmark.evaluate(fixture, findings, leads)
 
 
+@app.post("/benchmark/blind/{session_id}")
+async def blind_benchmark_run(session_id: str, answer_key_url: str = ""):
+    """BLIND benchmark (CHAD): score a SEALED mission against the target's published answer key WITHOUT
+    the scanner ever having seen it. The mission ran with the answer-key surface hard-blocked at the
+    scope choke point; here we (1) seal + hash the mission's independently-produced output, (2) THEN fetch
+    the answer key with our own client (bypassing the agent), (3) parse + match by path+family+proof,
+    (4) emit two hashed+timestamped artifacts whose ordering proves the key did not influence discovery."""
+    import blind_benchmark as bb
+    import httpx
+    m = _require_mission(session_id)
+    findings = db.get_findings(session_id) or []
+    ctx = m.get("context") or {}
+    leads = ctx.get("leads") or []
+    cvrec = (ctx.get("candidate_validation") or {}).get("records") or []
+    candidates = list(leads) + list(cvrec) + list(findings)
+    counts = (ctx.get("candidate_validation") or {}).get("counts") or {}
+    validations = {"executed": counts.get("confirmed", 0) + counts.get("dismissed", 0),
+                   "dismissed": counts.get("dismissed", 0), "unsupported": counts.get("unsupported", 0),
+                   "blocked": counts.get("blocked", 0)}
+    # derive the target host from the mission's own artifacts (never from the answer key)
+    host = ""
+    for it in findings + candidates:
+        t = str((it or {}).get("target") or "")
+        if t.startswith("http"):
+            from urllib.parse import urlparse as _up
+            host = _up(t).netloc
+            break
+    if not host:
+        host = str(ctx.get("primary_host") or (m.get("in_scope") or [""])[0] or "").split("//")[-1].split("/")[0]
+    key_url = answer_key_url or ("https://%s/vulnerabilities" % host)
+    code_rev = ctx.get("code_rev") or os.environ.get("APOLAKI_GIT_COMMIT", "")
+
+    # 1) SEAL the mission output BEFORE the answer key is ever fetched (hash + timestamp)
+    blind = bb.blind_artifact(session_id, host, findings, candidates, validations, code_rev)
+    outdir = os.path.join(os.path.dirname(__file__), "benchmark_results")
+    os.makedirs(outdir, exist_ok=True)
+    bpath = os.path.join(outdir, "blind_%s_%s.json" % (session_id, blind["content_hash"][:12]))
+    with open(bpath, "w", encoding="utf-8") as fh:
+        json.dump(blind, fh, indent=2, default=str)
+
+    # 2) ONLY NOW fetch the answer key, with our OWN client (the agent/scope never sees it)
+    try:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as c:
+            r = await c.get(key_url)
+            key_html = r.text if r.status_code == 200 else ""
+    except Exception as e:
+        return {"error": "answer-key fetch failed: %s" % e, "blind_artifact": blind, "blind_path": bpath}
+    if not key_html:
+        return {"error": "answer key empty/unreachable at %s" % key_url, "blind_artifact": blind}
+
+    # 3) parse + match by path+family+proof, 4) score, 5) comparison artifact (bound to the sealed hash)
+    expected = bb.parse_answer_key(key_html, host)
+    matched = bb.match(expected, findings, candidates)
+    scored = bb.score(expected, matched, candidates, validations)
+    key_sha = bb.sha256_text(key_html)
+    comparison = bb.comparison_artifact(blind, expected, matched, scored, key_sha, key_url)
+    cpath = os.path.join(outdir, "compare_%s_%s.json" % (session_id, comparison["content_hash"][:12]))
+    with open(cpath, "w", encoding="utf-8") as fh:
+        json.dump(comparison, fh, indent=2, default=str)
+
+    return {"session_id": session_id, "target": host, "answer_key_url": key_url,
+            "blind_artifact_hash": blind["content_hash"], "blind_sealed_at": blind["sealed_at"],
+            "answer_key_sha256": key_sha, "ordering_ok": comparison["ordering_ok"],
+            "score": scored, "expected_instances": len(expected),
+            "true_positives": [e["path"] + " / " + e["family"] for e in matched["true_positives"]],
+            "missed": [e["path"] + " / " + e["family"] for e in matched["missed"]],
+            "discovered_unconfirmed": [e["path"] + " / " + e["family"] for e in matched["discovered_unconfirmed"]],
+            "false_positives": matched["false_positives"],
+            "artifacts": {"blind": bpath, "comparison": cpath}}
+
+
 @app.get("/plan/{session_id}")
 async def technique_plan(session_id: str):
     """Deterministic evidence-driven plan (CHAD's core, zero-token): derive observations from everything

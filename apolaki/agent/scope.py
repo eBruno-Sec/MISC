@@ -122,6 +122,16 @@ class ScopeEngine:
         if not host:
             return False, "Invalid target"
         req_path = self._target_path(target)
+        # BLIND BENCHMARK: a published answer-key / vulnerability-disclosure surface is HARD-BLOCKED
+        # from the scanner at the single scope choke point — so crawl, browser, JS-route harvest,
+        # candidate generation, credential harvest and report evidence can NEVER learn the answers.
+        # The benchmark driver fetches it separately (its own httpx), only AFTER the mission is sealed.
+        try:
+            import blind_benchmark as _bb
+            if _bb.is_answer_key(target):
+                return False, "BLIND BENCHMARK: answer-key surface is blocked from the scanner"
+        except Exception:
+            pass
         for entry in self.out_of_scope:
             if self._matches(host, entry.value):
                 return False, f"{host} is explicitly out of scope"
