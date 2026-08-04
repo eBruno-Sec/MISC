@@ -233,7 +233,8 @@ class BBHAgent:
         self.leads: list = []           # unconfirmed candidate/static signals (not report findings)
         self._advisor_recs: list = []   # technique-advisor picks for this run (report orchestration view)
         self._codeintel_summary: dict = {}   # what code-intelligence recon fed the scan (orchestration view)
-        self._stored_fps: set = set()   # fingerprints already stored (auto-store dedup)
+        self._stored_fps: set = set()   # CONFIRMED-finding fingerprints (auto-store dedup)
+        self._lead_fps: set = set()      # lead fingerprints (deduped separately; never block a confirmed)
         # share the dedup set with the tool registry so the model's store_finding tool
         # deduplicates against what auto-store already recorded (AI stays additive).
         try:
@@ -442,13 +443,18 @@ class BBHAgent:
             fp = memory_mod.finding_fp(f)
             if fp in self._stored_fps:
                 continue
-            self._stored_fps.add(fp)
             if self._is_confirmed(result.tool, f):
+                # only a CONFIRMED finding claims the fingerprint slot — a non-confirmed lead must NEVER
+                # block a later confirmed finding of the same fp (that silently dropped real findings).
+                self._stored_fps.add(fp)
                 if self.mission_id:
                     f["id"] = db.add_finding(self.mission_id, f)
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
             else:
+                if fp in self._lead_fps:
+                    continue
+                self._lead_fps.add(fp)
                 f.setdefault("confidence", "candidate")
                 self.leads.append(f)
                 yield {"type": "lead", "lead": f}

@@ -85,7 +85,15 @@ def finding_fp(f: dict) -> str:
     cls = (f.get("category") or f.get("cwe") or f.get("wstg") or "").strip().lower()
     if not cls:
         cls = (f.get("title") or "").strip().lower()[:40]
-    return f"{cls}|{host}{path}"
+    # Include the vulnerability FAMILY + affected parameter so distinct issues that share a CWE at the
+    # same path (e.g. dom_link vs dom_data vs reflected XSS on /catalog, all CWE-79) are NOT merged into
+    # one fingerprint — the coarse cwe|host/path key silently deduped separate confirmed findings.
+    fam = str(f.get("family") or f.get("vuln_class") or "").strip().lower()
+    param = ""
+    m = str(f.get("title") or "").rsplit(" in '", 1)
+    if len(m) == 2 and m[1].endswith("'"):
+        param = m[1][:-1].lower()
+    return f"{cls}|{fam}|{param}|{host}{path}"
 
 
 def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> dict:
