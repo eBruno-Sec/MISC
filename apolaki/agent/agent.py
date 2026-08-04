@@ -2084,7 +2084,9 @@ class BBHAgent:
             s = str(e)
             seeds.append(s if "://" in s else "https://" + s.split("/")[0])
         seeds = list(dict.fromkeys(seeds))[:2]
+        from urllib.parse import urlparse as _up, parse_qs as _pq
         seen, frontier, before = set(), list(seeds), set(self.tools.urls or [])
+        sig_seen = set()                           # (path, sorted-param-names) already surfaced ONCE
         for _depth in range(2):                    # homepage + one level of rendered links
             nxt, links = [], []
             for u in frontier[:10]:
@@ -2101,9 +2103,17 @@ class BBHAgent:
                 base = obs.get("target") or u
                 for href in (obs.get("links") or []):
                     absu = urljoin(base, str(href)).split("#")[0]
-                    if absu.startswith("http") and self.scope.validate(absu)[0]:
-                        links.append(absu)
-                        nxt.append(absu)
+                    if not absu.startswith("http") or not self.scope.validate(absu)[0]:
+                        continue
+                    nxt.append(absu)               # follow every distinct link for the crawl frontier
+                    # but surface only ONE representative per (path, param-signature) so 18 productId
+                    # VALUE-variants can't crowd the injectable category/searchTerm out of the probe cap
+                    pr = _up(absu)
+                    sig = (pr.path, tuple(sorted(_pq(pr.query).keys())))
+                    if sig in sig_seen:
+                        continue
+                    sig_seen.add(sig)
+                    links.append(absu)
                 self._harvest_rendered_forms(obs.get("forms") or [], base)
             if links:
                 self.tools._add_urls(links)
@@ -2141,12 +2151,13 @@ class BBHAgent:
         # JS-rendered crawl FIRST: seed the injectable surface with client-rendered links + form params
         # (SPAs hide these from the HTTP crawler), so the injection probes have real inputs to test.
         try:
+            _u0 = len(self.tools.urls or [])
             _np = await self._browser_harvest_surface(session_id)
-            if _np:
-                yield {"type": "info", "content": "JS-rendered crawl surfaced %d client-rendered "
-                       "parameterized endpoint(s) the HTTP crawler could not see." % _np}
+            _u1 = len(self.tools.urls or [])
+            yield {"type": "info", "content": "JS-rendered crawl: %d client-rendered parameterized "
+                   "endpoint(s) surfaced (surface %d→%d URLs)." % (_np, _u0, _u1)}
         except Exception as _e:
-            yield {"type": "info", "content": "JS-rendered crawl skipped (%s)." % type(_e).__name__}
+            yield {"type": "info", "content": "JS-rendered crawl skipped (%s: %s)." % (type(_e).__name__, str(_e)[:80])}
         async for ev in self._execute_plan(session_id):
             yield ev
         note = " AI was unavailable; deterministic coverage completed." if self.ai_degraded else ""

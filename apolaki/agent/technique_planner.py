@@ -80,6 +80,24 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         obs.add("has_xml_input")
     if any(w in allpaths for w in ("redirect", "url=", "return=", "next=", "returnto")):
         obs.add("has_redirect_param")
+    # ANY query parameter on the surface is an injectable input — derive the observations that gate the
+    # injection techniques from the surface URLs' query strings, not just search-NAMED params. Without
+    # this, a client-rendered param the JS-rendered crawl surfaced (a SPA's ?category=/?searchTerm=/
+    # ?productId=) never reaches run_sqli / run_xss because no observation gated the technique on.
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    _surf_params = set()
+    for _u in (surface or []):
+        try:
+            _surf_params |= {k.lower() for k in _pq(_up(str(_u)).query).keys()}
+        except Exception:
+            pass
+    if _surf_params:
+        obs.add("reflects_input")     # reflected-input candidate — run_xss confirms or denies it
+        obs.add("has_search_param")   # injectable query input — run_sqli / union confirms or denies it
+    if any(t in p for p in _surf_params for t in ("redirect", "return", "next", "goto", "dest", "callback", "url")):
+        obs.add("has_redirect_param")
+    if any(t in p for p in _surf_params for t in ("id", "productid", "userid", "orderid", "uid", "account")):
+        obs.add("has_object_id")
     if ci_routes:
         obs.add("has_sensitive_route")
     if ((ci.get("logic") or {}).get("detail")):
