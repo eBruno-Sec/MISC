@@ -3490,14 +3490,24 @@ class ToolRegistry:
         if not self.scope.validate(url)[0]:
             return ToolResult("encoded_cookie", url, False, "", [], "SCOPE BLOCK")
         findings = []
-        hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+        # separate the authed session's Cookie header from the other headers so it doesn't clash with the
+        # per-request cookie jar (that clash made this find 0 in-mission while working standalone).
+        hdrs, base_cookies = {"User-Agent": _UA}, {}
+        for k, v in (self.session_headers or {}).items():
+            if k.lower() == "cookie":
+                for part in str(v).split(";"):
+                    if "=" in part:
+                        nm, vl = part.split("=", 1)
+                        base_cookies[nm.strip()] = vl.strip()
+            else:
+                hdrs[k] = v
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs) as c:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs, cookies=base_cookies) as c:
                 try:
                     await c.get(url)
                 except Exception as e:
                     return ToolResult("encoded_cookie", url, True, "fetch error: %s" % str(e)[:60], [])
-                jar = {k: v for k, v in c.cookies.items()}
+                jar = {**base_cookies, **{k: v for k, v in c.cookies.items()}}
                 for cname, cval in list(jar.items()):
                     up = ep.unpack(cval)
                     if not up:
