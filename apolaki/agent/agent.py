@@ -2162,6 +2162,39 @@ class BBHAgent:
         if synth:
             self.tools._add_urls(synth)
 
+    async def _inject_sweep_surface(self, session_id: str):
+        """Deterministic coverage guarantee: directly run the injection probes on EVERY distinct
+        parameterized endpoint on the live surface (one representative per path + param-signature), so a
+        discovered query input is ALWAYS tested even if the graph-authoritative planner did not select
+        it. Reuses _run_tool, so findings auto-store through the same scope/HITL-gated path. Bounded."""
+        from urllib.parse import urlparse, parse_qs
+        seen_sig, targets = set(), []
+        for u in (self.tools.urls or []):
+            if "?" not in u or not self.scope.validate(u)[0]:
+                continue
+            pr = urlparse(u)
+            sig = (pr.path, tuple(sorted(parse_qs(pr.query).keys())))
+            if sig in seen_sig:
+                continue
+            seen_sig.add(sig)
+            targets.append(u)
+        targets = targets[:20]
+        if not targets:
+            return
+        yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
+               "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect "
+               "(coverage guarantee, planner-independent)." % len(targets)}
+        for u in targets:
+            for tool in ("run_sqli", "run_injection_probes", "run_xss"):
+                if self.stop_event.is_set():
+                    return
+                try:
+                    async for ev in self._run_tool(tool, {"url": u}, session_id):
+                        if "_content" not in ev:
+                            yield ev
+                except Exception:
+                    pass
+
     async def _run_deterministic(self, session_id: str):
         yield {"type": "info", "content": f"Deterministic scan planner engaged ({self.mode} mode, no AI) — "
                "recon → live hosts → fingerprint → enrich → surface probes → nuclei → playbook."}
@@ -2177,6 +2210,14 @@ class BBHAgent:
             yield {"type": "info", "content": "JS-rendered crawl skipped (%s: %s)." % (type(_e).__name__, str(_e)[:80])}
         async for ev in self._execute_plan(session_id):
             yield ev
+        # COVERAGE GUARANTEE: directly probe every distinct parameterized endpoint on the surface, so a
+        # discovered query input is ALWAYS tested even if the graph-authoritative planner did not select
+        # it. This is the reliable "endpoint -> technique -> validator" path CHAD requires.
+        try:
+            async for ev in self._inject_sweep_surface(session_id):
+                yield ev
+        except Exception as _e:
+            yield {"type": "info", "content": "Injection sweep skipped (%s)." % type(_e).__name__}
         note = " AI was unavailable; deterministic coverage completed." if self.ai_degraded else ""
         if not self.ai_note:
             self.ai_note = ("Deterministic (no-AI) coverage completed." if not self.ai_degraded
