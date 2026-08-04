@@ -2182,10 +2182,10 @@ class BBHAgent:
         if not targets:
             return
         yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
-               "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect "
-               "(coverage guarantee, planner-independent)." % len(targets)}
+               "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect + "
+               "runtime DOM source-to-sink (coverage guarantee, planner-independent)." % len(targets)}
         for u in targets:
-            for tool in ("run_sqli", "run_injection_probes", "run_xss"):
+            for tool in ("run_sqli", "run_injection_probes", "run_xss", "run_dom_trace"):
                 if self.stop_event.is_set():
                     return
                 try:

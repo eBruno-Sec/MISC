@@ -82,6 +82,7 @@ TOOL_PERMISSIONS = {
     "run_jwt": PermissionLevel.ACTIVE,
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
+    "run_dom_trace": PermissionLevel.ACTIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
     "run_anomaly_scan": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
@@ -3476,6 +3477,33 @@ class ToolRegistry:
                 "reproduction_steps": [f"GET {d['url']} and compare to a baseline with a random parameter name."]})
         return ToolResult("param_mine", url, True,
                           f"{len(discovered)} hidden param(s) discovered → surface", findings)
+
+    async def _run_dom_trace(self, inp: dict) -> ToolResult:
+        """Runtime DOM source-to-sink tracer (CHAD Engine B/C): inject a per-request canary into each
+        query parameter and observe in a REAL browser where it lands — script execution (DOM XSS),
+        navigation to an attacker host (open redirect), a link/resource URL (DOM link manipulation), or
+        rendered DOM content (DOM data manipulation). ACTIVE (read-only rendering); one finding per
+        (family, param) confirmed only by the runtime canary."""
+        import dom_trace as dt
+        import os as _os
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("dom_trace", url, False, "", [], "SCOPE BLOCK")
+        if not _os.environ.get("CDP_BROWSER_URL"):
+            return ToolResult("dom_trace", url, True, "no headless browser configured — DOM trace skipped", [])
+        params = inp.get("params") or dt.params_of(url)
+        findings, seen = [], set()
+        for p in params[:8]:
+            try:
+                for hit in dt.trace_param(url, p):
+                    key = (hit["family"], hit["param"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    findings.append(dt.finding(hit))
+            except Exception:
+                pass
+        return ToolResult("dom_trace", url, True, "%d DOM source-to-sink finding(s)" % len(findings), findings)
 
     async def _run_dom_audit(self, inp: dict) -> ToolResult:
         """Dynamic client-side confirmation: drive a headless browser to CONFIRM
