@@ -78,6 +78,7 @@ def generate_report(program: str, findings: list, scope: dict,
                      delta: dict = None, tool_ledger: dict = None, intel: dict = None,
                      orchestration: dict = None) -> str:
     now = _now()
+    findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
     ledger_block = "\n".join(_ledger_md(tool_ledger))
@@ -1051,31 +1052,175 @@ def _artery_with_note(aa: dict) -> dict:
     return {**aa, "authenticated_requests": {**areq, "note": note}}
 
 
-def report_integrity_check(findings: list, chains: list = None, candidate_validation: dict = None) -> list:
-    """Deterministic report-integrity GATES (CHAD #10) — returns a list of VIOLATIONS (empty == clean).
-    Enforced by the test suite so these client-readiness defects can never silently return:
-    every HIGH/CRITICAL confirmed finding has a CVSS vector or explicit rationale; every confirmed
-    finding has a reproduction AND a success oracle; every attack-path chain is labelled verified vs
-    hypothetical; unique confirmed findings reconcile with candidate-confirmed counts; and no generic
-    impact text is reused across unrelated finding families."""
+_CVSS_W = {
+    "AV": {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2},
+    "AC": {"L": 0.77, "H": 0.44},
+    "PR_U": {"N": 0.85, "L": 0.62, "H": 0.27}, "PR_C": {"N": 0.85, "L": 0.68, "H": 0.5},
+    "UI": {"N": 0.85, "R": 0.62}, "CIA": {"H": 0.56, "L": 0.22, "N": 0.0},
+}
+
+
+def cvss31_base_score(vector: str):
+    """Deterministic CVSS 3.1 BASE score from a vector string (None if unparseable). Used by the
+    integrity gate to catch a score that contradicts its own vector (CHAD final-audit defect #6)."""
+    import math
+    try:
+        m = dict(p.split(":", 1) for p in str(vector).replace("CVSS:3.1/", "").replace("CVSS:3.0/", "").split("/") if ":" in p)
+        av, ac, ui = _CVSS_W["AV"][m["AV"]], _CVSS_W["AC"][m["AC"]], _CVSS_W["UI"][m["UI"]]
+        scope_c = m["S"] == "C"
+        pr = _CVSS_W["PR_C" if scope_c else "PR_U"][m["PR"]]
+        c, i, a = _CVSS_W["CIA"][m["C"]], _CVSS_W["CIA"][m["I"]], _CVSS_W["CIA"][m["A"]]
+    except Exception:
+        return None
+    iss = 1 - ((1 - c) * (1 - i) * (1 - a))
+    impact = (7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15) if scope_c else (6.42 * iss)
+    expl = 8.22 * av * ac * pr * ui
+    if impact <= 0:
+        return 0.0
+    raw = min((1.08 if scope_c else 1.0) * (impact + expl), 10)
+    return math.ceil(round(raw, 6) * 10) / 10.0   # CVSS "round up to 1 decimal"
+
+
+def _netloc_repeats(url: str) -> bool:
+    """True if a URL is malformed by a DUPLICATED host (scheme://host//host/… or the netloc appearing
+    twice in the path) — the doubled-host bug CHAD final-audit defect #3 flagged."""
+    from urllib.parse import urlparse
+    try:
+        p = urlparse(str(url))
+        if not p.netloc:
+            return False
+        host = p.netloc.split("@")[-1].split(":")[0]
+        # host name repeated inside the path (e.g. /ginandjuice.shop/resources/…), or a leading //host
+        return bool(host) and (("/" + host + "/") in (p.path or "") or (p.path or "").startswith("//" + host))
+    except Exception:
+        return False
+
+
+def _canon_url(url: str) -> str:
+    """Collapse a duplicated host (scheme://host//host/… or a leading /host/ repeat) into one
+    well-formed URL. Idempotent; leaves already-clean URLs untouched."""
+    loc = str(url or "")
+    if "://" not in loc:
+        return loc
+    try:
+        scheme, rest = loc.split("://", 1)
+        host = rest.split("/", 1)[0]
+        path = rest[len(host):]
+        h = host.split("@")[-1].split(":")[0]
+        while h and (path.startswith("//" + h + "/") or path.startswith("/" + h + "/")):
+            path = path[path.index(h) + len(h):]
+        return scheme + "://" + host + path
+    except Exception:
+        return loc
+
+
+def sanitize_finding_urls(findings: list) -> list:
+    """Render-time guard: rewrite any duplicated-host URL in a finding's URL-bearing string fields
+    (target/surface/location/curl and inline http(s) URLs in evidence/description). Fixes a finding
+    restored from prior-scan MEMORY that was persisted before the crawler fix, so the shipped report
+    (JSON and HTML alike) never prints a malformed URL (CHAD final-audit defect #3)."""
+    def _fix_inline(s):
+        return re.sub(r"https?://[^\s'\"<>)]+", lambda m: _canon_url(m.group(0)), str(s))
+    out = []
+    for f in findings or []:
+        g = dict(f)
+        for k in ("target", "surface", "location", "curl", "request"):
+            if isinstance(g.get(k), str) and g[k]:
+                g[k] = _canon_url(g[k]) if k in ("target", "surface", "location") else _fix_inline(g[k])
+        for k in ("evidence", "description", "impact"):
+            if isinstance(g.get(k), str) and "//" in g[k]:
+                g[k] = _fix_inline(g[k])
+        if isinstance(g.get("instances"), list):
+            g["instances"] = [_canon_url(x) if isinstance(x, str) else x for x in g["instances"]]
+        out.append(g)
+    return out
+
+
+def _cves_in(text) -> set:
+    return set(re.findall(r"CVE-\d{4}-\d{4,7}", str(text or ""), re.I))
+
+
+def report_integrity_check(findings: list, chains: list = None, candidate_validation: dict = None,
+                           kev_cves=None) -> list:
+    """Deterministic report-integrity GATES — returns a list of VIOLATIONS (empty == clean). Beyond
+    field-presence, these are SEMANTIC cross-field checks (CHAD final-audit defect #6) enforced by the
+    test suite AND run live at report time, so a deliberately bad fixture cannot pass:
+      • HIGH/CRIT confirmed carries a CVSS vector/rationale; every confirmed has a repro AND oracle;
+      • a credential/broken-auth repro actually AUTHENTICATES (POST + a password field), never a bare GET;
+      • no finding URL (target/curl/location) carries a duplicated host;
+      • no finding CLAIMS 'known-exploited/CISA KEV' unless it carries a CVE that is in the exact KEV set;
+      • a CVSS score matches the score computed from its own vector (±0.5);
+      • severity and CVSS band agree, or a rationale explains the gap;
+      • a chain's narrative does not say 'prove/execute' while it is labelled unverified;
+      • every candidate row is self-consistent (no confirmed-with-no-validator; unsupported reconciles);
+      • no generic impact text is reused across unrelated families."""
     issues, findings = [], findings or []
+    kevset = {str(x).upper() for x in (kev_cves or [])}
     for f in findings:
+        title = f.get("title")
         sev = str(f.get("severity") or "").lower()
         conf = str(f.get("confidence") or "")
+        fam = str(f.get("family") or "").lower()
+        cwe = str(f.get("cwe") or "").upper()
+        vec = str(f.get("cvss_vector") or "").strip()
+        score = f.get("cvss_score")
+        reps = f.get("reproduction_steps") or []
+        curl = str(f.get("curl") or "")
+        blob = " ".join(str(f.get(k) or "") for k in ("evidence", "description", "impact", "title")) + " " + " ".join(str(x) for x in (f.get("tags") or []))
         if sev in ("high", "critical") and conf == "confirmed":
-            if not (str(f.get("cvss_vector") or "").strip() or f.get("cvss_score")
-                    or str(f.get("cvss_rationale") or "").strip()):
-                issues.append("HIGH/CRITICAL finding without a CVSS vector or scoring rationale: %s" % f.get("title"))
+            if not (vec or score or str(f.get("cvss_rationale") or "").strip()):
+                issues.append("HIGH/CRITICAL finding without a CVSS vector or scoring rationale: %s" % title)
         if conf == "confirmed":
-            reps = f.get("reproduction_steps") or []
             has_oracle = bool(str(f.get("success_oracle") or "").strip()) or any("oracle" in str(s).lower() for s in reps)
             if not reps:
-                issues.append("confirmed finding without reproduction steps: %s" % f.get("title"))
+                issues.append("confirmed finding without reproduction steps: %s" % title)
             elif not has_oracle:
-                issues.append("confirmed finding without a machine-checkable success oracle: %s" % f.get("title"))
+                issues.append("confirmed finding without a machine-checkable success oracle: %s" % title)
+            # SEMANTIC: a credential / broken-auth proof must actually authenticate, not GET a page
+            is_cred = fam in ("broken_auth", "exposed_credentials") or cwe == "CWE-522" or "credential" in str(title or "").lower()
+            if is_cred:
+                repro_txt = (curl + " " + " ".join(str(s) for s in reps)).lower()
+                if "post" not in repro_txt or "password" not in repro_txt:
+                    issues.append("credential/broken-auth finding whose reproduction does not authenticate (no POST + password field): %s" % title)
+                if re.search(r"curl[^\n]*--path-as-is\s+'[^']+'\s*$", curl) or (curl and "post" not in curl.lower() and "-x" not in curl.lower() and "--data" not in curl.lower() and curl.count("\n") == 0):
+                    issues.append("credential/broken-auth finding renders a bare GET reproduction: %s" % title)
+        # SEMANTIC: URLs must be well-formed (no duplicated host anywhere the report will print them)
+        for uk in ("target", "surface", "location", "curl"):
+            uv = f.get(uk)
+            for cand in ([uv] if isinstance(uv, str) else []):
+                for tok in re.findall(r"https?://[^\s'\"<>]+", cand) or ([cand] if "://" in cand else []):
+                    if _netloc_repeats(tok):
+                        issues.append("finding carries a malformed URL with a duplicated host (%s): %s" % (uk, title))
+                        break
+        # SEMANTIC: a "known-exploited / CISA KEV" claim on a finding requires an EXACT CVE in the KEV set
+        if kev_cves is not None and re.search(r"known[\s-]?exploited|cisa kev", blob, re.I):
+            fcves = {c.upper() for c in _cves_in(blob) | _cves_in(f.get("cve")) | _cves_in(f.get("cves"))}
+            if not (fcves & kevset):
+                issues.append("finding claims 'known-exploited/CISA KEV' with no exact CVE present in the KEV set: %s" % title)
+        # SEMANTIC: score must match the vector it is presented with (±0.5)
+        if vec and isinstance(score, (int, float)):
+            computed = cvss31_base_score(vec)
+            if computed is not None and abs(computed - float(score)) > 0.5:
+                issues.append("CVSS score %.1f disagrees with its vector (computes to %.1f): %s" % (float(score), computed, title))
+        # SEMANTIC: severity band must agree with CVSS score unless a rationale explains the gap
+        if isinstance(score, (int, float)) and not str(f.get("cvss_rationale") or "").strip():
+            band = ("critical" if score >= 9 else "high" if score >= 7 else "medium" if score >= 4 else "low" if score > 0 else "info")
+            _ok = {"critical": {"critical"}, "high": {"high"}, "medium": {"medium"}, "low": {"low", "info"}, "info": {"info", "low"}}
+            if sev and sev in _ok and band not in _ok[sev]:
+                issues.append("severity '%s' disagrees with CVSS %.1f (band '%s') and no rationale is given: %s" % (sev, float(score), band, title))
     for c in (chains or []):
         if "verified" not in c:
             issues.append("attack-path chain not labelled verified/hypothetical: %s" % (c.get("narrative") or c.get("name")))
+        else:
+            narr = (str(c.get("narrative") or "") + " " + str(c.get("summary") or "")).lower()
+            # Overclaim only counts when it is AFFIRMATIVE and NOT accompanied by an explicit
+            # disclaimer. Apolaki's honest chains always disclaim ("NOT a proven attack path",
+            # "does not auto-execute", "infers", "co-located") — flagging those would be a false
+            # positive (the colocated-chain disclaimer CHAD's re-run surfaced).
+            overclaim = re.search(r"proves this|proven (?:attack )?path|auto-execute[sd]?|we (?:proved|executed)|apolaki (?:proves|proved)|executed the (?:exploit|attack|takeover|path)", narr)
+            disclaimed = re.search(r"not a proven|does not auto-execute|does not execute|never (?:auto-)?execute|\binfers\b|co-located|co-present|no .*?\bwas executed\b|hypothetical|not proven", narr)
+            if not c.get("verified") and overclaim and not disclaimed:
+                issues.append("unverified chain narrates a PROVEN/executed path (wording overstates evidence): %s" % (c.get("name") or c.get("narrative")))
     seen = {}
     for f in findings:
         imp, fam = str(f.get("impact") or "").strip(), str(f.get("family") or "")
@@ -1083,10 +1228,27 @@ def report_integrity_check(findings: list, chains: list = None, candidate_valida
             issues.append("generic impact text reused across unrelated families (%s vs %s)" % (seen[imp], fam))
         elif imp:
             seen[imp] = fam
-    # reconciliation must be REPORTED (not that candidate-confirmed == findings; they legitimately differ)
+    # candidate-validation consistency + reconciliation
     cv = candidate_validation or {}
-    if cv.get("records") and "confirmed" not in (cv.get("counts") or {}):
+    recs = cv.get("records") or []
+    counts = cv.get("counts") or {}
+    if recs and "confirmed" not in counts:
         issues.append("candidate validation present but confirmed count missing (cannot reconcile)")
+    for rc in recs:
+        res = str(rc.get("result") or "").lower()
+        val = str(rc.get("validator") or "").strip()
+        orc = str(rc.get("oracle") or "").lower()
+        cand = rc.get("candidate")
+        # confirmed row must not simultaneously claim "no validator implemented"
+        if res == "confirmed" and (not val or "no validator implemented" in orc) and not (rc.get("deduplicated") or rc.get("result_ref")):
+            issues.append("candidate confirmed but its validator/oracle is empty or says 'no validator implemented': %s" % cand)
+        # a row confirmed WITHOUT being independently attempted must name how it was confirmed
+        if res == "confirmed" and rc.get("attempted") is False and not (rc.get("deduplicated") or rc.get("result_ref")):
+            issues.append("candidate confirmed but not attempted and no confirming reference given: %s" % cand)
+    # unsupported must be RECONCILED (surfaced in counts), never a hidden coverage debt
+    n_unsupported = sum(1 for rc in recs if str(rc.get("result") or "").lower() == "unsupported")
+    if n_unsupported and int(counts.get("unsupported", 0)) != n_unsupported:
+        issues.append("unsupported candidate debt not reconciled in counts (%d rows vs counts=%s)" % (n_unsupported, counts.get("unsupported")))
     return issues
 
 
@@ -1124,6 +1286,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          candidate_validation: dict = None) -> str:
     e = _html.escape
     leads = leads or []
+    findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     raw_findings = _with_capec(findings)
     # Group duplicate findings by root cause (family + parameter). Counts, the risk
     # score and the cards all use the DISTINCT issues; every raw instance is kept on
@@ -1682,6 +1845,18 @@ def generate_html_report(program: str, findings: list, scope: dict,
         f"{e(_ri.summary_line(integ))}</p>" +
         ("" if _clean else "<ul>" + "".join(
             f"<li><code>{e(i['check'])}</code> — {e(i['detail'])}</li>" for i in integ["issues"]) + "</ul>") +
+        "</div>")
+    # SEMANTIC integrity gate (cross-field): a repro that actually authenticates, well-formed URLs,
+    # exact-CVE KEV claims, CVSS score matching its vector, chain wording matching its label, and
+    # self-consistent candidate rows. Runs LIVE here (not only in tests) so the report cannot ship
+    # a defect this gate can see (CHAD final-audit defect #6).
+    _sem = report_integrity_check(findings, chains, candidate_validation, kev_cves=kev_cves)
+    _sc = "#1f9d6b" if not _sem else "#c0392b"
+    integrity_html += (
+        f"<div class='biz' style='border-left-color:{_sc};margin-top:.6rem'>"
+        f"<p><b style='color:{_sc}'>{'✓ 0 semantic violations' if not _sem else '⚠ '+str(len(_sem))+' semantic violation(s)'}</b> — "
+        f"cross-field checks (auth reproduction, URL validity, exact-CVE KEV, CVSS↔vector, chain wording, candidate consistency).</p>" +
+        ("" if not _sem else "<ul>" + "".join(f"<li>{e(v)}</li>" for v in _sem) + "</ul>") +
         "</div>")
 
     # since last scan (historical delta — never says "fixed")

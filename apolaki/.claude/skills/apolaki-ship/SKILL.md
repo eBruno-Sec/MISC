@@ -1,6 +1,6 @@
 ---
 name: apolaki-ship
-description: The mandatory "definition of done" gate for ANY change to Apolaki (the web/API pentest platform at C:\Users\voice\Desktop\GitHub\MISC\apolaki) — a feature build, a bug fix, a new technique, or a lab absorption. Trigger it EVERY time before calling a change done, and whenever asked "did you check orchestration / absorption / the UI", "is it wired in", "run the checks", or "is this shippable". Runs five gates in order: (1) orchestration composition — the change composes into the ONE engagement state, no island; (2) absorption — every technique/trick used is distilled into the registry with validated_on updated per lab; (3) UI verification — drive the changed control in the REAL browser, not the engine room; (4) QA — full pytest green on 3.11 + endpoint sweep; (5) bake + commit + memory. This is the check that catches "wired the backend but never verified it composes / shows in the UI / got absorbed".
+description: The mandatory "definition of done" gate for ANY change to Apolaki (the web/API pentest platform at C:\Users\voice\Desktop\GitHub\MISC\apolaki) — a feature build, a bug fix, a new technique, or a lab absorption. Trigger it EVERY time before calling a change done, and whenever asked "did you check orchestration / absorption / the UI", "is it wired in", "run the checks", or "is this shippable". Runs five gates in order: (1) orchestration composition — the change composes into the ONE engagement state, no island; (2) absorption — every technique/trick used is distilled into the registry with validated_on updated per lab; (3) UI verification — drive the changed control in the REAL browser, not the engine room; (4) QA — full pytest green on the agent image (python:3.12; there is no CI) + endpoint sweep; (5) bake + commit + memory. This is the check that catches "wired the backend but never verified it composes / shows in the UI / got absorbed".
 ---
 
 # Apolaki ship gate
@@ -11,8 +11,10 @@ into the registry, and never driven through the real UI is **not shipped**. Ever
 caught a real miss; skip none.
 
 Repo: `C:\Users\voice\Desktop\GitHub\MISC\apolaki`. Deploy fast = `docker cp <f> apolaki-agent-1:/app/<f>`
-+ `docker restart apolaki-agent-1`; ship = `docker compose build agent` (BAKE). CI = pytest on **3.11**
-(container is 3.12), so no backslash inside f-string expressions and verify on 3.11 before pushing.
++ `docker restart apolaki-agent-1`; ship = `docker compose build agent` (BAKE). There is **no CI**; the
+agent image is **python:3.12** so pytest runs on 3.12 — that image IS the bar. Keep code 3.11-compatible
+too (no backslash inside f-string expressions); a real 3.11 run is optional extra evidence, never claim
+"3.11 CI parity" (there is no 3.11 CI).
 
 ## Gate 1 — Orchestration composition (no islands)
 The north star: **one engagement state, every gathered signal feeds every phase.** A capability the
@@ -48,7 +50,9 @@ planner, attack-chain, proxy, and mutation engine each started — built, then f
   depth; never substitute it for the UI pass.
 
 ## Gate 4 — QA
-- Full `pytest` GREEN on **3.11** (CI parity) — note the exact passed count, never inflate.
+- Full `pytest` GREEN on the agent image (**python:3.12**) — note the exact passed count, never inflate.
+  There is no CI, so the baked 3.12 image IS the bar; a separate 3.11 run is optional extra evidence
+  (report it as "3.11" only if you actually ran 3.11, never as "CI parity").
 - Endpoint sweep: `/health` + every major GET/POST returns 200 with a real payload (health, techniques,
   intel, plan, graph, benchmark, proxy, and whatever the change touched).
 

@@ -584,9 +584,21 @@ class BBHAgent:
                             and (cp.canonical_family(f) == fam
                                  or (fam not in ("unknown", "") and fam in str(f.get("family") or "").lower()))), None)
             if already:
-                rec["attempted"] = True
+                # DEDUPLICATED, not independently executed: this lead's vulnerability is already
+                # confirmed by a primary probe's finding. Reference that finding + its REAL oracle so
+                # the row can never read "validator empty / no validator implemented yet / confirmed"
+                # (the self-contradiction CHAD final-audit defect #4 flagged).
+                _ref = str(already.get("title") or "")[:100]
+                _orc = str(already.get("success_oracle") or "").strip()
+                rec["deduplicated"] = True
+                rec["attempted"] = False   # confirmed by the owning finding, NOT re-run as its own candidate
                 state = cp.CONFIRMED
-                rec["evidence"] = "already confirmed by a scan probe (deduped to: %s)" % str(already.get("title") or "")[:80]
+                rec["result_ref"] = _ref
+                rec["validator"] = "deduplicated → primary finding"
+                rec["oracle"] = ("confirmed by finding '%s'%s" %
+                                 (_ref, (" via its success oracle: " + _orc) if _orc else ""))
+                rec["evidence"] = ("deduplicated: the same vulnerability is already confirmed by finding '%s' "
+                                   "(not re-executed as an independent candidate)." % _ref)
             elif fam in ("prototype_pollution", "csti", "dom_xss", "eval_sink"):
                 if not browser_ok:
                     state, rec["missing_prerequisite"] = cp.BLOCKED, "headless browser (Chromium) unavailable"
@@ -1111,10 +1123,33 @@ class BBHAgent:
         verified = bool(sess)
         self._creds_verified = verified
         _src = "inherited from a prior scan of this target" if from_prior else "harvested from the target's own client-reachable surface"
+        # A REAL, redacted authentication reproduction (method + content-type + required fields), then a
+        # follow-up authenticated request — NOT a bogus GET page-load. The password is NEVER emitted; the
+        # real value lives only in the encrypted vault (CHAD final-audit defect #2). Built from the EXACT
+        # winning login shape captured by acquire_session.
+        _shape = (getattr(self.tools, "_session_shapes", None) or {}).get("__scan__") or {}
+        _auth_curl = ""
+        if verified:
+            _m = (_shape.get("method") or "POST").upper()
+            _act = _shape.get("action") or login_url
+            _ct = _shape.get("content_type") or "application/x-www-form-urlencoded"
+            _uf, _pf = _shape.get("user_field") or "username", _shape.get("pass_field") or "password"
+            _body = ('{"%s":"%s","%s":"<REDACTED_PASSWORD>"}' % (_uf, user, _pf)) if "json" in _ct \
+                else ("%s=%s&%s=<REDACTED_PASSWORD>" % (_uf, user, _pf))
+            _replay = ("-H 'Authorization: Bearer <TOKEN_FROM_STEP_1>'"
+                       if _shape.get("auth_kind") == "bearer" else "-b 'session=<SESSION_COOKIE_FROM_STEP_1>'")
+            _auth_curl = "\n".join([
+                "# 1) Authenticate with the exposed credential (real secret redacted — held only in the vault)",
+                "curl -i -sS -k -X %s '%s' \\" % (_m, _act),
+                "  -H 'Content-Type: %s' \\" % _ct,
+                "  --data '%s'" % _body,
+                "# 2) Replay the issued session on an authenticated-only resource (expect 200 as '%s', not the login view)" % user,
+                "curl -i -sS -k %s '%s'" % (_replay, base.rstrip("/") + "/my-account"),
+            ])
         f = {"title": "%s application credentials for '%s'" % ("Confirmed working" if verified else "Exposed", user),
              "severity": "high" if verified else "medium",
              "family": "broken_auth", "confidence": "confirmed" if verified else "candidate",
-             "target": login_url,
+             "target": login_url, "method": "POST", "curl": _auth_curl,
              # mappings supported by the actual evidence: a real, usable credential exposed to attackers
              "cwe": "CWE-522", "capec": "CAPEC-560", "owasp": "A07:2021",
              # CVSS reflects single-user-account compromise via a no-effort known credential (network,

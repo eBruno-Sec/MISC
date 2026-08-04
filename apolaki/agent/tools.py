@@ -18,7 +18,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, urljoin
 
 import authz_tool as authz
 import db
@@ -28,6 +28,24 @@ import surface as surface_mod
 import web_security as ws
 import xss_tool as xt
 from scope import ScopeEngine, PermissionLevel
+
+
+def _collapse_dup_host(u: str) -> str:
+    """Collapse a duplicated host (scheme://host//host/… or a leading /host/ repeat) into one
+    well-formed URL, at the single choke point where URLs enter the surface. Guards against a
+    protocol-relative src or a URL restored from stale prior-scan memory (CHAD final-audit #3)."""
+    s = str(u or "")
+    if "://" not in s:
+        return s
+    try:
+        p = urlparse(s)
+        h = (p.netloc or "").split("@")[-1].split(":")[0]
+        path = p.path or ""
+        while h and (path.startswith("//" + h + "/") or path.startswith("/" + h + "/")):
+            path = path[path.index(h) + len(h):]
+        return urlunparse((p.scheme, p.netloc, path, p.params, p.query, p.fragment)) if path != (p.path or "") else s
+    except Exception:
+        return s
 
 
 @dataclass
@@ -898,6 +916,7 @@ class ToolRegistry:
         # returned to the model. _login_attempts caps acquire_session to preserve the
         # never-brute-force-credentials guarantee.
         self._sessions = {}
+        self._session_shapes = {}   # role -> the exact winning login request shape (redacted), for honest reproduction
         self._login_attempts = 0
         # capability-based investigation state (identities, ownership, capabilities, vars)
         import investigation as _inv
@@ -1428,13 +1447,21 @@ class ToolRegistry:
                             j = {}
                         tok = ((j.get("authentication") or {}).get("token") or j.get("token")
                                or j.get("access_token") or j.get("jwt") or j.get("id_token"))
+                        _user_key = next((k for k in body if k != "password"), "email")
                         if tok:
                             auth_header = {"Authorization": "Bearer " + tok}
                             identity = (j.get("authentication") or {}).get("umail") or user
+                            self._session_shapes[role] = {"method": "POST", "action": url,
+                                "content_type": "application/json", "user_field": _user_key,
+                                "pass_field": "password", "auth_kind": "bearer"}
                             break
                         ck = "; ".join(f"{k}={v}" for k, v in c.cookies.items())
                         if ck:
-                            auth_header = {"Cookie": ck}; identity = user; break
+                            auth_header = {"Cookie": ck}; identity = user
+                            self._session_shapes[role] = {"method": "POST", "action": url,
+                                "content_type": "application/json", "user_field": _user_key,
+                                "pass_field": "password", "auth_kind": "cookie"}
+                            break
         except Exception:
             pass
         # 2) fallback: form login
@@ -1443,6 +1470,8 @@ class ToolRegistry:
             res = await auth.login(url, user, pw)
             if res.get("headers"):
                 auth_header, identity = res["headers"], user
+                if res.get("shape"):
+                    self._session_shapes[role] = dict(res["shape"], auth_kind="cookie")
         if not auth_header:
             return ToolResult("acquire_session", url, True,
                               json.dumps({"acquired": False, "role": role, "note": "login did not yield a session"}), [])
@@ -2424,7 +2453,10 @@ class ToolRegistry:
 
     def _add_urls(self, urls) -> None:
         for u in urls:
-            if not u or u in self.urls:
+            if not u:
+                continue
+            u = _collapse_dup_host(u)   # never let a duplicated-host URL into the surface
+            if u in self.urls:
                 continue
             # never let a session-destroying endpoint into the surface (self-logout)
             p = urlparse(u)
@@ -2751,12 +2783,14 @@ class ToolRegistry:
         # extract in-scope links + params to seed surface
         links = re.findall(r"""(?:href|src|action)=["']([^"'#]+)""", r["body"], re.I)
         abs_links = []
-        base = urlparse(r["final_url"] or url)
+        base_url = r["final_url"] or url
         for l in links:
-            if l.startswith("http"):
-                abs_links.append(l)
-            elif l.startswith("/"):
-                abs_links.append(f"{base.scheme}://{base.netloc}{l}")
+            # urljoin resolves absolute (http…), root-relative (/x) AND protocol-relative
+            # (//host/x) links correctly. The old manual `scheme://netloc + l` concat turned a
+            # protocol-relative src ("//host/x", which also startswith "/") into a DOUBLED host
+            # (scheme://host//host/x) — the malformed Angular URL CHAD flagged (final-audit #3).
+            if l.startswith("http") or l.startswith("/"):
+                abs_links.append(urljoin(base_url, l))
         self._add_urls([url] + abs_links)
         # Forms feed the injection surface. POST forms are stored so the planner can
         # reach POST-body sinks (e.g. the XML stock-check form → run_xxe). GET forms are

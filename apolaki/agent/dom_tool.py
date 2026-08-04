@@ -118,14 +118,25 @@ def confirmed_csti(body: str) -> bool:
 _DOM_CVSS = {
     "xss":                 ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", 6.1),
     "csti":                ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", 6.1),
-    "prototype_pollution": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L", 4.6),
+    "prototype_pollution": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L", 6.3),
     "open_redirect":       ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N", 4.7),
 }
 
 
 # ── finding builders (all CONFIRMED, with evidence) ──────────────
+def _sev_from_score(score, fallback):
+    if not isinstance(score, (int, float)):
+        return fallback
+    return ("critical" if score >= 9 else "high" if score >= 7 else "medium" if score >= 4
+            else "low" if score > 0 else "info")
+
+
 def _base(url, title, sev, desc, evidence, family, cwe, tags, steps, impact=None, oracle=None):
     vec, score = _DOM_CVSS.get(family, ("", None))
+    # Severity ALWAYS agrees with the CVSS band (reflected XSS/CSTI = 6.1 → Medium, not an inflated
+    # High). Truth-first: the label can never contradict the score the report prints beside it
+    # (CHAD final-audit defect #6 — caught by report.report_integrity_check).
+    sev = _sev_from_score(score, sev)
     return {"title": title, "severity": sev, "target": url, "description": desc,
             "impact": impact or "Client-side code execution / manipulation in victims' browsers.",
             "evidence": evidence, "reproduction_steps": steps, "cwe": cwe, "family": family,

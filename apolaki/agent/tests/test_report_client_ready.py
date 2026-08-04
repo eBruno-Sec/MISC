@@ -10,7 +10,13 @@ def _good_finding():
     return {"title": "Confirmed working application credentials for 'carlos'", "severity": "high",
             "family": "broken_auth", "confidence": "confirmed", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
             "cvss_score": 8.2, "impact": "Attacker logs in as carlos.", "target": "https://t/login",
-            "reproduction_steps": ["POST /login ...", "Success oracle: a session cookie is issued and an auth-only page loads."],
+            "method": "POST",
+            "curl": ("# 1) Authenticate\ncurl -i -sS -k -X POST 'https://t/login' \\\n"
+                     "  -H 'Content-Type: application/x-www-form-urlencoded' \\\n"
+                     "  --data 'username=carlos&password=<REDACTED_PASSWORD>'\n"
+                     "# 2) Replay session\ncurl -i -sS -k -b 'session=<SESSION_FROM_STEP_1>' 'https://t/my-account'"),
+            "reproduction_steps": ["POST /login with username=carlos and password=<REDACTED_PASSWORD>",
+                                   "Success oracle: a session cookie is issued and an auth-only page loads."],
             "success_oracle": "session cookie issued + auth-only page loads"}
 
 

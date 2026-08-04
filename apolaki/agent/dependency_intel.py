@@ -80,9 +80,30 @@ def _norm_cdn(name):
     return n[:-3] if n.endswith(".js") else n
 
 
+def canon_location(location: str) -> str:
+    """Defensive URL normalization: collapse a DUPLICATED host (scheme://host//host/… or a leading
+    /host/ that repeats the netloc) into a single well-formed URL. Belt-and-suspenders against the
+    doubled-host bug (root cause fixed in the crawler); keeps a component's `location` printable and
+    reproducible (CHAD final-audit defect #3)."""
+    loc = str(location or "")
+    if "://" not in loc:
+        return loc
+    try:
+        scheme, rest = loc.split("://", 1)
+        host = rest.split("/", 1)[0]
+        path = rest[len(host):]
+        h = host.split("@")[-1].split(":")[0]
+        # strip one or more immediate repeats of the host at the front of the path
+        while h and (path.startswith("//" + h + "/") or path.startswith("/" + h + "/")):
+            path = path[path.index(h) + len(h):]
+        return scheme + "://" + host + (path or "/")
+    except Exception:
+        return loc
+
+
 def make_component(name, version, source, confidence, evidence="", location=""):
     return {"name": (name or "").lower(), "version": version or "", "source": source,
-            "confidence": confidence, "evidence": (evidence or "")[:300], "location": location or ""}
+            "confidence": confidence, "evidence": (evidence or "")[:300], "location": canon_location(location)}
 
 
 def extract_script_srcs(html):

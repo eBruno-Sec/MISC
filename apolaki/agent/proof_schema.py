@@ -62,6 +62,14 @@ _FAMILY = {
         ["exposed", "leak", "listing", "public", "disclosed", "readable"],
         ["200", "bucket", "file", "key", "token", "data", "response"],
     ]},
+    # exposed/verified credentials (CWE-522) — the proof is "a discovered credential yielded a valid
+    # authenticated session", NOT an anon-access control (so it must never inherit the access_control
+    # rule). Requires the credential noun AND the verification/exposure signal.
+    "exposed_credentials": {"impact": True, "signals": [
+        ["credential", "password", "login", "account", "api key", "apikey", "secret", "token"],
+        ["valid", "authenticated session", "session cookie", "token issued", "session issued",
+         "logged in", "working", "issued", "exposed", "harvested", "reused"],
+    ]},
 }
 
 # Default for any other family: still require a non-trivial evidence string + an impact.
@@ -77,9 +85,19 @@ _ALIAS = {"sqli": "sql_injection", "nosqli": "sql_injection", "bola_idor": "idor
 
 
 def family_of(finding: dict) -> str:
-    fam = str((finding or {}).get("family") or "").strip().lower()
+    f = finding or {}
+    cwe = str(f.get("cwe") or "").upper().strip()
+    # CWE-522 (Insufficiently Protected Credentials) is an EXPOSED-CREDENTIALS class, not an
+    # access-control / auth-bypass class. It must NOT inherit broken_auth→access_control, whose proof
+    # rule demands anon-access signals a credential-exposure proof can never carry — that mis-mapping
+    # wrongly demoted a genuinely-verified credential to a lead (evidence said "verified working" while
+    # the status read "lead", a self-contradiction). Give the unambiguous CWE precedence over the
+    # coarse family label; auth-BYPASS findings carry CWE-287/305/306 and still route to access_control.
+    if cwe == "CWE-522":
+        return "exposed_credentials"
+    fam = str(f.get("family") or "").strip().lower()
     if not fam:
-        fam = _CWE_FAMILY.get(str((finding or {}).get("cwe") or "").upper().strip(), "")
+        fam = _CWE_FAMILY.get(cwe, "")
     return _ALIAS.get(fam, fam)
 
 

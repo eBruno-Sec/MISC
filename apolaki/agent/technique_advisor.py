@@ -46,10 +46,14 @@ def recommend(findings, techniques, kev_cwes=None, signals=None, top=8):
         if fam and fam in signals:
             score += 12
             reasons.append("matches gathered-intel signal (%s)" % fam)
-        # real-world weight
+        # real-world weight. A CWE class appearing in CISA KEV is a CONTEXTUAL prior (this weakness
+        # family HAS known-exploited instances in the wild) — it is NOT proof that this exact technique
+        # or its CVE is itself known-exploited. KEV is CVE-indexed; "known-exploited in the wild" is
+        # only ever claimed from an EXACT-CVE match (see report.py KEV section). Never launder a
+        # CWE-class intersection into a "known-exploited" claim (CHAD final-audit defect #1).
         if tcwes & kev_cwes:
-            score += 15
-            reasons.append("CISA KEV known-exploited")
+            score += 8
+            reasons.append("weakness class is represented in CISA KEV (contextual prior, not an exact-CVE match)")
         # actionability + demonstrated reliability
         if t.get("payloads") or t.get("try_it"):
             score += 5

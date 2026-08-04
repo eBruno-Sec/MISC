@@ -261,9 +261,10 @@ _CONSUMERS = ("idor", "oauth", "stored_xss", "xss", "ssrf")
 def _dataflow_chains(findings: list, max_chains: int = 6) -> list:
     """Directed producer -> data -> consumer chains grounded in CONFIRMED findings: a
     data-yielding bug (SQLi/RCE/XXE/exposure) feeds a downstream step (auth/IDOR/OAuth/...)
-    to complete takeover. Truth-first AND non-destructive: this PROVES and names the data
-    path deterministically — it never auto-executes the exploitation (extracting and
-    reusing real credentials is destructive and authorization-gated)."""
+    to complete takeover. Truth-first AND non-destructive: this INFERS and names the data
+    path deterministically from co-present confirmed findings — it never auto-executes the
+    exploitation nor claims the transition was run (extracting and reusing real credentials is
+    destructive and authorization-gated)."""
     by_host: dict = {}
     for f in findings:
         by_host.setdefault(_host_of(f), []).append(f)
@@ -289,9 +290,9 @@ def _dataflow_chains(findings: list, max_chains: int = 6) -> list:
                 "summary": (f"Data-flow: the confirmed {pc.upper()} yields {data}; that data flows into "
                             + (f"the confirmed {sink.upper()} on the same host to complete takeover. "
                                if sink else "the application's authentication to impersonate users. ")
-                            + "Apolaki proves this path from confirmed findings; it does NOT auto-execute the "
-                              "exploitation (extracting and reusing real data is destructive and requires explicit "
-                              "authorization)."),
+                            + "Apolaki INFERS this path from co-present confirmed findings (it does not execute "
+                              "the transition); it does NOT auto-execute the exploitation (extracting and reusing "
+                              "real data is destructive and requires explicit authorization)."),
                 "impact": f"End-to-end account/data compromise via the {pc.upper()} data path.",
                 "finding_ids": [f.get("id") for f in links if f.get("id")],
             })

@@ -170,7 +170,13 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
                 return {"headers": {}, "verified": False, "note": "no session cookie set after submit"}
             # crude verification: a login page that no longer shows the password field
             verified = "password" not in resp.text.lower()[:5000] or resp.status_code in (301, 302)
-            return {"headers": {"Cookie": cookie}, "verified": verified,
+            # the EXACT winning request shape (redacted at render time) so the report can reproduce a
+            # real authentication request, not a bogus GET page-load (CHAD final-audit defect #2).
+            shape = {"method": (method or "post").upper(), "action": action,
+                     "content_type": "application/x-www-form-urlencoded",
+                     "user_field": (form["user_field"] if (form and form.get("user_field")) else "username"),
+                     "pass_field": (form["pass_field"] if (form and form.get("pass_field")) else "password")}
+            return {"headers": {"Cookie": cookie}, "verified": verified, "shape": shape,
                     "note": "session cookie captured" + ("" if verified else " (login not verified — continuing anyway)")}
     except Exception as e:
         return {"headers": {}, "verified": False, "note": f"login error: {e}"}
