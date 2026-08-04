@@ -2190,6 +2190,14 @@ class BBHAgent:
         yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
                "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect + "
                "runtime DOM source-to-sink (coverage guarantee, planner-independent)." % len(targets)}
+        # encoded-cookie/param injection once per distinct host base (cookies are host-wide)
+        for hb in list(dict.fromkeys("%s://%s" % (urlparse(t).scheme, urlparse(t).netloc) + urlparse(t).path for t in targets))[:6]:
+            try:
+                async for ev in self._run_tool("run_encoded_cookie", {"url": hb}, session_id):
+                    if "_content" not in ev:
+                        yield ev
+            except Exception:
+                pass
         for u in targets:
             for tool in ("run_sqli", "run_injection_probes", "run_xss", "run_dom_trace"):
                 if self.stop_event.is_set():

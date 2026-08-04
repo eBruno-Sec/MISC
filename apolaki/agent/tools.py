@@ -83,6 +83,7 @@ TOOL_PERMISSIONS = {
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
     "run_dom_trace": PermissionLevel.ACTIVE,
+    "run_encoded_cookie": PermissionLevel.INTRUSIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
     "run_anomaly_scan": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
@@ -3477,6 +3478,53 @@ class ToolRegistry:
                 "reproduction_steps": [f"GET {d['url']} and compare to a baseline with a random parameter name."]})
         return ToolResult("param_mine", url, True,
                           f"{len(discovered)} hidden param(s) discovered → surface", findings)
+
+    async def _run_encoded_cookie(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: recursive encoded-parameter injection. A Base64 cookie/param that decodes to
+        JSON/query (e.g. GinAndJuice's TrackingId -> base64({"value":<SQLi>})) hides its real injection
+        point behind a decode layer. Decode -> mutate an inner field -> re-encode -> resend -> confirm by
+        a request-level differential (status change or boolean split). Reuses the mission session."""
+        import encoding_probe as ep
+        import httpx
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("encoded_cookie", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs) as c:
+                try:
+                    await c.get(url)
+                except Exception as e:
+                    return ToolResult("encoded_cookie", url, True, "fetch error: %s" % str(e)[:60], [])
+                jar = {k: v for k, v in c.cookies.items()}
+                for cname, cval in list(jar.items()):
+                    up = ep.unpack(cval)
+                    if not up:
+                        continue
+                    kind, obj, reenc = up
+                    for field in ep.string_fields(obj)[:4]:
+                        orig = obj[field]
+
+                        async def _send(val):
+                            o2 = dict(obj); o2[field] = val
+                            ck = dict(jar); ck[cname] = reenc(o2)
+                            try:
+                                rr = await c.get(url, cookies=ck)
+                                return {"status": rr.status_code, "len": len(rr.text)}
+                            except Exception:
+                                return {"status": 0, "len": 0}
+
+                        base = await _send(orig)
+                        pr = ep.probes(orig)
+                        q, t, f = await _send(pr["quote"]), await _send(pr["true"]), await _send(pr["false"])
+                        ev = ep.evaluate(base, q, t, f)
+                        if ev["confirmed"]:
+                            findings.append(ep.finding(url, "Cookie '%s'" % cname, field, kind, ev["oracle"]))
+                            break
+        except Exception as e:
+            return ToolResult("encoded_cookie", url, True, "error: %s" % str(e)[:60], findings)
+        return ToolResult("encoded_cookie", url, True, "%d encoded-parameter finding(s)" % len(findings), findings)
 
     async def _run_dom_trace(self, inp: dict) -> ToolResult:
         """Runtime DOM source-to-sink tracer (CHAD Engine B/C): inject a per-request canary into each
