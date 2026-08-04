@@ -2067,9 +2067,86 @@ class BBHAgent:
         # only the ones known at deterministic-pass time. See _run_scan.
         self._plan_steps = steps
 
+    async def _browser_harvest_surface(self, session_id: str) -> int:
+        """JS-RENDERED CRAWL (general technique): most modern apps (SPAs, React/Angular, GinAndJuice)
+        build their navigation, product links and search/param forms in JavaScript, which the HTTP
+        crawler never sees — so the injection probes have nothing to test. Render the app with the
+        headless browser, one level deep, and harvest the CLIENT-RENDERED links + form params into the
+        injectable surface (self.tools.urls + recon['forms']). Target-agnostic; no-ops with no browser.
+        Returns the count of new parameter-bearing endpoints surfaced."""
+        import os as _os
+        if not _os.environ.get("CDP_BROWSER_URL"):
+            return 0
+        import browser_engine as _be
+        from urllib.parse import urljoin
+        seeds = []
+        for e in (self.scope.to_dict().get("in_scope") or []):
+            s = str(e)
+            seeds.append(s if "://" in s else "https://" + s.split("/")[0])
+        seeds = list(dict.fromkeys(seeds))[:2]
+        seen, frontier, before = set(), list(seeds), set(self.tools.urls or [])
+        for _depth in range(2):                    # homepage + one level of rendered links
+            nxt, links = [], []
+            for u in frontier[:10]:
+                u = u.split("#")[0]
+                if u in seen or not self.scope.validate(u)[0]:
+                    continue
+                seen.add(u)
+                try:
+                    obs = await asyncio.to_thread(_be.observe, u)
+                except Exception:
+                    continue
+                if not obs or obs.get("browser") is False:
+                    continue
+                base = obs.get("target") or u
+                for href in (obs.get("links") or []):
+                    absu = urljoin(base, str(href)).split("#")[0]
+                    if absu.startswith("http") and self.scope.validate(absu)[0]:
+                        links.append(absu)
+                        nxt.append(absu)
+                self._harvest_rendered_forms(obs.get("forms") or [], base)
+            if links:
+                self.tools._add_urls(links)
+            frontier = list(dict.fromkeys(nxt))
+        new_params = [u for u in (self.tools.urls or []) if u not in before and "?" in u]
+        return len(new_params)
+
+    def _harvest_rendered_forms(self, forms: list, page_url: str) -> None:
+        """Turn browser-rendered forms into injectable surface, mirroring http_probe: a GET form becomes a
+        parameterized URL (action?field=1&…) so query-injection probes reach it; a POST form is stored so
+        the planner can reach POST-body sinks (e.g. GinAndJuice's XML stock-check → run_xxe)."""
+        from urllib.parse import urljoin
+        store = self.tools.recon.setdefault("forms", [])
+        seen_actions = {f.get("action") for f in store}
+        synth = []
+        for fm in forms or []:
+            action = urljoin(page_url, str(fm.get("action") or page_url)).split("#")[0]
+            if not self.scope.validate(action)[0]:
+                continue
+            method = str(fm.get("method") or "get").upper()
+            names = [n for n in (fm.get("inputs") or []) if n]
+            if method == "POST":
+                if action not in seen_actions:
+                    store.append({"action": action, "method": "POST", "fields": names})
+                    seen_actions.add(action)
+            elif names:
+                sep = "&" if "?" in action else "?"
+                synth.append(action + sep + "&".join("%s=1" % n for n in names[:12]))
+        if synth:
+            self.tools._add_urls(synth)
+
     async def _run_deterministic(self, session_id: str):
         yield {"type": "info", "content": f"Deterministic scan planner engaged ({self.mode} mode, no AI) — "
                "recon → live hosts → fingerprint → enrich → surface probes → nuclei → playbook."}
+        # JS-rendered crawl FIRST: seed the injectable surface with client-rendered links + form params
+        # (SPAs hide these from the HTTP crawler), so the injection probes have real inputs to test.
+        try:
+            _np = await self._browser_harvest_surface(session_id)
+            if _np:
+                yield {"type": "info", "content": "JS-rendered crawl surfaced %d client-rendered "
+                       "parameterized endpoint(s) the HTTP crawler could not see." % _np}
+        except Exception as _e:
+            yield {"type": "info", "content": "JS-rendered crawl skipped (%s)." % type(_e).__name__}
         async for ev in self._execute_plan(session_id):
             yield ev
         note = " AI was unavailable; deterministic coverage completed." if self.ai_degraded else ""

