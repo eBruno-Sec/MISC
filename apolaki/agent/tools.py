@@ -113,6 +113,7 @@ TOOL_PERMISSIONS = {
     "run_param_mine": PermissionLevel.INTRUSIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_cache_deception": PermissionLevel.ACTIVE,
+    "run_client_checks": PermissionLevel.PASSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -5929,6 +5930,33 @@ class ToolRegistry:
         except Exception:
             pass
         return ToolResult("cache_deception", url, True, "%d web-cache-deception finding(s)" % len(findings), findings)
+
+    async def _run_client_checks(self, inp: dict) -> ToolResult:
+        """PASSIVE: two deterministic content checks that close WSTG-CLNT-14 + CONF-08 — reverse tabnabbing
+        (CWE-1022, a target=_blank cross-origin link without rel=noopener, from the page HTML) and a
+        permissive cross-domain policy (CWE-942, crossdomain.xml / clientaccesspolicy.xml with domain="*").
+        Read-only, non-destructive; confirmed from content alone."""
+        import client_checks_tool as cc
+        from urllib.parse import urlparse
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("client_checks", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        page = await self._http(url, "GET", capture=False)
+        tab = cc.reverse_tabnabbing(page.get("body", "") or "", url)
+        if tab:
+            findings.append(self._attach_poc(cc.tabnabbing_finding(url, tab), url, None))
+        pr = urlparse(url)
+        origin = "%s://%s" % (pr.scheme, pr.netloc)
+        for fn in ("crossdomain.xml", "clientaccesspolicy.xml"):
+            pol_url = origin + "/" + fn
+            if not self.scope.validate(pol_url)[0]:
+                continue
+            r = await self._http(pol_url, "GET", capture=False)
+            body = r.get("body", "") or ""
+            if "<" in body and cc.crossdomain_wildcard(body, fn):
+                findings.append(self._attach_poc(cc.crossdomain_finding(pol_url, fn), pol_url, None))
+        return ToolResult("client_checks", url, True, "%d client/config finding(s)" % len(findings), findings)
 
     async def _run_llm_probe(self, inp: dict) -> ToolResult:
         """LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires

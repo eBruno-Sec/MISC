@@ -120,6 +120,21 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        oracle="An anonymous GET of the path-confused URL leaks the tester's OWN authenticated-only tokens.",
        needs_fixture=["authenticated_session"], fixture_source="harvest"),
 
+    # deterministic client/config hygiene checks (RedCyber corpus WSTG coverage gaps) — content-confirmed.
+    _t(id="reverse_tabnabbing", vuln_class="client_side", cwe="CWE-1022", owasp="A05:2021",
+       permission=PASSIVE, transferable=True, wstg="WSTG-CLNT-14",
+       summary="A target=_blank link to a different origin without rel=noopener leaks window.opener.",
+       detect="Page HTML has <a target=_blank href=EXTERNAL> lacking rel=noopener/noreferrer.",
+       exploit="From the opened page, set window.opener.location to a phishing clone of the original tab.",
+       oracle="The offending anchor is present in the page HTML (deterministic, no runtime needed)."),
+
+    _t(id="permissive_crossdomain", vuln_class="misconfiguration", cwe="CWE-942", owasp="A05:2021",
+       permission=PASSIVE, transferable=True, wstg="WSTG-CONF-08",
+       summary="crossdomain.xml / clientaccesspolicy.xml grants cross-origin access to any origin (domain=*).",
+       detect="The served policy file contains a wildcard allow-access-from domain=\"*\" (or <domain uri=\"*\">).",
+       exploit="A Flash/Silverlight object on any origin reads this site's authenticated responses.",
+       oracle="The policy file content contains the wildcard grant (deterministic file content)."),
+
     _t(id="ssi_injection", vuln_class="ssi_injection", cwe="CWE-97", owasp="A03:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-INPV-08",
        summary="Server-Side Includes injection: user input reaches an SSI-parsed response and executes.",
