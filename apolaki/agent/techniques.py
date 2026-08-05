@@ -122,6 +122,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "pair (single known value, never brute-force) and confirm via the product's authenticated marker.",
        exploit="Log in as administrator; on Tomcat/JBoss deploy a WAR/MBean for remote code execution.",
        oracle="The single default pair returns HTTP 200 with the product's admin-console marker."),
+    # beyond web (network pentest): SSH crypto audit from the read-only handshake. Apolaki's first non-HTTP engine.
+    _t(id="weak_ssh_crypto", vuln_class="network_service", cwe="CWE-326", owasp="A02:2021", wstg="WSTG-CRYP-04",
+       permission=ACTIVE, transferable=True,
+       summary="An SSH daemon advertises weak/deprecated KEX, cipher, MAC, or host-key algorithms.",
+       detect="Complete ONE SSH handshake (no auth) and read the server's KEXINIT name-lists; exact-match the "
+              "advertised algorithms against the deprecated set (CBC, SHA-1, arcfour, 3des, umac-64, ssh-rsa/dss).",
+       exploit="From a MITM position, negotiate a weak cipher/MAC/KEX to attempt session decryption or tampering.",
+       oracle="The server's KEXINIT literally lists a weak algorithm (exact name / anchored suffix, no substring FP)."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

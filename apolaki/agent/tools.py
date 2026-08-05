@@ -121,6 +121,7 @@ TOOL_PERMISSIONS = {
     "run_username_enum": PermissionLevel.ACTIVE,
     "run_session_fixation": PermissionLevel.ACTIVE,
     "run_default_creds": PermissionLevel.ACTIVE,
+    "run_ssh_audit": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -2144,6 +2145,13 @@ class ToolRegistry:
             if probe.get("confirmed"):
                 findings.append(self._service_finding(service, chk, "%s:%s" % (host, port),
                                 probe.get("evidence", ""), critical=False))
+        elif service == "ssh":
+            import ssh_audit_tool as _ssh                     # read-only handshake, no credential attack
+            offer = await asyncio.get_event_loop().run_in_executor(None, _ssh.probe, host, int(port))
+            res = _ssh.analyze(offer) if not offer.get("error") else None
+            if res:
+                weak, sev = res
+                findings.append(_ssh.finding(host, int(port), weak, sev, offer.get("banner", "")))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6222,6 +6230,38 @@ class ToolRegistry:
             if dc.confirmed(au.get("status"), au.get("body", ""), entry):
                 findings.append(self._attach_poc(dc.finding(url, entry), url, None))
         return ToolResult("default_credentials", url, True, "%d default-credential finding(s)" % len(findings), findings)
+
+    async def _run_ssh_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service — Apolaki's first beyond-web engine): read-only SSH crypto audit (CWE-326).
+        Completes ONE SSH handshake (NO authentication, NO credential attempt, NO brute-force) and flags weak
+        KEX/cipher/MAC/host-key algorithms the daemon advertises. Exact-match classification — never false-flags
+        the strong group16/18-sha512 exchanges or sha2 MACs."""
+        import asyncio as _aio
+        import ssh_audit_tool as ssh
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("ssh://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 22
+        host = raw
+        if not host:
+            return ToolResult("ssh_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("ssh://%s" % host)[0] or self.scope.validate("http://%s" % host)[0]
+                or self.scope.validate(host)[0]):
+            return ToolResult("ssh_audit", host, False, "", [], "SCOPE BLOCK")
+        offer = await _aio.get_event_loop().run_in_executor(None, ssh.probe, host, port)
+        if offer.get("error"):
+            return ToolResult("ssh_audit", "%s:%d" % (host, port), True, "no SSH handshake: %s" % offer["error"], [])
+        findings = []
+        res = ssh.analyze(offer)
+        if res:
+            weak, sev = res
+            findings.append(self._attach_poc(ssh.finding(host, port, weak, sev, offer.get("banner", "")),
+                                             "%s:%d" % (host, port), None))
+        return ToolResult("ssh_audit", "%s:%d" % (host, port), True,
+                          "%d weak-ssh-crypto finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

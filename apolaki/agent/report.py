@@ -359,6 +359,7 @@ _CWE_FAMILY = {
     "cwe-204": "username_enumeration", "cwe-208": "username_enumeration",
     "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
     "cwe-1392": "default_credentials", "cwe-521": "default_credentials",
+    "cwe-326": "weak_ssh_crypto", "cwe-327": "weak_ssh_crypto",
 }
 
 # CWE -> CAPEC attack pattern (MITRE). Only well-established 1:1 mappings are
@@ -462,6 +463,9 @@ _FAMILY_FIX = {
                         "after login and logout; invalidate the pre-auth session server-side.",
     "default_credentials": "Change or disable the default account immediately; restrict the management interface "
                            "to trusted networks and require strong, unique credentials.",
+    "weak_ssh_crypto": "Restrict sshd to strong algorithms only (curve25519 / group16-18-sha512 KEX; "
+                       "chacha20-poly1305 + aes-gcm/ctr ciphers; *-etm hmac-sha2 MACs; rsa-sha2/ed25519 host "
+                       "keys); remove CBC, SHA-1, arcfour, 3des, umac-64, ssh-rsa and ssh-dss.",
 }
 
 

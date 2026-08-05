@@ -62,9 +62,9 @@ _PACKS = {
         {"id": "smtp_spf_dmarc", "cwe": "CWE-290", "intrusive": False,
          "oracle": "no SPF/DMARC record for the sending domain (spoofable)", "enables": []},
     ]},
-    "ssh": {"graph_kind": "service", "note": "SSH version/config intelligence (no credential attack).", "checks": [
-        {"id": "ssh_version_intel", "cwe": "CWE-1104", "intrusive": False,
-         "oracle": "banner version matches a known-vulnerable OpenSSH build", "enables": []},
+    "ssh": {"graph_kind": "service", "note": "SSH crypto/version audit (read-only handshake, no credential attack).", "checks": [
+        {"id": "ssh_weak_crypto", "cwe": "CWE-326", "intrusive": False,
+         "oracle": "the server's KEXINIT advertises weak KEX/cipher/MAC/host-key algorithms", "enables": []},
     ]},
     "snmp": {"graph_kind": "service", "note": "SNMP community/config exposure.", "checks": [
         {"id": "snmp_default_community", "cwe": "CWE-1188", "intrusive": False,

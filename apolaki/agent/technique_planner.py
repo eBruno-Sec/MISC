@@ -87,6 +87,7 @@ ALWAYS_ON = {
     "encoded_data_decode":      "passive intel harvest at every transport chokepoint",
     "llm_prompt_injection":     "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
     "llm_output_handling":      "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
+    "weak_ssh_crypto":          "service_router pack: fingerprint(port 22/SSH) -> _run_service_pack runs the read-only audit",
 }
 
 

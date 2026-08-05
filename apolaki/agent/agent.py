@@ -93,7 +93,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
     "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_form_nosqli", "run_upload_test",
-    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_waf_bypass", "run_sqli_structural", "run_session_token", "run_username_enum", "run_session_fixation", "run_default_creds", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
+    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_waf_bypass", "run_sqli_structural", "run_session_token", "run_username_enum", "run_session_fixation", "run_default_creds", "run_ssh_audit", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -2176,6 +2176,33 @@ class BBHAgent:
         discovered query input is ALWAYS tested even if the graph-authoritative planner did not select
         it. Reuses _run_tool, so findings auto-store through the same scope/HITL-gated path. Bounded."""
         from urllib.parse import urlparse, parse_qs
+        # API-FIRST SEEDING (before targets are gathered): a linkless JSON API or a GraphQL host yields nothing
+        # to an HTML crawl, so its whole surface is invisible. Auto-fetch the OpenAPI spec (fetch_openapi seeds
+        # every documented endpoint into self.tools.urls via _add_urls) and probe GraphQL (run_graphql
+        # auto-discovers /graphql + introspection). Cheap: a few GETs per distinct base host; both self-skip a
+        # non-API/non-GraphQL host. This is what lets the injection/authz engines below reach an API target.
+        _bases = []
+        for u in (self.tools.urls or []):
+            pr = urlparse(u)
+            b = "%s://%s" % (pr.scheme, pr.netloc)
+            if b not in _bases and pr.scheme and self.scope.validate(b)[0]:
+                _bases.append(b)
+        for b in _bases[:6]:
+            if self.stop_event.is_set():
+                return
+            for _spec in ("/openapi.json", "/swagger.json", "/v3/api-docs", "/api-docs", "/swagger/v1/swagger.json"):
+                try:
+                    async for ev in self._run_tool("fetch_openapi", {"url": b + _spec}, session_id):
+                        if "_content" not in ev:
+                            yield ev
+                except Exception:
+                    pass
+            try:
+                async for ev in self._run_tool("run_graphql", {"url": b}, session_id):
+                    if "_content" not in ev:
+                        yield ev
+            except Exception:
+                pass
         seen_sig, targets = set(), []
         for u in (self.tools.urls or []):
             if "?" not in u or not self.scope.validate(u)[0]:
