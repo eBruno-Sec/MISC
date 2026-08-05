@@ -126,6 +126,7 @@ TOOL_PERMISSIONS = {
     "run_smb_enum": PermissionLevel.ACTIVE,
     "run_snmp_audit": PermissionLevel.ACTIVE,
     "run_modbus_audit": PermissionLevel.ACTIVE,
+    "run_path_sqli": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6358,6 +6359,39 @@ class ToolRegistry:
             findings.append(self._attach_poc(se.signing_finding(host, port), "%s:%d" % (host, port), None))
         return ToolResult("smb_enum", "%s:%d" % (host, port), True,
                           "%d smb finding(s)" % len(findings), findings)
+
+    async def _run_path_sqli(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: path-parameter SQL injection for REST/API endpoints (CWE-89). REST APIs put ids in the PATH
+        (/users/v1/{id}), which the query-string SQLi sweep never reaches. Injects a quote into each id-like
+        (numeric) path segment and confirms via the ERROR-based oracle: a DBMS error appears that the baseline
+        lacked, so the segment is concatenated into SQL. FP-safe — only a matched DBMS error signature counts."""
+        import sqli_tool as sq
+        from urllib.parse import urlparse, urlunparse
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("sqli", url, False, "", [], "SCOPE BLOCK")
+        pr = urlparse(url)
+        if pr.query:
+            return ToolResult("sqli", url, True, "has query string (run_sqli covers it)", [])
+        segs = pr.path.split("/")
+        cand = [i for i, s in enumerate(segs) if s.isdigit()]        # seeded API ids are numeric -> low-FP target
+        if not cand:
+            return ToolResult("sqli", url, True, "no id-like path segment", [])
+        base = await self._http(url, "GET", capture=False)
+        base_body = base.get("body", "") or ""
+        findings = []
+        for i in cand[:4]:
+            for payload in ("'", "%27"):
+                q = list(segs)
+                q[i] = segs[i] + payload
+                u2 = urlunparse(pr._replace(path="/".join(q)))
+                r = await self._http(u2, "GET", capture=False)
+                hits = sq.error_signatures(base_body, r.get("body", "") or "")
+                if hits:
+                    findings.append(self._attach_poc(
+                        sq.error_finding(url, "path segment %d" % i, segs[i] + payload, hits), u2, None))
+                    break
+        return ToolResult("sqli", url, True, "%d path-param SQLi finding(s)" % len(findings), findings)
 
     async def _run_snmp_audit(self, inp: dict) -> ToolResult:
         """ACTIVE (network service, beyond web): SNMP default-community audit (CWE-1188). One read-only UDP GET
