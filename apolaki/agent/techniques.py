@@ -90,6 +90,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Inject query operators ($ne, $gt, $where) to bypass filters or coerce mass updates.",
        oracle="Response set changes in a way only an interpreted operator (not a literal) explains."),
     # distilled from *Beginner Web Application Pentester* (Abdollahi), "Testing for XPath injection".
+    # distilled from WAHH ch7 — weak session-token generation (predictable / meaningful).
+    _t(id="weak_session_token", vuln_class="session", cwe="CWE-330", owasp="A07:2021", wstg="WSTG-SESS-01",
+       permission=ACTIVE, transferable=True,
+       summary="Session token is predictable — sequential/time-incrementing, or decodes to meaningful user data.",
+       detect="Sample N fresh tokens: a numeric component forms an arithmetic/bounded sequence, or a decoding "
+              "leaks user=/uid=/role= — signals a CSPRNG token never produces.",
+       exploit="Extrapolate the sequence (or forge a meaningful token) to hijack other users' sessions.",
+       oracle="Sampled tokens are sequential across the set, or decode to structured user/role data."),
+
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",
        permission=INTRUSIVE, transferable=True,

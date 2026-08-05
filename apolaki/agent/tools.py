@@ -117,6 +117,7 @@ TOOL_PERMISSIONS = {
     "run_css_injection": PermissionLevel.ACTIVE,
     "run_waf_bypass": PermissionLevel.ACTIVE,
     "run_sqli_structural": PermissionLevel.INTRUSIVE,
+    "run_session_token": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6035,6 +6036,43 @@ class ToolRegistry:
             if confirmed:
                 findings.append(self._attach_poc(sq.structural_finding(url, name, hits), _setq(name, p["bad"]), None))
         return ToolResult("sqli", url, True, "%d structural SQLi finding(s)" % len(findings), findings)
+
+    async def _run_session_token(self, inp: dict) -> ToolResult:
+        """ACTIVE: session-token predictability analyzer (WAHH ch7, CWE-330/384). Fetches the session-issuing
+        URL N times with FRESH clients (no cookie jar), collects each fresh Set-Cookie, and confirms if a
+        cookie's values are SEQUENTIAL/predictable or DECODE to meaningful user/role data. Safe: ~16 GETs,
+        no brute-force, no DoS. A CSPRNG token yields nothing (no FP)."""
+        import session_token_tool as stt
+        from http.cookies import SimpleCookie
+
+        import httpx
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("session_token", url, False, "", [], "SCOPE BLOCK")
+        samples = {}
+        try:
+            for _ in range(16):
+                async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15,
+                                             headers={"User-Agent": _UA}) as c:
+                    r = await c.get(url)
+                    for sc in r.headers.get_list("set-cookie"):
+                        ck = SimpleCookie()
+                        ck.load(sc)
+                        for name, morsel in ck.items():
+                            samples.setdefault(name, []).append(morsel.value)
+        except Exception:
+            pass
+        findings = []
+        for name, vals in samples.items():
+            if len(set(vals)) < 4:
+                continue                                   # a static cookie isn't a fresh-per-request session token
+            if not (stt.is_sessionish(name) or len(set(vals)) == len(vals)):
+                continue
+            res = stt.analyze(vals)
+            if res:
+                kind, ev, cwe = res
+                findings.append(self._attach_poc(stt.finding(url, kind, ev, cwe, name), url, None))
+        return ToolResult("session_token", url, True, "%d weak-session-token finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

@@ -52,6 +52,7 @@ _PRECONDITIONS = {
     # session engines distilled from the books/corpus — gated on existing observations so the planner
     # (and the graph, which shares this precondition table) reasons about them, not just the blind sweep.
     "sqli_structural":         ["has_search_param"],   # input in the query STRUCTURE (ORDER BY / column)
+    "weak_session_token":      ["serves_js"],          # any web app issues session cookies to sample
     "xpath_injection":         ["has_search_param"],   # input concatenated into an XPath query
     "ldap_injection":          ["has_search_param"],   # input concatenated into an LDAP filter
     "ssi_injection":           ["reflects_input"],     # input reaches an SSI-parsed response
