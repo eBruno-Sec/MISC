@@ -883,6 +883,23 @@ async def techniques_taxonomy(lens: str = "owasp"):
         return {"error": str(e), "lens": lens}
 
 
+@app.get("/bench/labs")
+async def bench_labs():
+    """The multi-lab regression surface (#101): every wired benchmark lab, its expected vuln classes, and whether
+    it is reachable right now — so a run scores only labs that are UP. The full sweep (scan+score each) is driven
+    by bench_all.bench(reachable, scan_via_mission); this endpoint is the cheap, non-blocking inventory."""
+    import bench_all as BA
+    import benchmark as B
+    try:
+        up = set(await BA.reachable_labs())
+        labs = [{"fixture": k, "name": B.MANIFESTS[k]["name"], "url": BA.LAB_URLS[k],
+                 "expected": B.MANIFESTS[k]["expected"], "reachable": k in up}
+                for k in BA.LAB_URLS if k in B.MANIFESTS]
+        return {"labs": labs, "reachable_count": len(up), "min_gate": BA.MIN_GATE}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/orchestration/audit")
 async def orchestration_audit():
     """Apolaki's north star made checkable: every auto-fired, oracle-confirmed technique must feed the planner
