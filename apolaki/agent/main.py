@@ -883,6 +883,18 @@ async def techniques_taxonomy(lens: str = "owasp"):
         return {"error": str(e), "lens": lens}
 
 
+@app.get("/coverage/wstg")
+async def wstg_coverage():
+    """Honest coverage against the full OWASP WSTG v4.2 active-test catalog (109 tests): how many Apolaki
+    fully tests (a confirming engine owns it), partially touches, or deliberately does NOT test — including
+    the safety exclusions (no-brute lock-out, MFA-pauses, request-smuggling collateral) with the reason."""
+    import wstg_catalog as wc
+    try:
+        return wc.coverage()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # --- Offensive intel feeds (Phase 0): enrich the registry with KEV/CAPEC. Deterministic, cached. ---
 _INTEL_CACHE = {"mtime": None, "snaps": {}}
 
