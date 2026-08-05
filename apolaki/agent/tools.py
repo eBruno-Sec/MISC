@@ -124,6 +124,7 @@ TOOL_PERMISSIONS = {
     "run_ssh_audit": PermissionLevel.ACTIVE,
     "run_ldap_enum": PermissionLevel.ACTIVE,
     "run_smb_enum": PermissionLevel.ACTIVE,
+    "run_snmp_audit": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -2168,6 +2169,13 @@ class ToolRegistry:
             if out:
                 sev, ev, data = out
                 findings.append(_se.finding(host, int(port), sev, ev, data))
+        elif service == "snmp":
+            import snmp_audit_tool as _sa                        # read-only GET, documented default communities only
+            res = await asyncio.get_event_loop().run_in_executor(None, _sa.probe, host, int(port))
+            out = _sa.analyze(res) if not res.get("error") else None
+            if out:
+                comm, sysd = out
+                findings.append(_sa.finding(host, int(port), comm, sysd))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6338,6 +6346,34 @@ class ToolRegistry:
             findings.append(self._attach_poc(se.finding(host, port, sev, ev, data), "%s:%d" % (host, port), None))
         return ToolResult("smb_enum", "%s:%d" % (host, port), True,
                           "%d smb-null-session finding(s)" % len(findings), findings)
+
+    async def _run_snmp_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service, beyond web): SNMP default-community audit (CWE-1188). One read-only UDP GET
+        (sysDescr.0) per DOCUMENTED default community (public/private — single known values, NOT a wordlist);
+        confirms an agent still on its default. An agent ignores a wrong community, so a GetResponse proves it."""
+        import asyncio as _aio
+        import snmp_audit_tool as sa
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("snmp://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 161
+        host = raw
+        if not host:
+            return ToolResult("snmp_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("snmp://%s" % host)[0] or self.scope.validate("http://%s" % host)[0]
+                or self.scope.validate(host)[0]):
+            return ToolResult("snmp_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, sa.probe, host, port)
+        findings = []
+        out = sa.analyze(res)
+        if out:
+            comm, sysd = out
+            findings.append(self._attach_poc(sa.finding(host, port, comm, sysd), "%s:%d" % (host, port), None))
+        return ToolResult("snmp_audit", "%s:%d" % (host, port), True,
+                          "%d snmp-default-community finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

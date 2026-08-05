@@ -218,6 +218,16 @@ services:
       - "127.0.0.1:42445:445"
     restart: unless-stopped
 
+  # snmpd — an SNMP agent lab for the beyond-web SNMP engine (#105). Reachable at snmp://snmpd:161/udp on the
+  # compose network; host 42161/udp. Ships the default RO community 'public', so the default-community audit has
+  # a positive case to confirm against (mirrors a router/switch/printer/hypervisor on the DW network).
+  snmpd:
+    image: polinux/snmpd:latest
+    profiles: ["labs"]
+    ports:
+      - "127.0.0.1:42161:161/udp"
+    restart: unless-stopped
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:

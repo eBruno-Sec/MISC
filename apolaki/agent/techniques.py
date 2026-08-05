@@ -146,6 +146,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "refuses the anonymous session and returns nothing.",
        exploit="Map the file-server layout pre-auth and read any guest-exposed non-administrative share.",
        oracle="A null session connects and listShares returns a share (a non-admin share escalates to high)."),
+    # beyond web (infra pentest): SNMP still on a documented default community string.
+    _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An SNMP agent still accepts a documented default community string (public/private).",
+       detect="One read-only SNMPv2c GET for sysDescr.0 per default community (single known values, no wordlist); "
+              "an agent ignores a wrong community, so a GetResponse with error-status 0 proves the default is live.",
+       exploit="Read device config/interfaces/routes/ARP (RO 'public'); a RW 'private' community rewrites config.",
+       oracle="A GET with a default community returns a GetResponse (error-status 0) with a sysDescr value."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

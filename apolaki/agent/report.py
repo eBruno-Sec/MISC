@@ -360,6 +360,7 @@ _CWE_FAMILY = {
     "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
     "cwe-1392": "default_credentials", "cwe-521": "default_credentials",
     "cwe-326": "weak_ssh_crypto", "cwe-327": "weak_ssh_crypto",
+    "cwe-1188": "snmp_default_community",
 }
 
 # CWE -> CAPEC attack pattern (MITRE). Only well-established 1:1 mappings are
@@ -471,6 +472,8 @@ _FAMILY_FIX = {
     "smb_null_session": "Deny anonymous access: 'restrict anonymous = 2' (Windows) / 'map to guest = Never' + "
                         "'restrict anonymous = yes' (Samba); disable SMBv1 and require authentication for share "
                         "enumeration; remove guest-readable shares.",
+    "snmp_default_community": "Change or disable default community strings; move to SNMPv3 with auth + privacy; "
+                             "restrict UDP/161 to trusted management hosts.",
 }
 
 
