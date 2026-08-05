@@ -178,6 +178,13 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Complete the @RSYNCD greeting and send '#list' (no password); the daemon returns its module names.",
        exploit="Read exposed modules (backups/web roots/config) anonymously for data theft + lateral-movement intel.",
        oracle="An anonymous '#list' returns >=1 module name."),
+    # beyond web (infra pentest): NTP monlist amplification + client disclosure.
+    _t(id="ntp_monlist", vuln_class="network_service", cwe="CWE-406", owasp="A05:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An NTP server answers the legacy 'monlist' (mode 7) request — a UDP-amplification reflector.",
+       detect="Send one read-only ntpdc REQ_MON_GETLIST_1 (monlist) query; a mode-7 response confirms it (CVE-2013-5211).",
+       exploit="Abuse as a high-ratio UDP-amplification DDoS reflector; harvest recent client IPs it discloses.",
+       oracle="The server returns a mode-7 monlist response to the monlist request."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

@@ -25,6 +25,7 @@ _PORT_SVC = {
     6379: "redis", 8080: "http", 8443: "https", 9000: "http", 9200: "elasticsearch",
     9300: "elasticsearch", 10250: "kubelet", 11211: "memcached", 27017: "mongodb",
     502: "modbus",                                   # ICS/OT — Modbus/TCP (read-only audit)
+    123: "ntp",                                       # NTP — monlist/amplification (read-only)
 }
 
 # banner signature -> service type (a banner OVERRIDES the port guess when present)
@@ -95,6 +96,10 @@ _PACKS = {
     "rsync": {"graph_kind": "service", "note": "File sync: anonymous rsync module enumeration (READ-ONLY).", "checks": [
         {"id": "rsync_anon", "cwe": "CWE-306", "intrusive": False,
          "oracle": "an anonymous '#list' returns the daemon's module names", "enables": ["file_read"]},
+    ]},
+    "ntp": {"graph_kind": "service", "note": "Time: NTP monlist amplification/disclosure (READ-ONLY query).", "checks": [
+        {"id": "ntp_monlist", "cwe": "CWE-406", "intrusive": False,
+         "oracle": "the server answers the ntpdc monlist (mode 7) request (CVE-2013-5211)", "enables": []},
     ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,

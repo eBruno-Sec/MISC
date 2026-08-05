@@ -484,6 +484,8 @@ _FAMILY_FIX = {
                    "restrict TCP/5900 to trusted management hosts.",
     "rsync_anon": "Set 'list = no' and require 'auth users' + a secrets file on every rsync module; restrict "
                   "TCP/873 to trusted hosts or tunnel rsync over SSH.",
+    "ntp_monlist": "Upgrade ntpd to >=4.2.7 or add 'disable monitor' to ntp.conf; restrict mode-6/7 queries "
+                   "('restrict ... noquery') and limit inbound UDP/123 from untrusted networks.",
 }
 
 
