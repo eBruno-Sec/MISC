@@ -99,6 +99,26 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                "(XPath has no per-node ACLs).",
        oracle="A stray quote breaks the query (status-class change) OR the true-branch matches the baseline "
               "while the false-branch diverges — a differential a literal value cannot explain."),
+
+    # distilled from *Beginner Web Application Pentester* (Abdollahi), "Testing for LDAP/SSI injection".
+    _t(id="ldap_injection", vuln_class="ldap_injection", cwe="CWE-90", owasp="A03:2021",
+       permission=INTRUSIVE, transferable=True, wstg="WSTG-INPV-06",
+       summary="Injection into an LDAP search filter built from user input (directory auth / user lookup).",
+       detect="An unbalanced filter metacharacter ( ) * & | provokes an LDAP DIRECTORY error signature "
+              "(javax.naming/JNDI/OpenLDAP/AD/ldap_*) that the baseline lacks — LDAP-specific, so it never "
+              "collides with SQLi/XPath.",
+       exploit="Bypass an LDAP-backed login with a filter tautology `*)(uid=*))(|(uid=*`, or enumerate objects.",
+       oracle="An LDAP directory error signature appears on the metacharacter break but not the baseline."),
+
+    _t(id="ssi_injection", vuln_class="ssi_injection", cwe="CWE-97", owasp="A03:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-INPV-08",
+       summary="Server-Side Includes injection: user input reaches an SSI-parsed response and executes.",
+       detect="Inject the benign `<!--#echo var=\"DATE_GMT\" -->` wrapped in unique markers; the server "
+              "replaces it with a live DATE between the markers (executed) rather than echoing the literal.",
+       exploit="Escalate to file read via `#include file=` and, if the exec directive is on, OS command via "
+               "`#exec cmd=` (NOT fired by the engine — confirmation is the benign echo only).",
+       oracle="A live date appears between our two random markers where the literal directive was injected."),
+
     # distilled from *Redefining Hacking* (Santos), ch 8 AI security — Table 8-2 + garak/ps-fuzz probes.
     _t(id="llm_prompt_injection", vuln_class="llm_prompt_injection", cwe="CWE-1427", owasp="LLM01:2025",
        permission=ACTIVE, transferable=True,

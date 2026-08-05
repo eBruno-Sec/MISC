@@ -101,6 +101,8 @@ TOOL_PERMISSIONS = {
     "run_xxe": PermissionLevel.INTRUSIVE,
     "run_sqli": PermissionLevel.INTRUSIVE,
     "run_xpath": PermissionLevel.INTRUSIVE,
+    "run_ldap": PermissionLevel.INTRUSIVE,
+    "run_ssi": PermissionLevel.ACTIVE,
     "run_auth_sqli": PermissionLevel.INTRUSIVE,
     "run_form_cmdi": PermissionLevel.INTRUSIVE,
     "run_nosqli": PermissionLevel.INTRUSIVE,
@@ -3505,6 +3507,132 @@ class ToolRegistry:
         except Exception:
             pass
         return ToolResult("xpath", url, True, "%d XPath injection finding(s)" % len(findings), findings)
+
+    async def _run_ldap(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: LDAP injection (CWE-90) — distilled from *Beginner Web Application Pentester*. Apps that
+        authenticate/look up against a directory concatenate input into an LDAP search filter. Confirmed
+        LDAP-SPECIFICALLY (an LDAP directory error signature on an unbalanced filter break), so it never
+        collides with SQLi/XPath. Tests GET query params AND POST form fields."""
+        import ldap_tool as lp
+        import httpx
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("ldap", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        pr0 = urlparse(url)
+
+        def _setq(name, val):
+            pairs = [(k, val if k == name else v) for k, v in parse_qsl(pr0.query, keep_blank_values=True)]
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        async def _body(u):
+            r = await self._http(u, "GET", capture=False)
+            return r.get("body", "") or ""
+
+        for name, val in parse_qsl(pr0.query, keep_blank_values=True):
+            p = lp.probes(val)
+            base = await _body(url)
+            for key in ("paren", "star_group", "amp", "pipe"):
+                ev = lp.evaluate(base, await _body(_setq(name, p[key])))
+                if ev["confirmed"]:
+                    findings.append(self._attach_poc(lp.finding(url, name, "parameter", ev["oracle"]),
+                                                     _setq(name, p[key]), None))
+                    break
+
+        try:
+            import form_xss as fx
+            hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+                r0 = await c.get(url)
+                forms = fx.parse_forms(r0.text, url)
+
+                async def _pbody(action, field, value):
+                    g = await c.get(url)
+                    fresh = fx.parse_forms(g.text, url)
+                    ff = next((x for x in fresh if x["action"] == action and field in x["text_fields"]), None)
+                    body = fx.body_with(ff, field, value) if ff else {field: value}
+                    rr = await c.post(action, data=body,
+                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
+                    return rr.text
+                seen = set()
+                for form in forms:
+                    act = form["action"]
+                    if not self.scope.validate(act)[0]:
+                        continue
+                    for field in form["text_fields"]:
+                        if (act, field) in seen:
+                            continue
+                        seen.add((act, field))
+                        p = lp.probes("x")
+                        base = await _pbody(act, field, "x")
+                        for key in ("paren", "star_group", "amp", "pipe"):
+                            ev = lp.evaluate(base, await _pbody(act, field, p[key]))
+                            if ev["confirmed"]:
+                                findings.append(self._attach_poc(
+                                    lp.finding(act, field, "form field", ev["oracle"]), act, None, method="POST"))
+                                break
+        except Exception:
+            pass
+        return ToolResult("ldap", url, True, "%d LDAP injection finding(s)" % len(findings), findings)
+
+    async def _run_ssi(self, inp: dict) -> ToolResult:
+        """ACTIVE: Server-Side Includes injection (CWE-97) — distilled from *Beginner Web Application
+        Pentester*. Injects ONLY the benign `#echo var="DATE_GMT"` directive wrapped in unique markers;
+        confirmed when the server replaces it with a live DATE between the markers (executed, not reflected).
+        Non-destructive (never #exec/#include). Tests GET query params AND POST form fields."""
+        import os as _os
+
+        import httpx
+        import ssi_tool as si
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("ssi", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        pr0 = urlparse(url)
+
+        def _setq(name, val):
+            pairs = [(k, val if k == name else v) for k, v in parse_qsl(pr0.query, keep_blank_values=True)]
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        for name, val in parse_qsl(pr0.query, keep_blank_values=True):
+            t = _os.urandom(4).hex()
+            r = await self._http(_setq(name, si.payload(t)), "GET", capture=False)
+            ev = si.evaluate(r.get("body", "") or "", t)
+            if ev["confirmed"]:
+                findings.append(self._attach_poc(si.finding(url, "parameter", name, ev["oracle"]),
+                                                 _setq(name, si.payload(t)), None))
+
+        try:
+            import form_xss as fx
+            hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+                r0 = await c.get(url)
+                forms = fx.parse_forms(r0.text, url)
+                seen = set()
+                for form in forms:
+                    act = form["action"]
+                    if not self.scope.validate(act)[0]:
+                        continue
+                    for field in form["text_fields"]:
+                        if (act, field) in seen:
+                            continue
+                        seen.add((act, field))
+                        t = _os.urandom(4).hex()
+                        g = await c.get(url)
+                        fresh = fx.parse_forms(g.text, url)
+                        ff = next((x for x in fresh if x["action"] == act and field in x["text_fields"]), None)
+                        body = fx.body_with(ff, field, si.payload(t)) if ff else {field: si.payload(t)}
+                        rr = await c.post(act, data=body,
+                                          headers={"Content-Type": "application/x-www-form-urlencoded"})
+                        ev = si.evaluate(rr.text, t)
+                        if ev["confirmed"]:
+                            findings.append(self._attach_poc(
+                                si.finding(act, "form field", field, ev["oracle"]), act, None, method="POST"))
+        except Exception:
+            pass
+        return ToolResult("ssi", url, True, "%d SSI injection finding(s)" % len(findings), findings)
 
     async def _run_form_xss(self, inp: dict) -> ToolResult:
         """Reflected XSS through POST FORM fields (general): the GET-query engine misses a value submitted in
