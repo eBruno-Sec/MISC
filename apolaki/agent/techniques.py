@@ -98,6 +98,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "leaks user=/uid=/role= — signals a CSPRNG token never produces.",
        exploit="Extrapolate the sequence (or forge a meaningful token) to hijack other users' sessions.",
        oracle="Sampled tokens are sequential across the set, or decode to structured user/role data."),
+    # distilled from WAHH ch6 — authentication that leaks account existence (username enumeration).
+    _t(id="username_enumeration", vuln_class="authentication", cwe="CWE-204", owasp="A07:2021", wstg="WSTG-IDNT-04",
+       permission=ACTIVE, transferable=True,
+       summary="Login/registration/reset reveals whether an account exists via a response discrepancy.",
+       detect="Submit a KNOWN account and two random non-existent ones with the SAME wrong password; a masked "
+              "message or status divergence beyond the endpoint's own noise floor is a membership oracle.",
+       exploit="Harvest valid usernames/emails pre-auth to seed credential-stuffing and targeted phishing.",
+       oracle="The existing-account response diverges from a non-existent one (status or wording), same wrong pw."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

@@ -356,6 +356,7 @@ _CWE_FAMILY = {
     "cwe-601": "open_redirect", "cwe-1336": "ssti", "cwe-94": "ssti", "cwe-502": "deserialization",
     "cwe-352": "csrf", "cwe-942": "cors", "cwe-200": "exposure", "cwe-527": "git_exposure",
     "cwe-1321": "prototype_pollution", "cwe-1336": "ssti",
+    "cwe-204": "username_enumeration", "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
 }
 
 # CWE -> CAPEC attack pattern (MITRE). Only well-established 1:1 mappings are
@@ -449,6 +450,12 @@ _FAMILY_FIX = {
     "exposure": "Remove the exposed file from the web root and rotate any leaked secrets; block dotfiles/backups "
                 "at the web server.",
     "git_exposure": "Block access to .git/ at the web server and rotate every secret found in the repo history.",
+    "username_enumeration": "Return one identical, generic failure ('invalid username or password') with the same "
+                            "status, body, and timing whether or not the account exists — on login, registration, "
+                            "and password reset alike.",
+    "weak_session_token": "Generate session tokens from a CSPRNG with >=128 bits of entropy; never encode "
+                          "meaningful data (username/role) in the token; issue a fresh token on login/privilege "
+                          "change.",
 }
 
 

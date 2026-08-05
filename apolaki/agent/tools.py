@@ -118,6 +118,7 @@ TOOL_PERMISSIONS = {
     "run_waf_bypass": PermissionLevel.ACTIVE,
     "run_sqli_structural": PermissionLevel.INTRUSIVE,
     "run_session_token": PermissionLevel.ACTIVE,
+    "run_username_enum": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6073,6 +6074,59 @@ class ToolRegistry:
                 kind, ev, cwe = res
                 findings.append(self._attach_poc(stt.finding(url, kind, ev, cwe, name), url, None))
         return ToolResult("session_token", url, True, "%d weak-session-token finding(s)" % len(findings), findings)
+
+    def _known_account(self) -> str:
+        """A username/email we ALREADY know exists — the ground truth for the enumeration differential. Prefers
+        the scan's verified working login, then any persona identity. Never a guessed value."""
+        u = getattr(self, "_enum_known_username", "") or ""
+        if u:
+            return u
+        for meta in (getattr(self.state, "identities", {}) or {}).values():
+            ident = (meta or {}).get("identity") or ""
+            if ident and "@" in ident or (ident and not ident.isdigit()):
+                return ident
+        return ""
+
+    async def _run_username_enum(self, inp: dict) -> ToolResult:
+        """ACTIVE: username / account enumeration via login response discrepancy (WAHH ch6, CWE-204 /
+        WSTG-IDNT-04). Submits a KNOWN-existing account and two random NON-existent ones to the app's own login
+        form, each with the SAME deliberately-wrong password, and confirms a leak ONLY when the existing
+        account's response diverges (status or masked message) beyond the endpoint's own noise floor. Ground
+        truth = an account we already verified/registered, so NO password is guessed and NO brute-force runs."""
+        import os as _os
+        import username_enum_tool as ue
+        from urllib.parse import urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("username_enumeration", url, False, "", [], "SCOPE BLOCK")
+        known = inp.get("known_username") or self._known_account()
+        if not known:
+            return ToolResult("username_enumeration", url, True, "no known account to differential against", [])
+        page = await self._http(url, "GET", capture=False)
+        form = ue.parse_login_form(page.get("body", "") or "", url)
+        if not form:
+            return ToolResult("username_enumeration", url, True, "no server-rendered login form here", [])
+        if not self.scope.validate(form["action"])[0]:
+            return ToolResult("username_enumeration", url, True, "form action out of scope", [])
+        wrong_pw = "Wr0ng_" + _os.urandom(8).hex()          # deliberately-wrong, never a real credential
+        a1, a2 = "zqx" + _os.urandom(4).hex(), "wvk" + _os.urandom(4).hex()   # two DIFFERENT non-existent users
+        users = [a1, a2, known]
+        hdr = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        async def _submit(u):
+            body = urlencode({form["user_field"]: u, form["pass_field"]: wrong_pw})
+            r = await self._http(form["action"], form["method"].upper() if form["method"] in ("post", "get") else "POST",
+                                 headers=hdr, body=body, capture=False)
+            return {"status": r.get("status"), "headers": r.get("headers", {}), "body": r.get("body", "")}
+
+        r_a1, r_a2, r_pr = await _submit(a1), await _submit(a2), await _submit(known)
+        findings = []
+        res = ue.enumerable(r_a1, r_a2, r_pr, users)
+        if res:
+            evidence, cwe = res
+            findings.append(self._attach_poc(ue.finding(form["action"], evidence, cwe, known, form["user_field"]),
+                                             form["action"], None))
+        return ToolResult("username_enumeration", url, True, "%d username-enumeration finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

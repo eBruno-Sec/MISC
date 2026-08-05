@@ -62,6 +62,7 @@ _PRECONDITIONS = {
     "waf_bypass":              ["has_search_param"],   # a parameter to smuggle a blocked signature through
     "reverse_tabnabbing":      ["serves_js"],          # HTML page with target=_blank links
     "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
+    "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
 }
 
 
