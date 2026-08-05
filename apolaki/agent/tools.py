@@ -127,6 +127,7 @@ TOOL_PERMISSIONS = {
     "run_snmp_audit": PermissionLevel.ACTIVE,
     "run_modbus_audit": PermissionLevel.ACTIVE,
     "run_vnc_audit": PermissionLevel.ACTIVE,
+    "run_rsync_audit": PermissionLevel.ACTIVE,
     "run_path_sqli": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -2195,6 +2196,12 @@ class ToolRegistry:
             out = _vt.analyze(res) if not res.get("error") else None
             if out:
                 findings.append(_vt.finding(host, int(port), out[0], res))
+        elif service == "rsync":
+            import rsync_audit_tool as _rt                       # greeting + #list only, no download, no password
+            res = await asyncio.get_event_loop().run_in_executor(None, _rt.probe, host, int(port))
+            out = _rt.analyze(res) if not res.get("error") else None
+            if out:
+                findings.append(_rt.finding(host, int(port), out[0], res))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6480,6 +6487,32 @@ class ToolRegistry:
             findings.append(self._attach_poc(vt.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
         return ToolResult("vnc_audit", "%s:%d" % (host, port), True,
                           "%d vnc-no-auth finding(s)" % len(findings), findings)
+
+    async def _run_rsync_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service, beyond web): rsync anonymous-module audit (CWE-306). Performs only the rsync
+        greeting + a '#list' request and confirms a daemon that leaks its module list to anonymous clients.
+        READ-ONLY — never downloads a module or tries a password."""
+        import asyncio as _aio
+        import rsync_audit_tool as rt
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("rsync://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 873
+        host = raw
+        if not host:
+            return ToolResult("rsync_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("http://%s" % host)[0] or self.scope.validate(host)[0]):
+            return ToolResult("rsync_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, rt.probe, host, port)
+        findings = []
+        out = rt.analyze(res)
+        if out:
+            findings.append(self._attach_poc(rt.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
+        return ToolResult("rsync_audit", "%s:%d" % (host, port), True,
+                          "%d rsync-anon finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

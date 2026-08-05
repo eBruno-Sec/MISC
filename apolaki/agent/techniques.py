@@ -171,6 +171,13 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "'None' (1) is advertised.",
        exploit="Connect with any VNC client and take full keyboard/mouse/screen control of the host.",
        oracle="The RFB handshake's offered security types include 'None' (1)."),
+    # beyond web (infra pentest): anonymous rsync module enumeration.
+    _t(id="rsync_anon", vuln_class="network_service", cwe="CWE-306", owasp="A01:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An rsync daemon lets an anonymous client enumerate (and often read) its modules.",
+       detect="Complete the @RSYNCD greeting and send '#list' (no password); the daemon returns its module names.",
+       exploit="Read exposed modules (backups/web roots/config) anonymously for data theft + lateral-movement intel.",
+       oracle="An anonymous '#list' returns >=1 module name."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

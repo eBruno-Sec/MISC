@@ -92,6 +92,10 @@ _PACKS = {
          "oracle": "the RFB handshake advertises security type 'None' (no password required)",
          "enables": ["remote_control"]},
     ]},
+    "rsync": {"graph_kind": "service", "note": "File sync: anonymous rsync module enumeration (READ-ONLY).", "checks": [
+        {"id": "rsync_anon", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "an anonymous '#list' returns the daemon's module names", "enables": ["file_read"]},
+    ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,
          "oracle": "INFO/PING succeeds without AUTH (open data store)", "enables": ["database_read"]},

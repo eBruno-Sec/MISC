@@ -482,6 +482,8 @@ _FAMILY_FIX = {
                       "gateway, and remove any internet reachability.",
     "vnc_no_auth": "Require a strong VNC password or disable password-only VNC; tunnel VNC over SSH/VPN and "
                    "restrict TCP/5900 to trusted management hosts.",
+    "rsync_anon": "Set 'list = no' and require 'auth users' + a secrets file on every rsync module; restrict "
+                  "TCP/873 to trusted hosts or tunnel rsync over SSH.",
 }
 
 
