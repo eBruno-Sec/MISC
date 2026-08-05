@@ -235,6 +235,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        needs_fixture=["weak_secret_if_crackable"], fixture_source="external",
        maps_to={"juiceshop": ["Forged Signed JWT", "Unsigned JWT"]}),
 
+    _t(id="jwt_key_confusion", vuln_class="crypto_authz", cwe="CWE-347", owasp="A02:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-SESS-10",
+       summary="JWT algorithm confusion (RS/ES/PS -> HS): forge HS256 signed with the server's OWN public key.",
+       detect="Token uses an asymmetric alg and the public key is reachable (JWKS at /.well-known/jwks.json, or an x5c header).",
+       exploit="Forge an HS256 token HMAC-signed with the RSA public-key PEM as the secret, escalating privilege claims.",
+       oracle="The forged token authenticates on a scoped endpoint where a signature-tampered token is REJECTED (differential — never fires on an accept-anything endpoint).",
+       needs_fixture=["asymmetric_jwt", "public_key_from_jwks_or_x5c"], fixture_source="harvest",
+       refs=["https://portswigger.net/web-security/jwt/algorithm-confusion"]),
+
     _t(id="ssrf", vuln_class="ssrf", cwe="CWE-918", owasp="A10:2021",
        permission=INTRUSIVE, transferable=True,
        summary="Server-side request forgery to an attacker-influenced destination.",

