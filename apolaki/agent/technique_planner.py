@@ -63,6 +63,7 @@ _PRECONDITIONS = {
     "reverse_tabnabbing":      ["serves_js"],          # HTML page with target=_blank links
     "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
     "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
+    "session_fixation":        ["has_login", "authenticated"],  # a login + a working credential to drive it
 }
 
 

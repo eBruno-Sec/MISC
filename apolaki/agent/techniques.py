@@ -106,6 +106,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "message or status divergence beyond the endpoint's own noise floor is a membership oracle.",
        exploit="Harvest valid usernames/emails pre-auth to seed credential-stuffing and targeted phishing.",
        oracle="The existing-account response diverges from a non-existent one (status or wording), same wrong pw."),
+    # distilled from WAHH ch7/ch8 — session identifier not regenerated at authentication (session fixation).
+    _t(id="session_fixation", vuln_class="session", cwe="CWE-384", owasp="A07:2021", wstg="WSTG-SESS-03",
+       permission=ACTIVE, transferable=True,
+       summary="The session id is not regenerated on login — a pre-auth token survives authentication unchanged.",
+       detect="Drive one client with a known-good credential across the login boundary; the pre-auth session "
+              "cookie is byte-for-byte identical after a SUCCESSFUL login (no rotation).",
+       exploit="Fix a known token in a victim's browser; inherit their authenticated session when they log in.",
+       oracle="A session-ish cookie held before login is unchanged after a confirmed-successful login."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

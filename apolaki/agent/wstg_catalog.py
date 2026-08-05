@@ -104,6 +104,7 @@ FULL = {
     "WSTG-INPV-19": "run_ssrf", "WSTG-INPV-20": "mass_assignment (authz)",
     "WSTG-SESS-01": "run_session_token (predictability/meaningful analyzer)",
     "WSTG-SESS-02": "cookie/header analysis", "WSTG-SESS-05": "run_csrf", "WSTG-SESS-10": "run_jwt (+ key confusion)",
+    "WSTG-SESS-03": "run_session_fixation (token-rotation-on-login oracle)",
 }
 
 # `partial` = a related tool touches it but does not confirm the specific WSTG scenario.
@@ -123,7 +124,7 @@ PARTIAL = {
     "WSTG-INFO-01": "run_dork_gen (offline)",
     "WSTG-INFO-07": "crawl maps some paths", "WSTG-INFO-10": "canonical asset graph",
     "WSTG-INPV-11": "run_cmdi/SSTI cover code-exec subsets",
-    "WSTG-SESS-03": "session handling observed", "WSTG-SESS-04": "intel harvest flags exposed session vars",
+    "WSTG-SESS-04": "intel harvest flags exposed session vars",
     "WSTG-SESS-09": "session capture, no active hijack",
 }
 

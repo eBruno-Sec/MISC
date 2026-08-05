@@ -102,7 +102,7 @@ def test_new_session_engines_are_planner_wired_not_islands():
     import technique_planner as TP
     new = ["xpath_injection", "ldap_injection", "ssi_injection", "css_injection", "jwt_key_confusion",
            "cache_deception", "waf_bypass", "reverse_tabnabbing", "permissive_crossdomain",
-           "sqli_structural", "weak_session_token", "username_enumeration"]
+           "sqli_structural", "weak_session_token", "username_enumeration", "session_fixation"]
     for tid in new:
         assert tid in TP._PRECONDITIONS, "%s is a planner island (no precondition)" % tid
         assert all(o in TP.OBSERVATIONS for o in TP._PRECONDITIONS[tid]), "%s uses an unknown observation" % tid

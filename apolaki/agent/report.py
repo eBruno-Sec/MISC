@@ -456,6 +456,8 @@ _FAMILY_FIX = {
     "weak_session_token": "Generate session tokens from a CSPRNG with >=128 bits of entropy; never encode "
                           "meaningful data (username/role) in the token; issue a fresh token on login/privilege "
                           "change.",
+    "session_fixation": "Regenerate the session identifier on every privilege change, especially immediately "
+                        "after login and logout; invalidate the pre-auth session server-side.",
 }
 
 

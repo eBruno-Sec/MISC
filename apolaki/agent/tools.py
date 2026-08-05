@@ -119,6 +119,7 @@ TOOL_PERMISSIONS = {
     "run_sqli_structural": PermissionLevel.INTRUSIVE,
     "run_session_token": PermissionLevel.ACTIVE,
     "run_username_enum": PermissionLevel.ACTIVE,
+    "run_session_fixation": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6127,6 +6128,48 @@ class ToolRegistry:
             findings.append(self._attach_poc(ue.finding(form["action"], evidence, cwe, known, form["user_field"]),
                                              form["action"], None))
         return ToolResult("username_enumeration", url, True, "%d username-enumeration finding(s)" % len(findings), findings)
+
+    async def _run_session_fixation(self, inp: dict) -> ToolResult:
+        """ACTIVE: session-fixation check (WAHH ch7/ch8, CWE-384 / WSTG-SESS-03). Drives ONE real client with a
+        KNOWN-GOOD credential (single value, never a brute-force) through the login boundary and confirms the app
+        FAILED to regenerate the session id: the pre-auth session cookie is unchanged after a SUCCESSFUL login.
+        The raw credential is used only to authenticate and never appears in any finding. Runs once per mission."""
+        import httpx
+        import session_fixation_tool as sf
+        import username_enum_tool as ue
+        from urllib.parse import urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("session_fixation", url, False, "", [], "SCOPE BLOCK")
+        cred = inp.get("credential") or getattr(self, "_fixation_credential", None)
+        if not cred:
+            return ToolResult("session_fixation", url, True, "no verified credential to test login rotation", [])
+        if getattr(self, "_fixation_done", False):
+            return ToolResult("session_fixation", url, True, "already tested this mission", [])
+        user, pw = cred[0], cred[1]
+        findings = []
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20,
+                                         headers={"User-Agent": _UA}) as c:
+                g = await c.get(url)
+                pre = {k: v for k, v in c.cookies.items()}
+                form = ue.parse_login_form(g.text or "", url)
+                if not form or not self.scope.validate(form["action"])[0]:
+                    return ToolResult("session_fixation", url, True, "no in-scope login form here", [])
+                self._fixation_done = True                    # one login per mission, whatever the outcome
+                body = urlencode({form["user_field"]: user, form["pass_field"]: pw})
+                p = await c.post(form["action"], content=body.encode(),
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+                post = {k: v for k, v in c.cookies.items()}
+                still_login = ue.parse_login_form(p.text or "", form["action"]) is not None
+                login_ok = (p.status_code < 400) and not still_login and bool(post)
+                res = sf.analyze(pre, post, login_ok)
+                if res:
+                    name, ev = res
+                    findings.append(self._attach_poc(sf.finding(form["action"], name, ev), form["action"], None))
+        except Exception:
+            pass
+        return ToolResult("session_fixation", url, True, "%d session-fixation finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

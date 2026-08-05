@@ -93,7 +93,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
     "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_form_nosqli", "run_upload_test",
-    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_waf_bypass", "run_sqli_structural", "run_session_token", "run_username_enum", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
+    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_waf_bypass", "run_sqli_structural", "run_session_token", "run_username_enum", "run_session_fixation", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -1116,6 +1116,7 @@ class BBHAgent:
         self._scan_credential = "%s:%s" % (user, pw)     # reuse channel (persisted to target memory; redacted in reports)
         self._scan_login_url = login_url
         self.tools._enum_known_username = user            # ground truth for the username-enumeration differential
+        self.tools._fixation_credential = (user, pw)      # known-good login for the session-fixation rotation check (never emitted)
         # 2) VERIFY the discovered credential ACTUALLY WORKS with a single login (anti-brute capped) --
         #    a found credential is only a real finding once it authenticates. This does NOT run the scan
         #    authenticated; it just confirms validity + obtains a session. The FULL authenticated scan
@@ -2261,9 +2262,13 @@ class BBHAgent:
                 _login_page = any(k in u.lower() for k in ("login", "signin", "sign-in", "log-in", "sign_in"))
                 _have_known = bool(getattr(self.tools, "_enum_known_username", "")
                                    or (getattr(self.tools.state, "identities", {}) or {}))
+                # session fixation needs a VERIFIED working credential (to drive a real successful login) — only
+                # available on an authenticated scan; runs once per mission (the tool self-guards).
+                _have_cred = bool(getattr(self.tools, "_fixation_credential", None))
                 _htools = ["run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_client_checks"] \
                     + (["run_session_token"] if _sess_page else []) \
                     + (["run_username_enum"] if (_login_page and _have_known) else []) \
+                    + (["run_session_fixation"] if (_login_page and _have_cred) else []) \
                     + (["run_dom_trace"] if urlparse(u).path not in swept_paths else [])
                 # web cache deception needs an authenticated session to have a private page to leak — only
                 # add it on an authed scan (it self-skips otherwise, but this avoids a pointless call/page).
