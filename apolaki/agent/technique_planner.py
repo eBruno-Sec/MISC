@@ -91,6 +91,7 @@ ALWAYS_ON = {
     "ldap_anonymous_read":      "service_router pack: fingerprint(port 389/636/LDAP) -> _run_service_pack anonymous read",
     "smb_null_session":         "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack null-session enum",
     "snmp_default_community":   "service_router pack: fingerprint(port 161/SNMP) -> _run_service_pack default-community GET",
+    "smb_signing_disabled":     "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack SMB2 negotiate signing check",
 }
 
 

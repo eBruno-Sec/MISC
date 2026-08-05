@@ -2169,6 +2169,9 @@ class ToolRegistry:
             if out:
                 sev, ev, data = out
                 findings.append(_se.finding(host, int(port), sev, ev, data))
+            sig = await asyncio.get_event_loop().run_in_executor(None, _se.probe_signing, host, int(port))
+            if not sig.get("error") and sig.get("signing_required") is False:
+                findings.append(_se.signing_finding(host, int(port)))
         elif service == "snmp":
             import snmp_audit_tool as _sa                        # read-only GET, documented default communities only
             res = await asyncio.get_event_loop().run_in_executor(None, _sa.probe, host, int(port))
@@ -6337,15 +6340,16 @@ class ToolRegistry:
                 or self.scope.validate(host)[0]):
             return ToolResult("smb_enum", host, False, "", [], "SCOPE BLOCK")
         res = await _aio.get_event_loop().run_in_executor(None, se.probe, host, port)
-        if res.get("error"):
-            return ToolResult("smb_enum", "%s:%d" % (host, port), True, "no SMB: %s" % res["error"], [])
         findings = []
-        out = se.analyze(res)
+        out = se.analyze(res) if not res.get("error") else None
         if out:
             sev, ev, data = out
             findings.append(self._attach_poc(se.finding(host, port, sev, ev, data), "%s:%d" % (host, port), None))
+        sig = await _aio.get_event_loop().run_in_executor(None, se.probe_signing, host, port)
+        if not sig.get("error") and sig.get("signing_required") is False:
+            findings.append(self._attach_poc(se.signing_finding(host, port), "%s:%d" % (host, port), None))
         return ToolResult("smb_enum", "%s:%d" % (host, port), True,
-                          "%d smb-null-session finding(s)" % len(findings), findings)
+                          "%d smb finding(s)" % len(findings), findings)
 
     async def _run_snmp_audit(self, inp: dict) -> ToolResult:
         """ACTIVE (network service, beyond web): SNMP default-community audit (CWE-1188). One read-only UDP GET

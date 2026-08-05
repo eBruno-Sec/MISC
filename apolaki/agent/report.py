@@ -474,6 +474,9 @@ _FAMILY_FIX = {
                         "enumeration; remove guest-readable shares.",
     "snmp_default_community": "Change or disable default community strings; move to SNMPv3 with auth + privacy; "
                              "restrict UDP/161 to trusted management hosts.",
+    "smb_signing_disabled": "Require SMB signing everywhere ('server signing = mandatory' on Samba / the "
+                            "'Digitally sign communications (always)' GPO on Windows) and enable EPA/channel "
+                            "binding on domain controllers to stop NTLM relay.",
 }
 
 

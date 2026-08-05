@@ -146,6 +146,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "refuses the anonymous session and returns nothing.",
        exploit="Map the file-server layout pre-auth and read any guest-exposed non-administrative share.",
        oracle="A null session connects and listShares returns a share (a non-admin share escalates to high)."),
+    # beyond web (AD relay): SMB message signing not required -> NTLM relay.
+    _t(id="smb_signing_disabled", vuln_class="network_service", cwe="CWE-347", owasp="A02:2021", wstg="WSTG-CONF-11",
+       permission=ACTIVE, transferable=True,
+       summary="An SMB server does not require message signing, so authenticated sessions can be relayed/tampered.",
+       detect="Read the server SecurityMode from an SMB2 NEGOTIATE response (no auth); SIGNING_REQUIRED (0x0002) "
+              "is not set.",
+       exploit="Coerce/capture an authentication and NTLM-relay it to this host to act as the victim.",
+       oracle="The SMB2 NEGOTIATE SecurityMode lacks the SIGNING_REQUIRED flag."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

@@ -32,3 +32,26 @@ def test_finding_is_proof_with_cvss():
     f = smb.finding("10.0.0.3", 445, sev, ev, data)
     assert f["family"] == "smb_null_session" and f["cwe"] == "CWE-306" and bb._has_proof(f)
     assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05
+
+
+def test_smb2_negotiate_request_wellformed():
+    req = smb._smb2_negotiate_request()
+    assert req[4:8] == b"\xfeSMB"                              # SMB2 header after the 4-byte TCP length prefix
+    import struct
+    assert struct.unpack(">I", req[:4])[0] == len(req) - 4     # length prefix matches
+
+
+def test_parse_signing_reads_securitymode():
+    import struct
+    def _resp(secmode):
+        return b"\x00\x00\x00\x50" + b"\xfeSMB" + b"\x00" * 60 + struct.pack("<H", 65) + struct.pack("<H", secmode)
+    assert smb.parse_signing(_resp(0x0003)) is True           # ENABLED|REQUIRED -> required
+    assert smb.parse_signing(_resp(0x0001)) is False          # ENABLED only -> NOT required (relay-able)
+    assert smb.parse_signing(b"garbage") is None
+
+
+def test_signing_finding_is_proof_with_cvss():
+    from report import cvss31_base_score
+    f = smb.signing_finding("10.0.0.3", 445)
+    assert f["family"] == "smb_signing_disabled" and f["cwe"] == "CWE-347" and bb._has_proof(f)
+    assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05
