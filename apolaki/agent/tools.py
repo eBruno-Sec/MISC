@@ -82,6 +82,7 @@ TOOL_PERMISSIONS = {
     "run_jwt": PermissionLevel.ACTIVE,
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
+    "run_form_xss": PermissionLevel.ACTIVE,
     "run_dom_trace": PermissionLevel.ACTIVE,
     "run_encoded_cookie": PermissionLevel.INTRUSIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
@@ -99,6 +100,7 @@ TOOL_PERMISSIONS = {
     "run_exposure": PermissionLevel.INTRUSIVE,
     "run_xxe": PermissionLevel.INTRUSIVE,
     "run_sqli": PermissionLevel.INTRUSIVE,
+    "run_xpath": PermissionLevel.INTRUSIVE,
     "run_auth_sqli": PermissionLevel.INTRUSIVE,
     "run_form_cmdi": PermissionLevel.INTRUSIVE,
     "run_nosqli": PermissionLevel.INTRUSIVE,
@@ -3145,10 +3147,72 @@ class ToolRegistry:
             summary += f", secret='{res['cracked_secret']}'"
         return ToolResult("jwt", url or "token", True, summary, findings)
 
+    async def _discover_params(self, url: str, limit: int = 10) -> list:
+        """General parameter discovery (arjun-style, target-derived): many injection points sit on params
+        no crawl edge links (e.g. /login?redirect=, /?url=). Union two general sources — the param names the
+        page's own JS reads (searchParams.get / getParameterByName / params[...]) and a framework wordlist
+        confirmed by ONE batched reflection probe — so the reflected/DOM/request-override passes actually
+        reach them. Bounded + cheap; returns EXTRA param names beyond the URL's own query string."""
+        import param_discovery as pdisc
+        from urllib.parse import urlparse, parse_qsl
+        # cache so run_xss + run_dom_trace + dom_audit don't each re-run discovery for one page. The result
+        # EXCLUDES params already present in the URL, so it depends on those params — the key MUST include the
+        # existing-param signature, else a call on /catalog?category=X (category excluded) poisons the bare
+        # /catalog call (category never discovered → dom_audit skipped → CSTI missed).
+        cache = getattr(self, "_param_cache", None)
+        if cache is None:
+            cache = self._param_cache = {}
+        _pu = urlparse(url)
+        _existing_sig = ",".join(sorted(k for k, _ in parse_qsl(_pu.query, keep_blank_values=True) if k))
+        ckey = _pu._replace(query="", fragment="").geturl() + "|" + _existing_sig
+        if ckey in cache:
+            return cache[ckey][:limit]
+        try:
+            page = await self._http(url, "GET", capture=False)
+            body = page.get("body", "") or ""
+            host = urlparse(url).netloc
+            js_sources = []
+            for u in (self.urls or []):
+                if len(js_sources) >= 4:
+                    break
+                if u.lower().split("?")[0].endswith(".js") and urlparse(u).netloc == host:
+                    r = await self._http(u, "GET", capture=False)
+                    if r.get("body"):
+                        js_sources.append(r["body"])
+            plan = pdisc.discover(url, js_sources=js_sources, body=body)
+            extra = []
+            probe = plan["probe"]
+            if probe["tokens"] and self.scope.validate(probe["probe_url"])[0]:
+                # one retry: under mission load the batched probe can transiently return an empty/error body,
+                # which would drop every reflected param for the page (this silently lost /login's redirect
+                # param in-mission). A single retry recovers the common transient case.
+                for _try in range(2):
+                    pr = await self._http(probe["probe_url"], "GET", capture=False)
+                    refl = pdisc.reflected(pr.get("body", ""), probe["tokens"])
+                    if refl:
+                        extra.extend(refl)
+                        break
+            # JS-harvested params often DON'T reflect (a client-side fetch/DOM source) — include them too
+            for n in plan["js_params"]:
+                if n not in extra:
+                    extra.append(n)
+            existing = set(plan["existing"])
+            out = [n for n in extra if n not in existing]
+            # cache ONLY a non-empty success. Caching an empty/errored result POISONS the path: a single
+            # transient _http hiccup (empty body, no exception) would make every later dom_trace/dom_audit on
+            # that page see zero params — which silently killed /login dom_data + /catalog CSTI in-mission.
+            if out:
+                cache[ckey] = out
+            return out[:limit]
+        except Exception:
+            return []
+
     async def _run_xss(self, inp: dict) -> ToolResult:
         import httpx
         url = inp["url"]
         params = inp.get("params") or xt.params_of(url)
+        if not inp.get("params"):
+            params = list(dict.fromkeys(list(params) + await self._discover_params(url)))
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         reflected = []
 
@@ -3337,6 +3401,221 @@ class ToolRegistry:
             return hit
         return hit
 
+    async def _run_xpath(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: XPath injection (CWE-643) — distilled from *Beginner Web Application Pentester*. Apps
+        that query an XML document (often XML-backed LOGIN forms) concatenate input into an XPath expression.
+        Confirmed truth-first like SQLi: a stray quote flips the HTTP status class (error-based), or the
+        `' or '1'='1` / `' or '1'='2` pair splits (boolean). Tests GET query params AND POST form fields."""
+        import xpath_tool as xp
+        import httpx
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("xpath", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        pr0 = urlparse(url)
+
+        def _setq(name, val):
+            pairs = [(k, val if k == name else v) for k, v in parse_qsl(pr0.query, keep_blank_values=True)]
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        async def _body(u):
+            r = await self._http(u, "GET", capture=False)
+            return r.get("body", "") or ""
+
+        # 1) GET query params — confirm ONLY on an XPath-specific processor error (never a bare 500/boolean,
+        # which would collide with SQLi).
+        for name, val in parse_qsl(pr0.query, keep_blank_values=True):
+            p = xp.probes(val)
+            base = await _body(url)
+            for key in ("sq", "dq", "fn"):
+                ev = xp.evaluate(base, await _body(_setq(name, p[key])))
+                if ev["confirmed"]:
+                    findings.append(self._attach_poc(xp.finding(url, name, "parameter", ev["oracle"]),
+                                                     _setq(name, p[key]), None))
+                    break
+
+        # 2) POST form text fields (XML-backed login is the classic XPath injection surface) — session-aware
+        try:
+            import form_xss as fx
+            hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+                r0 = await c.get(url)
+                forms = fx.parse_forms(r0.text, url)
+
+                async def _pbody(action, field, value):
+                    g = await c.get(url)
+                    fresh = fx.parse_forms(g.text, url)
+                    ff = next((x for x in fresh if x["action"] == action and field in x["text_fields"]), None)
+                    body = fx.body_with(ff, field, value) if ff else {field: value}
+                    rr = await c.post(action, data=body,
+                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
+                    return rr.text
+                seen = set()
+                for form in forms:
+                    act = form["action"]
+                    if not self.scope.validate(act)[0]:
+                        continue
+                    for field in form["text_fields"]:
+                        if (act, field) in seen:
+                            continue
+                        seen.add((act, field))
+                        p = xp.probes("x")
+                        base = await _pbody(act, field, "x")
+                        for key in ("sq", "dq", "fn"):
+                            ev = xp.evaluate(base, await _pbody(act, field, p[key]))
+                            if ev["confirmed"]:
+                                findings.append(self._attach_poc(
+                                    xp.finding(act, field, "form field", ev["oracle"]), act, None, method="POST"))
+                                break
+        except Exception:
+            pass
+        return ToolResult("xpath", url, True, "%d XPath injection finding(s)" % len(findings), findings)
+
+    async def _run_form_xss(self, inp: dict) -> ToolResult:
+        """Reflected XSS through POST FORM fields (general): the GET-query engine misses a value submitted in
+        a POST form that reflects into the response (e.g. a login username echoed into `var username='HERE'`).
+        Parse forms, POST a canary per text field to find the reflection context, and CONFIRM in a real
+        browser by filling + submitting the form (the fresh CSRF token is carried by the page, so protected
+        forms are handled). ACTIVE; skips forms whose action looks state-changing (delete/pay/transfer)."""
+        import form_xss as fx
+        import httpx
+        from urllib.parse import urlparse
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("form_xss", url, False, "", [], "SCOPE BLOCK")
+        _DANGER = ("delete", "remove", "pay", "payment", "checkout", "transfer", "withdraw", "purchase",
+                   "order", "buy", "wallet", "card", "logout", "deregister", "erase")
+        findings, seen = [], set()
+        # a PERSISTENT client (cookie jar) so a POST carries the session cookie the GET set, and re-GETing
+        # the page yields a FRESH CSRF token bound to that session — otherwise the CSRF-protected submit is
+        # rejected and nothing reflects (this is what made the first cut find 0).
+        hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+                r0 = await c.get(url)
+                forms = fx.parse_forms(r0.text, url)
+                if not forms:
+                    return ToolResult("form_xss", url, True, "no POST forms with text fields", [])
+
+                async def _submit(action, field, value):
+                    # re-read the page for a fresh CSRF/hidden token bound to this client's session, then POST
+                    try:
+                        g = await c.get(url)
+                        fresh = fx.parse_forms(g.text, url)
+                        ff = next((x for x in fresh if x["action"] == action and field in x["text_fields"]), None)
+                    except Exception:
+                        ff = None
+                    body = fx.body_with(ff or {"fields": {}}, field, value) if ff else {field: value}
+                    rr = await c.post(action, data=body,
+                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
+                    return rr.text
+                for form in forms:
+                    act = form["action"]
+                    if not self.scope.validate(act)[0] or any(d in act.lower() for d in _DANGER):
+                        continue
+                    for field in form["text_fields"]:
+                        if (act, field) in seen:
+                            continue
+                        seen.add((act, field))
+                        try:
+                            canary_body = await _submit(act, field, xt.CANARY)
+                        except Exception:
+                            continue
+                        ctx = fx.reflection_context(canary_body)
+                        if not ctx:
+                            continue
+                        try:
+                            bk_body = await _submit(act, field, xt.BREAKOUTS.get(ctx, xt.CANARY))
+                        except Exception:
+                            bk_body = ""
+                        breakout = fx.exploitable_breakout(bk_body, ctx)
+                        await self._form_xss_emit(url, form, field, ctx, breakout, findings)
+        except Exception as e:
+            return ToolResult("form_xss", url, True, "form_xss error: %s" % str(e)[:60], findings)
+        return ToolResult("form_xss", url, True, "%d POST-form XSS finding(s)" % len(findings), findings)
+
+    async def _form_xss_emit(self, url, form, field, ctx, breakout, findings):
+        """Confirm a candidate field in a real browser (fill + submit) and append the finding. The HTTP-level
+        reflection got us a candidate; the browser fill+submit (carrying the fresh CSRF the page holds) is the
+        truth-first oracle. A surviving HTML-context breakout also stands as a (candidate) reflection finding."""
+        import form_xss as fx
+        from urllib.parse import urlencode
+        act = form["action"]
+        # script (JS-string) context: the breakout test is weak, but reflection there is worth a browser
+        # confirmation (the classic `var x='<here>'` reflected XSS).
+        if not breakout and ctx != "script":
+            return
+        confirmed, payload = await self._form_xss_browser_confirm(url, form, field)
+        if not (confirmed or breakout):
+            return
+        payload = payload or xt.BREAKOUTS.get(ctx, "")
+        ev = ("A payload submitted in the POST field '%s' executed in a headless browser (alert fired)."
+              % field) if confirmed else \
+             ("The POST field '%s' reflects into a %s context with the breakout '%s' surviving unescaped."
+              % (field, ctx, xt.BREAKOUTS.get(ctx, "")))
+        f = fx.finding(act, field, ctx, payload, ev, confirmed)
+        findings.append(self._attach_poc(f, act, None, method="POST",
+                                         body=urlencode(fx.body_with(form, field, payload))))
+
+    async def _form_xss_browser_confirm(self, page_url: str, form: dict, field: str):
+        """Load the form page, fill `field` with each auto-firing payload, submit, and return (True, payload)
+        if an alert carrying the marker fires. The page carries a fresh CSRF token, so protected forms work.
+        Best-effort: returns (False, '') with no browser."""
+        chrome = _chrome_path()
+        if not chrome:
+            return False, ""
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return False, ""
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True, executable_path=chrome,
+                                                   args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                ctx = await browser.new_context(ignore_https_errors=True)
+                if self.session_headers:
+                    hh = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hh:
+                        await ctx.set_extra_http_headers(hh)
+                await self._ctx_add_cookies(ctx)
+                page = await ctx.new_page()
+                fired = {"msg": None}
+                page.on("dialog", lambda d: (fired.__setitem__("msg", d.message), asyncio.ensure_future(d.dismiss())))
+                try:
+                    for pl in xt.EXEC_PAYLOADS:
+                        fired["msg"] = None
+                        try:
+                            await page.goto(page_url, wait_until="domcontentloaded", timeout=9000)
+                            # fill other required text fields with benign defaults, the target with the payload
+                            for fn in form["text_fields"]:
+                                val = pl if fn == field else (form["fields"].get(fn) or "x")
+                                try:
+                                    await page.fill('[name="%s"]' % fn, val, timeout=2000)
+                                except Exception:
+                                    pass
+                            # submit the form that owns the target field (carries the fresh CSRF token)
+                            try:
+                                await page.eval_on_selector('[name="%s"]' % field,
+                                                            "el => { const f = el.form; if (f) f.requestSubmit ? f.requestSubmit() : f.submit(); }")
+                            except Exception:
+                                pass
+                            await page.wait_for_timeout(500)
+                        except Exception:
+                            pass
+                        if fired["msg"] and xt.MARK in str(fired["msg"]):
+                            await browser.close()
+                            return True, pl
+                finally:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+        except Exception:
+            return False, ""
+        return False, ""
+
     async def _run_stored_xss(self, inp: dict) -> ToolResult:
         """Second-order / STORED XSS: submit a unique EXECUTING canary into a form, then
         browser-load display pages and confirm it executes somewhere it wasn't directly
@@ -3501,13 +3780,28 @@ class ToolRegistry:
                         base_cookies[nm.strip()] = vl.strip()
             else:
                 hdrs[k] = v
+        def _ch(d):
+            # build an explicit Cookie header; jar-free so the server's own Set-Cookie (e.g. `session`)
+            # never collides with a client jar entry of the same name (httpx raises "Multiple cookies
+            # exist with name=..." otherwise, which zeroed this find in-mission).
+            return "; ".join("%s=%s" % (k, v) for k, v in d.items() if v is not None)
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs, cookies=base_cookies) as c:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs) as c:
                 try:
-                    await c.get(url)
+                    r0 = await c.get(url, headers={"Cookie": _ch(base_cookies)}) if base_cookies else await c.get(url)
                 except Exception as e:
                     return ToolResult("encoded_cookie", url, True, "fetch error: %s" % str(e)[:60], [])
-                jar = {**base_cookies, **{k: v for k, v in c.cookies.items()}}
+                # harvest server-set cookies (e.g. TrackingId) straight from Set-Cookie response headers
+                server = {}
+                try:
+                    raw = r0.headers.get_list("set-cookie") if hasattr(r0.headers, "get_list") else []
+                    for scv in raw:
+                        if "=" in scv:
+                            nm, rest = scv.split("=", 1)
+                            server[nm.strip()] = rest.split(";", 1)[0].strip()
+                except Exception:
+                    pass
+                jar = {**server, **base_cookies}
                 for cname, cval in list(jar.items()):
                     up = ep.unpack(cval)
                     if not up:
@@ -3516,11 +3810,12 @@ class ToolRegistry:
                     for field in ep.string_fields(obj)[:4]:
                         orig = obj[field]
 
-                        async def _send(val):
-                            o2 = dict(obj); o2[field] = val
-                            ck = dict(jar); ck[cname] = reenc(o2)
+                        async def _send(val, _cname=cname, _field=field, _obj=obj, _reenc=reenc):
+                            o2 = dict(_obj); o2[_field] = val
+                            ck = dict(jar); ck[_cname] = _reenc(o2)
                             try:
-                                rr = await c.get(url, cookies=ck)
+                                c.cookies.clear()
+                                rr = await c.get(url, headers={"Cookie": _ch(ck)})
                                 return {"status": rr.status_code, "len": len(rr.text)}
                             except Exception:
                                 return {"status": 0, "len": 0}
@@ -3546,6 +3841,14 @@ class ToolRegistry:
         url = inp["url"]
         if not self.scope.validate(url)[0]:
             return ToolResult("dom_trace", url, False, "", [], "SCOPE BLOCK")
+        # skip static asset endpoints (images/fonts/styles, tracking pixels): they are not HTML pages, so
+        # any "reflection" of a canary there is spurious — this is what produced the tracker.gif DOM
+        # link/data false positives. Real DOM sinks live on HTML documents, not on a .gif/.css/.woff.
+        _pl = url.lower().split("?")[0]
+        if _pl.endswith((".gif", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".css", ".woff", ".woff2",
+                         ".ttf", ".eot", ".map", ".pdf", ".webp", ".mp4", ".woff")) \
+                or any(seg in _pl for seg in ("/tracker", "/pixel", "/beacon", "/analytics", "/collect")):
+            return ToolResult("dom_trace", url, True, "static asset — DOM trace skipped (no DOM sinks)", [])
         chrome = _chrome_path()
         if not chrome:
             return ToolResult("dom_trace", url, True, "no headless browser — DOM trace skipped", [])
@@ -3554,12 +3857,20 @@ class ToolRegistry:
         except Exception:
             return ToolResult("dom_trace", url, True, "playwright unavailable — DOM trace skipped", [])
         os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
-        params = (inp.get("params") or dt.params_of(url))[:6]
+        params = list(inp.get("params") or dt.params_of(url))
+        if not inp.get("params"):
+            # discover unlinked source params (client-JS reads + reflected wordlist), PLUS a small always-on
+            # seed of the classic DOM-sink param names — so a common sink (?redirect=/?url=/?search=) is reached
+            # even if the batched discovery probe transiently fails under mission load (this is what silently
+            # dropped /login's redirect-param DOM-data finding in-mission while it worked standalone).
+            _seed = ["redirect", "url", "search", "next"]   # small always-on DOM-sink seed (belt + braces)
+            params = list(dict.fromkeys(params + await self._discover_params(url) + _seed))
+        params = params[:8]
         findings, seen = [], set()
 
         async def _render(u, canary):
             """Load u in a fresh context; return the runtime signals for `canary`."""
-            sig = {"executed": False, "redirect": "", "in_href": "", "in_src": "", "in_attr": "", "in_text": False}
+            sig = {"executed": False, "redirect": "", "req_override": "", "in_href": "", "in_src": "", "in_attr": "", "in_text": False}
             ctx = await browser.new_context(ignore_https_errors=True)
             try:
                 if self.session_headers:
@@ -3571,7 +3882,21 @@ class ToolRegistry:
                 page.on("dialog", lambda d: (sig.__setitem__("executed", sig["executed"] or (canary in str(d.message))),
                                              asyncio.ensure_future(d.dismiss())))
                 page.on("framenavigated", lambda fr: sig.__setitem__("redirect", sig["redirect"] or (fr.url if dt.is_evil_host(fr.url) else "")))
-                page.on("request", lambda r: sig.__setitem__("redirect", sig["redirect"] or (r.url if (dt.is_evil_host(r.url) and r.is_navigation_request()) else "")))
+
+                def _on_req(r):
+                    # a request to the attacker host that the injected param produced: a NAVIGATION request is
+                    # an open redirect; a script-initiated fetch/XHR is a client-side request-URL override
+                    # (client-side request forgery). Declarative loads (img/script src) stay dom_link, not this.
+                    try:
+                        if not dt.is_evil_host(r.url):
+                            return
+                        if r.is_navigation_request():
+                            sig["redirect"] = sig["redirect"] or r.url
+                        elif r.resource_type in ("fetch", "xhr"):
+                            sig["req_override"] = sig["req_override"] or r.url
+                    except Exception:
+                        pass
+                page.on("request", _on_req)
                 try:
                     await page.goto(u, wait_until="domcontentloaded", timeout=12000)
                     await page.wait_for_timeout(600)
@@ -3596,12 +3921,17 @@ class ToolRegistry:
                         # 1) plain-canary render -> link/data signals
                         s = await _render(dt.set_param(url, p, canary), canary)
                         reflected = bool(s["in_href"] or s["in_src"] or s["in_attr"] or s["in_text"])
-                        # 2) redirect render (redirect-ish name or reached a URL sink)
+                        # 2) attacker-host render -> open_redirect (navigation) AND request_url_override
+                        #    (script-initiated fetch/XHR). Gated on a URL/redirect/request-ish param NAME or a
+                        #    param that already reached a URL sink — a client-side request target is URL-shaped,
+                        #    so this keeps the (costly) extra render off every benign param.
                         if p.lower() in dt._REDIRECTISH or s["in_href"] or s["in_src"]:
                             rv = "https://evilc%s.example/" % canary
                             rs = await _render(dt.set_param(url, p, rv), canary)
                             if rs["redirect"]:
                                 s["redirect"], s["redir_target"] = rs["redirect"], dt.set_param(url, p, rv)
+                            if rs["req_override"]:
+                                s["req_override"], s["reqov_target"] = rs["req_override"], dt.set_param(url, p, rv)
                         # 3) XSS renders (only where the canary reflects)
                         if reflected:
                             for pl in dt._XSS_PAYLOADS[:4]:
@@ -3638,105 +3968,168 @@ class ToolRegistry:
         except Exception:
             return ToolResult("dom_audit", url, True, "playwright unavailable — DOM audit skipped", [])
         os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
-        findings, seen_cls = [], set()
+        findings = []
+
+        async def _audit_one(browser, probe):
+            """Render ONE probe in an isolated context and return its CONFIRMED finding (with PoC) or None.
+            Records navigation targets (open redirect) AND non-navigation requests to the attacker host
+            (a prototype-pollution script/fetch gadget) so build_finding can key on the right runtime signal."""
+            ctx = await browser.new_context(ignore_https_errors=True)
+            try:
+                if self.session_headers:
+                    hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hdrs:
+                        await ctx.set_extra_http_headers(hdrs)
+                await self._ctx_add_cookies(ctx)      # load authed pages logged-in
+                page = await ctx.new_page()
+                fired, navs, evil_reqs = {"msg": None}, [], []
+
+                async def on_dialog(d):
+                    fired["msg"] = d.message
+                    try:
+                        await d.dismiss()
+                    except Exception:
+                        pass
+                page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
+                page.on("framenavigated", lambda fr: navs.append(fr.url))
+                # Record top-level navigation REQUESTS (open redirect to a non-resolving attacker host fires
+                # a navigation request but may never commit a framenavigated event). Separately record
+                # NON-navigation requests whose host is the attacker host — a prototype-pollution gadget that
+                # assigns the polluted value to a <script>/fetch src. confirmed_redirect()/is_evil_req()
+                # host-match, so the probe's own load (attacker host only in the fragment) is excluded.
+                def _on_request(r):
+                    try:
+                        if r.is_navigation_request():
+                            navs.append(r.url)
+                        elif dom.is_evil_req(r.url):
+                            evil_reqs.append(r.url)
+                    except Exception:
+                        pass
+                page.on("request", _on_request)
+                try:
+                    await page.goto(probe["nav"], wait_until="load", timeout=9000)
+                    # CSTI needs the client-side template engine (AngularJS) to bootstrap and run a digest
+                    # before {{7*7}} becomes 49 — wait for network idle.
+                    if probe["class"] == "csti":
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=5000)
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(900)
+                    else:
+                        await page.wait_for_timeout(350)
+                except Exception:
+                    pass
+                pp_value, body = None, ""
+                try:
+                    pp_value = await page.evaluate("window.Object.prototype[" + repr(dom.PP_KEY) + "]")
+                except Exception:
+                    pass
+                try:
+                    # read full HTML for CSTI (the evaluated marker can land in markup, not just visible
+                    # text); innerText is enough for the other classes.
+                    body = await page.evaluate(
+                        "document.documentElement.outerHTML" if probe["class"] == "csti"
+                        else "document.documentElement.innerText")
+                except Exception:
+                    pass
+                f = dom.build_finding({**probe, "base": url}, pp_value=pp_value, nav_targets=navs,
+                                      dialog_msg=fired["msg"], body=body, evil_reqs=evil_reqs)
+                if f:
+                    # Capture a browser PoC for the report: a viewport screenshot plus a DOM snippet around
+                    # the confirmation marker where one exists (e.g. CSTI's evaluated "49<MARK>"). Size-capped.
+                    try:
+                        import base64 as _b64
+                        _png = await page.screenshot(type="png", timeout=6000)
+                        _b = _b64.b64encode(_png).decode()
+                        if 0 < len(_b) <= 900000:          # ~675KB raw cap; keep report lean
+                            f["screenshot"] = "data:image/png;base64," + _b
+                    except Exception:
+                        pass
+                    try:
+                        _snip = await page.evaluate(
+                            "(m)=>{const h=document.documentElement.outerHTML;const i=h.indexOf(m);"
+                            "return i<0?'':h.slice(Math.max(0,i-120),i+160);}", "49" + dom.MARK)
+                        if _snip:
+                            f["dom_snippet"] = _snip
+                    except Exception:
+                        pass
+                return f
+            finally:
+                try:
+                    await ctx.close()
+                except Exception:
+                    pass
+
         try:
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(
                     headless=True, executable_path=chrome,
                     args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
                 try:
-                    for probe in dom.build_probes(url):
+                    # feed DISCOVERED params (client-JS reads + reflected wordlist) into the DOM probes so
+                    # CSTI/redirect on an unlinked app param (e.g. /catalog?category) is reached, not just the
+                    # crawled + fixed-wordlist params.
+                    disc_params = await self._discover_params(url, limit=8)
+                    seen_cls, pollutable = set(), False
+                    for probe in dom.build_probes(url, extra_params=disc_params):
                         if probe["class"] in seen_cls:      # one confirmation per class is enough
                             continue
-                        ctx = await browser.new_context(ignore_https_errors=True)
-                        if self.session_headers:
-                            hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
-                            if hdrs:
-                                await ctx.set_extra_http_headers(hdrs)
-                        await self._ctx_add_cookies(ctx)      # load authed pages logged-in
-                        page = await ctx.new_page()
-                        fired, navs = {"msg": None}, []
-
-                        async def on_dialog(d):
-                            fired["msg"] = d.message
-                            try:
-                                await d.dismiss()
-                            except Exception:
-                                pass
-                        page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
-                        page.on("framenavigated", lambda fr: navs.append(fr.url))
-                        # Also record top-level navigation REQUESTS: a real open
-                        # redirect to a non-resolving attacker host (e.g. the reserved
-                        # .example TLD) fires a navigation request but may never commit
-                        # a framenavigated event. confirmed_redirect() host-matches, so
-                        # the probe's own load (attacker host only in the fragment) is
-                        # still excluded — this only adds genuine cross-host navigations.
-                        def _on_request(r):
-                            try:
-                                if r.is_navigation_request():
-                                    navs.append(r.url)
-                            except Exception:
-                                pass
-                        page.on("request", _on_request)
-                        try:
-                            await page.goto(probe["nav"], wait_until="load", timeout=9000)
-                            # CSTI needs the client-side template engine (AngularJS) to bootstrap
-                            # and run a digest before {{7*7}} becomes 49 — wait for network idle.
-                            if probe["class"] == "csti":
-                                try:
-                                    await page.wait_for_load_state("networkidle", timeout=5000)
-                                except Exception:
-                                    pass
-                                await page.wait_for_timeout(900)
-                            else:
-                                await page.wait_for_timeout(350)
-                        except Exception:
-                            pass
-                        pp_value, body = None, ""
-                        try:
-                            pp_value = await page.evaluate("window.Object.prototype[" + repr(dom.PP_KEY) + "]")
-                        except Exception:
-                            pass
-                        try:
-                            # read full HTML for CSTI (the evaluated marker can land in markup,
-                            # not just visible text); innerText is enough for the other classes.
-                            body = await page.evaluate(
-                                "document.documentElement.outerHTML" if probe["class"] == "csti"
-                                else "document.documentElement.innerText")
-                        except Exception:
-                            pass
-                        f = dom.build_finding({**probe, "base": url}, pp_value=pp_value,
-                                              nav_targets=navs, dialog_msg=fired["msg"], body=body)
+                        f = await _audit_one(browser, probe)
                         if f:
-                            # Capture a browser PoC for the report: a viewport screenshot
-                            # (visual proof the bug fired in a real browser) plus a DOM
-                            # snippet around the confirmation marker where one exists
-                            # (e.g. CSTI's evaluated "49<MARK>"). Best-effort, size-capped.
-                            try:
-                                import base64 as _b64
-                                _png = await page.screenshot(type="png", timeout=6000)
-                                _b = _b64.b64encode(_png).decode()
-                                if 0 < len(_b) <= 900000:          # ~675KB raw cap; keep report lean
-                                    f["screenshot"] = "data:image/png;base64," + _b
-                            except Exception:
-                                pass
-                            try:
-                                _snip = await page.evaluate(
-                                    "(m)=>{const h=document.documentElement.outerHTML;const i=h.indexOf(m);"
-                                    "return i<0?'':h.slice(Math.max(0,i-120),i+160);}", "49" + dom.MARK)
-                                if _snip:
-                                    f["dom_snippet"] = _snip
-                            except Exception:
-                                pass
                             findings.append(f)
                             seen_cls.add(probe["class"])
+                            if probe["class"] == "proto":
+                                pollutable = True
+                    # ── prototype-pollution GADGET pass ── only when pollution is CONFIRMED on this page, so
+                    # the browser budget is spent where a gadget can actually exist. Candidate gadget property
+                    # names come from the page's OWN JS first (target-derived), then the framework wordlist.
+                    # A site-wide pollution source (e.g. deparam loaded on every page) would make EVERY page
+                    # pollutable; cap the (browser-heavy) gadget pass to a few pages per mission so it can't
+                    # blow the time budget — the gadgets live in shared app scripts, so a few pages cover them.
+                    _gbudget = getattr(self, "_gadget_pages", 0)
+                    if pollutable and _gbudget < 3:
+                        self._gadget_pages = _gbudget + 1
+                        gseen = set()      # gadget families already confirmed (dom_xss / open_redirect)
+                        # Harvest gadget property names from the page's OWN app scripts (the gadget lives there:
+                        # e.g. `script.src = config.transport_url`). EXCLUDE big vendor libs — they hold no app
+                        # gadget and their thousands of property reads drown the sink-proximity ranking. Then
+                        # rank sink-adjacent props first; the framework wordlist backfills.
+                        import re as _re
+                        from urllib.parse import urlparse as _up, urljoin as _uj
+                        host = _up(url).netloc
+                        _VENDOR = ("angular", "react", "vue", "jquery", "lodash", "polyfill", "runtime.",
+                                   "bootstrap", "modernizr", "zone.js", "moment", "d3.", ".min.js")
+                        app_js = []
                         try:
-                            await ctx.close()
+                            pg = await self._http(url, "GET", capture=False)
+                            body = pg.get("body", "") or ""
+                            for s in _re.findall(r'<script[^>]+src=["\']?([^"\'> ]+)', body):
+                                if len(app_js) >= 5:
+                                    break
+                                su = _uj(url, s)
+                                if (_up(su).netloc and _up(su).netloc != host) or any(v in su.lower() for v in _VENDOR):
+                                    continue
+                                rr = await self._http(su, "GET", capture=False)
+                                if rr.get("body"):
+                                    app_js.append(rr["body"])
                         except Exception:
                             pass
+                        ranked = {}
+                        for s in app_js:
+                            for i, n in enumerate(dom.harvest_gadget_props(s, cap=10)):
+                                ranked[n] = min(ranked.get(n, 99), i)   # best rank across app scripts
+                        extra_props = [n for n, _ in sorted(ranked.items(), key=lambda kv: kv[1])][:6]
+                        for probe in dom.gadget_probes(url, extra_props=extra_props, cap=6):
+                            fam = "open_redirect" if probe["flavor"] == "nav" else "dom_xss"
+                            if fam in gseen:
+                                continue
+                            f = await _audit_one(browser, probe)
+                            if f:
+                                findings.append(f)
+                                gseen.add(f.get("family") or fam)
+                finally:
                     await browser.close()
-                except Exception:
-                    pass
         except Exception as ex:
             return ToolResult("dom_audit", url, True, f"DOM audit error: {type(ex).__name__}", findings)
         if self.mission_id and findings:
@@ -4013,6 +4406,39 @@ class ToolRegistry:
                     "description": f"Neighboring object ({probe.payload}) — {verdict['reason']}",
                     "evidence": f"{probe.payload}: {verdict['reason']}",
                     "confidence": verdict["confidence"], "family": "idor", "tags": ["idor"]})
+        # dangerous HTTP methods (distilled from *Metasploit Revealed*, auxiliary/scanner/http/options): a
+        # bare OPTIONS reveals the Allow list; a TRACE that ECHOES the request confirms Cross-Site Tracing.
+        # Non-destructive: OPTIONS + TRACE only (never an actual PUT/DELETE write).
+        try:
+            opt = await self._http(url, "OPTIONS", capture=False)
+            allow = ""
+            for k, v in (opt.get("headers") or {}).items():
+                if k.lower() == "allow":
+                    allow = str(v); break
+            risky = [m for m in ("PUT", "DELETE", "TRACE", "CONNECT", "PATCH") if allow and m in allow.upper()]
+            if risky:
+                findings.append({
+                    "title": "Dangerous HTTP methods advertised: %s" % ", ".join(risky),
+                    "severity": "low", "target": url, "family": "http_methods", "cwe": "CWE-650",
+                    "description": "OPTIONS advertises write/diagnostic methods (Allow: %s). PUT/DELETE can enable "
+                                   "file write/removal; TRACE enables Cross-Site Tracing." % allow[:120],
+                    "evidence": "Allow: %s" % allow[:160], "confidence": "candidate",
+                    "remediation": "Disable unused methods (PUT/DELETE/TRACE/CONNECT/PATCH) at the web server/WAF.",
+                    "tags": ["http-methods", "misconfiguration"]})
+            tr = await self._http(url, "TRACE", capture=False)
+            body = tr.get("body", "") or ""
+            if tr.get("status") == 200 and ("TRACE " in body[:200] or "X-Apolaki-XST" in body):
+                findings.append({
+                    "title": "Cross-Site Tracing (TRACE method enabled)",
+                    "severity": "medium", "target": url, "family": "http_methods", "cwe": "CWE-693",
+                    "description": "The server answers TRACE by echoing the request (200), confirming XST — an "
+                                   "attacker can read otherwise-protected headers (e.g. cookies) via a client-side vector.",
+                    "evidence": "TRACE -> 200 with the request echoed: %s" % " ".join(body[:160].split()),
+                    "confidence": "confirmed",
+                    "remediation": "Disable the TRACE method on the web server.",
+                    "tags": ["http-methods", "xst", "trace"]})
+        except Exception:
+            pass
         return ToolResult("web_probes", url, True,
                           f"{len(findings)} anomaly signal(s)", findings)
 
@@ -5312,14 +5738,37 @@ class ToolRegistry:
         headers = {"Content-Type": "application/json"}
         field_candidates = inp.get("field_candidates") or ["message", "prompt", "query", "text", "input"]
         findings = []
-        canary_text = lt.canary_probe(token)
+        # Try the guardrail-evasion technique FAMILY (distilled from Redefining Hacking, Table 8-2), not just
+        # the plain override — a model that refuses "ignore previous instructions" often complies with an
+        # obfuscated framing. Every variant carries the SAME marker, so the SAME canary oracle proves each.
+        # Bounded: a field that errors on the first (direct) probe is abandoned; total probes hard-capped.
+        variants = lt.canary_variants(token)
+        done, tried, MAXTRIES = False, 0, 26
         for field in field_candidates:
-            body = _json.dumps({field: canary_text})
+            if done or tried >= MAXTRIES:
+                break
+            for tech, probe in variants:
+                if tried >= MAXTRIES:
+                    break
+                tried += 1
+                body = _json.dumps({field: probe})
+                r = await self._http(url, "POST", headers, body, capture=False)
+                if r.get("error"):
+                    break   # this field is not accepted by the endpoint — move to the next field
+                if lt.canary_confirmed(r.get("body", ""), token):
+                    findings.append(lt.injection_confirmed_finding(url, token, r.get("body", ""), technique=tech))
+                    await self._http(url, "POST", headers, body, capture=True)
+                    done = True
+                    break
+        # OWASP LLM02 — insecure output handling: does the app return attacker-chosen Markdown/HTML from the
+        # model UNESCAPED? (distinct bug from LLM01). Try on the fields that accepted a probe above.
+        for field in field_candidates:
+            body = _json.dumps({field: lt.output_handling_probe(token)})
             r = await self._http(url, "POST", headers, body, capture=False)
             if r.get("error"):
                 continue
-            if lt.canary_confirmed(r.get("body", ""), token):
-                findings.append(lt.injection_confirmed_finding(url, token, r.get("body", "")))
+            if lt.output_handling_confirmed(r.get("body", ""), token):
+                findings.append(lt.output_handling_finding(url, token, r.get("body", "")))
                 await self._http(url, "POST", headers, body, capture=True)
                 break
         if not findings and field_candidates:
@@ -5327,8 +5776,15 @@ class ToolRegistry:
             r = await self._http(url, "POST", headers, body, capture=False)
             if not r.get("error") and lt.looks_like_system_leak(r.get("body", "")):
                 findings.append(lt.system_leak_lead(url, r.get("body", "")))
-        summary = ("prompt injection CONFIRMED (instruction override)" if findings and findings[0]["confidence"] == "confirmed"
-                   else ("possible system-prompt disclosure (lead)" if findings else "no prompt-injection signal observed"))
+        fams = {f.get("family") for f in findings}
+        if "llm_prompt_injection" in fams and any(f.get("confidence") == "confirmed" for f in findings):
+            summary = "prompt injection CONFIRMED (instruction override)"
+        elif "llm_output_handling" in fams:
+            summary = "insecure LLM output handling CONFIRMED (unescaped Markdown/HTML)"
+        elif findings:
+            summary = "possible system-prompt disclosure (lead)"
+        else:
+            summary = "no prompt-injection / output-handling signal observed"
         return ToolResult("llm_probe", url, True, summary, findings)
 
     async def _run_zap(self, inp: dict) -> ToolResult:

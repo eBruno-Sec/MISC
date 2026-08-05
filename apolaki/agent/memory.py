@@ -82,6 +82,11 @@ def finding_fp(f: dict) -> str:
     tgt = f.get("target") or f.get("surface") or ""
     host = _host_of(tgt)
     path = (urlparse(tgt).path or "/") if tgt else ""
+    # `/blog` and `/blog/` are the SAME resource — a crawler that reaches an endpoint
+    # both with and without a trailing slash otherwise fingerprints the identical vuln
+    # twice (this doubled the /blog dom_link/dom_data findings in the blind benchmark).
+    if len(path) > 1:
+        path = path.rstrip("/")
     cls = (f.get("category") or f.get("cwe") or f.get("wstg") or "").strip().lower()
     if not cls:
         cls = (f.get("title") or "").strip().lower()[:40]

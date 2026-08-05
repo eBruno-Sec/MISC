@@ -93,7 +93,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
     "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_form_nosqli", "run_upload_test",
-    "run_cache_poison", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
+    "run_cache_poison", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -2185,6 +2185,7 @@ class BBHAgent:
             seen_sig.add(sig)
             targets.append(u)
         targets = targets[:20]
+        swept_paths = {urlparse(t).path for t in targets}   # paths the param sweep already DOM-traced
         if not targets:
             return
         yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
@@ -2199,7 +2200,7 @@ class BBHAgent:
             except Exception:
                 pass
         for u in targets:
-            for tool in ("run_sqli", "run_injection_probes", "run_xss", "run_dom_trace"):
+            for tool in ("run_sqli", "run_xpath", "run_injection_probes", "run_xss", "run_dom_trace"):
                 if self.stop_event.is_set():
                     return
                 try:
@@ -2208,6 +2209,69 @@ class BBHAgent:
                             yield ev
                 except Exception:
                     pass
+        # HTML-PAGE coverage guarantee: many injection points live on pages with NO query string — a POST
+        # form (login username -> reflected XSS), or a client param the page reads that no crawl edge links
+        # (/login?redirect, /catalog?category -> DOM data / CSTI). The parameterized sweep above skips them.
+        # Run the DOM/form engines (which do their OWN param discovery) on distinct crawled HTML pages so
+        # these are ALWAYS reached, not left to the planner. Bounded; deduped by path.
+        seen_paths, cand = set(), []
+        # crawler noise (feeds/ads/well-known/image-proxy/api-doc echoes) pollutes the surface and would
+        # push the real app pages past the cap — drop it so /login, /catalog, /blog etc. are actually reached.
+        _NOISE = ("/image/", "/api/", "/feed", "/feeds", "/atom", "/ads", "/app-ads", "/favicon",
+                  "/.well-known", "/robots", "/sitemap", "//")
+        _HIVALUE = ("login", "register", "signin", "sign-in", "signup", "sign-up", "account", "profile",
+                    "contact", "feedback", "search", "subscribe", "comment", "reset", "forgot")
+        for u in (self.tools.urls or []):
+            if not self.scope.validate(u)[0]:
+                continue
+            pth = urlparse(u).path or "/"
+            if pth in seen_paths:
+                continue
+            low = pth.lower()
+            if any(low.endswith(x) for x in (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+                                             ".woff", ".woff2", ".ttf", ".map", ".pdf", ".json", ".xml", ".txt")):
+                continue
+            if any(n in low for n in _NOISE):
+                continue
+            seen_paths.add(pth)
+            # priority: auth/form pages first (a login/register form is the reflected-XSS/dom hot spot),
+            # then shallow top-level sections — so the cap keeps the high-value pages, not deep noise.
+            pri = (100 if any(h in low for h in _HIVALUE) else 0) + max(0, 8 - low.count("/"))
+            cand.append((-pri, pth, u.split("?")[0] if "?" in u else u))
+        cand.sort()
+        pages = [u for _, _, u in cand][:12]
+        if pages:
+            yield {"type": "info", "content": "HTML-page sweep: POST-form-XSS + source-to-sink on %d distinct "
+                   "app page(s); CSTI/proto DOM audit on the ones with discoverable params (reaches unlinked "
+                   "params like /catalog?category + form fields like /login username)." % len(pages)}
+            for u in pages:
+                if self.stop_event.is_set():
+                    return
+                # form-XSS + XPath-injection run on every app page (both self-skip pages with no form; an
+                # XML-backed login form is the classic XPath surface). DOM source-to-sink trace runs only
+                # where the parameterized sweep did NOT already cover this path — otherwise it re-reports the
+                # same DOM link/data twice (the /blog search over-report doubling).
+                _htools = ["run_form_xss", "run_xpath"] + (["run_dom_trace"] if urlparse(u).path not in swept_paths else [])
+                for tool in _htools:
+                    try:
+                        async for ev in self._run_tool(tool, {"url": u}, session_id):
+                            if "_content" not in ev:
+                                yield ev
+                    except Exception:
+                        pass
+                # the CSTI/prototype-pollution/gadget DOM audit is browser-heavy — run it only where param
+                # discovery found a reflecting/JS-read param (a real DOM/CSTI candidate), so it stays bounded.
+                try:
+                    disc = await self.tools._discover_params(u)
+                except Exception:
+                    disc = []
+                if disc:
+                    try:
+                        async for ev in self._run_tool("run_dom_audit", {"url": u}, session_id):
+                            if "_content" not in ev:
+                                yield ev
+                    except Exception:
+                        pass
 
     async def _run_deterministic(self, session_id: str):
         yield {"type": "info", "content": f"Deterministic scan planner engaged ({self.mode} mode, no AI) — "

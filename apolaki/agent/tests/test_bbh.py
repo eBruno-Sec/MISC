@@ -2696,6 +2696,22 @@ def test_memory_finding_fp_ignores_severity_and_wording():
     assert memory_mod.finding_fp(f1) != memory_mod.finding_fp(f3)  # different path
 
 
+def test_memory_finding_fp_normalizes_trailing_slash():
+    # `/blog` and `/blog/` are the SAME resource — a crawler that hits an endpoint both
+    # ways must NOT fingerprint the identical vuln twice (this doubled /blog dom_link and
+    # dom_data in the blind benchmark, dragging precision down for no real second finding).
+    slash = {"title": "Reflected DOM link manipulation in 'search'", "family": "dom_link_manipulation",
+             "cwe": "CWE-79", "target": "https://ginandjuice.shop/blog/?back=&search=domtr1"}
+    noslash = {"title": "Reflected DOM link manipulation in 'search'", "family": "dom_link_manipulation",
+               "cwe": "CWE-79", "target": "https://ginandjuice.shop/blog?search=domtr2"}
+    assert memory_mod.finding_fp(slash) == memory_mod.finding_fp(noslash)
+    # but the SAME family on a DISTINCT param at that path stays a separate finding
+    other = dict(noslash, title="Reflected DOM link manipulation in 'category'")
+    assert memory_mod.finding_fp(noslash) != memory_mod.finding_fp(other)
+    # root path "/" is preserved (not stripped to empty)
+    assert memory_mod.finding_fp({"target": "https://x/", "cwe": "CWE-1"}).endswith("/")
+
+
 def test_memory_snapshot_and_diff():
     snap = memory_mod.snapshot(_G_RECON, _G_URLS, _G_FINDINGS)
     assert "dev.example.com" in snap["subdomains"]

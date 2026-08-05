@@ -434,6 +434,9 @@ _FAMILY_FIX = {
                             "Adopt SCA and a regular dependency-patching cadence.",
     "open_redirect": "Validate redirect targets against an allowlist of internal paths; never redirect to a "
                      "user-supplied absolute URL, and strip //, /\\ and scheme tricks.",
+    "request_url_override": "Never build a client-side fetch/XHR/WebSocket target from attacker-controllable input "
+                            "(query/hash/message). Allowlist the destination origin+path, or use fixed relative "
+                            "endpoints; treat the decoded value as data, not a URL.",
     "ssti": "Never render user input as a template; pass it as data to a sandboxed, auto-escaping engine.",
     "csti": "Never place untrusted input where a client-side template engine will evaluate it. Bind user data as "
             "text (Angular {{ }} interpolation of a scope value / ng-bind), not by concatenating it into the "

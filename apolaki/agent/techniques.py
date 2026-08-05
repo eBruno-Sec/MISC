@@ -89,6 +89,33 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="$-operator / query-object reflection differential (nosqli_tool).",
        exploit="Inject query operators ($ne, $gt, $where) to bypass filters or coerce mass updates.",
        oracle="Response set changes in a way only an interpreted operator (not a literal) explains."),
+    # distilled from *Beginner Web Application Pentester* (Abdollahi), "Testing for XPath injection".
+    _t(id="xpath_injection", vuln_class="xpath_injection", cwe="CWE-643", owasp="A03:2021",
+       permission=INTRUSIVE, transferable=True,
+       summary="Injection into an XPath query built over an XML document (often an XML-backed login form).",
+       detect="Request-level differential (xpath_tool): a stray quote flips the HTTP status class (error-based), "
+              "or the `' or '1'='1` / `' or '1'='2` pair splits (boolean) — same shape as SQLi.",
+       exploit="Inject an XPath tautology to bypass an XML-backed login, or blind-boolean to read any node "
+               "(XPath has no per-node ACLs).",
+       oracle="A stray quote breaks the query (status-class change) OR the true-branch matches the baseline "
+              "while the false-branch diverges — a differential a literal value cannot explain."),
+    # distilled from *Redefining Hacking* (Santos), ch 8 AI security — Table 8-2 + garak/ps-fuzz probes.
+    _t(id="llm_prompt_injection", vuln_class="llm_prompt_injection", cwe="CWE-1427", owasp="LLM01:2025",
+       permission=ACTIVE, transferable=True,
+       summary="Direct prompt injection: user input overrides the app's LLM instructions.",
+       detect="Chat-endpoint gate + a UNIQUE-marker instruction-override across a guardrail-evasion family "
+              "(direct/leetspeak/base64/roleplay/hypothetical/reinforcement/format-shift/…) (llm_tool).",
+       exploit="Frame the override so a guardrail lets it through; escalate to a real policy/context bypass.",
+       oracle="The model returns the exact per-run marker verbatim (zero legitimate reason to appear)."),
+    _t(id="llm_output_handling", vuln_class="llm_output_handling", cwe="CWE-79", owasp="LLM02:2025",
+       permission=ACTIVE, transferable=True,
+       summary="Insecure output handling: the app returns model-generated Markdown/HTML UNESCAPED.",
+       detect="Ask the model to emit a Markdown image + HTML tag carrying a unique marker; check the raw, "
+              "un-encoded markup survives in the response (llm_tool.output_handling_*).",
+       exploit="A rendering client fetches the image (data exfil beacon) or executes the HTML (XSS) — "
+               "reachable via direct or indirect/stored prompt injection.",
+       oracle="Attacker-chosen markup with a unique marker appears un-encoded in the response (an encoding "
+              "control would have neutralised it)."),
 
     _t(id="idor_bola_read", vuln_class="access_control", cwe="CWE-639", owasp="A01:2021",
        permission=ACTIVE, transferable=True, pack="idor_read",

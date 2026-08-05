@@ -22,17 +22,21 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import browser_engine as be
 
 _REDIRECTISH = ("back", "url", "return", "returnurl", "returnto", "next", "goto", "dest",
-                "destination", "redirect", "redir", "continue", "callback", "to", "link", "out")
+                "destination", "redirect", "redir", "continue", "callback", "to", "link", "out",
+                # request-override-ish names too: a client-side fetch/XHR target is almost always a
+                # URL-shaped parameter, so gate the (costly) attacker-host render on these names + reflection
+                "endpoint", "api", "src", "uri", "path", "load", "fetch", "resource", "feed",
+                "host", "target", "data", "json", "proxy", "file", "u", "domain", "origin")
 
 _TRACE_JS = r'''
 export default async function ({ page }) {
   const C = %CANARY%;
   const TARGET = %URL%;
-  const res = { executed:false, redirect:"", in_href:"", in_src:"", in_attr:"", in_text:false, note:"" };
+  const res = { executed:false, redirect:"", req_override:"", in_href:"", in_src:"", in_attr:"", in_text:false, note:"" };
   page.on("dialog", async d => { try { if (String(d.message()).indexOf(C) >= 0) res.executed = true; await d.dismiss(); } catch(e){} });
   const isEvilHost = (u) => { try { return /^evilc[0-9a-z]+\.example$/i.test(new URL(u).hostname); } catch(e){ return false; } };
   page.on("framenavigated", f => { try { if (isEvilHost(f.url())) res.redirect = f.url().slice(0,140); } catch(e){} });
-  page.on("request", r => { try { if (isEvilHost(r.url()) && (r.isNavigationRequest ? r.isNavigationRequest() : true)) res.redirect = res.redirect || ("req:"+r.url().slice(0,120)); } catch(e){} });
+  page.on("request", r => { try { if (!isEvilHost(r.url())) return; const nav = r.isNavigationRequest ? r.isNavigationRequest() : true; const rt = r.resourceType ? r.resourceType() : ""; if (nav) res.redirect = res.redirect || r.url().slice(0,140); else if (rt === "fetch" || rt === "xhr") res.req_override = res.req_override || r.url().slice(0,140); } catch(e){} });
   await page.evaluateOnNewDocument((c) => {
     try {
       const oa = window.alert; window.alert = (m) => { try { if (String(m).indexOf(c) >= 0) window.__hit = true; } catch(e){} try { return oa && oa(m); } catch(e){} };
@@ -112,6 +116,9 @@ def classify(url: str, param: str, canary: str, sig: dict) -> list:
     if (s.get("redirect") or "").strip():
         hits.append({"family": "open_redirect", "param": param, "target": s.get("redir_target") or set_param(url, param, canary),
                      "canary": canary, "evidence": "navigation to attacker host from param '%s': %s" % (param, s["redirect"])})
+    if (s.get("req_override") or "").strip():
+        hits.append({"family": "request_url_override", "param": param, "target": s.get("reqov_target") or set_param(url, param, canary),
+                     "canary": canary, "evidence": "param '%s' overrides a client-side fetch/XHR request target at runtime: %s" % (param, str(s["req_override"])[:120])})
     if s.get("in_href") or s.get("in_src"):
         sink = s.get("in_href") or s.get("in_src")
         hits.append({"family": "dom_link_manipulation", "param": param, "target": set_param(url, param, canary),
@@ -156,13 +163,18 @@ def trace_param(url: str, param: str, browser_url=None) -> list:
         where = r.get("in_attr") or "DOM text"
         hits.append({"family": "dom_data_manipulation", "param": param, "target": set_param(url, param, canary),
                      "canary": canary, "evidence": "param '%s' reflects into rendered DOM content at runtime (%s)" % (param, where)})
-    # redirect pass — only for redirect-ish names or params that already reached a URL sink
+    # attacker-host pass -> open_redirect (navigation) AND request_url_override (script fetch/XHR).
+    # Gated on a URL/redirect/request-ish param NAME or a param that already reached a URL sink (a
+    # client-side request target is URL-shaped), so the extra render stays off every benign param.
     if param.lower() in _REDIRECTISH or link_sink:
         redir_val = "https://evilc%s.example/" % canary
         rr = _trace(set_param(url, param, redir_val), canary, browser_url) or {}
         if (rr.get("redirect") or "").strip():
             hits.insert(0, {"family": "open_redirect", "param": param, "target": set_param(url, param, redir_val),
                             "canary": canary, "evidence": "navigation to attacker host from param '%s': %s" % (param, rr["redirect"])})
+        if (rr.get("req_override") or "").strip():
+            hits.insert(0, {"family": "request_url_override", "param": param, "target": set_param(url, param, redir_val),
+                            "canary": canary, "evidence": "param '%s' overrides a client-side fetch/XHR request target at runtime: %s" % (param, rr["req_override"])})
     # XSS pass — only worth trying execution where the canary already reflects into the DOM
     if reflected:
         for pl in _XSS_PAYLOADS[:5]:
@@ -178,12 +190,14 @@ def trace_param(url: str, param: str, browser_url=None) -> list:
 _CVSS = {
     "dom_xss": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", 6.1),
     "open_redirect": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N", 4.7),
+    "request_url_override": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N", 5.4),
     "dom_link_manipulation": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N", 5.4),
     "dom_data_manipulation": ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N", 4.3),
 }
-_CWE = {"dom_xss": "CWE-79", "open_redirect": "CWE-601",
+_CWE = {"dom_xss": "CWE-79", "open_redirect": "CWE-601", "request_url_override": "CWE-918",
         "dom_link_manipulation": "CWE-79", "dom_data_manipulation": "CWE-79"}
 _TITLE = {"dom_xss": "DOM-based XSS", "open_redirect": "DOM-based open redirect",
+          "request_url_override": "Client-side request-URL override",
           "dom_link_manipulation": "Reflected DOM link manipulation",
           "dom_data_manipulation": "Reflected DOM data manipulation"}
 
@@ -204,6 +218,8 @@ def finding(hit: dict) -> dict:
                                "Observe the attacker-controlled canary reach the DOM sink / execute"],
         "impact": {"dom_xss": "Arbitrary script executes in the victim's browser (session/credential theft).",
                    "open_redirect": "The app redirects victims to an attacker-controlled host (phishing/token leak).",
+                   "request_url_override": "Attacker controls the URL the page fetches at runtime (client-side request forgery): "
+                                           "exfiltration to an attacker host, SSRF-style reach to internal endpoints, or token leakage via the outbound request.",
                    "dom_link_manipulation": "Attacker controls a link/resource URL the page requests or a victim clicks.",
                    "dom_data_manipulation": "Attacker controls rendered DOM content/attributes (UI redress, data spoofing)."}.get(fam, ""),
         "tags": ["dom", "runtime-canary", fam],
