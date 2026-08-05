@@ -49,6 +49,17 @@ _PRECONDITIONS = {
     "weak_2fa_bypass":         ["authenticated"],
     "weak_password_reset":     ["has_login"],
     "exposed_credentials":     ["credentials_exposed"],
+    # session engines distilled from the books/corpus — gated on existing observations so the planner
+    # (and the graph, which shares this precondition table) reasons about them, not just the blind sweep.
+    "xpath_injection":         ["has_search_param"],   # input concatenated into an XPath query
+    "ldap_injection":          ["has_search_param"],   # input concatenated into an LDAP filter
+    "ssi_injection":           ["reflects_input"],     # input reaches an SSI-parsed response
+    "css_injection":           ["reflects_input"],     # input reflected into a CSS/style context
+    "jwt_key_confusion":       ["authenticated"],      # RS->HS forgery on a captured token
+    "cache_deception":         ["authenticated"],      # needs a private page to leak from the cache
+    "waf_bypass":              ["has_search_param"],   # a parameter to smuggle a blocked signature through
+    "reverse_tabnabbing":      ["serves_js"],          # HTML page with target=_blank links
+    "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
 }
 
 

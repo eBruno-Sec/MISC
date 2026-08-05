@@ -94,3 +94,19 @@ def test_planner_is_graph_authoritative_flat_recon_cannot_drive_it():
     assert out2["observations"] == [] and out2["techniques"] == [] and out2["next_best_actions"] == []
     # None graph is tolerated (compat callers), still no plan
     assert TP.plan_graph_authoritative(None, seed)["observations"] == []
+
+
+def test_new_session_engines_are_planner_wired_not_islands():
+    """Orchestration guard: every confirming engine added this session must be gated by a precondition so
+    the planner (and the graph, which shares the table) reasons about it — not left as a sweep-only island."""
+    import technique_planner as TP
+    new = ["xpath_injection", "ldap_injection", "ssi_injection", "css_injection", "jwt_key_confusion",
+           "cache_deception", "waf_bypass", "reverse_tabnabbing", "permissive_crossdomain"]
+    for tid in new:
+        assert tid in TP._PRECONDITIONS, "%s is a planner island (no precondition)" % tid
+        assert all(o in TP.OBSERVATIONS for o in TP._PRECONDITIONS[tid]), "%s uses an unknown observation" % tid
+    # the gate really gates: none surface with zero observations, all surface when their obs hold
+    techs = [{"id": t} for t in new]
+    assert TP.plan(set(), techs) == []
+    obs = {"has_search_param", "reflects_input", "authenticated", "serves_js"}
+    assert {e["id"] for e in TP.plan(obs, techs)} == set(new)
