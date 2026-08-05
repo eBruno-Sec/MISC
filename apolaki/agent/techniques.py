@@ -668,6 +668,10 @@ _MITRE = {
     "jwt_forge": "T1550.001", "weak_2fa_bypass": "T1111", "weak_password_reset": "T1098",
     "exposed_files_harvest": "T1083", "target_intel_harvest": "T1592",
     "excessive_data_exposure": "T1213",
+    # session's new book/corpus engines — Exploit Public-Facing Application for the injection classes,
+    # Use Alternate Auth Material (app access token) for the JWT forgery. Others have no clean ATT&CK fit.
+    "xpath_injection": "T1190", "ldap_injection": "T1190", "ssi_injection": "T1190",
+    "css_injection": "T1190", "jwt_key_confusion": "T1550.001",
 }
 # "Try it" — a concrete request to fire against a wired practice target (Juice Shop @ :42000 /
 # DVWA @ :42080), so a technique can be learned by DOING it, in-app. Copy-paste, then tweak.
