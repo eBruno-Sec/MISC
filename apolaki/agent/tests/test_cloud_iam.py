@@ -21,7 +21,7 @@ _TF = {"planned_values": {"root_module": {"resources": [
 
 
 def test_live_enumeration_is_honestly_blocked(monkeypatch):
-    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"):
+    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS", "LINODE_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     st = CI.live_enumeration_supported()
     assert st["supported"] is False and st["reason"] and st["providers_ready"] == []
@@ -104,7 +104,7 @@ def test_collect_with_fixture_analyzes_each_provider():
 
 
 def test_collect_live_is_blocked_without_credentials(monkeypatch):
-    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"):
+    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS", "LINODE_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     for prov in ("aws", "azure", "gcp"):
         res = CI.collect(prov)
@@ -274,7 +274,7 @@ def test_collect_live_is_fixture_testable_for_aws_azure_gcp():
 
 
 def test_collect_aws_is_classified_unfinished_not_only_credential_blocked(monkeypatch):
-    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS"):
+    for k in ("AWS_ACCESS_KEY_ID", "AZURE_CLIENT_ID", "GOOGLE_APPLICATION_CREDENTIALS", "LINODE_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     res = CI.collect("aws")   # no fixture, no SDK glue
     assert res["blocked"] is True and "UNFINISHED" in res["reason"]

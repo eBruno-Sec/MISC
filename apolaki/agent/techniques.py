@@ -90,6 +90,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Inject query operators ($ne, $gt, $where) to bypass filters or coerce mass updates.",
        oracle="Response set changes in a way only an interpreted operator (not a literal) explains."),
     # distilled from *Beginner Web Application Pentester* (Abdollahi), "Testing for XPath injection".
+    # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
+    _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",
+       permission=INTRUSIVE, transferable=True,
+       summary="SQL injection into the query STRUCTURE (ORDER BY / column position), not a quoted data value.",
+       detect="A valid subquery (SELECT 1) runs clean while an invalid one (SELECT 1 FROM <nonexistent>) raises "
+              "a DBMS error absent from the baseline — a differential a non-SQL context cannot produce.",
+       exploit="Escalate with a boolean-inference subquery in the ORDER BY position to read arbitrary data.",
+       oracle="Invalid-subquery DBMS error present, valid-subquery error absent (both/neither = not SQL = no FP)."),
+
     _t(id="xpath_injection", vuln_class="xpath_injection", cwe="CWE-643", owasp="A03:2021",
        permission=INTRUSIVE, transferable=True,
        summary="Injection into an XPath query built over an XML document (often an XML-backed login form).",

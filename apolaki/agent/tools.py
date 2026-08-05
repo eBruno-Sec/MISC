@@ -116,6 +116,7 @@ TOOL_PERMISSIONS = {
     "run_client_checks": PermissionLevel.PASSIVE,
     "run_css_injection": PermissionLevel.ACTIVE,
     "run_waf_bypass": PermissionLevel.ACTIVE,
+    "run_sqli_structural": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6000,6 +6001,40 @@ class ToolRegistry:
                     findings.append(self._attach_poc(wb.finding(url, name, cls, ev["oracle"]), padded_url, None))
                     break
         return ToolResult("waf_bypass", url, True, "%d WAF-bypass finding(s)" % len(findings), findings)
+
+    async def _run_sqli_structural(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: structural / ORDER BY SQL injection (CWE-89, WAHH ch9). Input placed into the query
+        STRUCTURE (ORDER BY / column position) is unquoted, so the quote-break engine misses it and prepared
+        statements do NOT protect it. Confirmed by a subquery differential: a VALID subquery runs clean, an
+        INVALID one raises a DBMS error the baseline lacks (a non-SQL context errors on both/neither -> no FP)."""
+        import sqli_tool as sq
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("sqli", url, False, "", [], "SCOPE BLOCK")
+        pr0 = urlparse(url)
+        params = parse_qsl(pr0.query, keep_blank_values=True)
+        if not params:
+            return ToolResult("sqli", url, True, "no query params", [])
+        findings = []
+
+        def _setq(name, val):
+            pairs = [(k, val if k == name else v) for k, v in params]
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        async def _body(u):
+            r = await self._http(u, "GET", capture=False)
+            return r.get("body", "") or ""
+
+        base = await _body(url)
+        p = sq.structural_probes()
+        for name, _v in params:
+            ok_body = await _body(_setq(name, p["ok"]))
+            bad_body = await _body(_setq(name, p["bad"]))
+            confirmed, hits = sq.structural_confirmed(base, ok_body, bad_body)
+            if confirmed:
+                findings.append(self._attach_poc(sq.structural_finding(url, name, hits), _setq(name, p["bad"]), None))
+        return ToolResult("sqli", url, True, "%d structural SQLi finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

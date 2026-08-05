@@ -321,3 +321,33 @@ def time_finding(url: str, param: str, item: dict, control_elapsed: float, sleep
                  [f"Set '{param}' to {item['payload']!r}",
                   f"Observe the response takes ~{seconds}s longer than the sleep(0) control",
                   "Extract data via time-based boolean inference"])
+
+
+# ── structural / ORDER BY injection (WAHH ch9) ───────────────────────────────
+# Input placed into the query STRUCTURE (ORDER BY / column position / sort dir) is unquoted, so the
+# quote-break data-context oracle never fires and — crucially — prepared statements do NOT protect it.
+# WAHH flags this as a key modern vector. Confirmation is a SUBQUERY DIFFERENTIAL that a non-SQL context
+# cannot fake: a VALID subquery runs clean while an INVALID one raises a DBMS error absent from the baseline.
+def structural_probes() -> dict:
+    return {"ok": "(SELECT 1)", "bad": "(SELECT 1 FROM apolnope_zqx77)"}
+
+
+def structural_confirmed(baseline_body: str, ok_body: str, bad_body: str):
+    """(confirmed, dbms_hits): confirmed when the INVALID subquery errors (DBMS signature not in baseline) but
+    the VALID subquery does NOT. A context that merely reflects/ignores the value, or errors on ANY invalid
+    column name, gives the SAME result for both -> no differential -> no false positive."""
+    bad_hits = error_signatures(baseline_body, bad_body)
+    ok_hits = error_signatures(baseline_body, ok_body)
+    return (bool(bad_hits) and not ok_hits), bad_hits
+
+
+def structural_finding(url: str, param: str, dbms_hits: list) -> dict:
+    dbms = ", ".join(sorted({h["dbms"] for h in dbms_hits})) or "SQL"
+    return _base(url, param, "structural/ORDER BY", "high",
+                 (f"'{param}' is placed into the query STRUCTURE (e.g. an ORDER BY / column position), not a "
+                  f"quoted data value. A valid subquery ran cleanly while an invalid one raised a {dbms} error, "
+                  "so the input is evaluated as SQL. Note: parameterised queries do NOT protect this context."),
+                 f"(SELECT 1) ran clean; (SELECT 1 FROM <nonexistent>) -> {dbms} error not in baseline",
+                 [f"Set '{param}' to (SELECT 1) — normal response",
+                  f"Set '{param}' to (SELECT 1 FROM <nonexistent-table>) — a {dbms} error appears",
+                  "Escalate with boolean inference: replace the column with (SELECT 1 WHERE <cond> OR 1/0=0)"])
