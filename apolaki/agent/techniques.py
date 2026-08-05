@@ -110,6 +110,16 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Bypass an LDAP-backed login with a filter tautology `*)(uid=*))(|(uid=*`, or enumerate objects.",
        oracle="An LDAP directory error signature appears on the metacharacter break but not the baseline."),
 
+    # distilled from OWASP WSTG / PortSwigger material (RedCyber corpus) — "Path confusion: web cache deception".
+    _t(id="cache_deception", vuln_class="cache_deception", cwe="CWE-525", owasp="A05:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-05",
+       summary="Web cache deception: a path-confused URL (/account/x.css) caches the victim's private page.",
+       detect="The origin serves the private page for a fake static suffix; an ANONYMOUS fetch of the same "
+              "URL then returns tokens private to the authenticated page — only the cache could have served them.",
+       exploit="Lure a logged-in victim to /private/x.css; then read their cached private data unauthenticated.",
+       oracle="An anonymous GET of the path-confused URL leaks the tester's OWN authenticated-only tokens.",
+       needs_fixture=["authenticated_session"], fixture_source="harvest"),
+
     _t(id="ssi_injection", vuln_class="ssi_injection", cwe="CWE-97", owasp="A03:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-INPV-08",
        summary="Server-Side Includes injection: user input reaches an SSI-parsed response and executes.",

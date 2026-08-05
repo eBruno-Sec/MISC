@@ -112,6 +112,7 @@ TOOL_PERMISSIONS = {
     "run_jsonp": PermissionLevel.ACTIVE,
     "run_param_mine": PermissionLevel.INTRUSIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
+    "run_cache_deception": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -5882,6 +5883,52 @@ class ToolRegistry:
         summary = (f"cache poisoning CONFIRMED via {findings[0]['tags'][1]}" if findings and findings[0]["confidence"] == "confirmed"
                    else ("unkeyed header reflected (unconfirmed persistence)" if findings else "no unkeyed-header reflection observed"))
         return ToolResult("cache_poison", target, True, summary, findings)
+
+    async def _run_cache_deception(self, inp: dict) -> ToolResult:
+        """ACTIVE: Web cache deception (CWE-525) — distilled from OWASP WSTG / PortSwigger (RedCyber corpus).
+        A path-confused URL (/account/x.css) makes the ORIGIN serve the private page while the CACHE stores it
+        under the static-looking URL; an anonymous fetch then reads the victim's cached private data. Confirmed
+        by a three-way differential (authed base vs anon base -> private tokens; an ANON fetch of the variant
+        leaks the TESTER's own private tokens -> only the cache could have served them). Needs an authenticated
+        session; self-inflicted (caches the tester's OWN page) — non-destructive, no other user affected."""
+        import os as _os
+
+        import cache_deception_tool as cd
+        import httpx
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("cache_deception", url, False, "", [], "SCOPE BLOCK")
+        sess = self.session_headers or {}
+        if not sess:
+            return ToolResult("cache_deception", url, True,
+                              "skipped: web cache deception needs an authenticated session (no private page to leak)", [])
+        findings = []
+        try:
+            hdrs = {"User-Agent": _UA}
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as anon, \
+                       httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
+                                         headers={**hdrs, **sess}) as auth:
+                a_base = (await auth.get(url)).text
+                n_base = (await anon.get(url)).text
+                private = cd.private_tokens(a_base, n_base)
+                if not private:
+                    return ToolResult("cache_deception", url, True,
+                                      "no auth-differentiated private tokens on this page (nothing to leak)", [])
+                for variant in cd.deception_variants(url, _os.urandom(4).hex()):
+                    if not self.scope.validate(variant)[0]:
+                        continue
+                    av = await auth.get(variant)               # does the ORIGIN serve the private page for the fake suffix?
+                    if not cd.leaked_tokens(av.text, private):
+                        continue                               # path confusion did not route to the private page
+                    cacheable = cd.looks_cacheable(dict(av.headers))
+                    nv = await anon.get(variant)               # ANON fetch of the (now-cached) URL
+                    leaked = cd.leaked_tokens(nv.text, private)
+                    if leaked:
+                        findings.append(self._attach_poc(cd.finding(url, variant, leaked, cacheable), variant, None))
+                        break
+        except Exception:
+            pass
+        return ToolResult("cache_deception", url, True, "%d web-cache-deception finding(s)" % len(findings), findings)
 
     async def _run_llm_probe(self, inp: dict) -> ToolResult:
         """LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires
