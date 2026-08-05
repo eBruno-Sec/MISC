@@ -87,6 +87,11 @@ _PACKS = {
          "oracle": "an unauthenticated Modbus device answers a read-only request (device-id / read-holding)",
          "enables": ["ot_read"]},
     ]},
+    "vnc": {"graph_kind": "service", "note": "Remote desktop: unauthenticated VNC (READ-ONLY handshake).", "checks": [
+        {"id": "vnc_no_auth", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "the RFB handshake advertises security type 'None' (no password required)",
+         "enables": ["remote_control"]},
+    ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,
          "oracle": "INFO/PING succeeds without AUTH (open data store)", "enables": ["database_read"]},

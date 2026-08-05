@@ -93,6 +93,7 @@ ALWAYS_ON = {
     "snmp_default_community":   "service_router pack: fingerprint(port 161/SNMP) -> _run_service_pack default-community GET",
     "smb_signing_disabled":     "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack SMB2 negotiate signing check",
     "modbus_exposed":           "service_router pack: fingerprint(port 502/Modbus) -> _run_service_pack read-only OT probe",
+    "vnc_no_auth":              "service_router pack: fingerprint(port 5900/VNC) -> _run_service_pack RFB handshake",
 }
 
 

@@ -126,6 +126,7 @@ TOOL_PERMISSIONS = {
     "run_smb_enum": PermissionLevel.ACTIVE,
     "run_snmp_audit": PermissionLevel.ACTIVE,
     "run_modbus_audit": PermissionLevel.ACTIVE,
+    "run_vnc_audit": PermissionLevel.ACTIVE,
     "run_path_sqli": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -2188,6 +2189,12 @@ class ToolRegistry:
             if out:
                 sev, ev = out
                 findings.append(_mb.finding(host, int(port), sev, ev, res))
+        elif service == "vnc":
+            import vnc_audit_tool as _vt                         # RFB handshake only, no session, no password
+            res = await asyncio.get_event_loop().run_in_executor(None, _vt.probe, host, int(port))
+            out = _vt.analyze(res) if not res.get("error") else None
+            if out:
+                findings.append(_vt.finding(host, int(port), out[0], res))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6447,6 +6454,32 @@ class ToolRegistry:
             findings.append(self._attach_poc(mb.finding(host, port, sev, ev, res), "%s:%d" % (host, port), None))
         return ToolResult("modbus_audit", "%s:%d" % (host, port), True,
                           "%d modbus-exposure finding(s)" % len(findings), findings)
+
+    async def _run_vnc_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service, beyond web): VNC no-authentication audit (CWE-306). Performs only the RFB
+        version + security-type handshake and confirms an unauthenticated VNC server (offers security type
+        'None'). READ-ONLY — never opens a session or tries a password."""
+        import asyncio as _aio
+        import vnc_audit_tool as vt
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("vnc://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 5900
+        host = raw
+        if not host:
+            return ToolResult("vnc_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("http://%s" % host)[0] or self.scope.validate(host)[0]):
+            return ToolResult("vnc_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, vt.probe, host, port)
+        findings = []
+        out = vt.analyze(res)
+        if out:
+            findings.append(self._attach_poc(vt.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
+        return ToolResult("vnc_audit", "%s:%d" % (host, port), True,
+                          "%d vnc-no-auth finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

@@ -480,6 +480,8 @@ _FAMILY_FIX = {
     "modbus_exposed": "Never expose Modbus/OT to untrusted networks: segment OT behind a firewall/DMZ + VPN, "
                       "restrict TCP/502 to the SCADA master(s), front legacy Modbus with an authenticating "
                       "gateway, and remove any internet reachability.",
+    "vnc_no_auth": "Require a strong VNC password or disable password-only VNC; tunnel VNC over SSH/VPN and "
+                   "restrict TCP/5900 to trusted management hosts.",
 }
 
 

@@ -163,6 +163,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Read process/register data with no auth; an attacker who reaches TCP/502 could also WRITE to "
                "manipulate the physical process (out of scope for Apolaki — read-only, never writes to OT).",
        oracle="A Modbus response (0x2B/0x03 or its exception) matching our transaction id returns without auth."),
+    # beyond web (infra pentest): unauthenticated VNC remote desktop.
+    _t(id="vnc_no_auth", vuln_class="network_service", cwe="CWE-306", owasp="A07:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="A VNC server offers the 'None' security type — full remote desktop control with no password.",
+       detect="Complete only the RFB version + security-type handshake (no session, no password); security type "
+              "'None' (1) is advertised.",
+       exploit="Connect with any VNC client and take full keyboard/mouse/screen control of the host.",
+       oracle="The RFB handshake's offered security types include 'None' (1)."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,
