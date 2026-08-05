@@ -64,6 +64,7 @@ _PRECONDITIONS = {
     "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
     "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
     "session_fixation":        ["has_login", "authenticated"],  # a login + a working credential to drive it
+    "default_credentials":     ["has_sensitive_route"],       # a discovered admin/management interface
 }
 
 

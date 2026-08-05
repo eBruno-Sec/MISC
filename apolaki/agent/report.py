@@ -357,6 +357,7 @@ _CWE_FAMILY = {
     "cwe-352": "csrf", "cwe-942": "cors", "cwe-200": "exposure", "cwe-527": "git_exposure",
     "cwe-1321": "prototype_pollution", "cwe-1336": "ssti",
     "cwe-204": "username_enumeration", "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
+    "cwe-1392": "default_credentials", "cwe-521": "default_credentials",
 }
 
 # CWE -> CAPEC attack pattern (MITRE). Only well-established 1:1 mappings are
@@ -458,6 +459,8 @@ _FAMILY_FIX = {
                           "change.",
     "session_fixation": "Regenerate the session identifier on every privilege change, especially immediately "
                         "after login and logout; invalidate the pre-auth session server-side.",
+    "default_credentials": "Change or disable the default account immediately; restrict the management interface "
+                           "to trusted networks and require strong, unique credentials.",
 }
 
 

@@ -102,12 +102,13 @@ def test_new_session_engines_are_planner_wired_not_islands():
     import technique_planner as TP
     new = ["xpath_injection", "ldap_injection", "ssi_injection", "css_injection", "jwt_key_confusion",
            "cache_deception", "waf_bypass", "reverse_tabnabbing", "permissive_crossdomain",
-           "sqli_structural", "weak_session_token", "username_enumeration", "session_fixation"]
+           "sqli_structural", "weak_session_token", "username_enumeration", "session_fixation",
+           "default_credentials"]
     for tid in new:
         assert tid in TP._PRECONDITIONS, "%s is a planner island (no precondition)" % tid
         assert all(o in TP.OBSERVATIONS for o in TP._PRECONDITIONS[tid]), "%s uses an unknown observation" % tid
     # the gate really gates: none surface with zero observations, all surface when their obs hold
     techs = [{"id": t} for t in new]
     assert TP.plan(set(), techs) == []
-    obs = {"has_search_param", "reflects_input", "authenticated", "serves_js", "has_login"}
+    obs = {"has_search_param", "reflects_input", "authenticated", "serves_js", "has_login", "has_sensitive_route"}
     assert {e["id"] for e in TP.plan(obs, techs)} == set(new)

@@ -120,6 +120,7 @@ TOOL_PERMISSIONS = {
     "run_session_token": PermissionLevel.ACTIVE,
     "run_username_enum": PermissionLevel.ACTIVE,
     "run_session_fixation": PermissionLevel.ACTIVE,
+    "run_default_creds": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -6170,6 +6171,37 @@ class ToolRegistry:
         except Exception:
             pass
         return ToolResult("session_fixation", url, True, "%d session-fixation finding(s)" % len(findings), findings)
+
+    async def _run_default_creds(self, inp: dict) -> ToolResult:
+        """ACTIVE: default-credentials check on a recognised admin interface (WAHH ch18, CWE-1392 / WSTG-ATHN-02).
+        For a URL that IS a known product management interface (Tomcat Manager, JBoss jmx-console) and that issued
+        an HTTP Basic 401 challenge, tries exactly ONE documented vendor-default pair (a single known value, NEVER a
+        brute-force / wordlist / iteration) and confirms via the product's authenticated-view marker. One attempt
+        per interface; a changed credential or non-product path yields nothing."""
+        import base64 as _b64
+        import default_creds_tool as dc
+        from urllib.parse import urlparse
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("default_credentials", url, False, "", [], "SCOPE BLOCK")
+        entry = dc.match(urlparse(url).path)
+        if not entry:
+            return ToolResult("default_credentials", url, True, "not a known admin interface", [])
+        tried = getattr(self, "_defcreds_tried", None)
+        if tried is None:
+            tried = self._defcreds_tried = set()
+        key = (urlparse(url).netloc, urlparse(url).path.rstrip("/"))
+        if key in tried:
+            return ToolResult("default_credentials", url, True, "already tested this interface", [])
+        tried.add(key)                                        # hard guard: at most ONE attempt per interface
+        findings = []
+        un = await self._http(url, "GET", capture=False)
+        if dc.challenged(un.get("status"), un.get("headers", {})):
+            tok = _b64.b64encode(("%s:%s" % (entry["user"], entry["pass"])).encode()).decode()
+            au = await self._http(url, "GET", headers={"Authorization": "Basic %s" % tok}, capture=False)
+            if dc.confirmed(au.get("status"), au.get("body", ""), entry):
+                findings.append(self._attach_poc(dc.finding(url, entry), url, None))
+        return ToolResult("default_credentials", url, True, "%d default-credential finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

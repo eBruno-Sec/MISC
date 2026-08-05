@@ -114,6 +114,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "cookie is byte-for-byte identical after a SUCCESSFUL login (no rotation).",
        exploit="Fix a known token in a victim's browser; inherit their authenticated session when they log in.",
        oracle="A session-ish cookie held before login is unchanged after a confirmed-successful login."),
+    # distilled from WAHH ch18 — a dropped-in admin interface still on its documented vendor default login.
+    _t(id="default_credentials", vuln_class="authentication", cwe="CWE-1392", owasp="A07:2021", wstg="WSTG-ATHN-02",
+       permission=ACTIVE, transferable=True,
+       summary="A recognised admin interface (Tomcat Manager, JBoss jmx-console) still accepts its vendor-default login.",
+       detect="Against a URL that IS a known product interface and issued a Basic 401, try the ONE documented default "
+              "pair (single known value, never brute-force) and confirm via the product's authenticated marker.",
+       exploit="Log in as administrator; on Tomcat/JBoss deploy a WAR/MBean for remote code execution.",
+       oracle="The single default pair returns HTTP 200 with the product's admin-console marker."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

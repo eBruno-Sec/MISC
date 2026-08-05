@@ -110,7 +110,7 @@ FULL = {
 # `partial` = a related tool touches it but does not confirm the specific WSTG scenario.
 PARTIAL = {
     "WSTG-ATHN-01": "transport/header checks flag cleartext creds, no full channel test",
-    "WSTG-ATHN-02": "tests a single discovered/known credential (no brute-force by design)",
+    "WSTG-ATHN-02": "run_default_creds confirms vendor-default admin interfaces (Tomcat/JBoss, single known value); app-form default logins not auto-tested",
     "WSTG-ATHN-09": "host-header reset poisoning covered; full reset-flow logic not",
     "WSTG-BUSL-01": "business-logic graph reasons about it; no generic confirm",
     "WSTG-BUSL-02": "request forgery reasoned via graph", "WSTG-BUSL-04": "run_race covers timing side of it",
