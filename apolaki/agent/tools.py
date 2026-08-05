@@ -114,6 +114,7 @@ TOOL_PERMISSIONS = {
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_cache_deception": PermissionLevel.ACTIVE,
     "run_client_checks": PermissionLevel.PASSIVE,
+    "run_css_injection": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -5957,6 +5958,33 @@ class ToolRegistry:
             if "<" in body and cc.crossdomain_wildcard(body, fn):
                 findings.append(self._attach_poc(cc.crossdomain_finding(pol_url, fn), pol_url, None))
         return ToolResult("client_checks", url, True, "%d client/config finding(s)" % len(findings), findings)
+
+    async def _run_css_injection(self, inp: dict) -> ToolResult:
+        """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a
+        style="" attribute with the CSS structural chars unescaped lets an attacker inject rules (data
+        exfiltration via selector-driven url()). Reflection-context oracle over GET params. Non-destructive."""
+        import os as _os
+
+        import css_injection_tool as css
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("css_injection", url, False, "", [], "SCOPE BLOCK")
+        findings = []
+        pr0 = urlparse(url)
+
+        def _setq(name, val):
+            pairs = [(k, val if k == name else v) for k, v in parse_qsl(pr0.query, keep_blank_values=True)]
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        for name, _v in parse_qsl(pr0.query, keep_blank_values=True):
+            t = _os.urandom(3).hex()
+            r = await self._http(_setq(name, css.payload(t)), "GET", capture=False)
+            ev = css.evaluate(r.get("body", "") or "", t)
+            if ev["confirmed"]:
+                findings.append(self._attach_poc(css.finding(url, name, ev["where"], ev["oracle"]),
+                                                 _setq(name, css.payload(t)), None))
+        return ToolResult("css_injection", url, True, "%d CSS injection finding(s)" % len(findings), findings)
 
     async def _run_llm_probe(self, inp: dict) -> ToolResult:
         """LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires

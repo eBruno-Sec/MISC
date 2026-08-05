@@ -93,7 +93,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
     "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_form_nosqli", "run_upload_test",
-    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
+    "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_encoded_cookie", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",
     "run_dalfox", "run_sqlmap", "run_graphql", "run_js_review",
@@ -2200,7 +2200,7 @@ class BBHAgent:
             except Exception:
                 pass
         for u in targets:
-            for tool in ("run_sqli", "run_xpath", "run_ldap", "run_ssi", "run_injection_probes", "run_xss", "run_dom_trace"):
+            for tool in ("run_sqli", "run_xpath", "run_ldap", "run_ssi", "run_css_injection", "run_injection_probes", "run_xss", "run_dom_trace"):
                 if self.stop_event.is_set():
                     return
                 try:

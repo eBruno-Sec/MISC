@@ -135,6 +135,13 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="A Flash/Silverlight object on any origin reads this site's authenticated responses.",
        oracle="The policy file content contains the wildcard grant (deterministic file content)."),
 
+    _t(id="css_injection", vuln_class="css_injection", cwe="CWE-74", owasp="A03:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CLNT-05",
+       summary="User input reflected into a <style> block / style attribute lets an attacker inject CSS rules.",
+       detect="A marker carrying CSS breakout chars ({ } ; :) reflects into a style context with them unescaped.",
+       exploit="Inject attribute-selector rules with background:url() to exfiltrate CSRF tokens / input values.",
+       oracle="The CSS structural chars survive unescaped inside a <style> block or style=\"\" attribute."),
+
     _t(id="ssi_injection", vuln_class="ssi_injection", cwe="CWE-97", owasp="A03:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-INPV-08",
        summary="Server-Side Includes injection: user input reaches an SSI-parsed response and executes.",
