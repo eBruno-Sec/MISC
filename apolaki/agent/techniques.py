@@ -154,6 +154,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "is not set.",
        exploit="Coerce/capture an authentication and NTLM-relay it to this host to act as the victim.",
        oracle="The SMB2 NEGOTIATE SecurityMode lacks the SIGNING_REQUIRED flag."),
+    # beyond web (ICS/OT pentest): unauthenticated Modbus/TCP device exposure. READ-ONLY — never writes to OT.
+    _t(id="modbus_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A05:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An unauthenticated Modbus/TCP (OT) device is reachable on the network.",
+       detect="Send a READ-ONLY Modbus request (device-identification 0x2B/0x0E or read-holding-register 0x03); a "
+              "well-formed response echoing the transaction id + protocol 0 proves a live, unauthenticated device.",
+       exploit="Read process/register data with no auth; an attacker who reaches TCP/502 could also WRITE to "
+               "manipulate the physical process (out of scope for Apolaki — read-only, never writes to OT).",
+       oracle="A Modbus response (0x2B/0x03 or its exception) matching our transaction id returns without auth."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

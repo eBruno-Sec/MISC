@@ -24,6 +24,7 @@ _PORT_SVC = {
     3128: "proxy", 3306: "mysql", 3389: "rdp", 5432: "postgres", 5900: "vnc", 5985: "winrm",
     6379: "redis", 8080: "http", 8443: "https", 9000: "http", 9200: "elasticsearch",
     9300: "elasticsearch", 10250: "kubelet", 11211: "memcached", 27017: "mongodb",
+    502: "modbus",                                   # ICS/OT — Modbus/TCP (read-only audit)
 }
 
 # banner signature -> service type (a banner OVERRIDES the port guess when present)
@@ -80,6 +81,11 @@ _PACKS = {
         {"id": "ldap_anonymous_read", "cwe": "CWE-306", "intrusive": False,
          "oracle": "an anonymous bind can read directory entries from the naming context (not just RootDSE)",
          "enables": ["directory_read", "user_enumeration"]},
+    ]},
+    "modbus": {"graph_kind": "service", "note": "ICS/OT: unauthenticated Modbus/TCP device (READ-ONLY audit; never writes).", "checks": [
+        {"id": "modbus_exposed", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "an unauthenticated Modbus device answers a read-only request (device-id / read-holding)",
+         "enables": ["ot_read"]},
     ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,

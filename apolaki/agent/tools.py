@@ -125,6 +125,7 @@ TOOL_PERMISSIONS = {
     "run_ldap_enum": PermissionLevel.ACTIVE,
     "run_smb_enum": PermissionLevel.ACTIVE,
     "run_snmp_audit": PermissionLevel.ACTIVE,
+    "run_modbus_audit": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -2179,6 +2180,13 @@ class ToolRegistry:
             if out:
                 comm, sysd = out
                 findings.append(_sa.finding(host, int(port), comm, sysd))
+        elif service == "modbus":
+            import modbus_audit_tool as _mb                      # ICS/OT: READ-ONLY only, never a write to OT
+            res = await asyncio.get_event_loop().run_in_executor(None, _mb.probe, host, int(port))
+            out = _mb.analyze(res) if not res.get("error") else None
+            if out:
+                sev, ev = out
+                findings.append(_mb.finding(host, int(port), sev, ev, res))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6378,6 +6386,33 @@ class ToolRegistry:
             findings.append(self._attach_poc(sa.finding(host, port, comm, sysd), "%s:%d" % (host, port), None))
         return ToolResult("snmp_audit", "%s:%d" % (host, port), True,
                           "%d snmp-default-community finding(s)" % len(findings), findings)
+
+    async def _run_modbus_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (ICS/OT, beyond web): Modbus/TCP exposure audit (CWE-306). Confirms an unauthenticated Modbus
+        device on TCP/502 via a READ-ONLY request (device identification / read holding register). HARD SAFETY
+        RAIL: read-only only — Apolaki NEVER issues a Modbus write to an OT device."""
+        import asyncio as _aio
+        import modbus_audit_tool as mb
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("modbus://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 502
+        host = raw
+        if not host:
+            return ToolResult("modbus_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("http://%s" % host)[0] or self.scope.validate(host)[0]):
+            return ToolResult("modbus_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, mb.probe, host, port)
+        findings = []
+        out = mb.analyze(res)
+        if out:
+            sev, ev = out
+            findings.append(self._attach_poc(mb.finding(host, port, sev, ev, res), "%s:%d" % (host, port), None))
+        return ToolResult("modbus_audit", "%s:%d" % (host, port), True,
+                          "%d modbus-exposure finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

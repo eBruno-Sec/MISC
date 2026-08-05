@@ -477,6 +477,9 @@ _FAMILY_FIX = {
     "smb_signing_disabled": "Require SMB signing everywhere ('server signing = mandatory' on Samba / the "
                             "'Digitally sign communications (always)' GPO on Windows) and enable EPA/channel "
                             "binding on domain controllers to stop NTLM relay.",
+    "modbus_exposed": "Never expose Modbus/OT to untrusted networks: segment OT behind a firewall/DMZ + VPN, "
+                      "restrict TCP/502 to the SCADA master(s), front legacy Modbus with an authenticating "
+                      "gateway, and remove any internet reachability.",
 }
 
 
