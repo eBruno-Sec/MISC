@@ -468,6 +468,9 @@ _FAMILY_FIX = {
                        "keys); remove CBC, SHA-1, arcfour, 3des, umac-64, ssh-rsa and ssh-dss.",
     "ldap_anonymous_read": "Disable anonymous bind (olcDisallows: bind_anon / AD dsHeuristics) or deny anonymous "
                            "read of the naming context so only authenticated principals can enumerate the directory.",
+    "smb_null_session": "Deny anonymous access: 'restrict anonymous = 2' (Windows) / 'map to guest = Never' + "
+                        "'restrict anonymous = yes' (Samba); disable SMBv1 and require authentication for share "
+                        "enumeration; remove guest-readable shares.",
 }
 
 

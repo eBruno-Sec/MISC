@@ -207,6 +207,17 @@ services:
       - "127.0.0.1:42389:389"
     restart: unless-stopped
 
+  # Samba — an SMB/file-server lab for the beyond-web SMB engine (#105). Reachable at smb://smb:445 on the
+  # compose network; host 42445. Configured to MAP anonymous sessions to guest + a guest-readable "public" share,
+  # so the null-session share-enumeration audit has a positive case to confirm against (mirrors DW-FS).
+  smb:
+    image: dperson/samba:latest
+    profiles: ["labs"]
+    command: -p -n -g "map to guest = Bad User" -g "server min protocol = NT1" -g "ntlm auth = yes" -s "public;/share;yes;no;yes;all" -u "jdoe;Passw0rd1"
+    ports:
+      - "127.0.0.1:42445:445"
+    restart: unless-stopped
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:

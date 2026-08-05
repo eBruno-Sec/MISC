@@ -138,6 +138,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "(RootDSE-only read is normal and NOT flagged).",
        exploit="Enumerate users/groups/computers pre-auth to seed password spraying, Kerberoasting, lateral movement.",
        oracle="An anonymous session receives directory ENTRIES (person/OU/group objects) from the naming context."),
+    # beyond web (AD/file-server pentest): SMB null-session share enumeration.
+    _t(id="smb_null_session", vuln_class="network_service", cwe="CWE-306", owasp="A01:2021", wstg="WSTG-ATHN-01",
+       permission=ACTIVE, transferable=True,
+       summary="An SMB server lets an unauthenticated (null) session enumerate its shares.",
+       detect="Connect with an EMPTY username/password (null session) and call listShares; a hardened server "
+              "refuses the anonymous session and returns nothing.",
+       exploit="Map the file-server layout pre-auth and read any guest-exposed non-administrative share.",
+       oracle="A null session connects and listShares returns a share (a non-admin share escalates to high)."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

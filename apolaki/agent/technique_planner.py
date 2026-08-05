@@ -89,6 +89,7 @@ ALWAYS_ON = {
     "llm_output_handling":      "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
     "weak_ssh_crypto":          "service_router pack: fingerprint(port 22/SSH) -> _run_service_pack runs the read-only audit",
     "ldap_anonymous_read":      "service_router pack: fingerprint(port 389/636/LDAP) -> _run_service_pack anonymous read",
+    "smb_null_session":         "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack null-session enum",
 }
 
 
