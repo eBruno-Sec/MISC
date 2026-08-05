@@ -36,6 +36,10 @@ SOURCES = {
                "url": "https://raw.githubusercontent.com/mitre/cti/master/capec/2.1/stix-capec.json"},
     "attack": {"tier": "A", "name": "MITRE ATT&CK (Enterprise)", "large": True,
                "url": "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"},
+    # ExploitDB — the INDEX only (files_exploits.csv is machine-readable + redistributable GPL). We ingest the
+    # CVE<->exploit mapping as KNOWLEDGE/leads keyed by EXACT CVE; the exploit CODE is NEVER fetched or run.
+    "exploitdb": {"tier": "A", "name": "Exploit-DB index (searchsploit)", "large": True,
+                  "url": "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"},
 }
 
 _DEFAULT_DIR = "/app/data/intel_feeds"
@@ -147,7 +151,32 @@ def parse_attack(raw):
     return {"source": "attack", "tier": "A", "count": len(techs), "techniques": techs}
 
 
-_PARSERS = {"kev": parse_kev, "capec": parse_capec, "attack": parse_attack}
+def parse_exploitdb(raw):
+    """Exploit-DB files_exploits.csv -> {by_cve: {CVE: [{id,title,type,platform}]}, count}. INDEX ONLY — this
+    maps exact CVEs to public exploit entries (edb-id + metadata); the exploit CODE is never downloaded or run.
+    Keyed by EXACT CVE (never inferred from CWE), so an enrichment is a real 'a public exploit exists for THIS
+    CVE' signal, not a guess. Pure."""
+    import csv
+    import io
+    text = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    by_cve, n = {}, 0
+    for row in csv.DictReader(io.StringIO(text)):
+        n += 1
+        entry = {"id": str(row.get("id") or "").strip(),
+                 "title": (row.get("description") or "").strip()[:120],
+                 "type": (row.get("type") or "").strip(),
+                 "platform": (row.get("platform") or "").strip()}
+        if not entry["id"]:
+            continue
+        for code in str(row.get("codes") or "").replace(",", ";").split(";"):
+            code = code.strip().upper()
+            if code.startswith("CVE-") and code[4:].replace("-", "").isdigit():
+                by_cve.setdefault(code, []).append(entry)
+    return {"source": "exploitdb", "tier": "A", "count": n,
+            "cve_count": len(by_cve), "by_cve": {k: v[:10] for k, v in by_cve.items()}}
+
+
+_PARSERS = {"kev": parse_kev, "capec": parse_capec, "attack": parse_attack, "exploitdb": parse_exploitdb}
 
 
 # ---------------------------------------------------------------------------- fetch / refresh / load
@@ -172,6 +201,8 @@ def refresh(dest_dir=None, feeds=None, timeout=90):
         feeds = ["kev", "capec"]
         if os.environ.get("INTEL_FEEDS_ATTACK") in ("1", "true", "yes"):
             feeds.append("attack")
+        if os.environ.get("INTEL_FEEDS_EXPLOITDB") in ("1", "true", "yes"):
+            feeds.append("exploitdb")               # large index feed (opt-in) — CVE->public-exploit leads, index only
     manifest = {"refreshed_at": time.time(), "feeds": {}}
     for name in feeds:
         raw = fetch(name, timeout=timeout)
@@ -196,7 +227,7 @@ def load(dest_dir=None):
     """Load whatever snapshots exist (missing -> absent key). Never raises."""
     dest_dir = _dir(dest_dir)
     out = {}
-    for name in ("kev", "capec", "attack", "manifest"):
+    for name in ("kev", "capec", "attack", "exploitdb", "manifest"):
         p = os.path.join(dest_dir, name + ".json")
         if os.path.exists(p):
             try:
@@ -225,6 +256,7 @@ def enrich_techniques(techniques, snapshots):
     enrichment = {cwe, known_exploited, kev_cves, kev_ransomware, capec:[{id,name,severity,likelihood}]}."""
     kev = snapshots.get("kev") or {}
     capec = snapshots.get("capec") or {}
+    edb_by_cve = (snapshots.get("exploitdb") or {}).get("by_cve") or {}
     kev_cwes = kev.get("cwes") or {}
     kev_meta = kev.get("cves_meta") or {}
     capec_by_cwe = capec.get("cwes") or {}
@@ -237,16 +269,29 @@ def enrich_techniques(techniques, snapshots):
         cwe = _norm_cwe(t.get("cwe") or "")
         cves = kev_cwes.get(cwe, []) if cwe else []
         cap_ids = (capec_by_cwe.get(cwe, []) if cwe else [])[:6]
+        # ExploitDB orchestration hop: for THIS technique's known-exploited CVEs, is there a public exploit
+        # index entry? Keyed by EXACT CVE (never CWE-inferred), so this is a real 'public exploit exists' lead.
+        pub = []
+        for c in cves[:8]:
+            pub.extend(edb_by_cve.get(c, [])[:3])
         out[tid] = {
             "cwe": cwe,
             "known_exploited": bool(cves),
             "kev_cves": cves[:8],
             "kev_ransomware": any((kev_meta.get(c) or {}).get("ransomware") for c in cves),
+            "exploit_available": bool(pub),
+            "public_exploits": [{"edb_id": e["id"], "title": e["title"], "platform": e["platform"]} for e in pub[:8]],
             "capec": [{"id": cid, "name": capec_pat.get(cid, {}).get("name", ""),
                        "severity": capec_pat.get(cid, {}).get("severity", ""),
                        "likelihood": capec_pat.get(cid, {}).get("likelihood", "")} for cid in cap_ids],
         }
     return out
+
+
+def exploitdb_for_cve(snapshots, cve):
+    """Public Exploit-DB index entries for an EXACT CVE (edb-id + metadata), or []. Index only — no code is
+    fetched or run. Use for a finding/component that carries a concrete CVE."""
+    return ((snapshots.get("exploitdb") or {}).get("by_cve") or {}).get(str(cve or "").strip().upper(), [])
 
 
 def status(dest_dir=None):
