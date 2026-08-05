@@ -67,6 +67,16 @@ MANIFESTS = {
         "expected": ["sqli", "xss", "csrf", "broken_auth", "access_control", "sensitive_exposure",
                      "crypto", "command_injection"],
     },
+    "vampi": {
+        "name": "VAmPI (vulnerable REST API)", "url_hint": "vampi",
+        # OWASP API Top-10 shaped: BOLA + broken JWT auth, mass assignment, excessive data exposure, SQLi.
+        "expected": ["broken_auth", "access_control", "sensitive_exposure", "sqli"],
+    },
+    "dvga": {
+        "name": "Damn Vulnerable GraphQL Application", "url_hint": "dvga",
+        # GraphQL surface: injection (SQLi/OS), IDOR, stored/reflected XSS, info disclosure via introspection.
+        "expected": ["sqli", "command_injection", "xss", "access_control", "sensitive_exposure"],
+    },
 }
 
 # Map the many tool-emitted finding families onto the benchmark's canonical classes.
@@ -87,6 +97,8 @@ _CLASS_MAP = {
     "prototype_pollution": "prototype_pollution",
     "business_logic": "business_logic", "race": "business_logic",
     "jwt": "broken_auth", "oauth": "broken_auth", "weak_password_reset": "broken_auth", "broken_auth": "broken_auth",
+    "username_enumeration": "broken_auth", "session_fixation": "broken_auth", "weak_session_token": "broken_auth",
+    "default_credentials": "broken_auth",
     "deserialization": "deserialization", "crypto": "crypto", "weak_crypto": "crypto",
     "crypto_authz": "crypto", "open_redirect": "open_redirect",
     "misconfig": "misconfig", "security_misconfig": "misconfig", "cors": "misconfig",
@@ -100,6 +112,8 @@ _CWE_CLASS = {
     "cwe-502": "deserialization", "cwe-1321": "prototype_pollution", "cwe-1035": "vulnerable_component",
     "cwe-1336": "template_injection", "cwe-94": "template_injection", "cwe-434": "upload",
     "cwe-639": "access_control", "cwe-285": "access_control", "cwe-287": "broken_auth", "cwe-347": "broken_auth",
+    "cwe-384": "broken_auth", "cwe-204": "broken_auth", "cwe-208": "broken_auth", "cwe-1392": "broken_auth",
+    "cwe-330": "broken_auth", "cwe-521": "broken_auth",
 }
 
 

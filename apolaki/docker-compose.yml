@@ -167,6 +167,32 @@ services:
       - "127.0.0.1:42084:8080"
     restart: unless-stopped
 
+  # VAmPI (OWASP-style vulnerable REST API) -- API-focused lab. Reachable at http://vampi:5000 on the
+  # compose network; host http://localhost:42091. Exercises the API half: BOLA/broken-auth (JWT),
+  # mass-assignment, excessive-data-exposure. No manual setup (in-memory SQLite seeds on boot).
+  vampi:
+    image: erev0s/vampi:latest
+    profiles: ["labs"]
+    ports:
+      - "127.0.0.1:42091:5000"
+    restart: unless-stopped
+
+  # DVGA (Damn Vulnerable GraphQL Application) -- GraphQL lab. Reachable at http://dvga:5013 on the
+  # compose network; host http://localhost:42092. Cross-validates run_graphql (introspection, batching,
+  # injection, DoS-guarded) on a 2nd surface beyond Juice Shop's /api.
+  dvga:
+    image: dolevf/dvga:latest
+    profiles: ["labs"]
+    environment:
+      - WEB_HOST=0.0.0.0            # app.py defaults to 127.0.0.1 (container-local) -> bind on all ifaces so the agent can reach it
+    ports:
+      - "127.0.0.1:42092:5013"
+    restart: unless-stopped
+
+  # DVNA (Damn Vulnerable NodeJS Application) is a valid Node lab in benchmark.MANIFESTS but is NOT wired here:
+  # appsecco/dvna hard-requires a linked MySQL sibling (it wait-for-it blocks and crash-loops without one). Add a
+  # `dvna` + `dvna-mysql` pair under a dedicated profile when Node/deserialization cross-validation is needed.
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:
