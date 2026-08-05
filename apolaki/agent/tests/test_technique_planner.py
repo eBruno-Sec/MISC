@@ -112,3 +112,21 @@ def test_new_session_engines_are_planner_wired_not_islands():
     assert TP.plan(set(), techs) == []
     obs = {"has_search_param", "reflects_input", "authenticated", "serves_js", "has_login", "has_sensitive_route"}
     assert {e["id"] for e in TP.plan(obs, techs)} == set(new)
+
+
+def test_no_confirming_technique_is_an_orchestration_island():
+    """STANDING orchestration guard (#102), registry-driven so it can't rot: EVERY auto-fired, oracle-confirmed,
+    transferable technique in the live registry must be reachable — evidence-gated in _PRECONDITIONS OR declared
+    ALWAYS_ON with a reason. A new engine that is neither (a sweep-only island the planner/graph can't reason
+    about) fails HERE, forcing a conscious 'planner-gated vs always-on' decision instead of a silent island."""
+    import techniques as T
+    import technique_planner as TP
+    full = [T.get(t["id"]) for t in T.list_techniques()]
+    audit = TP.orchestration_audit(full)
+    assert audit["islands"] == [], "orchestration islands (unreachable confirming engines): %s" % audit["islands"]
+    confirming = {t["id"] for t in full
+                  if t.get("execution", "auto") == "auto" and t.get("oracle") and t.get("transferable")}
+    assert confirming <= (set(audit["gated"]) | set(audit["always_on"]))   # the union is TOTAL over confirming techniques
+    assert confirming, "expected a non-empty confirming-technique set"
+    # every ALWAYS_ON exemption must carry a non-empty reason (documented, never a silent bypass)
+    assert TP.ALWAYS_ON and all(str(r).strip() for r in TP.ALWAYS_ON.values())

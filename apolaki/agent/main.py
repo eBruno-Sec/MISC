@@ -883,6 +883,24 @@ async def techniques_taxonomy(lens: str = "owasp"):
         return {"error": str(e), "lens": lens}
 
 
+@app.get("/orchestration/audit")
+async def orchestration_audit():
+    """Apolaki's north star made checkable: every auto-fired, oracle-confirmed technique must feed the planner
+    (evidence-gated) or be a declared always-on path (sweep / passive recon / persona artery / tool-gate) — NEVER a
+    dashboard island. Returns the gated + always-on lists and, critically, `islands` (must be empty) so the
+    no-island property is visible, not just asserted in CI."""
+    import technique_planner as TP
+    import techniques as T
+    try:
+        full = [T.get(t["id"]) for t in T.list_techniques()]
+        a = TP.orchestration_audit(full)
+        return {**a, "gated_count": len(a["gated"]), "always_on_count": len(a["always_on"]),
+                "island_count": len(a["islands"]), "no_islands": a["islands"] == [],
+                "always_on_reasons": TP.ALWAYS_ON}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/coverage/wstg")
 async def wstg_coverage():
     """Honest coverage against the full OWASP WSTG v4.2 active-test catalog (109 tests): how many Apolaki

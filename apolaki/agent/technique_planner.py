@@ -67,6 +67,48 @@ _PRECONDITIONS = {
     "default_credentials":     ["has_sensitive_route"],       # a discovered admin/management interface
 }
 
+# Auto-fired, oracle-confirmed techniques that are intentionally NOT evidence-gated in _PRECONDITIONS because an
+# ALWAYS-ON path already reaches them: the deterministic injection/DOM sweep, passive recon, the persona
+# authorization artery, the autonomy/next-best-action path, or a tool-level target gate. Each MUST state HOW it is
+# reached. The orchestration guard (orchestration_audit) treats _PRECONDITIONS ∪ ALWAYS_ON as "wired"; any
+# auto+oracle+transferable technique in NEITHER is an island the engagement can't orchestrate, and fails the guard.
+ALWAYS_ON = {
+    "dom_xss":                  "always-on DOM sweep (run_xss / run_dom_trace on every reflected param + app page)",
+    "csti":                     "always-on DOM audit (run_dom_audit on every page with a discoverable param)",
+    "prototype_pollution":      "always-on DOM audit (run_dom_audit prototype-gadget scan)",
+    "ssti":                     "always-on injection_probes sweep on every parameterized endpoint",
+    "crlf_injection":           "always-on injection_probes sweep (header injection) on every endpoint",
+    "jsonp_info_leak":          "run_jsonp fired from the next-best-action / autonomy path on discovered endpoints",
+    "race_condition":           "run_race probe on single-use actions (probe phase)",
+    "insecure_deser":           "run_deserialization probe on requests carrying serialized blobs (probe phase)",
+    "missing_authentication":   "persona authorization matrix (_do_persona_authz) whenever personas mint",
+    "vulnerable_component":     "always-on fingerprint / nuclei recon",
+    "security_misconfig_errors": "passive stack-trace / error-signature detection on every response",
+    "encoded_data_decode":      "passive intel harvest at every transport chokepoint",
+    "llm_prompt_injection":     "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
+    "llm_output_handling":      "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
+}
+
+
+def orchestration_audit(full_techniques) -> dict:
+    """No-island invariant (Apolaki's north star: one engagement state, every confirming engine feeds every phase).
+    Every auto-fired, oracle-confirmed, transferable technique must be REACHABLE — either evidence-gated in
+    _PRECONDITIONS (the planner + graph reason about it) or declared ALWAYS_ON (reached by the sweep / passive recon
+    / persona artery / autonomy path / a tool-level gate, with a stated reason). Anything in NEITHER is an island.
+    Pure: caller supplies full technique records. Returns {gated, always_on, islands}; islands MUST be empty."""
+    gated, always_on, islands = [], [], []
+    for t in full_techniques or []:
+        if not (t.get("execution", "auto") == "auto" and t.get("oracle") and t.get("transferable")):
+            continue
+        tid = t.get("id")
+        if tid in _PRECONDITIONS:
+            gated.append(tid)
+        elif tid in ALWAYS_ON:
+            always_on.append(tid)
+        else:
+            islands.append(tid)
+    return {"gated": sorted(gated), "always_on": sorted(always_on), "islands": sorted(islands)}
+
 
 def derive_observations(surface=None, harvest=None, findings=None, leads=None, code_intel=None,
                         authenticated=False, graph=None):
