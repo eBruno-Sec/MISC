@@ -115,6 +115,7 @@ TOOL_PERMISSIONS = {
     "run_cache_deception": PermissionLevel.ACTIVE,
     "run_client_checks": PermissionLevel.PASSIVE,
     "run_css_injection": PermissionLevel.ACTIVE,
+    "run_waf_bypass": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -5958,6 +5959,47 @@ class ToolRegistry:
             if "<" in body and cc.crossdomain_wildcard(body, fn):
                 findings.append(self._attach_poc(cc.crossdomain_finding(pol_url, fn), pol_url, None))
         return ToolResult("client_checks", url, True, "%d client/config finding(s)" % len(findings), findings)
+
+    async def _run_waf_bypass(self, inp: dict) -> ToolResult:
+        """ACTIVE: WAF inspection-window bypass (CWE-693) — a signature payload the WAF blocks is smuggled past
+        its ~8KB inspection ceiling by prepending junk. Confirmed by a three-state differential (baseline OK →
+        raw signature BLOCKED → padded signature NOT blocked AND reflected). Non-destructive; only fires where a
+        WAF actually blocks the bare signature, so a no-WAF target yields nothing. Deliverable: 'the WAF is
+        bypassable, enforce app-layer validation.' Tests GET params."""
+        import waf_bypass_tool as wb
+        from urllib.parse import urlparse, parse_qsl, urlencode
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("waf_bypass", url, False, "", [], "SCOPE BLOCK")
+        pr0 = urlparse(url)
+        params = parse_qsl(pr0.query, keep_blank_values=True)
+        if not params:
+            return ToolResult("waf_bypass", url, True, "no query params to test", [])
+        findings = []
+
+        def _setq(name, val, extra=None):
+            pairs = [(k, val if k == name else v) for k, v in params]
+            if extra:
+                pairs = [extra] + pairs
+            return pr0._replace(query=urlencode(pairs)).geturl()
+
+        async def _get(u):
+            r = await self._http(u, "GET", capture=False)
+            return (r.get("status", 0), r.get("body", "") or "")
+
+        for name, _v in params:
+            baseline = await _get(_setq(name, "apolwafbase"))
+            for cls, payload in wb.SIGNATURE_PAYLOADS:
+                raw = await _get(_setq(name, payload))
+                if not wb.is_blocked(baseline[0], baseline[1], raw[0], raw[1]):
+                    continue                                  # the WAF didn't block the bare signature — nothing to bypass
+                padded_url = _setq(name, payload, extra=("_pad", "A" * 8300))
+                padded = await _get(padded_url)
+                ev = wb.evaluate(baseline, raw, padded, payload)
+                if ev["confirmed"]:
+                    findings.append(self._attach_poc(wb.finding(url, name, cls, ev["oracle"]), padded_url, None))
+                    break
+        return ToolResult("waf_bypass", url, True, "%d WAF-bypass finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

@@ -135,6 +135,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="A Flash/Silverlight object on any origin reads this site's authenticated responses.",
        oracle="The policy file content contains the wildcard grant (deterministic file content)."),
 
+    # distilled from the WAF-evasion TTP material (RedCyber/NotebookLM corpus) — inspection-window padding.
+    _t(id="waf_bypass", vuln_class="protection_failure", cwe="CWE-693", owasp="A05:2021",
+       permission=ACTIVE, transferable=True,
+       summary="WAF inspection-window bypass: pad a blocked signature past the ~8KB inspection ceiling.",
+       detect="A bare signature payload is BLOCKED, but the same payload after ~8KB of junk is NOT blocked and reflects.",
+       exploit="Smuggle any WAF-blocked payload (XSS/SQLi) to the app by prepending junk past the inspection limit.",
+       oracle="Three-state differential: baseline OK, raw signature blocked, padded signature passes + reflects."),
+
     _t(id="css_injection", vuln_class="css_injection", cwe="CWE-74", owasp="A03:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-CLNT-05",
        summary="User input reflected into a <style> block / style attribute lets an attacker inject CSS rules.",
