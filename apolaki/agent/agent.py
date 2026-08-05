@@ -2182,10 +2182,12 @@ class BBHAgent:
         # auto-discovers /graphql + introspection). Cheap: a few GETs per distinct base host; both self-skip a
         # non-API/non-GraphQL host. This is what lets the injection/authz engines below reach an API target.
         _bases = []
-        for u in (self.tools.urls or []):
+        # derive base hosts from the crawl AND the scope's target roots — a linkless JSON API leaves the crawl
+        # empty, so the scope roots are what let the API sweep start at all (this was the vampi 0% root cause).
+        for u in (list(self.tools.urls or []) + list(self.scope.base_urls() or [])):
             pr = urlparse(u)
             b = "%s://%s" % (pr.scheme, pr.netloc)
-            if b not in _bases and pr.scheme and self.scope.validate(b)[0]:
+            if b and pr.scheme and b not in _bases and self.scope.validate(b)[0]:
                 _bases.append(b)
         for b in _bases[:6]:
             if self.stop_event.is_set():

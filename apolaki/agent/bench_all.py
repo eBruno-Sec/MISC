@@ -106,6 +106,10 @@ async def scan_via_mission(api_base: str, key: str, url: str, poll_s: int = 6, m
             await asyncio.sleep(poll_s)
             waited += poll_s
             m = (await c.get(api_base + "/missions/%s" % sid)).json()
-            if str(m.get("status")) in ("complete", "error", "failed", "stopped"):
+            # status is nested under m["mission"] (the top level has no "status" key) — reading m.get("status")
+            # here silently never terminated + misread findings, which is what made every API-lab bench read 0.
+            status = str((m.get("mission") or {}).get("status") or m.get("status"))
+            if status in ("complete", "error", "failed", "stopped"):
                 return (m.get("findings") or []), (m.get("leads") or [])
-        return [], []
+        m = (await c.get(api_base + "/missions/%s" % sid)).json()
+        return (m.get("findings") or []), (m.get("leads") or [])
