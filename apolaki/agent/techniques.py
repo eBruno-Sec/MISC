@@ -130,6 +130,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "advertised algorithms against the deprecated set (CBC, SHA-1, arcfour, 3des, umac-64, ssh-rsa/dss).",
        exploit="From a MITM position, negotiate a weak cipher/MAC/KEX to attempt session decryption or tampering.",
        oracle="The server's KEXINIT literally lists a weak algorithm (exact name / anchored suffix, no substring FP)."),
+    # beyond web (AD/directory pentest): anonymous LDAP directory read — the classic pre-auth AD enumeration foothold.
+    _t(id="ldap_anonymous_read", vuln_class="network_service", cwe="CWE-306", owasp="A01:2021", wstg="WSTG-ATHN-01",
+       permission=ACTIVE, transferable=True,
+       summary="An LDAP/AD server permits an anonymous bind that can read the naming-context directory subtree.",
+       detect="Anonymous bind, then a read-only SUBTREE search of the naming context returns directory entries "
+              "(RootDSE-only read is normal and NOT flagged).",
+       exploit="Enumerate users/groups/computers pre-auth to seed password spraying, Kerberoasting, lateral movement.",
+       oracle="An anonymous session receives directory ENTRIES (person/OU/group objects) from the naming context."),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",

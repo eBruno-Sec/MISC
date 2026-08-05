@@ -122,6 +122,7 @@ TOOL_PERMISSIONS = {
     "run_session_fixation": PermissionLevel.ACTIVE,
     "run_default_creds": PermissionLevel.ACTIVE,
     "run_ssh_audit": PermissionLevel.ACTIVE,
+    "run_ldap_enum": PermissionLevel.ACTIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
     "run_zap": PermissionLevel.INTRUSIVE,
@@ -2152,6 +2153,13 @@ class ToolRegistry:
             if res:
                 weak, sev = res
                 findings.append(_ssh.finding(host, int(port), weak, sev, offer.get("banner", "")))
+        elif service in ("ldap", "ldaps"):
+            import ldap_enum_tool as _le                       # anonymous read-only enumeration, no credential attack
+            res = await asyncio.get_event_loop().run_in_executor(None, _le.probe, host, int(port))
+            out = _le.analyze(res) if not res.get("error") else None
+            if out:
+                sev, ev = out
+                findings.append(_le.finding(host, int(port), res, sev, ev))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6262,6 +6270,36 @@ class ToolRegistry:
                                              "%s:%d" % (host, port), None))
         return ToolResult("ssh_audit", "%s:%d" % (host, port), True,
                           "%d weak-ssh-crypto finding(s)" % len(findings), findings)
+
+    async def _run_ldap_enum(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service, beyond web): LDAP anonymous-read audit (CWE-306). Anonymous bind + a READ-ONLY
+        naming-context subtree search; confirms an AD/directory server that leaks its DIT to unauthenticated
+        sessions. No credentials, NO brute-force. RootDSE-only read is not flagged (that is normal)."""
+        import asyncio as _aio
+        import ldap_enum_tool as le
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("ldaps://", "").replace("ldap://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 389
+        host = raw
+        if not host:
+            return ToolResult("ldap_enum", host, False, "", [], "no host")
+        if not (self.scope.validate("ldap://%s" % host)[0] or self.scope.validate("http://%s" % host)[0]
+                or self.scope.validate(host)[0]):
+            return ToolResult("ldap_enum", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, le.probe, host, port)
+        if res.get("error"):
+            return ToolResult("ldap_enum", "%s:%d" % (host, port), True, "no LDAP: %s" % res["error"], [])
+        findings = []
+        out = le.analyze(res)
+        if out:
+            sev, ev = out
+            findings.append(self._attach_poc(le.finding(host, port, res, sev, ev), "%s:%d" % (host, port), None))
+        return ToolResult("ldap_enum", "%s:%d" % (host, port), True,
+                          "%d ldap-anon-read finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

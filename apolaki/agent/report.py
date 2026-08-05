@@ -466,6 +466,8 @@ _FAMILY_FIX = {
     "weak_ssh_crypto": "Restrict sshd to strong algorithms only (curve25519 / group16-18-sha512 KEX; "
                        "chacha20-poly1305 + aes-gcm/ctr ciphers; *-etm hmac-sha2 MACs; rsa-sha2/ed25519 host "
                        "keys); remove CBC, SHA-1, arcfour, 3des, umac-64, ssh-rsa and ssh-dss.",
+    "ldap_anonymous_read": "Disable anonymous bind (olcDisallows: bind_anon / AD dsHeuristics) or deny anonymous "
+                           "read of the naming context so only authenticated principals can enumerate the directory.",
 }
 
 

@@ -193,6 +193,20 @@ services:
   # appsecco/dvna hard-requires a linked MySQL sibling (it wait-for-it blocks and crash-loops without one). Add a
   # `dvna` + `dvna-mysql` pair under a dedicated profile when Node/deserialization cross-validation is needed.
 
+  # OpenLDAP — a directory lab for the beyond-web AD/LDAP engines (#105). Reachable at ldap://openldap:1389 on
+  # the compose network; host 42389. ANON binding is left ON (LDAP_ALLOW_ANON_BINDING=yes, the default) so the
+  # anonymous-read audit has a positive case to confirm against; seeded with two users under dc=designworld,dc=local.
+  openldap:
+    image: osixia/openldap:latest
+    profiles: ["labs"]
+    environment:
+      - LDAP_ORGANISATION=Design World
+      - LDAP_DOMAIN=designworld.local     # -> base DN dc=designworld,dc=local; osixia allows anonymous read by default
+      - LDAP_ADMIN_PASSWORD=adminpw
+    ports:
+      - "127.0.0.1:42389:389"
+    restart: unless-stopped
+
   # OPTIONAL headless Chrome for the CDP RUNTIME collector (agent/cdp.py) — collects service
   # workers, runtime XHR/GraphQL endpoints, lazy JS chunks and storage a curl can't see. NOT in
   # the default stack (heavy). Activate with:

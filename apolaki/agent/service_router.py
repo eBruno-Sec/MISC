@@ -76,6 +76,11 @@ _PACKS = {
         {"id": "smb_signing_disabled", "cwe": "CWE-347", "intrusive": False,
          "oracle": "message signing is not required (relay-able)", "enables": []},
     ]},
+    "ldap": {"graph_kind": "service", "note": "LDAP/AD directory anonymous-read exposure.", "checks": [
+        {"id": "ldap_anonymous_read", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "an anonymous bind can read directory entries from the naming context (not just RootDSE)",
+         "enables": ["directory_read", "user_enumeration"]},
+    ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,
          "oracle": "INFO/PING succeeds without AUTH (open data store)", "enables": ["database_read"]},
