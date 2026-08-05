@@ -66,3 +66,36 @@ def test_finding_is_proof_with_cvss():
     f = ue.finding("https://x/login", "status oracle", "CWE-204", "real.user@site.test", "login")
     assert f["family"] == "username_enumeration" and bb._has_proof(f)
     assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05
+
+
+def test_timing_enum_confirms_decisive_gap():
+    absent1 = [0.020, 0.022, 0.019, 0.021, 0.020, 0.023, 0.018, 0.021, 0.020, 0.022]
+    absent2 = [0.021, 0.020, 0.022, 0.019, 0.021, 0.020, 0.022, 0.019, 0.021, 0.020]
+    present = [0.210, 0.205, 0.215, 0.208, 0.212, 0.207, 0.211, 0.209, 0.213, 0.206]  # ~190ms slower, tight
+    assert ue.timing_enumerable(absent1, absent2, present) is not None
+
+
+def test_timing_enum_ignores_jitter_without_signal():
+    import random
+    random.seed(7)
+    jit = lambda: [0.02 + random.uniform(-0.008, 0.008) for _ in range(12)]   # same distribution, only jitter
+    assert ue.timing_enumerable(jit(), jit(), jit()) is None
+
+
+def test_timing_enum_ignores_small_gap_within_noise():
+    # present only ~10ms slower but the endpoint's own noise floor is ~8ms -> not decisive -> no FP
+    absent1 = [0.020, 0.028, 0.019, 0.027, 0.021, 0.029, 0.020, 0.026]
+    absent2 = [0.021, 0.020, 0.029, 0.019, 0.028, 0.020, 0.027, 0.019]
+    present = [0.030, 0.031, 0.029, 0.032, 0.030, 0.031, 0.029, 0.030]
+    assert ue.timing_enumerable(absent1, absent2, present) is None
+
+
+def test_timing_enum_needs_enough_samples():
+    assert ue.timing_enumerable([0.02, 0.02], [0.02, 0.02], [0.5, 0.5]) is None    # too few samples
+
+
+def test_timing_finding_is_proof_with_cvss():
+    from report import cvss31_base_score
+    f = ue.timing_finding("https://x/login", "median 210ms vs 20ms", "real.user@site.test", "email")
+    assert f["family"] == "username_enumeration" and f["cwe"] == "CWE-208" and bb._has_proof(f)
+    assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05

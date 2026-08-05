@@ -6128,6 +6128,26 @@ class ToolRegistry:
             evidence, cwe = res
             findings.append(self._attach_poc(ue.finding(form["action"], evidence, cwe, known, form["user_field"]),
                                              form["action"], None))
+        # residual TIMING side channel (WAHH ch15): only when content was IDENTICAL (no finding above) — a valid
+        # username may still be slower (DB lookup + password hashing). Interleaved sampling cancels drift; the
+        # analyzer confirms ONLY when the gap dwarfs the endpoint's own timing noise, so jitter yields nothing.
+        # Once per mission (bounded ~30 extra timed POSTs, same wrong password — a measurement, not a guess).
+        if not findings and not getattr(self, "_timing_enum_done", False):
+            import time as _time
+            self._timing_enum_done = True
+
+            async def _timed(u):
+                t0 = _time.perf_counter()
+                await _submit(u)
+                return _time.perf_counter() - t0
+
+            ta1, ta2, tpr = [], [], []
+            for _ in range(10):
+                ta1.append(await _timed(a1)); ta2.append(await _timed(a2)); tpr.append(await _timed(known))
+            tev = ue.timing_enumerable(ta1, ta2, tpr)
+            if tev:
+                findings.append(self._attach_poc(ue.timing_finding(form["action"], tev, known, form["user_field"]),
+                                                 form["action"], None))
         return ToolResult("username_enumeration", url, True, "%d username-enumeration finding(s)" % len(findings), findings)
 
     async def _run_session_fixation(self, inp: dict) -> ToolResult:

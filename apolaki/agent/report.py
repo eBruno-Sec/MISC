@@ -356,7 +356,8 @@ _CWE_FAMILY = {
     "cwe-601": "open_redirect", "cwe-1336": "ssti", "cwe-94": "ssti", "cwe-502": "deserialization",
     "cwe-352": "csrf", "cwe-942": "cors", "cwe-200": "exposure", "cwe-527": "git_exposure",
     "cwe-1321": "prototype_pollution", "cwe-1336": "ssti",
-    "cwe-204": "username_enumeration", "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
+    "cwe-204": "username_enumeration", "cwe-208": "username_enumeration",
+    "cwe-330": "weak_session_token", "cwe-384": "weak_session_token",
     "cwe-1392": "default_credentials", "cwe-521": "default_credentials",
 }
 

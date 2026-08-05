@@ -130,6 +130,28 @@ def _distinct_phrase(present_body: str, absent_body: str) -> str:
     return ""
 
 
+def timing_enumerable(t_absent1: list, t_absent2: list, t_present: list, min_samples: int = 8):
+    """(evidence) when a KNOWN account is DECISIVELY slower to authenticate than a non-existent one — the WAHH
+    ch15 timing oracle (valid username ⇒ extra DB lookup + password hashing). FP-SAFE BY CONSERVATISM: timing is
+    jitter-prone, so this confirms ONLY when the existing-vs-nonexistent median gap dwarfs BOTH the endpoint's own
+    timing noise floor (measured from two NON-existent accounts) AND the present group's own spread, and clears a
+    hard 50 ms absolute floor. Under network jitter the noise floor is large, the margin is unmet, and it yields
+    nothing — the safe failure mode. Each sample is the SAME wrong password (timing measurement, not a guess)."""
+    import statistics
+    groups = [t_absent1 or [], t_absent2 or [], t_present or []]
+    if any(len(g) < min_samples for g in groups):
+        return None
+    m_a1, m_a2, m_pr = (statistics.median(g) for g in groups)
+    noise = abs(m_a1 - m_a2)                              # two non-existent accounts = the endpoint's own noise floor
+    signal = m_pr - max(m_a1, m_a2)                       # existing account slower than BOTH non-existent
+    spread = statistics.median([abs(x - m_pr) for x in t_present]) or 1e-6   # within-group jitter of the present group
+    if signal > 0 and signal > max(3 * noise, 0.05) and signal > 4 * spread:
+        return ("the existing account's median login time (%.0f ms) exceeds a non-existent one's (%.0f ms) by "
+                "%.0f ms — far beyond the endpoint's own timing noise (%.0f ms) and the sample's spread"
+                % (m_pr * 1000, max(m_a1, m_a2) * 1000, signal * 1000, noise * 1000))
+    return None
+
+
 def finding(url: str, evidence: str, cwe: str, present_username: str, field: str) -> dict:
     return {
         "title": "Username enumeration via login response discrepancy (%s)" % field,
@@ -150,4 +172,28 @@ def finding(url: str, evidence: str, cwe: str, present_username: str, field: str
                         "status, body, and timing whether or not the account exists — on login, registration, "
                         "and password reset alike."),
         "tags": ["authentication", "username-enumeration", cwe.lower(), "wstg-idnt-04"],
+    }
+
+
+def timing_finding(url: str, evidence: str, present_username: str, field: str) -> dict:
+    """A username-enumeration finding proven by a TIMING side channel (CWE-208) rather than response content —
+    fires only when the content responses were identical, so it is the residual, harder-to-spot variant."""
+    return {
+        "title": "Username enumeration via login TIMING side channel (%s)" % field,
+        "severity": "low", "family": "username_enumeration", "confidence": "confirmed", "target": url,
+        "cwe": "CWE-208", "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N", "cvss_score": 3.7,
+        "evidence": ("The '%s' endpoint returns identical content for valid and invalid usernames but leaks account "
+                     "existence by RESPONSE TIME: %s. Each probe used the SAME wrong password; only the username "
+                     "varied, and the timing gap dwarfs the endpoint's own measured noise floor." % (url, evidence)),
+        "success_oracle": evidence,
+        "reproduction_steps": [
+            "POST %s many times with a random non-existent username + a fixed wrong password; record the median time." % url,
+            "POST %s many times with a real account ('%s') + the SAME wrong password; record the median time." % (url, present_username),
+            "The real account is decisively slower (valid username ⇒ extra DB lookup + password hashing) beyond the "
+            "endpoint's own timing noise — a membership oracle with no content difference at all."],
+        "impact": ("Pre-auth account harvesting even against a 'generic message' login — timing alone confirms which "
+                   "usernames exist, seeding credential-stuffing and targeted phishing."),
+        "remediation": ("Make authentication timing independent of account existence: always run the password-hash "
+                        "comparison (against a dummy hash for unknown users) and return after a constant-time path."),
+        "tags": ["authentication", "username-enumeration", "timing", "cwe-208", "wstg-idnt-04"],
     }
