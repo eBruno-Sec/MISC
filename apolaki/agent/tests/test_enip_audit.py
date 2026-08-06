@@ -46,6 +46,28 @@ def test_request_is_the_only_thing_built_and_carries_no_payload():
     assert not any(k in n.lower() for n in dir(E) for k in ("write", "forward_open", "set_attribute"))
 
 
+def test_probe_round_trips_over_a_real_socket():
+    """Not synthetic: bind a real UDP mock PLC and prove probe() sends, receives, and parses over the wire."""
+    import socket
+    import threading
+    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    srv.bind(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    srv.settimeout(5)
+
+    def serve():
+        try:
+            _data, addr = srv.recvfrom(1024)
+            srv.sendto(_resp(name=b"MockPLC", serial=42), addr)
+        finally:
+            srv.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    res = E.probe("127.0.0.1", port, timeout=3)
+    assert res["reachable"] and res["device_info"]["product_name"] == "MockPLC"
+    assert res["device_info"]["serial"] == 42
+
+
 def test_finding_is_read_only_ics_and_well_formed():
     f = E.finding("10.0.0.5", 44818, E.parse_list_identity(_resp()))
     assert f["cwe"] == "CWE-306" and f["family"] == "ics_ot" and f["severity"] == "high"

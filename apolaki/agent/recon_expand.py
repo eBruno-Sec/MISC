@@ -46,8 +46,14 @@ def _mmh3_32(data: bytes, seed: int = 0) -> int:
 
 
 def favicon_hash(favicon_bytes: bytes) -> int:
-    """The Shodan-style favicon hash: mmh3 over base64.encodebytes(favicon). Deterministic pivot key."""
-    return _mmh3_32(base64.encodebytes(favicon_bytes or b""))
+    """The Shodan-style favicon hash: mmh3 over base64.encodebytes(favicon). Uses the mmh3 library when
+    present (authoritative); the pure _mmh3_32 fallback is proven byte-identical to it. Deterministic."""
+    b = base64.encodebytes(favicon_bytes or b"")
+    try:
+        import mmh3
+        return mmh3.hash(b)
+    except ImportError:
+        return _mmh3_32(b)
 
 
 def favicon_pivot_queries(h: int) -> dict:
