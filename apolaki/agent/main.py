@@ -930,6 +930,30 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/exploit-descriptor")
+async def exploit_descriptor_build(payload: dict):
+    """Build an exploit-module DESCRIPTOR (Codex Tier-3 #15) — taxonomy for planning, never a payload runner.
+    Body: {source: nuclei|exploitdb|metasploit|manual, template|entry|module|..., lab_only, approved}.
+    Destructive/unknown side effects are BLOCKED unless lab_only AND approved; ExploitDB entries are always
+    manual/never-auto-run. Returns the descriptor + the is_executable decision."""
+    import exploit_descriptor as ed
+    p = payload or {}
+    src = str(p.get("source") or "manual").lower()
+    if src == "nuclei" and p.get("template") is not None:
+        d = ed.from_nuclei(p["template"])
+    elif src == "exploitdb" and p.get("entry") is not None:
+        d = ed.from_exploitdb(p["entry"])
+    elif src == "metasploit" and p.get("module") is not None:
+        d = ed.from_metasploit(p["module"])
+    else:
+        d = ed.make_descriptor(src, str(p.get("id") or "descriptor"), family=p.get("family"),
+                               cwe=p.get("cwe"), requires_auth=bool(p.get("requires_auth")),
+                               side_effects=str(p.get("side_effects") or "unknown"),
+                               check_method=p.get("check_method"), proof_contract=p.get("proof_contract"))
+    allowed, reason = ed.is_executable(d, lab_only=bool(p.get("lab_only")), approved=bool(p.get("approved")))
+    return {"descriptor": d, "executable": allowed, "reason": reason}
+
+
 @app.get("/intel/ad-frontier")
 async def ad_frontier_view(capability: str = None):
     """The AD/Windows frontier modeled read-only (Codex Tier-3 #13): which capabilities are read-only-present
