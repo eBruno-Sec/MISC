@@ -1674,6 +1674,14 @@ def generate_html_report(program: str, findings: list, scope: dict,
             biz_html = (f"<div class='biz'><h4>Why This Matters (plain English)</h4>"
                         f"<p><b>What it is:</b> {e(bi[0])}</p>"
                         f"<p><b>If left unpatched:</b> {e(bi[1])}</p></div>")
+        _g = graded_business_impact(f)
+        graded_html = ""
+        if _g:
+            graded_html = (f"<div class='biz'><h4>Impact (evidence-graded)</h4>"
+                           f"<p><b>Demonstrated:</b> {e(_g['demonstrated'])}</p>"
+                           f"<p><b>Plausible next step:</b> {e(_g['plausible'])}</p>"
+                           f"<p><b>Unverified worst case:</b> {e(_g['unverified'])}</p>"
+                           f"<p class='sub'>Confidence: {e(str(_g['confidence']))} — {e(_g['assumptions'])}</p></div>")
         cards.append(f"""
         <article class="finding" style="--c:{color}">
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
@@ -1691,6 +1699,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
           {biz_html}
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
+          {graded_html}
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
           {curl_html}{ev}{raw_html}{poc_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")

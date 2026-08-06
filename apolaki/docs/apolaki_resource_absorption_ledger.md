@@ -146,9 +146,14 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   surfaced: an exposure finding that actually LEAKS credentials/secrets now upgrades to `credential_material`
   (chase: try the creds), while schema/info exposure of the same family does not (no false attack-path).
   `asset_graph._content_enables()` — conservative keyword match on the finding's OWN text; unioned with the
-  family map at node creation. Test +1 (825 total, 0 fail). Baked; VALIDATED on real archived mission
+  family map at node creation. Test +1 (824 total, 0 fail). Baked; VALIDATED on real archived mission
   `/graph/canonical/10b07231`: 5 utility-ranked paths incl. `chase_capability credential_material` (0.68).
   Files: asset_graph.py, tests/test_asset_graph.py.
+- 2026-08-06: **SLICE 5 shipped (evidence-graded impact in the HTML report).** The Phase-6 grading was
+  MD-only; added the same demonstrated/plausible/unverified block to the HTML report finding renderer
+  (`report.py`, `graded_html` next to `biz_html`). 824 tests, 0 fail. Baked; VERIFIED LIVE in the VAmPI
+  HTML report. Note: the #116 attack-path table already rendered in the HTML orchestration section (an
+  earlier check used the wrong case and mis-read it as missing). File: report.py.
 
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
