@@ -248,6 +248,19 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   ingest -> canonical graph gained sink/source_secret/endpoint, raw AWS key NOT in graph. Boundaries held.
   Files: codereview_graph.py, asset_graph.py, main.py, tests/test_codereview_graph.py.
 
+- 2026-08-06: **SLICE 12 shipped (#114 governed intel connectors — wired, gated OFF).** New
+  `intel_connectors.py`: `fetch()` = fetch->cache->rate-limit->log->normalize->dedup->provenance, HARD-GATED
+  on `intel_sources.is_enabled()` FIRST so a DISABLED source performs ZERO network I/O (default: all off).
+  Enabled path: freshness cache, per-source rate limit, mandatory `request_log_entry` audit, source-specific
+  parsers (EPSS/NVD/GHSA) -> strict-provenance CANDIDATE records (validation_state=candidate, conf<=0.3,
+  untrusted until validated). HTTP call injected -> whole pipeline unit-tested with NO network. `GET
+  /intel/audit` (outward-request log) + `POST /intel/fetch/{source}` (governed, returns 'disabled' by
+  default). +5 tests (853 total, 0 fail). Baked; live: POST fetch/nvd -> 'disabled', audit empty (0 outward).
+  Files: intel_connectors.py, main.py, tests/test_intel_connectors.py. REMAINING #114: more Tier-1 parsers
+  (CVE-v5/KEV-normalizer/CERT-CC/vendor/nuclei-templates/OWASP), promote validated records into the
+  knowledge registry (candidate->fixture->reviewed->production), Tier-2 passive adapters. Core architecture
+  the operator specified is now COMPLETE + gated.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

@@ -2287,6 +2287,26 @@ async def intel_sources_view():
             "note": "external connectors are DISABLED by default; enable per-source via config + credentials"}
 
 
+@app.get("/intel/audit")
+async def intel_audit(limit: int = 100):
+    """The outward-request audit log (#114): every governed connector call, with source / endpoint /
+    purpose / target-scope / timestamp / status / rate-limit / cache / parser-version. Empty by default
+    because connectors are disabled and make no requests. Read-only."""
+    import intel_connectors as _ic
+    return {"requests": _ic.audit_log(limit), "count": len(_ic.audit_log(limit))}
+
+
+@app.post("/intel/fetch/{source}")
+async def intel_fetch(source: str, key: str = ""):
+    """Governed fetch of an allowlisted intel source (#114). Returns 'disabled' unless the source's
+    allowlist entry is explicitly enabled (+ credential for key-gated). Records are strict-provenance
+    CANDIDATES (untrusted until validated); the raw feed is never returned. No outward I/O when disabled."""
+    import intel_connectors as _ic
+    r = _ic.fetch(source, key)
+    return {"source": source, "status": r["status"], "cache": r.get("cache"),
+            "records": len(r.get("records") or []), "note": r.get("note"), "log": r.get("log")}
+
+
 @app.get("/cloud/posture/{provider}")
 async def cloud_posture(provider: str):
     """READ-ONLY PREVIEW of the operator's OWN cloud account (CHAD: a GET must not change state). For
