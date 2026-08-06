@@ -267,6 +267,14 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   needs a human reviewer (internet intel NEVER auto-promotes — anti-contamination). Added CVE-v5 + CISA-KEV
   parsers to intel_connectors. `GET /intel/registry` (lifecycle stats). +6 tests (858 total, 0 fail). Baked.
 
+- 2026-08-06: **SLICE 15 shipped (#107 EtherNet/IP ICS engine — read-only).** `enip_audit_tool.py`:
+  hand-rolled EtherNet/IP (CIP) ListIdentity fingerprint (encap cmd 0x0063) confirming an unauthenticated
+  OT device (CWE-306). HARD READ-ONLY RAIL: the ONLY builder is build_list_identity (test asserts no
+  write/forward_open/set_attribute is constructible). FP-safe oracle (echoed cmd 0x0063 + status 0 + identity
+  item 0x000C). Wired (no island): service_router 44818->enip pack + tools _run_service_pack enip branch, so
+  a discovered 44818 fires the read-only probe. +4 tests (868 total, 0 fail). Baked. Mirrors the Modbus
+  read-only pattern; advances the ICS-in-cloud goal.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

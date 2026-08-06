@@ -26,6 +26,7 @@ _PORT_SVC = {
     9300: "elasticsearch", 10250: "kubelet", 11211: "memcached", 27017: "mongodb",
     502: "modbus",                                   # ICS/OT — Modbus/TCP (read-only audit)
     123: "ntp",                                       # NTP — monlist/amplification (read-only)
+    44818: "enip",                                    # ICS/OT — EtherNet/IP (read-only ListIdentity)
 }
 
 # banner signature -> service type (a banner OVERRIDES the port guess when present)
@@ -86,6 +87,11 @@ _PACKS = {
     "modbus": {"graph_kind": "service", "note": "ICS/OT: unauthenticated Modbus/TCP device (READ-ONLY audit; never writes).", "checks": [
         {"id": "modbus_exposed", "cwe": "CWE-306", "intrusive": False,
          "oracle": "an unauthenticated Modbus device answers a read-only request (device-id / read-holding)",
+         "enables": ["ot_read"]},
+    ]},
+    "enip": {"graph_kind": "service", "note": "ICS/OT: unauthenticated EtherNet/IP (CIP) device (READ-ONLY ListIdentity; never writes).", "checks": [
+        {"id": "enip_exposed", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "an unauthenticated EtherNet/IP device answers ListIdentity (0x0063) with a valid identity item",
          "enables": ["ot_read"]},
     ]},
     "vnc": {"graph_kind": "service", "note": "Remote desktop: unauthenticated VNC (READ-ONLY handshake).", "checks": [

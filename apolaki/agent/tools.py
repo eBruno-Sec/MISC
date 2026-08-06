@@ -2196,6 +2196,11 @@ class ToolRegistry:
             if out:
                 sev, ev = out
                 findings.append(_mb.finding(host, int(port), sev, ev, res))
+        elif service == "enip":
+            import enip_audit_tool as _en                        # ICS/OT: READ-ONLY ListIdentity, never a CIP write
+            res = await asyncio.get_event_loop().run_in_executor(None, _en.probe, host, int(port))
+            if res.get("device_info"):
+                findings.append(_en.finding(host, int(port), res["device_info"]))
         elif service == "vnc":
             import vnc_audit_tool as _vt                         # RFB handshake only, no session, no password
             res = await asyncio.get_event_loop().run_in_executor(None, _vt.probe, host, int(port))
