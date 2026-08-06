@@ -2112,7 +2112,8 @@ async def get_canonical_graph(session_id: str):
         caps = list(aa["capabilities"])
     g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
                                   personas=personas, capabilities=caps,
-                                  scope_asset=memory_mod.target_key(m["scope"]))
+                                  scope_asset=memory_mod.target_key(m["scope"]),
+                                  code_review=(m.get("context") or {}).get("code_review"))
     # rebuild EVERY persisted cloud account's graph so an ARCHIVED mission keeps its cloud
     # account/resource/role nodes (CHAD #2/#5) — shared with the portable export.
     cloud_summary = _project_cloud_postures(g, m)
@@ -2237,6 +2238,35 @@ def _cloud_posture_run(provider: str) -> dict:
                         "by_severity": {s: sum(1 for f in findings if f.get("severity") == s)
                                         for s in ("critical", "high", "medium", "low")},
                         "collection_complete": not partial}}
+
+
+@app.post("/mission/{session_id}/codereview")
+async def codereview_ingest(session_id: str, payload: dict):
+    """Code review as pre-recon (#114 Part 2): run static source review on SUPPLIED authorized source,
+    store it on the mission, and seed the canonical graph with STATIC candidate facts (routes / sinks /
+    secrets) that the planner then validates at runtime (white -> black). Secrets are hashed, never stored
+    raw; a source route is reachable='unverified' until a live probe proves it. Body: {source, source_name}."""
+    import codereview as _cr
+    import codereview_graph as _crg
+    import asset_graph as _ag
+    m = _require_mission(session_id)
+    src = str((payload or {}).get("source") or "")
+    name = str((payload or {}).get("source_name") or "source")
+    if not src.strip():
+        raise HTTPException(status_code=400, detail="no source provided")
+    rev = _cr.review(src, name)
+    ctx = dict(m.get("context") or {})
+    prev = ctx.get("code_review") or {"findings": [], "endpoints": []}
+    prev["findings"] = (prev.get("findings") or []) + (rev.get("findings") or [])
+    prev["endpoints"] = sorted(set((prev.get("endpoints") or []) + (rev.get("endpoints") or [])))
+    ctx["code_review"] = prev
+    db.update_mission(session_id, context=ctx)
+    g = _ag.AssetGraph(session_id)
+    delta = _crg.seed(g, rev, scope_asset=memory_mod.target_key(m["scope"]))
+    return {"session_id": session_id, "source_name": name,
+            "review": {"findings": len(rev.get("findings") or []), "endpoints": len(rev.get("endpoints") or [])},
+            "graph_delta": delta,
+            "note": "static candidate facts seeded into the engagement graph; the planner validates them at runtime"}
 
 
 @app.get("/intel/sources")

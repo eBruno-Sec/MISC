@@ -235,6 +235,19 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   findings — VPN-Server-Firewall + Design-World-Firewall both expose SSH(22) to 0.0.0.0/0; collection
   partial (token lacks /account + /object-storage scope -> 403, honestly flagged not-clean).
 
+- 2026-08-06: **SLICE 11 shipped (#114 Part 2 — code review as pre-recon, bidirectional through ONE graph).**
+  New `codereview_graph.py`: `seed()` projects `codereview.review()` output (routes / sinks / secrets) into
+  the canonical AssetGraph as STATIC candidate facts — endpoints `reachable='unverified'`, sinks as
+  vuln-class hypotheses (conf<=0.3), secrets as a DISTINCT `source_secret` node (sha256 + location only,
+  NEVER raw, `tested=False`, `external_test='requires_authorization'`, kept off the runtime `credential`
+  kind so it can't auto-trigger cred-testing). White->black: seeded endpoints feed `to_observations`
+  (`has_api` etc.) so the planner validates code-discovered surface. Black->white: `link_runtime_to_source()`
+  cross-references a runtime finding to the exact source location. `build_from_engagement(code_review=...)`
+  seeds into the SAME graph (no island); `POST /mission/{sid}/codereview` ingests authorized source +
+  stores it; `/graph/canonical` threads it. +5 tests (848 total, 0 fail). Baked; VALIDATED LIVE on VAmPI:
+  ingest -> canonical graph gained sink/source_secret/endpoint, raw AWS key NOT in graph. Boundaries held.
+  Files: codereview_graph.py, asset_graph.py, main.py, tests/test_codereview_graph.py.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

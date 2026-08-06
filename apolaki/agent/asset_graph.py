@@ -443,7 +443,7 @@ def _content_enables(finding) -> list:
 
 def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = None,
                           findings: list = None, personas: dict = None, capabilities: list = None,
-                          services: list = None, scope_asset: str = "") -> "AssetGraph":
+                          services: list = None, scope_asset: str = "", code_review: dict = None) -> "AssetGraph":
     """Project the engagement's gathered intelligence into the canonical graph WITH provenance —
     hosts, endpoints, object endpoints, params, findings (+ what they enable), personas (vault refs
     only), confirmed capabilities, and non-web services (beyond-web routing). Deterministic; reuses
@@ -530,4 +530,12 @@ def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = N
         for fn in g.nodes("finding"):
             if cap in (fn.get("enables") or []):
                 g.link(fn["id"], cid, "enables", source="scan")
+    # code review as pre-recon: seed STATIC source facts (routes / sinks / secrets) as candidate
+    # hypotheses into the SAME graph, so the planner validates code-discovered surface (white -> black).
+    if code_review:
+        try:
+            import codereview_graph as _crg
+            _crg.seed(g, code_review, scope_asset=scope_asset)
+        except Exception:
+            pass
     return g
