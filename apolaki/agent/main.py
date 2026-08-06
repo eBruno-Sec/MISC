@@ -2421,6 +2421,20 @@ async def sarif_export(session_id: str):
     return _sf.export_sarif(findings, tool_name="Apolaki")
 
 
+@app.get("/mission/{session_id}/tool-provenance")
+async def tool_provenance_view(session_id: str):
+    """Per-external-tool-execution provenance for a live mission (Codex Tier-3 #14): tool + binary path/version,
+    argv hash (secrets redacted), timeout, exit code, output-artifact hash, scope hash, permission class. Read
+    from the live session's tool wrapper; empty (with a note) once the session is evicted from RAM."""
+    _require_mission(session_id)
+    tl = (sessions.get(session_id) or {}).get("tools")
+    recs = list(getattr(tl, "_tool_provenance", []) or []) if tl is not None else []
+    return {"session_id": session_id, "count": len(recs), "records": recs,
+            "note": ("" if tl is not None else
+                     "session not live in RAM — external-tool provenance is in-memory this build; "
+                     "re-run or keep the session live to capture it.")}
+
+
 @app.post("/intel/sarif")
 async def sarif_import(payload: dict):
     """Import a SARIF document (Semgrep/CodeQL/other SAST) as Apolaki CANDIDATES — NEVER auto-confirmed

@@ -49,6 +49,18 @@ def _looks_privileged(request_id: str) -> bool:
     return bool(_PRIV_RX.search(request_id or ""))
 
 
+def _json_body(body):
+    """Parse a response body as JSON for field-level analysis; None if it is not a JSON object/array."""
+    s = (body or "").strip()
+    if not s or s[0] not in "{[":
+        return None
+    try:
+        import json
+        return json.loads(s)
+    except Exception:
+        return None
+
+
 def build_matrix(cells: list) -> dict:
     """Pure differential analysis over collected (request×role) cells. Returns the matrix plus the
     authorization GAPS, each with the differential evidence that proves it."""
@@ -101,6 +113,31 @@ def build_matrix(cells: list) -> dict:
                              "evidence": ("privileged function reached by authenticated non-privileged role(s) %s "
                                           "(anonymous is denied) — function-level authorization is not enforced."
                                           % authed_lowpriv)})
+
+        # 5) FIELD-LEVEL over-exposure (Codex #9), distinct from BOLA: a response leaks sensitive/admin/debug
+        # fields even when object-level access is legitimate. Fires only on conservative sensitive field NAMES.
+        _ranks = {r: c.get("rank", 1) for r, c in got}
+        _maxrank = max(_ranks.values(), default=1)
+        for r, c in got:
+            data = _json_body(c.get("body"))
+            if data is None:
+                continue
+            try:
+                import field_authz as _fa
+                obs = _fa.excessive_data_exposure(
+                    data, role=r, authenticated=(c.get("rank", 1) >= 1),
+                    own_resource=(c.get("owner") in (None, r)))
+            except Exception:
+                obs = None
+            if obs:
+                _fields = [e["field"] for e in obs["exposed_fields"]]
+                _low = _ranks.get(r, 1) < _maxrank
+                gaps.append({"type": "excessive_data_exposure", "request": req,
+                             "severity": obs["severity"], "roles": [r], "exposed_fields": _fields,
+                             "evidence": ("role '%s' response exposes %d sensitive/admin/debug field(s): %s%s"
+                                          % (r, len(_fields), ", ".join(_fields[:6]),
+                                             " — and this role is lower-privileged than a peer that accessed the "
+                                             "same object (field-level authorization gap)" if _low else ""))})
 
     # dedup identical gaps (same type+request+roles)
     seen, uniq = set(), []

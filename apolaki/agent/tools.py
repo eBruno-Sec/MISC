@@ -949,6 +949,10 @@ class ToolRegistry:
         self._sessions = {}
         self._session_shapes = {}   # role -> the exact winning login request shape (redacted), for honest reproduction
         self._login_attempts = 0
+        # Codex Tier-3 #14: a provenance record per EXTERNAL tool execution (tool/binary/version/argv-hash/
+        # timeout/exit-code/output-hash), surfaced at /mission/{sid}/tool-provenance. Fail-safe: never breaks
+        # a scan. Secrets are redacted inside tool_provenance.record.
+        self._tool_provenance = []
         # capability-based investigation state (identities, ownership, capabilities, vars)
         import investigation as _inv
         self.state = _inv.InvestigationState()
@@ -1028,15 +1032,30 @@ class ToolRegistry:
         if not self.budget.charge(weight):
             return "", (f"__BUDGET__ mission request budget exhausted "
                         f"(external tool '{os.path.basename(str(cmd[0]))}' costs {weight})")
+        _binary = os.path.basename(str(cmd[0]))
+        _out_text, _exit = "", None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return out.decode(errors="replace"), err.decode(errors="replace")
+            _out_text, _exit = out.decode(errors="replace"), proc.returncode
+            return _out_text, err.decode(errors="replace")
         except asyncio.TimeoutError:
+            _out_text = "Command timed out"
             return "", "Command timed out"
         except Exception as e:
+            _out_text = str(e)
             return "", str(e)
+        finally:
+            # Codex #14: durable provenance for every external tool run (fail-safe — never breaks the scan).
+            try:
+                import tool_provenance as _tp
+                self._tool_provenance.append(_tp.record(
+                    _binary, list(cmd), binary_path=shutil.which(cmd[0]), timeout=timeout,
+                    exit_code=_exit, scope={"mission": self.mission_id}, output=_out_text,
+                    permission=("INTRUSIVE" if _binary in ("sqlmap", "nuclei", "nikto", "wpscan") else "ACTIVE")))
+            except Exception:
+                pass
 
     # ── capability-expansion tools (2026-07) ─────────────────────
     async def _run_dork_gen(self, inp: dict) -> ToolResult:
