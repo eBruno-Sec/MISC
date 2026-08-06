@@ -72,6 +72,24 @@ def _leads_md(leads: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _defense_controls_md(finding: dict) -> list:
+    """Curated defensive-control mapping for a finding (Codex Tier-1 #3): the structured complement to the
+    remediation line — each control + the attacker CAPABILITY it reduces. Honest: curated, not official
+    D3FEND ids. Unknown family -> nothing rendered (no fabricated control)."""
+    try:
+        import defense_mapping
+    except Exception:
+        return []
+    ctrls = defense_mapping.controls_for(finding)
+    if not ctrls:
+        return []
+    out = ["**Defensive Controls** _(curated mapping — reduces attacker capability)_", ""]
+    for c in ctrls:
+        out.append("- **%s** → reduces: %s" % (c["name"], ", ".join(c["reduces"])))
+    out.append("")
+    return out
+
+
 def _asvs_md(findings: list, tool_ledger: dict) -> list:
     """Curated-partial ASVS-5 objective coverage for the report: which security PROPERTIES were verified /
     failed / blocked / not tested this mission. Findings violate objectives; a clean run of an objective's
@@ -222,6 +240,7 @@ def generate_report(program: str, findings: list, scope: dict,
         if str(f.get("false_positive_check") or "").strip():
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
         lines += ["**Remediation**", "", remediation_line(f), ""]
+        lines += _defense_controls_md(f)
         if f.get("evidence"):
             lines += ["**Supporting Material**", "", "```", str(f["evidence"]), "```", ""]
         for _lbl, _txt in evidence_items(f):

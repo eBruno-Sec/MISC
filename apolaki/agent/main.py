@@ -930,6 +930,21 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.get("/intel/defenses")
+async def defense_catalog(family: str = None):
+    """Curated defensive-control mappings (Codex Tier-1 #3): finding family -> the control(s) that neutralize
+    it + the attacker CAPABILITY each reduces. HONEST: curated local mappings, not official D3FEND ids. With
+    ?family= it returns the controls for one family (unknown family -> empty, never a fabricated control)."""
+    import defense_mapping as dm
+    try:
+        if family:
+            return {"family": family, "controls": dm.controls_for(family), "reduces": dm.reduces_for(family)}
+        return {"scheme": dm.SCHEME, "provenance": dm.PROVENANCE, "families": dm.families_covered(),
+                "controls": {f: dm.controls_for(f) for f in dm.families_covered()}}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/coverage/asvs")
 async def asvs_coverage(session: str = None):
     """Curated-partial OWASP ASVS-5 objective coverage: what security PROPERTIES were verified / failed /
