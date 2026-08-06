@@ -232,6 +232,23 @@ def test_confidence_decay_and_utility_ranking():
     assert [o["target"] for o in objs] == ["/a", "/b"] and objs[0]["utility"] > objs[1]["utility"]
 
 
+def test_content_aware_enables_upgrade_credential_leaks_only():
+    # a credentials-leak exposure UPGRADES to credential_material -> a real chase attack-path
+    g = AG.build_from_engagement("m", findings=[
+        {"title": "Sensitive data / credentials exposed", "family": "exposure",
+         "confidence": "confirmed", "target": "http://h/users/v1/_debug"}])
+    assert "credential_material" in g.nodes("finding")[0]["enables"]
+    acts = g.next_best_actions()
+    assert any(a["action"] == "chase_capability" and a.get("capability") == "credential_material"
+               for a in acts)
+    # a NON-credential exposure of the SAME family does NOT get the upgrade (no false attack-path)
+    g2 = AG.build_from_engagement("m", findings=[
+        {"title": "API schema exposed", "family": "exposure", "confidence": "confirmed",
+         "target": "http://h/openapi.json"}])
+    assert "credential_material" not in g2.nodes("finding")[0]["enables"]
+    assert not any(a.get("capability") == "credential_material" for a in g2.next_best_actions())
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

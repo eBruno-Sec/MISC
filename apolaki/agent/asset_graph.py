@@ -425,6 +425,21 @@ _FINDING_ENABLES = {
     "ssrf": ["internal_request"], "file_upload": ["file_upload"],
 }
 
+# Content signals that UPGRADE a finding's enables beyond its family alone: an `exposure` finding that
+# actually leaks credentials/secrets unlocks credential_material (chase: try those creds), while a
+# schema/info exposure of the same family does not. Keyed on the finding's OWN text so a whole family is
+# never blunt-mapped into a capability it doesn't always unlock (avoids false attack-paths). Deterministic.
+_CRED_SIGNALS = ("credential", "password", "passwd", "secret", "api key", "api-key", "apikey",
+                 "token", "private key", "access key", "aws_secret", "authorization header")
+
+
+def _content_enables(finding) -> list:
+    """Capabilities a finding unlocks by its CONTENT (title/evidence), not just its family. Conservative:
+    only a clear credential/secret leak upgrades. Pure keyword match."""
+    blob = " ".join(str(finding.get(k, "")) for k in
+                    ("title", "name", "summary", "evidence", "impact")).lower()
+    return ["credential_material"] if any(s in blob for s in _CRED_SIGNALS) else []
+
 
 def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = None,
                           findings: list = None, personas: dict = None, capabilities: list = None,
@@ -466,9 +481,10 @@ def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = N
     for f in findings:
         key = f.get("id") or (f.get("title", "")[:40] + "@" + (f.get("target", "") or ""))
         fam = (f.get("family") or "").lower()
+        _enables = sorted(set(_FINDING_ENABLES.get(fam, [])) | set(_content_enables(f)))
         fid = g.observe("finding", key, label=f.get("title", "Finding"), source="scan",
                         confidence=CONFIRMED if f.get("confidence") == "confirmed" else MEDIUM,
-                        scope_asset=scope_asset, enables=_FINDING_ENABLES.get(fam, []),
+                        scope_asset=scope_asset, enables=_enables,
                         severity=(f.get("severity") or "info"), cwe=f.get("cwe", ""), family=fam)
         g.mark_tested(fid, ok=(f.get("confidence") == "confirmed"))
         tgt = f.get("target", "")

@@ -100,8 +100,10 @@ edge — DONE this session: #116 (utility attack-paths + decay) and #115 (execut
 - **VAmPI** (`vampi:5000`, deterministic full mode) — mission `10b07231`, completed in 276s, exit clean.
   - Findings: **2, both CONFIRMED** — critical `exposure` (sensitive data/credentials via /users/v1/_debug),
     medium `exposure` (API schema exposed). No false positives observed. Canonical graph: 25 nodes, 24 edges.
-  - `next_best_actions=0` — CORRECT for this target (exposure findings map to no capability-enable; no
-    object/service nodes to rank). Populated utility ranking proven separately (baked-image + unit tests).
+  - `next_best_actions`: my optest driver initially read `/graph/{sid}` (the graph_model VIEW, no
+    next_best field) and mis-reported 0. The CANONICAL graph `/graph/canonical/10b07231` actually returns
+    **5 utility-ranked attack-paths**: `chase_capability credential_material` (util 0.68) + 4 `cross_user_test`
+    BOLA paths on VAmPI's /users/v1/* objects (util 0.10). #116 validated end-to-end on real data.
   - Report renders the evidence-graded business impact LIVE (demonstrated/plausible/unverified, fenced
     "do NOT claim without further evidence").
   - **Discovered improvement (future):** an exposed-CREDENTIALS finding should chain to `credential_material`
@@ -139,6 +141,14 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
 # live mission:  docker cp <driver> apolaki-agent-1:/tmp/optest.py && docker exec apolaki-agent-1 python /tmp/optest.py juice-shop:3000
 # bake after edits: docker compose build agent && docker compose up -d --no-deps agent
 ```
+
+- 2026-08-06: **SLICE 4 shipped (content-aware finding `enables`).** Closes the gap the VAmPI OpTest
+  surfaced: an exposure finding that actually LEAKS credentials/secrets now upgrades to `credential_material`
+  (chase: try the creds), while schema/info exposure of the same family does not (no false attack-path).
+  `asset_graph._content_enables()` — conservative keyword match on the finding's OWN text; unioned with the
+  family map at node creation. Test +1 (825 total, 0 fail). Baked; VALIDATED on real archived mission
+  `/graph/canonical/10b07231`: 5 utility-ranked paths incl. `chase_capability credential_material` (0.68).
+  Files: asset_graph.py, tests/test_asset_graph.py.
 
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
