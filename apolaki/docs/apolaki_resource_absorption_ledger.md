@@ -47,9 +47,9 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
 | Evasion Engineering.txt | 0.37 | QUEUED | #113 evasion |
 | Cybersecurity Attacks- Red Team Strategies.txt | 0.67 | QUEUED | |
 | Mastering Kali Linux 4e.txt | 0.66 | QUEUED | |
-| Advanced WAF Evasion & Parameter Exploitation TTPs.txt | 0.01 | QUEUED | small, focused |
-| The Advanced Adversary's Playbook.txt | 0.01 | QUEUED | small |
-| Comprehensive Offensive Security Blueprint.txt | 0.01 | QUEUED | small |
+| Advanced WAF Evasion & Parameter Exploitation TTPs.txt | 0.01 | READ | ~fully absorbed (see notes) |
+| The Advanced Adversary's Playbook.txt | 0.01 | READ | ~fully absorbed (see notes) |
+| Comprehensive Offensive Security Blueprint.txt | 0.01 | READ | ~fully absorbed (see notes) |
 | BBH_Bootcamp.txt | 0.68 | QUEUED | |
 | Threat Modeling Best Practices.txt | 0.57 | QUEUED | |
 | Tribe of Hackers Red Team.txt | 0.83 | QUEUED | interviews, low-mid yield |
@@ -66,7 +66,28 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
 - P3-P5 integration — highest-value vertical slices, each fully wired (graph/planner/report/UI/test).
 - Landing order: **#116 utility+decay (attack-planning keystone)** → #115 schema → #117 retest → new engines from reads.
 
+## Extraction notes (technique-level, deduped, provenance kept)
+- **WAF-Evasion TTPs / Adversary Playbook / Offensive Blueprint (3 tiny files, READ):** dense
+  methodology overviews; ~everything is ALREADY implemented in Apolaki. Verified against source:
+  - WAF inspection-ceiling padding ("10,000 A" / 8-16KB) → `waf_bypass_tool.py` (raw-blocked vs
+    padded-not-blocked-and-reflects differential oracle). ALREADY BUILT.
+  - JWT alg confusion (RSA→HMAC) + alg:none → `jwt_tool.py` (`_ASYM_ALGS`, `forge_none`). ALREADY BUILT.
+  - Open-redirect backslash/@-userinfo/host-suffix bypass → `web_security.py` + `oauth_tool.py`. BUILT.
+  - Keyword-reassembly-via-stripping, look-alike Unicode → covered by `encoding_probe.py`/waf_bypass.
+  - Recon (crt.sh CT, ASN→prefix, S3, GitHub, dorks, Arjun params, 403-vs-404) → dns_recon/github_recon/
+    dorks/param_discovery; ASN→prefix + favicon-hash remain #114. HONEST NEW-ENGINE YIELD: 0.
+  - STRUCTURAL find: technique registry had no machine-readable proof contract → became #115 (below).
+
 ## Change log (append-only)
+- 2026-08-05: **SLICE 2 shipped (#115 executable-knowledge proof contract).** Added first-class
+  `negative_control` / `evidence_requirements` / `replayable` / `safety` / `cleanup` to the canonical
+  Technique schema (`technique_model.py`) + `proof_contract()` deriving them deterministically from
+  vuln_class + oracle (class-specific FP-safety differentials for 30+ families; per-record override).
+  `techniques._t()` attaches the contract to all 65 records; `from_registry` surfaces it on the model.
+  Guard test `test_technique_contract.py` (+4) enforces every proven technique declares a real
+  differential + >=2 evidence items. Wired: `/intel/techniques` serves the contract (53 techniques
+  live-verified — ssrf shows OOB-correlation evidence, operator-gated safety). 818 tests, 0 fail.
+  Baked + recreated + health 200. Files: technique_model.py, techniques.py, tests/test_technique_contract.py.
 - 2026-08-05: P0 started. Inventory + baseline (812 green) + architecture map done. Ledger created.
 - 2026-08-05: **SLICE 1 shipped (#116 attack-planning keystone).** Pentera utility scoring + Cosmos
   temporal confidence-decay in `asset_graph.py`: `decay_factor()`, `utility_score()`,

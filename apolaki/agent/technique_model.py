@@ -34,6 +34,9 @@ FIELDS = (
     "applicable_products", "product_versions",
     # the offensive method
     "preconditions", "discovery_methods", "payloads", "detection_logic", "mitigations",
+    # executable-knowledge proof contract (Nuclei-style) — the FP-safety + evidence obligations, made
+    # explicit + machine-checkable instead of buried in engine code.
+    "negative_control", "evidence_requirements", "replayable", "safety", "cleanup",
     # trust + lineage
     "evidence", "provenance", "confidence", "status", "version", "version_history",
     "success_metrics", "parents", "children",
@@ -57,6 +60,7 @@ STATUSES = (
 
 _LIST_FIELDS = ("cwe", "owasp", "wstg", "capec", "attack", "applicable_products", "product_versions",
                 "preconditions", "discovery_methods", "payloads", "detection_logic", "mitigations",
+                "evidence_requirements",
                 "evidence", "provenance", "version_history", "parents", "children", "tags")
 
 
@@ -66,7 +70,8 @@ def blank(id, name=""):
     t.update({"id": id, "name": name or _humanize(id), "summary": "", "vuln_class": "",
               "confidence": {"score": 0, "tier": "low", "factors": []}, "status": "catalogued",
               "version": 1, "success_metrics": {}, "transferable": True, "permission": "auto",
-              "try_it": None})
+              "try_it": None, "negative_control": "", "replayable": True, "safety": "active-safe",
+              "cleanup": "None — non-destructive read/probe; no target state is modified."})
     return t
 
 
@@ -78,6 +83,119 @@ def _as_list(v):
     if v is None or v == "":
         return []
     return list(v) if isinstance(v, (list, tuple, set)) else [v]
+
+
+# ---------------------------------------------------------------------------- proof contract (executable knowledge)
+# The Nuclei-style contract every technique carries so its FALSE-POSITIVE-safety differential and its
+# EVIDENCE obligations are explicit + machine-checkable — not buried in engine code. Derived
+# deterministically from the technique's vuln_class + oracle; any record may pre-set a field to override.
+# This is what turns "we have an oracle" into a declared, testable proof discipline: which negative
+# control must FAIL, and what a confirmed finding MUST retain to be believed + replayed. No LLM.
+_NEG_CONTROL_BY_CLASS = [   # (vuln_class substring, negative-control text) — MOST SPECIFIC FIRST
+    ("nosql", "A literal (non-operator) value in the same field does NOT change the result set the way the "
+              "injected $-operator ($ne/$gt/$regex) does."),
+    ("sql", "An inert control of the same shape but without SQL metacharacters does NOT reproduce the "
+            "error/boolean/time differential; the unmodified baseline behaves normally."),
+    ("template", "An arithmetic control evaluates server-side ({{7*7}}->49) while a non-evaluating control "
+                 "({{7*'7'}}) does not — proving evaluation, not mere reflection."),
+    ("xpath", "A control value without XPath metacharacters does not alter the node-set the query returns."),
+    ("ldap", "A control value without LDAP filter metacharacters ()(|&* does not change the directory result set."),
+    ("ssi", "A control string without SSI directives is echoed literally; only the <!--#exec/#include--> "
+            "directive is evaluated by the server."),
+    ("css", "A benign style value neither exfiltrates data nor alters state; only the injected selector does."),
+    ("prototype", "A control property that is NOT a prototype key leaves object behaviour unchanged; only "
+                  "__proto__/constructor pollution changes a downstream default."),
+    ("command", "A control input without the shell separator yields the baseline output/latency; only the "
+                "injected command changes the computed output or adds delay above the measured noise floor."),
+    ("xxe", "A request without the external entity does NOT return file contents or trigger the OOB callback."),
+    ("deser", "A well-formed (non-corrupted) serialized blob does NOT raise the parser-specific error the "
+              "corrupt-and-watch oracle keys on."),
+    ("traversal", "A control path inside the web root returns normal content; only the ../ escape reveals "
+                  "out-of-root file contents."),
+    ("path", "A control path inside the web root returns normal content; only the ../ escape reveals "
+             "out-of-root file contents."),
+    ("ssrf", "A control URL to a non-existent internal host does NOT return the internal-only signal; only the "
+             "targeted internal resource (or the unique OOB correlation token) does."),
+    ("redirect", "A same-origin control value keeps the response on-site (no external Location); only the "
+                 "crafted external value redirects off-site."),
+    ("csrf", "The same state-change WITH the anti-CSRF token / SameSite protection is rejected cross-site; "
+             "only the token-less cross-site request succeeds."),
+    ("xss", "A unique benign marker in the same sink is neutralised/encoded on a control request; only the "
+            "payload request produces unencoded execution of that marker."),
+    ("session", "Freshly minted control tokens do NOT fit the predicted sequence, and a token is not accepted "
+                "after its session is invalidated."),
+    ("crypto", "A token signed with the wrong/again-modified key is REJECTED; only the forgery that exploits "
+               "the algorithm-confusion / none / weak-secret flaw is accepted."),
+    ("access_control", "The authorized/owner persona sees only its own object and the attacker persona is "
+                       "DENIED the same object on the negative-control request (no foreign data without the "
+                       "identifier change)."),
+    ("authentication", "Valid credentials succeed and invalid ones are rejected on the baseline; only the "
+                       "tested bypass yields an authenticated session without valid credentials."),
+    ("broken_auth", "Valid credentials succeed and invalid ones are rejected on the baseline; only the tested "
+                    "bypass yields an authenticated session without valid credentials."),
+    ("cache", "A clean re-request from an unpoisoned cache key returns the normal response; only the "
+              "unkeyed-input request re-serves the injected canary."),
+    ("network_service", "A securely-configured control (auth required / signing enforced / anonymous access "
+                        "disabled) does NOT expose the same data — the finding reflects the target's actual "
+                        "read-only configuration, not a probe artifact."),
+    ("sensitive_exposure", "A request to a benign/non-existent control path does NOT return the sensitive "
+                           "artifact; only the exposed resource does, matched by a content signature."),
+    ("vuln_component", "The detected version banner/marker falls in a KNOWN-vulnerable range; a patched-version "
+                       "control does not match the signature."),
+    ("business_logic", "The workflow executed in the intended order / within limits is enforced on the "
+                       "baseline; only the abused sequence (skipped step, replayed action, tampered value) "
+                       "produces the unauthorized outcome, reproducibly."),
+    ("llm", "A benign control prompt does NOT produce the injected marker or behaviour; only the "
+            "instruction-override payload yields exact marker compliance."),
+    ("prompt", "A benign control prompt does NOT produce the injected marker or behaviour; only the "
+               "instruction-override payload yields exact marker compliance."),
+    ("ics", "READ-ONLY: a benign read function returns the same data; NO write/coil/register command is ever "
+            "issued to the target — exposure is proven by unauthenticated read alone."),
+]
+_DEFAULT_NEG = ("A negative-control request WITHOUT the trigger does NOT reproduce the confirming signal "
+                "(differential measured over a stable baseline).")
+# classes that can create/modify target state -> their cleanup obligation differs from pure read probes.
+_WRITE_CLASSES = ("mass_assignment", "csrf", "business_logic", "upload", "deserialization", "command")
+
+
+def _neg_control_for(vuln_class):
+    vc = str(vuln_class or "").lower()
+    for key, text in _NEG_CONTROL_BY_CLASS:
+        if key in vc:
+            return text
+    return _DEFAULT_NEG
+
+
+def proof_contract(rec):
+    """Derive a technique's executable-knowledge proof contract (negative_control, evidence_requirements,
+    safety, cleanup, replayable) from its class + oracle. Deterministic; a record may pre-set any field to
+    override the derivation. Used by techniques._t() (so the registry + API carry it) and by the guard test
+    that enforces every proven technique declares its FP-safety differential + evidence obligations."""
+    vc = str(rec.get("vuln_class") or "").lower()
+    _dl = rec.get("detection_logic")
+    oracle = str(rec.get("oracle") or (_dl[0] if isinstance(_dl, list) and _dl else "") or "").strip()
+    perm = str(rec.get("permission") or "").upper()
+    execu = str(rec.get("execution") or "").lower()
+    neg = rec.get("negative_control") or _neg_control_for(vc)
+    ev = list(rec.get("evidence_requirements") or [])
+    if not ev:
+        if oracle:
+            ev.append("Oracle satisfied: " + oracle)
+        ev.append("Negative control captured showing the confirming signal is ABSENT without the trigger.")
+        ev.append("Baseline + mutation request/response retained for deterministic replay.")
+        if any(k in vc for k in ("ssrf", "xxe")):
+            ev.append("Unique out-of-band correlation token that only a server-side fetch could return.")
+        if any(k in vc for k in ("command", "sql", "race", "timing")):
+            ev.append("Timing/repetition samples exceeding the measured noise floor across trials (where timing-based).")
+    safety = rec.get("safety") or ("operator-gated" if (perm == "INTRUSIVE" or execu == "operator")
+                                   else "passive-readonly" if perm == "PASSIVE" else "active-safe")
+    cleanup = rec.get("cleanup") or (
+        "Revert or flag any test artifact created (record/object/state) for operator cleanup; never destructive."
+        if any(k in vc for k in _WRITE_CLASSES) else
+        "None — non-destructive read/probe; no target state is modified.")
+    replay = rec.get("replayable")
+    return {"negative_control": neg, "evidence_requirements": ev, "safety": safety,
+            "cleanup": cleanup, "replayable": True if replay is None else bool(replay)}
 
 
 # ---------------------------------------------------------------------------- confidence (deterministic)
@@ -140,6 +258,9 @@ def from_registry(rec, try_it=None, known_exploited=False, kev_cves=None, capec=
         "permission": rec.get("permission", rec.get("execution", "auto")),
         "try_it": try_it,
     })
+    # executable-knowledge proof contract (FP-safety differential + evidence obligations) — from the
+    # record if it declares them, else derived deterministically from class + oracle.
+    t.update(proof_contract(rec))
     # evidence: which labs/challenges proved it
     maps = rec.get("maps_to") or {}
     for lab in validated:

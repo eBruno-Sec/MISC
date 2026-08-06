@@ -55,6 +55,11 @@ def _t(**kw) -> dict:
     kw.setdefault("wstg", None)    # OWASP WSTG test id (e.g. WSTG-SESS-10)
     kw.setdefault("mitre", None)   # MITRE ATT&CK technique id (coarse fit for web; None where none fits)
     kw.setdefault("refs", [])      # external reference URLs (WSTG / PortSwigger topic) — links, not copied prose
+    # Executable-knowledge proof contract (Nuclei-style): the FP-safety differential + evidence obligations,
+    # made explicit on every record (derived from class+oracle; an entry may pre-set any field to override).
+    import technique_model as _tm
+    for _k, _v in _tm.proof_contract(kw).items():
+        kw.setdefault(_k, _v)
     return kw
 
 
