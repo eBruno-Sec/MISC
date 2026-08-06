@@ -930,6 +930,28 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/ot-context")
+async def ot_context_analyze(payload: dict):
+    """OT/ICS zone + process-impact context for an ICS finding (Codex Tier-3 #12). Body: {finding} for asset
+    context + potential process impact (POTENTIAL until operator-confirmed), or {pack} to check whether an OT
+    service pack's declared safety_class is admissible (only read_only is — ot_write/state_change/firmware and
+    undeclared packs are rejected), or {protocol} to check if it may be routed."""
+    import ot_context as ot
+    p = payload or {}
+    out = {}
+    if p.get("finding"):
+        ctx = ot.ot_asset_context(p["finding"])
+        out["asset_context"] = ctx
+        out["process_impact"] = ot.process_impact(ctx, operator_context=p.get("operator_context"))
+    if p.get("pack") is not None:
+        allowed, reason = ot.is_pack_allowed(p["pack"])
+        out["pack_allowed"] = allowed
+        out["pack_reason"] = reason
+    if p.get("protocol"):
+        out["can_route_protocol"] = ot.can_route_protocol(p["protocol"])
+    return out
+
+
 @app.post("/intel/action-envelope")
 async def action_envelope_mint(payload: dict):
     """Mint + validate a durable action envelope (Codex Tier-3 #11) — the replay-safe contract a side-effecting

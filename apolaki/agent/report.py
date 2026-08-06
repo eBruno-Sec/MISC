@@ -72,6 +72,24 @@ def _leads_md(leads: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _ot_context_md(finding: dict) -> list:
+    """OT/ICS context for an ICS finding (Codex Tier-3 #12): asset role + Purdue zone + process impact framed
+    as POTENTIAL until an operator confirms the process context. Nothing rendered for non-ICS findings."""
+    fam = str((finding or {}).get("family") or "").lower()
+    if fam not in ("ics_ot", "ics", "ot"):
+        return []
+    try:
+        import ot_context
+    except Exception:
+        return []
+    ctx = ot_context.ot_asset_context(finding)
+    imp = ot_context.process_impact(ctx)
+    return ["**OT/ICS Context**", "",
+            "- Asset role: %s — %s" % (ctx["role"], ctx["zone"]),
+            "- Process criticality: %s (operator context %s)" % (ctx["criticality"], ctx["process_context"]),
+            "- %s" % imp["statement"], ""]
+
+
 def _defense_controls_md(finding: dict) -> list:
     """Curated defensive-control mapping for a finding (Codex Tier-1 #3): the structured complement to the
     remediation line — each control + the attacker CAPABILITY it reduces. Honest: curated, not official
@@ -248,6 +266,7 @@ def generate_report(program: str, findings: list, scope: dict,
                   "**Retest / closure**", "", _pr["retest"], ""]
         if str(f.get("false_positive_check") or "").strip():
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
+        lines += _ot_context_md(f)
         lines += ["**Remediation**", "", remediation_line(f), ""]
         lines += _defense_controls_md(f)
         if f.get("evidence"):
