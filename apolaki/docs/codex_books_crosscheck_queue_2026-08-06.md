@@ -92,3 +92,33 @@ production skills. ICS/cloud stays read-only until policy+lab+creds. Report only
 
 ## Build log (Claude)
 - 2026-08-06: queue persisted; existence claims verified. Building Tier-1 top-down.
+- 2026-08-06: **Tier-1 COMPLETE + baked** (image apolaki-agent rebuilt, recreated, endpoints verified).
+  - #1 ASVS-5 curated-partial objective model — `asvs_model.py`, report "## ASVS Objective Coverage",
+    `GET /coverage/asvs?session=`. Caught+fixed an over-claim bug. (9df9121)
+  - #2 SARIF 2.1.0 boundary — `sarif_io.py`, `GET /mission/{sid}/sarif`, `POST /intel/sarif`. Import→
+    candidate (never confirmed); export atomic-only; order-stable fingerprints; suppression preserved-not-
+    trusted; secrets redacted. (f62c056)
+  - #3 curated defensive-control (D3FEND-like) mapping — `defense_mapping.py`, per-finding "Defensive
+    Controls" report block, `GET /intel/defenses`. 24 families; unknown→no fake mapping. (e89e321)
+  - #4 cloud provider-policy GATE — `cloud_policy.py`, `cloud_iam.collect()` live-path gate, `GET
+    /cloud/policy`. Default read-only (Linode flow preserved); writes/active/destructive default-denied;
+    prohibited wins; notification/approval/region/provider scope enforced. (7fc0d72)
+  - #5 docs/ledger correction = this queue doc + memory [[apolaki-codex-crosscheck-queue]].
+  - +37 tests, full suite 903 passed / 0 failed (container 3.12; no f-strings-with-backslash → 3.11-safe).
+- 2026-08-06: **Tier-2 COMPLETE** — #6 cvss4 (373d1ff), #7 graph_export (e1b2c92), #8 api_protocols
+  (9089c3f), #9 field_authz (cd76b66), #10 api_inventory (d6dd051).
+- 2026-08-06: **Tier-3 COMPLETE** — #11 action_envelope (d2b8a66), #12 ot_context (6670414),
+  #13 ad_context (40443f4), #14 tool_provenance (d98d0d3), #15 exploit_descriptor (bc08d0a).
+- 2026-08-06: **ALL 15 buildable items DONE + baked.** 14 new modules, 12 new endpoints, +80 tests, full
+  suite **980 passed / 0 failed** on the freshly-baked image (all 12 endpoints verified from the image).
+  - Tier-4 (#16-20: live AWS/Azure/GCP collectors, Kerberos/ADCS authed, SAML/OIDC IdP, more OT protocols,
+    Temporal) is ENVIRONMENT-GATED by Codex's own rule ("do NOT build live without creds+scope+policy") —
+    deferred by design, not actionable without a lab/creds. The read-only frontier models for AD (#13) and
+    OT (#12) already stand in front of them.
+  - **BAKE GOTCHA (caught here):** `docker compose build agent` (no `--no-cache`) reused the `COPY *.py .`
+    layer even though .py files changed → the image silently lacked the new endpoints while `docker cp` +
+    restart made tests pass. Fix: `docker compose build --no-cache agent`, then `up -d --force-recreate`,
+    then verify a NEW endpoint answers from the recreated container (not just that pytest passes).
+- Adoption follow-ons (Codex "requires more integration", modules+contracts landed, deeper wiring later):
+  action_envelope + tool_provenance into each side-effecting tools.py wrapper; field_authz into authz_matrix;
+  exploit_descriptor into the #112 ExploitDB feed.
