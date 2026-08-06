@@ -930,6 +930,25 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/api-inventory")
+async def api_inventory_reconcile(payload: dict):
+    """API inventory drift + version governance (Codex Tier-2 #10): reconcile runtime vs documented (OpenAPI)
+    vs archived vs code-discovered endpoints. Surfaces undocumented-live, documented-dead (coverage gap),
+    deprecated-version, multi-version-coexistence, schema-drift, and third-party dependency observations —
+    almost all OBSERVATIONS/leads, not vulns. Off-scope archived endpoints are not imported as live. Body:
+    {runtime, documented, archived, code, observed_fields, spec_fields, outbound_urls, target_hosts}."""
+    import api_inventory as ai
+    p = payload or {}
+    out = {"drift": ai.reconcile(runtime=p.get("runtime"), documented=p.get("documented"),
+                                 archived=p.get("archived"), code=p.get("code"))}
+    if p.get("observed_fields") is not None or p.get("spec_fields") is not None:
+        out["schema_drift"] = ai.schema_drift(p.get("observed_fields"), p.get("spec_fields"),
+                                              endpoint=str(p.get("endpoint") or ""))
+    if p.get("outbound_urls"):
+        out["third_party"] = ai.third_party_dependency_apis(p.get("outbound_urls"), p.get("target_hosts"))
+    return out
+
+
 @app.post("/intel/field-authz")
 async def field_authz_analyze(payload: dict):
     """Field-level authorization / excessive-data-exposure analysis (Codex Tier-2 #9) — distinct from BOLA.
