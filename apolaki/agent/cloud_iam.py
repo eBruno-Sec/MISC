@@ -394,6 +394,17 @@ def collect(provider: str, *, fixture: dict = None, token: str = None) -> dict:
     if fixture is not None:
         model = normalize(p, fixture)
         return {"provider": p, "blocked": False, "model": model, "findings": analyze(model)}
+    # LIVE path: a real cloud call. Gate it against the provider policy FIRST (Codex Tier-1 #4). Live
+    # posture collection is a read-only inventory action; the default policy permits read_inventory (so the
+    # authorized Linode read-only flow is unaffected) but blocks it if an explicit policy prohibits it.
+    try:
+        import cloud_policy
+        _dec = cloud_policy.gate(p, "read_inventory")
+        if not _dec["allowed"]:
+            return {"provider": p, "blocked": True, "reason": "cloud-policy gate: " + _dec["reason"],
+                    "policy_decision": _dec, "model": {"roles": [], "resources": []}, "findings": []}
+    except Exception:
+        pass
     if p == "linode":
         tok = token or os.environ.get("LINODE_TOKEN", "")
         if not tok:

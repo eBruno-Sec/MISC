@@ -2377,6 +2377,22 @@ async def intel_fetch(source: str, key: str = ""):
             "note": r.get("note"), "log": r.get("log")}
 
 
+@app.get("/cloud/policy")
+async def cloud_policy_view(provider: str = None, action: str = None):
+    """The effective cloud provider-policy that GATES cloud actions (Codex Tier-1 #4). Default is read-only:
+    only read-only inventory is permitted; every mutating/active/destructive action is default-denied until an
+    explicit policy (env APOLAKI_CLOUD_POLICY) grants it. With ?action= it returns the gate decision for that
+    action (dry-run — no cloud call is made)."""
+    import cloud_policy as cp
+    try:
+        out = {"effective_policy": cp.summary(provider)}
+        if action:
+            out["decision"] = cp.gate(provider or "any", action)
+        return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/cloud/posture/{provider}")
 async def cloud_posture(provider: str):
     """READ-ONLY PREVIEW of the operator's OWN cloud account (CHAD: a GET must not change state). For
