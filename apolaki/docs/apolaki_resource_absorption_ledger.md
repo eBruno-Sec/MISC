@@ -205,6 +205,19 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   2 bundles, all 9 sections populated. NOTE: #111's OTHER half (CI/CD PR-triggered autonomous testing) is
   GATED — needs a CI/GitHub environment. Files: poc_bundle.py, main.py, tests/test_poc_bundle.py.
 
+- 2026-08-06: **SLICE 9 shipped (#113 stealth / IDS-evasion nmap profile) — CORRECTS a prior wrong call.**
+  Last turn I called this an island claiming "Apolaki doesn't self-invoke nmap." WRONG: `tools._run_nmap`
+  shells out to nmap with a `flags` arg (allowlisted via `security.safe_flags`), and `_run_nmap_vuln` runs
+  the full NSE `vuln` category; the planner schedules the vuln pass in Full mode. Verified nmap 7.93 is
+  installed and the container runs as ROOT (raw-socket SYN/frag/decoy work). New `stealth.py`: named
+  profiles off/polite/sneaky/paranoid mapping to evasion flags (slower timing / fragmentation / decoys /
+  padding — EVASION, never DoS). `_run_nmap` gains a `stealth` param; the safe_flags allowlist widened to
+  EXACTLY the evasion flags (-f/-D/--data-length/-g/--source-port/--mtu) and still refuses --script/-o*/-iL/
+  shell-injection. Tool spec documents the param. +3 tests (836 total, 0 fail). Baked; VALIDATED LIVE: the
+  paranoid combo (SYN+frag+5 decoys+padding) actually ran → `8000/tcp open http-alt uvicorn`. Followup:
+  planner auto-selecting a stealth level per-engagement (today it's an option on the wired run_nmap tool).
+  Files: stealth.py, tools.py, tests/test_stealth.py.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

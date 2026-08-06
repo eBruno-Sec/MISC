@@ -377,9 +377,12 @@ CLAUDE_TOOLS = [
      "description": "ACTIVE: Web technology fingerprinting (CMS, frameworks, server versions).",
      "input_schema": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}},
     {"name": "run_nmap",
-     "description": "ACTIVE: Port scan + service/version detection.",
+     "description": ("ACTIVE: Port scan + service/version detection. Optional `stealth` level "
+                     "(off|polite|sneaky|paranoid) applies an IDS-evasion profile (slower timing / "
+                     "fragmentation / decoys — evasion, never DoS)."),
      "input_schema": {"type": "object", "properties": {
-         "target": {"type": "string"}, "flags": {"type": "string", "default": "-sT -sV --top-ports 1000 -T3"}},
+         "target": {"type": "string"}, "flags": {"type": "string", "default": "-sT -sV --top-ports 1000 -T3"},
+         "stealth": {"type": "string", "enum": ["off", "polite", "sneaky", "paranoid"]}},
          "required": ["target"]}},
     {"name": "run_nmap_vuln",
      "description": ("INTRUSIVE: Heavyweight nmap NSE vulnerability scan — the full `vuln` script category "
@@ -2987,9 +2990,14 @@ class ToolRegistry:
 
     async def _run_nmap(self, inp: dict) -> ToolResult:
         target = inp["target"]
-        flags = inp.get("flags", "-sT -sV --top-ports 1000 -T3")
+        import stealth as _stealth
+        # a named stealth level (IDS-evasion: slower timing / fragmentation / decoys — never DoS) picks the
+        # flags; an explicit `flags` string still overrides. Both are filtered by the allowlist below.
+        flags = _stealth.stealth_profile(inp["stealth"]) if inp.get("stealth") \
+            else inp.get("flags", "-sT -sV --top-ports 1000 -T3")
         from security import safe_flags
-        flag_tokens = safe_flags(flags, ("-s", "-p", "-T", "--top-ports", "-Pn", "-n", "--open"))
+        flag_tokens = safe_flags(flags, ("-s", "-p", "-T", "--top-ports", "-Pn", "-n", "--open")
+                                 + _stealth.EVASION_FLAGS)
         out, err = await self._cmd(["nmap"] + flag_tokens + ["-oX", "-", target], timeout=360)
         if err.startswith("__MISSING__"):
             return ToolResult("nmap", target, False, "", [], "nmap not installed")
