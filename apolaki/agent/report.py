@@ -179,6 +179,13 @@ def generate_report(program: str, findings: list, scope: dict,
         _impact = str(f.get("impact") or "").strip() or (_bi[1] if _bi else
                   "Impact depends on how the affected input is used downstream; verify reachability.")
         lines += ["", "**Impact**", "", _impact, ""]
+        _g = graded_business_impact(f)
+        if _g:
+            lines += ["**Impact (evidence-graded)**", "",
+                      f"- _Demonstrated:_ {_g['demonstrated']}",
+                      f"- _Plausible next step:_ {_g['plausible']}",
+                      f"- _Unverified worst case:_ {_g['unverified']}",
+                      f"- _Confidence:_ {_g['confidence']} — {_g['assumptions']}", ""]
         if str(f.get("false_positive_check") or "").strip():
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
         lines += ["**Remediation**", "", remediation_line(f), ""]
@@ -750,6 +757,96 @@ def business_impact(finding: dict):
     cwe = str(finding.get("cwe") or "").strip().lower()
     fam2 = _CWE_FAMILY.get(cwe)
     return _BIZ.get(fam2) if fam2 else None
+
+
+# Evidence-aware impact grade (Pentera "exploitability over theoretical severity" + the mission's
+# demonstrated / plausible / unverified discipline). Per family: (what a confirmed oracle DEMONSTRATES,
+# the PLAUSIBLE next step, the UNVERIFIED worst case that must NOT be claimed without more evidence).
+# Deterministic; grades DOWN from the flat consequence so a report never overclaims.
+_IMPACT_GRADE = {
+    "sqli": ("an injectable parameter confirmed by a control-vs-payload differential (the database interprets "
+             "attacker input where an inert control does not)",
+             "reading or altering application data the affected query can reach",
+             "full-database exfiltration, authentication bypass, or OS/RCE"),
+    "xss": ("attacker-controlled script executing in the browser through an unencoded reflected/stored sink",
+            "theft of a logged-in victim's session, or actions performed as that victim",
+            "mass account takeover or admin-session compromise at scale"),
+    "idor": ("access to another account's object by changing only its identifier (the owner is denied on the control)",
+             "viewing or altering other customers' records across the affected endpoint",
+             "bulk enumeration/exfiltration of every user's records"),
+    "bfla": ("a privileged/admin function invoked by an under-privileged caller",
+             "unauthorized state changes or privilege escalation through that function",
+             "full administrative takeover of the affected function set"),
+    "ssrf": ("the server issuing a request to an attacker-chosen address (a unique out-of-band token returned)",
+             "reaching internal-only services or cloud metadata from the public app",
+             "cloud-credential theft and a pivot into private infrastructure"),
+    "xxe": ("the XML parser resolving an attacker-supplied external entity",
+            "reading server-side files or making internal requests",
+            "secret/credential disclosure enabling a deeper breach"),
+    "cmdi": ("attacker input changing the command the server runs (computed-output/timing oracle over baseline)",
+             "running attacker commands in the application's OS context",
+             "full compromise of the host and everything it can reach"),
+    "ssti": ("server-side template evaluation of attacker input ({{7*7}}->49 while an inert control does not)",
+             "code execution within the template context",
+             "full server compromise"),
+    "path_traversal": ("reading a file outside the intended directory via ../ traversal (an in-root control is normal)",
+                       "disclosure of configuration, source, or credential files",
+                       "a broader compromise seeded by the leaked material"),
+    "open_redirect": ("the app redirecting to an attacker-chosen external host (a same-origin control stays on-site)",
+                      "trusted-domain phishing, or an OAuth/SSRF allowlist bypass",
+                      "credential theft through a redirect chain"),
+    "csrf": ("a state-changing action triggered cross-site without the user's intent",
+             "unwanted actions performed as the victim (settings/email change, transfer)",
+             "account takeover where a sensitive action is reachable"),
+    "vulnerable_component": ("a dependency whose version falls in a known-CVE range (a patched control does not match)",
+                             "exposure to the public exploit(s) for that CVE where the code path is reachable",
+                             "the worst outcome of the matched CVE (often RCE) — not demonstrated here"),
+    "exposure": ("a sensitive file/resource served directly over the web (a control path 404s)",
+                 "disclosure of the exposed configuration, secret, or source",
+                 "credential reuse enabling a deeper breach"),
+    "git_exposure": ("a downloadable source-control folder over the web",
+                     "reconstruction of source and extraction of secrets from history",
+                     "credential/key compromise enabling a deeper breach"),
+    "deserialization": ("attacker-controlled serialized data reaching an unsafe deserializer (corrupt-and-watch oracle)",
+                        "code paths toward server-side code execution",
+                        "full server compromise"),
+    "csti": ("client-side template evaluation of attacker text in the victim's browser (the server is not compromised)",
+             "session/cookie theft or account takeover from a crafted link on the real domain",
+             "widespread client-side compromise via a shared link"),
+    "prototype_pollution": ("attacker input setting properties on JavaScript's shared base object",
+                            "corrupted client-side logic, becoming DOM XSS when a suitable sink exists",
+                            "browser-side account takeover via a chained sink"),
+    "cors": ("a cross-origin read allowed by an over-permissive CORS policy",
+             "another site reading your logged-in users' private data",
+             "broad data leakage across authenticated users"),
+}
+_DEFAULT_GRADE = ("the confirming oracle condition for this vulnerability class",
+                  "the direct consequence of the confirmed weakness",
+                  "escalation beyond what was demonstrated — not claimed without further evidence")
+
+
+def graded_business_impact(finding: dict):
+    """Evidence-aware DEMONSTRATED / PLAUSIBLE / UNVERIFIED impact for a finding, or None for an
+    unknown family. Truth-first: 'demonstrated' is gated on an oracle-confirmed finding; anything
+    beyond it is explicitly labelled plausible or unverified so a report never overclaims (the
+    mission's business-impact discipline). Deterministic; reuses business_impact()'s family resolution."""
+    fam = str(finding.get("family") or "").strip().lower()
+    if fam not in _IMPACT_GRADE:
+        fam = _CWE_FAMILY.get(str(finding.get("cwe") or "").strip().lower(), fam)
+    grade = _IMPACT_GRADE.get(fam)
+    if not grade:
+        return None
+    dem, plaus, unv = grade
+    confirmed = str(finding.get("confidence") or "").strip().lower() == "confirmed"
+    return {
+        "confidence": finding.get("confidence") or "unconfirmed",
+        "demonstrated": ("Confirmed on this target: " + dem) if confirmed
+                        else ("Signal observed but NOT oracle-confirmed (treat as a candidate): " + dem),
+        "plausible": "Plausible next step (not demonstrated here): " + plaus,
+        "unverified": "Unverified worst case — do NOT claim without further evidence: " + unv,
+        "assumptions": ("Blast radius depends on the sensitivity of the affected data and its reachability; "
+                        "assumes the demonstrated behaviour generalises across similar records/inputs."),
+    }
 
 
 def risk_score(findings: list) -> dict:

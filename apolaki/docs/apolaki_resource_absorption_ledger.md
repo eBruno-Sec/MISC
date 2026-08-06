@@ -42,7 +42,7 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
 | Grokking Web Application Security.txt | 0.44 | QUEUED | |
 | Web Penetration Testing with Kali Linux 3e.txt | 0.40 | QUEUED | |
 | Advanced Infrastructure Penetration Testing.txt | 0.48 | QUEUED | network/infra |
-| Cloud Penetration Testing.txt | 0.53 | QUEUED | #106 cloud |
+| Cloud Penetration Testing.txt | 0.53 | PARTIAL | targeted extraction (storage/metadata/snapshot) — see notes |
 | Red Team Engineering.txt | 0.62 | QUEUED | |
 | Evasion Engineering.txt | 0.37 | QUEUED | #113 evasion |
 | Cybersecurity Attacks- Red Team Strategies.txt | 0.67 | QUEUED | |
@@ -78,7 +78,44 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
     dorks/param_discovery; ASN→prefix + favicon-hash remain #114. HONEST NEW-ENGINE YIELD: 0.
   - STRUCTURAL find: technique registry had no machine-readable proof contract → became #115 (below).
 
+- **Cloud Penetration Testing (PARTIAL — targeted extraction, not full cover-to-cover):** book
+  centers on storage exposure (S3/blob), ACLs, metadata, snapshots. Verified against Apolaki:
+  provider fingerprint + public-storage URL recognition + **public bucket-listing oracle**
+  (ListBucketResult/EnumerationResults 200 signature) live in `cloud_intel.py`; Linode/Azure ACL
+  public-access in `cloud_iam.py`; SSRF→cloud-metadata (169.254.169.254) in `ssrf_tool`. Remaining
+  book emphasis (public EBS/RDS snapshots, fine-grained ACL audit) needs AUTHENTICATED cloud-API
+  access + real cloud creds → genuinely #106, correctly gated on the user's cloud material. New
+  deterministic engine validatable against LOCAL labs: none.
+
+## Emerging pattern (honest, for the final audit)
+Apolaki's DETERMINISTIC web/API/infra core is **mature** — the read TTP/methodology resources map
+almost entirely onto already-implemented engines (WAF-evasion, JWT confusion, open-redirect bypass,
+bucket-listing oracle all pre-built). The genuine remaining frontier is **external-environment-gated**:
+cloud-authenticated checks (#106, needs creds), AD/Kerberos (#105, needs a DC lab), SAML (#109, needs an
+IdP), WAF-padding proof (needs WAF+vuln lab). Highest-value work I CAN complete now is the
+**architectural force-multipliers** the competitive analysis + this mission both identify as Apolaki's
+edge — DONE this session: #116 (utility attack-paths + decay) and #115 (executable-knowledge contract).
+
+## OpTest (live mission, Phase 8)
+- **VAmPI** (`vampi:5000`, deterministic full mode) — mission `10b07231`, completed in 276s, exit clean.
+  - Findings: **2, both CONFIRMED** — critical `exposure` (sensitive data/credentials via /users/v1/_debug),
+    medium `exposure` (API schema exposed). No false positives observed. Canonical graph: 25 nodes, 24 edges.
+  - `next_best_actions=0` — CORRECT for this target (exposure findings map to no capability-enable; no
+    object/service nodes to rank). Populated utility ranking proven separately (baked-image + unit tests).
+  - Report renders the evidence-graded business impact LIVE (demonstrated/plausible/unverified, fenced
+    "do NOT claim without further evidence").
+  - **Discovered improvement (future):** an exposed-CREDENTIALS finding should chain to `credential_material`
+    so the planner chases try-login; needs CONTENT-aware enables (title/body signal), not a blunt
+    family→capability map (would mis-fire on schema-exposure). Not forced this session (avoids false paths).
+- Orchestration audit: **0 islands** (39 gated + 25 always-on), `no_islands=True`.
+
 ## Change log (append-only)
+- 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
+  `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED
+  worst-case (fenced "do NOT claim") + confidence + assumptions; 17 families, reuses business_impact()'s
+  family/CWE resolution; grades DOWN so a report never overclaims. Rendered in the finding detail.
+  Test `test_report_business_impact.py` (+5, incl. a never-overclaim guard). 823 tests, 0 fail. Baked;
+  verified LIVE on the VAmPI report. Files: report.py, tests/test_report_business_impact.py.
 - 2026-08-05: **SLICE 2 shipped (#115 executable-knowledge proof contract).** Added first-class
   `negative_control` / `evidence_requirements` / `replayable` / `safety` / `cleanup` to the canonical
   Technique schema (`technique_model.py`) + `proof_contract()` deriving them deterministically from
