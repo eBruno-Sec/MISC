@@ -124,6 +124,39 @@ def _hidden_and_action(html: str, page_url: str, login_url: str):
     return best_hidden, best_action
 
 
+def _safe_json(resp):
+    try:
+        return resp.json()
+    except Exception:
+        return None
+
+
+# JSON keys (lowercased, dashes->underscores) that commonly carry a bearer/JWT token in a login response.
+_TOKEN_KEYS = {"token", "access_token", "accesstoken", "id_token", "idtoken", "jwt",
+               "auth_token", "authtoken", "session_token", "sessiontoken", "bearer"}
+
+
+def _find_token(obj, _depth: int = 0):
+    """Find a plausible bearer/JWT token in a JSON login response — handles common nested shapes like
+    Juice Shop's {authentication:{token}}, {data:{token}}, {access_token}. Returns the token or None."""
+    if _depth > 4 or obj is None:
+        return None
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and str(k).lower().replace("-", "_") in _TOKEN_KEYS and len(v) >= 20:
+                return v
+        for v in obj.values():
+            t = _find_token(v, _depth + 1)
+            if t:
+                return t
+    elif isinstance(obj, list):
+        for v in obj[:10]:
+            t = _find_token(v, _depth + 1)
+            if t:
+                return t
+    return None
+
+
 async def login(login_url: str, username: str, password: str, timeout: int = 15) -> dict:
     """Fetch a login form, submit credentials, return session headers.
 
@@ -167,7 +200,28 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
                 raw = resp.headers.get_list("set-cookie") if hasattr(resp.headers, "get_list") else []
                 cookie = _cookie_header(raw)
             if not cookie:
-                return {"headers": {}, "verified": False, "note": "no session cookie set after submit"}
+                # Token-in-JSON API login (very common: SPA/REST APIs return a bearer token in the response
+                # body rather than a Set-Cookie — e.g. Juice Shop's {authentication:{token}}). Check the form
+                # response, then try an explicit JSON POST of {email/username, password} to the login URL.
+                token = _find_token(_safe_json(resp))
+                if not token:
+                    for body in ({"email": username, "password": password},
+                                 {"username": username, "password": password}):
+                        try:
+                            jr = await c.post(login_url, json=body)
+                        except Exception:
+                            continue
+                        token = _find_token(_safe_json(jr))
+                        if token:
+                            resp = jr
+                            break
+                if token:
+                    shape = {"method": "POST", "action": login_url, "content_type": "application/json",
+                             "user_field": "email", "pass_field": "password"}
+                    return {"headers": {"Authorization": "Bearer %s" % token}, "verified": True,
+                            "shape": shape, "note": "bearer token captured from JSON login response"}
+                return {"headers": {}, "verified": False,
+                        "note": "no session cookie or bearer token after submit"}
             # crude verification: a login page that no longer shows the password field
             verified = "password" not in resp.text.lower()[:5000] or resp.status_code in (301, 302)
             # the EXACT winning request shape (redacted at render time) so the report can reproduce a
