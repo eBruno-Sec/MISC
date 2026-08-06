@@ -930,6 +930,40 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.get("/intel/ad-frontier")
+async def ad_frontier_view(capability: str = None):
+    """The AD/Windows frontier modeled read-only (Codex Tier-3 #13): which capabilities are read-only-present
+    vs environment-gated (authenticated AD attacks — Kerberoast/ADCS/DCSync/relay — stay BLOCKED until an
+    authorized DC lab). With ?capability= it returns the gate decision for one capability."""
+    import ad_context as ad
+    if capability:
+        allowed, reason = ad.is_capability_allowed(capability)
+        return {"capability": capability, "allowed": allowed, "reason": reason}
+    return ad.frontier()
+
+
+@app.post("/intel/ad-context")
+async def ad_context_analyze(payload: dict):
+    """Read-only AD context from LDAP/SMB facts (Codex Tier-3 #13): domain model + SPN/CA inventory + SMB-relay
+    risk observation. Inventory only — no authenticated AD attack is performed. Body: {facts, ldap_entries,
+    smb_signing_required}."""
+    import ad_context as ad
+    p = payload or {}
+    out = {}
+    if p.get("facts"):
+        out["domain_model"] = ad.model_domain(p["facts"])
+    if p.get("ldap_entries") is not None:
+        out["spn_inventory"] = ad.spn_inventory(p["ldap_entries"])
+        ca = ad.ca_presence(p["ldap_entries"])
+        if ca:
+            out["ca_presence"] = ca
+    if "smb_signing_required" in p:
+        relay = ad.smb_relay_risk(p["smb_signing_required"])
+        if relay:
+            out["smb_relay_risk"] = relay
+    return out
+
+
 @app.post("/intel/ot-context")
 async def ot_context_analyze(payload: dict):
     """OT/ICS zone + process-impact context for an ICS finding (Codex Tier-3 #12). Body: {finding} for asset
