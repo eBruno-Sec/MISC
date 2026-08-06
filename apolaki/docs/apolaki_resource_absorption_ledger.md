@@ -103,6 +103,13 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
     traversal/mass-assign — all have], ch12 injection [SQLi/NoSQLi/LDAP/cmdi/CRLF/ReDoS — have; ReDoS=DoS
     out-of-scope], ch13 3rd-party/dependency + info-leakage [have]). Confirmed defensive book, 0 new engines.
     RESUME at line 5150 (ch13 rest + ch14 SSRF/open-redirect/email-spoof/DKIM/SPF + ch15).
+  - **DONE — full cover-to-cover.** ch14 (SSRF/open-redirect/SPF/DKIM/DMARC — all have), ch15 (incident
+    response/security.txt). Prose ends line ~5585; 5586-7374 = alphabetical INDEX (page refs, no content).
+    FINAL VERDICT: defensive/secure-coding book, **0 new offensive engines** (everything already in Apolaki).
+- **NEXT UP (unread):** the offensive/red-team books likely have higher yield than a defensive primer —
+  WAHH 2e (18844L, canonical offensive web), BBH Bootcamp (9143L), Web App Security 2e (9802L), Web Pentest
+  Kali 3e, Evasion Engineering, Red Team Engineering, Advanced Infra, Cybersecurity Attacks-RT, Mastering
+  Kali 4e, Tribe of Hackers, Threat Modeling, Cloud Pentest(partial). Start next turn.
 
 ## Extraction notes (technique-level, deduped, provenance kept)
 - **WAF-Evasion TTPs / Adversary Playbook / Offensive Blueprint (3 tiny files, READ):** dense
