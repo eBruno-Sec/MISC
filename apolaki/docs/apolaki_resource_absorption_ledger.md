@@ -218,6 +218,23 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   planner auto-selecting a stealth level per-engagement (today it's an option on the wired run_nmap tool).
   Files: stealth.py, tools.py, tests/test_stealth.py.
 
+- 2026-08-06: **SLICE 10 shipped (#114 trusted-intel governance foundation).** Per Erwin's explicit spec:
+  build the INTERNAL architecture now, connectors OFF until configured. New `intel_sources.py` — the
+  allowlist registry (12 Tier-1 default-intent + 6 Tier-2 key-gated: CVE-v5/NVD/KEV/EPSS/CERT-CC/GHSA/
+  vendor/nuclei-templates/OWASP/CWE/CAPEC/ATT&CK ; Censys/Shodan/VT/CT/URLhaus/GitHub), each with tier/type/
+  license/rate-limit/cache/parser-version/purpose and a `live` flag (KEV/CAPEC/ATT&CK already have fetchers
+  in intel_feeds). `is_enabled()` gate = OFF unless per-source `INTEL_SRC_<NAME>=1` or Tier-1 master
+  `INTEL_CONNECTORS=1`, AND a key present for key-gated sources -> **default: all off, no outward I/O**.
+  Strict `PROVENANCE_FIELDS`, one-step `can_promote()` lifecycle (candidate->...->production, no queue-jump),
+  `request_log_entry()` audit contract, `PROHIBITED` list (9 rules) in code. `GET /intel/sources` exposes
+  the configurable allowlist (no island). +7 tests (843 total, 0 fail). Baked; live: 18 sources, 0 enabled.
+  Files: intel_sources.py, main.py, tests/test_intel_sources.py. REMAINING #114: connector base
+  (fetch->normalize->dedup->provenance->confidence->cache->log) with Tier-1 fetchers wired-but-gated; Tier-2
+  passive-enrichment adapters; + PART 2 code-review-as-pre-recon (codereview -> engagement graph seeding,
+  bidirectional white/black-box). Also ran a live READ-ONLY Linode posture scan (authorized): 2 HIGH real
+  findings — VPN-Server-Firewall + Design-World-Firewall both expose SSH(22) to 0.0.0.0/0; collection
+  partial (token lacks /account + /object-storage scope -> 403, honestly flagged not-clean).
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

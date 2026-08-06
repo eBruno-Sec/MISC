@@ -2239,6 +2239,24 @@ def _cloud_posture_run(provider: str) -> dict:
                         "collection_complete": not partial}}
 
 
+@app.get("/intel/sources")
+async def intel_sources_view():
+    """The trusted-source ALLOWLIST + governance state (#114): every approved feed with tier / type /
+    license / rate-limit / cache, whether a fetcher exists (`live`) and whether it is currently ENABLED
+    (default: ALL OFF until a per-source flag or the Tier-1 master switch is set, and a key is present for
+    key-gated sources). Also the ingestion lifecycle + the explicit prohibited list. Read-only, makes NO
+    outward request. This is the operator's per-source configuration surface, so nothing is an island."""
+    import intel_sources as _isrc
+    srcs = [{k: s.get(k) for k in ("name", "tier", "type", "license", "requires_key", "live",
+                                   "rate_per_min", "cache_ttl_s", "parser_version", "purpose")}
+            | {"enabled": _isrc.is_enabled(s["name"])} for s in _isrc.allowlist()]
+    return {"sources": srcs, "enabled": _isrc.enabled_sources(),
+            "validation_states": list(_isrc.VALIDATION_STATES),
+            "provenance_fields": list(_isrc.PROVENANCE_FIELDS),
+            "prohibited": list(_isrc.PROHIBITED),
+            "note": "external connectors are DISABLED by default; enable per-source via config + credentials"}
+
+
 @app.get("/cloud/posture/{provider}")
 async def cloud_posture(provider: str):
     """READ-ONLY PREVIEW of the operator's OWN cloud account (CHAD: a GET must not change state). For
