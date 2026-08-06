@@ -99,6 +99,10 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
     `TAKEOVER_FINGERPRINTS` (from can-i-take-over-xyz) + `match_takeover()`. NOT a gap (checked before
     building, unlike the nmap mistake). Grokking net yield: ~0 new engines (defensive book, all covered).
     RESUME at line 2600.
+  - **UPDATE: read to line 5150 / 7374** (ch10 authz, ch11 payload [deser/proto-pollution/XXE/upload/
+    traversal/mass-assign — all have], ch12 injection [SQLi/NoSQLi/LDAP/cmdi/CRLF/ReDoS — have; ReDoS=DoS
+    out-of-scope], ch13 3rd-party/dependency + info-leakage [have]). Confirmed defensive book, 0 new engines.
+    RESUME at line 5150 (ch13 rest + ch14 SSRF/open-redirect/email-spoof/DKIM/SPF + ch15).
 
 ## Extraction notes (technique-level, deduped, provenance kept)
 - **WAF-Evasion TTPs / Adversary Playbook / Offensive Blueprint (3 tiny files, READ):** dense
