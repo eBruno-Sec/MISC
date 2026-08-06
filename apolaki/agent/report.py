@@ -204,6 +204,15 @@ def generate_report(program: str, findings: list, scope: dict,
         _cv = estimated_cvss(f)
         _cvss_line = (f"{_cv[0]}{' (est.)' if _cv[2] else ''}" + (f" {_cv[1]}" if _cv[1] else "")) if _cv else "N/A"
         lines += [f"**CVSS:** {_cvss_line}", f"**CWE:** {f.get('cwe', 'N/A')}"]
+        _v4vec = f.get("cvss40_vector")                # v4 stored INDEPENDENTLY of v3.1 (Codex Tier-2 #6)
+        if _v4vec:
+            try:
+                import cvss4 as _c4
+                _b4 = _c4.base_score(_v4vec)
+                lines.append("**CVSS v4.0 (est.):** %s %s `%s` — %s"
+                             % (_b4["base_score"], _b4["base_severity"].upper(), _b4["vector"], _b4["nomenclature"]))
+            except Exception:
+                pass
         if f.get("capec"):
             lines.append(f"**CAPEC:** {f['capec']}")
         if f.get("owasp"):

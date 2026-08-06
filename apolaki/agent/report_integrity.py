@@ -53,9 +53,38 @@ def _recompute_score(findings: list) -> int:
     return min(100, sum(_SEV_WEIGHT.get(_sev(f), 1) for f in (findings or [])))
 
 
+def cvss_version_of(finding: dict):
+    """Which CVSS version a finding carries a VALID vector for: '4.0', '3.1', or None. Report integrity
+    ACCEPTS EITHER version (Codex Tier-2 #6) — a high/critical finding scored with v3.1 or v4 is both fine."""
+    f = finding or {}
+    v40 = str(f.get("cvss40_vector") or "")
+    if v40:
+        try:
+            import cvss4
+            if cvss4.is_valid(v40):
+                return "4.0"
+        except Exception:
+            pass
+    v31 = str(f.get("cvss31_vector") or f.get("cvss_vector") or "")
+    if "CVSS:3." in v31:
+        return "3.1"
+    return None
+
+
+def chain_cvss_violations(chains: list) -> list:
+    """Names of attack chains that illegally carry a CVSS vector/score. CVSS scores ATOMIC vulnerabilities
+    only; a chain's severity is Apolaki impact-path severity, never a CVSS vector (Codex Tier-2 #6)."""
+    out = []
+    for c in (chains or []):
+        if any(str((c or {}).get(k) or "").strip()
+               for k in ("cvss", "cvss_vector", "cvss31_vector", "cvss40_vector", "cvss_score")):
+            out.append((c or {}).get("host") or (c or {}).get("narrative") or "(chain)")
+    return out
+
+
 def check_report_consistency(findings: list, leads: list, risk: dict = None,
                              counts: dict = None, attack_surface: dict = None,
-                             tool_ledger: dict = None) -> dict:
+                             tool_ledger: dict = None, chains: list = None) -> dict:
     """Validate the assembled report for metric/status contradictions.
 
     Returns {"ok": bool, "checks_run": int, "issues": [ {level, check, detail} ]}.
@@ -161,6 +190,13 @@ def check_report_consistency(findings: list, leads: list, risk: dict = None,
             add("error", "ledger-note-contradiction",
                 f"Tool '{t.get('tool')}' reports {t.get('findings')} finding(s) but its note says "
                 f"\"{t.get('note')}\" — the ledger note contradicts the tool's own findings.")
+
+    # N) CVSS is for ATOMIC findings only — an attack chain must never carry a CVSS vector/score.
+    checks += 1
+    for name in chain_cvss_violations(chains):
+        add("error", "chain-level-cvss",
+            f"Attack chain '{name}' carries a CVSS vector/score — CVSS scores atomic vulnerabilities only; "
+            f"a chain's severity is Apolaki impact-path severity, not a CVSS vector.")
 
     return {"ok": not any(i["level"] == "error" for i in issues),
             "checks_run": checks, "issues": issues}
