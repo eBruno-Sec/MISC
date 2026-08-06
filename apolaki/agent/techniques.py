@@ -193,6 +193,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "(CVE-2013-4786). Detection only — never request the RAKP hash or try a credential.",
        exploit="Capture + crack the RAKP HMAC offline -> BMC admin -> out-of-band host takeover (power/console/vmedia).",
        oracle="The BMC returns an RMCP+ Open Session Response (payload type 0x11)."),
+    # beyond web (infra pentest): RDP without Network Level Authentication.
+    _t(id="rdp_no_nla", vuln_class="network_service", cwe="CWE-287", owasp="A07:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An RDP server does not require Network Level Authentication (CredSSP), exposing the pre-auth stack.",
+       detect="Offer standard RDP security in the X.224 negotiation; a Negotiation Response (not a HYBRID_REQUIRED "
+              "failure) confirms NLA is not enforced.",
+       exploit="Reach the RDP login unauthenticated for credential attacks + pre-auth RCE (CVE-2019-0708 BlueKeep).",
+       oracle="The RDP server returns a Negotiation Response to a standard-RDP offer instead of requiring CredSSP."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

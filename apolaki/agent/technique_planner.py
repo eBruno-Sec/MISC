@@ -97,6 +97,7 @@ ALWAYS_ON = {
     "rsync_anon":               "service_router pack: fingerprint(port 873/rsync) -> _run_service_pack #list probe",
     "ntp_monlist":              "service_router pack: fingerprint(port 123/NTP) -> _run_service_pack monlist query",
     "ipmi_rakp":                "service_router pack: fingerprint(port 623/IPMI) -> _run_service_pack RMCP+ open-session",
+    "rdp_no_nla":               "service_router pack: fingerprint(port 3389/RDP) -> _run_service_pack X.224 negotiation",
 }
 
 

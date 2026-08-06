@@ -106,6 +106,10 @@ _PACKS = {
          "oracle": "the BMC returns an RMCP+ Open Session Response (IPMI 2.0 = inherent RAKP hash disclosure, CVE-2013-4786)",
          "enables": ["bmc_takeover"]},
     ]},
+    "rdp": {"graph_kind": "service", "note": "Remote desktop: RDP without Network Level Authentication (READ-ONLY negotiation).", "checks": [
+        {"id": "rdp_no_nla", "cwe": "CWE-287", "intrusive": False,
+         "oracle": "the RDP server negotiates a session without requiring CredSSP/NLA", "enables": ["pre_auth_surface"]},
+    ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,
          "oracle": "INFO/PING succeeds without AUTH (open data store)", "enables": ["database_read"]},

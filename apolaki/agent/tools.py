@@ -130,6 +130,7 @@ TOOL_PERMISSIONS = {
     "run_rsync_audit": PermissionLevel.ACTIVE,
     "run_ntp_audit": PermissionLevel.ACTIVE,
     "run_ipmi_audit": PermissionLevel.ACTIVE,
+    "run_rdp_audit": PermissionLevel.ACTIVE,
     "run_path_sqli": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -2216,6 +2217,12 @@ class ToolRegistry:
             out = _ip.analyze(res) if not res.get("error") else None
             if out:
                 findings.append(_ip.finding(host, int(port), out[0], res))
+        elif service == "rdp":
+            import rdp_audit_tool as _rd                           # X.224/RDP security negotiation only, no login
+            res = await asyncio.get_event_loop().run_in_executor(None, _rd.probe, host, int(port))
+            out = _rd.analyze(res) if not res.get("error") else None
+            if out:
+                findings.append(_rd.finding(host, int(port), out[0], res))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6579,6 +6586,32 @@ class ToolRegistry:
             findings.append(self._attach_poc(ip.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
         return ToolResult("ipmi_audit", "%s:%d" % (host, port), True,
                           "%d ipmi-rakp finding(s)" % len(findings), findings)
+
+    async def _run_rdp_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (network service, beyond web): RDP NLA audit (CWE-287). Performs only the X.224/RDP security
+        negotiation and confirms an RDP server that does NOT require Network Level Authentication (CredSSP).
+        READ-ONLY — no login, no credential, no session."""
+        import asyncio as _aio
+        import rdp_audit_tool as rd
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("rdp://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 3389
+        host = raw
+        if not host:
+            return ToolResult("rdp_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("http://%s" % host)[0] or self.scope.validate(host)[0]):
+            return ToolResult("rdp_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, rd.probe, host, port)
+        findings = []
+        out = rd.analyze(res)
+        if out:
+            findings.append(self._attach_poc(rd.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
+        return ToolResult("rdp_audit", "%s:%d" % (host, port), True,
+                          "%d rdp-no-nla finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a

@@ -489,6 +489,8 @@ _FAMILY_FIX = {
     "ipmi_rakp": "Isolate IPMI/BMC (UDP/623) to a dedicated management VLAN reachable only by trusted admins; set "
                  "strong unique BMC passwords; disable IPMI-over-LAN where possible and prefer authenticated "
                  "Redfish/HTTPS.",
+    "rdp_no_nla": "Require Network Level Authentication (CredSSP) on all RDP hosts via GPO; restrict TCP/3389 to "
+                  "VPN/jump hosts; prefer an authenticated RD Gateway.",
 }
 
 
