@@ -2210,6 +2210,29 @@ async def poc_bundle_export(session_id: str, finding_id: str = ""):
     return {"session_id": session_id, "count": len(bundles), "bundles": bundles}
 
 
+@app.get("/mission/{session_id}/sarif")
+async def sarif_export(session_id: str):
+    """Export this mission's ATOMIC findings as SARIF 2.1.0 for toolchain ingestion (Codex Tier-1 #2). Attack
+    CHAINS are intentionally not exported (SARIF has no faithful chain semantics — chain severity stays
+    Apolaki's own model). Snippets/evidence are redacted before emission."""
+    import sarif_io as _sf
+    _require_mission(session_id)
+    findings = db.get_findings(session_id) or []
+    return _sf.export_sarif(findings, tool_name="Apolaki")
+
+
+@app.post("/intel/sarif")
+async def sarif_import(payload: dict):
+    """Import a SARIF document (Semgrep/CodeQL/other SAST) as Apolaki CANDIDATES — NEVER auto-confirmed
+    findings. Each result requires runtime validation; producer suppressions are preserved as external
+    metadata (not trusted triage); secret-looking snippets are redacted. Body: a SARIF 2.1.0 document."""
+    import sarif_io as _sf
+    cands = _sf.import_sarif(payload or {})
+    return {"count": len(cands), "candidates": cands,
+            "note": "SARIF results are UNVALIDATED candidates; runtime proof is still required before any "
+                    "becomes a confirmed finding or an attack-path edge."}
+
+
 @app.get("/mission/{session_id}/export")
 async def export_mission(session_id: str):
     """Portable, redacted mission bundle: metadata + findings + surface + canonical graph +
