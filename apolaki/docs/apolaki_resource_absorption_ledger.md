@@ -35,7 +35,7 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
 | Metasploit Revealed.txt | 0.29 | DONE-prior | #96 |
 | Pentesting Active Directory...txt | 0.44 | DONE-prior | #96 AD |
 | Pentesting Industrial Control Systems.txt | 0.44 | DONE-prior | #96 ICS (Modbus engine shipped) |
-| The Web Application Hacker's Handbook 2e.txt | 1.72 | QUEUED | classic, high yield, unread |
+| The Web Application Hacker's Handbook 2e.txt | 1.72 | PARTIAL | distinctive-technique coverage-check done (see notes); full read pending |
 | RedCyber_Book.md | 29.28 | QUEUED | huge; targeted read |
 | Web-Application-Hacking-Security-Program-WAHS.pdf | 18.94 | QUEUED | huge PDF |
 | Web Application Security 2e.txt | 0.72 | QUEUED | |
@@ -87,6 +87,15 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
   access + real cloud creds → genuinely #106, correctly gated on the user's cloud material. New
   deterministic engine validatable against LOCAL labs: none.
 
+- **WAHH 2e (PARTIAL — distinctive-technique coverage-check, not a full cover-to-cover read):** checked
+  Apolaki against WAHH's highest-value distinctive techniques. Already covered: clickjacking/framable-page
+  (`guidance.py`), web-cache deception (`cache_deception_tool`), password-reset poisoning (`weak_password_reset`),
+  CORS/JWT/session-token (dedicated tools). Genuine absences + verdicts: HTTP request smuggling (CL.TE/TE.CL)
+  — NOT built, DELIBERATELY (its differential oracle risks desyncing the target/other users → violates
+  no-DoS/non-destructive rails); HPP + CSWSH — absent but FP-prone/complex (deferred, not worth a noisy check).
+  Net: no new deterministic engine safely buildable + validatable from WAHH's distinctive set. Full read still
+  pending (#103).
+
 ## Emerging pattern (honest, for the final audit)
 Apolaki's DETERMINISTIC web/API/infra core is **mature** — the read TTP/methodology resources map
 almost entirely onto already-implemented engines (WAF-evasion, JWT confusion, open-redirect bypass,
@@ -110,6 +119,21 @@ edge — DONE this session: #116 (utility attack-paths + decay) and #115 (execut
     so the planner chases try-login; needs CONTENT-aware enables (title/body signal), not a blunt
     family→capability map (would mis-fire on schema-exposure). Not forced this session (avoids false paths).
 - Orchestration audit: **0 islands** (39 gated + 25 always-on), `no_islands=True`.
+- **Cross-lab regression bench (post 8-commit session):** DVWA 0 findings (114s), bWAPP 0 findings (60s).
+  HONEST reading: NOT a regression — both apps gate every vuln behind login + a security-level cookie, so an
+  UNAUTHENTICATED deterministic scan correctly confirms nothing (0 false positives = truth-first working).
+  It did NOT exercise detection RECALL (never past the login wall; those labs need the authenticated
+  persona/auth-artery path with lab creds the bench driver didn't supply). Real regression proof stays: 830
+  tests green + VAmPI 2/2 confirmed 0 FP. Juice Shop (flagship, unauth-scannable) re-run for a genuine recall
+  signal + live #116 attack-paths.
+- **Juice Shop bench: INCONCLUSIVE in time budget (not a regression).** Deterministic full scan is long
+  (>10 min); at the poll deadline it had built a **954-node canonical graph** (recon + surface mapping
+  demonstrably working) but had not yet reached the exploitation phase, so 0 confirmed findings AT THAT
+  MOMENT (mission still `running` server-side). Honest reading: proves recon/graph健康 at scale; does NOT
+  give a recall number in the available budget. Not re-chased — the 830-test suite + VAmPI end-to-end are
+  the authoritative no-regression proof. Driver caveat also noted: the quick optest driver reads
+  `/graph/{sid}` (graph_model, no next_best) not `/graph/canonical/{sid}`, so its NEXT_BEST=0 line is a
+  driver artifact, not the engine (the canonical endpoint is the #116 source of truth).
 
 ## Session completion status (honest, by phase)
 - P0 baseline/inventory/ledger: **100%**. P1 extraction: **~15%** of the corpus read (3 TTP files fully +
