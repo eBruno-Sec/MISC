@@ -29,6 +29,16 @@ def test_unknown_family_returns_none_rather_than_inventing_impact():
     assert report.graded_business_impact({"family": "totally_unknown_class"}) is None
 
 
+def test_proof_and_retest_surfaces_contract_and_retest_method():
+    # a GET-oracle family: FP-safety negative control (from #115) + a concrete auto-retest (from #117)
+    pr = report.proof_and_retest({"family": "exposure", "target": "http://h/_debug", "confidence": "confirmed"})
+    assert pr["negative_control"]
+    assert "Re-request GET http://h/_debug" in pr["retest"] and "OPEN if" in pr["retest"]
+    # a state-changing family: operator-driven retest, still carries a real negative control
+    pr2 = report.proof_and_retest({"family": "sqli", "target": "http://h/login", "confidence": "confirmed"})
+    assert "SQL" in pr2["negative_control"] and "Operator-driven" in pr2["retest"]
+
+
 def test_grading_never_overclaims_demonstrated_equals_worstcase():
     # demonstrated must never be the same statement as the unverified worst case (truth-first)
     for fam in ("sqli", "xss", "ssrf", "cmdi", "vulnerable_component"):

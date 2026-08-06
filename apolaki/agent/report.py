@@ -186,6 +186,9 @@ def generate_report(program: str, findings: list, scope: dict,
                       f"- _Plausible next step:_ {_g['plausible']}",
                       f"- _Unverified worst case:_ {_g['unverified']}",
                       f"- _Confidence:_ {_g['confidence']} — {_g['assumptions']}", ""]
+        _pr = proof_and_retest(f)
+        lines += ["**How this was confirmed (false-positive safety)**", "", _pr["negative_control"], "",
+                  "**Retest / closure**", "", _pr["retest"], ""]
         if str(f.get("false_positive_check") or "").strip():
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
         lines += ["**Remediation**", "", remediation_line(f), ""]
@@ -847,6 +850,26 @@ def graded_business_impact(finding: dict):
         "assumptions": ("Blast radius depends on the sensitivity of the affected data and its reachability; "
                         "assumes the demonstrated behaviour generalises across similar records/inputs."),
     }
+
+
+def proof_and_retest(finding: dict) -> dict:
+    """A finding's FALSE-POSITIVE-safety negative control (from the #115 technique proof contract, keyed
+    by family) + its RETEST/closure method (from the #117 closure loop). Deterministic; surfaces both in
+    the report so a reviewer sees how the finding was kept honest and how to re-verify a fix."""
+    import technique_model as _tm
+    import retest as _rt
+    fam = str(finding.get("family") or "").strip().lower()
+    nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
+    rp = _rt.plan(finding)
+    if rp.get("retestable"):
+        how = {"reachable": "the resource is still served with content",
+               "offsite_redirect": "the redirect still points off-site",
+               "reflects": "the crafted payload still reflects unencoded"}.get(rp["oracle"], "the oracle still fires")
+        retest = "Re-request %s %s: OPEN if %s, CLOSED once the fix removes it (Apolaki auto-retests this)." % (
+            rp["method"], rp["url"], how)
+    else:
+        retest = "Operator-driven: re-run the original confirming request + oracle (%s)." % rp.get("reason", "")
+    return {"negative_control": nc, "retest": retest}
 
 
 def risk_score(findings: list) -> dict:
@@ -1682,6 +1705,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
                            f"<p><b>Plausible next step:</b> {e(_g['plausible'])}</p>"
                            f"<p><b>Unverified worst case:</b> {e(_g['unverified'])}</p>"
                            f"<p class='sub'>Confidence: {e(str(_g['confidence']))} — {e(_g['assumptions'])}</p></div>")
+        _pr = proof_and_retest(f)
+        pr_html = (f"<div class='biz'><h4>How this was confirmed (false-positive safety)</h4>"
+                   f"<p>{e(_pr['negative_control'])}</p>"
+                   f"<h4>Retest / closure</h4><p>{e(_pr['retest'])}</p></div>")
         cards.append(f"""
         <article class="finding" style="--c:{color}">
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
@@ -1700,6 +1727,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
           <h4>Technical detail</h4><p>{e(str(f.get('description','')))}</p>
           <h4>Impact</h4><p>{e(impact)}</p>
           {graded_html}
+          {pr_html}
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
           {curl_html}{ev}{raw_html}{poc_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")

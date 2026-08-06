@@ -164,6 +164,14 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   ("resource still served HTTP 200"). Files: retest.py, main.py, tests/test_retest.py. NOTE remaining:
   report/UI surface of retest verdicts + persisted per-finding replay recipe for non-GET families.
 
+- 2026-08-06: **SLICE 7 shipped (per-finding FP-safety + retest in the report).** `report.proof_and_retest()`
+  surfaces, per confirmed finding, the #115 negative-control differential (by family) + the #117 retest
+  method (concrete GET-oracle re-check or operator-driven), in BOTH MD + HTML. Satisfies the mission's
+  report-check ("negative controls" + "retest method" per finding). Test +1 (830 total, 0 fail). Baked;
+  VERIFIED LIVE in the VAmPI HTML report. Also confirmed WAHH-distinctive techniques' coverage: clickjacking
+  already in guidance.py; request-smuggling deliberately NOT built (its oracle risks disrupting the
+  target/other users — violates no-DoS/non-destructive rails). File: report.py.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED
