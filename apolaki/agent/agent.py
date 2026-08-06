@@ -1321,15 +1321,26 @@ class BBHAgent:
             svc = _sr.fingerprint(p)
             services.append({"host": host, "port": p, "service": svc, "banner": ""})
             self.tools.recon.setdefault("nmap", {}).setdefault("open_ports", []).append("%d/tcp open %s" % (p, svc))
+        # PARALLEL beyond-web execution (Strix-borrow #110, done the safe way): each non-web service pack is an
+        # INDEPENDENT host:port probe (ssh/ldap/smb/snmp/modbus/vnc/rsync/ntp/ipmi/rdp), so run them CONCURRENTLY
+        # under a bounded semaphore instead of one-at-a-time — a large wall-clock cut on multi-host engagements.
+        # Findings are stored SERIALLY afterwards so the graph/db writes never interleave; scope/HITL gates stay
+        # inside tools.execute(); the graph is still the single source of truth (workers don't talk to each other).
+        _targets = [s for s in services
+                    if not (_sr.is_web(s["service"]) or s["service"] == "unknown" or not s.get("host"))]
+        _sem = _aio.Semaphore(6)
+
+        async def _run_pack(s):
+            async with _sem:
+                try:
+                    return await self.tools.execute("run_service_pack",
+                                                    {"host": s["host"], "port": s["port"],
+                                                     "service": s["service"]}, session_id)
+                except Exception:
+                    return None
         ran = 0
-        for s in services:
-            if _sr.is_web(s["service"]) or s["service"] == "unknown" or not s.get("host"):
-                continue
-            try:
-                res = await self.tools.execute("run_service_pack",
-                                               {"host": s["host"], "port": s["port"],
-                                                "service": s["service"]}, session_id)
-            except Exception:
+        for res in await _aio.gather(*[_run_pack(s) for s in _targets]):   # concurrent probes, serial storage
+            if res is None:
                 continue
             ran += 1
             for f in (res.findings or []):
