@@ -195,6 +195,43 @@ def test_graph_as_brain_replans_when_graph_changes():
     assert g.plan_next() is None            # a fully-consumed world model has no next action
 
 
+def test_utility_score_and_decay_factor_formulas():
+    # Pentera-style utility: impact/probability/confidence raise it; cost/risk lower it
+    hi = AG.utility_score(0.8, 0.9, 1.0, cost=1.0, risk=1.0)
+    lo = AG.utility_score(0.8, 0.9, 1.0, cost=2.0, risk=1.5)
+    assert hi > lo and hi == round(0.8 * 0.9 * 1.0 / 1.0, 4)
+    # Cosmos decay: 0 age = full weight, one half-life = 0.5, huge age floored (never silently zero)
+    assert AG.decay_factor(0) == 1.0
+    assert AG.decay_factor(14 * AG._DAY, halflife_days=14) == 0.5
+    assert AG.decay_factor(10 ** 9) >= AG.CONF_FLOOR and AG.decay_factor(10 ** 9) > 0
+
+
+def test_confidence_decay_and_utility_ranking():
+    now = 1_000_000_000.0
+    g = AG.AssetGraph("m")
+    # a TESTED fact is ground truth — it does NOT decay even when old
+    tf = g.observe("finding", "sqli", source="scan", confidence=AG.CONFIRMED, tested=True,
+                   enables=["database_read"])
+    g.node(tf)["last_seen"] = now - 60 * AG._DAY
+    assert g.decayed_confidence(g.node(tf), now=now) == AG.CONFIRMED
+    # an UNVERIFIED fact decays with age: 28 days ~= 2 half-lives (14d) -> ~1/4 the weight
+    fresh = g.observe("object", "/a", source="recon", confidence=AG.MEDIUM)
+    g.node(fresh)["last_seen"] = now
+    stale = g.observe("object", "/b", source="recon", confidence=AG.MEDIUM)
+    g.node(stale)["last_seen"] = now - 28 * AG._DAY
+    df = g.decayed_confidence(g.node(fresh), now=now)
+    ds = g.decayed_confidence(g.node(stale), now=now)
+    assert abs(df - AG.MEDIUM) < 1e-6                        # fresh ~ unchanged
+    assert abs(ds - AG.MEDIUM * 0.25) < 0.02 and ds < df    # stale ~ quarter weight
+    # utility ranking: the confirmed database_read chase tops the list; the FRESH object outranks the
+    # STALE one purely because decayed confidence feeds the utility score (decay -> planning weight).
+    acts = g.next_best_actions(now=now)
+    assert acts[0]["action"] == "chase_capability" and acts[0]["capability"] == "database_read"
+    assert all("utility" in a and "utility_factors" in a for a in acts)   # inspectable, no black box
+    objs = [a for a in acts if a["action"] == "cross_user_test"]
+    assert [o["target"] for o in objs] == ["/a", "/b"] and objs[0]["utility"] > objs[1]["utility"]
+
+
 def test_roundtrip_and_persistence(tmp_path):
     g = AG.AssetGraph("m1")
     h = g.observe("host", "juice-shop", source="recon", confidence=AG.CONFIRMED)

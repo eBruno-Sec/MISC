@@ -1827,6 +1827,19 @@ def _record_orchestration(session_id: str) -> None:
         ctx["auth_artery"] = artery
         if artery.get("ran") and artery.get("auth_success", 0) >= 1:
             ctx["authenticated"] = True
+        # utility-ranked attack-path opportunities from the canonical graph (Pentera-style: which lead
+        # to pursue next, ranked by impact x evidence-confidence / cost / risk with Cosmos decay). Same
+        # source the /graph endpoint serves, snapshotted so an archived report renders it too.
+        try:
+            import asset_graph as _ag
+            recon, urls, findings = _graph_inputs(session_id)
+            _personas = {"personas": artery["personas"]} if artery.get("personas") else None
+            g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
+                                          personas=_personas, capabilities=list(artery.get("capabilities") or []),
+                                          scope_asset=memory_mod.target_key(m["scope"]))
+            ctx["orchestration"]["attack_paths"] = g.next_best_actions(limit=8)
+        except Exception:
+            pass
         # structured degraded/failure state (e.g. a halted primary cycle) so it shows in status/report
         deg = getattr(ag, "_degraded", None)
         if deg:

@@ -26,9 +26,45 @@ import time
 # confidence rungs — a fact's strength, raised (never silently lowered) as evidence accrues.
 LOW, MEDIUM, HIGH, CONFIRMED = 0.3, 0.6, 0.9, 1.0
 
+# ── Cosmos-style temporal confidence decay ──
+# An UNVERIFIED fact loses PLANNING weight as it ages, so a stale discovered-but-unconfirmed asset
+# never drives the plan like a freshly-seen one. A TESTED fact is ground truth and does NOT decay
+# (the retest/closure loop re-verifies those). Half-life is env-tunable. Deterministic, pure.
+CONF_HALFLIFE_DAYS = float(os.environ.get("ASSET_CONF_HALFLIFE_DAYS", "14") or 14.0)
+CONF_FLOOR = 0.05           # decay never silently reaches zero — a fact keeps a trace of weight
+_DAY = 86400.0
+
+# ── Pentera-style attack-path utility ──
+# Business-impact weight per capability a step would UNLOCK (advisory + evidence-aware — it ranks
+# opportunities, it never inflates a finding's severity beyond what an oracle proved).
+_IMPACT = {
+    "rce": 1.0, "remote_code_execution": 1.0, "os_command": 1.0,
+    "arbitrary_file_write": 0.9, "database_read": 0.9, "credential_material": 0.85,
+    "arbitrary_file_read": 0.85, "account_takeover": 0.85, "internal_request": 0.7,
+    "ssrf": 0.7, "file_upload": 0.7, "foreign_object_read": 0.6,
+}
+_DEFAULT_IMPACT = 0.4
+
 
 def _now() -> float:
     return time.time()
+
+
+def decay_factor(age_seconds, halflife_days=None, now=None):
+    """Exponential decay in [CONF_FLOOR, 1.0] for a fact of the given age. age<=0 -> 1.0. Pure."""
+    hl = (halflife_days if halflife_days is not None else CONF_HALFLIFE_DAYS) or 14.0
+    if age_seconds is None or age_seconds <= 0:
+        return 1.0
+    f = 0.5 ** ((age_seconds / _DAY) / hl)
+    return max(CONF_FLOOR, min(1.0, f))
+
+
+def utility_score(probability, impact, evidence_confidence, cost=1.0, risk=1.0, duplication=1.0):
+    """Pentera-style utility = P(success) x impact x evidence_confidence / (cost x risk x duplication).
+    Simplest defensible form; every factor is bounded > 0. Deterministic, no LLM. The graph's ranking
+    of WHICH opportunity to pursue next — most valuable, most certain, cheapest, least risky, first."""
+    denom = max(1e-6, float(cost) * float(risk) * float(duplication))
+    return round(float(probability) * float(impact) * float(evidence_confidence) / denom, 4)
 
 
 def _nid(kind: str, key: str) -> str:
@@ -142,6 +178,20 @@ class AssetGraph:
         """Nodes whose provenance says they could unlock a given capability/technique."""
         return [n for n in self._nodes.values() if capability in (n.get("enables") or [])]
 
+    def decayed_confidence(self, node, now: float = None) -> float:
+        """Effective PLANNING confidence for a node (Cosmos lifecycle): a TESTED fact holds its stored
+        confidence (it was verified); an UNVERIFIED fact decays from last_seen toward CONF_FLOOR so
+        stale unconfirmed intel loses weight in ranking + gating. Pure; missing timestamps -> no decay."""
+        if not node:
+            return MEDIUM
+        base = float(node.get("confidence", MEDIUM))
+        if node.get("tested"):
+            return base
+        ls = node.get("last_seen")
+        if not ls:
+            return base
+        return round(base * decay_factor((now or _now()) - ls, now=now), 4)
+
     _REDIRECT_HINTS = ("redirect", "return", "returnurl", "next", "goto", "dest", "url", "continue", "callback")
     _SEARCH_HINTS = ("q", "query", "search", "s", "keyword", "term")
     _UPLOAD_HINTS = ("file", "upload", "filename", "path", "dir")
@@ -218,27 +268,47 @@ class AssetGraph:
                 obs.add("sql_error_seen")
         return obs
 
-    def next_best_actions(self, limit: int = 10) -> list:
-        """Deterministic next-best-action list — the planner querying the world model. Ranks
-        unrealized capability chains (a confirmed finding enables X, but X isn't achieved yet) above
-        untested services above untested object endpoints. Pure; drives the autonomy loop."""
+    def next_best_actions(self, limit: int = 10, now: float = None) -> list:
+        """Deterministic next-best-action list — the planner querying the world model, RANKED BY
+        UTILITY (Pentera) with Cosmos-decayed evidence confidence. Ranks unrealized capability chains
+        (a confirmed finding enables X, but X isn't achieved yet) above untested services above
+        untested object endpoints, but WITHIN and ACROSS those by expected value: impact x certainty /
+        cost / risk. Each action carries its utility + the factor breakdown so the ranking is
+        inspectable, never a black box. Pure; drives the autonomy loop."""
+        now = now or _now()
         have = {n["key"] for n in self.nodes("capability")}
         out = []
+
+        def _emit(base_score, action, evidence_conf, probability, impact, cost, risk, **extra):
+            fac = {"probability": round(probability, 3), "impact": round(impact, 3),
+                   "evidence_confidence": round(evidence_conf, 3), "cost": cost, "risk": risk,
+                   "duplication": 1.0}
+            out.append({"score": base_score, "action": action,
+                        "utility": utility_score(**fac), "utility_factors": fac, **extra})
+
         for f in self.nodes("finding"):
+            fconf = self.decayed_confidence(f, now)
             for cap in (f.get("enables") or []):
                 if cap not in have:
-                    out.append({"score": 8, "action": "chase_capability", "capability": cap,
-                                "target": f["label"],
-                                "rationale": "a confirmed finding enables '%s' — chase it" % cap})
+                    # a CONFIRMED finding already enables this — high odds the chain completes
+                    _emit(8, "chase_capability", fconf, 0.8, _IMPACT.get(cap, _DEFAULT_IMPACT), 1.0, 1.0,
+                          capability=cap, target=f["label"],
+                          rationale="a confirmed finding enables '%s' — chase it" % cap)
         for s in self.untested("service"):
-            out.append({"score": 6, "action": "run_service_pack", "service": s["label"],
-                        "target": s["key"], "enables": s.get("enables", []),
-                        "rationale": "a %s service was discovered but its technique pack has not run" % s["label"]})
+            enables = s.get("enables", []) or []
+            impact = max([_IMPACT.get(e, _DEFAULT_IMPACT) for e in enables] or [0.5])
+            # beyond-web probe: service exists (medium prob its pack confirms), slightly higher risk/cost
+            _emit(6, "run_service_pack", self.decayed_confidence(s, now), 0.5, impact, 1.5, 1.2,
+                  service=s["label"], target=s["key"], enables=enables,
+                  rationale="a %s service was discovered but its technique pack has not run" % s["label"])
         for o in self.untested("object"):
-            out.append({"score": 4, "action": "cross_user_test", "target": o["label"],
-                        "rationale": "object endpoint not yet compared across personas (IDOR/BOLA)"})
+            _emit(4, "cross_user_test", self.decayed_confidence(o, now), 0.5, _IMPACT["foreign_object_read"],
+                  1.8, 1.0, target=o["label"],
+                  rationale="object endpoint not yet compared across personas (IDOR/BOLA)")
+
         seen, uniq = set(), []
-        for a in sorted(out, key=lambda x: -x["score"]):
+        # utility-primary, then the tier score, so ties fall back to the old ordering (stable, testable)
+        for a in sorted(out, key=lambda x: (-x.get("utility", 0), -x["score"])):
             k = (a["action"], a.get("target"), a.get("capability"))
             if k in seen:
                 continue

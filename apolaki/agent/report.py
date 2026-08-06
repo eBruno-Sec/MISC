@@ -1826,6 +1826,24 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          "confirmed — the ordered path to keep testing):</p>"
                          "<table class='tbl'><tr><th>Technique</th><th>Class</th><th>Action / oracle</th></tr>"
                          "%s</table>" % rows)
+        ap = orchestration.get("attack_paths") or []
+        if ap:
+            def _apr(a):
+                fac = a.get("utility_factors") or {}
+                why = ("impact %.2f · confidence %.2f · cost %s · risk %s"
+                       % (fac.get("impact", 0), fac.get("evidence_confidence", 0),
+                          fac.get("cost", 1), fac.get("risk", 1)))
+                tgt = a.get("capability") or a.get("service") or a.get("target") or ""
+                return ("<tr><td><b>%.3f</b></td><td>%s</td><td class='sub'>%s</td><td class='sub'>%s</td></tr>"
+                        % (a.get("utility", 0), e((a.get("action") or "").replace("_", " ")),
+                           e(str(tgt))[:48], e(why)))
+            parts.append("<p class='sub'>Utility-ranked <b>attack-path opportunities</b> from the canonical "
+                         "graph (Pentera-style expected value: probability &times; business-impact &times; "
+                         "evidence-confidence &divide; execution-cost &divide; operational-risk, with "
+                         "time-decayed confidence for unverified facts) — the graph ranking <b>which</b> lead "
+                         "is worth pursuing next, most valuable first:</p>"
+                         "<table class='tbl'><tr><th>Utility</th><th>Action</th><th>Target</th><th>Why</th></tr>"
+                         "%s</table>" % "".join(_apr(a) for a in ap[:6]))
         if parts:
             orch_html = "<h2 id='orchestration'>Intelligence Orchestration</h2>" + "".join(parts)
 
