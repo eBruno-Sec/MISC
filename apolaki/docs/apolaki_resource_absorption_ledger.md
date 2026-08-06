@@ -89,6 +89,16 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
   Apolaki already checks + deliberately rates LOW (CSP, CORS[have], cookie flags[have], HSTS, TLS, bcrypt).
   Candidate (low-value): flag external `<script>`/`<link>` missing Subresource-Integrity; flag CSP with
   unsafe-inline/unsafe-eval. RESUME at line 900.
+  - **UPDATE: read to line 2600 / 7374** (ch4 web-server-sec, ch5 security-as-process, ch6 browser-vulns
+    [XSS/CSRF/clickjacking/XSSI — all have], ch7 network-vulns [MITM/ARP/SSL-strip/downgrade/DNS-poison/
+    cert-compromise/CT-logs — mostly out-of-scope no-MitM rail, CT-logs=#114], ch8 auth partial [brute-force/
+    SSO/OAuth/OpenID/SAML=#109/password-complexity]). **GENUINE NEW CANDIDATE (both Grokking + TBHM stress it):
+    SUBDOMAIN TAKEOVER** — dangling CNAME to an unclaimed 3rd-party service, confirmed by service-specific
+    fingerprints (S3 "NoSuchBucket", GitHub Pages 404, Heroku "no such app", etc.). Deterministic, clean
+    per-service oracle, high bug-bounty value. VERIFIED: Apolaki ALREADY HAS this — `dns_recon.py`
+    `TAKEOVER_FINGERPRINTS` (from can-i-take-over-xyz) + `match_takeover()`. NOT a gap (checked before
+    building, unlike the nmap mistake). Grokking net yield: ~0 new engines (defensive book, all covered).
+    RESUME at line 2600.
 
 ## Extraction notes (technique-level, deduped, provenance kept)
 - **WAF-Evasion TTPs / Adversary Playbook / Offensive Blueprint (3 tiny files, READ):** dense
