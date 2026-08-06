@@ -66,6 +66,30 @@ Legend: [DONE-prior]=distilled in earlier sessions (#88-96); [READ]=read this mi
 - P3-P5 integration — highest-value vertical slices, each fully wired (graph/planner/report/UI/test).
 - Landing order: **#116 utility+decay (attack-planning keystone)** → #115 schema → #117 retest → new engines from reads.
 
+## Cover-to-cover read tracker (Erwin: read ALL .txt cover to cover, NON-NEGOTIABLE)
+26 .txt files (+2 .md). Honest per-file status (READ = actually read this pass, not skimmed):
+- **READ this pass:** Bug_Chaining (84L, chaining curriculum: OAuth Dirty Dancing / login-CSRF / self-XSS→ATO /
+  client-side path-traversal + polyglot upload / postMessage / null-origin+credentialless iframes / subdomain
+  cookie smuggling+bombing→ATO), The_Bug_Hunters_Methodology (169L, TBHM recon→CD→JS→heat-map→per-class tips;
+  validates my #114 favicon/permutation/ASN; flags dependency-confusion), SEC660 syllabus (251L, network-L2/
+  crypto/fuzzing/binary-exploit — OUT OF SCOPE for Apolaki safe-deterministic, ~0 yield). CORRECTION: I had
+  mislabeled Bug_Chaining + Bug_Hunters as EMPTY (they had content; 0 MB was rounding).
+- **READ prior (tiny TTP):** Advanced WAF Evasion TTPs, Adversary Playbook, Offensive Blueprint.
+- **DONE-PRIOR (distilled #88-96):** Redefining Hacking, Beginner WebApp Pentester(.md), Pentesting APIs, Black
+  Hat Python, Pentesting Azure, Bash, Metasploit, Pentesting AD, Pentesting ICS.
+- **STILL TO READ cover-to-cover (14 big, ~130K lines — multi-turn):** WAHH 2e (18844L), Grokking WebApp Sec
+  (7374), Web App Security 2e (9802), Web Pentest w/ Kali 3e (6898), Evasion Engineering (7877), Red Team
+  Engineering (9428), Advanced Infra Pentest (9659), Cybersecurity Attacks-Red Team Strategies (8376), Mastering
+  Kali 4e (9714), BBH_Bootcamp (9143), Threat Modeling (3847), Tribe of Hackers RT (6225), Cloud Pentest (6170,
+  partial), + re-verify done-prior. This is a genuine multi-turn effort; tracked here so it resumes honestly.
+
+## Cover-to-cover reading LOG (resumes here; line-accurate)
+- **Grokking Web App Security — IN PROGRESS, read to line 900 / 7374** (ch1 Know-your-enemy, ch2 Browser
+  security, ch3 Encryption partial). DEFENSIVE/secure-coding book. Offensive yield low: maps to header-hygiene
+  Apolaki already checks + deliberately rates LOW (CSP, CORS[have], cookie flags[have], HSTS, TLS, bcrypt).
+  Candidate (low-value): flag external `<script>`/`<link>` missing Subresource-Integrity; flag CSP with
+  unsafe-inline/unsafe-eval. RESUME at line 900.
+
 ## Extraction notes (technique-level, deduped, provenance kept)
 - **WAF-Evasion TTPs / Adversary Playbook / Offensive Blueprint (3 tiny files, READ):** dense
   methodology overviews; ~everything is ALREADY implemented in Apolaki. Verified against source:
