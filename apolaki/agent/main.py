@@ -2124,6 +2124,53 @@ async def get_canonical_graph(session_id: str):
     return d
 
 
+@app.post("/retest/{session_id}")
+async def retest_findings(session_id: str, finding_id: str = ""):
+    """Remediation-revalidation closure loop (Picus): re-fire each confirmed finding's oracle and report
+    OPEN (still vulnerable) / CLOSED (fixed) / INCONCLUSIVE (can't tell — never a false closure). Read-only:
+    only families whose confirming request is a safe idempotent GET to the finding's OWN in-scope target are
+    auto-retested; state-changing or recipe-less findings are honestly not_retestable. Feeds attack_chain
+    (OPEN re-confirms, CLOSED dismisses the dead technique) so a closure updates the cross-run memory."""
+    import httpx
+    import retest as _rt
+    import attack_chain as _ac
+    m = _require_mission(session_id)
+    findings = db.get_findings(session_id) or []
+    if finding_id:
+        findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
+    # in-scope host guard: a retest may only re-hit a host the mission was scoped to
+    scope_hosts = {str(s).split("//")[-1].split("/")[0] for s in (m.get("in_scope") or []) if s}
+    results, summary = [], {"open": 0, "closed": 0, "inconclusive": 0, "not_retestable": 0}
+    async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
+        for f in findings:
+            base = {"id": f.get("id"), "title": f.get("title"), "family": f.get("family")}
+            plan = _rt.plan(f)
+            if not plan.get("retestable"):
+                summary["not_retestable"] += 1
+                results.append({**base, "verdict": "not_retestable", "detail": plan.get("reason", "")})
+                continue
+            url = plan["url"]
+            host = url.split("//")[-1].split("/")[0]
+            if scope_hosts and host not in scope_hosts:
+                summary["inconclusive"] += 1
+                results.append({**base, "verdict": "inconclusive", "detail": "target host out of mission scope"})
+                continue
+            try:
+                r = await c.get(url)
+                v = _rt.evaluate(f, r.status_code, body=r.text, headers=dict(r.headers))
+            except Exception as ex:
+                v = {"verdict": "inconclusive", "detail": "retest request failed: %s" % ex, "url": url}
+            summary[v["verdict"]] = summary.get(v["verdict"], 0) + 1
+            results.append({**base, **v})
+            try:
+                _ac.record(f.get("target"), f.get("family") or f.get("title", "")[:40],
+                           _rt.chain_outcome(v["verdict"]), evidence="retest: " + str(v.get("detail", ""))[:200],
+                           session=session_id, name="retest")
+            except Exception:
+                pass
+    return {"session_id": session_id, "retested": len(results), "summary": summary, "results": results}
+
+
 @app.get("/mission/{session_id}/export")
 async def export_mission(session_id: str):
     """Portable, redacted mission bundle: metadata + findings + surface + canonical graph +

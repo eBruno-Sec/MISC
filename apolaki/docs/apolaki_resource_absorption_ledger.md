@@ -155,6 +155,15 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   HTML report. Note: the #116 attack-path table already rendered in the HTML orchestration section (an
   earlier check used the wrong case and mis-read it as missing). File: report.py.
 
+- 2026-08-06: **SLICE 6 shipped (#117 retest / remediation-revalidation closure loop, Picus).** New
+  `retest.py` — pure deterministic OPEN/CLOSED/INCONCLUSIVE verdict by family GET-oracle (served-resource /
+  off-site-redirect / URL-borne reflection); honest not_retestable for state-changing or recipe-less
+  findings (never a false closure). `POST /retest/{sid}` re-fires each confirmed finding's oracle (GET-only,
+  in-scope-host guarded, read-only), feeds attack_chain (OPEN=confirmed, CLOSED=dismissed). Tests +5
+  (829 total, 0 fail). Baked; VALIDATED LIVE on VAmPI mission: both exposure findings re-fired -> OPEN
+  ("resource still served HTTP 200"). Files: retest.py, main.py, tests/test_retest.py. NOTE remaining:
+  report/UI surface of retest verdicts + persisted per-finding replay recipe for non-GET families.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED
