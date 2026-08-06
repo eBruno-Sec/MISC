@@ -930,6 +930,23 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/action-envelope")
+async def action_envelope_mint(payload: dict):
+    """Mint + validate a durable action envelope (Codex Tier-3 #11) — the replay-safe contract a side-effecting
+    tool carries. Body: {mission_id, tool, inputs, scope, permission, approval_id}. Returns the envelope (only
+    hashes of secret-stripped input/scope — no raw secrets), plus the authorize + validate decisions so a
+    caller can see whether an INTRUSIVE action would be admitted."""
+    import action_envelope as ae
+    p = payload or {}
+    env = ae.make_envelope(str(p.get("mission_id") or "adhoc"), str(p.get("tool") or "tool"),
+                           p.get("inputs") or {}, p.get("scope") or {},
+                           permission=str(p.get("permission") or "ACTIVE"))
+    authz = ae.authorize(env, approval_id=p.get("approval_id"))
+    valid = ae.validate_before_execute(authz["envelope"], p.get("scope") or {}, p.get("inputs") or {},
+                                       approval_id=p.get("approval_id"))
+    return {"envelope": authz["envelope"], "authorized": authz["allowed"], "validate": valid}
+
+
 @app.post("/intel/api-inventory")
 async def api_inventory_reconcile(payload: dict):
     """API inventory drift + version governance (Codex Tier-2 #10): reconcile runtime vs documented (OpenAPI)
