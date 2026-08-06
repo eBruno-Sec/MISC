@@ -2160,6 +2160,30 @@ async def get_canonical_graph(session_id: str):
     return d
 
 
+@app.get("/graph/opengraph/{session_id}")
+async def get_opengraph_export(session_id: str):
+    """Sanitized OpenGraph / BloodHound-style projection of the canonical graph (Codex Tier-2 #7): namespaced
+    node kinds, secrets exported as refs only, and edges that DISTINGUISH topology from capability transitions
+    (only capability edges with traversable=true are attack-path edges). An interoperability export, never the
+    internal model. Built from the same one engagement state as /graph/canonical (no island)."""
+    m = _require_mission(session_id)
+    import asset_graph as _ag
+    import graph_export as _gx
+    recon, urls, findings = _graph_inputs(session_id)
+    aa = (m.get("context") or {}).get("auth_artery") or {}
+    personas = {"personas": aa["personas"]} if aa.get("personas") else None
+    caps = list(aa.get("capabilities") or [])
+    g = _ag.build_from_engagement(session_id, recon=recon, urls=urls, findings=findings,
+                                  personas=personas, capabilities=caps,
+                                  scope_asset=memory_mod.target_key(m["scope"]),
+                                  code_review=(m.get("context") or {}).get("code_review"))
+    _project_cloud_postures(g, m)
+    _scope_blob = " ".join(str(x) for x in (m.get("in_scope") or [])) + " " + str(m.get("scope") or "")
+    env = (m.get("context") or {}).get("environment") or (
+        "lab" if any(t in _scope_blob for t in ("localhost", "127.0.0.1", "juice-shop", ":3000")) else "unknown")
+    return _gx.export_graph(g, scope=memory_mod.target_key(m["scope"]), environment=env)
+
+
 @app.post("/retest/{session_id}")
 async def retest_findings(session_id: str, finding_id: str = ""):
     """Remediation-revalidation closure loop (Picus): re-fire each confirmed finding's oracle and report
