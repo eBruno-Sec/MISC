@@ -2311,9 +2311,12 @@ async def intel_fetch(source: str, key: str = ""):
     allowlist entry is explicitly enabled (+ credential for key-gated). Records are strict-provenance
     CANDIDATES (untrusted until validated); the raw feed is never returned. No outward I/O when disabled."""
     import intel_connectors as _ic
+    import intel_registry as _ir
     r = _ic.fetch(source, key)
+    ingested = _ir.ingest(r.get("records") or []) if r["status"] == "ok" else 0
     return {"source": source, "status": r["status"], "cache": r.get("cache"),
-            "records": len(r.get("records") or []), "note": r.get("note"), "log": r.get("log")}
+            "records": len(r.get("records") or []), "ingested_as_candidates": ingested,
+            "note": r.get("note"), "log": r.get("log")}
 
 
 @app.get("/cloud/posture/{provider}")

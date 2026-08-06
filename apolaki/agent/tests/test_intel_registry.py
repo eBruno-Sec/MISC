@@ -47,3 +47,15 @@ def test_reject_is_always_allowed():
     R.reset(); R.ingest([_rec()])
     rid = R.by_state("candidate")[0]["_id"]
     assert R.advance(rid, "rejected")[0] is True
+
+
+def test_closed_loop_fetch_normalizes_into_candidate_registry():
+    # fetch (enabled, injected http) -> normalize -> registry ingest as CANDIDATES (the full pipeline)
+    import intel_connectors as C
+    C.reset(); R.reset()
+    def http(url, headers=None):
+        return 200, '{"data":[{"cve":"CVE-2024-7","epss":"0.9","percentile":"0.9","date":"2024-01-01"}]}'
+    res = C.fetch("epss", env={"INTEL_SRC_EPSS": "1"}, http=http, now=1.0)
+    assert R.ingest(res["records"]) == 1
+    assert R.stats()["by_state"] == {"candidate": 1}     # lands untrusted, as candidate only
+    assert R.production() == []
