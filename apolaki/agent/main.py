@@ -930,6 +930,26 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/field-authz")
+async def field_authz_analyze(payload: dict):
+    """Field-level authorization / excessive-data-exposure analysis (Codex Tier-2 #9) — distinct from BOLA.
+    Body: {response, role?, authenticated?, own_resource?} flags a single response that leaks sensitive/admin/
+    debug fields; {low_response, high_response, low_role, high_role} does a two-persona differential. Raw
+    secret values are redacted; a same-role diff yields nothing (no privilege differential)."""
+    import field_authz as fa
+    p = payload or {}
+    out = {}
+    if "low_response" in p or "high_response" in p:
+        out["differential"] = fa.field_authz_diff(p.get("low_response") or {}, p.get("high_response") or {},
+                                                   low_role=str(p.get("low_role") or "user"),
+                                                   high_role=str(p.get("high_role") or "admin"))
+    if "response" in p:
+        out["excessive_data_exposure"] = fa.excessive_data_exposure(
+            p.get("response") or {}, role=str(p.get("role") or "user"),
+            authenticated=bool(p.get("authenticated", True)), own_resource=bool(p.get("own_resource", True)))
+    return out
+
+
 @app.post("/intel/api-protocols")
 async def api_protocol_inventory(payload: dict):
     """API protocol inventory beyond REST/OpenAPI/GraphQL (Codex Tier-2 #8). Body may carry {wsdl: <xml>} to
