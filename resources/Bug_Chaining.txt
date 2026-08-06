@@ -1,0 +1,85 @@
+M01
+Intro: Framing the chaining mindset
+Chain vocabulary: self-XSS → login CSRF → OAuth misconfig → subdomain cookie abuse → ATO
+Threat surface: identities, tokens, cookies, storage, iframes, upload/CDN edges
+Mental model: "data that moves → trusts that break"
+M02
+OAuth Dirty Dancing
+Parameters that matter (fast pass): client_id, redirect_uri strictness, response_type, response_mode, scope, state, nonce, code_verifier/PKCE
+The Franz Rosen gadget: structure, preconditions, and where it hides (RP vs. IdP vs. proxy)
+Exploit code patterns: crafting malicious redirect_uri/response_mode combos
+State handling pitfalls (generation, storage, reflection)
+Token bounce/relay tricks; mixing origins with permissive allowlists
+Hardening notes to call out (one-liners, not a lecture)
+M03
+Login CSRF
+Preconditions: auto-login endpoints, weak state, token reuse, GET/POST quirks
+Exploit code patterns: GET/POST login CSRF payloads that bind victim to attacker account
+SameSite edge cases; silent auth endpoints
+Outcome: stable victim session bound to attacker identity
+M04
+Self-XSS → ATO (Part 1)
+Typical footholds: profile fields, comment boxes, postMessage receivers
+Exploit code patterns: from clipboard/console "self-XSS" to stored DOM sink
+Piggyback the login CSRF to flip session/identity mid-flow
+Outcome: self-XSS becomes real XSS with the victim's privileges
+M05
+Client-side path traversal + open redirect
+Pitfalls: naïve new URL(), joiners, .. normalization, custom routers
+Exploit code patterns: traversal to internal loaders; force-load attacker script via open redirect
+Build canonical XSS chain: traversal → open redirect → script sink
+Outcome: reliable DOM XSS on strict frontends
+M06
+Client-side path traversal + file upload
+Key idea: PDF/WEBP that is also valid JSON/JS (polyglot conventions)
+Exploit code patterns: JSON-valid PDF/WEBP to smuggle attacker-controlled config
+JS-valid PDF/WEBP served with lenient sniffing → CSP bypass route
+Storage/hosting gotchas that make this land (CDN, MIME, sniffers)
+M07
+postMessage bugs
+Anti-patterns: no origin check, loose schema, eval/Function
+Exploit code patterns: shaping messages to hit sinks; stealing tokens/CSRF via responses
+Upgrading via Dirty Dancing: message → OAuth hop → account control
+M08
+XSS in a third-party iframe (Open-faced iframe sandwich)
+Model: parent ↔ 3P iframe ↔ IdP/RP surfaces
+Exploit code patterns: using the iframe XSS as a staging area for OAuth Dirty Dancing
+Bypassing UI isolation with permissive postMessage bridges
+Outcome: ATO via 3P content that "isn't ours"
+M09
+The power of null-origin iframes
+What "null" actually strips, and what it doesn't
+Exploit code patterns: driving OAuth/login CSRF flows from null-origin sandboxes
+Moving data between contexts to retain the win
+M10
+Credentialless iframes
+Where credentialless helps attackers (and where it kills them)
+Exploit code patterns: self-XSS → credentialless bridge → CSRF/XSS on primary
+Cookie scoping surprises when requests lose credentials
+M11
+Subdomain XSS, Part 1: Cookie smuggling
+Domain vs. host vs. path semantics in the real world
+Exploit code patterns: smuggling cookies that override RP expectations
+Targeted path cookies → data exfil + CSRF in "secure" areas
+Chain: subdomain XSS → smuggle → skip login CSRF → ATO
+M12
+Subdomain XSS, Part 2: Cookie bombing
+Exploit code patterns: forcing oversized cookie jars to clobber legitimate state
+Dirty-dance variant: bomb → fall back path → unintended OAuth
+Side effect: app-level DoS and auth instability
+M13
+Conclusion
+Visual chain map of all paths to ATO
+Quick mitigations checklist (one slide)
+Disclosure hygiene: what to report, how to keep chains reproducible
+
+BONUS
+JavaScript Module from TBHM Core
+Cheatsheets (BETA)
+Raw Analysis
+Inline JS
+Obfuscated JS
+Lazy Loaded JS
+Minified JS
+Mobile JS Analysis
+Advanced tooling and tips for all the above

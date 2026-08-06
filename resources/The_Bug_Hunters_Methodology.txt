@@ -1,0 +1,169 @@
+M01
+General Topics
+Project tracking for large scope assessments (red team and bounty)
+Mental health in offensive security
+Templating and reporting
+Testing environment
+Providers
+Tools
+M02
+Recon Concepts
+Introduction to recon
+M03
+Recon Techniques
+Acquisitions and domains
+Shodan
+ASN analysis
+Crunchbase ++
+SSL recon
+ReconGPT
+Reverse WHOIS
+Reverse DNS
+Reverse IP
+DMARC analysis
+Ad and analytics relationships
+Supply chain investigation and SaaS
+Google-fu (trademark & privacy policy)
+TLD scanning
+O365 enumeration for apex domains
+Subdomain scraping (all the best sources and why to use them)
+Sources
+Brute force
+Wildcards
+Permutation scanning
+Linked discovery
+Wordlists
+Advantageous subs (WAF bypass - origins)
+Favicon analysis
+Sub sub domains
+Port scanning
+Screenshotting
+Esoteric techniques
+Service bruteforce
+M04
+Best Resources to Follow to Stay Sharp
+Print resources
+Trainings
+Podcasts and YouTube
+Labs
+M05
+Recon Adjacent Vulnerability Analysis
+CVE scanners vs dynamic analysis
+Subdomain takeover
+S3 buckets
+Quick hits (swagger, .git, configs, panel analysis)
+M06
+Analysis Concepts
+Intended usage (not holistic, contextual)
+Analysis layers
+Application layers as related to success
+Tech profiling
+The big questions
+Change monitoring
+M07
+Vulnerability Automation
+More on CVE and dynamic scanners
+Dependencies
+Early running so you can focus on manual
+Secrets of automation kings
+M08
+Content Discovery
+Intro to CD (walking, brute/fuzz, historical, JS, spider, mobile, params)
+Importance of walking the app
+Bruteforce tooling
+Bruteforce tooling lists: based on tech
+Make your own (from-install, dockerhub, trials, from word analysis)
+Best base wordlists
+Quick configs
+API lists
+Bruteforce tooling tips: recursion
+Bruteforce tooling tips: sub as path
+Bruteforce tooling tips: 403 bypass
+Historical content discovery
+Spidering
+Mobile content discovery
+Parameter content discovery
+M09
+JavaScript
+Cheatsheets (BETA)
+Raw analysis
+Inline JS
+Obfuscated JS
+Lazy loaded JS
+Minified JS
+Mobile JS analysis
+Advanced tooling and tips for all the above
+M10
+The Big Questions
+How does the app pass data?
+How/where does the app talk about users?
+Does the site have multi-tenancy or user levels?
+Does the site have a unique threat model?
+Has there been past security research & vulns?
+How does the app handle common vuln classes?
+Where does the app store data?
+M11
+Application Heat Mapping
+Common issue place: upload functions
+Common issue place: content type multipart-form
+Common issue place: content type XML / JSON
+Common issue place: account section and integrations
+Common issue place: errors
+Common issue place: paths/URLs passed in parameters
+Common issue place: chatbots
+M12
+Web Fuzzing & Analyzing Fuzzing Results
+Parameters and paths (generic fuzzing)
+Reducing similar URLs
+Dynamic only fuzzing
+Fuzzing resources SSWLR - "Sensitive Secrets Were Leaked Recently"
+Backslash powered scanner
+M13
+XSS Tips and Tricks
+Stored and reflected
+Polyglots
+Blind
+DOM tools
+Common parameters
+Automation and tools
+M14
+IDOR Tips and Tricks
+IDOR, access, authorization, MLAC, direct browsing, business logic, parameter manipulation
+Numeric IDOR
+Identifying user tokens: GUID IDOR
+Common parameters
+Resources
+M15
+SSRF Tips and Tricks
+SSRF intro
+Schemas
+Alternate IP encoding
+Common parameters
+Resources
+M16
+XXE
+Common areas of exploitation
+Payloads
+Common parameters
+Resources
+M17
+File Upload Vulnerabilities Tips and Tricks
+Common bypasses
+Common parameters
+Resources
+M18
+SQL Injection Tips and Tricks
+SQLmap tamper
+ghauri
+Resources
+Common parameters
+M19
+Bypass of Security Controls
+Security control types (CDN, server, code-level)
+Block triggers
+Bypass techniques
+M20
+Dependency Confusion
+How it works
+Where and what to look for
+Resources
