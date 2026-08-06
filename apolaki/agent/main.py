@@ -930,6 +930,31 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.post("/intel/api-protocols")
+async def api_protocol_inventory(payload: dict):
+    """API protocol inventory beyond REST/OpenAPI/GraphQL (Codex Tier-2 #8). Body may carry {wsdl: <xml>} to
+    parse a WSDL into service/endpoints/operations + SOAP XML-body candidates (routing to the XXE check under
+    existing safety rules), {html, base_url} to discover WSDL links, and/or {headers, content_type, path} to
+    classify a protocol family. INVENTORY ONLY — no vulnerability is implied. Off-scope WSDL URLs are dropped."""
+    import api_protocols as ap
+    p = payload or {}
+    out = {"note": "API protocol inventory — surface only; no vulnerabilities implied by inventory."}
+    if p.get("html") is not None:
+        out["wsdl_links"] = ap.detect_wsdl_links(str(p.get("html")), base_url=str(p.get("base_url") or ""))
+    if p.get("wsdl"):
+        parsed = ap.parse_wsdl(str(p.get("wsdl")))
+        out["wsdl"] = parsed
+        out["soap_candidates"] = ap.soap_body_candidates(parsed)
+    if any(k in p for k in ("headers", "content_type", "path")):
+        out["protocol"] = ap.detect_protocol(headers=p.get("headers"), path=str(p.get("path") or ""),
+                                              content_type=str(p.get("content_type") or ""))
+        grpc = ap.grpc_observation(headers=p.get("headers"), url=str(p.get("path") or ""),
+                                   content_type=str(p.get("content_type") or ""))
+        if grpc:
+            out["grpc_observation"] = grpc
+    return out
+
+
 @app.get("/intel/defenses")
 async def defense_catalog(family: str = None):
     """Curated defensive-control mappings (Codex Tier-1 #3): finding family -> the control(s) that neutralize
