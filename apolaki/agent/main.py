@@ -2171,6 +2171,24 @@ async def retest_findings(session_id: str, finding_id: str = ""):
     return {"session_id": session_id, "retested": len(results), "summary": summary, "results": results}
 
 
+@app.get("/mission/{session_id}/poc-bundle")
+async def poc_bundle_export(session_id: str, finding_id: str = ""):
+    """Per-finding proof-of-concept EVIDENCE BUNDLES (#111): a self-contained, submission-ready artifact
+    per CONFIRMED finding — reproduction (curl + PoC), the #115 FP-safety negative control, the evidence-
+    graded impact, the #117 retest recipe, remediation, provenance. Reuses poc/retest/report/technique_model
+    (no island). Secrets redacted. Downloadable JSON; the exact evidence a reviewer needs to believe +
+    reproduce + re-verify, nothing external required."""
+    import poc_bundle as _pb
+    m = _require_mission(session_id)
+    findings = db.get_findings(session_id) or []
+    if finding_id:
+        findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
+    tgt = str((m.get("in_scope") or [""])[0] or "")
+    tool_version = (m.get("context") or {}).get("code_rev") or os.environ.get("APOLAKI_GIT_COMMIT", "")
+    bundles = _pb.build_all(findings, tool_version=tool_version, target=tgt)
+    return {"session_id": session_id, "count": len(bundles), "bundles": bundles}
+
+
 @app.get("/mission/{session_id}/export")
 async def export_mission(session_id: str):
     """Portable, redacted mission bundle: metadata + findings + surface + canonical graph +

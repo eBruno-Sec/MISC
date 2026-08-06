@@ -196,6 +196,15 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   already in guidance.py; request-smuggling deliberately NOT built (its oracle risks disrupting the
   target/other users — violates no-DoS/non-destructive rails). File: report.py.
 
+- 2026-08-06: **SLICE 8 shipped (#111 PoC evidence bundles — Strix absorption, local half).** New
+  `poc_bundle.py` — one self-contained, submission-ready artifact per CONFIRMED finding: identity/taxonomy +
+  reproduction (curl + poc.py markdown, secrets redacted) + the #115 FP-safety negative control + evidence
+  requirements + the evidence-graded impact + the #117 retest recipe + remediation + provenance/versions.
+  `GET /mission/{sid}/poc-bundle` serves them (reuses poc/retest/report/technique_model — no island). +3
+  tests incl. a redaction guard + confirmed-only guard (833 total, 0 fail). Baked; VALIDATED LIVE on VAmPI:
+  2 bundles, all 9 sections populated. NOTE: #111's OTHER half (CI/CD PR-triggered autonomous testing) is
+  GATED — needs a CI/GitHub environment. Files: poc_bundle.py, main.py, tests/test_poc_bundle.py.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED
