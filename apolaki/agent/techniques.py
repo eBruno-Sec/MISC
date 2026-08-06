@@ -349,6 +349,17 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Add a privileged attribute (role, isAdmin, deluxeToken) to a write body.",
        oracle="Server persists the injected attribute (readback shows elevated state)."),
 
+    _t(id="unrestricted_file_upload", vuln_class="upload", cwe="CWE-434", owasp="A04:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Unrestricted file upload — server-side type/content-type/size restriction bypass.",
+       detect="A file-upload form/endpoint accepts files without enforcing the claimed type/size server-side.",
+       exploit="Upload a non-allowlisted type or an oversize file via extension / Content-Type / poison-null-"
+               "byte tricks (non-destructive canary payloads only); a dangerous type reaching a served path "
+               "is web-shell-capable.",
+       oracle="Server accepts + stores a file whose type/size the app claims to forbid (readback confirms).",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["Upload Type", "Upload Size"]}),
+
     _t(id="exposed_files_harvest", vuln_class="sensitive_exposure", cwe="CWE-548", owasp="A05:2021",
        permission=ACTIVE, transferable=True, pack=None,
        summary="Harvest sensitive files from a browsable/guessable path (incl. null-byte bypass).",

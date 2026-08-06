@@ -42,6 +42,7 @@ _PRECONDITIONS = {
     "target_intel_harvest":    ["serves_js"],
     "path_traversal":          ["has_api"],
     "archive_slip":            ["has_file_upload"],
+    "unrestricted_file_upload": ["has_file_upload"],
     "soft_deleted_login":      ["has_login"],
     "command_injection":       ["has_api"],
     "csrf":                    ["has_login"],

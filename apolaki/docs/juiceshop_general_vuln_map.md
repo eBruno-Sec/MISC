@@ -45,11 +45,12 @@ difficulty / description for all 113) and cross-referenced against the Apolaki t
 | Weak crypto | weirdCrypto | no | `crypto_authz` / hash-id ✅ |
 | LLM prompt injection | chatbotPromptInjection/Greedy, systemPromptExtraction | env-gated (needs local LLM) | `llm_prompt_injection`, `llm_output_handling` ✅ |
 
-### Real class-level GAPS worth adding to general TTP (small)
-- **Mass assignment** (`registerAdmin` — register with elevated role): not a first-class registry class yet
-  (only referenced in ASVS/authz). Worth a dedicated general technique.
-- **File-upload restriction bypass** (`uploadType`, `uploadSize` — extension/size control bypass): partial
-  (`run_upload_test` exists) but not a registry technique class.
+### Real class-level GAPS (re-verified — smaller than first claimed)
+- **Mass assignment** (`registerAdmin`): **NOT a gap** — `mass_assignment` (CWE-915) already exists in the
+  registry, mapped to "Admin Registration", with a `has_api` planner precondition. (Original claim corrected.)
+- **File-upload restriction bypass** (`uploadType`, `uploadSize`): the `run_upload_test` engine already exists
+  and runs in the probe sweep — it only lacked a first-class **catalog technique**. Added
+  `unrestricted_file_upload` (CWE-434) + `has_file_upload` planner precondition. Now closed.
 - Everything else already has a technique.
 
 ## The lab-specific / non-general ~55 (do NOT belong in general TTP)
