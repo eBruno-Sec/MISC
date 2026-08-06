@@ -72,6 +72,34 @@ def _leads_md(leads: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _asvs_md(findings: list, tool_ledger: dict) -> list:
+    """Curated-partial ASVS-5 objective coverage for the report: which security PROPERTIES were verified /
+    failed / blocked / not tested this mission. Findings violate objectives; a clean run of an objective's
+    engine verifies it (negative-control discipline). The engines that ran are the tool-ledger keys. HONEST:
+    this is never a full-ASVS claim (see the rendered disclaimer)."""
+    try:
+        import asvs_model
+    except Exception:
+        return []
+    a = asvs_model.assess(findings or [], attempted_engines=set((tool_ledger or {}).keys()))
+    t = a["tally"]
+    out = ["", "## ASVS Objective Coverage", "", "_%s_" % a["disclaimer"], "",
+           "| Status | Count |", "| --- | --- |",
+           "| Verified | %d |" % t["verified"], "| Failed (finding violates) | %d |" % t["failed"],
+           "| Attempted (inconclusive) | %d |" % t["attempted"],
+           "| Blocked (safety-excluded) | %d |" % t["blocked"], "| Not tested | %d |" % t["not_tested"], ""]
+    failed = [o for o in a["objectives"] if o["status"] == "failed"]
+    if failed:
+        out += ["**Failed objectives — a finding violates the verification property:**", ""]
+        for o in failed:
+            ids = o["finding_ids"]
+            shown = ", ".join(ids[:6]) + (" …+%d more" % (len(ids) - 6) if len(ids) > 6 else "")
+            out.append("- `%s` (%s) %s _(%d findings: %s)_" % (o["cid"], o["chapter"], o["requirement"],
+                                                               len(ids), shown))
+        out.append("")
+    return out
+
+
 def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
                      ai_summary: str = None, execution: dict = None, leads: list = None,
@@ -143,6 +171,8 @@ def generate_report(program: str, findings: list, scope: dict,
         lines += ["", "## Assessment Coverage", ""]
         for k, v in coverage.items():
             lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+
+    lines += _asvs_md(findings, tool_ledger)
 
     lines += ["", "---", "", "## Findings", ""]
     for i, f in enumerate(findings, 1):

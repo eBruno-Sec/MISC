@@ -930,6 +930,26 @@ async def wstg_coverage():
         return {"error": str(e)}
 
 
+@app.get("/coverage/asvs")
+async def asvs_coverage(session: str = None):
+    """Curated-partial OWASP ASVS-5 objective coverage: what security PROPERTIES were verified / failed /
+    blocked / not tested — the verification-objective complement to WSTG's test catalog. With `?session=<sid>`
+    it folds in that mission's findings (which violate objectives) and the engines that actually ran (a clean
+    run verifies the property); without a session it returns the static curated catalog (all untested). HONEST:
+    always a curated partial model, never a full-ASVS claim."""
+    import asvs_model as am
+    try:
+        findings, ran = [], set()
+        if session:
+            findings = db.get_findings(session) or []
+            for l in db.get_logs(session, limit=4000):
+                if l.get("type") == "tool_call" and l.get("tool"):
+                    ran.add(l.get("tool"))
+        return am.assess(findings, attempted_engines=ran)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # --- Offensive intel feeds (Phase 0): enrich the registry with KEV/CAPEC. Deterministic, cached. ---
 _INTEL_CACHE = {"mtime": None, "snaps": {}}
 
