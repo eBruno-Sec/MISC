@@ -486,6 +486,9 @@ _FAMILY_FIX = {
                   "TCP/873 to trusted hosts or tunnel rsync over SSH.",
     "ntp_monlist": "Upgrade ntpd to >=4.2.7 or add 'disable monitor' to ntp.conf; restrict mode-6/7 queries "
                    "('restrict ... noquery') and limit inbound UDP/123 from untrusted networks.",
+    "ipmi_rakp": "Isolate IPMI/BMC (UDP/623) to a dedicated management VLAN reachable only by trusted admins; set "
+                 "strong unique BMC passwords; disable IPMI-over-LAN where possible and prefer authenticated "
+                 "Redfish/HTTPS.",
 }
 
 

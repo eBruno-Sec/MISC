@@ -101,6 +101,11 @@ _PACKS = {
         {"id": "ntp_monlist", "cwe": "CWE-406", "intrusive": False,
          "oracle": "the server answers the ntpdc monlist (mode 7) request (CVE-2013-5211)", "enables": []},
     ]},
+    "ipmi": {"graph_kind": "service", "note": "BMC: IPMI 2.0 RMCP+ RAKP hash disclosure (READ-ONLY, detection only).", "checks": [
+        {"id": "ipmi_rakp", "cwe": "CWE-522", "intrusive": False,
+         "oracle": "the BMC returns an RMCP+ Open Session Response (IPMI 2.0 = inherent RAKP hash disclosure, CVE-2013-4786)",
+         "enables": ["bmc_takeover"]},
+    ]},
     "redis": {"graph_kind": "service", "note": "Unauthenticated data store.", "checks": [
         {"id": "redis_no_auth", "cwe": "CWE-306", "intrusive": False,
          "oracle": "INFO/PING succeeds without AUTH (open data store)", "enables": ["database_read"]},

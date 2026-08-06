@@ -185,6 +185,14 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Send one read-only ntpdc REQ_MON_GETLIST_1 (monlist) query; a mode-7 response confirms it (CVE-2013-5211).",
        exploit="Abuse as a high-ratio UDP-amplification DDoS reflector; harvest recent client IPs it discloses.",
        oracle="The server returns a mode-7 monlist response to the monlist request."),
+    # beyond web (BMC/infra pentest): IPMI 2.0 RMCP+ RAKP hash disclosure — detection only.
+    _t(id="ipmi_rakp", vuln_class="network_service", cwe="CWE-522", owasp="A07:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An IPMI 2.0 BMC speaks RMCP+ over LAN, inherently disclosing a crackable RAKP password hash.",
+       detect="Send one read-only RMCP+ Open Session Request; an Open Session Response confirms IPMI 2.0 "
+              "(CVE-2013-4786). Detection only — never request the RAKP hash or try a credential.",
+       exploit="Capture + crack the RAKP HMAC offline -> BMC admin -> out-of-band host takeover (power/console/vmedia).",
+       oracle="The BMC returns an RMCP+ Open Session Response (payload type 0x11)."),
     # beyond web (infra pentest): SNMP still on a documented default community string.
     _t(id="snmp_default_community", vuln_class="network_service", cwe="CWE-1188", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,

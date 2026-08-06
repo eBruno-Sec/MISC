@@ -129,6 +129,7 @@ TOOL_PERMISSIONS = {
     "run_vnc_audit": PermissionLevel.ACTIVE,
     "run_rsync_audit": PermissionLevel.ACTIVE,
     "run_ntp_audit": PermissionLevel.ACTIVE,
+    "run_ipmi_audit": PermissionLevel.ACTIVE,
     "run_path_sqli": PermissionLevel.INTRUSIVE,
     "run_llm_probe": PermissionLevel.INTRUSIVE,
     "run_cmdi": PermissionLevel.INTRUSIVE,
@@ -2209,6 +2210,12 @@ class ToolRegistry:
             out = _nt.analyze(res) if not res.get("error") else None
             if out:
                 findings.append(_nt.finding(host, int(port), out[0], res))
+        elif service == "ipmi":
+            import ipmi_audit_tool as _ip                         # one read-only RMCP+ open-session request
+            res = await asyncio.get_event_loop().run_in_executor(None, _ip.probe, host, int(port))
+            out = _ip.analyze(res) if not res.get("error") else None
+            if out:
+                findings.append(_ip.finding(host, int(port), out[0], res))
         # record into the LIVE graph (service node + any confirmed finding)
         try:
             svc_id = self.graph.observe("service", "%s:%s" % (host, port), label=service,
@@ -6546,6 +6553,32 @@ class ToolRegistry:
             findings.append(self._attach_poc(nt.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
         return ToolResult("ntp_audit", "%s:%d" % (host, port), True,
                           "%d ntp-monlist finding(s)" % len(findings), findings)
+
+    async def _run_ipmi_audit(self, inp: dict) -> ToolResult:
+        """ACTIVE (BMC/infra, beyond web): IPMI 2.0 RMCP+ exposure audit (CWE-522 / CVE-2013-4786). Sends ONE
+        read-only RMCP+ Open Session Request and confirms an IPMI 2.0 BMC (inherently RAKP-hash-disclosure
+        vulnerable). Detection only — never requests the RAKP hash and never tries a credential."""
+        import asyncio as _aio
+        import ipmi_audit_tool as ip
+        raw = str(inp.get("host") or inp.get("target") or inp.get("url") or "").replace("ipmi://", "").strip().strip("/")
+        port = int(inp.get("port") or 0)
+        if not port:
+            if raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+                raw, port = raw.rsplit(":", 1)[0], int(raw.rsplit(":", 1)[1])
+            else:
+                port = 623
+        host = raw
+        if not host:
+            return ToolResult("ipmi_audit", host, False, "", [], "no host")
+        if not (self.scope.validate("http://%s" % host)[0] or self.scope.validate(host)[0]):
+            return ToolResult("ipmi_audit", host, False, "", [], "SCOPE BLOCK")
+        res = await _aio.get_event_loop().run_in_executor(None, ip.probe, host, port)
+        findings = []
+        out = ip.analyze(res)
+        if out:
+            findings.append(self._attach_poc(ip.finding(host, port, out[0], res), "%s:%d" % (host, port), None))
+        return ToolResult("ipmi_audit", "%s:%d" % (host, port), True,
+                          "%d ipmi-rakp finding(s)" % len(findings), findings)
 
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a
