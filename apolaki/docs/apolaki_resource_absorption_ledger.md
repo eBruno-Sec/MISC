@@ -261,6 +261,12 @@ docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings
   knowledge registry (candidate->fixture->reviewed->production), Tier-2 passive adapters. Core architecture
   the operator specified is now COMPLETE + gated.
 
+- 2026-08-06: **SLICE 13 shipped (#114 staged promotion + more parsers).** `intel_registry.py`:
+  candidate->validating->validated->fixture_backed->reviewed->production, ONE gated step at a time; ingest
+  is ALWAYS candidate; `validated` needs validation evidence, `fixture_backed` needs a fixture, `production`
+  needs a human reviewer (internet intel NEVER auto-promotes — anti-contamination). Added CVE-v5 + CISA-KEV
+  parsers to intel_connectors. `GET /intel/registry` (lifecycle stats). +6 tests (858 total, 0 fail). Baked.
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED

@@ -63,3 +63,16 @@ def test_rate_limit_blocks_a_burst():
 def test_unknown_source_is_never_fetched():
     C.reset()
     assert C.fetch("randomblog", env={"INTEL_CONNECTORS": "1"}, http=_boom)["status"] == "unknown_source"
+
+
+def test_kev_and_cve_v5_parsers_produce_candidates():
+    kev = ('{"vulnerabilities":[{"cveID":"CVE-2021-44228","vendorProject":"Apache","product":"Log4j",'
+           '"dateAdded":"2021-12-10","dueDate":"2021-12-24"}]}')
+    recs = C.normalize("cisa_kev", kev)
+    assert recs and recs[0]["cve"] == "CVE-2021-44228" and recs[0]["known_exploited"] is True
+    assert recs[0]["validation_state"] == "candidate"
+    cve5 = ('{"cveMetadata":{"cveId":"CVE-2024-5555","datePublished":"2024-05-05"},'
+            '"containers":{"cna":{"affected":[{"product":"acme","versions":[{"version":"1.0"}]}],'
+            '"references":[{"url":"http://ref"}]}}}')
+    r5 = C.normalize("cve_v5", cve5)
+    assert r5 and r5[0]["cve"] == "CVE-2024-5555" and r5[0]["affected_product"] == "acme"

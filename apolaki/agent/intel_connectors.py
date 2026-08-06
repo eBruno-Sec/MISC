@@ -173,4 +173,32 @@ def vulnerabilities_pkg(vulns: list):
     return None
 
 
-_PARSERS = {"epss": _parse_epss, "nvd": _parse_nvd, "ghsa": _parse_ghsa}
+def _parse_cve_v5(raw) -> list:
+    d = _load(raw)
+    cna = ((d.get("containers") or {}).get("cna") or {})
+    cid = (d.get("cveMetadata") or {}).get("cveId")
+    affected = cna.get("affected") or []
+    prod = affected[0].get("product") if affected else None
+    vers = [v.get("version") for a in affected for v in (a.get("versions") or []) if v.get("version")]
+    r = _src.provenance_record("cve_v5", cve=cid, published_at=(d.get("cveMetadata") or {}).get("datePublished"),
+                               last_modified=(d.get("cveMetadata") or {}).get("dateUpdated"),
+                               affected_product=prod, affected_versions=vers,
+                               references=[x.get("url") for x in (cna.get("references") or [])][:10], confidence=0.3)
+    return [r]
+
+
+def _parse_kev(raw) -> list:
+    d = _load(raw)
+    out = []
+    for v in (d.get("vulnerabilities") or []):
+        r = _src.provenance_record("cisa_kev", cve=v.get("cveID"),
+                                   affected_product=(str(v.get("vendorProject", "")) + " " + str(v.get("product", ""))).strip(),
+                                   published_at=v.get("dateAdded"), confidence=0.3)
+        r["known_exploited"] = True
+        r["due_date"] = v.get("dueDate")
+        out.append(r)
+    return out
+
+
+_PARSERS = {"epss": _parse_epss, "nvd": _parse_nvd, "ghsa": _parse_ghsa,
+            "cve_v5": _parse_cve_v5, "cisa_kev": _parse_kev}

@@ -2296,6 +2296,15 @@ async def intel_audit(limit: int = 100):
     return {"requests": _ic.audit_log(limit), "count": len(_ic.audit_log(limit))}
 
 
+@app.get("/intel/registry")
+async def intel_registry_view():
+    """Staged intel-knowledge registry (#114): how many ingested candidates sit at each lifecycle state
+    (candidate -> validating -> validated -> fixture_backed -> reviewed -> production). Only PRODUCTION
+    records are trusted; internet intel never auto-promotes there. Read-only."""
+    import intel_registry as _ir
+    return {**_ir.stats(), "production": len(_ir.production())}
+
+
 @app.post("/intel/fetch/{source}")
 async def intel_fetch(source: str, key: str = ""):
     """Governed fetch of an allowlisted intel source (#114). Returns 'disabled' unless the source's
