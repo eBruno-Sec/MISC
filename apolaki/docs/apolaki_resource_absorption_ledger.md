@@ -109,6 +109,37 @@ edge — DONE this session: #116 (utility attack-paths + decay) and #115 (execut
     family→capability map (would mis-fire on schema-exposure). Not forced this session (avoids false paths).
 - Orchestration audit: **0 islands** (39 gated + 25 always-on), `no_islands=True`.
 
+## Session completion status (honest, by phase)
+- P0 baseline/inventory/ledger: **100%**. P1 extraction: **~15%** of the corpus read (3 TTP files fully +
+  cloud targeted; WAHH/RedCyber/WAHS/Grokking/RedTeam/Evasion/AdvInfra/etc. UNREAD — see table).
+  P2 knowledge-model: **100%** of the planned slice (#115). P3-5 integration/planner: **#116 shipped**;
+  broader HTN/behavior-tree NOT built (existing planner+graph deemed sufficient; not re-architected).
+  P6 reporting/business-impact: **grading shipped**; HTML-report rendering of the graded block + per-finding
+  negative-control from the #115 contract NOT yet wired (MD report only). P7 UI: not touched this session
+  (API surfaces verified; no new UI tab). P8 QA/OpTest: full suite green + 1 live mission + orchestration audit.
+- Net new this session: 3 integrated+validated capabilities (#116, #115, Phase-6 grading), all baked, tested,
+  committed, and (for #116 + grading) live-verified. Baseline 812 -> 823 tests.
+
+## Exact remaining work (prioritized, for continuation)
+1. Wire the #115 proof-contract + #116 utility into the HTML report + UI Intel tab (MD + API done).
+2. Content-aware finding `enables` (exposed-credentials -> credential_material) so #116 produces attack-paths
+   on exposure findings (guard against false paths; add a test).
+3. #117 retest/closure loop (Picus): per-family confirming-signal replay — needs findings to persist a
+   replay recipe + oracle id; scoped, not started.
+4. Read the large unread books (WAHH 2e, RedCyber 29MB, WAHS PDF, Grokking, Red Team Engineering, Evasion
+   Engineering, Advanced Infra) in targeted passes; expect low NEW-engine yield (mature core) but verify.
+5. External-env-gated frontier (own tasks, need environments): #106 cloud-authed, #105 Kerberos, #109 SAML,
+   #113 WAF-padding live proof, #114 ASN/favicon recon.
+
+## Continuation commands
+```
+cd C:/Users/voice/Desktop/GitHub/MISC/apolaki
+docker compose up -d --no-deps agent && curl -s localhost:8000/health
+docker exec apolaki-agent-1 sh -c "cd /app && python -m pytest -q -p no:warnings --junitxml=/tmp/j.xml"   # 823 green
+# live mission:  docker cp <driver> apolaki-agent-1:/tmp/optest.py && docker exec apolaki-agent-1 python /tmp/optest.py juice-shop:3000
+# bake after edits: docker compose build agent && docker compose up -d --no-deps agent
+```
+
 ## Change log (append-only)
 - 2026-08-05: **SLICE 3 shipped (evidence-aware business-impact grading, Phase 6).** `report.py`
   `graded_business_impact()` — per-family DEMONSTRATED (oracle-gated) / PLAUSIBLE next-step / UNVERIFIED
