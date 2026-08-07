@@ -1664,9 +1664,16 @@ class BBHAgent:
         if pair:
             app = "juiceshop" if "juice" in base.lower() else ""
             try:
+                # The bounded, self-cleaning, uniquely-marked object-create is the ONLY way to get a
+                # DEFINITIVE cross-user BOLA proof. authenticated_scan is already the opt-in that authorizes
+                # state-changing account creation, so the same opt-in authorizes this bounded object-create —
+                # enabling confirmed BOLA in active mode without the heavy full-mode tooling that can overload
+                # a fragile single-process target.
                 cres = await self.tools.execute("confirm_create_object_idor",
                                                 {"base_url": base, "owner": pair[0], "attacker": pair[1],
-                                                 "app": app, "allow_write": self.mode == "full"}, session_id)
+                                                 "app": app,
+                                                 "allow_write": (self.mode == "full" or self.authenticated_scan)},
+                                                session_id)
                 for f in (cres.findings or []):
                     if self.mission_id:
                         try:
