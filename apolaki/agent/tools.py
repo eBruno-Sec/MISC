@@ -950,6 +950,7 @@ class ToolRegistry:
         self._sessions = {}
         self._session_shapes = {}   # role -> the exact winning login request shape (redacted), for honest reproduction
         self._login_attempts = 0
+        self._login_pw_by_key = {}   # (login_url, user) -> set of distinct password hashes tried (brute-force guard)
         # Codex Tier-3 #14: a provenance record per EXTERNAL tool execution (tool/binary/version/argv-hash/
         # timeout/exit-code/output-hash), surfaced at /mission/{sid}/tool-provenance. Fail-safe: never breaks
         # a scan. Secrets are redacted inside tool_provenance.record.
@@ -1475,10 +1476,20 @@ class ToolRegistry:
         user = inp.get("username") or inp.get("email") or ""
         pw = inp.get("password") or ""
         role = inp.get("role") or "default"
+        # Anti-brute-force = never iterate a PASSWORD list against an endpoint+user. Endpoint/identifier
+        # DISCOVERY (many login URLs / email-vs-username, ONE password each) is not brute-force, so we cap
+        # DISTINCT PASSWORDS per (login_url, user) — not the raw call count — plus a generous global bound.
         self._login_attempts += 1
-        if self._login_attempts > 8:
+        _bkey = (url, user)
+        _pset = self._login_pw_by_key.setdefault(_bkey, set())
+        if pw:
+            _pset.add(hash(pw))
+        if len(_pset) > 2:
             return ToolResult("acquire_session", url, False, "", [],
                               "login attempt cap reached (anti-brute-force): acquire_session does not iterate credentials")
+        if self._login_attempts > 40:
+            return ToolResult("acquire_session", url, False, "", [],
+                              "login discovery bound reached (bounded endpoint/identifier probing)")
         if not url or not self.scope.validate(url)[0]:
             return ToolResult("acquire_session", url, False, "", [], "SCOPE BLOCK: off-scope login URL")
         auth_header, identity = None, None

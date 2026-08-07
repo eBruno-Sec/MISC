@@ -1066,16 +1066,21 @@ class BBHAgent:
         Fully best-effort -- any missing attribute/error degrades to a no-op, never breaking a scan."""
         try:
             events = await self._do_scan_auth(session_id)
-        except Exception:
-            events = []
+        except Exception as e:
+            events = [{"type": "info", "content": "scan-auth artery error: %s: %s"
+                       % (type(e).__name__, str(e)[:180])}]
         for e in (events or []):
             yield e
         # Second half of the artery: mint same-privilege personas + run the two-user authorization
-        # matrix. Best-effort; a failure here never breaks the scan.
+        # matrix. Best-effort; a failure here never breaks the scan — but it is now SURFACED (a silently
+        # swallowed artery error is invisible and undebuggable, which is exactly how a persona-flow failure
+        # on a versioned/JSON API went unnoticed).
         try:
             pevents = await self._do_persona_authz(session_id)
-        except Exception:
-            pevents = []
+        except Exception as e:
+            import traceback
+            pevents = [{"type": "info", "content": "persona/authz artery error: %s: %s | %s"
+                        % (type(e).__name__, str(e)[:160], traceback.format_exc().splitlines()[-2][:120])}]
         for e in (pevents or []):
             yield e
 
@@ -1291,7 +1296,7 @@ class BBHAgent:
                     out.append(u)
             except Exception:
                 pass
-        return out[:6]
+        return out[:10]
 
     async def _run_service_packs(self, session_id: str) -> list:
         """Beyond-web: DISCOVER non-web services on the target, classify them, and RUN each matching
@@ -1585,6 +1590,12 @@ class BBHAgent:
             pm.add(_p.USER_A, identity="(discovered credential)", method="discovered", headers=scan_sess)
             minted.append(_p.USER_A)
         if not pm.session_roles():
+            # Observability (this was a silent dead-end): say WHY no persona was established so a
+            # register-ok-but-login-failed case on a versioned/JSON API is visible, not invisible.
+            events.append({"type": "info", "content":
+                           "Authorization matrix: no personas established (minted=%d, register candidates=%d) "
+                           "— account creation and/or login did not yield a session; supply operator accounts "
+                           "to test access control." % (len(minted), len(reg_cands))})
             return events
         pm.bind(self.tools)   # project persona sessions onto the live registry (_sessions + identities)
 
@@ -1831,7 +1842,7 @@ class BBHAgent:
                     out.append(u)
             except Exception:
                 pass
-        return out[:6]   # bounded — stays under the acquire_session anti-brute cap
+        return out[:10]  # bounded endpoint discovery (distinct-password anti-brute cap applies per endpoint)
 
     async def _probe_for_creds(self, base: str) -> list:
         """Bounded, polite fetch of the login page + common credential-disclosure pages, harvesting any
