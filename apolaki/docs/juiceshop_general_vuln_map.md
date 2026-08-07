@@ -68,6 +68,19 @@ difficulty / description for all 113) and cross-referenced against the Apolaki t
   noSqlCommand(sleep) (~5) — Apolaki refuses brute/DoS by rail.
 - **UI / trivia:** closeNotifications, securityPolicy, weakPassword (credential-guessing, no-brute rail).
 
+## UPDATE (2026-08-06): general mode now confirms real BOLA fully autonomously (proven on VAmPI)
+
+The "does general mode find real vulns" question was answered on a real vulnerable API (VAmPI — not a hardened
+CTF). After a chain of general fixes (bearer/JWT-in-JSON login; email/username login fallback; versioned
+auth-endpoint candidates; distinct-password anti-brute cap replacing the global call-count cap; general
+collection discovery + envelope unwrap + natural-key ids; the owner-attribution sensitive-read oracle), a
+single `/engage` on an UNSEEN target now runs **fully autonomously**: recon → register 2 personas → bearer
+login → authenticated re-crawl → authorization matrix → **5 CONFIRMED cross-user BOLA reads** (attacker reads
+apo_owner/admin/name1/name2 secrets), zero false positives, no lab hardcoding. Commits: 558e8f4 (bearer),
+c9880cf, b2d9307, e1b2c92-range, 75ff62d/9aed722 (BOLA engines), 2feeb29 (versioned auth+identifier),
+4931486 (anti-brute fix), b131943. This is the thesis — general techniques transfer to a new house —
+demonstrated end to end.
+
 ## Conclusion / next action
 
 The experiment Erwin proposed answered itself: **the general checklist already covers the vuln classes** —
