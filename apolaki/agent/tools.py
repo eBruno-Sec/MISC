@@ -5142,9 +5142,17 @@ class ToolRegistry:
                     hit = ssrf.analyze_reflection(r["body"], payload)
                     if hit:
                         findings.append(self._attach_poc(
-                            ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"]),
+                            ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"],
+                                                    credentials=bool(hit.get("credentials"))),
                             r["target"], r))
                         evidence_targets.append(r["target"])
+                        # confirmed cloud-credential capture feeds the attack chain (post-exploitation pivot)
+                        if hit.get("credentials"):
+                            try:
+                                self.state.add_capability("cloud_credentials_captured",
+                                                          "SSRF -> %s IMDS credential exfiltration" % hit["cloud"])
+                            except Exception:
+                                pass
                         confirmed = True
                         break
                 if confirmed:

@@ -87,17 +87,34 @@ METADATA_SIGNATURES = {
 }
 
 
-def analyze_reflection(body: str, payload_value: str = "") -> dict | None:
-    """Return {cloud, matched} when the response carries real metadata content.
+# Signatures that mean the leaked metadata literally carried IAM CREDENTIALS — the response IS the temporary
+# cloud credential set, i.e. confirmed credential EXFILTRATION (post-exploitation), not just metadata reach.
+# Presence only — the tool NEVER emits the secret value.
+_CREDENTIAL_SIGS = {
+    "AWS": ("AccessKeyId", "SecretAccessKey"),      # STS creds JSON from /iam/security-credentials/<role>
+    "GCP": ("ya29.", "access_token"),               # OAuth access token
+    "Azure": ("access_token",),
+    "Alibaba": ("AccessKeyId", "SecurityToken"),
+    "DigitalOcean": (),
+}
 
-    A signature only counts if it is NOT part of the injected URL (so echoing
-    the payload back does not produce a hit)."""
+
+def analyze_reflection(body: str, payload_value: str = "") -> dict | None:
+    """Return {cloud, matched, credentials} when the response carries real metadata content.
+
+    A signature only counts if it is NOT part of the injected URL (so echoing the payload back does not
+    produce a hit). `credentials` is True when the leaked content literally carried IAM credentials (e.g.
+    AccessKeyId+SecretAccessKey) — confirmed credential exfiltration, the critical escalation."""
     bl = body or ""
     pv = payload_value or ""
     for cloud, sigs in METADATA_SIGNATURES.items():
         hits = [s for s in sigs if s in bl and s not in pv]
         if hits:
-            return {"cloud": cloud, "matched": hits[:4]}
+            cred_sigs = _CREDENTIAL_SIGS.get(cloud, ())
+            cred_hits = [s for s in cred_sigs if s in bl and s not in pv]
+            # AWS/Alibaba creds are a key+secret PAIR (require >=2); GCP/Azure a single token is the credential
+            creds = len(cred_hits) >= (2 if cloud in ("AWS", "Alibaba") else 1)
+            return {"cloud": cloud, "matched": hits[:4], "credentials": creds}
     return None
 
 
@@ -151,23 +168,40 @@ def analyze_blind(open_r: dict, closed_r: dict, min_ratio: float = 3.0,
 
 
 # ── finding builders ─────────────────────────────────────────────
-def reflection_finding(url: str, param: str, payload: str, cloud: str, matched: list) -> dict:
+def reflection_finding(url: str, param: str, payload: str, cloud: str, matched: list,
+                       credentials: bool = False) -> dict:
     tgt = set_param(url, param, payload)
+    # When the leaked content literally carried IAM credentials, this is confirmed credential EXFILTRATION —
+    # sharpen the title/impact/tags so the report + attack graph treat it as post-exploitation cloud-cred
+    # capture (feeds the 'cloud_credentials_captured' capability), not merely "SSRF reaches metadata".
+    title = (f"IAM credential exfiltration via SSRF ('{param}' -> {cloud} metadata)" if credentials
+             else f"SSRF confirmed via '{param}' ({cloud} metadata)")
+    impact = (("The response CARRIED temporary %s IAM credentials — an attacker now holds working cloud "
+               "credentials (AccessKey/Secret/Token) and can call the cloud API as the instance role: full "
+               "account-level compromise. Rotate the exposed role credentials and enforce IMDSv2." % cloud)
+              if credentials else
+              ("Read cloud instance metadata and (on AWS IMDSv1) IAM role credentials, reach internal-only "
+               "services, and pivot into the private network. Metadata access typically yields temporary cloud "
+               "credentials — full account compromise."))
+    tags = ["ssrf", "cloud", "metadata"] + (["credential-theft", "imds"] if credentials else [])
     return {
-        "title": f"SSRF confirmed via '{param}' ({cloud} metadata)",
+        "title": title,
         "severity": "critical", "target": tgt,
         "description": (f"The parameter '{param}' causes the server to fetch an attacker-supplied URL. Pointing it at "
                         f"the {cloud} instance-metadata endpoint returned metadata content (matched: "
                         f"{', '.join(matched)}) — data that can only come from a request originating on the server to "
-                        "an internal-only address."),
-        "impact": ("Read cloud instance metadata and (on AWS IMDSv1) IAM role credentials, reach internal-only "
-                   "services, and pivot into the private network. Metadata access typically yields temporary cloud "
-                   "credentials — full account compromise."),
+                        "an internal-only address."
+                        + (" The response contained IAM CREDENTIAL material (key+secret) — confirmed credential "
+                           "exfiltration." if credentials else "")),
+        "impact": impact,
         "reproduction_steps": [f"Set '{param}' to {payload}",
                                f"Observe the response contains {cloud} metadata ({', '.join(matched)})",
                                "For AWS, request /latest/meta-data/iam/security-credentials/<role> to lift credentials"],
-        "evidence": f"matched {cloud} metadata: {', '.join(matched)}",
-        "cwe": "CWE-918", "family": "ssrf", "tags": ["ssrf"], "confidence": "confirmed",
+        "evidence": f"matched {cloud} metadata: {', '.join(matched)}"
+                    + (" (IAM credential material present — value redacted)" if credentials else ""),
+        "cwe": "CWE-918", "family": "ssrf", "tags": tags, "confidence": "confirmed",
+        "false_positive_check": ("signatures are metadata CONTENT not present in the injected URL, so an echoed "
+                                 "payload never matches; credential grade requires the key+secret pair in-body."),
     }
 
 
