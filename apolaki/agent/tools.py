@@ -155,6 +155,7 @@ TOOL_PERMISSIONS = {
     "confirm_idor": PermissionLevel.ACTIVE,        # deterministic IDOR/BOLA oracle-helper (auto-confirms)
     "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
     "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
+    "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
     "acquire_session": PermissionLevel.ACTIVE,     # single authorized login → reusable named session (anti-brute-force capped)
     "browser_navigate": PermissionLevel.ACTIVE,    # declarative headless-browser drive + client-state capture
     "test_numeric_abuse": PermissionLevel.INTRUSIVE,  # business-logic numeric boundary probing (gated, never finalizes)
@@ -2042,6 +2043,52 @@ class ToolRegistry:
         return ToolResult("create_object_idor", base, True,
                           json.dumps({"ran": True, "attempts": attempts, "created": created,
                                       "confirmed": len(findings), "details": details}), findings)
+
+    async def _confirm_read_object_idor(self, inp: dict) -> ToolResult:
+        """ACTIVE (read-only, no writes): cross-user READ BOLA on PRE-EXISTING / auto-created objects via an
+        ownership DIFFERENTIAL. For each discovered per-user collection: owner lists it, attacker lists it, an
+        id only the owner sees is provably owner-owned — if the attacker can then GET it and the response
+        carries that id, it's a CONFIRMED cross-user read (CWE-639). Zero false-positive: a public/shared
+        collection yields no owner-only ids. Bounded + scope-gated; only safe GETs are sent."""
+        import read_object_idor as _ro
+        import create_object_idor as _co
+        base = (inp.get("base_url") or "").strip().rstrip("/")
+        owner_h = dict(self._sessions.get(inp.get("owner"), {}))
+        atk_h = dict(self._sessions.get(inp.get("attacker"), {}))
+        if not base or not owner_h or not atk_h:
+            return ToolResult("read_object_idor", base, True,
+                              json.dumps({"ran": False, "note": "need base + two sessions"}), [])
+        colls = inp.get("collections") or _co.discover_collection_endpoints(
+            [str(u) for u in (getattr(self, "urls", []) or [])])
+        findings, details = [], []
+        for cpath in colls[:10]:
+            curl = base + cpath
+            if not self.scope.validate(curl)[0]:
+                continue
+            try:
+                orr, _ = await self._http_send("GET", curl, owner_h, None, True)
+                arr, _ = await self._http_send("GET", curl, atk_h, None, True)
+            except Exception:
+                continue
+            owner_only = _ro.owner_only_ids(orr.text, arr.text)
+            confirmed_here = 0
+            for oid in owner_only[:5]:
+                rurl = base + cpath.rstrip("/") + "/" + oid
+                if not self.scope.validate(rurl)[0]:
+                    continue
+                try:
+                    xr, _ = await self._http_send("GET", rurl, atk_h, None, True)
+                except Exception:
+                    continue
+                if _ro.confirm_read(xr.status_code, xr.text or "", oid):
+                    findings.append(_ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl))
+                    confirmed_here += 1
+            if owner_only:
+                details.append({"collection": cpath, "owner_only_ids": len(owner_only),
+                                "confirmed": confirmed_here})
+        return ToolResult("read_object_idor", base, True,
+                          json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
+                                      "details": details}), findings)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:
         """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the

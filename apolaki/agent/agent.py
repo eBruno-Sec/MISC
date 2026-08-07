@@ -1696,6 +1696,28 @@ class BBHAgent:
             except Exception:
                 pass
 
+        # 5d) READ-ONLY cross-user BOLA (general, no writes): ownership differential over per-user
+        #     collections — confirms cross-user READ on PRE-EXISTING / auto-created objects that the
+        #     create-object test cannot reach. Definitive + zero-FP.
+        if pair:
+            try:
+                rres = await self.tools.execute("confirm_read_object_idor",
+                                                {"base_url": base, "owner": pair[0], "attacker": pair[1]},
+                                                session_id)
+                for f in (rres.findings or []):
+                    if self.mission_id:
+                        try:
+                            f["id"] = db.add_finding(self.mission_id, f)
+                        except Exception:
+                            pass
+                    self.findings.append(f)
+                    events.append({"type": "finding", "finding": f})
+                if rres.findings:
+                    events.append({"type": "info", "content": "Read-object BOLA: %d confirmed cross-user "
+                                   "read(s) via ownership differential." % len(rres.findings)})
+            except Exception:
+                pass
+
         # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
         caps = pm.capabilities() + (["authenticated_surface_mapped"] if pm.session_roles() else [])
         for cap in caps:
