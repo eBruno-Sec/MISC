@@ -79,7 +79,11 @@ OBJECTIVES = (
      "summary": "Access control is enforced end-to-end (no broken access control).",
      "objective": "Confirm no broken-access-control violation was demonstrated.",
      "engine": ("run_bfla", "confirm_idor", "authz_matrix"),
-     "violated_by": ("access_control", "broken_access_control"), "verifiable": True},
+     # This is the UMBRELLA access-control property: ANY child access-control violation must fail it too,
+     # otherwise it could read "verified" while a child IDOR/BFLA is "failed" (#11 — a self-contradiction).
+     # So its violated_by subsumes every specific access-control family (idor/bola/bfla/priv-esc/mass-assign).
+     "violated_by": ("access_control", "broken_access_control", "idor", "bola", "bfla",
+                     "privilege_escalation", "mass_assignment"), "verifiable": True},
     {"chapter": "Authorization", "cid": "ATHZ-01", "level": 1,
      "summary": "Object-level authorization prevents access to others' resources (no IDOR/BOLA).",
      "objective": "Confirm object-level authz is enforced.",

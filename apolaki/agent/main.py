@@ -2359,8 +2359,21 @@ async def retest_findings(session_id: str, finding_id: str = ""):
     findings = db.get_findings(session_id) or []
     if finding_id:
         findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
-    # in-scope host guard: a retest may only re-hit a host the mission was scoped to
-    scope_hosts = {str(s).split("//")[-1].split("/")[0] for s in (m.get("in_scope") or []) if s}
+    # in-scope guard: a retest may only re-hit a target the mission was scoped to. Rebuild the mission's
+    # ScopeEngine from m["scope"] (the CORRECT shape — the old m.get("in_scope") always read empty because
+    # scope lives at m["scope"]["in_scope"], so the guard silently NEVER fired, #9) and validate EVERY
+    # retest URL — host, pinned port, and pinned path included.
+    import scope as _scope
+    _sc = m.get("scope") or {}
+    _scoped = bool(_sc.get("in_scope"))
+    _eng = None
+    if _scoped:
+        _eng = _scope.ScopeEngine()
+        try:
+            _eng.load_manual(_sc.get("bases") or _sc.get("in_scope") or [], _sc.get("out_of_scope") or [],
+                             _sc.get("program") or "Program")
+        except Exception:
+            _eng = None
     results, summary = [], {"open": 0, "closed": 0, "inconclusive": 0, "not_retestable": 0}
     async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
         for f in findings:
@@ -2371,10 +2384,9 @@ async def retest_findings(session_id: str, finding_id: str = ""):
                 results.append({**base, "verdict": "not_retestable", "detail": plan.get("reason", "")})
                 continue
             url = plan["url"]
-            host = url.split("//")[-1].split("/")[0]
-            if scope_hosts and host not in scope_hosts:
+            if _eng is not None and not _eng.validate(url)[0]:
                 summary["inconclusive"] += 1
-                results.append({**base, "verdict": "inconclusive", "detail": "target host out of mission scope"})
+                results.append({**base, "verdict": "inconclusive", "detail": "target out of mission scope"})
                 continue
             try:
                 r = await c.get(url)
@@ -2885,13 +2897,16 @@ async def add_finding(session_id: str, finding: dict):
 @app.put("/findings/{session_id}/{fid}")
 async def update_finding(session_id: str, fid: str, finding: dict):
     _require_mission(session_id)
-    db.update_finding(fid, finding)
+    if not db.update_finding(session_id, fid, finding):   # scoped to (mission, id) — no cross-mission write
+        raise HTTPException(404, "finding not found in this mission")
     return {"ok": True}
 
 
 @app.delete("/findings/{session_id}/{fid}")
 async def delete_finding(session_id: str, fid: str):
-    db.delete_finding(fid)
+    _require_mission(session_id)                          # was unguarded — require the mission first
+    if not db.delete_finding(session_id, fid):            # scoped to (mission, id) — no cross-mission delete
+        raise HTTPException(404, "finding not found in this mission")
     return {"ok": True}
 
 
@@ -2914,7 +2929,7 @@ async def capture_finding_poc(session_id: str, fid: str):
     merged = dict(finding)
     merged["poc_screenshot"] = shot["png_b64"][:1200000]
     merged["poc_url"] = url
-    db.update_finding(fid, merged)
+    db.update_finding(session_id, fid, merged)            # scoped to (mission, id) — tenant isolation (#10)
     return {"ok": True, "bytes": shot.get("bytes"), "attached_to": fid}
 
 

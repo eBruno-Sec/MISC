@@ -144,6 +144,19 @@ def delete_mission(mid: str) -> None:
 
 # ── Findings ─────────────────────────────────────────────────────
 def add_finding(mid: str, finding: dict) -> str:
+    """Persist a CONFIRMED finding — the single write chokepoint, so the central finding-gate is
+    enforced here for EVERY producer (deterministic tools, the model's store_finding, API paths):
+      * schema-normalize (reproduction_steps -> list, safe defaults)   [#6]
+      * REJECT a finding whose target is provably out of the mission scope (returns "" — not written) [#8]
+      * ROUTE a lead-confidence finding to the mission's leads list, never the confirmed table          [#7]
+    Fail-open on scope only when scope is absent / the target has no host (we block only proven-off-scope)."""
+    import findings_gate as _fg
+    finding = _fg.normalize(finding)
+    scope = (get_mission(mid) or {}).get("scope") or {}
+    if _fg.off_scope(finding, scope):
+        return ""                                        # off-scope: refuse to persist (safety #8)
+    if _fg.is_lead(finding):
+        return add_lead(mid, finding)                    # not a confirmed finding -> leads (truth #7)
     fid = finding.get("id") or uuid.uuid4().hex[:12]
     finding["id"] = fid
     _exec("INSERT OR REPLACE INTO findings VALUES(?,?,?,?)",
@@ -151,18 +164,49 @@ def add_finding(mid: str, finding: dict) -> str:
     return fid
 
 
+def add_lead(mid: str, lead: dict) -> str:
+    """Append an UNPROVEN lead to the mission's leads list (mission context), NOT the confirmed-findings
+    table. Keeps leads first-class + surfaced in the report's Unconfirmed-Leads section without ever being
+    counted as a confirmed finding. Bounded to the most-recent 200. Returns the lead id."""
+    lid = lead.get("id") or uuid.uuid4().hex[:12]
+    lead["id"] = lid
+    m = get_mission(mid)
+    if not m:
+        return lid
+    ctx = m.get("context") or {}
+    leads = list(ctx.get("leads") or [])
+    if not any((l or {}).get("id") == lid for l in leads):
+        leads.append(lead)
+    ctx["leads"] = leads[-200:]
+    update_mission(mid, context=ctx)
+    return lid
+
+
 def get_findings(mid: str) -> list:
     return [json.loads(r["data"]) for r in _query(
         "SELECT data FROM findings WHERE mission_id=? ORDER BY created_at", (mid,))]
 
 
-def update_finding(fid: str, finding: dict) -> None:
+def get_finding(mid: str, fid: str):
+    """One finding scoped to its mission — None if the id doesn't belong to this mission (tenant isolation)."""
+    rows = _query("SELECT data FROM findings WHERE mission_id=? AND id=?", (mid, fid))
+    return json.loads(rows[0]["data"]) if rows else None
+
+
+def update_finding(mid: str, fid: str, finding: dict) -> bool:
+    """Update a finding ONLY within its own mission — the WHERE clause pins BOTH mission_id AND id so a
+    finding id from one mission can never mutate another mission's row (tenant isolation, #10). Returns
+    True when a row was actually updated."""
     finding["id"] = fid
-    _exec("UPDATE findings SET data=? WHERE id=?", (json.dumps(finding), fid))
+    cur = _exec("UPDATE findings SET data=? WHERE mission_id=? AND id=?", (json.dumps(finding), mid, fid))
+    return bool(getattr(cur, "rowcount", 0))
 
 
-def delete_finding(fid: str) -> None:
-    _exec("DELETE FROM findings WHERE id=?", (fid,))
+def delete_finding(mid: str, fid: str) -> bool:
+    """Delete a finding ONLY within its own mission (WHERE mission_id AND id) — cross-mission delete by a
+    bare finding id is impossible (tenant isolation, #10). Returns True when a row was actually removed."""
+    cur = _exec("DELETE FROM findings WHERE mission_id=? AND id=?", (mid, fid))
+    return bool(getattr(cur, "rowcount", 0))
 
 
 def finding_counts(mid: str) -> dict:

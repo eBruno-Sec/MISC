@@ -156,6 +156,9 @@ TOOL_PERMISSIONS = {
     "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
     "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
     "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
+    "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
+    "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
+    "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
     "acquire_session": PermissionLevel.ACTIVE,     # single authorized login → reusable named session (anti-brute-force capped)
     "browser_navigate": PermissionLevel.ACTIVE,    # declarative headless-browser drive + client-state capture
     "test_numeric_abuse": PermissionLevel.INTRUSIVE,  # business-logic numeric boundary probing (gated, never finalizes)
@@ -1453,6 +1456,13 @@ class ToolRegistry:
             verdict = _ci.analyze(url=url, headers=dict(r.headers))
             if verdict.get("is_cloud"):
                 _ci.to_graph_facts(self.graph, _up(url).netloc, verdict)
+            # #13: remember any discovered object-storage URL so the orchestrator can actively probe it
+            # for public listing (run_cloud_probe). Was an island — the tool existed but nothing fed it.
+            if _ci.storage_bucket(url):
+                if not hasattr(self, "cloud_bucket_urls"):
+                    self.cloud_bucket_urls = []
+                if url not in self.cloud_bucket_urls:
+                    self.cloud_bucket_urls.append(url)
         except Exception:
             pass
 
@@ -1986,7 +1996,9 @@ class ToolRegistry:
                     continue
                 items = _co.first_object_list(data)          # general envelope unwrap (data/Books/results/…)
                 sample = items[0] if items else None
-                spec = _co.build_spec_from_sample(cpath, sample, _co.new_marker()) if sample else None
+                # derive with the {marker} PLACEHOLDER (default) — the driver stamps a fresh live marker per
+                # attempt below, so the verdict checks the marker actually sent (fixes derived-spec false-neg)
+                spec = _co.build_spec_from_sample(cpath, sample) if sample else None
                 if spec:
                     specs.append(spec)
                     seen.add(cpath)
@@ -2075,7 +2087,7 @@ class ToolRegistry:
                               json.dumps({"ran": False, "note": "need base + two sessions"}), [])
         colls = inp.get("collections") or _co.discover_collection_endpoints(
             [str(u) for u in (getattr(self, "urls", []) or [])])
-        findings, details = [], []
+        findings, leads, details = [], [], []
         for cpath in colls[:10]:
             curl = base + cpath
             if not self.scope.validate(curl)[0]:
@@ -2099,10 +2111,14 @@ class ToolRegistry:
                     findings.append(_ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl))
                     confirmed_here += 1
             # Owner-attribution oracle (fits SHARED-listing APIs like VAmPI): an object whose DETAIL is
-            # attributed to a different user and leaks a sensitive field the shared listing hid = confirmed
-            # cross-user read. Needs the attacker's own identity to define "foreign".
-            ident = str(inp.get("attacker_identity") or "")
-            if ident:
+            # attributed to a DIFFERENT principal and leaks a sensitive field the listing hid = cross-user
+            # read. Needs the attacker's OWN identifiers (email + username + numeric id if known) to define
+            # "foreign" without false-positives; a non-comparable owner scheme yields a LEAD, not a confirm.
+            idents = inp.get("attacker_identities")
+            if not idents and inp.get("attacker_identity"):
+                idents = [inp.get("attacker_identity")]
+            lead_here = 0
+            if idents:
                 for oid in sorted(_ro.extract_ids(arr.text))[:8]:
                     rurl = base + cpath.rstrip("/") + "/" + oid
                     if not self.scope.validate(rurl)[0]:
@@ -2111,16 +2127,22 @@ class ToolRegistry:
                         xr2, _ = await self._http_send("GET", rurl, atk_h, None, True)
                     except Exception:
                         continue
-                    hit = _ro.foreign_sensitive_read(xr2.status_code, xr2.text or "", ident)
-                    if hit:
-                        findings.append(_ro.foreign_finding(cpath, oid, hit, inp.get("attacker"), rurl))
+                    hit = _ro.foreign_sensitive_read(xr2.status_code, xr2.text or "", idents)
+                    if not hit:
+                        continue
+                    f = _ro.foreign_finding(cpath, oid, hit, inp.get("attacker"), rurl)
+                    if hit.get("confidence") == "confirmed":
+                        findings.append(f)
                         confirmed_here += 1
-            if owner_only or confirmed_here:
+                    else:
+                        leads.append(f)
+                        lead_here += 1
+            if owner_only or confirmed_here or lead_here:
                 details.append({"collection": cpath, "owner_only_ids": len(owner_only),
-                                "confirmed": confirmed_here})
+                                "confirmed": confirmed_here, "leads": lead_here})
         return ToolResult("read_object_idor", base, True,
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
-                                      "details": details}), findings)
+                                      "leads": len(leads), "lead_findings": leads, "details": details}), findings)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:
         """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the

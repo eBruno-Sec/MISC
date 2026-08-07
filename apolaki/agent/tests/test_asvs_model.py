@@ -71,6 +71,20 @@ def test_real_emitted_families_fail_their_objective_even_when_engine_ran():
     assert comm3["status"] == "failed" and comm3["finding_ids"] == ["B"]
 
 
+def test_umbrella_access_control_fails_when_any_child_violation_exists():
+    # #11 regression: ATHZ-00 is the UMBRELLA "no broken access control" property. A confirmed idor/bola/
+    # bfla/privilege_escalation/mass_assignment must FAIL it too — it can never read "verified" while a
+    # specific access-control child is failed (that self-contradiction was the bug).
+    ran = {"run_bfla", "confirm_idor", "authz_matrix", "run_mass_assignment"}
+    for fam, child_cid in (("idor", "ATHZ-01"), ("bola", "ATHZ-01"), ("bfla", "ATHZ-02"),
+                           ("privilege_escalation", "ATHZ-02"), ("mass_assignment", "ATHZ-04")):
+        r = A.assess([{"id": "X", "family": fam}], attempted_engines=ran)
+        athz0 = next(o for o in r["objectives"] if o["cid"] == "ATHZ-00")
+        child = next(o for o in r["objectives"] if o["cid"] == child_cid)
+        assert athz0["status"] == "failed", "ATHZ-00 must fail for child family %s" % fam
+        assert child["status"] == "failed"
+
+
 def test_untested_is_not_verified():
     r = A.assess()          # nothing ran
     assert r["tally"]["verified"] == 0

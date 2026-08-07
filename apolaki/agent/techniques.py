@@ -246,7 +246,9 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
 
     # distilled from OWASP WSTG / PortSwigger material (RedCyber corpus) — "Path confusion: web cache deception".
     _t(id="cache_deception", vuln_class="cache_deception", cwe="CWE-525", owasp="A05:2021",
-       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-05",
+       # WSTG-CONF-13 "Path Confusion" (the catalog already maps CONF-13 -> run_cache_deception). The old
+       # WSTG-ATHZ-05 was OAuth Weaknesses — a taxonomy drift that showed the technique (unmapped) at runtime (#12).
+       permission=ACTIVE, transferable=True, wstg="WSTG-CONF-13",
        summary="Web cache deception: a path-confused URL (/account/x.css) caches the victim's private page.",
        detect="The origin serves the private page for a fake static suffix; an ANONYMOUS fetch of the same "
               "URL then returns tokens private to the authenticated page — only the cache could have served them.",
@@ -812,6 +814,10 @@ _WSTG = {
     "business_logic_abuse": "WSTG-BUSL-01", "race_condition": "WSTG-BUSL-09",
     "weak_secret_forgery": "WSTG-CRYP-04", "encoded_data_decode": "WSTG-CRYP-04",
     "jsonp_info_leak": "WSTG-CLNT-11", "csti": "WSTG-CLNT-13",
+    # cache_deception -> Path Confusion. This `_WSTG` map is AUTHORITATIVE at runtime (line ~854 overwrites
+    # each record's wstg from it), so the fix must live HERE — cache_deception was simply absent, which is
+    # why the runtime showed it (unmapped) even though its _t() carried a wstg kwarg (#12).
+    "cache_deception": "WSTG-CONF-13",
 }
 # MITRE ATT&CK is an adversary-TTP lens — deliberately coarse for web-app bugs; mapped only
 # where a technique genuinely corresponds, None elsewhere (honest gaps rather than forced fits).

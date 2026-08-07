@@ -30,3 +30,20 @@ def test_build_spec_from_sample_stamps_marker_and_drops_server_fields():
 def test_build_spec_none_without_string_field():
     assert C.build_spec_from_sample("/api/Nums", {"id": 1, "count": 5}, "M") is None
     assert C.build_spec_from_sample("/api/x", "not a dict", "M") is None
+
+
+def test_derived_spec_defaults_to_marker_placeholder():
+    """Defect #3 regression: a derived spec (no explicit marker) must carry the literal ``{marker}``
+    PLACEHOLDER — NOT a concrete value baked at derivation time. The live driver stamps one fresh marker
+    per attempt via body.replace("{marker}", live), so the verdict always checks the marker actually sent.
+    A concrete baked marker never matched the driver's freshly-generated one => confirmed reads went silently
+    missing (false negative)."""
+    sample = {"id": 7, "book_title": "some long-enough title", "secret": "s"}
+    spec = C.build_spec_from_sample("/books/v1", sample)          # no marker arg -> default placeholder
+    body = json.loads(spec["create"]["body"])
+    assert spec["marker_field"] == "book_title" and spec["natural_key"] is True
+    assert body["book_title"] == "{marker}"                       # placeholder, not a concrete marker
+    # the driver's substitution reaches a real value the verdict can then match
+    live = C.new_marker()
+    sent = spec["create"]["body"].replace("{marker}", live)
+    assert live in sent and "{marker}" not in sent

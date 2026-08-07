@@ -105,10 +105,15 @@ def first_object_list(data) -> list:
     return []
 
 
-def build_spec_from_sample(path: str, sample: dict, marker: str) -> dict:
+def build_spec_from_sample(path: str, sample: dict, marker: str = "{marker}") -> dict:
     """Build a create-object IDOR spec from ONE sample object of a collection (learned from a GET). Mirrors
     the sample's field types, drops server-assigned fields, and stamps the marker into the longest string
-    field so a cross-user read can be PROVEN (returns None when no suitable string field exists). Pure."""
+    field so a cross-user read can be PROVEN (returns None when no suitable string field exists). Pure.
+
+    `marker` defaults to the literal ``{marker}`` PLACEHOLDER (not a concrete value): the live driver stamps
+    one fresh marker per attempt via ``body.replace("{marker}", live)``, exactly like the hardcoded specs, so
+    the verdict always checks the marker that was actually sent (fixes the derived-spec false-negative where a
+    concrete baked marker never matched the driver's freshly-generated one)."""
     if not isinstance(sample, dict):
         return None
     body, str_fields = {}, []

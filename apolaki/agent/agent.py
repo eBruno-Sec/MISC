@@ -100,6 +100,7 @@ _AUTO_STORE_TOOLS = {
     "run_content_discovery", "run_ffuf", "run_nmap_vuln", "run_param_mine", "run_anomaly_scan",
     # investigative + exploitation tools (their confirmed findings must persist too)
     "run_dir_harvest", "confirm_idor", "run_metadata", "run_sourcemap", "test_numeric_abuse",
+    "run_cloud_probe",   # public-bucket listing is confirmed-by-oracle; auto-store it (#13, was an island)
 }
 # Confirmatory tools that emit no per-finding confidence grade — their results are
 # confirmed by construction (a template/active-scan/fingerprint match). Everything
@@ -405,6 +406,28 @@ class BBHAgent:
         })[:3500]
         yield {"_content": content}
 
+    async def _exec_internal(self, tool_name: str, tool_input: dict, session_id: str):
+        """Central GATED dispatch for the internal (non-model) tool calls the auth artery + service sweep
+        make directly. Enforces the SAME passive-mode + intrusive-HITL gates as _run_tool so an internal
+        caller can NEVER bypass them (#2 — previously these called self.tools.execute() straight through,
+        skipping both gates). Scope is enforced inside tools.execute(). A blocked call returns a
+        ran:false ToolResult with no findings (never raises), so callers keep their .findings handling."""
+        import tools as _tm
+        perm = TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)
+        # passive mode forbids any non-passive LIVE contact
+        if self.mode == "passive" and perm != PermissionLevel.PASSIVE:
+            return _tm.ToolResult(tool_name, "", True,
+                                  json.dumps({"ran": False, "blocked": "passive mode: %s not permitted" % tool_name}), [])
+        # intrusive (state-changing) tools require operator approval — or an autonomous pre-authorization,
+        # mirroring _run_tool's HITL gate exactly (auto_approve pre-authorizes the intrusive phase once).
+        if perm == PermissionLevel.INTRUSIVE:
+            if self.intrusive_state is None and self.auto_approve:
+                self.intrusive_state = "approved"
+            if self.intrusive_state != "approved":
+                return _tm.ToolResult(tool_name, "", True,
+                                      json.dumps({"ran": False, "blocked": "intrusive tool not approved (HITL)"}), [])
+        return await self.tools.execute(tool_name, tool_input, session_id)
+
     def _is_confirmed(self, tool: str, f: dict) -> bool:
         """A finding is report-worthy CONFIRMED only when the probe says so. The
         native tools grade every finding (confirmed / candidate / possible /
@@ -655,7 +678,7 @@ class BBHAgent:
             elif fam == "exposed_files":
                 rec["attempted"] = True
                 try:
-                    r = await self.tools.execute("run_exposure", {"base_url": n["raw_target"] or self._primary_base()}, session_id)
+                    r = await self._exec_internal("run_exposure", {"base_url": n["raw_target"] or self._primary_base()}, session_id)  # gated (#2)
                     if r.findings:
                         promoted = r.findings[0]; state = cp.CONFIRMED
                         rec["evidence"] = "content/type signature matched: " + str(r.output or "")[:120]
@@ -672,7 +695,7 @@ class BBHAgent:
                 else:
                     rec["attempted"] = True
                     try:
-                        r = await self.tools.execute("run_stored_xss", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                        r = await self._exec_internal("run_stored_xss", {"url": n["raw_target"] or self._primary_base()}, session_id)  # gated (#2)
                         if r.findings:
                             promoted = r.findings[0]; state = cp.CONFIRMED
                             rec["evidence"] = "canary stored + re-read + executed: " + str(r.output or "")[:100]
@@ -688,7 +711,7 @@ class BBHAgent:
                 else:
                     rec["attempted"] = True
                     try:
-                        r = await self.tools.execute("run_bfla", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                        r = await self._exec_internal("run_bfla", {"url": n["raw_target"] or self._primary_base()}, session_id)  # gated (#2)
                         if r.findings:
                             promoted = r.findings[0]; state = cp.CONFIRMED
                             rec["evidence"] = "low-priv session performed a prohibited action: " + str(r.output or "")[:100]
@@ -844,6 +867,8 @@ class BBHAgent:
         strategy, before the scan, so the harvest drives the run instead of sitting in a dashboard."""
         import asyncio
         import codeintel
+        if self.mode == "passive":     # SAFETY (#1): harvesting served JS is LIVE target contact — never in passive
+            return
         base = self._primary_base()
         if not base:
             return
@@ -1307,6 +1332,8 @@ class BBHAgent:
         import service_router as _sr
         from urllib.parse import urlparse as _up
         events = []
+        if self.mode == "passive":     # SAFETY (#1): socket scan + service packs are LIVE contact — never in passive
+            return events
         recon = getattr(self.tools, "recon", {}) or {}
         base = self._primary_base()
         host = (_up(base).hostname if base else "") or recon.get("target") or recon.get("domain") or ""
@@ -1340,9 +1367,9 @@ class BBHAgent:
         async def _run_pack(s):
             async with _sem:
                 try:
-                    return await self.tools.execute("run_service_pack",
-                                                    {"host": s["host"], "port": s["port"],
-                                                     "service": s["service"]}, session_id)
+                    return await self._exec_internal("run_service_pack",       # gated (#2)
+                                                     {"host": s["host"], "port": s["port"],
+                                                      "service": s["service"]}, session_id)
                 except Exception:
                     return None
         ran = 0
@@ -1362,6 +1389,32 @@ class BBHAgent:
             events.append({"type": "info", "content": "Ran %d network service pack(s) from the port "
                            "scan (beyond-web execution)." % ran})
         return events
+
+    async def _probe_cloud_storage(self, session_id: str):
+        """#13: for every object-storage URL the scan discovered (tools.cloud_bucket_urls, populated during
+        response harvest), actively run the public-listing oracle (run_cloud_probe) through the gated
+        dispatch. A confirmed public bucket becomes a real finding + graph node. Scope-gated, read-only GET,
+        no credentials; skipped in passive mode (run_cloud_probe is ACTIVE, so _exec_internal blocks it)."""
+        buckets = list(getattr(self.tools, "cloud_bucket_urls", []) or [])
+        probed = 0
+        seen = set()
+        for url in buckets[:8]:
+            if url in seen or not self.scope.validate(url)[0]:
+                continue
+            seen.add(url)
+            res = await self._exec_internal("run_cloud_probe", {"url": url}, session_id)
+            probed += 1
+            for f in (res.findings or []):
+                if self.mission_id:
+                    try:
+                        f["id"] = db.add_finding(self.mission_id, f)
+                    except Exception:
+                        pass
+                self.findings.append(f)
+                yield {"type": "finding", "finding": f}
+        if probed:
+            yield {"type": "info", "content": "Probed %d discovered cloud-storage URL(s) for public "
+                   "listing (run_cloud_probe)." % probed}
 
     async def _authenticated_recrawl(self, roles, base, session_id) -> list:
         """Per-persona authenticated pass. For EACH session persona, GET a set of common authed routes
@@ -1636,10 +1689,10 @@ class BBHAgent:
         if pair and pm.get(pair[0]):
             p0 = pm.get(pair[0])
             owner_identity = p0.identity or (p0.account or {}).get("email", "")
-        res = await self.tools.execute("run_authz_matrix",
-                                       {"base_url": base, "roles": roles, "operations": operations,
-                                        "pair": list(pair) if pair else None,
-                                        "owner_identity": owner_identity}, session_id)
+        res = await self._exec_internal("run_authz_matrix",       # gated (#2)
+                                        {"base_url": base, "roles": roles, "operations": operations,
+                                         "pair": list(pair) if pair else None,
+                                         "owner_identity": owner_identity}, session_id)
         # real per-persona transport counters from the matrix (CHAD #2) — attempted/succeeded auth
         # requests, status distribution, endpoints touched. Stored in _auth_artery below as PROOF.
         try:
@@ -1662,9 +1715,9 @@ class BBHAgent:
                          if f.get("family") == "idor" and "write" not in (f.get("tags") or [])]
             for tgt in read_idor[:5]:
                 try:
-                    wr = await self.tools.execute("confirm_authz_write",
-                                                  {"target_url": tgt, "owner_session": pair[0],
-                                                   "attacker_session": pair[1]}, session_id)
+                    wr = await self._exec_internal("confirm_authz_write",       # gated INTRUSIVE (#2)
+                                                   {"target_url": tgt, "owner_session": pair[0],
+                                                    "attacker_session": pair[1]}, session_id)
                 except Exception:
                     continue
                 for f in (wr.findings or []):
@@ -1687,11 +1740,11 @@ class BBHAgent:
                 # state-changing account creation, so the same opt-in authorizes this bounded object-create —
                 # enabling confirmed BOLA in active mode without the heavy full-mode tooling that can overload
                 # a fragile single-process target.
-                cres = await self.tools.execute("confirm_create_object_idor",
-                                                {"base_url": base, "owner": pair[0], "attacker": pair[1],
-                                                 "app": app,
-                                                 "allow_write": (self.mode == "full" or self.authenticated_scan)},
-                                                session_id)
+                cres = await self._exec_internal("confirm_create_object_idor",   # gated INTRUSIVE (#2)
+                                                 {"base_url": base, "owner": pair[0], "attacker": pair[1],
+                                                  "app": app,
+                                                  "allow_write": (self.mode == "full" or self.authenticated_scan)},
+                                                 session_id)
                 for f in (cres.findings or []):
                     if self.mission_id:
                         try:
@@ -1720,11 +1773,15 @@ class BBHAgent:
         if pair:
             try:
                 _atk = pm.get(pair[1])
-                _atk_ident = (_atk.identity if _atk else "") or (getattr(_atk, "account", {}) or {}).get("email", "")
-                rres = await self.tools.execute("confirm_read_object_idor",
-                                                {"base_url": base, "owner": pair[0], "attacker": pair[1],
-                                                 "attacker_identity": _atk_ident},
-                                                session_id)
+                _acct = (getattr(_atk, "account", {}) or {}) if _atk else {}
+                # pass ALL known reader identifiers (email + username + identity) so the owner-attribution
+                # oracle only confirms a provably-different principal (no numeric-owner-vs-email false positive)
+                _atk_ids = [x for x in ((_atk.identity if _atk else ""), _acct.get("email"),
+                                        _acct.get("username")) if x]
+                rres = await self._exec_internal("confirm_read_object_idor",     # gated (#2)
+                                                 {"base_url": base, "owner": pair[0], "attacker": pair[1],
+                                                  "attacker_identities": _atk_ids},
+                                                 session_id)
                 for f in (rres.findings or []):
                     if self.mission_id:
                         try:
@@ -1900,15 +1957,21 @@ class BBHAgent:
 
         # Deterministic code-intelligence recon: mine the target's served JS, seed the scan surface,
         # and raise sensitive-route + business-logic leads BEFORE the scan runs (every strategy).
-        async for ev in self._recon_code_intelligence(session_id):
-            yield ev
-
-        # Beyond-web: turn the port scan into service-pack EXECUTION (nmap -> classify -> run pack).
-        try:
-            for ev in await self._run_service_packs(session_id):
+        # SAFETY (#1): both this (fetches served JS) and the service-pack sweep (socket scan + packs) make
+        # LIVE target contact, so they are skipped in PASSIVE mode — passive = OSINT only, no direct contact.
+        if self.mode == "passive":
+            yield {"type": "info", "content": "PASSIVE mode: skipping served-JS code-intelligence and the "
+                   "network service-pack sweep (both make live target contact)."}
+        else:
+            async for ev in self._recon_code_intelligence(session_id):
                 yield ev
-        except Exception:
-            pass
+
+            # Beyond-web: turn the port scan into service-pack EXECUTION (nmap -> classify -> run pack).
+            try:
+                for ev in await self._run_service_packs(session_id):
+                    yield ev
+            except Exception:
+                pass
 
         # Authenticated scanning: discover credentials the target exposes (or inherit them from a prior
         # scan) and log in, so the whole assessment runs as a real user (every strategy, active/full only).
@@ -1974,6 +2037,10 @@ class BBHAgent:
                        " — the deterministic coverage floor already completed for this run."}
                 yield {"type": "complete", "content": f"Agentic run completed on the deterministic "
                        f"coverage floor ({floor_steps} step(s)). See Playbooks and the report."}
+        # #13: actively probe every object-storage URL discovered during the scan for a public listing
+        # (run_cloud_probe) — turns cloud fingerprinting into confirmed cloud exposure (was an island).
+        async for ev in self._probe_cloud_storage(session_id):
+            yield ev
         # Deterministic technique advisor: consult the knowledge model for the top applicable
         # techniques given the surface + confirmed findings, raised as prioritized leads (every strategy).
         async for ev in self._technique_advisor(session_id):
@@ -2540,7 +2607,7 @@ class BBHAgent:
             f["owasp"] = ann["owasp"]
             existing = f.get("analyst_notes", "")
             f["analyst_notes"] = (existing + " | " + ann["analyst_notes"]).strip(" |") if existing else ann["analyst_notes"]
-            db.update_finding(f["id"], f)
+            db.update_finding(self.mission_id, f["id"], f)   # scoped to (mission, id) — tenant isolation (#10)
         m = db.get_mission(self.mission_id)
         ctx = (m or {}).get("context", {})
         ctx["chains"] = result["chains"]
