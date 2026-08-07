@@ -1973,8 +1973,8 @@ class ToolRegistry:
                     data = json.loads(gr.text or "")
                 except Exception:
                     continue
-                items = data.get("data") if isinstance(data, dict) else data
-                sample = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+                items = _co.first_object_list(data)          # general envelope unwrap (data/Books/results/…)
+                sample = items[0] if items else None
                 spec = _co.build_spec_from_sample(cpath, sample, _co.new_marker()) if sample else None
                 if spec:
                     specs.append(spec)
@@ -2000,6 +2000,10 @@ class ToolRegistry:
                 continue
             attempts += 1
             oid = _co.extract_id(cr.status_code, cr.text, (dict(cr.headers or {})).get("Location", ""))
+            # Natural-key resources (keyed by title/slug/username — e.g. VAmPI /books/v1/{title}) return no
+            # numeric id; the read key IS the marker we put in the key field. Fall back to it.
+            if not oid and spec.get("natural_key") and _co._accessed(cr.status_code):
+                oid = marker
             read_s, read_b, del_s = None, "", None
             if oid and spec.get("read"):
                 rurl = base + spec["read"].replace("{id}", oid)
@@ -2083,7 +2087,24 @@ class ToolRegistry:
                 if _ro.confirm_read(xr.status_code, xr.text or "", oid):
                     findings.append(_ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl))
                     confirmed_here += 1
-            if owner_only:
+            # Owner-attribution oracle (fits SHARED-listing APIs like VAmPI): an object whose DETAIL is
+            # attributed to a different user and leaks a sensitive field the shared listing hid = confirmed
+            # cross-user read. Needs the attacker's own identity to define "foreign".
+            ident = str(inp.get("attacker_identity") or "")
+            if ident:
+                for oid in sorted(_ro.extract_ids(arr.text))[:8]:
+                    rurl = base + cpath.rstrip("/") + "/" + oid
+                    if not self.scope.validate(rurl)[0]:
+                        continue
+                    try:
+                        xr2, _ = await self._http_send("GET", rurl, atk_h, None, True)
+                    except Exception:
+                        continue
+                    hit = _ro.foreign_sensitive_read(xr2.status_code, xr2.text or "", ident)
+                    if hit:
+                        findings.append(_ro.foreign_finding(cpath, oid, hit, inp.get("attacker"), rurl))
+                        confirmed_here += 1
+            if owner_only or confirmed_here:
                 details.append({"collection": cpath, "owner_only_ids": len(owner_only),
                                 "confirmed": confirmed_here})
         return ToolResult("read_object_idor", base, True,

@@ -1701,8 +1701,11 @@ class BBHAgent:
         #     create-object test cannot reach. Definitive + zero-FP.
         if pair:
             try:
+                _atk = pm.get(pair[1])
+                _atk_ident = (_atk.identity if _atk else "") or (getattr(_atk, "account", {}) or {}).get("email", "")
                 rres = await self.tools.execute("confirm_read_object_idor",
-                                                {"base_url": base, "owner": pair[0], "attacker": pair[1]},
+                                                {"base_url": base, "owner": pair[0], "attacker": pair[1],
+                                                 "attacker_identity": _atk_ident},
                                                 session_id)
                 for f in (rres.findings or []):
                     if self.mission_id:

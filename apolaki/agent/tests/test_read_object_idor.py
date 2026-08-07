@@ -33,3 +33,21 @@ def test_finding_is_confirmed_bola():
     f = R.finding("/api/Addresss", "5", "user_a", "user_b", "http://app/api/Addresss/5")
     assert f["confidence"] == "confirmed" and f["family"] == "idor" and f["cwe"] == "CWE-639"
     assert "cross-user" in f["description"].lower()
+
+
+def test_foreign_sensitive_read_confirms_cross_user_secret():
+    body = json.dumps({"book_title": "b1", "owner": "alice", "secret": "TOPSECRET"})
+    hit = R.foreign_sensitive_read(200, body, "bob")          # bob reading alice's secret
+    assert hit and hit["owner"] == "alice" and "secret" in hit["sensitive_fields"]
+
+
+def test_foreign_sensitive_read_zero_fp():
+    own = json.dumps({"book_title": "b1", "owner": "bob", "secret": "x"})
+    assert R.foreign_sensitive_read(200, own, "bob") is None   # reading your OWN object is not BOLA
+    nosec = json.dumps({"book_title": "b1", "owner": "alice"})
+    assert R.foreign_sensitive_read(200, nosec, "bob") is None # no sensitive field -> not flagged
+    assert R.foreign_sensitive_read(401, json.dumps({"owner": "alice", "secret": "x"}), "bob") is None
+
+
+def test_extract_ids_natural_key_fallback():
+    assert R.extract_ids(json.dumps({"Books": [{"book_title": "t1"}, {"book_title": "t2"}]})) == {"t1", "t2"}

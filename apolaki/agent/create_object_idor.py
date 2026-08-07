@@ -59,12 +59,21 @@ def extract_id(status, body: str, location: str = "") -> str:
 # ── GENERAL create-object-endpoint discovery (target-agnostic, no lab hardcoding) ──
 from urllib.parse import urlsplit as _urlsplit
 
-# REST object-collection path: /api/Feedbacks, /rest/products, /v1/orders — a single resource segment
-# under an api-ish root. We deliberately do NOT match paths that already carry an id (…/Feedbacks/3).
-_COLLECTION_RE = re.compile(r"^/(?:api|rest|v\d+|graphql-api)/([A-Za-z][A-Za-z0-9_]*)/?$")
+# REST object-collection paths (a single resource, no trailing id). Covers the common conventions:
+#   /api/Feedbacks · /rest/products · /v1/orders           (api-root + resource)
+#   /books/v1 · /users/v1                                    (resource + version, e.g. VAmPI)
+#   /api/v1/orders                                           (api-root + version + resource)
+# We deliberately do NOT match paths that already carry an id (…/Feedbacks/3, …/books/v1/title).
+_COLLECTION_RES = (
+    re.compile(r"^/(?:api|rest|graphql-api)/([A-Za-z][A-Za-z0-9_]*)/?$"),
+    re.compile(r"^/(?:api/)?v\d+/([A-Za-z][A-Za-z0-9_]*)/?$"),
+    re.compile(r"^/([A-Za-z][A-Za-z0-9_]*)/v\d+/?$"),
+)
 # server-assigned / immutable fields we must NOT send back on create
 _SERVER_FIELDS = {"id", "_id", "createdat", "updatedat", "created_at", "updated_at", "userid", "user_id",
-                  "ownerid", "owner_id", "deletedat", "deleted_at", "__v", "uuid"}
+                  "ownerid", "owner_id", "owner", "user", "deletedat", "deleted_at", "__v", "uuid"}
+# fields many APIs use as a natural object key (the read path is /collection/{this})
+_NATURAL_KEY_FIELDS = {"book_title", "title", "slug", "name", "username", "handle", "label", "key", "code"}
 
 
 def discover_collection_endpoints(urls, max_out: int = 12) -> list:
@@ -76,12 +85,24 @@ def discover_collection_endpoints(urls, max_out: int = 12) -> list:
             path = _urlsplit(str(u)).path
         except Exception:
             continue
-        m = _COLLECTION_RE.match(path or "")
-        if m and path.rstrip("/") not in out:
+        if any(rx.match(path or "") for rx in _COLLECTION_RES) and path.rstrip("/") not in out:
             out.append(path.rstrip("/"))
         if len(out) >= max_out:
             break
     return out
+
+
+def first_object_list(data) -> list:
+    """The first list-of-objects in a parsed response — a bare list, or ANY dict value that is a list of
+    objects (handles envelopes like {data:[...]}, {Books:[...]}, {results:[...]} without hardcoding the key).
+    Target-agnostic. Pure."""
+    if isinstance(data, list):
+        return [o for o in data if isinstance(o, dict)]
+    if isinstance(data, dict):
+        for v in data.values():
+            if isinstance(v, list) and any(isinstance(o, dict) for o in v):
+                return [o for o in v if isinstance(o, dict)]
+    return []
 
 
 def build_spec_from_sample(path: str, sample: dict, marker: str) -> dict:
@@ -104,11 +125,15 @@ def build_spec_from_sample(path: str, sample: dict, marker: str) -> dict:
         # skip nested objects/lists — keep the create body minimal + likely-valid
     if not str_fields:
         return None
-    marker_field = max(str_fields, key=lambda kv: kv[1])[0]   # longest string field carries the marker
+    # Prefer a NATURAL-KEY field for the marker — many APIs key an object by title/slug/username/name and the
+    # read path is /collection/{that}, so the marker must land in the key. Fall back to the longest string.
+    nat = [k for k, _ in str_fields if str(k).lower() in _NATURAL_KEY_FIELDS]
+    marker_field = nat[0] if nat else max(str_fields, key=lambda kv: kv[1])[0]
     body[marker_field] = marker
     p = path.rstrip("/")
     return {"create": {"method": "POST", "path": p, "body": json.dumps(body)},
-            "read": p + "/{id}", "delete": p + "/{id}", "marker_field": marker_field, "derived": True}
+            "read": p + "/{id}", "delete": p + "/{id}", "marker_field": marker_field,
+            "natural_key": bool(nat), "derived": True}
 
 
 def _accessed(status) -> bool:
