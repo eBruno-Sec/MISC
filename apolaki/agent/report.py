@@ -108,6 +108,67 @@ def _defense_controls_md(finding: dict) -> list:
     return out
 
 
+def _engines_from_ledger(tool_ledger: dict) -> set:
+    """The engine/tool names that actually RAN, from the tool_ledger. The ledger is structured
+    {tools:[{tool,status,calls,...}], zap_status, authenticated, strategy, ai_calls} — the ran engines live
+    under ['tools'] as {tool: name} rows, NOT the top-level keys. Reading the top-level keys (the prior bug)
+    made ASVS objective coverage ALWAYS report 0 verified because no engine name ever matched."""
+    tl = tool_ledger or {}
+    tools = tl.get("tools")
+    if isinstance(tools, list):
+        return {str(t.get("tool") or t.get("name")) for t in tools
+                if isinstance(t, dict) and (t.get("tool") or t.get("name"))}
+    if isinstance(tools, dict):
+        return set(tools.keys())
+    return {k for k in tl.keys() if k not in ("tools", "zap_status", "authenticated", "strategy", "ai_calls")}
+
+
+def coverage_rollup(findings: list, tool_ledger: dict, candidate_validation: dict = None) -> dict:
+    """A single, honest COVERAGE view (competitor-inspired) rolling the ASVS objective model + the WSTG
+    catalog + the candidate-validation ledger into the buckets a reader actually wants: of the security
+    PROPERTIES Apolaki models, how many were confirmed-safe / found-vulnerable / inconclusive / blocked /
+    not-tested. Pure — reuses asvs_model.assess (verified=safe, failed=vuln, attempted=inconclusive,
+    blocked=safety/prereq, not_tested+not_applicable=not-tested) and wstg_catalog.coverage. Truth-first: this
+    is a CURATED-PARTIAL model, never a full-coverage claim."""
+    out = {"properties": {}, "wstg": {}, "candidates": {}, "model": "curated_partial"}
+    try:
+        import asvs_model
+        a = asvs_model.assess(findings or [], attempted_engines=_engines_from_ledger(tool_ledger))
+        t = a["tally"]
+        total = a["total_objectives"]
+        out["properties"] = {
+            "confirmed_safe": t.get("verified", 0),
+            "vulnerable": t.get("failed", 0),
+            "inconclusive": t.get("attempted", 0),
+            "blocked": t.get("blocked", 0),
+            "not_tested": t.get("not_tested", 0) + t.get("not_applicable", 0),
+            "total": total,
+            "tested_pct": round(100.0 * (t.get("verified", 0) + t.get("failed", 0) + t.get("attempted", 0))
+                                / total, 1) if total else 0.0,
+        }
+    except Exception:
+        pass
+    try:
+        import wstg_catalog
+        w = wstg_catalog.coverage()["tally"]
+        out["wstg"] = {"tested": w.get("full", 0) + w.get("partial", 0), "full": w.get("full", 0),
+                       "partial": w.get("partial", 0), "not_tested": w.get("none", 0),
+                       "excluded": w.get("excluded", 0), "total": 109}
+    except Exception:
+        pass
+    cv = candidate_validation or {}
+    rows = cv.get("candidates") or cv.get("rows") or []
+    if rows:
+        b = {"confirmed": 0, "dismissed": 0, "blocked": 0, "unsupported": 0}
+        for r in rows:
+            st = str((r or {}).get("state") or (r or {}).get("status") or "").lower()
+            for k in b:
+                if k in st:
+                    b[k] += 1
+        out["candidates"] = {**b, "total": len(rows)}
+    return out
+
+
 def _asvs_md(findings: list, tool_ledger: dict) -> list:
     """Curated-partial ASVS-5 objective coverage for the report: which security PROPERTIES were verified /
     failed / blocked / not tested this mission. Findings violate objectives; a clean run of an objective's
@@ -117,7 +178,7 @@ def _asvs_md(findings: list, tool_ledger: dict) -> list:
         import asvs_model
     except Exception:
         return []
-    a = asvs_model.assess(findings or [], attempted_engines=set((tool_ledger or {}).keys()))
+    a = asvs_model.assess(findings or [], attempted_engines=_engines_from_ledger(tool_ledger))
     t = a["tally"]
     out = ["", "## ASVS Objective Coverage", "", "_%s_" % a["disclaimer"], "",
            "| Status | Count |", "| --- | --- |",
@@ -1570,6 +1631,27 @@ def generate_html_report(program: str, findings: list, scope: dict,
                    "first — shown ALONGSIDE technical severity (CVSS/CWE), never replacing it.</div>"
                    f"<div class='cov-grid'>{_fp_cells}</div>")
 
+    # Coverage overview — of the security PROPERTIES Apolaki models, how many are confirmed-safe / vulnerable
+    # / inconclusive / blocked / not-tested (rolled up from ASVS + WSTG + the candidate ledger). Truth-first:
+    # a curated-partial model, never a full-coverage claim.
+    _cr = coverage_rollup(raw_findings, tool_ledger, candidate_validation)
+    _pp = _cr.get("properties") or {}
+    _cov_meta = [("confirmed_safe", "Confirmed safe", "#3fb950"), ("vulnerable", "Vulnerable", "#e5484d"),
+                 ("inconclusive", "Inconclusive", "#d29922"), ("blocked", "Blocked", "#8b949e"),
+                 ("not_tested", "Not tested", "#6e7681")]
+    _cov_cells = "".join(f"<div class='cov'><span style='color:{col}'>{_pp.get(k, 0)}</span><label>{lbl}</label></div>"
+                         for k, lbl, col in _cov_meta) if _pp else ""
+    _w = _cr.get("wstg") or {}
+    _wstg_line = (f"<div class='sub' style='margin-top:.3rem'>WSTG active tests: {_w.get('tested', 0)}/"
+                  f"{_w.get('total', 109)} covered ({_w.get('full', 0)} full, {_w.get('partial', 0)} partial), "
+                  f"{_w.get('excluded', 0)} safety-excluded.</div>") if _w else ""
+    cov_overview_html = (("<h2 id='coverage-overview'>Coverage Overview</h2>"
+                          "<div class='sub' style='margin:-.3rem 0 .5rem'>Of the security properties Apolaki "
+                          f"models ({_pp.get('total', 0)} ASVS objectives, curated-partial) — how many were "
+                          "confirmed safe, found vulnerable, inconclusive, blocked, or not tested. Never a "
+                          f"full-coverage claim.</div><div class='cov-grid'>{_cov_cells}</div>{_wstg_line}")
+                         if _pp else "")
+
     # attack surface metrics
     surf_html = ""
     if attack_surface:
@@ -2494,6 +2576,7 @@ figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
   <div class="dist">{dist_rows}</div>
 </div>
 {fixpri_html}
+{cov_overview_html}
 {signals_html}
 {cvss_html}
 {roe_html}
@@ -2598,6 +2681,9 @@ def findings_json(program: str, findings: list, scope: dict,
         "fix_priority": _rem.fix_priority_summary(findings, leads),
         # ── coverage / attack surface / methodology ──
         "coverage": coverage or {},
+        # unified COVERAGE rollup — of the security properties Apolaki models, how many are confirmed-safe /
+        # vulnerable / inconclusive / blocked / not-tested (from ASVS + WSTG + the candidate ledger).
+        "coverage_rollup": coverage_rollup(findings, tool_ledger, candidate_validation),
         "attack_surface": attack_surface or {},
         "tool_ledger": tool_ledger or {},
         # ── intelligence provenance: WHERE the world model came from (per-source feed counts) +
