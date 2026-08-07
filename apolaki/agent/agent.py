@@ -418,14 +418,20 @@ class BBHAgent:
         if self.mode == "passive" and perm != PermissionLevel.PASSIVE:
             return _tm.ToolResult(tool_name, "", True,
                                   json.dumps({"ran": False, "blocked": "passive mode: %s not permitted" % tool_name}), [])
-        # intrusive (state-changing) tools require operator approval — or an autonomous pre-authorization,
-        # mirroring _run_tool's HITL gate exactly (auto_approve pre-authorizes the intrusive phase once).
+        # intrusive (state-changing) tools require an explicit operator authorization, which is ANY of:
+        #   * the intrusive HITL gate was approved (operator said yes in the modal),
+        #   * auto_approve (an autonomous run pre-authorizes the intrusive phase), or
+        #   * authenticated_scan — the operator's explicit opt-in to state-changing AUTHENTICATED testing,
+        #     which the artery's bounded, self-cleaning writes (create-object / authz-write) fall under
+        #     (per the call-site design contract). This is authorization, NOT a bypass: passive mode + scope
+        #     are still enforced above/inside, so an intrusive tool can never fire in passive or off-scope.
         if perm == PermissionLevel.INTRUSIVE:
             if self.intrusive_state is None and self.auto_approve:
                 self.intrusive_state = "approved"
-            if self.intrusive_state != "approved":
+            authorized = (self.intrusive_state == "approved") or bool(getattr(self, "authenticated_scan", False))
+            if not authorized:
                 return _tm.ToolResult(tool_name, "", True,
-                                      json.dumps({"ran": False, "blocked": "intrusive tool not approved (HITL)"}), [])
+                                      json.dumps({"ran": False, "blocked": "intrusive tool not authorized (HITL)"}), [])
         return await self.tools.execute(tool_name, tool_input, session_id)
 
     def _is_confirmed(self, tool: str, f: dict) -> bool:

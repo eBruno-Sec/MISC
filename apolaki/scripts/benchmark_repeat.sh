@@ -20,8 +20,10 @@ IMG_DIGEST=$(docker image inspect apolaki-agent:latest --format '{{.Id}}' 2>/dev
 run_mission() {
   sh scripts/fresh_lab.sh 1>&2 || { echo ""; return 1; }
   JS_DIGEST=$(docker inspect "$($COMPOSE --profile bench ps -q juice-shop-bench 2>/dev/null | head -1)" --format '{{index .Image}}' 2>/dev/null || echo "")
+  # auto_approve:true — non-interactive benchmark; without it the deterministic plan blocks forever at the
+  # first intrusive step (no operator, BBH_APPROVAL_TIMEOUT=0). See benchmark_full.sh for the full rationale.
   sid=$(curl -s -X POST "$A/engage" -H 'Content-Type: application/json' \
-    -d '{"program_name":"benchmark-repeat","in_scope":["http://juice-shop-bench:3000"],"mode":"active","strategy":"deterministic","authenticated_scan":true}' \
+    -d '{"program_name":"benchmark-repeat","in_scope":["http://juice-shop-bench:3000"],"mode":"active","strategy":"deterministic","authenticated_scan":true,"auto_approve":true}' \
     | grep -oE '"session_id":"[a-f0-9]+"' | head -1 | cut -d'"' -f4)
   [ -z "$sid" ] && { echo ""; return 1; }
   echo "  engaged mission $sid; running (~5-10 min)..." 1>&2

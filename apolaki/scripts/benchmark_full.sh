@@ -37,8 +37,13 @@ if [ "$FRESH_LAB" = "1" ]; then
 fi
 
 echo "[full-mission] 1. engage a deterministic AUTHENTICATED scan of $TARGET"
+# auto_approve:true — this is a NON-INTERACTIVE benchmark: there is no operator to answer the intrusive
+# HITL gate, and BBH_APPROVAL_TIMEOUT defaults to 0 (wait forever), so without it the deterministic plan
+# blocks forever at the first intrusive step (status stuck at awaiting_approval). auto_approve is the
+# explicit "autonomous authorized run" signal that pre-approves the intrusive phase (and, with
+# authenticated_scan, the artery's bounded writes) so the mission runs to completion with full coverage.
 sid=$(curl -s -X POST "$A/engage" -H 'Content-Type: application/json' \
-  -d "{\"program_name\":\"benchmark\",\"in_scope\":[\"$TARGET\"],\"mode\":\"active\",\"strategy\":\"deterministic\",\"authenticated_scan\":true}" \
+  -d "{\"program_name\":\"benchmark\",\"in_scope\":[\"$TARGET\"],\"mode\":\"active\",\"strategy\":\"deterministic\",\"authenticated_scan\":true,\"auto_approve\":true}" \
   | grep -oE '"session_id":"[a-f0-9]+"' | head -1 | cut -d'"' -f4)
 if [ -z "$sid" ]; then ck "engage returned a session" FAIL; echo "[full-mission] cannot continue"; exit 1; fi
 ck "engage returned a session ($sid)" PASS

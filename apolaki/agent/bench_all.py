@@ -94,9 +94,14 @@ async def scan_via_mission(api_base: str, key: str, url: str, poll_s: int = 6, m
     from urllib.parse import urlparse
     host = urlparse(url).netloc or url
     async with httpx.AsyncClient(verify=False, timeout=30) as c:
+        # authenticated_scan:true is REQUIRED or the auth artery (_do_persona_authz) never runs
+        # (agent.py: `if not self.authenticated_scan ...: return`), so the auth-gated classes — BOLA /
+        # broken-object-authz / mass-assignment / authed business-logic — would be silently unreachable and
+        # every API lab (VAmPI/crAPI) would under-report access_control recall. Comparing general mode to a
+        # lab WITHOUT it is an invalid benchmark.
         eng = (await c.post(api_base + "/engage", json={
             "program_name": "bench-%s" % key, "in_scope": [host], "mode": "full",
-            "strategy": "deterministic", "auto_approve": True})).json()
+            "strategy": "deterministic", "auto_approve": True, "authenticated_scan": True})).json()
         sid = eng.get("session_id") or eng.get("id") or eng.get("sid")
         if not sid:
             return [], []

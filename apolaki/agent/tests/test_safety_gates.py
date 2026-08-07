@@ -58,6 +58,20 @@ def test_exec_internal_allows_intrusive_when_autoapproved():
     assert a.intrusive_state == "approved"
 
 
+def test_exec_internal_authenticated_scan_preauthorizes_artery_writes():
+    # authenticated_scan is the operator's explicit opt-in to state-changing AUTHENTICATED testing; the
+    # artery's bounded self-cleaning writes fall under it (call-site design contract). Passive still wins.
+    a = _agent("active")
+    a.authenticated_scan = True
+    _run(a._exec_internal("confirm_create_object_idor", {}, "s"))
+    assert a.tools.calls == ["confirm_create_object_idor"]      # authorized by authenticated_scan
+    # but authenticated_scan does NOT override passive mode
+    b = _agent("passive")
+    b.authenticated_scan = True
+    _run(b._exec_internal("confirm_create_object_idor", {}, "s"))
+    assert b.tools.calls == []                                  # passive still blocks live contact
+
+
 def test_exec_internal_allows_active_tool_in_active_mode():
     a = _agent("active")
     _run(a._exec_internal("confirm_read_object_idor", {}, "s"))     # ACTIVE, no HITL
