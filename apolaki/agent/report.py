@@ -1554,6 +1554,22 @@ def generate_html_report(program: str, findings: list, scope: dict,
                       f"<span class='distbar'><i style='width:{pct}%;background:{SEV_COLORS[s]}'></i></span>"
                       f"<span class='distn'>{n}</span></div>")
 
+    # Fix Now / Fix If / Strengthen — remediation ACTION priority ALONGSIDE technical severity (CVSS/CWE),
+    # so the report answers "what to do first", not only how bad it is. Same pure classifier as the JSON.
+    import remediation as _rem
+    _fp = _rem.fix_priority_summary(findings, leads)["counts"]
+    _fp_meta = [("fix_now", "Fix Now", "#e5484d", "confirmed, exploitable now"),
+                ("fix_if", "Fix If", "#f5a623", "conditional / verify then fix"),
+                ("strengthen", "Strengthen", "#4c9aff", "hardening / defense-in-depth")]
+    _fp_cells = "".join(
+        f"<div class='cov'><span style='color:{col}'>{_fp.get(k, 0)}</span><label>{lbl}</label>"
+        f"<div class='sub' style='font-size:.7rem;line-height:1.2'>{desc}</div></div>"
+        for k, lbl, col, desc in _fp_meta)
+    fixpri_html = ("<h2 id='fixpriority'>Fix Priority</h2>"
+                   "<div class='sub' style='margin:-.3rem 0 .5rem'>Remediation action priority — what to fix "
+                   "first — shown ALONGSIDE technical severity (CVSS/CWE), never replacing it.</div>"
+                   f"<div class='cov-grid'>{_fp_cells}</div>")
+
     # attack surface metrics
     surf_html = ""
     if attack_surface:
@@ -2466,6 +2482,7 @@ figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
   </div>
   <div class="dist">{dist_rows}</div>
 </div>
+{fixpri_html}
 {signals_html}
 {cvss_html}
 {roe_html}
