@@ -108,6 +108,38 @@ def _defense_controls_md(finding: dict) -> list:
     return out
 
 
+def business_logic_view(findings: list, leads: list) -> dict:
+    """Headline summary of BUSINESS-LOGIC testing — the workflows probed, the abuse-test categories generated,
+    and the outcomes (confirmed vs hypothesis-needs-verification). Business-logic flaws (double-spend, negative
+    amounts, skipped/out-of-order steps) are what automated scanners CAN'T derive; Apolaki generates them from
+    the workflow STRUCTURE (bizlogic.py). Pure — reads the business_logic/race signals already in the report."""
+    import re
+    fams = {"business_logic", "race"}
+    conf = [f for f in (findings or []) if str(f.get("family") or "").lower() in fams
+            and str(f.get("confidence") or "").lower() == "confirmed"]
+    hyp = [x for x in (leads or []) if str(x.get("family") or "").lower() in fams]
+    flows, cats = set(), set()
+    for item in conf + hyp:
+        title = str(item.get("title") or "")
+        m = re.search(r"\(([^)]+)\)", title)                 # e.g. "(Checkout / order placement)"
+        if m:
+            flows.add(m.group(1).strip())
+        if "—" in title:
+            c = title.rsplit("—", 1)[-1].strip()
+            if c:
+                cats.add(c)
+    return {
+        "tested": bool(conf or hyp),
+        "workflows": sorted(flows),
+        "abuse_categories": sorted(cats),
+        "confirmed": len(conf),
+        "hypotheses_to_verify": len(hyp),
+        "note": ("Business-logic flaws — double-spend / replay, negative amounts or quantities, skipped or "
+                 "out-of-order steps — are what a human consultant tries but a scanner can't derive. Apolaki "
+                 "generates these tests deterministically from the target's workflow structure."),
+    }
+
+
 def _engines_from_ledger(tool_ledger: dict) -> set:
     """The engine/tool names that actually RAN, from the tool_ledger. The ledger is structured
     {tools:[{tool,status,calls,...}], zap_status, authenticated, strategy, ai_calls} — the ran engines live
@@ -1652,6 +1684,20 @@ def generate_html_report(program: str, findings: list, scope: dict,
                           f"full-coverage claim.</div><div class='cov-grid'>{_cov_cells}</div>{_wstg_line}")
                          if _pp else "")
 
+    # Business Logic Testing — headline capability: the workflows probed + abuse categories generated (the
+    # tests a scanner can't derive), with confirmed vs hypothesis-to-verify outcomes.
+    _bl = business_logic_view(raw_findings, leads)
+    bizlogic_html = ""
+    if _bl.get("tested"):
+        _flows = ", ".join(e(f) for f in _bl["workflows"]) or "the discovered workflows"
+        _cats = "".join(f"<span>{e(c)}</span>" for c in _bl["abuse_categories"])
+        bizlogic_html = ("<h2 id='business-logic'>Business Logic Testing</h2>"
+                         f"<div class='sub' style='margin:-.3rem 0 .5rem'>{e(_bl['note'])}</div>"
+                         f"<p>Workflows probed: <b>{_flows}</b>. Abuse tests: "
+                         f"<b>{_bl['confirmed']}</b> confirmed, <b>{_bl['hypotheses_to_verify']}</b> "
+                         "hypotheses to verify (listed under Unconfirmed Leads).</p>"
+                         f"<div class='meta'>{_cats}</div>")
+
     # attack surface metrics
     surf_html = ""
     if attack_surface:
@@ -2577,6 +2623,7 @@ figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
 </div>
 {fixpri_html}
 {cov_overview_html}
+{bizlogic_html}
 {signals_html}
 {cvss_html}
 {roe_html}
@@ -2684,6 +2731,8 @@ def findings_json(program: str, findings: list, scope: dict,
         # unified COVERAGE rollup — of the security properties Apolaki models, how many are confirmed-safe /
         # vulnerable / inconclusive / blocked / not-tested (from ASVS + WSTG + the candidate ledger).
         "coverage_rollup": coverage_rollup(findings, tool_ledger, candidate_validation),
+        # BUSINESS-LOGIC testing as a headline capability — the workflows probed + abuse categories + outcomes.
+        "business_logic": business_logic_view(findings, leads),
         "attack_surface": attack_surface or {},
         "tool_ledger": tool_ledger or {},
         # ── intelligence provenance: WHERE the world model came from (per-source feed counts) +
