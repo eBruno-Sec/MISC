@@ -1,0 +1,63 @@
+# Apolaki security gate (Strix-borrow #111): on a PR or manual dispatch, bring the deterministic engine up,
+# scan a STAGING url, fail the check on a confirmed high/critical, and post an evidence-first PR comment.
+#
+# Safety: only ever point APOLAKI_TARGET at a disposable/staging deploy you are authorized to test. The engine
+# enforces scope + no-DoS + no-credential-brute, but scanning production from CI is out of policy. Set the
+# target via the repo/environment variable APOLAKI_TARGET (or edit the default below).
+name: apolaki-security-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Staging URL to scan (authorized targets only)"
+        required: true
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write   # to post the gate comment
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the Apolaki engine
+        working-directory: apolaki
+        run: |
+          docker compose up -d --no-deps agent
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/health && break || sleep 2
+          done
+
+      - name: Run the security gate
+        id: gate
+        working-directory: apolaki
+        env:
+          APOLAKI_TARGET: ${{ github.event.inputs.target || vars.APOLAKI_TARGET }}
+          APOLAKI_FAIL_ON: ${{ vars.APOLAKI_FAIL_ON || 'critical,high' }}
+        run: |
+          set +e
+          sh scripts/ci_scan.sh "$APOLAKI_TARGET" apolaki_pr_comment.md
+          echo "gate_rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Post the gate comment on the PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '✅ Apolaki security gate: no comment produced.';
+            try { body = fs.readFileSync('apolaki/apolaki_pr_comment.md', 'utf8'); } catch (e) {}
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body,
+            });
+
+      - name: Fail the check on a confirmed gating finding
+        if: always()
+        working-directory: apolaki
+        run: exit ${{ steps.gate.outputs.gate_rc }}
