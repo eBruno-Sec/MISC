@@ -1802,6 +1802,16 @@ def generate_html_report(program: str, findings: list, scope: dict,
         pr_html = (f"<div class='biz'><h4>How this was confirmed (false-positive safety)</h4>"
                    f"<p>{e(_pr['negative_control'])}</p>"
                    f"<h4>Retest / closure</h4><p>{e(_pr['retest'])}</p></div>")
+        # Evidence-dossier chips: the remediation-action priority + the ASVS objective(s)/WSTG test this
+        # finding violates — composed from the SAME primitives the downloadable poc-bundle uses (no island).
+        import remediation as _remmod
+        import poc_bundle as _pbmod
+        _fp = _remmod.fix_priority(f)
+        _fpcol = {"fix_now": "#e5484d", "fix_if": "#f5a623", "strengthen": "#4c9aff"}.get(_fp["tier"], "#888")
+        _fp_chip = f"<span style='background:{_fpcol};color:#fff'>{e(_fp['label'])}</span>"
+        _std = _pbmod.standards(f)
+        _asvs_chip = ("<span>ASVS: " + e(", ".join(a["cid"] for a in _std["asvs"][:3])) + "</span>") if _std.get("asvs") else ""
+        _wstg_chip = f"<span>WSTG: {e(str(_std['wstg']))}</span>" if _std.get("wstg") else ""
         cards.append(f"""
         <article class="finding" style="--c:{color}">
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
@@ -1814,6 +1824,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {cvss_vec}
             {prov_html}
             <span class="tag-conf">CONFIRMED</span>
+            {_fp_chip}{_asvs_chip}{_wstg_chip}
           </div>
           {cvss_basis}
           {biz_html}

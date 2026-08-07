@@ -2416,9 +2416,13 @@ async def poc_bundle_export(session_id: str, finding_id: str = ""):
     findings = db.get_findings(session_id) or []
     if finding_id:
         findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
-    tgt = str((m.get("in_scope") or [""])[0] or "")
+    # scope lives at m["scope"]["in_scope"] — m.get("in_scope") is the wrong shape and always empty
+    # (same class as the retest-scope bug fixed in the 2026-08-06 fix-pass #9).
+    _scope = m.get("scope") or {}
+    tgt = str((_scope.get("in_scope") or _scope.get("bases") or [""])[0] or "")
     tool_version = (m.get("context") or {}).get("code_rev") or os.environ.get("APOLAKI_GIT_COMMIT", "")
-    bundles = _pb.build_all(findings, tool_version=tool_version, target=tgt)
+    chains = (m.get("context") or {}).get("chains") or []   # the attack path each dossier's finding is part of
+    bundles = _pb.build_all(findings, tool_version=tool_version, target=tgt, chains=chains)
     return {"session_id": session_id, "count": len(bundles), "bundles": bundles}
 
 
