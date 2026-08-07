@@ -27,7 +27,20 @@ _PORT_SVC = {
     502: "modbus",                                   # ICS/OT — Modbus/TCP (read-only audit)
     123: "ntp",                                       # NTP — monlist/amplification (read-only)
     44818: "enip",                                    # ICS/OT — EtherNet/IP (read-only ListIdentity)
+    102: "s7comm",                                    # ICS/OT — Siemens S7comm (read-only identify) [#107]
+    20000: "dnp3",                                    # ICS/OT — DNP3 (read-only identify) [#107]
+    47808: "bacnet",                                  # ICS/OT — BACnet/IP (read-only identify) [#107]
 }
+# ICS/OT control ports classified above are recognised as industrial services so an exposed PLC/RTU surfaces
+# in the graph as a high-severity exposure. Apolaki NEVER writes to them — ics_fingerprint.is_write_frame is
+# the safety self-check that proves every industrial frame it builds is read-only.
+import ics_fingerprint as _ics
+
+
+def is_ics_ot(service: str) -> bool:
+    """True when a discovered service is an industrial (ICS/OT) protocol — a reachable one is an exposure and
+    must ONLY ever be probed read-only (ics_fingerprint enforces no write frames)."""
+    return service in _ics.PROTO_PORTS.values()
 
 # banner signature -> service type (a banner OVERRIDES the port guess when present)
 _BANNER_SVC = [
