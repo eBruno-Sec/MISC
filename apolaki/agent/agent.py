@@ -1274,7 +1274,9 @@ class BBHAgent:
         index.html without creating anything), then the discovered URL, then form defaults. Deduped
         + scope-valid."""
         b = base.rstrip("/")
-        cands = [b + p for p in ("/api/Users", "/api/register", "/api/auth/register", "/api/signup", "/api/users")]
+        cands = [b + p for p in ("/api/Users", "/api/register", "/api/auth/register", "/api/signup", "/api/users",
+                                 "/users/v1/register", "/api/v1/register", "/api/v1/users", "/v1/users/register",
+                                 "/auth/v1/register", "/register/v1")]
         d = self._discover_register_url(base)
         if d:
             cands.append(d)
@@ -1519,17 +1521,22 @@ class BBHAgent:
                 # API-style signup doesn't auto-login — log in with the freshly-created account.
                 # Probe a short ordered candidate list (one KNOWN credential, never a password list)
                 # and stop at the first that yields a session.
+                # APIs authenticate by EITHER email or username — try both identifiers per login URL so the
+                # persona logs in whether the app is email-login (Juice Shop) or username-login (VAmPI).
+                _idents = [i for i in (acct.get("email"), acct.get("username")) if i]
                 for lu in self._login_candidates(base):
-                    try:
-                        await self.tools.execute("acquire_session",
-                                                 {"login_url": lu,
-                                                  "username": acct.get("email") or acct.get("username"),
-                                                  "password": acct.get("password"), "role": role}, session_id)
-                    except Exception:
-                        pass
-                    hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                    for _ident in _idents:
+                        try:
+                            await self.tools.execute("acquire_session",
+                                                     {"login_url": lu, "username": _ident,
+                                                      "password": acct.get("password"), "role": role}, session_id)
+                        except Exception:
+                            pass
+                        hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
+                        if hdr:
+                            login_url = lu
+                            break
                     if hdr:
-                        login_url = lu
                         break
             if not hdr and acct.get("password"):
                 # browser-driven fallback (CHAD 1): API/form login didn't yield a session (SPA login,
@@ -1807,7 +1814,9 @@ class BBHAgent:
         One KNOWN credential is tried against each until a session is obtained — endpoint discovery,
         never a password list."""
         b = base.rstrip("/")
-        cands = [b + p for p in ("/rest/user/login", "/api/login", "/api/auth/login", "/auth/login")]
+        cands = [b + p for p in ("/rest/user/login", "/api/login", "/api/auth/login", "/auth/login",
+                                 "/users/v1/login", "/api/v1/login", "/v1/users/login", "/auth/v1/login",
+                                 "/login/v1")]
         d = self._discover_login_url(base)
         if d:
             cands.append(d)
