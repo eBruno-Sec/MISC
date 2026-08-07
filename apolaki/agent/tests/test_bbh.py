@@ -3986,9 +3986,12 @@ def test_acquire_session_registration_guards_and_injection():
 
     async def go():
         # anti-brute-force: hard cap, refuses to iterate credentials (no network reached)
-        reg._login_attempts = 8
-        r = await reg._acquire_session({"login_url": "http://target.tld/login", "password": "x"})
-        assert r.error and "cap" in r.error
+        # anti-brute-force: refuses to ITERATE PASSWORDS against the same endpoint+user (real brute-force).
+        # Trying many login endpoints/identifiers with ONE password is discovery, not brute-force (allowed).
+        r = None
+        for pw in ("p1", "p2", "p3", "p4"):
+            r = await reg._acquire_session({"login_url": "http://target.tld/login", "username": "u", "password": pw})
+        assert r.error and "cap" in r.error   # the 3rd+ DISTINCT password against the same endpoint is refused
         # off-scope login refused
         reg._login_attempts = 0
         r2 = await reg._acquire_session({"login_url": "http://evil.example/login", "password": "x"})
