@@ -441,6 +441,16 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        oracle="Server accepts the forged token and grants the asserted identity/claim.",
        needs_fixture=["weak_secret_if_crackable"], fixture_source="external",
        maps_to={"juiceshop": ["Forged Signed JWT", "Unsigned JWT"]}),
+    _t(id="saml_signature_bypass", vuln_class="broken_auth", cwe="CWE-347", owasp="A07:2021",
+       permission=INTRUSIVE, transferable=True,
+       summary="SAML SSO assertion forgery: signature exclusion / stripping / XML signature wrapping (XSW).",
+       detect="A SAMLResponse whose Assertion is unsigned, or Response-signed-but-Assertion-unsigned (saml_tool "
+              "analyzes the captured SAMLResponse's signing posture).",
+       exploit="Replay a tampered assertion (remove the signature, or wrap a forged unsigned assertion before the "
+               "signed original) to the SP's ACS — NEVER forges a signature or cracks a key.",
+       oracle="The SP issues an authenticated session for the TAMPERED assertion while the baseline flow also "
+              "authenticated — zero-FP; a rejected tamper claims nothing.",
+       needs_fixture=["captured_samlresponse"], fixture_source="harvest"),
 
     _t(id="jwt_key_confusion", vuln_class="crypto_authz", cwe="CWE-347", owasp="A02:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-SESS-10",

@@ -20,6 +20,7 @@ OBSERVATIONS = (
     "serves_js", "has_api", "has_search_param", "has_login", "has_object_id", "has_file_upload",
     "has_xml_input", "has_redirect_param", "has_versions", "has_coupon", "reflects_input",
     "sql_error_seen", "authenticated", "has_sensitive_route", "has_workflow", "credentials_exposed",
+    "saml_sso_detected",
 )
 
 # technique_id -> observations that must ALL hold for the technique to be applicable (the precondition gate).
@@ -66,6 +67,7 @@ _PRECONDITIONS = {
     "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
     "session_fixation":        ["has_login", "authenticated"],  # a login + a working credential to drive it
     "default_credentials":     ["has_sensitive_route"],       # a discovered admin/management interface
+    "saml_signature_bypass":   ["saml_sso_detected"],         # a captured SAMLResponse / SAML ACS on the surface
 }
 
 # Auto-fired, oracle-confirmed techniques that are intentionally NOT evidence-gated in _PRECONDITIONS because an
@@ -148,6 +150,11 @@ def derive_observations(surface=None, harvest=None, findings=None, leads=None, c
         obs.add("has_file_upload")
     if any(w in allpaths for w in ("xml", "soap", "xxe")):
         obs.add("has_xml_input")
+    # SAML SSO flow on the surface — a SAMLResponse/SAMLRequest param or an IdP/SP/ACS path (allpaths already
+    # includes query strings). Gates the saml_signature_bypass engine so the planner reaches it only where SSO
+    # is actually present (no island).
+    if any(w in allpaths for w in ("saml", "/sso", "/acs", "simplesaml", "/adfs")):
+        obs.add("saml_sso_detected")
     if any(w in allpaths for w in ("redirect", "url=", "return=", "next=", "returnto")):
         obs.add("has_redirect_param")
     # ANY query parameter on the surface is an injectable input — derive the observations that gate the
