@@ -1955,9 +1955,29 @@ class ToolRegistry:
         import create_object_idor as _co
         base = (inp.get("base_url") or "").strip().rstrip("/")
         owner, attacker = inp.get("owner"), inp.get("attacker")
-        specs = inp.get("specs") or self._CREATE_IDOR_SPECS.get(inp.get("app", ""), [])
+        specs = list(inp.get("specs") or self._CREATE_IDOR_SPECS.get(inp.get("app", ""), []))
         owner_h = dict(self._sessions.get(owner, {}))
         atk_h = dict(self._sessions.get(attacker, {}))
+        # GENERAL (no lab hardcoding): discover REST object-collection endpoints from the recon surface,
+        # learn each object's shape from a sample GET as the OWNER, and derive create-specs — so create-object
+        # BOLA is confirmed on ANY REST API, not just known apps. Bounded + scope-gated.
+        if base and owner_h:
+            seen = {s.get("create", {}).get("path") for s in specs}
+            for cpath in _co.discover_collection_endpoints([str(u) for u in (getattr(self, "urls", []) or [])]):
+                if cpath in seen or not self.scope.validate(base + cpath)[0]:
+                    continue
+                try:
+                    gr, _ = await self._http_send("GET", base + cpath,
+                                                  {**owner_h, "Content-Type": "application/json"}, None, True)
+                    data = json.loads(gr.text or "")
+                except Exception:
+                    continue
+                items = data.get("data") if isinstance(data, dict) else data
+                sample = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+                spec = _co.build_spec_from_sample(cpath, sample, _co.new_marker()) if sample else None
+                if spec:
+                    specs.append(spec)
+                    seen.add(cpath)
         if not base or not owner_h or not atk_h or not specs:
             return ToolResult("create_object_idor", base, True,
                               json.dumps({"ran": False, "note": "need base, two sessions, and specs"}), [])

@@ -56,6 +56,61 @@ def extract_id(status, body: str, location: str = "") -> str:
     return m.group(1) if m else ""
 
 
+# ── GENERAL create-object-endpoint discovery (target-agnostic, no lab hardcoding) ──
+from urllib.parse import urlsplit as _urlsplit
+
+# REST object-collection path: /api/Feedbacks, /rest/products, /v1/orders — a single resource segment
+# under an api-ish root. We deliberately do NOT match paths that already carry an id (…/Feedbacks/3).
+_COLLECTION_RE = re.compile(r"^/(?:api|rest|v\d+|graphql-api)/([A-Za-z][A-Za-z0-9_]*)/?$")
+# server-assigned / immutable fields we must NOT send back on create
+_SERVER_FIELDS = {"id", "_id", "createdat", "updatedat", "created_at", "updated_at", "userid", "user_id",
+                  "ownerid", "owner_id", "deletedat", "deleted_at", "__v", "uuid"}
+
+
+def discover_collection_endpoints(urls, max_out: int = 12) -> list:
+    """From discovered URLs, return likely REST object-collection PATHS (no trailing id) to probe for
+    create-object IDOR. Target-agnostic — pattern-based, deduped, order-preserved. Pure."""
+    out = []
+    for u in (urls or []):
+        try:
+            path = _urlsplit(str(u)).path
+        except Exception:
+            continue
+        m = _COLLECTION_RE.match(path or "")
+        if m and path.rstrip("/") not in out:
+            out.append(path.rstrip("/"))
+        if len(out) >= max_out:
+            break
+    return out
+
+
+def build_spec_from_sample(path: str, sample: dict, marker: str) -> dict:
+    """Build a create-object IDOR spec from ONE sample object of a collection (learned from a GET). Mirrors
+    the sample's field types, drops server-assigned fields, and stamps the marker into the longest string
+    field so a cross-user read can be PROVEN (returns None when no suitable string field exists). Pure."""
+    if not isinstance(sample, dict):
+        return None
+    body, str_fields = {}, []
+    for k, v in sample.items():
+        if str(k).lower() in _SERVER_FIELDS:
+            continue
+        if isinstance(v, bool):
+            body[k] = v
+        elif isinstance(v, (int, float)):
+            body[k] = v
+        elif isinstance(v, str):
+            body[k] = v or "apolaki"
+            str_fields.append((k, len(v or "")))
+        # skip nested objects/lists — keep the create body minimal + likely-valid
+    if not str_fields:
+        return None
+    marker_field = max(str_fields, key=lambda kv: kv[1])[0]   # longest string field carries the marker
+    body[marker_field] = marker
+    p = path.rstrip("/")
+    return {"create": {"method": "POST", "path": p, "body": json.dumps(body)},
+            "read": p + "/{id}", "delete": p + "/{id}", "marker_field": marker_field, "derived": True}
+
+
 def _accessed(status) -> bool:
     """A status that means the server served the resource (not an auth/again-missing wall)."""
     try:
