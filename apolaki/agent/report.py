@@ -2544,6 +2544,13 @@ def findings_json(program: str, findings: list, scope: dict,
     # more "JSON says 13 confirmed / HTML says 7". Counts, risk and integrity all derive
     # from the grouped set here too.
     findings = group_findings(_with_capec(findings))
+    # Fix Now / Fix If / Strengthen — a remediation-ACTION priority ALONGSIDE technical severity (CVSS/CWE),
+    # so a consumer sees "what to do first", not only how bad it is. Additive per-item + a header summary.
+    import remediation as _rem
+    for _f in findings:
+        _f["fix_priority"] = _rem.fix_priority(_f)
+    for _l in leads:
+        _l["fix_priority"] = _rem.fix_priority(_l)
     pkg = {
         # ── report metadata ──
         "report_id": report_id or "",
@@ -2558,6 +2565,9 @@ def findings_json(program: str, findings: list, scope: dict,
         "risk": risk_score(findings),
         "counts": _counts(findings),
         "lead_counts": _counts(leads),
+        # Fix Now / Fix If / Strengthen action-priority header (counts across findings+leads) — the
+        # developer-facing triage lens next to technical severity.
+        "fix_priority": _rem.fix_priority_summary(findings, leads),
         # ── coverage / attack surface / methodology ──
         "coverage": coverage or {},
         "attack_surface": attack_surface or {},

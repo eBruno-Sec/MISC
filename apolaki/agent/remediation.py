@@ -231,3 +231,64 @@ def remediation_text(finding: dict) -> str:
     if not entry:
         return ""
     return entry.get("summary", "")
+
+
+# ── Fix Now / Fix If / Strengthen — action-priority layer ALONGSIDE technical severity (CVSS/CWE) ──
+# A remediation-PRIORITY lens (competitor-inspired) that answers "what should the team do FIRST", derived
+# deterministically from the fields Apolaki already emits — it never replaces the technical severity, it adds a
+# triage action a developer can act on:
+#   * fix_now    — a CONFIRMED, exploitable-now high/critical: an attacker can use it today.
+#   * fix_if     — a CONFIRMED medium, OR a strong-but-UNCONFIRMED high/critical lead (verify, then fix if real),
+#                  OR a confirmed issue that only bites under a stated precondition (conditional weakness).
+#   * strengthen — hardening / defense-in-depth: confirmed low/info, missing-header/cookie-flag/transport
+#                  hygiene, or a weak unconfirmed lead. Best-practice, not an open door.
+_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "": 0}
+# families that are hardening / defense-in-depth by nature -> Strengthen regardless of a scanner's severity label
+_HARDENING_FAMILIES = {"cookie_flags", "security_headers", "header", "headers", "cleartext_transport",
+                       "clickjacking", "csp", "cors", "cache_control", "info_leak", "verbose_error",
+                       "tls_config", "permissions_policy"}
+_CONDITIONAL_TAGS = {"needs-confirmation", "conditional", "requires-precondition", "context-dependent"}
+
+
+def fix_priority(finding: dict) -> dict:
+    """Return {tier, label, reason} where tier ∈ {fix_now, fix_if, strengthen}. Pure; deterministic over
+    (confidence, severity, family, tags). Adds a triage ACTION next to CVSS/CWE — does not replace them."""
+    f = finding or {}
+    fam = str(f.get("family") or f.get("vuln_class") or "").strip().lower()
+    sev = str(f.get("severity") or "info").strip().lower()
+    conf = str(f.get("confidence") or "").strip().lower()
+    confirmed = conf == "confirmed"
+    rank = _SEV_RANK.get(sev, 0)
+    tags = {str(t).strip().lower() for t in (f.get("tags") or [])}
+    conditional = bool(tags & _CONDITIONAL_TAGS)
+
+    def out(tier, reason):
+        label = {"fix_now": "Fix Now", "fix_if": "Fix If", "strengthen": "Strengthen"}[tier]
+        return {"tier": tier, "label": label, "reason": reason}
+
+    if fam in _HARDENING_FAMILIES:
+        return out("strengthen", "defense-in-depth / hardening (%s) — best practice, not an open door" % (fam or "config"))
+    if confirmed and rank >= 3:                 # confirmed high/critical
+        if conditional:
+            return out("fix_if", "confirmed %s but only exploitable under a stated precondition" % sev)
+        return out("fix_now", "confirmed %s severity — exploitable now" % sev)
+    if confirmed and rank == 2:                 # confirmed medium
+        return out("fix_if", "confirmed medium — fix in the normal cycle unless it composes into a chain")
+    if confirmed and rank <= 1:                 # confirmed low/info
+        return out("strengthen", "confirmed but low impact — hardening")
+    # unconfirmed leads
+    if rank >= 3:
+        return out("fix_if", "strong unconfirmed %s lead — verify, then fix if real" % sev)
+    return out("strengthen", "weak/unconfirmed signal — hardening or dismiss after review")
+
+
+_TIER_ORDER = {"fix_now": 0, "fix_if": 1, "strengthen": 2}
+
+
+def fix_priority_summary(findings: list, leads: list = None) -> dict:
+    """Group findings (+ optional leads) by fix tier for the report header. Returns
+    {counts:{fix_now,fix_if,strengthen}, order:[...]}. Pure."""
+    counts = {"fix_now": 0, "fix_if": 0, "strengthen": 0}
+    for f in list(findings or []) + list(leads or []):
+        counts[fix_priority(f)["tier"]] += 1
+    return {"counts": counts, "order": ["fix_now", "fix_if", "strengthen"]}
