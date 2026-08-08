@@ -27,7 +27,7 @@ isolated engines.
 | 6 | practical model-based testing | 5,986 | 321 KB | P2 — pairs with #1 |
 | 7 | The Tangled Web | 8,546 | 803 KB | P2 — browser security model |
 | 8 | Web Browser Engineering | 22,216 | 1.02 MB | P2 — pairs with BIE |
-| 9 | Black Hat GraphQL | 8,273 | 513 KB | P2 — capability gap |
+| 9 | Black Hat GraphQL | 8,273 | 513 KB | **P1 — measured zero coverage + lab available** |
 | 10 | Building Secure and Reliable Systems | 9,759 | 1.21 MB | P3 — defensive/design |
 | 11 | Real-World Bug Hunting | 7,353 | 505 KB | P3 — corpus/technique |
 | 12 | A Frontend Web Developer's Guide to Testing | 5,068 | 392 KB | P3 — overlaps #3 |
@@ -356,6 +356,54 @@ than to a target.
 
 Deferred only because it adds a dependency (`hypothesis`) and belongs in the D7 ordering, not because it is
 in doubt.
+
+### Black Hat GraphQL
+
+**Measured starting point: Apolaki has ZERO GraphQL techniques.** GraphQL appears in ~10 modules for
+*detection and routing* (`api_protocols`, `browser_engine`, `bie`, `codeintel`…), but the technique
+registry returns an empty list for GraphQL. Detection without testing. DVGA is already running in the lab
+fleet (`dolevf/dvga:42092`), so every item below has a validation target available.
+
+**GQL-1 — `gap`, highest value. Introspection as a surface-expansion engine, not just a finding.**
+*Black Hat GraphQL Ch.1–3.* Introspection is GraphQL's self-documenting API: one standard query returns
+the entire schema — every query, mutation, type and field. The book notes production deployments often
+disable it precisely because *"information about the various fields and objects that the backend
+application supports can only aid threat actors."*
+
+For Apolaki the finding ("introspection is enabled") is the *smaller* half. The larger half is that the
+schema is a **complete, authoritative map of the API's attack surface**, obtained in one read-only request
+with a perfect oracle (a schema comes back, or it does not — no FP risk). Feeding it into the engagement
+graph would hand every existing engine a fully enumerated set of operations and arguments. This is the
+cleanest no-island fit found in any book so far.
+
+**GQL-2 — `gap`. Existing injection engines are blind to GraphQL entry points.**
+*Ch.8, "Injection Vulnerabilities in GraphQL".* The book lists the entry points: query arguments, field
+arguments, **directive arguments**, and mutations. Apolaki's injection engines probe query strings and form
+fields, so they cannot currently reach any of these — the engines exist and are simply not wired to the
+transport. Combined with GQL-1 this is a strong pairing: introspection enumerates the arguments, the
+existing SQLi/XSS/traversal engines test them. No new oracles required.
+
+**GQL-3 — `gap`, read-only. Schema recovery when introspection is disabled.**
+*Ch.6, field suggestions.* GraphQL servers commonly return *"Did you mean…"* suggestions in errors, which
+allows schema reconstruction (the book cites Clairvoyance). Deterministic and read-only, but it is
+dictionary-driven guessing, so results are **candidates**, not confirmed surface — they must enter the
+graph as unverified, exactly like the CT/permutation candidates in #114.
+
+**GQL-4 — REJECTED as exploitation, ACCEPTED as posture.** *Ch.5: circular queries, circular fragments,
+field duplication, alias overloading, array-based batching.* These are the book's DoS family, and Apolaki's
+no-DoS rail is absolute — **Apolaki will not send a resource-exhaustion query.**
+
+The salvage is that the book's own countermeasure sections ("Alias and Array-Based Batching Limits",
+"Field Duplication Limits") describe what a well-configured server enforces. Whether those limits *exist*
+is checkable without attacking: a modestly nested query (depth ~10) or a small alias batch either gets
+rejected by a depth/complexity limiter or does not. That is a configuration observation with a clean
+oracle and no load. **Depth and batch limits are probed at token levels, never at exhaustion levels**, and
+that boundary must be written into the technique record so it cannot drift.
+
+**GQL-5 — note, ties to an existing rail.** *Ch.7* teaches defeating auth controls "with aliases, batch
+queries, and good, old-fashioned logic flaws". Alias-based batching is a rate-limit/brute-force **bypass**
+technique. Apolaki's no-brute rail stands: detecting that batching is permitted is a posture finding;
+using it to run credential attempts is not on the table.
 
 ---
 
