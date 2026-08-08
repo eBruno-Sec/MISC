@@ -63,9 +63,6 @@ export default async function ({ page }) {
 '''
 
 
-def _canary() -> str:
-    return "domtr" + secrets.token_hex(4)
-
 
 def set_param(url: str, name: str, value: str) -> str:
     p = urlparse(url)
@@ -80,23 +77,6 @@ def set_param(url: str, name: str, value: str) -> str:
 def params_of(url: str) -> list:
     return [k for k, _ in parse_qsl(urlparse(url).query, keep_blank_values=True)]
 
-
-def _trace(url: str, canary: str, browser_url=None) -> dict:
-    js = _TRACE_JS.replace("%CANARY%", json.dumps(canary)).replace("%URL%", json.dumps(url))
-    r = be.drive(url, js, browser_url=browser_url)
-    return r if isinstance(r, dict) and r.get("browser") is not False else (r if isinstance(r, dict) else {})
-
-
-# DOM-scan snippet (evaluated in-page by the LOCAL Playwright driver in tools._run_dom_trace) — returns
-# where the canary `c` landed. Kept here so the payloads/classification stay in one module.
-DOM_SCAN_JS = (
-    "(c) => { const o={in_href:'',in_src:'',in_attr:'',in_text:false};"
-    "for (const e of document.querySelectorAll('a[href],area[href],link[href],base[href],form[action]')){"
-    "const h=e.getAttribute('href')||e.getAttribute('action')||''; if(h.indexOf(c)>=0){o.in_href=e.tagName+':'+h.slice(0,140);break;}}"
-    "for (const e of document.querySelectorAll('[src]')){const s=e.getAttribute('src')||''; if(s.indexOf(c)>=0){o.in_src=e.tagName+':'+s.slice(0,140);break;}}"
-    "for (const e of document.querySelectorAll('*')){let hit=false;const at=e.attributes||[];for(let i=0;i<at.length;i++){const a=at[i];if(a.name!=='value'&&a.value&&a.value.indexOf(c)>=0){o.in_attr=e.tagName+'@'+a.name;hit=true;break;}}if(hit)break;}"
-    "try{o.in_text=!!(document.body&&document.body.innerHTML.indexOf(c)>=0);}catch(e){}return o; }"
-)
 
 
 def is_evil_host(u: str) -> bool:
@@ -147,44 +127,11 @@ _XSS_PAYLOADS = (
 )
 
 
-def trace_param(url: str, param: str, browser_url=None) -> list:
-    """Run the source-to-sink trace for ONE parameter. Returns a LIST of hits (a param can reach several
-    sinks — e.g. both a link URL and DOM data). Adaptive: skips the redirect/XSS renders when the plain
-    canary never reflects, keeping the browser cost bounded."""
-    canary = _canary()
-    hits = []
-    r = _trace(set_param(url, param, canary), canary, browser_url) or {}
-    link_sink = r.get("in_href") or r.get("in_src")
-    reflected = bool(r.get("in_attr") or r.get("in_text") or link_sink)
-    if link_sink:
-        hits.append({"family": "dom_link_manipulation", "param": param, "target": set_param(url, param, canary),
-                     "canary": canary, "evidence": "param '%s' controls a link/resource URL at runtime (%s)" % (param, str(link_sink)[:120])})
-    if r.get("in_attr") or r.get("in_text"):
-        where = r.get("in_attr") or "DOM text"
-        hits.append({"family": "dom_data_manipulation", "param": param, "target": set_param(url, param, canary),
-                     "canary": canary, "evidence": "param '%s' reflects into rendered DOM content at runtime (%s)" % (param, where)})
-    # attacker-host pass -> open_redirect (navigation) AND request_url_override (script fetch/XHR).
-    # Gated on a URL/redirect/request-ish param NAME or a param that already reached a URL sink (a
-    # client-side request target is URL-shaped), so the extra render stays off every benign param.
-    if param.lower() in _REDIRECTISH or link_sink:
-        redir_val = "https://evilc%s.example/" % canary
-        rr = _trace(set_param(url, param, redir_val), canary, browser_url) or {}
-        if (rr.get("redirect") or "").strip():
-            hits.insert(0, {"family": "open_redirect", "param": param, "target": set_param(url, param, redir_val),
-                            "canary": canary, "evidence": "navigation to attacker host from param '%s': %s" % (param, rr["redirect"])})
-        if (rr.get("req_override") or "").strip():
-            hits.insert(0, {"family": "request_url_override", "param": param, "target": set_param(url, param, redir_val),
-                            "canary": canary, "evidence": "param '%s' overrides a client-side fetch/XHR request target at runtime: %s" % (param, rr["req_override"])})
-    # XSS pass — only worth trying execution where the canary already reflects into the DOM
-    if reflected:
-        for pl in _XSS_PAYLOADS[:5]:
-            u = set_param(url, param, pl.replace("%C%", canary))
-            rx = _trace(u, canary, browser_url) or {}
-            if rx.get("executed"):
-                hits.insert(0, {"family": "dom_xss", "param": param, "target": u, "canary": canary,
-                                "evidence": "browser executed alert(%s) via param '%s' (breakout: %s)" % (canary, param, pl)})
-                break
-    return hits
+# NOTE (#125): a synchronous `trace_param` used to live here — a source-to-sink tracer that duplicated
+# what `tools._run_dom_trace` implements asynchronously. It had no caller anywhere in the codebase, and a
+# superseded duplicate sitting beside the live engine is a trap: it emits the same families, so calling
+# the wrong one would look like it worked. The async path in tools.py is the engine; this module keeps the
+# shared pure helpers (`classify`, `finding`, `set_param`, `params_of`) that it uses.
 
 
 _CVSS = {
