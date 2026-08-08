@@ -486,6 +486,74 @@ prominently as what passed.** This also supplies the argument for AP-2's cutoff 
 falsifies the hypothesis."* Apolaki's negative controls are exactly falsification-seeking, and this is the
 citation for the standing engineering-cognition discipline.
 
+### Web Browser Engineering
+
+**WBE-1 — `gap`, concrete and testable. The same-origin policy and cookies disagree about what a "site"
+is.** *WBE §10.5–10.6.* Building a browser from scratch surfaces the incongruity plainly: SOP compares
+scheme, host and port, while *"cookies don't care about scheme or port… an oversight or incongruity left
+over from the messy early web."* A cookie scoped to a host is therefore sent over plaintext HTTP **and** to
+any port on that host.
+
+`cookie_scope_posture` (shipped today) checks Secure/HttpOnly/SameSite. It does **not** check scope
+breadth: a `Domain=`-widened cookie shared across subdomains, or a session cookie reachable on a different
+port, is a real and directly observable class. Cheap addition to an engine that already parses Set-Cookie.
+
+**WBE-2 — reinforces the control-surface engine.** §10.6 on CSRF notes the form submission *"could be
+triggered by JavaScript, with the user not involved at all"*, and can be disguised by *"hiding the entry
+widget, pre-filling the post, and styling the button to look like a normal link."* That is UI-redress
+mechanics, and it is the same DOM property `client_side_authz` measures — hidden and disabled controls.
+Confirms the engine is pointed at something real.
+
+**WBE-3 — `have`.** §15.7: same-origin iframes share one JS context and can reach each other's globals;
+cross-origin ones cannot. This is the mechanism behind BIE's isolation being correct — separate *browser
+contexts* per persona, not iframes.
+
+### practical model-based testing
+
+**PMBT-1 — `gap`, immediately useful. Pairwise (combinatorial) testing.** *§4.2.3.* Rather than every
+combination of parameter values, cover every **pair**. Apolaki's probe space is payload × parameter ×
+encoding and is currently bounded by flat caps (`max_probes`, `max_candidates`). Pairwise is the principled
+version of the same budget, and unlike a flat cap it can state what it covers. Pairs directly with AP-2:
+a pairwise cutoff is arguably *safe* in the book's sense; a flat "first 12" is not.
+
+**PMBT-2 — vocabulary for the coverage AP-1 unlocks.** *§4.1.3 transition-based criteria* names the exact
+ladder: all-states, all-transitions, all-round-trips. That is what structural coverage over the engagement
+graph would report once techniques declare effects. §4.3 fault-based criteria is mutation testing, already
+shipped as the mutation gate. §4.7 combining criteria confirms MBT Essentials' point that no single family
+suffices.
+
+### Building Secure and Reliable Systems
+
+**BSRS-1 — `gap`, but in the REPORT, not the scanner.** *Ch.5 Least Privilege, Ch.6 Understandability,
+Ch.8 Resilience, Ch.9 Recovery.* This is a design book, and its Apolaki value is remediation quality.
+Apolaki's remediation strings are competent one-liners ("Enforce object-level authorization on the
+server"). BSRS supplies the design-level answer a client actually needs — least-privilege structure,
+failure domains, recovery posture. **Recommendation: mine BSRS for remediation depth on the top finding
+families, not for detection.** Nothing here becomes an engine.
+
+**BSRS-2 — noted, deliberately not acted on.** *Ch.10 Mitigating Denial-of-Service.* The defensive mirror
+of Apolaki's no-DoS rail. Useful as remediation text for the GraphQL limits posture check; never as an
+attack.
+
+### A Frontend Web Developer's Guide to Testing
+
+**FE-1 — a terminology correction worth making.** *Ch.8.* The book separates **code coverage** (white-box:
+did the tests execute this line) from **test coverage** (did we test against requirements, across
+functional/security/accessibility/platform). Apolaki says "coverage" for the second and has never measured
+the first. The distinction matters because the mutation gate is a strictly better answer than code coverage
+for the oracle modules — it measures whether tests would *catch a bug*, not whether they *ran a line*.
+Worth stating in the coverage view so the two are not conflated.
+
+Remaining chapters overlap Selenium/Playwright material already applied. Lowest marginal yield of the
+fourteen, as predicted — the one ranking that held.
+
+### Hands-On Selenium WebDriver — remaining chapters
+
+Already mined in a prior session for BIE (locator strategies, waits, the visibility contract). The
+remaining grid/parallelism chapters describe scaling test execution across browsers, which Apolaki does not
+need: it drives a small number of personas against one target, and its parallelism constraint is politeness
+(no-DoS), not throughput. **No further extraction.**
+
 ### Books inspected at chapter level, extraction pending
 
 Recorded honestly rather than summarised from the table of contents:
@@ -669,6 +737,72 @@ analysis-before-architecture rule. Steps 4–9 must wait for the full read.
 | — taxonomy caution, no task | — | The Tangled Web | "Enlightenment Through Taxonomy" |
 
 ---
+
+## FINAL — reconciled recommendations after all 14 books
+
+The read is complete. D6/D7 above were provisional; this supersedes them.
+
+**The headline did not change, and that is the point.** Fourteen books produced exactly **one**
+architectural proposal, and four of them independently pointed at it:
+
+| Book | What it contributes to the same change |
+|------|----------------------------------------|
+| Black Hat Go Ch.10 | engines need ONE published declaration, or every addition edits the consumer |
+| Automated Planning §4.2 | that declaration must carry preconditions **and effects**, or the planner cannot search |
+| Automated Planning §4.4 | it must include **negative** effects, or it reproduces the Sussman anomaly |
+| MBT §8.1 / practical MBT §4.1.3 | without transitions there is no structural coverage to report |
+
+Everything else the read produced is either already shipped, a small independent engine, or a rejection.
+
+### What the books changed about the plan
+
+1. **Pairwise replaces flat caps** (PMBT-1 + AP-2). Apolaki's probe budgets are arbitrary first-N cuts. A
+   pairwise selection covers every parameter/payload pair and can be *argued safe*; "the first 12" cannot.
+   This is a better answer than raising the caps.
+2. **BSRS is a reporting input, not a scanner input** (BSRS-1). Its value is remediation depth. Filing it
+   as an engine source would have been a mistake.
+3. **Coverage vocabulary must be split** (FE-1): test coverage vs code coverage, with the mutation gate
+   named as the stronger claim for oracle modules.
+4. **Cookie scope breadth is a real gap** (WBE-1) that the transport-posture engine shipped today does not
+   cover — scheme/port/Domain breadth, distinct from the Secure/HttpOnly/SameSite attributes it does check.
+
+### Final priority queue
+
+**Tier 1 — independent, evidence-backed, no architecture risk**
+
+| # | Work | Source | Why now |
+|---|------|--------|---------|
+| T1 | Header-trust engine (authz from Referer / X-Forwarded-* / X-Original-URL) | Natas 4 live | proven gap on a live target; adjacent to two benchmark misses |
+| T2 | Cookie scope breadth (Domain widening, scheme/port reach) | WBE §10.5 | extends an engine shipped today; directly observable |
+| T3 | Pairwise probe selection replacing flat caps | practical MBT §4.2.3 + AP §4.2.1 | makes the budget defensible instead of arbitrary |
+| T4 | Configure `BBH_OOB_BASE` | capability preflight | unlocks 5 blind classes currently reported as untested |
+| T5 | Remediation depth from BSRS for the top finding families | BSRS Ch.5–9 | improves the deliverable, touches no engine |
+
+**Tier 2 — the one architecture change, now unblocked**
+
+| # | Work | Depends on |
+|---|------|-----------|
+| T6 | Engine descriptor: declare preconditions + **effects** + **negative effects** | — |
+| T7 | Router/planner/registry/no-island guard read the descriptor (pure refactor, zero behaviour delta) | T6 |
+| T8 | Planner gains goal test + successor → it **searches** instead of filtering | T7 |
+| T9 | Structural coverage: all-states / all-transitions / all-round-trips | T8 |
+| T10 | Deleted-condition (Sussman) detection | T8 |
+| T11 | Label every cutoff safe / strongly-safe / neither in the coverage view | T9 |
+
+**Tier 3 — validation debt**
+
+| # | Work |
+|---|------|
+| T12 | A lab that CSS-hides a privileged control → validates `client_side_authz` |
+| T13 | A lab passing identity in a query string → validates `client_supplied_identity_param` |
+| T14 | Confirm DNP3/S7 engines against a real ICS simulator, not only mocks |
+
+### Rejected, final list
+
+C2/RAT · GraphQL DoS exploitation (salvaged as token-level limit posture) · alias batching for auth bypass ·
+AI-driven test generation · unseeded randomness (salvaged as seeded + seed in evidence) · fuzzing aimed at
+access control · Go plugin machinery · taxonomy-driven technique creation · Selenium Grid parallelism
+(Apolaki's constraint is politeness, not throughput).
 
 ## Read state and what remains
 
