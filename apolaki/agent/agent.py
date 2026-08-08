@@ -1927,6 +1927,59 @@ class BBHAgent:
                    "certificate, session-cookie attributes, protective headers, HTTP methods. %d "
                    "finding(s)." % (min(len(origins), 3), total)}
 
+    async def _do_header_trust(self, session_id: str):
+        """T1: authorization decided by a client-controlled header, on each in-scope origin plus any path
+        the scan actually met a 401/403 on.
+
+        WHY THIS EXISTS AS A SEPARATE PASS. `run_header_trust` was registered in the permission map and
+        fully implemented, but its name was never passed to `execute`/`_exec_internal`, and it was absent
+        from the CLAUDE_TOOLS spec — so neither the deterministic path nor the agentic path could reach
+        it. Its ALWAYS_ON reason claimed it ran "on every in-scope origin". That claim is now true.
+
+        Read-only: safe GETs replaying a denied request behind an override header. Best-effort — any
+        failure degrades to a no-op rather than a broken scan, matching `_do_transport_posture`."""
+        from urllib.parse import urlsplit as _us
+        targets, seen = [], set()
+        for e in (self.scope.to_dict().get("in_scope") or []):
+            s = str(e)
+            u = s if "://" in s else "http://" + s.split("/")[0]
+            o = "%s://%s" % (_us(u).scheme, _us(u).netloc)
+            if o and o not in seen:
+                seen.add(o)
+                targets.append(o)
+        # Sensitive routes the scan actually discovered are the high-value targets: a header that flips
+        # their denial into a grant IS the finding. No separate denied-path tracker is invented here —
+        # `_run_header_trust` establishes its own baseline per URL and recognises a denial itself, so
+        # feeding it discovered routes is sufficient and avoids a second source of truth.
+        for u in (getattr(self.tools, "urls", None) or []):
+            s = str(u)
+            if s in seen:
+                continue
+            if any(w in s.lower() for w in ("admin", "manage", "internal", "console", "dashboard",
+                                            "config", "private", "staff")):
+                seen.add(s)
+                targets.append(s)
+
+        total = 0
+        for t in targets[:6]:
+            try:
+                res = await self._exec_internal("run_header_trust", {"url": t}, session_id)
+            except Exception:
+                continue
+            for f in (res.findings or []):
+                if self.mission_id:
+                    try:
+                        f["id"] = db.add_finding(self.mission_id, f)
+                    except Exception:
+                        pass
+                self.findings.append(f)
+                yield {"type": "finding", "finding": f}
+                total += 1
+        if targets:
+            yield {"type": "info", "content": "Header-trust: tested %d target(s) for authorization "
+                   "decided by a client-controlled header (Referer / X-Forwarded-* / X-Original-URL). "
+                   "%d finding(s)." % (min(len(targets), 6), total)}
+
     def _runtime_seed_paths(self, limit: int = 6) -> list:
         """The authenticated app routes worth RENDERING so the SPA fetches the logged-in user's own
         objects (which is what gives the Browser Intelligence Engine real cross-user hypotheses).
@@ -2081,6 +2134,11 @@ class BBHAgent:
             # Transport + web posture (#103): TLS protocol/certificate, session-cookie attributes,
             # protective headers and HTTP methods for every in-scope origin. Read-only.
             async for ev in self._do_transport_posture(session_id):
+                yield ev
+
+            # Header-trust (T1): authorization decided by a client-controlled header. Read-only GETs on
+            # each in-scope origin plus any path the scan met a 401/403 on.
+            async for ev in self._do_header_trust(session_id):
                 yield ev
 
         # Authenticated scanning: discover credentials the target exposes (or inherit them from a prior

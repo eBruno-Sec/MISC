@@ -248,9 +248,15 @@ def verify_always_on(app_dir: str = None) -> dict:
             checked.append("%s -> %s" % (tid, tok))
             wired = False
             for fn, s in srcs.items():
-                # strip this file's own definitions of the name so a def never counts as a use
+                # Strip this file's own definitions of the name so a def never counts as a use, AND strip
+                # the permission-map registration line. REGISTRATION IS NOT INVOCATION: `run_header_trust`
+                # was registered in `_PERMISSIONS` and fully implemented, yet its name was never passed to
+                # execute()/_exec_internal() and it was absent from the CLAUDE_TOOLS spec — unreachable by
+                # both the deterministic and the agentic path. Counting the registry key as a reference is
+                # exactly what hid that.
                 body = re.sub(r"^\s*(async\s+)?def\s+_?%s\s*\(" % re.escape(bare), "", s, flags=re.M)
-                # a call/reference in either spelling, or the string-dispatch form
+                body = re.sub(r"^\s*[\"']_?%s[\"']\s*:\s*PermissionLevel.*$" % re.escape(bare), "",
+                              body, flags=re.M)
                 if re.search(r"(?<![\w])_?%s\b" % re.escape(bare), body) or \
                    re.search(r"[\"']_?%s[\"']" % re.escape(bare), body):
                     wired = True

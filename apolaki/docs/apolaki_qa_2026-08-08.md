@@ -649,3 +649,64 @@ Two observations worth keeping:
   graph first and only searches files that import the module, so it is both cheaper and correct.
 - **~162 seconds came off every full-suite run** by sharing the scans rather than recomputing them six
   times. That was pure waste, and it was invisible until something timed out.
+
+---
+
+# Pass 7 — triage found a SECOND unreachable engine, and it was mine
+
+Working the 47 qualified-unused candidates (#30) surfaced three clusters. One is a correction to work
+reported complete earlier in this same session.
+
+## `run_header_trust` (T1) was never invoked
+
+T1 shipped earlier today with a live Natas-derived design, a full implementation, and an ALWAYS_ON reason
+reading *"run_header_trust on every in-scope origin + any denied path the scan met"*.
+
+It was **registered** in the permission map and **implemented** as `_run_header_trust` — and its name was
+never passed to `execute()` / `_exec_internal()`, nor present in the `CLAUDE_TOOLS` spec. Tool dispatch is
+`getattr(self, "_" + tool_name)`, so a tool runs only when its NAME STRING reaches the dispatcher.
+Unreachable by the deterministic path *and* the agentic path.
+
+The contrast that made it provable:
+
+```
+run_transport_posture   in CLAUDE_TOOLS spec: False   in agent.py: True    -> wired (deterministic)
+run_graphql             in CLAUDE_TOOLS spec: True    in agent.py: True    -> wired (both)
+run_nmap / run_hash_id  in CLAUDE_TOOLS spec: True    in agent.py: True    -> wired (agentic)
+run_header_trust        in CLAUDE_TOOLS spec: False   in agent.py: False   -> UNREACHABLE
+```
+
+**My reason-verifier passed it**, because `"run_header_trust"` appears as a key in the permission map and
+the check counted any quoted occurrence. **Registration is not invocation.** The verifier now strips the
+`PermissionLevel` registration line before looking for a reference, with a paired negative/positive
+control: a registered-and-implemented-but-uninvoked tool must FAIL, and adding one real call site must
+flip it to pass.
+
+Fixed by `_do_header_trust`, mirroring `_do_transport_posture`: in-scope origins plus discovered
+sensitive routes, read-only GETs, best-effort so a failure degrades to a no-op rather than a broken scan.
+No separate denied-path tracker was invented — `_run_header_trust` establishes its own baseline per URL
+and recognises a denial itself, so feeding it discovered routes is sufficient and avoids a second source
+of truth. (A first draft read `self.tools.denied_paths`, which does not exist; `getattr` would have
+returned `None` silently — dead intent that looks like wiring, the very thing being fixed.)
+
+## `saml_tool` is doubly disconnected
+
+`saml_signature_bypass` is gated on `saml_sso_detected`, which IS derived (from `saml`/`/sso`/`/acs`
+path keywords). `execution` defaults to `"auto"`, so it is auto + oracle + transferable and the
+orchestration audit counts it as wired. But:
+
+1. nothing calls `saml_tool` — its only mention outside itself is prose in `techniques.py`; and
+2. nothing ever captures a SAMLResponse to feed it, so even the analysis path has no input.
+
+The module is well-built (zero-FP `confirm_bypass`, a safe `plan_leads` that makes no requests). Not
+fixed in this pass — it needs a harvest step for the SAMLResponse parameter before an executor is
+meaningful, which is its own change. Recorded rather than half-wired.
+
+## `ics_fingerprint` is a superseded duplicate
+
+`service_router` imports it but uses only its `PROTO_PORTS` constant. The live Modbus path is
+`modbus_audit_tool`. Its six probe functions (`identify_protocol`, `modbus_read_device_id`,
+`ethernetip_list_identity`, the two parsers, `is_read_only`) have no caller — the same shape as the
+`dom_trace.trace_param` case this gate's own docstring already documents: a superseded implementation
+sitting beside the live one, waiting to be called by mistake. Left in place pending proof it is safe to
+remove; `is_write_frame` from the same module IS live and is the safety authority for OT writes.

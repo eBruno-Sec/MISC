@@ -161,3 +161,42 @@ def test_a_tool_registered_by_string_still_counts_as_wired():
     engines as broken — a false alarm that would have destroyed trust in the guard."""
     r = ed.verify_always_on()
     assert not any("service_pack" in u for u in r["unwired"]), r["unwired"]
+
+
+def test_registration_alone_does_not_count_as_wired(monkeypatch, tmp_path):
+    """THE hole that hid a second unreachable engine. `run_header_trust` was registered in the permission
+    map and fully implemented, but its name was never passed to execute()/_exec_internal() and it was
+    absent from the CLAUDE_TOOLS spec — unreachable by BOTH the deterministic and the agentic path. The
+    first version of this verifier counted the registry key as a reference and passed it."""
+    (tmp_path / "tools.py").write_text(
+        '"run_ghost": PermissionLevel.ACTIVE,\n\n\nasync def _run_ghost(self, inp):\n    return 1\n',
+        encoding="utf8")
+    monkeypatch.setattr(ed, "ALWAYS_ON", {"ghost_engine": "reached via run_ghost on every origin"})
+    r = ed.verify_always_on(str(tmp_path))
+    assert r["ok"] is False, "registration + definition must not read as wired"
+    assert any("run_ghost" in u for u in r["unwired"]), r["unwired"]
+
+
+def test_an_invoked_tool_is_recognised_as_wired(monkeypatch, tmp_path):
+    """Positive control for the rule above — adding a real call site must flip it to wired, or the check
+    is simply always-fail."""
+    (tmp_path / "tools.py").write_text(
+        '"run_ghost": PermissionLevel.ACTIVE,\n\n\nasync def _run_ghost(self, inp):\n    return 1\n',
+        encoding="utf8")
+    (tmp_path / "agent.py").write_text(
+        'async def go(self, sid):\n    return await self._exec_internal("run_ghost", {}, sid)\n',
+        encoding="utf8")
+    monkeypatch.setattr(ed, "ALWAYS_ON", {"ghost_engine": "reached via run_ghost on every origin"})
+    assert ed.verify_always_on(str(tmp_path))["ok"] is True
+
+
+def test_header_trust_is_invoked_not_merely_registered():
+    """Regression for the specific engine. Its ALWAYS_ON reason claims it runs on every in-scope origin;
+    that must remain true."""
+    import os
+    ag = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ed.__file__))),
+                           "agent", "agent.py"), encoding="utf8").read() \
+        if False else open(os.path.join(os.path.dirname(os.path.abspath(ed.__file__)), "agent.py"),
+                           encoding="utf8").read()
+    assert '"run_header_trust"' in ag, "header-trust is registered but never invoked by the scan"
+    assert "_do_header_trust" in ag
