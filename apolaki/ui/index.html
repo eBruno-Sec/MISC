@@ -733,6 +733,20 @@ X-Requested-With: </textarea>
       <div id="taxonomyBody"><div class="empty"><h4>Loading the taxonomy…</h4></div></div>
     </section>
 
+    <!-- ORCHESTRATION: the no-island north star, made visible instead of only asserted in CI -->
+    <section class="panel" id="p-orchestration">
+      <div class="view-head"><h3 class="sec">Orchestration &amp; Effects</h3>
+        <span class="muted">Every confirming engine must be reachable — evidence-gated or a declared always-on path. Never a dashboard island.</span>
+        <button class="btn ghost sm" style="margin-left:auto" onclick="loadOrchestration()">Refresh</button>
+      </div>
+      <div id="orchestrationBody"><div class="empty"><h4>Auditing orchestration…</h4></div></div>
+      <div class="view-head" style="margin-top:1.4rem"><h3 class="sec">Reachability</h3>
+        <span class="muted">Pick what recon established. The planner searches over engine effects — not just what runs now, but what becomes possible.</span>
+      </div>
+      <div id="reachPicker" class="tx-lenses" style="margin-bottom:.6rem"></div>
+      <div id="reachBody"><div class="empty"><h4>Select observations above</h4><p>Each one is something recon can establish about a target.</p></div></div>
+    </section>
+
     <!-- INTEL: first-class Technique knowledge model + human review -->
     <section class="panel" id="p-intel">
       <div class="view-head"><h3 class="sec">Offensive Knowledge Model</h3>
@@ -969,7 +983,7 @@ const VIEWS={
   assurance:[["assurance","Assurance"]],
   reports:  [["report","Report & export"]],
   conquest: [["conquest","Juice Shop Conquest"]],
-  taxonomy: [["taxonomy","Technique Taxonomy"]],
+  taxonomy: [["taxonomy","Technique Taxonomy"],["orchestration","Orchestration"]],
   intel:    [["intel","Knowledge Model"]],
   codereview:[["codereview","Code Review"]],
   proxy:    [["proxy","Intercept Proxy"]],
@@ -1000,6 +1014,7 @@ function switchTab(name){
   if(name==="report")fetchReport(); if(name==="archive")loadArchive();
   if(name==="conquest")loadConquest();
   if(name==="taxonomy")loadTaxonomy();
+  if(name==="orchestration"){loadOrchestration();loadReach();}
   if(name==="intel")loadIntel();
   if(name==="assurance")loadAssurance();
   if(name==="codereview")loadCodeReview();
@@ -2103,6 +2118,109 @@ function renderTaxonomy(d){
   return h;
 }
 
+/* ── Orchestration: the no-island invariant + the effects layer, visible rather than CI-only ── */
+async function loadOrchestration(){
+  const el=document.getElementById("orchestrationBody"); if(!el)return;
+  el.innerHTML=`<div class="empty"><h4>Auditing orchestration…</h4></div>`;
+  let d={};
+  try{d=await(await fetch(`${API}/orchestration/audit`)).json();}
+  catch(e){el.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;return;}
+  if(d.error){el.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(d.error)}</p></div>`;return;}
+  const ef=d.effects||{};
+  const ok=(b,good,bad)=>`<span style="color:${b?'var(--ok)':'var(--danger)'}">${b?good:bad}</span>`;
+  let h=`<div class="tx-bar">
+    <div class="tx-stat"><span class="v acc">${d.gated_count||0}</span><span class="k">Evidence-gated</span></div>
+    <div class="tx-stat"><span class="v">${d.always_on_count||0}</span><span class="k">Always-on path</span></div>
+    <div class="tx-stat"><span class="v" style="color:${d.no_islands?'var(--ok)':'var(--danger)'}">${d.island_count||0}</span><span class="k">Islands (must be 0)</span></div>
+    <div class="tx-stat"><span class="v">${ef.chain_count||0}</span><span class="k">Effect chains</span></div>
+    <div class="tx-stat"><span class="v" style="color:var(--warn)">${ef.conflict_count||0}</span><span class="k">Ordering conflicts</span></div>
+    <div class="tx-note">An <b>island</b> is an auto-fired, oracle-confirmed, transferable engine that neither the planner gates on evidence nor a declared always-on path reaches — it would run, find things, and feed nothing. The count must be zero.</div>
+  </div>`;
+  if(!d.no_islands){
+    h+=`<div style="margin:1rem 0;padding:.9rem 1.1rem;border-radius:10px;border:1px solid var(--danger);background:color-mix(in srgb,var(--danger) 12%,transparent)">
+      <b style="color:var(--danger)">⚠ ${d.island_count} ISLAND(S)</b> — ${(d.islands||[]).map(esc).join(", ")}</div>`;
+  }
+  h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Effects model</span>
+      <span class="tx-gcount">${ef.engines_with_effects||0}/${ef.engines_total||0}</span></div>
+    <div class="tx-sum" style="padding:.6rem .9rem">
+      Preconditions say when an engine <i>may</i> run. Effects say what running it <i>makes possible</i>.
+      Effect vocabulary valid: ${ok(ef.vocabulary_ok,"yes","NO")}
+      ${(ef.unknown_effect_vocabulary||[]).length?` — ${(ef.unknown_effect_vocabulary||[]).map(esc).join(", ")}`:""}.
+      Planner searches over effects: ${ef.planner_uses_effects?`<span style="color:var(--ok)">yes</span>`:`<span style="color:var(--warn)">not yet</span>`}.
+      <br><span style="color:var(--text-dim)">${esc(ef.note||"")}</span>
+    </div></div>`;
+  if((ef.conflicts||[]).length){
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Ordering conflicts (deleted conditions)</span><span class="tx-gcount">${ef.conflicts.length}</span></div>
+      <div class="tx-sum" style="padding:.6rem .9rem">Running these <b>destroys</b> a condition another engine needs. Sequence them last, or re-establish the condition afterwards.</div>
+      <table class="tbl" style="width:100%">${ef.conflicts.map(c=>
+        `<tr><td><code>${esc(c.technique)}</code></td><td style="color:var(--warn)">destroys <b>${esc(c.observation)}</b></td><td>needed by <code>${esc(c.blocks)}</code></td></tr>`).join("")}</table></div>`;
+  }
+  if((ef.chains||[]).length){
+    const byProd={}; (ef.chains||[]).forEach(c=>{(byProd[c.producer]=byProd[c.producer]||[]).push(c);});
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Effect chains — confirming one engine unlocks another</span><span class="tx-gcount">${ef.chains.length}</span></div>
+      <table class="tbl" style="width:100%">${Object.keys(byProd).sort().map(p=>
+        `<tr><td style="width:28%"><code>${esc(p)}</code></td>
+             <td style="width:20%;color:var(--accent)">establishes <b>${esc(byProd[p][0].observation)}</b>${byProd[p].some(x=>x.observation!==byProd[p][0].observation)?" +":""}</td>
+             <td>${byProd[p].map(x=>`<code>${esc(x.consumer)}</code>`).join(", ")}</td></tr>`).join("")}</table></div>`;
+  }
+  const reasons=d.always_on_reasons||{};
+  if(Object.keys(reasons).length){
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Always-on engines — how each is reached</span><span class="tx-gcount">${Object.keys(reasons).length}</span></div>
+      <table class="tbl" style="width:100%">${Object.keys(reasons).sort().map(k=>
+        `<tr><td style="width:30%"><code>${esc(k)}</code></td><td>${esc(reasons[k])}</td></tr>`).join("")}</table></div>`;
+  }
+  el.innerHTML=h;
+}
+
+/* ── Reachability: forward search over engine effects (what recon UNLOCKS, not just what runs) ── */
+let _reachObs=new Set(["has_login"]);
+function reachToggle(o){ _reachObs.has(o)?_reachObs.delete(o):_reachObs.add(o); loadReach(); }
+async function loadReach(){
+  const pick=document.getElementById("reachPicker"), box=document.getElementById("reachBody");
+  if(!pick||!box)return;
+  let d={};
+  try{
+    d=await(await fetch(`${API}/orchestration/reachability`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({observations:[..._reachObs]})})).json();
+  }catch(e){box.innerHTML=`<div class="empty"><h4>Offline</h4><p>${esc(String(e))}</p></div>`;return;}
+  if(d.error){box.innerHTML=`<div class="empty"><h4>Error</h4><p>${esc(d.error)}</p></div>`;return;}
+  pick.innerHTML=(d.vocabulary||[]).map(o=>
+    `<button class="tx-lens ${_reachObs.has(o)?"active":""}" onclick="reachToggle('${esc(o)}')">${esc(o)}</button>`).join("");
+  const f=d.frontier||{}, now=f.applicable_now||[], goals=f.reachable_goals||{}, cons=f.consequences||{};
+  let h="";
+  if(!_reachObs.size){
+    h+=`<div class="tx-sum" style="padding:.6rem .9rem;color:var(--text-dim)">No observations selected — nothing is applicable. This is the honest empty state, not a failure.</div>`;
+  }
+  h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Applicable right now</span><span class="tx-gcount">${now.length}</span></div>
+    <div class="tx-sum" style="padding:.6rem .9rem">${now.length?now.map(t=>`<code>${esc(t)}</code>`).join(", "):`<span style="color:var(--text-dim)">none</span>`}</div></div>`;
+  const reach=Object.keys(goals).filter(g=>goals[g].reachable), unreach=Object.keys(goals).filter(g=>!goals[g].reachable);
+  if(reach.length){
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Reachable goals — the answer the precondition filter cannot give</span><span class="tx-gcount">${reach.length}</span></div>
+      <table class="tbl" style="width:100%">${reach.sort((a,b)=>goals[a].depth-goals[b].depth).map(g=>{
+        const p=goals[g];
+        return `<tr><td style="width:22%"><b style="color:var(--accent)">${esc(g)}</b></td>
+          <td style="width:12%">${p.depth} step${p.depth===1?"":"s"}</td>
+          <td>${(p.plan||[]).map(s=>`<code>${esc(s)}</code>`).join(" → ")}
+          ${(p.assumes||[]).length?`<br><span style="color:var(--warn)">⚠ assumes always-on path: ${(p.assumes||[]).map(esc).join(", ")} — requires configured credentials / a reachable browser, not evidence</span>`:""}</td></tr>`;
+      }).join("")}</table></div>`;
+  }
+  if(unreach.length){
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Not reachable from this evidence</span><span class="tx-gcount">${unreach.length}</span></div>
+      <div class="tx-sum" style="padding:.6rem .9rem">${unreach.map(g=>`<code>${esc(g)}</code>`).join(", ")}
+      <br><span style="color:var(--text-dim)">No engine sequence establishes these. An exhausted path is a result, not a gap.</span></div></div>`;
+  }
+  const withCons=Object.keys(cons).filter(t=>(cons[t].unlocks||[]).length||(cons[t].breaks||[]).length);
+  if(withCons.length){
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Consequences of running each applicable engine</span><span class="tx-gcount">${withCons.length}</span></div>
+      <table class="tbl" style="width:100%">${withCons.sort().map(t=>
+        `<tr><td style="width:26%"><code>${esc(t)}</code></td>
+          <td>${(cons[t].unlocks||[]).length?`<span style="color:var(--ok)">unlocks</span> ${(cons[t].unlocks||[]).map(x=>`<code>${esc(x)}</code>`).join(", ")}`:""}
+              ${(cons[t].breaks||[]).length?`<br><span style="color:var(--warn)">costs you</span> ${(cons[t].breaks||[]).map(x=>`<code>${esc(x)}</code>`).join(", ")}`:""}</td></tr>`).join("")}</table></div>`;
+  }
+  box.innerHTML=h;
+}
+
 /* ── Intel: first-class Technique knowledge model + human review workflow ── */
 let _intelState={status:"",q:""};
 async function loadIntel(){
@@ -2695,7 +2813,7 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadCodeReview,runCodeReview,runHarvest,
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadOrchestration,loadReach,reachToggle,loadCodeReview,runCodeReview,runHarvest,
   loadIntel,intelReview,intelMerge,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch,
   setFindFilter,confirmLead,dismissLead,showAddFinding,submitAddFinding});
 

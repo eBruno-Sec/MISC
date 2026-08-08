@@ -782,12 +782,39 @@ Everything else the read produced is either already shipped, a small independent
 
 | # | Work | Depends on |
 |---|------|-----------|
-| T6 | Engine descriptor: declare preconditions + **effects** + **negative effects** | — |
-| T7 | Router/planner/registry/no-island guard read the descriptor (pure refactor, zero behaviour delta) | T6 |
-| T8 | Planner gains goal test + successor → it **searches** instead of filtering | T7 |
+| T6 | ✅ **DONE** — `engine_descriptor.py`: preconditions + **effects** + **negative effects** | — |
+| T7 | ◐ **PARTIAL** — `/orchestration/audit` + the Orchestration UI read the descriptor. The router/planner tables are NOT yet generated from it. | T6 |
+| T8 | ✅ **DONE** — `effect_search.py`: goal test + successor → it **searches**, additively | T6 |
 | T9 | Structural coverage: all-states / all-transitions / all-round-trips | T8 |
-| T10 | Deleted-condition (Sussman) detection | T8 |
+| T10 | ✅ **DONE** — deleted-condition detection: `conflicts()`, `breaks()`, applied in `successor()` | T8 |
 | T11 | Label every cutoff safe / strongly-safe / neither in the coverage view | T9 |
+
+**What T6/T8 actually found, and the one thing the analysis got wrong.**
+
+The reconciled analysis said Apolaki had "no effects model". That was imprecise in a way that mattered:
+effects *did* exist — `service_router._PACKS` `enables` lists and free-form `state.add_capability` strings.
+The real defect is narrower and much more fixable: **preconditions and effects spoke different
+languages.** Preconditions use the 17-term `OBSERVATIONS` vocabulary; effects used ad-hoc terms
+(`arbitrary_file_read`, `ot_read`) that no precondition could ever consume. Nothing chained because
+nothing produced was expressible as something required. Declaring effects *in the precondition
+vocabulary* is the whole fix — it turns 13 engines into a graph with **50 chains and 5 ordering
+conflicts**, none of which the planner could previously see.
+
+Three defects surfaced while building it, all caught by the tests rather than by review:
+
+1. `find_hidden_route` was given an `establishes` — but it is a lab-local catalog entry with **no
+   executor and no gate**. An effect on an unreachable engine tells the planner a capability is
+   obtainable by an action it can never take. Removed, and promoted to a general invariant.
+2. `breaks()` reported an engine breaking **itself** (`weak_password_reset` deletes the login it just
+   consumed). Arithmetically true, useless for ordering, and it buried the five real conflicts.
+3. Among equal-length plans the search returned whichever sorted first — so it recommended a plan
+   routed through an always-on engine (silently assuming configured credentials) over an equally short
+   fully evidence-gated one. Depth still dominates; fewest assumptions is now the tie-break.
+
+**Deliberate limits.** T7 is partial on purpose: making the live routing tables *generated* from the
+descriptor is the only step that can change scan behaviour, and it earns its own reviewed change. And an
+always-on engine declares no observations, so search treats it as applicable everywhere; plans routed
+through one carry an `assumes` list rather than pretending the dependency is evidence.
 
 **Tier 3 — validation debt**
 

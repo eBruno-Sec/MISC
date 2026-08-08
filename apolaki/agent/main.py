@@ -918,12 +918,59 @@ async def orchestration_audit():
     no-island property is visible, not just asserted in CI."""
     import technique_planner as TP
     import techniques as T
+    import engine_descriptor as ED
     try:
         full = [T.get(t["id"]) for t in T.list_techniques()]
         a = TP.orchestration_audit(full)
+        # Effects layer (T6): the same no-island question one level deeper. Reachability says an engine
+        # CAN fire; the effects model says what firing it makes possible. `vocabulary_ok` is the load-
+        # bearing check — an effect outside the observation vocabulary can never satisfy a precondition,
+        # so it is a declaration that silently does nothing.
+        d = ED.build()
+        v = ED.validate(d)
+        chains, conflicts = ED.chains(d), ED.conflicts(d)
         return {**a, "gated_count": len(a["gated"]), "always_on_count": len(a["always_on"]),
                 "island_count": len(a["islands"]), "no_islands": a["islands"] == [],
-                "always_on_reasons": TP.ALWAYS_ON}
+                "always_on_reasons": TP.ALWAYS_ON,
+                "effects": {
+                    "engines_with_effects": v["with_effects"], "engines_total": v["total"],
+                    "vocabulary_ok": v["ok"],
+                    "unknown_effect_vocabulary": v["unknown_effect_vocabulary"],
+                    "chains": [{"producer": p, "observation": o, "consumer": c} for p, o, c in chains],
+                    "conflicts": [{"technique": t, "observation": o, "blocks": c} for t, o, c in conflicts],
+                    "chain_count": len(chains), "conflict_count": len(conflicts),
+                    "planner_uses_effects": False,
+                    "note": ("Effects are DECLARED and validated but the planner does not yet search over "
+                             "them: it still filters by preconditions only, so these chains are visible "
+                             "here and not yet acted on."),
+                }}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/orchestration/reachability")
+async def orchestration_reachability(payload: dict):
+    """Forward search over engine EFFECTS (T8): given a set of observations, what is runnable now, what
+    would each runnable engine unlock or cost, and how many steps away is each remaining goal.
+
+    This is the question the precondition filter structurally cannot answer. The filter says what is
+    applicable in the current state; this says what states are REACHABLE from it, and by which sequence.
+    `assumes` flags steps routed through an always-on engine, whose real requirements (credentials, a
+    browser) live outside the observation vocabulary."""
+    import effect_search as ES
+    import engine_descriptor as ED
+    import technique_planner as TP
+    try:
+        obs = [o for o in (payload or {}).get("observations") or [] if o in TP.OBSERVATIONS]
+        unknown = sorted(set((payload or {}).get("observations") or []) - set(TP.OBSERVATIONS))
+        d = ED.build()
+        goal = (payload or {}).get("goal")
+        out = {"observations": sorted(obs), "unknown_observations": unknown,
+               "vocabulary": list(TP.OBSERVATIONS), "frontier": ES.frontier(d, obs)}
+        if goal:
+            out["goal"] = goal
+            out["plan"] = ES.plan(d, obs, goal)
+        return out
     except Exception as e:
         return {"error": str(e)}
 
