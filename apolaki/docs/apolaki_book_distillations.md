@@ -19,6 +19,10 @@ lab fixtures). Confidence for each mapping: `have` (already an engine), `gap` (n
 | 1 | Redefining Hacking (Red Team + BBH in AI world) | 13939 | **READ (full)** | 1–13939 ✓ |
 | 2 | The Web Application Hacker's Handbook 2nd Ed | 18844 | **READ** | 1–15381 full content (Ch.1–21 + methodology); 15390–18844 = index back-matter |
 | 3 | Advanced Penetration Testing (Allsopp — APT/C2/red-team) | 9644 | reading | 1–1080 (front-matter + intro + Ch.1 start); low Apolaki-yield (offensive-implant tradecraft, mostly n/a) |
+| 4 | DeveloperTool.txt (Chrome DevTools + VS Code debugging + Selenium locators) | 1184 | **READ (full)** | 1–1184 ✓ — mixed compilation; yield concentrated in the Selenium locator/interaction half |
+| 5 | Python Testing with Selenium (Raghavendra, Apress) | 4547 | **READ (targeted-full)** | TOC + Ch.1–4 + Ch.9–12 in full; Ch.5–8 are per-widget syntax reference (skimmed, no new method) |
+| 6 | Practical Playwright Test (Next-Generation Web Testing) | 6843 | reading | determinism spine read: auto-wait/actionability, web-first assertions, route()/routeFromHAR, storageState, tracing, waitForResponse |
+| 7 | Hands-On Automated Testing with Playwright | 9488 | reading | determinism spine read: waitForLoadState/waitForResponse/waitForFunction, storageState, POM layout, contexts; AI/Copilot/MCP chapters deliberately REJECTED |
 
 Total substantial books: ~21. Books fully read: **2** (Redefining Hacking ✓, WAHH 2nd Ed ✓). Net build-worthy
 candidates surfaced so far: **~31** (7 from Book 1 + ~24 from Book 2, consolidating into 6 engine families —
@@ -889,3 +893,69 @@ families.** Guardrails hold on every one: deterministic-first, oracle+negative-c
 no-DoS, no-credential-brute loops (single known/discovered values only), secrets vaulted/redacted.
 
 *(Book 2 of ~21 COMPLETE. Next: Book 3 — pick the next substantial unread resource and read cover-to-cover.)*
+
+---
+
+## Books 4–7 — the browser-automation cluster (DevTools · Selenium · Playwright ×2)
+
+Read together because they answer one question: **how do you drive a real browser as an instrument whose
+output is trustworthy evidence?** That is exactly what the Browser Intelligence Engine (#124) needed, so
+these were distilled straight into `agent/bie.py` rather than parked as candidates.
+
+**The user's framing was the correct one and is now a standing rule:** both Playwright books devote
+chapters to AI/Copilot/MCP-driven test generation. Those are **rejected**. Apolaki's oracle is
+deterministic; an LLM may never decide whether a vulnerability exists. Everything below is a mechanism
+that removes non-determinism, which is the opposite of what the AI chapters sell.
+
+### Book 4 — DeveloperTool.txt (Chrome DevTools · VS Code debugging · Selenium locators)
+- Chrome DevTools panel tour + VS Code/Node breakpoint debugging → **`n/a`** (developer workflow; the CDP
+  domains BIE already speaks are the programmatic form of the same panels).
+- Selenium `By.*` locators + `getAttribute`/`getText`/`isDisplayed`/`isEnabled` → **`have` (shipped)**:
+  the element-state predicates became BIE's control-surface enumeration.
+
+### Book 5 — Python Testing with Selenium (Raghavendra)
+- **Ch.10 Waits (implicit / explicit+ExpectedConditions / fluent)** → **`have` (shipped)**. The single most
+  valuable idea in the cluster: wait on a CONDITION, never a duration. Became `bie.settle()` +
+  `bie._goto_awaiting_object()`, which wait for the app's real object response and record the settle
+  REASON as evidence instead of hiding a magic number.
+- **Ch.10 `visibility_of` contract** — visible means displayed AND height/width > 0 → **`have` (shipped)**,
+  the exact predicate behind `client_side_authz` (CWE-602). Without a precise definition of "hidden", that
+  engine would be a guess.
+- **Ch.4 Locator issues** (attribute churn · element created only after an event · element not yet visible ·
+  test/app desync · iframes) → **`gap`**: a fallback locator chain + iframe traversal for BIE's flow
+  driving. Not yet built; needed before multi-step business-logic flows are reliable.
+- **Ch.9 Exception taxonomy** (StaleElementReference · ElementClickIntercepted · ElementNotInteractable ·
+  UnexpectedAlertPresent · InsecureCertificate) → **`gap`**: an honest browser-driving failure taxonomy, so
+  a flow that could not be driven reports WHY instead of silently yielding nothing.
+  `ElementClickIntercepted` is independently interesting — an overlay covering a control is a clickjacking
+  signal.
+- **Ch.11 Page Object Model** (Locators / Elements / Page / Test separation) → **`gap`**: the structure for
+  the spec's "user-flow recording → graph-backed reproducible attack path".
+- Ch.5–8 (hyperlinks, buttons, selects, frames, textboxes) → per-widget syntax reference; no new method.
+
+### Books 6–7 — Practical Playwright Test · Hands-On Automated Testing with Playwright
+- **Auto-waiting / actionability checks before every action** → **`have`**: BIE inherits this by using
+  Playwright rather than raw CDP for control.
+- **"`wait_for_timeout` is an anti-pattern"** (stated outright in Book 7) → **`have` (shipped)**: every
+  fixed sleep was removed from `bie.py`.
+- **`waitForResponse` / `expect_response` predicates** → **`have` (shipped)**: the expectation is registered
+  BEFORE navigation so a fast response cannot be missed.
+- **`storageState`** → **`have` (shipped, redacted form)**: `bie.session_fingerprint()` proves two personas
+  held genuinely distinct logged-in sessions by exporting cookie/storage NAMES only — never values.
+- **`record_har`** → **`have` (shipped, optional)**: the run is recordable as a standard HAR artifact.
+- **`page.route()` / `context.route()` request interception** → **`gap` (next BIE slice, highest value)**:
+  mutate the application's OWN outgoing request — URL, method, POST body, headers — before it leaves the
+  browser. Stronger than replaying a fetch, because the request under test is the one the app genuinely
+  built. This is the spec's "CDP Fetch pause/modify" and unlocks parameter tampering, workflow bypass and
+  mass-assignment inside real user flows, all with a single-variable-change discipline.
+- **`routeFromHAR`** → **`gap`**: replay a recorded HAR as the network layer = deterministic retest of a
+  confirmed finding without re-hitting the client's production system.
+- **Trace viewer** → **`gap`**: attach a Playwright trace to the PoC bundle so a client can scrub the
+  confirmed run interactively.
+- **AI/Copilot/MCP test generation chapters** → **REJECTED by policy**, recorded here so the decision is
+  explicit and does not get re-litigated: generation by model, confirmation by oracle — never the reverse.
+
+**Cluster yield: 8 mechanisms shipped into `bie.py` this pass, 6 concrete gaps queued** (route-interception
+mutation, routeFromHAR retest, trace-in-bundle, locator fallback chain, browser-failure taxonomy, POM flow
+model). Guardrails unchanged: read-only GETs auto-fire, state-changing controls stay operator-gated,
+scope+HITL in front of every mutation, secrets vaulted and redacted.
