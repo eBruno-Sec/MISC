@@ -87,3 +87,21 @@ def test_fixture_source_is_honest_and_valid():
     # weak reset derives its answer from the target (harvest), JWT crack does not (external)
     assert tq.get("weak_password_reset")["fixture_source"] == "harvest"
     assert tq.get("jwt_forge")["fixture_source"] == "external"
+
+
+def test_an_inline_wstg_kwarg_is_not_destroyed_by_the_authoritative_map():
+    """The `_WSTG` map is authoritative where it has an entry, but it used to be applied as a plain
+    overwrite, so every technique that declared `_t(wstg=...)` for an id absent from the map silently
+    reported 'unmapped'. That hid 25 real mappings. The map must WIN, never DELETE."""
+    src = open("/app/techniques.py").read() if __import__("os").path.exists("/app/techniques.py") else ""
+    if src:
+        assert '_rec["wstg"] = _WSTG.get(_tid) or _rec.get("wstg")' in src, \
+            "the WSTG assignment must fall back to the record's own value, not clobber it"
+    # techniques that declare a WSTG test inline keep it
+    for tid in ("browser_persona_bola", "client_side_authz", "client_supplied_identity_param",
+                "jwt_key_confusion"):
+        t = tq.get(tid)
+        if t:
+            assert t.get("wstg"), "%s lost its inline WSTG mapping" % tid
+    # and the authoritative map still wins where it has an entry
+    assert tq.get("cache_deception")["wstg"] == "WSTG-CONF-13"

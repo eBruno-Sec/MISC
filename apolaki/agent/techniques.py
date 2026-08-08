@@ -915,8 +915,12 @@ _TRY = {
 }
 _WSTG_BASE = "https://owasp.org/www-project-web-security-testing-guide/stable/"
 for _tid, _rec in TECHNIQUES.items():
-    _rec["wstg"] = _WSTG.get(_tid)
-    _rec["mitre"] = _MITRE.get(_tid)
+    # The `_WSTG` map stays AUTHORITATIVE where it has an entry, but it must not DELETE a mapping a
+    # technique declared inline: the old `= _WSTG.get(_tid)` clobbered every `_t(wstg=...)` kwarg to None
+    # for any id absent from the map, so techniques that correctly declared their WSTG test silently
+    # reported "unmapped". Fall back to the record's own value instead of destroying it.
+    _rec["wstg"] = _WSTG.get(_tid) or _rec.get("wstg")
+    _rec["mitre"] = _MITRE.get(_tid) or _rec.get("mitre")
     if _rec["wstg"] and not _rec.get("refs"):
         _rec["refs"] = [_WSTG_BASE]
 
