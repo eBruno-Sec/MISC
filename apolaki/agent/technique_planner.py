@@ -89,6 +89,8 @@ ALWAYS_ON = {
                                 "the Browser Intelligence Engine's runtime swap fires on the same proven persona pair",
     "client_side_authz":        "Browser Intelligence Engine phase 2, inside the same artery step 5e run: the rendered "
                                 "control surface is enumerated on every persona route the swap already visits",
+    "client_supplied_identity_param": "Browser Intelligence Engine phase 3, same artery step 5e run: identity params both "
+                                "personas' browsers sent are mutated by route interception on the observed endpoints",
     "vulnerable_component":     "always-on fingerprint / nuclei recon",
     "security_misconfig_errors": "passive stack-trace / error-signature detection on every response",
     "encoded_data_decode":      "passive intel harvest at every transport chokepoint",

@@ -158,6 +158,72 @@ def test_replay_script_uses_the_owner_url_and_the_implausible_id_control():
     assert "http://t/rest/basket/1" in s and "http://t/rest/basket/%s" % bie._IMPLAUSIBLE_ID in s
 
 
+# ── client-supplied identity parameters (route-interception tampering) ────────
+MINE = '{"user":"alice","orders":[{"id":1,"total":10}]}'
+THEIRS = '{"user":"bob","orders":[{"id":2,"total":99}]}'
+
+
+def test_identity_params_finds_only_identity_bearing_params():
+    got = dict(bie.identity_params("http://t/api/orders?userId=42&page=2&sort=asc"))
+    assert got == {"userId": "42"}
+    assert bie.identity_params("http://t/api/orders?page=2") == []
+
+
+def test_mutate_param_changes_exactly_one_variable():
+    u = bie.mutate_param("http://t/api/orders?userId=42&page=2", "userId", "43")
+    assert "userId=43" in u and "page=2" in u
+
+
+def test_same_endpoint_ignores_the_query():
+    assert bie.same_endpoint("http://t/api/o?a=1", "http://t/api/o?a=2")
+    assert not bie.same_endpoint("http://t/api/o", "http://t/api/p")
+
+
+def test_param_candidates_need_two_personas_sending_different_values():
+    c = bie.param_candidates(["http://t/api/orders?userId=42"], ["http://t/api/orders?userId=43"])
+    assert len(c) == 1 and c[0]["param"] == "userId"
+    assert c[0]["owner_value"] == "42" and c[0]["attacker_value"] == "43"
+    # same value for both personas => not identity-scoped => no hypothesis
+    assert bie.param_candidates(["http://t/api/o?userId=1"], ["http://t/api/o?userId=1"]) == []
+
+
+def test_param_swap_confirms_only_when_the_other_persona_data_comes_back():
+    v = bie.judge_param_swap(_ex(200, MINE), _ex(200, THEIRS), _ex(200, THEIRS), anon=_ex(401, ""))
+    assert v["verdict"] == "confirmed"
+
+
+def test_param_swap_rejects_the_SECURE_case_of_a_server_ignoring_the_param():
+    v = bie.judge_param_swap(_ex(200, MINE), _ex(200, THEIRS), _ex(200, MINE), anon=_ex(401, ""))
+    assert v["verdict"] == "rejected" and "SECURE" in v["reason"]
+
+
+def test_param_swap_rejects_public_content_and_indistinguishable_personas():
+    assert bie.judge_param_swap(_ex(200, MINE), _ex(200, THEIRS), _ex(200, THEIRS),
+                                anon=_ex(200, THEIRS))["verdict"] == "rejected"
+    assert bie.judge_param_swap(_ex(200, MINE), _ex(200, MINE), _ex(200, MINE))["verdict"] == "not_applicable"
+
+
+def test_param_swap_third_outcome_is_a_lead_not_a_confirmation():
+    v = bie.judge_param_swap(_ex(200, MINE), _ex(200, THEIRS), _ex(200, '{"user":"carol"}'))
+    assert v["verdict"] == "lead"
+
+
+def test_param_swap_finding_satisfies_the_proof_contract_and_names_the_variable():
+    import proof_schema
+    cand = {"template": "http://t/api/orders", "param": "userId", "owner_url": "http://t/api/orders?userId=42",
+            "owner_value": "42", "attacker_url": "http://t/api/orders?userId=43", "attacker_value": "43"}
+    probes = {"self_baseline": _ex(200, MINE), "other_baseline": _ex(200, THEIRS),
+              "mutation": {**_ex(200, THEIRS), "param": "userId"}, "anon": _ex(401, "")}
+    v = bie.judge_param_swap(probes["self_baseline"], probes["other_baseline"], probes["mutation"],
+                             anon=probes["anon"])
+    f = bie.finding_param_swap(cand, probes, v, owner="user_a", attacker="user_b",
+                               mutation_method="route-interception")
+    ok, missing = proof_schema.validate_confirmed(f)
+    assert ok, missing
+    mv = f["browser_evidence"]["mutated_variable"]
+    assert mv == {"param": "userId", "from": "42", "to": "43", "method": "route-interception"}
+
+
 # ── client-side control surface (CWE-602) ─────────────────────────────────────
 ADMIN_PAGE = '{"users":[{"id":1,"email":"a@t"},{"id":2,"email":"b@t"}],"roles":["admin","user"]}'
 

@@ -342,6 +342,23 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
+    _t(id="client_supplied_identity_param", vuln_class="access_control", cwe="CWE-639", owasp="API1:2023",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-04",
+       summary="Server derives identity from a client-supplied parameter — proven by mutating the app's own request.",
+       detect="Two personas' browsers send the SAME endpoint with DIFFERENT values for an identity-bearing "
+              "query parameter. That difference is observed evidence the parameter is identity-scoped, not "
+              "an inference from its name.",
+       exploit="Intercept the owner's genuine outgoing request with Playwright route interception and "
+               "rewrite ONLY that one value to the other persona's, before it leaves the browser. Safe "
+               "methods only; the evidence records honestly whether the app re-issued the request "
+               "(route-interception) or the mutated request had to be issued in-page.",
+       oracle="bie.judge_param_swap — the response becomes the OTHER persona's baseline byte-for-byte. The "
+              "secure behaviour (server ignores the parameter and answers about the session's own user) has "
+              "a distinct signature and is explicitly rejected, as are public content and personas whose "
+              "views are already identical.",
+       validated_on=[],
+       maps_to={}),
+
     _t(id="client_side_authz", vuln_class="access_control", cwe="CWE-602", owasp="A01:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-01",
        summary="Access control enforced only in the browser: the UI withholds a control the server still serves.",

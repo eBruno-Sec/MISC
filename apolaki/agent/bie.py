@@ -307,6 +307,202 @@ def finding(cand: dict, probes: dict, verdict: dict, *, owner: str = "owner", at
     }
 
 
+# ────────────────────────────── pure: CLIENT-SUPPLIED IDENTITY PARAMETERS (route-interception tampering)
+# Parameter names that carry WHO the request is about. When a server derives identity from one of these
+# instead of from the session, changing it is an authorization bypass. Ranking only — never proof.
+_IDENTITY_PARAM_HINTS = ("userid", "user_id", "uid", "accountid", "account_id", "customerid", "customer_id",
+                         "clientid", "client_id", "memberid", "profileid", "profile_id", "ownerid",
+                         "owner_id", "tenant", "tenantid", "tenant_id", "orgid", "org_id", "companyid",
+                         "basketid", "basket_id", "cartid", "cart_id", "orderid", "order_id", "email",
+                         "username", "user", "owner", "account")
+
+
+def identity_params(url: str) -> list:
+    """Query parameters that name WHO the request concerns, with their observed values. Pure."""
+    try:
+        from urllib.parse import urlsplit, parse_qsl
+    except Exception:
+        return []
+    out = []
+    try:
+        for k, v in parse_qsl(urlsplit(str(url)).query, keep_blank_values=False):
+            kl = k.lower().replace("-", "_")
+            if not v:
+                continue
+            if kl in _IDENTITY_PARAM_HINTS or any(h == kl or kl.endswith(h) for h in _IDENTITY_PARAM_HINTS):
+                out.append((k, v))
+    except Exception:
+        return []
+    return out
+
+
+def mutate_param(url: str, name: str, value: str) -> str:
+    """Replace exactly ONE query parameter's value, preserving everything else. Pure."""
+    try:
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        p = urlsplit(str(url))
+        q = [(k, (str(value) if k == name else v)) for k, v in parse_qsl(p.query, keep_blank_values=True)]
+        return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), p.fragment))
+    except Exception:
+        return str(url)
+
+
+def same_endpoint(a: str, b: str) -> bool:
+    """Same scheme/host/path, ignoring the query — 'the same request, different variable'. Pure."""
+    try:
+        from urllib.parse import urlsplit
+        x, y = urlsplit(str(a)), urlsplit(str(b))
+        return (x.scheme, x.netloc, x.path) == (y.scheme, y.netloc, y.path)
+    except Exception:
+        return False
+
+
+def param_candidates(owner_urls, attacker_urls, max_n: int = 3) -> list:
+    """Identity parameters BOTH personas' browsers sent on the same endpoint with DIFFERENT values. That
+    difference is the evidence the parameter is identity-scoped — derived from observing two real sessions,
+    never from a guess about naming. Pure."""
+    atk = {}
+    for u in (attacker_urls or []):
+        for k, v in identity_params(u):
+            atk.setdefault((_path_key(u), k.lower()), (u, v))
+    out, seen = [], set()
+    for u in (owner_urls or []):
+        for k, v in identity_params(u):
+            key = (_path_key(u), k.lower())
+            if key in seen or key not in atk:
+                continue
+            au, av = atk[key]
+            if str(av) == str(v):
+                continue                       # both personas send the same value -> not identity-scoped
+            seen.add(key)
+            out.append({"template": _path_key(u), "param": k, "owner_url": u, "owner_value": v,
+                        "attacker_url": au, "attacker_value": av})
+            if len(out) >= max_n:
+                return out
+    return out
+
+
+def _path_key(url: str) -> str:
+    try:
+        from urllib.parse import urlsplit
+        p = urlsplit(str(url))
+        return p.scheme + "://" + p.netloc + p.path
+    except Exception:
+        return str(url)
+
+
+def judge_param_swap(self_baseline, other_baseline, mutation, anon=None) -> dict:
+    """Decide whether the server derived identity from a CLIENT-SUPPLIED parameter. Pure, deterministic.
+
+    The secure behaviour has a specific, recognisable signature — the server ignores the parameter and
+    keeps answering about the session's own user — and it is explicitly REJECTED here rather than being
+    mistaken for a weak signal. A confirmation requires the response to become, byte-for-byte, the OTHER
+    persona's own view of that endpoint."""
+    def _b(x):
+        return ((x or {}).get("body") or "")
+
+    def _s(x):
+        return int((x or {}).get("status") or 0)
+
+    if _s(self_baseline) != 200 or len(_b(self_baseline).strip()) < _MIN_BODY:
+        return {"verdict": "not_applicable", "reason": "the persona's own request returned nothing "
+                                                       "substantive to compare against"}
+    if _s(other_baseline) != 200 or len(_b(other_baseline).strip()) < _MIN_BODY:
+        return {"verdict": "not_applicable", "reason": "the second persona has no comparable view of this "
+                                                       "endpoint"}
+    if _b(other_baseline) == _b(self_baseline):
+        return {"verdict": "not_applicable", "reason": "both personas already see identical content — the "
+                                                       "endpoint is not user-specific, so nothing can be proven"}
+    if _s(mutation) != 200:
+        return {"verdict": "rejected", "reason": "the tampered parameter was refused (status %s)" % _s(mutation)}
+    if _b(mutation) == _b(self_baseline):
+        return {"verdict": "rejected", "reason": "SECURE: the server ignored the client-supplied parameter "
+                                                 "and answered about the session's own user"}
+    if _b(mutation) == _b(other_baseline):
+        if anon is not None and _s(anon) == 200 and _b(anon) == _b(other_baseline):
+            return {"verdict": "rejected", "reason": "the content is PUBLIC — anonymous receives it too"}
+        return {"verdict": "confirmed",
+                "reason": "the server derived identity from the client-supplied '%s' parameter: changing "
+                          "only that value returned the other persona's data verbatim (%d bytes)"
+                          % (str((mutation or {}).get("param") or "parameter"), len(_b(mutation)))}
+    return {"verdict": "lead", "reason": "the response changed but matched neither persona's baseline — "
+                                         "the parameter influences the answer without a proven cross-user read"}
+
+
+PARAM_ORACLE = ("two personas' browsers sent the same endpoint with different identity-parameter values; "
+                "rewriting ONLY that value in the owner's own outgoing request returns the other persona's "
+                "baseline byte-for-byte, while a server that ignores the parameter is explicitly rejected")
+
+
+def finding_param_swap(cand: dict, probes: dict, verdict: dict, *, owner: str = "owner",
+                       attacker: str = "attacker", mutation_method: str = "") -> dict:
+    """Server trusts a client-supplied identity parameter — proven by mutating the app's own request."""
+    confirmed = verdict.get("verdict") == "confirmed"
+    url = cand.get("owner_url", "")
+    return {
+        "title": "Server trusts a client-supplied identity parameter '%s' (%s)"
+                 % (cand.get("param"), cand.get("template") or url),
+        "severity": "high" if confirmed else "medium",
+        "confidence": "confirmed" if confirmed else "lead",
+        "family": "bola",
+        "cwe": "CWE-639",
+        "owasp": "API1:2023",
+        "target": url,
+        "tags": ["bola", "idor", "browser", "runtime", "parameter-tampering", "access_control"],
+        "description": ("The application's own request carries '%s' to say which user it concerns. Rewriting "
+                        "only that value in the outgoing request — as persona '%s', targeting persona '%s''s "
+                        "value — returned the other user's data. %s"
+                        % (cand.get("param"), owner, attacker, verdict.get("reason", ""))),
+        "impact": ("Identity is taken from a value the client controls, so any authenticated user can read "
+                   "any other user's data at %s by editing one parameter; the entire user base is "
+                   "enumerable." % (cand.get("template") or url)),
+        "oracle": PARAM_ORACLE,
+        "evidence": ("owner %s -> %s %dB | same request with %s rewritten to the other persona's value -> "
+                     "%s %dB, identical to that persona's own baseline | anonymous -> %s"
+                     % (url, (probes.get("self_baseline") or {}).get("status"),
+                        (probes.get("self_baseline") or {}).get("len", 0), cand.get("param"),
+                        (probes.get("mutation") or {}).get("status"),
+                        (probes.get("mutation") or {}).get("len", 0),
+                        (probes.get("anon") or {}).get("status"))),
+        "remediation": ("Derive the subject of the request from the authenticated session, not from a "
+                        "request parameter. If the parameter must exist, verify it matches the session's "
+                        "principal and reject it otherwise."),
+        "browser_evidence": {
+            "schema": "apolaki.bie-evidence/1",
+            "engine": "browser-intelligence-engine",
+            "instrumentation": "playwright route interception (%s)" % (mutation_method or "unknown"),
+            "reproduction_steps": [
+                "1. Authenticate as persona '%s' in a browser." % owner,
+                "2. Observe the application send %s at runtime." % url,
+                "3. Intercept that outgoing request and change ONLY '%s' from '%s' to '%s'."
+                % (cand.get("param"), cand.get("owner_value"), cand.get("attacker_value")),
+                "4. Observe the response is persona '%s''s data, byte-for-byte." % attacker,
+                "5. Negative controls: a server that ignores the parameter, and anonymous access, both "
+                "fail to produce this result.",
+            ],
+            "mutated_variable": {"param": cand.get("param"), "from": cand.get("owner_value"),
+                                 "to": cand.get("attacker_value"), "method": mutation_method},
+            "exact_request": probes.get("self_baseline"),
+            "mutated_request": probes.get("mutation"),
+            "negative_controls": {k: probes.get(k) for k in ("anon", "other_baseline")
+                                  if probes.get(k) is not None},
+            "verdict": verdict,
+            "personas": {"owner": owner, "attacker": attacker, "secrets": "[REDACTED -- held server-side]"},
+            "replay_script": "\n".join([
+                "#!/bin/sh",
+                "# Apolaki BIE replay -- server trusts a client-supplied identity parameter.",
+                "AUTH=\"$1\"   # persona '%s' auth material" % owner,
+                "echo '1. baseline -- own value:'",
+                "curl -sk -o /dev/null -w '   %%{http_code} %%{size_download}B\\n' -H \"Authorization: $AUTH\" '%s'" % url,
+                "echo '2. mutation -- only %s changed:'" % cand.get("param"),
+                "curl -sk -o /dev/null -w '   %%{http_code} %%{size_download}B\\n' -H \"Authorization: $AUTH\" '%s'"
+                % mutate_param(url, cand.get("param", ""), cand.get("attacker_value", "")),
+            ]),
+        },
+        "found_by": "bie",
+    }
+
+
 # ─────────────────────────────────────────── pure: the CLIENT-SIDE CONTROL SURFACE (CWE-602)
 # Words that mark a control as reaching privileged/state-changing functionality. Used only to RANK which
 # hidden controls are worth a safe probe -- never to assert a finding.
@@ -719,6 +915,62 @@ def _new_persona(browser, base: str, headers: dict, *, timeout_ms: int, wire: li
     return ctx, page, cdp, seeded
 
 
+def route_mutate(context, page, target_url: str, param: str, new_value: str, *, persona: str,
+                 trigger_url: str = "", timeout_ms: int = 25000) -> tuple:
+    """Change ONE variable in the application's OWN outgoing request, before it leaves the browser.
+
+    This is the real thing the spec asks for: not a replayed fetch we composed, but the request the app
+    itself decided to make, intercepted and rewritten in flight. Returns (exchange, method) where method
+    records HONESTLY how the mutation was achieved — "route-interception" when the app re-issued the
+    request and we rewrote it, or "in-page-fetch" when it did not and we had to issue the mutated request
+    from inside the persona's page instead. Never raises; read-only (safe methods only)."""
+    mutated = mutate_param(target_url, param, new_value)
+    captured, method = {}, "route-interception"
+
+    def _handler(route):
+        try:
+            req = route.request
+            if req.method.upper() in ("GET", "HEAD") and same_endpoint(req.url, target_url):
+                route.continue_(url=mutate_param(req.url, param, new_value))
+                return
+        except Exception:
+            pass
+        try:
+            route.continue_()
+        except Exception:
+            pass
+
+    def _on_response(resp):
+        try:
+            if not captured and same_endpoint(resp.url, target_url) and param + "=" in resp.url:
+                captured.update({"status": resp.status, "body": (resp.text() or "")[:_MAX_BODY]})
+        except Exception:
+            pass
+
+    try:
+        context.route("**/*", _handler)
+        page.on("response", _on_response)
+    except Exception:
+        return _fetch(page, mutated, {}, persona), "in-page-fetch"
+    try:
+        nav = trigger_url or page.url or target_url
+        page.goto(nav, wait_until="domcontentloaded", timeout=timeout_ms)
+        settle(page, timeout_ms)
+    except Exception:
+        pass
+    try:
+        context.unroute("**/*", _handler)
+        page.remove_listener("response", _on_response)
+    except Exception:
+        pass
+    if not captured:
+        # The app did not re-issue that request on this navigation. Say so, and fall back to issuing the
+        # mutated request from inside the persona's own page — still a real browser request in a real
+        # session, but a weaker provenance claim, so the evidence records which one happened.
+        return _fetch(page, mutated, {}, persona), "in-page-fetch"
+    return exchange(mutated, captured.get("status"), captured.get("body", ""), persona=persona), method
+
+
 def _read_controls(page) -> list:
     """Enumerate the rendered control surface of whatever page the persona is currently on. Never raises."""
     try:
@@ -830,6 +1082,28 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                     if verdict.get("verdict") in ("confirmed", "lead"):
                         out["findings"].append(finding(cand, probes, verdict, owner=owner,
                                                        attacker=attacker, screenshots=shots))
+                # PHASE 3 — CLIENT-SUPPLIED IDENTITY PARAMETERS, mutated by route interception. Where
+                # phase 1 changes an id in a path, this changes one identity VARIABLE inside the request
+                # the application itself emits, in flight. Safe methods only.
+                for pc in param_candidates(owner_urls, attacker_urls):
+                    if not ok(pc["owner_url"]) or not ok(pc["attacker_url"]):
+                        continue
+                    mut, how = route_mutate(o_ctx, o_page, pc["owner_url"], pc["param"],
+                                            pc["attacker_value"], persona=owner, timeout_ms=timeout_ms)
+                    pprobes = {"self_baseline": _fetch(o_page, pc["owner_url"], owner_headers, owner),
+                               "other_baseline": _fetch(a_page, pc["attacker_url"], attacker_headers,
+                                                        attacker),
+                               "mutation": {**mut, "param": pc["param"]},
+                               "anon": _fetch(n_page, pc["attacker_url"], {}, "anonymous")}
+                    pver = judge_param_swap(pprobes["self_baseline"], pprobes["other_baseline"],
+                                            pprobes["mutation"], anon=pprobes["anon"])
+                    out["probes"].append({"candidate": pc, "verdict": pver, "mutation_method": how,
+                                          "exchanges": {k: v for k, v in pprobes.items() if v}})
+                    out["exchanges"].extend([v for v in pprobes.values() if v])
+                    if pver.get("verdict") in ("confirmed", "lead"):
+                        out["findings"].append(finding_param_swap(pc, pprobes, pver, owner=owner,
+                                                                  attacker=attacker, mutation_method=how))
+
                 # PHASE 2 — the client-side CONTROL SURFACE (CWE-602). What did the interface WITHHOLD from
                 # this persona, and does the server withhold it too? Only safe GETs on real server
                 # resources are fired; state-changing controls become operator leads, never auto-clicks.
