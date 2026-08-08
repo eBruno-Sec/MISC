@@ -432,7 +432,36 @@ class BBHAgent:
             if not authorized:
                 return _tm.ToolResult(tool_name, "", True,
                                       json.dumps({"ran": False, "blocked": "intrusive tool not authorized (HITL)"}), [])
-        return await self.tools.execute(tool_name, tool_input, session_id)
+        # LOG IT. `_run_tool` yields a {"type": "tool_call"} event that main.py persists, and the report's
+        # per-tool ledger is built from exactly those rows. `_exec_internal` yielded nothing, so all TWELVE
+        # internally-dispatched engines were invisible in the report's "tools executed" section —
+        # including confirm_browser_persona_bola, both BOLA oracles, run_authz_matrix,
+        # run_transport_posture and run_header_trust. A client reading the Methodology would conclude the
+        # crown-jewel engines never ran. Verified live: header-trust executed against 6 targets on mission
+        # 5ebd704d and appeared nowhere in the ledger.
+        #
+        # This is not a generator, so it writes to the log directly rather than yielding. Logging must
+        # never break a scan, hence the guards.
+        try:
+            db.add_log(session_id, "tool_call", {"tool": tool_name, "input": tool_input,
+                                                 "permission": getattr(perm, "value", str(perm)),
+                                                 "via": "internal"})
+        except Exception:
+            pass
+        res = await self.tools.execute(tool_name, tool_input, session_id)
+        try:
+            if res is not None and not getattr(res, "success", True):
+                db.add_log(session_id, "tool_error",
+                           {"tool": tool_name, "error": str(getattr(res, "error", ""))[:200]})
+            else:
+                # `output`, not `summary` — ToolResult is (tool, target, success, output, findings, error)
+                # and `_tool_ledger` reads exactly the `count`/`output` keys written here.
+                db.add_log(session_id, "tool_result",
+                           {"tool": tool_name, "count": len(getattr(res, "findings", None) or []),
+                            "output": str(getattr(res, "output", ""))[:300]})
+        except Exception:
+            pass
+        return res
 
     def _is_confirmed(self, tool: str, f: dict) -> bool:
         """A finding is report-worthy CONFIRMED only when the probe says so. The
@@ -1960,11 +1989,17 @@ class BBHAgent:
                 seen.add(s)
                 targets.append(s)
 
-        total = 0
+        total, ran, first_error = 0, 0, ""
         for t in targets[:6]:
             try:
                 res = await self._exec_internal("run_header_trust", {"url": t}, session_id)
-            except Exception:
+                ran += 1
+            except Exception as e:
+                # Record WHY, once. A bare `except: continue` here hid a total failure behind a summary
+                # line that counted TARGETS rather than EXECUTIONS: the first live run reported "tested 6
+                # target(s)" while zero calls had actually reached the tool. Silence plus an optimistic
+                # count reads exactly like success.
+                first_error = first_error or "%s: %s" % (type(e).__name__, str(e)[:120])
                 continue
             for f in (res.findings or []):
                 if self.mission_id:
@@ -1976,9 +2011,15 @@ class BBHAgent:
                 yield {"type": "finding", "finding": f}
                 total += 1
         if targets:
-            yield {"type": "info", "content": "Header-trust: tested %d target(s) for authorization "
-                   "decided by a client-controlled header (Referer / X-Forwarded-* / X-Original-URL). "
-                   "%d finding(s)." % (min(len(targets), 6), total)}
+            # Report what RAN, not what was queued, and never hide a total failure.
+            if ran:
+                yield {"type": "info", "content": "Header-trust: tested %d of %d target(s) for "
+                       "authorization decided by a client-controlled header (Referer / X-Forwarded-* / "
+                       "X-Original-URL). %d finding(s)." % (ran, min(len(targets), 6), total)}
+            else:
+                yield {"type": "info", "content": "Header-trust: DID NOT RUN on any of %d target(s) — %s. "
+                       "Treat this class as untested, not as clean."
+                       % (min(len(targets), 6), first_error or "no reason captured")}
 
     def _runtime_seed_paths(self, limit: int = 6) -> list:
         """The authenticated app routes worth RENDERING so the SPA fetches the logged-in user's own

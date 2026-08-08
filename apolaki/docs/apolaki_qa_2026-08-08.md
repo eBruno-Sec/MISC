@@ -732,3 +732,79 @@ The honest division of labour, now explicit:
 Each catches what the others cannot, and none of them alone would have caught either island. Extending
 the qualified scan to methods is worthwhile but is not a small change — method calls resolve through
 `self`, so an AST-level receiver analysis is needed rather than a regex.
+
+## Triage verdicts so far (#30)
+
+Working the 47 candidates individually rather than in bulk. Each needs one of three verdicts: **wire it**,
+**delete it after proving it unused**, or **allowlist it with a reason**. Progress:
+
+| Candidate | Verdict | Basis |
+|---|---|---|
+| `graphql_tool.build_query` + `schema_operations` + `injectable_arguments` | **WIRED** | reachable-on-paper engine; live SQLite injection confirmed on DVGA |
+| `probe_selection.pairwise` / `safety_label` | **WIRED** | pairwise now bounds the GraphQL argument grid; `safety_label` states the pruning class in `describe()` |
+| `ssrf_tool.bypass_payloads` | **WIRED (as a new metadata variant)** | literal-address-only probing was a false-negative class |
+| `saml_tool.*` (3 fns) | **RECORDED — needs a harvest step first** | nothing captures a SAMLResponse, so an executor alone would have no input |
+| `ics_fingerprint.*` (6 fns) | **SUPERSEDED DUPLICATE** | live Modbus path is `modbus_audit_tool`; `service_router` uses only `PROTO_PORTS`. Do not delete blindly — `is_write_frame` in the same module IS live and is the OT write-safety authority |
+| `waf_bypass_tool.pad` | **NOT A GAP — a second variant** | the live path pads inline via a SEPARATE `_pad` parameter; `pad()` pads WITHIN the payload's own parameter. Both are legitimate WAF-bypass shapes; only the first is exercised. Smaller coverage gap, not dead code |
+| `wordlists.payloads_for`, `wordlists.seclists_available`, `security.validate_targets`, `service_router.is_ics_ot`, `dependency_intel.extract_script_srcs`, `xxe_tool.build_error_xml` | **ALREADY ALLOWLISTED** | present in `ALLOWED_UNUSED` with reasons; `scan_qualified` does not yet consult that list |
+
+The `waf_bypass_tool.pad` case is worth generalising: **"has no caller" and "the capability is missing"
+are different claims.** Three of the seven verdicts above turned out to be capability that exists by
+another route. Checking which, before writing code, is what keeps the triage from becoming churn.
+
+---
+
+# Pass 8 — the report was under-reporting its own best engines
+
+Verifying the header-trust wiring on a live Juice Shop scan (mission `5ebd704d`) produced a result I did
+not expect. The mission log proves it ran:
+
+```
+info: "Header-trust: tested 6 target(s) for authorization decided by a client-controlled
+       header (Referer / X-Forwarded-* / X-Original-URL)"
+```
+
+…and the report's tool ledger — the Methodology section's "tools executed" list — **does not contain it.**
+Nor `run_transport_posture`. Nor `run_service_pack`. 35 tools listed, those absent.
+
+Not truncation (869 log rows against a 4000 limit). The cause is structural:
+
+- `_run_tool` (the model/deterministic path) **yields** `{"type": "tool_call", ...}`, and `main.py:2278`
+  persists every yielded event. `_tool_ledger` is built from exactly those rows.
+- `_exec_internal` — the gated dispatch for internal calls — **yielded nothing and logged nothing.**
+
+So every engine dispatched internally was invisible in the report. All twelve:
+
+```
+confirm_authz_write          confirm_browser_persona_bola   confirm_create_object_idor
+confirm_read_object_idor     run_authz_matrix               run_bfla
+run_cloud_probe              run_exposure                   run_header_trust
+run_service_pack             run_stored_xss                 run_transport_posture
+```
+
+That list is not peripheral. It is the **Browser Intelligence Engine, both BOLA oracles, the authorization
+matrix, the transport-posture family and all thirteen ICS/service-pack techniques** — the work most worth
+showing a client. A reader of the Methodology section would reasonably conclude none of it ran.
+
+`_exec_internal` now writes `tool_call` and `tool_result`/`tool_error` rows directly (it is not a
+generator, so it cannot yield), using the `count`/`output` keys `_tool_ledger` actually reads. Logging is
+guarded both sides: a logging failure must never break a scan.
+
+## A second defect, in code I wrote an hour earlier
+
+While tracing this, my own `_do_header_trust` summary line was wrong:
+
+```python
+yield ... "Header-trust: tested %d target(s)" % min(len(targets), 6)   # counts TARGETS
+```
+
+It counted targets **queued**, not calls that **executed**, and every failure went to
+`except Exception: continue` with nothing recorded. Had all six calls failed, the scan would still have
+printed "tested 6 target(s)" — a silent total failure wearing the words of a successful pass. Now it
+reports `tested N of M`, and on zero executions says so explicitly:
+
+> *"Header-trust: DID NOT RUN on any of 6 target(s) — <reason>. Treat this class as untested, not as
+> clean."*
+
+Which is the same discipline as the capability-preflight section: **untested is not clean**, and a
+summary that cannot distinguish the two is worse than no summary.

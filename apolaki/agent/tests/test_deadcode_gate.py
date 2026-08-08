@@ -121,3 +121,12 @@ def test_the_baseline_is_not_slack(qual):
     q = qual
     assert q["baseline"] - q["count"] <= 3, (
         "baseline %d is stale against an actual %d — tighten it" % (q["baseline"], q["count"]))
+
+
+def test_the_qualified_scan_honours_the_allowlist(qual):
+    """A function with a written justification is unwired-but-explained, not unwired-and-unexplained.
+    Counting both toward the ratchet makes the number mean two things at once."""
+    assert qual["allowed"], "the allowlist should still be catching some entries"
+    for name in qual["allowed"]:
+        assert name.split(".")[-1] in dg.ALLOWED_UNUSED
+    assert not (set(qual["unused"]) & set(qual["allowed"])), "an entry cannot be both"

@@ -116,9 +116,10 @@ def scan(app_dir: str = None) -> dict:
 # let a genuinely unreachable engine ship.
 #
 # 52 when first measured; 47 after wiring `probe_selection` (pairwise/safety_label) and the GraphQL
-# argument functions into live paths in the same session. Lower it whenever the real number drops, so the
-# ratchet stays tight enough to catch the next regression.
-QUALIFIED_BASELINE = 47
+# argument functions into live paths; 40 once the check started honouring ALLOWED_UNUSED, which removed
+# six entries that already carried a written justification. Lower it whenever the real number drops, so
+# the ratchet stays tight enough to catch the next regression.
+QUALIFIED_BASELINE = 40
 
 
 def _module_bindings(tree, known_modules):
@@ -205,5 +206,11 @@ def scan_qualified(app_dir: str = None) -> dict:
                     break
             if not hit:
                 unused.append("%s.%s" % (mod, f))
-    return {"unused": unused, "count": len(unused), "baseline": QUALIFIED_BASELINE,
-            "ok": len(unused) <= QUALIFIED_BASELINE}
+    # Honour the same allowlist `scan()` uses. Without this, six functions that already carry a written
+    # justification counted toward the ratchet, which both inflates the number and makes it mean two
+    # different things at once ("unwired" vs "unwired and unexplained"). Matched on the bare name because
+    # ALLOWED_UNUSED is keyed that way.
+    allowed = [u for u in unused if u.split(".")[-1] in ALLOWED_UNUSED]
+    flagged = [u for u in unused if u.split(".")[-1] not in ALLOWED_UNUSED]
+    return {"unused": flagged, "allowed": allowed, "count": len(flagged),
+            "baseline": QUALIFIED_BASELINE, "ok": len(flagged) <= QUALIFIED_BASELINE}
