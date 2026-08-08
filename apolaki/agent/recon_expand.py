@@ -94,6 +94,42 @@ def permute(domain: str, words=None, *, max_out: int = 300) -> list:
     return sorted(out)[:max_out]
 
 
+# ── certificate-transparency harvest ──
+def parse_ct_names(rows, root: str) -> list:
+    """crt.sh JSON -> candidate subdomains of `root`. Pure: no network, no resolution.
+
+    A CT entry proves a certificate was ISSUED for a name, which is not proof the name resolves, is live,
+    or is in scope — every result is a CANDIDATE. Wildcards are unfolded to the bare root rather than
+    emitted as '*.x', and anything outside the authorized root is dropped even if the certificate
+    mentioned it (a shared cert routinely names other people's domains)."""
+    r = _root(root)
+    out = set()
+    for row in (rows or []):
+        blob = ""
+        if isinstance(row, dict):
+            blob = "%s\n%s" % (row.get("name_value") or "", row.get("common_name") or "")
+        else:
+            blob = str(row)
+        for name in blob.replace(",", "\n").split("\n"):
+            n = name.strip().lower().strip(".")
+            if not n:
+                continue
+            if n.startswith("*."):
+                n = n[2:]
+            if not n or " " in n or "@" in n:
+                continue
+            if r and (n == r or n.endswith("." + r)):     # authorized root only
+                out.add(n)
+    return sorted(out)
+
+
+def ct_query_url(root: str) -> str:
+    """The crt.sh query for a root domain. Returned as a STRING — executing it is the caller's job and
+    stays behind the gated intel-source allowlist (ct_logs / CT_LOGS_ENABLED)."""
+    r = _root(root)
+    return "https://crt.sh/?q=%%25.%s&output=json" % r if r else ""
+
+
 def seed_candidates(graph, domain: str, subs, *, scope_asset: str = "") -> int:
     """Seed permuted subdomains into the engagement graph as UNVERIFIED candidates (never resolved/probed
     here). They earn a real host node only after a live reachability check. Returns count seeded."""

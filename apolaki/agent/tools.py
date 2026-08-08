@@ -158,6 +158,7 @@ TOOL_PERMISSIONS = {
     "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
     "confirm_browser_persona_bola": PermissionLevel.ACTIVE,    # BIE runtime persona-swap BOLA (safe GETs only, #124)
     "run_transport_posture": PermissionLevel.ACTIVE,           # TLS/cookie/header/method posture (read-only, #103)
+    "run_external_surface": PermissionLevel.ACTIVE,            # ASN/favicon/permutation/CT candidates (#114)
     "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
     "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
     "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
@@ -2163,6 +2164,93 @@ class ToolRegistry:
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
                                       "leads": len(leads), "lead_findings": leads, "details": details}), findings)
 
+    async def _run_external_surface(self, inp: dict) -> ToolResult:
+        """PASSIVE/ACTIVE-light external attack-surface expansion (#114): ASN + BGP prefix, favicon pivot
+        hash, permuted subdomain candidates, and a certificate-transparency harvest.
+
+        Everything here produces CANDIDATES, not findings. A permuted name is a guess, a CT entry proves
+        only that a certificate was issued, and neither means the host exists, is live, or is yours — so
+        results are seeded as unverified graph candidates and NEVER promoted without a live check.
+
+        The CT fetch is the only outbound call and it is gated by the intel-source allowlist (ct_logs /
+        CT_LOGS_ENABLED); with the gate off, the query is returned as a string for the operator instead of
+        being executed."""
+        import intel_sources as _isrc
+        import recon_expand as _rx
+        from urllib.parse import urlsplit
+        target = (inp.get("domain") or inp.get("target") or inp.get("url") or "").strip()
+        if not target:
+            return ToolResult("external_surface", "", False, "", [], "no target")
+        # host WITHOUT the port drives DNS/permutation/CT; the authority WITH the port drives the favicon
+        # fetch, because a target on a non-standard port (the common case for an internal app) would
+        # otherwise never be reachable for the icon.
+        if "://" in target:
+            _p = urlsplit(target)
+            host, authority = _p.hostname or "", _p.netloc or ""
+        else:
+            authority = target.split("/")[0]
+            host = authority.split(":")[0]
+        if not host or not self.scope.validate(host)[0]:
+            return ToolResult("external_surface", target, False, "", [], "SCOPE BLOCK")
+
+        out = {"host": host, "asn": {}, "favicon": {}, "permutations": [], "ct": {},
+               "candidates": 0, "note": ""}
+        # 1) ASN + BGP prefix (the netblock the operator may also be authorized for — never assumed)
+        try:
+            import dns_recon as _dns
+            out["asn"] = await _dns.ip_intel(host)
+        except Exception:
+            pass
+        # 2) favicon pivot hash — the icon is fetched from the IN-SCOPE target itself
+        for scheme in ("https", "http"):
+            fav = "%s://%s/favicon.ico" % (scheme, authority or host)
+            if not self.scope.validate(fav)[0]:
+                continue
+            try:
+                r, _ = await self._http_send("GET", fav, {}, None, True)
+                if r.status_code == 200 and r.content:
+                    h = _rx.favicon_hash(r.content)
+                    out["favicon"] = {"hash": h, "bytes": len(r.content),
+                                      "pivots": _rx.favicon_pivot_queries(h)}
+                    break
+            except Exception:
+                continue
+        # 3) permuted subdomain candidates (offline)
+        out["permutations"] = _rx.permute(host, max_out=int(inp.get("max_permutations") or 120))
+        # 4) certificate transparency — gated
+        enabled = _isrc.is_enabled("ct_logs")
+        q = _rx.ct_query_url(host)
+        if not enabled:
+            out["ct"] = {"enabled": False, "query": q,
+                         "note": "ct_logs is gated (CT_LOGS_ENABLED); the query is provided for the "
+                                 "operator rather than executed"}
+        else:
+            try:
+                rows = await self._get_json(q, timeout=30)
+                names = _rx.parse_ct_names(rows if isinstance(rows, list) else [], host)
+                out["ct"] = {"enabled": True, "names": names[:200], "count": len(names)}
+            except Exception as e:
+                out["ct"] = {"enabled": True, "names": [], "count": 0, "error": str(e)[:100]}
+
+        # seed every candidate into the engagement graph as UNVERIFIED — this is what stops #114 from
+        # being a report of guesses: the graph records provenance and confidence, and a live check has to
+        # promote them.
+        cands = list(dict.fromkeys(list(out["permutations"]) + list((out["ct"] or {}).get("names") or [])))
+        try:
+            g = getattr(self, "graph", None) or getattr(self.state, "graph", None)
+            if g is not None:
+                out["candidates"] = _rx.seed_candidates(g, host, cands, scope_asset=host)
+            else:
+                self.recon.setdefault("external_candidates", []).extend(cands[:500])
+                out["candidates"] = len(cands)
+        except Exception:
+            self.recon.setdefault("external_candidates", []).extend(cands[:500])
+            out["candidates"] = len(cands)
+        self.recon.setdefault("external_surface", {})[host] = {
+            "asn": out["asn"], "favicon_hash": (out["favicon"] or {}).get("hash"),
+            "ct_enabled": bool(enabled), "candidates": out["candidates"]}
+        return ToolResult("external_surface", host, True, json.dumps(out), [])
+
     async def _run_transport_posture(self, inp: dict) -> ToolResult:
         """ACTIVE, read-only: the transport + web posture family (#103) for one origin — TLS protocol and
         certificate posture, session-cookie attributes, protective headers, and HTTP methods.
@@ -2972,14 +3060,14 @@ class ToolRegistry:
         domain = inp["domain"]
         subs = []
         try:
+            import recon_expand as _rx
             data = await self._get_json(f"https://crt.sh/?q=%.{domain}&output=json", timeout=30) or []
-            seen = set()
-            for entry in data:
-                for name in entry.get("name_value", "").split("\n"):
-                    name = name.strip().lstrip("*.")
-                    if name and name not in seen and self.scope.validate(name)[0]:
-                        seen.add(name)
-                        subs.append({"subdomain": name, "source": "crt.sh"})
+            # ONE CT parser for the whole platform (#114): root-scoped, wildcard-unfolded, and it drops
+            # names a shared certificate happens to mention that are outside the authorized root — the
+            # inline version stripped '*.' but kept any name the scope engine let through.
+            for name in _rx.parse_ct_names(data, domain):
+                if self.scope.validate(name)[0]:
+                    subs.append({"subdomain": name, "source": "crt.sh"})
         except Exception as e:
             return ToolResult("crtsh", domain, False, "", [], str(e))
         self.recon["subdomains"].extend(s["subdomain"] for s in subs)
