@@ -156,6 +156,7 @@ TOOL_PERMISSIONS = {
     "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
     "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
     "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
+    "confirm_browser_persona_bola": PermissionLevel.ACTIVE,    # BIE runtime persona-swap BOLA (safe GETs only, #124)
     "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
     "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
     "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
@@ -952,6 +953,7 @@ class ToolRegistry:
         # never-brute-force-credentials guarantee.
         self._sessions = {}
         self._session_shapes = {}   # role -> the exact winning login request shape (redacted), for honest reproduction
+        self._session_state = {}    # role -> app-issued session state from the login response (SPA storage seed, #124)
         self._login_attempts = 0
         self._login_pw_by_key = {}   # (login_url, user) -> set of distinct password hashes tried (brute-force guard)
         # Codex Tier-3 #14: a provenance record per EXTERNAL tool execution (tool/binary/version/argv-hash/
@@ -1520,6 +1522,19 @@ class ToolRegistry:
                         tok = ((j.get("authentication") or {}).get("token") or j.get("token")
                                or j.get("access_token") or j.get("jwt") or j.get("id_token"))
                         _user_key = next((k for k in body if k != "password"), "email")
+                        # APP-ISSUED SESSION STATE (#124): keep the scalar fields the login response
+                        # returned. A bearer header authenticates the TRANSPORT; a single-page app also
+                        # needs the identity fields it normally stores (basket id, user id, email) before
+                        # it will render the pages that fetch this user's objects. The Browser
+                        # Intelligence Engine seeds these into the persona's browser storage. Secrets
+                        # stay server-side — this never leaves the registry.
+                        try:
+                            import bie as _bie
+                            st = _bie.storage_from_login(j)
+                            if st:
+                                self._session_state[role] = st
+                        except Exception:
+                            pass
                         if tok:
                             auth_header = {"Authorization": "Bearer " + tok}
                             identity = (j.get("authentication") or {}).get("umail") or user
@@ -2143,6 +2158,69 @@ class ToolRegistry:
         return ToolResult("read_object_idor", base, True,
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
                                       "leads": len(leads), "lead_findings": leads, "details": details}), findings)
+
+    async def _confirm_browser_persona_bola(self, inp: dict) -> ToolResult:
+        """ACTIVE (read-only, GETs only): the Browser Intelligence Engine's RUNTIME cross-user proof (#124).
+
+        Two personas get their own real browser context (separate cookie jar + storage + session, seeded
+        with the app's OWN login-response state). Each app boots for real, and the object requests it makes
+        at runtime become the cross-user hypotheses — observation, not id-spraying. Each hypothesis is then
+        replayed from inside the attacker's page with ONLY the object id changed, alongside three negative
+        controls (anonymous / implausible id / the attacker's own object). The deterministic oracle in
+        bie.judge decides; the browser never gets a vote. Confirmed findings carry an evidence-derived PoC
+        bundle frozen from the actual run. Roles are referenced by name — session secrets stay server-side."""
+        import bie as _bie
+        base = (inp.get("base_url") or "").strip().rstrip("/")
+        owner, attacker = inp.get("owner") or "user_a", inp.get("attacker") or "user_b"
+        owner_h = dict(self._sessions.get(owner, {}))
+        atk_h = dict(self._sessions.get(attacker, {}))
+        if not base or not owner_h or not atk_h:
+            return ToolResult("browser_persona_bola", base, True,
+                              json.dumps({"ran": False, "note": "need base_url + two persona sessions"}), [])
+        usable, note = _bie.available()
+        if not usable:
+            return ToolResult("browser_persona_bola", base, True,
+                              json.dumps({"ran": False, "note": note}), [])
+        res = await asyncio.to_thread(
+            _bie.run_persona_swap, base,
+            owner_headers=owner_h, attacker_headers=atk_h, owner=owner, attacker=attacker,
+            owner_storage=self._session_state.get(owner), attacker_storage=self._session_state.get(attacker),
+            seed_paths=inp.get("seed_paths") or [], extra_owner_urls=inp.get("owner_object_urls") or [],
+            max_candidates=int(inp.get("max_candidates") or 3),
+            screenshots=bool(inp.get("screenshots", True)),
+            scope_ok=lambda u: self.scope.validate(u)[0])
+        # NO ISLAND: the browser's runtime traffic joins the ONE engagement ledger (and therefore the HAR
+        # export + traffic view), tagged engine="browser" so its provenance stays honest.
+        try:
+            for w in (res.get("wire") or []):
+                if w.get("url"):
+                    self.capture.add(w.get("method") or "GET", w["url"], w.get("status") or 0,
+                                     resp_len=w.get("resp_len") or 0, engine="browser",
+                                     resp_ct=w.get("mime") or "")
+            for ex in (res.get("exchanges") or []):
+                self.capture.add(ex.get("method") or "GET", ex.get("url"), ex.get("status") or 0,
+                                 resp_len=ex.get("len") or 0, ms=ex.get("ms") or 0, engine="browser")
+        except Exception:
+            pass
+        # runtime observations reach the SAME planner vocabulary as HTTP recon
+        try:
+            for o in (res.get("observations") or []):
+                self.state.add_capability("runtime:" + str(o), "browser intelligence engine")
+        except Exception:
+            pass
+        findings = [f for f in (res.get("findings") or []) if f.get("confidence") == "confirmed"]
+        leads = [f for f in (res.get("findings") or []) if f.get("confidence") != "confirmed"]
+        summary = {"ran": bool(res.get("ran")), "note": res.get("note") or "",
+                   "counts": res.get("counts") or {}, "candidates": res.get("candidates") or [],
+                   "verdicts": [{"url": p["candidate"].get("owner_url"), **p["verdict"]}
+                                for p in (res.get("probes") or [])],
+                   "confirmed": len(findings), "leads": len(leads), "lead_findings": leads,
+                   "observations": res.get("observations") or [],
+                   "control_surface": res.get("control_surface") or {},
+                   "settle": res.get("settle") or [],
+                   "personas": res.get("personas") or {}}
+        self._bie_result = summary
+        return ToolResult("browser_persona_bola", base, True, json.dumps(summary), findings)
 
     async def _confirm_authz_write(self, inp: dict) -> ToolResult:
         """ACTIVE, INTRUSIVE (opt-in): horizontal WRITE authorization test with RESTORE. Reads the

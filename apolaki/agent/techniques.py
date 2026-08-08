@@ -325,6 +325,39 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
+    _t(id="browser_persona_bola", vuln_class="access_control", cwe="CWE-639", owasp="API1:2023",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-04",
+       summary="Runtime persona-swap BOLA: prove cross-user object access inside two real browser sessions.",
+       detect="A single-page app that fetches per-user objects after JavaScript runs — the object request "
+              "the application itself makes, captured at the wire by raw CDP (bie.observe), not guessed "
+              "from static HTML.",
+       exploit="Give each of two same-privilege personas its own browser context (separate cookie jar, "
+               "storage and session, seeded from the app's OWN login response), let each app boot for "
+               "real, then replay the owner's runtime request from inside the attacker's page changing "
+               "ONLY the object id. Read-only: GETs only, no writes, no id-spraying.",
+       oracle="bie.judge — the attacker's browser receives the owner's object byte-for-byte (200) while "
+              "THREE negative controls do not: anonymous (proves it is not public), an implausible id "
+              "(proves the route is object-specific, not an SPA shell), and the attacker's own object "
+              "(proves the objects are distinguishable). A missing control yields a lead, never a confirm.",
+       validated_on=["juiceshop"],
+       maps_to={"juiceshop": ["View Basket"]}),
+
+    _t(id="client_side_authz", vuln_class="access_control", cwe="CWE-602", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-01",
+       summary="Access control enforced only in the browser: the UI withholds a control the server still serves.",
+       detect="Enumerate the RENDERED control surface per persona and split what the interface offers from "
+              "what it withholds (Selenium's visibility contract: not displayed, zero-size, or disabled). "
+              "A framework that removes the control from the DOM entirely yields nothing here — that case "
+              "belongs to the JS-bundle route harvest, and this engine reports zero rather than guessing.",
+       exploit="Request the withheld control's target with a SAFE GET as the same persona. Client-side-only "
+               "routes and anything requiring a state-changing submit are never auto-fired — they become "
+               "operator leads.",
+       oracle="bie.judge_client_side_authz — the server returns a substantive body for a control the UI "
+              "withheld, and that body is neither the SPA shell (unknown-path control) nor public content "
+              "(anonymous control).",
+       validated_on=[],
+       maps_to={}),
+
     _t(id="bfla_privileged_action", vuln_class="access_control", cwe="CWE-285", owasp="A01:2021",
        permission=ACTIVE, transferable=True, pack="bfla_privileged_action",
        summary="Broken function-level authz: low-privilege session reaches a privileged function.",

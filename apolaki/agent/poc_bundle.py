@@ -119,7 +119,7 @@ def build(finding: dict, exchanges: list = None, *, tool_version: str = "", targ
                                                "oracle": str(finding.get("oracle") or "")})
     grade = report.graded_business_impact(finding)
     rplan = retest.plan(finding)
-    return {
+    out = {
         "schema": "apolaki.poc-bundle/1",
         "generated_at": _iso(),
         "finding": {
@@ -149,6 +149,17 @@ def build(finding: dict, exchanges: list = None, *, tool_version: str = "", targ
         "provenance": {"tool_version": tool_version or "", "found_by": finding.get("found_by") or "apolaki",
                        "skill_version": "apolaki.poc-bundle/1"},
     }
+    # BROWSER-DERIVED evidence (#124): when the Browser Intelligence Engine confirmed this finding, the
+    # bundle carries proof frozen from the ACTUAL run — before/after screenshots, the exact runtime request,
+    # the mutated request, every negative control, and a replay script. Not reconstructed after the fact.
+    be = finding.get("browser_evidence")
+    if isinstance(be, dict) and be:
+        out["browser_evidence"] = be
+        out["reproduction"]["steps"] = list(be.get("reproduction_steps") or [])
+        out["reproduction"]["replay_script"] = be.get("replay_script") or ""
+        shots = be.get("screenshots") or {}
+        out["reproduction"]["screenshots"] = sorted(shots) if isinstance(shots, dict) else []
+    return out
 
 
 def build_all(findings: list, exchanges_by_finding: dict = None, *, tool_version: str = "",

@@ -1007,6 +1007,7 @@ async function loadAssurance(){
   try{rep=await(await fetch(`${API}/report/${sessionId}/json`)).json();}catch(e){}
   try{graph=await(await fetch(`${API}/graph/canonical/${sessionId}`)).json();}catch(e){}
   const aa=rep.auth_artery||{ran:false}, areq=aa.authenticated_requests||{}, mtx=aa.matrix||{}, co=aa.create_object_idor||{};
+  const bie=aa.browser_persona_bola||{ran:false}, bcnt=bie.counts||{}, bcs=(bie.control_surface||{}).counts||{};
   const findings=rep.findings||[], leads=rep.leads||[];
   const nConf=findings.filter(f=>f.confidence==="confirmed").length, nLead=(findings.length-nConf)+leads.length;
   const st=(graph.stats||{}), bk=(st.by_kind||{}), prov=graph.provenance||{}, nba=graph.next_best_actions||[];
@@ -1026,6 +1027,18 @@ async function loadAssurance(){
     row("Both personas succeeded", yn(areq.both_personas_succeeded)),
     row("Authorization matrix", `${esc(mtx.operations||0)} operation(s), ${esc(mtx.findings||0)} finding(s)`),
     row("Create-object IDOR", `ran ${yn(co.ran)}, ${esc(co.attempts||0)} created, ${esc(co.confirmed||0)} confirmed`),
+  ].join(""));
+  // Browser Intelligence Engine — the RUNTIME viewpoint. Shown whether or not it confirmed anything:
+  // "ran, 0 confirmed" is evidence that authorization held, not an absence of testing.
+  html+=card("Browser Intelligence Engine (runtime persona swap)",[
+    row("Ran", yn(bie.ran)+(bie.note?` <span style="color:var(--text-dim)">— ${esc(bie.note)}</span>`:"")),
+    row("Browser requests observed", `<b>${esc(bcnt.requests||0)}</b> across `+
+        Object.entries(bcnt.by_persona||{}).map(([r,n])=>`${esc(r)}=${esc(n)}`).join(", ")||"—"),
+    row("Runtime object hypotheses", `${esc((bie.candidates||[]).length)} formed, ${esc(bcnt.probes||0)} swapped + control-tested`),
+    row("Cross-user reads CONFIRMED", `<b style="color:${(bie.confirmed||0)>0?'var(--bad,#ff3d6b)':'var(--ok)'}">${esc(bie.confirmed||0)}</b>`
+        +` <span style="color:var(--text-dim)">(oracle-decided; 3 negative controls each)</span>`),
+    row("Client-side control surface", `${esc(bcs.total||0)} controls — ${esc(bcs.offered||0)} offered, ${esc(bcs.withheld||0)} withheld, ${esc(bcs.withheld_privileged||0)} privileged+withheld`),
+    row("Runtime observations fed to planner", esc((bie.observations||[]).join(", ")||"—")),
   ].join(""));
   html+=card("Findings posture",[
     row("Confirmed", `<b>${nConf}</b> (proof-backed only)`),

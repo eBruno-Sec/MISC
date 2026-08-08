@@ -1022,6 +1022,48 @@ def graded_business_impact(finding: dict):
     }
 
 
+def browser_evidence_html(finding: dict, e) -> str:
+    """Render the Browser Intelligence Engine's evidence-derived proof (#124): the before/after
+    screenshots, the exact runtime request, the mutated request, every negative control, and the replay
+    script — all frozen from the ACTUAL confirmed run. Empty string when the finding has none."""
+    be = finding.get("browser_evidence")
+    if not isinstance(be, dict) or not be:
+        return ""
+    rows = []
+    labels = {"exact_request": "Exact runtime request (owner)", "mutated_request": "Mutated request (attacker)"}
+    for key in ("exact_request", "mutated_request"):
+        x = be.get(key) or {}
+        if x:
+            rows.append((labels[key], x))
+    for name, x in (be.get("negative_controls") or {}).items():
+        pretty = {"anon": "Negative control — anonymous", "nonexistent": "Negative control — implausible id",
+                  "control": "Negative control — attacker's own object"}.get(name, "Control — " + name)
+        rows.append((pretty, x or {}))
+    trs = "".join(
+        "<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s B</td></tr>"
+        % (e(lbl), e(str(x.get("url", ""))), e(str(x.get("status", ""))), e(str(x.get("len", 0))))
+        for lbl, x in rows)
+    shots = ""
+    for lbl, s in sorted((be.get("screenshots") or {}).items()):
+        b64 = (s or {}).get("png_b64")
+        if b64:
+            shots += ("<figure style='display:inline-block;max-width:48%%;margin:6px'>"
+                      "<img src='data:image/png;base64,%s' style='max-width:100%%;border:1px solid #2a3b45'/>"
+                      "<figcaption class='sub'>%s</figcaption></figure>" % (b64, e(lbl.replace("_", " "))))
+    steps = "".join("<li>%s</li>" % e(str(s)) for s in (be.get("reproduction_steps") or []))
+    return ("<div class='biz'><h4>Browser runtime proof (Browser Intelligence Engine)</h4>"
+            "<p class='sub'>Instrumentation: %s. The browser performed the attempt; the deterministic "
+            "oracle decided the verdict.</p>"
+            "%s"
+            "<table class='tbl'><tr><th>Exchange</th><th>URL</th><th>Status</th><th>Size</th></tr>%s</table>"
+            "%s"
+            "<h4>Reproduce (from the actual run)</h4><ol>%s</ol>"
+            "<h4>Replay script</h4><pre><code>%s</code></pre></div>"
+            % (e(str(be.get("instrumentation", ""))),
+               ("<p><b>Verdict:</b> %s</p>" % e(str((be.get("verdict") or {}).get("reason", "")))),
+               trs, shots, steps, e(str(be.get("replay_script", "")))))
+
+
 def proof_and_retest(finding: dict) -> dict:
     """A finding's FALSE-POSITIVE-safety negative control (from the #115 technique proof contract, keyed
     by family) + its RETEST/closure method (from the #117 closure loop). Deterministic; surfaces both in
@@ -1960,6 +2002,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
           <h4>Impact</h4><p>{e(impact)}</p>
           {graded_html}
           {pr_html}
+          {browser_evidence_html(f, e)}
           <h4>Steps to Reproduce</h4><ol>{steps}</ol>
           {curl_html}{ev}{raw_html}{poc_html}{fpc_html}{inst_html}{rem}{val}{notes}
         </article>""")

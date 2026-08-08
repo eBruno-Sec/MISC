@@ -85,6 +85,10 @@ ALWAYS_ON = {
     "race_condition":           "run_race probe on single-use actions (probe phase)",
     "insecure_deser":           "run_deserialization probe on requests carrying serialized blobs (probe phase)",
     "missing_authentication":   "persona authorization matrix (_do_persona_authz) whenever personas mint",
+    "browser_persona_bola":     "persona authorization artery step 5e (_do_persona_authz -> confirm_browser_persona_bola): "
+                                "the Browser Intelligence Engine's runtime swap fires on the same proven persona pair",
+    "client_side_authz":        "Browser Intelligence Engine phase 2, inside the same artery step 5e run: the rendered "
+                                "control surface is enumerated on every persona route the swap already visits",
     "vulnerable_component":     "always-on fingerprint / nuclei recon",
     "security_misconfig_errors": "passive stack-trace / error-signature detection on every response",
     "encoded_data_decode":      "passive intel harvest at every transport chokepoint",
