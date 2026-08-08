@@ -564,3 +564,88 @@ Wiring `safety_label` into `describe()` also gave it its first caller, so the pr
 in the Automated Planning §4.2.1 vocabulary rather than left to the reader:
 
 > `Pruning class: declared — every value pair is covered; 3-way interactions are not.`
+
+## The systemic fix: ALWAYS_ON reasons are now checked against the code
+
+The GraphQL island was one instance of a class. `engine_descriptor.verify_always_on()` now extracts every
+code identifier an always-on reason NAMES and requires it to be referenced by code that runs — with
+`techniques.py` and `engine_descriptor.py` excluded, because those are prose and a mention there is
+exactly how the false promise survived.
+
+**Result across all 40 reasons: 39 identifier references checked, 0 unwired.** GraphQL was the only
+genuine break, and it is fixed.
+
+Two false alarms during development, both worth recording because each would have destroyed trust in the
+guard:
+
+- **13 ICS engines reported broken.** A tool is REGISTERED under a bare string (`"run_service_pack"`) and
+  IMPLEMENTED as a private method (`_run_service_pack`). Treating those as different names flagged every
+  service-pack engine. Fixed by normalising the leading underscore. Verified by hand first
+  (`tools.py:2571`, dispatched from `agent.py:1376`) rather than trusting the tool that was under test.
+- **`looks_like_chat_endpoint` and `run_header_trust` looked thin** at one reference each; both are real
+  (`llm_tool.py:38` → `tools.py:7219`, and a registered tool plus `_run_header_trust`).
+
+The lesson generalises: a guard's own false positives are as dangerous as its false negatives, because a
+noisy guard gets switched off.
+
+**Negative control, because a guard that cannot fail is not a guard.** Pointing a reason at
+`bie.resolve_locator` — real, tested, no production caller — makes the check fail with the right message.
+That is asserted as a test, not just run once.
+
+Surfaced in `GET /orchestration/audit` (`reason_verification`) and in the Orchestration UI beside the
+island count, so the property is visible rather than CI-only — the same treatment the no-island count got.
+
+## The dead-code gate, fixed as a ratchet
+
+`scan_qualified()` resolves usage through the actual import graph — module-qualified, alias-aware
+(`import probe_selection as ps` → `ps.pairwise(...)` counts), `from`-import aware, and production-only
+(a function its own test calls is *exercised*, not *wired*).
+
+It ships **alongside** `scan()` rather than replacing it, as a ratchet:
+
+| | count |
+|---|---|
+| bare-name `scan()` | 0 |
+| qualified `scan_qualified()` | **47** (52 before this session's wiring removed 5) |
+
+The 47 are **candidates, not proven dead** — some will be reachable through patterns the checker does not
+model. Bulk-deleting them would be exactly the mistake the rule "remove obsolete code only after proving
+it is unused" exists to prevent, and it is how a working engine gets removed. So the number is pinned:
+**it may fall, never rise.** New dead code fails immediately; the backlog gets triaged deliberately.
+
+A second test asserts the baseline is not slack (within 3 of the real count), because a baseline parked
+far above reality silently permits regressions up to it.
+
+**Performance note worth recording.** The first implementation was O(functions × files) — 1391 functions
+across 166 files, ~231k regex passes — and blew past a two-minute test timeout. A module is only
+reachable from files that import it, so indexing importers narrowed the inner loop from every file to a
+handful: **5.4s, identical result.** A correctness check nobody can afford to run is not a check.
+
+The blind spot is also demonstrated as an executable test rather than asserted in prose: two modules
+define `helper`, only one is called, and the bare-name scan clears both while the qualified scan flags
+exactly the dead one.
+
+### Measured, not estimated
+
+The `--durations` output made the cost concrete, and showed the new check is the cheap one:
+
+```
+BEFORE (six independent real-tree scans)
+  55.91s  test_no_unexplained_dead_functions           }
+  54.66s  test_the_allowlist_does_not_rot              }  legacy bare-name scan()
+  54.01s  test_framework_invoked_functions_not_flagged }  ~55s each
+  51.79s  test_the_scan_actually_finds_things          }
+   5.21s  test_the_ratchet_holds                          <- the NEW qualified scan
+
+AFTER (module-scoped fixtures, scans computed once)
+  54.51s  setup :: scan()
+   4.77s  setup :: scan_qualified()
+```
+
+Two observations worth keeping:
+
+- **The legacy `scan()` is 10x slower than the qualified one AND less accurate.** The bare-name check is
+  O(names x files) with no index — 1391 names against every file. `scan_qualified` resolves the import
+  graph first and only searches files that import the module, so it is both cheaper and correct.
+- **~162 seconds came off every full-suite run** by sharing the scans rather than recomputing them six
+  times. That was pure waste, and it was invisible until something timed out.

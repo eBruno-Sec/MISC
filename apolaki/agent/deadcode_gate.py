@@ -14,6 +14,23 @@ waiting for someone to call the wrong one.
 Framework-invoked functions have no in-repo caller by design (FastAPI routes, pytest tests, middleware).
 Those are recognised structurally — a decorated top-level function is assumed framework-called — rather
 than by maintaining a name list that would rot.
+
+**`scan()` UNDER-REPORTS, and by more than "conservative" suggests.** It matches a BARE NAME across the
+whole corpus, so a function counts as used the moment any unrelated module mentions the same word. 90
+function names in this codebase are defined in more than one module (`finding` x30, `analyze` x20,
+`probe` x11). It also counts test files, so a function only its own test calls looks wired.
+
+That is not theoretical. `probe_selection.pairwise`, `safety_label` and `full_grid` had no production
+caller while `scan()` reported nothing, because `coverage` and `describe` collide with same-named
+functions in `main.py`, `report.py`, `wstg_catalog.py` and `stealth.py`. Following that thread found
+`graphql_argument_injection` running on paper only.
+
+`scan_qualified()` is the honest check: module-resolved, import-alias-aware, production-only. It reports
+substantially more, and those extras are CANDIDATES, not proven-dead — several will be reachable through
+patterns it does not model. So it ships as a RATCHET (`QUALIFIED_BASELINE`) rather than a blocking gate:
+the number may go down, never up. New dead code fails immediately; the existing backlog gets triaged
+deliberately instead of bulk-deleted, which is what "remove obsolete code only after proving it is
+unused" requires.
 """
 from __future__ import annotations
 
@@ -92,3 +109,101 @@ def scan(app_dir: str = None) -> dict:
     stale = sorted(set(ALLOWED_UNUSED) - {u["name"] for u in unused})
     return {"unused": flagged, "allowed": allowed, "stale_allowlist": stale,
             "total_functions": len(defs), "passed": not flagged and not stale}
+
+
+# The count `scan_qualified` reports today. A RATCHET, not a target: it may fall, never rise. Raising it
+# to make a change pass would defeat the point — the whole reason this exists is that the bare-name check
+# let a genuinely unreachable engine ship.
+#
+# 52 when first measured; 47 after wiring `probe_selection` (pairwise/safety_label) and the GraphQL
+# argument functions into live paths in the same session. Lower it whenever the real number drops, so the
+# ratchet stays tight enough to catch the next regression.
+QUALIFIED_BASELINE = 47
+
+
+def _module_bindings(tree, known_modules):
+    """({module: {names it is bound to here}}, {(module, original, local)}) for one parsed file. Pure."""
+    aliased, from_imported = {}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                base = al.name.split(".")[0]
+                if base in known_modules:
+                    aliased.setdefault(base, set()).add(al.asname or al.name)
+        elif isinstance(node, ast.ImportFrom):
+            base = (node.module or "").split(".")[0]
+            if base in known_modules:
+                for al in node.names:
+                    from_imported.add((base, al.name, al.asname or al.name))
+    return aliased, from_imported
+
+
+def scan_qualified(app_dir: str = None) -> dict:
+    """Module-resolved dead-code scan: PRODUCTION callers only, name collisions impossible.
+
+    A function counts as used when it is referenced inside its own module, or through an import of that
+    specific module (`probe_selection.pairwise`, `ps.pairwise`, or `from probe_selection import pairwise`)
+    — never merely because some unrelated file happens to define the same word.
+
+    Tests are deliberately excluded. A function only its own test calls is exercised, not wired, and that
+    distinction is the one `scan()` cannot make.
+
+    Returns {unused, count, baseline, ok}. `ok` is the RATCHET: count must not exceed the baseline."""
+    app = app_dir or APP_DIR
+    srcs, trees = {}, {}
+    for fn in sorted(os.listdir(app)):
+        if not fn.endswith(".py"):
+            continue
+        try:
+            s = open(os.path.join(app, fn), encoding="utf8").read()
+            trees[fn] = ast.parse(s)
+            srcs[fn] = s
+        except Exception:
+            continue
+
+    modules = {fn[:-3]: {n.name for n in trees[fn].body
+                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                         and not _decorated(n) and not _FRAMEWORK_PREFIX.match(n.name)}
+               for fn in trees}
+    bindings = {fn: _module_bindings(t, modules) for fn, t in trees.items()}
+
+    # Index which files import each module. Without this the search is O(functions x files) — 1391
+    # functions across 166 files is ~231k regex passes over the whole tree, which took the scan past a
+    # two-minute test timeout. A module is only reachable from files that import it, so this narrows the
+    # inner loop from every file to typically a handful, with no change in result.
+    importers = {}
+    for other, (aliased, from_imported) in bindings.items():
+        for mod in aliased:
+            importers.setdefault(mod, set()).add(other)
+        for (mod, _orig, _local) in from_imported:
+            importers.setdefault(mod, set()).add(other)
+
+    unused = []
+    for mod, funcs in sorted(modules.items()):
+        own = srcs.get(mod + ".py", "")
+        for f in sorted(funcs):
+            # Own module: any mention other than the definition itself. NOT requiring a call, because a
+            # function placed in a dispatch table is referenced as a value.
+            body = re.sub(r"^\s*(async\s+)?def\s+%s\s*\(" % re.escape(f), "", own, flags=re.M)
+            if re.search(r"(?<![\w.])%s\b" % re.escape(f), body):
+                continue
+            hit = False
+            for other in sorted(importers.get(mod, ())):
+                if other == mod + ".py":
+                    continue
+                src = srcs[other]
+                aliased, from_imported = bindings[other]
+                for name in aliased.get(mod, ()):
+                    if re.search(r"(?<![\w.])%s\.%s\b" % (re.escape(name), re.escape(f)), src):
+                        hit = True
+                        break
+                if hit:
+                    break
+                if any(m == mod and orig == f and re.search(r"(?<![\w.])%s\b" % re.escape(local), src)
+                       for (m, orig, local) in from_imported):
+                    hit = True
+                    break
+            if not hit:
+                unused.append("%s.%s" % (mod, f))
+    return {"unused": unused, "count": len(unused), "baseline": QUALIFIED_BASELINE,
+            "ok": len(unused) <= QUALIFIED_BASELINE}

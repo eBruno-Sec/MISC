@@ -929,9 +929,20 @@ async def orchestration_audit():
         d = ED.build()
         v = ED.validate(d)
         chains, conflicts = ED.chains(d), ED.conflicts(d)
+        # An ALWAYS_ON entry is accepted on the strength of its stated REASON, and the reason is prose.
+        # `graphql_argument_injection` was declared reached "via graphql_tool.build_query" while nothing
+        # called it — the engine ran on paper only and this audit reported no islands. Checking the prose
+        # against the code closes that gap.
+        reasons = ED.verify_always_on()
         return {**a, "gated_count": len(a["gated"]), "always_on_count": len(a["always_on"]),
                 "island_count": len(a["islands"]), "no_islands": a["islands"] == [],
                 "always_on_reasons": TP.ALWAYS_ON,
+                "reason_verification": {
+                    "identifiers_checked": len(reasons["checked"]),
+                    "unwired": reasons["unwired"], "ok": reasons["ok"],
+                    "note": ("Every function an always-on reason NAMES must be referenced by code that "
+                             "runs. Mentions in techniques.py or the descriptor are prose, not wiring."),
+                },
                 "effects": {
                     "engines_with_effects": v["with_effects"], "engines_total": v["total"],
                     "vocabulary_ok": v["ok"],

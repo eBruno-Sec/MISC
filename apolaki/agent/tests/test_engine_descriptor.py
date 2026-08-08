@@ -116,3 +116,48 @@ def test_validate_catches_an_invented_effect_term():
     r = ed.validate(d)
     assert not r["ok"]
     assert any("root_on_the_box" in x for x in r["unknown_effect_vocabulary"])
+
+
+# ── ALWAYS_ON reasons must be TRUE, not merely present ──────────────────────────────────────────
+
+def test_every_function_an_always_on_reason_names_is_actually_wired():
+    """THE guard for a defect class that shipped. `graphql_argument_injection` was declared ALWAYS_ON
+    "via graphql_tool.build_query", and nothing called build_query, injectable_arguments or
+    schema_operations. The engine ran on paper only.
+
+    The no-island guard could not catch it: it proves a technique is DECLARED reached, and the
+    declaration is prose. This checks the prose against the code."""
+    r = ed.verify_always_on()
+    assert r["ok"], "ALWAYS_ON reasons naming unwired functions:\n  " + "\n  ".join(r["unwired"])
+    assert len(r["checked"]) >= 30, "verifier resolved suspiciously few identifiers: %d" % len(r["checked"])
+
+
+def test_the_verifier_catches_an_unwired_reason(monkeypatch):
+    """NEGATIVE CONTROL. A guard that cannot fail is not a guard. `bie.resolve_locator` is real, tested,
+    and has no production caller — exactly the shape of the historical bug."""
+    monkeypatch.setitem(ed.ALWAYS_ON, "fake_engine", "reached via bie.resolve_locator on every page")
+    r = ed.verify_always_on()
+    assert r["ok"] is False
+    assert any("resolve_locator" in u for u in r["unwired"]), r["unwired"]
+
+
+def test_the_verifier_ignores_prose_that_is_not_an_identifier():
+    """Reasons are written for humans. Ordinary words must not be mistaken for functions, or the guard
+    becomes noise and gets switched off."""
+    assert ed._identifiers("always-on DOM sweep on every reflected param") == set()
+    assert "run_xss" in ed._identifiers("always-on DOM sweep (run_xss / run_dom_trace on every page)")
+
+
+def test_prose_files_do_not_count_as_wiring():
+    """The false promise lived in techniques.py and in the reason itself. If a mention there counted as
+    a reference, the guard would have passed the very bug it exists to catch."""
+    assert "techniques.py" in ed._PROSE_FILES
+    assert "engine_descriptor.py" in ed._PROSE_FILES
+
+
+def test_a_tool_registered_by_string_still_counts_as_wired():
+    """Tools are registered under a bare string ("run_service_pack") and implemented as a private method
+    (`_run_service_pack`). Treating those as different names made the verifier report 13 wired ICS
+    engines as broken — a false alarm that would have destroyed trust in the guard."""
+    r = ed.verify_always_on()
+    assert not any("service_pack" in u for u in r["unwired"]), r["unwired"]

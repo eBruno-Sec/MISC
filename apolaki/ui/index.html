@@ -2163,6 +2163,15 @@ async function loadOrchestration(){
              <td style="width:20%;color:var(--accent)">establishes <b>${esc(byProd[p][0].observation)}</b>${byProd[p].some(x=>x.observation!==byProd[p][0].observation)?" +":""}</td>
              <td>${byProd[p].map(x=>`<code>${esc(x.consumer)}</code>`).join(", ")}</td></tr>`).join("")}</table></div>`;
   }
+  const rv=d.reason_verification||{};
+  if(rv.identifiers_checked!==undefined){
+    const bad=(rv.unwired||[]).length;
+    h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Always-on reasons — checked against the code</span>
+        <span class="tx-gcount" style="color:${bad?'var(--danger)':'var(--ok)'}">${bad?bad+" UNWIRED":"all wired"}</span></div>
+      <div class="tx-sum" style="padding:.6rem .9rem">${rv.identifiers_checked} function reference(s) named across the reasons, verified present in code that runs.
+      <br><span style="color:var(--text-dim)">${esc(rv.note||"")}</span>
+      ${bad?`<br>${(rv.unwired||[]).map(u=>`<span style="color:var(--danger)">⚠ ${esc(u)}</span>`).join("<br>")}`:""}</div></div>`;
+  }
   const reasons=d.always_on_reasons||{};
   if(Object.keys(reasons).length){
     h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">Always-on engines — how each is reached</span><span class="tx-gcount">${Object.keys(reasons).length}</span></div>

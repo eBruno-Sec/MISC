@@ -192,6 +192,75 @@ EFFECTS = {
 }
 
 
+# Files that DESCRIBE the platform rather than run it. A mention here is prose, not wiring — which is
+# exactly how `graphql_argument_injection` came to be declared reachable via a function nobody called.
+_PROSE_FILES = {"techniques.py", "engine_descriptor.py"}
+
+
+def _identifiers(reason: str) -> set:
+    """Code identifiers a reason names: snake_case tokens and dotted `module.function` forms. Prose words
+    are excluded by requiring an underscore or a dot, which every real identifier here has. Pure."""
+    import re
+    return {t for t in re.findall(r"[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?", reason or "")
+            if "_" in t or "." in t}
+
+
+def verify_always_on(app_dir: str = None) -> dict:
+    """Check that every function an ALWAYS_ON reason NAMES is actually wired.
+
+    The no-island guard proves a technique is DECLARED reached — evidence-gated or always-on with a stated
+    reason. It cannot prove the declaration is TRUE, because the reason is prose. That gap was real:
+    `graphql_argument_injection` was declared reached "via graphql_tool.build_query", and nothing called
+    `build_query`, `injectable_arguments` or `schema_operations`. The engine ran on paper only, and the
+    guard passed it.
+
+    This closes the gap. For each identifier a reason names, require a reference from code that RUNS,
+    excluding the identifier's own definition and excluding the prose files where the false promise lived.
+
+    Two resolution rules learned from the codebase rather than assumed:
+      * a tool is registered under a bare string (`"run_graphql"`) and implemented as `_run_graphql`, so
+        both spellings count
+      * a dotted `module.function` must have the FUNCTION referenced, not merely the module imported
+
+    Returns {checked, unwired, ok}. `unwired` MUST be empty. Pure apart from reading the source tree."""
+    import os
+    import re
+    app = app_dir or os.path.dirname(os.path.abspath(__file__))
+    srcs = {}
+    for fn in sorted(os.listdir(app)):
+        if fn.endswith(".py") and fn not in _PROSE_FILES:
+            try:
+                srcs[fn] = open(os.path.join(app, fn), encoding="utf8").read()
+            except Exception:
+                pass
+
+    checked, unwired = [], []
+    for tid, reason in sorted(ALWAYS_ON.items()):
+        for tok in sorted(_identifiers(reason)):
+            # Strip a leading underscore before matching. A tool is REGISTERED under a bare string
+            # ("run_service_pack") and IMPLEMENTED as a private method (`_run_service_pack`); treating
+            # those as different names made the verifier report 13 wired ICS engines as broken.
+            bare = tok.split(".")[-1].lstrip("_")
+            defined = any(re.search(r"^\s*(async\s+)?def\s+_?%s\s*\(" % re.escape(bare), s, re.M)
+                          for s in srcs.values())
+            if not defined:
+                continue                      # names a module/concept, not a function — nothing to verify
+            checked.append("%s -> %s" % (tid, tok))
+            wired = False
+            for fn, s in srcs.items():
+                # strip this file's own definitions of the name so a def never counts as a use
+                body = re.sub(r"^\s*(async\s+)?def\s+_?%s\s*\(" % re.escape(bare), "", s, flags=re.M)
+                # a call/reference in either spelling, or the string-dispatch form
+                if re.search(r"(?<![\w])_?%s\b" % re.escape(bare), body) or \
+                   re.search(r"[\"']_?%s[\"']" % re.escape(bare), body):
+                    wired = True
+                    break
+            if not wired:
+                unwired.append("%s: reason names %s, which nothing outside prose references" % (tid, tok))
+    return {"checked": sorted(set(checked)), "unwired": sorted(set(unwired)),
+            "ok": not unwired}
+
+
 def descriptor(tech: dict, preconditions: dict, always_on: dict) -> dict:
     """One engine's full contract. Pure."""
     tid = tech.get("id", "")
