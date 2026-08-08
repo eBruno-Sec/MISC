@@ -105,3 +105,28 @@ def test_an_inline_wstg_kwarg_is_not_destroyed_by_the_authoritative_map():
             assert t.get("wstg"), "%s lost its inline WSTG mapping" % tid
     # and the authoritative map still wins where it has an entry
     assert tq.get("cache_deception")["wstg"] == "WSTG-CONF-13"
+
+
+def test_every_wstg_mapping_names_a_real_test_id():
+    """A wrong standards mapping is worse than a blank one — it tells a reader a standard covers
+    something it does not. (Caught client_side_authz pointing at ATHZ-01 'Directory Traversal'.)"""
+    import wstg_catalog
+    cat = getattr(wstg_catalog, "WSTG", None) or getattr(wstg_catalog, "CATALOG", None)
+    for t in tq.TECHNIQUES.values():
+        w = t.get("wstg")
+        if w:
+            assert w in cat, "%s maps to %s, which is not a WSTG test id" % (t["id"], w)
+
+
+def test_unmapped_techniques_are_a_recorded_decision_not_an_omission():
+    unmapped = {t["id"] for t in tq.TECHNIQUES.values() if not t.get("wstg")}
+    undocumented = unmapped - set(tq.WSTG_DELIBERATELY_UNMAPPED)
+    assert not undocumented, ("these techniques have no WSTG mapping and no stated reason: %s"
+                              % sorted(undocumented))
+    for tid, why in tq.WSTG_DELIBERATELY_UNMAPPED.items():
+        assert len(why) > 15, tid
+
+
+def test_access_control_techniques_map_to_authorization_tests_not_traversal():
+    assert tq.get("client_side_authz")["wstg"] == "WSTG-ATHZ-02"
+    assert tq.get("path_traversal")["wstg"] == "WSTG-ATHZ-01"     # ATHZ-01 IS the traversal test

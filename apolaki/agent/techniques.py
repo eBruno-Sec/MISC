@@ -421,7 +421,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        maps_to={}),
 
     _t(id="client_side_authz", vuln_class="access_control", cwe="CWE-602", owasp="A01:2021",
-       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-01",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-02",
        summary="Access control enforced only in the browser: the UI withholds a control the server still serves.",
        detect="Enumerate the RENDERED control surface per persona and split what the interface offers from "
               "what it withholds (Selenium's visibility contract: not displayed, zero-size, or disabled). "
@@ -939,6 +939,34 @@ _WSTG = {
     # each record's wstg from it), so the fix must live HERE — cache_deception was simply absent, which is
     # why the runtime showed it (unmapped) even though its _t() carried a wstg kwarg (#12).
     "cache_deception": "WSTG-CONF-13",
+    # Mapped after auditing the remaining unmapped set against wstg_catalog's authoritative titles.
+    "xpath_injection": "WSTG-INPV-09",              # XPath Injection
+    "path_traversal": "WSTG-ATHZ-01",               # Directory Traversal File Include
+    "archive_slip": "WSTG-BUSL-09",                 # Upload of Malicious Files (zip-slip arrives as one)
+    "unrestricted_file_upload": "WSTG-BUSL-08",     # Upload of Unexpected File Types
+    "find_hidden_route": "WSTG-CONF-04",            # Old Backup and Unreferenced Files
+    "missing_authentication": "WSTG-ATHZ-02",       # Bypassing Authorization Schema
+    "client_side_authz": "WSTG-ATHZ-02",            # Bypassing Authorization Schema
+}
+
+# Techniques with NO WSTG test, recorded as a DECISION rather than left looking like an oversight.
+# WSTG v4.2 is a web-application testing guide: it has no tests for LLM behaviour, industrial protocols,
+# or dependency inventory, and no dedicated test for prototype pollution, deserialization or SAML. A
+# forced mapping is worse than an honest blank — it tells a reader a standard covers something it does
+# not. Revisit when WSTG adds the coverage.
+WSTG_DELIBERATELY_UNMAPPED = {
+    "llm_prompt_injection": "WSTG v4.2 predates LLM testing",
+    "llm_output_handling": "WSTG v4.2 predates LLM testing",
+    "dnp3_exposed": "WSTG is web-only; ICS/OT is out of its scope",
+    "s7comm_exposed": "WSTG is web-only; ICS/OT is out of its scope",
+    "modbus_exposed": "WSTG is web-only; ICS/OT is out of its scope",
+    "waf_bypass": "an evasion amplifier applied to other tests, not a test of its own",
+    "prototype_pollution": "no dedicated WSTG v4.2 test",
+    "insecure_deser": "no dedicated WSTG v4.2 test (covered by ASVS instead)",
+    "vulnerable_component": "no dedicated WSTG v4.2 test (dependency inventory, not a test case)",
+    "saml_signature_bypass": "WSTG-ATHZ-05 covers OAuth, not SAML assertion handling",
+    "exposed_credentials": "credential exposure spans several WSTG tests; none is a clean fit",
+    "soft_deleted_login": "no dedicated WSTG v4.2 test",
 }
 # MITRE ATT&CK is an adversary-TTP lens — deliberately coarse for web-app bugs; mapped only
 # where a technique genuinely corresponds, None elsewhere (honest gaps rather than forced fits).
