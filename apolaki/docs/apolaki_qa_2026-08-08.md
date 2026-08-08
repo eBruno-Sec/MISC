@@ -109,7 +109,40 @@ instead of hiding a magic number.
 Those books also devote chapters to AI/Copilot/MCP-driven test generation. Those are **rejected by policy**:
 generation may involve a model, confirmation never does. The oracle stays deterministic.
 
-## 7. Guardrails, unchanged
+## 7. Queue completion (second pass)
+
+The six gaps the book cluster surfaced are closed, except one that was deliberately declined.
+
+| Gap | Outcome |
+|-----|---------|
+| Route-interception mutation | shipped (phase 3) |
+| Object keys beyond id-shape | shipped — detection is now observational, so username/slug-keyed APIs are covered |
+| Browser-driving failure taxonomy | shipped — 9 classes, retryable vs terminal, `click_intercepted` reported as a clickjacking **signal** |
+| Playwright trace in the PoC bundle | shipped — frozen only on a confirmation; 268 KB artifact live-verified |
+| `routeFromHAR` retest | shipped **as what it honestly is** (below) |
+| Page-Object flow model | shipped as flow **recording**; flow **driving** declined (below) |
+
+**Second lab, and the oracle earned its keep.** On VAmPI the attacker's request returned the owner's
+object verbatim — the exact shape a scanner reports as BOLA — but the anonymous control returned the
+identical body, so it was rejected as public data. Candidate formed by the new observational detection,
+false positive refused by the oracle.
+
+**What a HAR replay is not.** Replaying a HAR as the network layer reproduces the *recording*, so it can
+never prove a bug still exists. It is a demonstration (show a client the exploit without touching
+production) and a frozen baseline — never a verification. Only a live re-send decides OPEN/CLOSED. That
+sentence lives in the code, with a test asserting the docstring keeps saying it.
+
+What *did* become possible: access-control findings are inconclusive in `retest.plan` for want of a
+persisted request, and a BIE finding carries one, so BIE findings are now auto-retestable. Conservative in
+one direction on purpose — a 200 whose body merely changed stays INCONCLUSIVE, because ordinary data churn
+looks exactly like a fix and a false "closed" is the worst thing a retest can produce.
+
+**Declined: flow driving.** Recording the route a user takes needs no clicking, and is shipped. *Driving*
+a flow by clicking is state-changing, so it must be operator-gated — and a driver that can never auto-fire
+would be precisely the island the doctrine forbids. Building it needs the HITL design first; it is not
+worth a half-wired engine in the meantime.
+
+## 8. Guardrails, unchanged
 
 Only safe methods auto-fire (GET). State-changing controls become operator leads and are never auto-clicked.
 Every URL passes the caller's scope gate. Session secrets stay server-side — evidence carries cookie and

@@ -392,6 +392,135 @@ def finding(cand: dict, probes: dict, verdict: dict, *, owner: str = "owner", at
     }
 
 
+# ──────────────────────────────────────── pure: USER-FLOW RECORDING -> REPRODUCIBLE ATTACK PATH
+def user_flow(settle, wire, probe, *, owner: str = "owner", attacker: str = "attacker") -> dict:
+    """Turn the run into an ordered, reproducible path: authenticate -> navigate -> the app fetches an
+    object -> the swap -> the result. Pure.
+
+    This is the Page-Object idea applied to evidence rather than to test code: the value is not a class
+    hierarchy, it is that a confirmed finding can state the ROUTE a human takes to reach it, derived from
+    what actually happened rather than narrated afterwards.
+
+    Deliberately built only from navigation and observation. Driving a flow by CLICKING is state-changing
+    and stays operator-gated, so it is not done here — and a flow recorder that could never fire would be
+    exactly the island the doctrine forbids."""
+    steps, n = [], 0
+    n += 1
+    steps.append({"n": n, "actor": owner, "action": "authenticate",
+                  "detail": "open an isolated browser context and restore the persona's own session"})
+    seen = set()
+    for s in (settle or []):
+        u = (s or {}).get("url")
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        n += 1
+        steps.append({"n": n, "actor": owner, "action": "navigate", "url": u,
+                      "detail": "synchronised on %s" % (s.get("reason") or "load")})
+    obj_urls = [w.get("url") for w in (wire or []) if w.get("url") and _split_path(w["url"])]
+    cand = (probe or {}).get("candidate") or {}
+    if cand.get("owner_url"):
+        n += 1
+        steps.append({"n": n, "actor": owner, "action": "observe_request", "url": cand["owner_url"],
+                      "detail": "the application itself requests this object at runtime"})
+        n += 1
+        steps.append({"n": n, "actor": attacker, "action": "replay_with_one_change",
+                      "url": cand["owner_url"],
+                      "detail": "same request from the second persona's browser, changing only %s"
+                                % ("the object key '%s' -> '%s'" % (cand.get("attacker_id"),
+                                                                    cand.get("owner_id"))
+                                   if cand.get("index") is not None or cand.get("owner_id")
+                                   else "one identity parameter")})
+    v = (probe or {}).get("verdict") or {}
+    if v:
+        n += 1
+        steps.append({"n": n, "actor": "oracle", "action": "decide",
+                      "detail": "%s — %s" % (str(v.get("verdict", "")).upper(), v.get("reason", ""))})
+    return {"schema": "apolaki.bie-flow/1", "personas": {"owner": owner, "attacker": attacker},
+            "steps": steps, "objects_seen": len(set(obj_urls)),
+            "narrative": " -> ".join("%s %s" % (s["actor"], s["action"]) for s in steps)}
+
+
+# ──────────────────────────────────────────────────────── pure: LOCATOR FALLBACK CHAIN
+# Selenium Ch.4 catalogues why a single locator breaks: attributes churn between deploys, the element is
+# created only after an event, it is not visible yet, or the page and the script are out of sync. The fix
+# is not a cleverer selector — it is ORDERED FALLBACK plus a wait. Strategies are ordered most-stable
+# first, so a run degrades to a weaker locator instead of failing outright, and records WHICH one worked
+# (a finding reproduced via a brittle selector deserves to say so).
+_LOCATOR_ORDER = ("test_id", "id", "name", "role", "label", "placeholder", "text", "css", "xpath")
+
+# How stable each strategy is against ordinary front-end churn — reported with the resolution so evidence
+# never implies more reproducibility than the locator actually has.
+_LOCATOR_STABILITY = {"test_id": "high", "id": "high", "name": "high", "role": "high", "label": "medium",
+                      "placeholder": "medium", "text": "medium", "css": "low", "xpath": "low"}
+
+
+def locator_chain(descriptor: dict) -> list:
+    """Ordered [(strategy, value)] to try for one element. Pure — no browser needed, so the ordering
+    policy itself is testable."""
+    d = descriptor or {}
+    out = []
+    for strat in _LOCATOR_ORDER:
+        v = d.get(strat)
+        if v:
+            out.append((strat, str(v)))
+    return out
+
+
+def locator_quality(strategy: str) -> str:
+    return _LOCATOR_STABILITY.get(str(strategy), "unknown")
+
+
+def resolve_locator(page, descriptor: dict, *, timeout_ms: int = 5000) -> dict:
+    """Walk the fallback chain until one strategy resolves to exactly one visible element.
+
+    Returns {resolved, strategy, stability, tried, failure}. Never raises, never clicks — resolution is
+    read-only. Ambiguity is a FAILURE, not a coin flip: a chain that matches several elements has not
+    identified anything, and silently taking the first is how automation acts on the wrong control."""
+    chain = locator_chain(descriptor)
+    if not chain:
+        return {"resolved": False, "strategy": "", "tried": [],
+                "failure": classify_failure("no such element: empty locator descriptor")}
+    tried, last = [], None
+    for strat, val in chain:
+        try:
+            if strat == "test_id":
+                loc = page.get_by_test_id(val)
+            elif strat == "role":
+                loc = page.get_by_role(val)
+            elif strat == "label":
+                loc = page.get_by_label(val)
+            elif strat == "placeholder":
+                loc = page.get_by_placeholder(val)
+            elif strat == "text":
+                loc = page.get_by_text(val)
+            elif strat == "id":
+                loc = page.locator("#" + val)
+            elif strat == "name":
+                loc = page.locator("[name=%s]" % _css_quote(val))
+            elif strat == "xpath":
+                loc = page.locator("xpath=" + val)
+            else:
+                loc = page.locator(val)
+            n = loc.count()
+            if n == 1:
+                loc.wait_for(state="visible", timeout=timeout_ms)
+                tried.append({"strategy": strat, "matches": 1, "ok": True})
+                return {"resolved": True, "strategy": strat, "stability": locator_quality(strat),
+                        "locator": loc, "tried": tried, "failure": classify_failure("")}
+            tried.append({"strategy": strat, "matches": n, "ok": False,
+                          "why": "ambiguous" if n > 1 else "no match"})
+        except Exception as e:
+            last = e
+            tried.append({"strategy": strat, "ok": False, "why": classify_failure(e)["code"]})
+    return {"resolved": False, "strategy": "", "tried": tried,
+            "failure": classify_failure(last or "no such element: no strategy in the chain resolved")}
+
+
+def _css_quote(v: str) -> str:
+    return '"%s"' % str(v).replace("\\", "\\\\").replace('"', '\\"')
+
+
 # ──────────────────────────────────────────── pure: RETEST FROM FROZEN BROWSER EVIDENCE
 def _sha(s: str) -> str:
     import hashlib
@@ -1427,8 +1556,13 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                                           "exchanges": {k: v for k, v in probes.items() if v}})
                     out["exchanges"].extend([v for v in probes.values() if v])
                     if verdict.get("verdict") in ("confirmed", "lead"):
-                        out["findings"].append(finding(cand, probes, verdict, owner=owner,
-                                                       attacker=attacker, screenshots=shots))
+                        f = finding(cand, probes, verdict, owner=owner, attacker=attacker,
+                                    screenshots=shots)
+                        # the route a human takes to reach this, derived from what actually happened
+                        f["browser_evidence"]["flow"] = user_flow(
+                            out.get("settle") or [], o_wire,
+                            {"candidate": cand, "verdict": verdict}, owner=owner, attacker=attacker)
+                        out["findings"].append(f)
                 # PHASE 3 — CLIENT-SUPPLIED IDENTITY PARAMETERS, mutated by route interception. Where
                 # phase 1 changes an id in a path, this changes one identity VARIABLE inside the request
                 # the application itself emits, in flight. Safe methods only.

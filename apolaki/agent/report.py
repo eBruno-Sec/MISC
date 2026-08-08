@@ -1051,6 +1051,16 @@ def browser_evidence_html(finding: dict, e) -> str:
                       "<img src='data:image/png;base64,%s' style='max-width:100%%;border:1px solid #2a3b45'/>"
                       "<figcaption class='sub'>%s</figcaption></figure>" % (b64, e(lbl.replace("_", " "))))
     steps = "".join("<li>%s</li>" % e(str(s)) for s in (be.get("reproduction_steps") or []))
+    fl = be.get("flow") or {}
+    flow_html = ""
+    if fl.get("steps"):
+        flow_html = ("<h4>User flow (the route actually taken)</h4><table class='tbl'>"
+                     "<tr><th>#</th><th>Actor</th><th>Action</th><th>Detail</th></tr>"
+                     + "".join("<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>"
+                               % (e(str(s.get("n"))), e(str(s.get("actor"))), e(str(s.get("action"))),
+                                  e(str(s.get("url") or "")) + (" " if s.get("url") else "")
+                                  + e(str(s.get("detail", ""))))
+                               for s in fl["steps"]) + "</table>")
     tr = be.get("trace") or {}
     trace_html = ""
     if tr.get("path"):
@@ -1064,12 +1074,12 @@ def browser_evidence_html(finding: dict, e) -> str:
             "%s"
             "<table class='tbl'><tr><th>Exchange</th><th>URL</th><th>Status</th><th>Size</th></tr>%s</table>"
             "%s"
-            "%s"
+            "%s%s"
             "<h4>Reproduce (from the actual run)</h4><ol>%s</ol>"
             "<h4>Replay script</h4><pre><code>%s</code></pre></div>"
             % (e(str(be.get("instrumentation", ""))),
                ("<p><b>Verdict:</b> %s</p>" % e(str((be.get("verdict") or {}).get("reason", "")))),
-               trs, shots, trace_html, steps, e(str(be.get("replay_script", "")))))
+               trs, shots, flow_html, trace_html, steps, e(str(be.get("replay_script", "")))))
 
 
 def proof_and_retest(finding: dict) -> dict:

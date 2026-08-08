@@ -197,6 +197,106 @@ def test_replay_script_uses_the_owner_url_and_the_implausible_id_control():
     assert "http://t/rest/basket/1" in s and "http://t/rest/basket/%s" % bie._IMPLAUSIBLE_ID in s
 
 
+# ── user-flow recording ───────────────────────────────────────────────────────
+def test_user_flow_records_the_route_actually_taken():
+    cand, probes, v = _confirmed()
+    flow = bie.user_flow(
+        [{"url": "http://t/#/basket", "reason": "networkidle+object-response"}],
+        [{"url": "http://t/rest/basket/1"}],
+        {"candidate": cand, "verdict": v}, owner="user_a", attacker="user_b")
+    actions = [s["action"] for s in flow["steps"]]
+    assert actions == ["authenticate", "navigate", "observe_request", "replay_with_one_change", "decide"]
+    assert flow["steps"][1]["detail"].endswith("networkidle+object-response")
+    assert flow["steps"][-1]["detail"].startswith("CONFIRMED")
+    assert flow["steps"][3]["actor"] == "user_b"          # the swap is the attacker's action
+    assert "user_a navigate" in flow["narrative"]
+
+
+def test_user_flow_dedupes_repeated_navigations_and_survives_empty_input():
+    flow = bie.user_flow([{"url": "http://t/a", "reason": "load"}, {"url": "http://t/a", "reason": "load"}],
+                         [], {})
+    assert [s["action"] for s in flow["steps"]] == ["authenticate", "navigate"]
+    assert bie.user_flow([], [], {})["steps"][0]["action"] == "authenticate"
+
+
+# ── locator fallback chain ────────────────────────────────────────────────────
+class _FakeLoc:
+    def __init__(self, n):
+        self._n = n
+
+    def count(self):
+        return self._n
+
+    def wait_for(self, **kw):
+        return None
+
+
+class _FakePage:
+    """Only the id strategy resolves uniquely; everything before it misses or is ambiguous."""
+    def __init__(self, counts):
+        self.counts = counts
+        self.calls = []
+
+    def get_by_test_id(self, v):
+        self.calls.append(("test_id", v)); return _FakeLoc(self.counts.get("test_id", 0))
+
+    def get_by_role(self, v):
+        self.calls.append(("role", v)); return _FakeLoc(self.counts.get("role", 0))
+
+    def get_by_label(self, v):
+        self.calls.append(("label", v)); return _FakeLoc(self.counts.get("label", 0))
+
+    def get_by_placeholder(self, v):
+        self.calls.append(("placeholder", v)); return _FakeLoc(self.counts.get("placeholder", 0))
+
+    def get_by_text(self, v):
+        self.calls.append(("text", v)); return _FakeLoc(self.counts.get("text", 0))
+
+    def locator(self, v):
+        key = "id" if v.startswith("#") else ("xpath" if v.startswith("xpath=") else
+                                              ("name" if v.startswith("[name=") else "css"))
+        self.calls.append((key, v)); return _FakeLoc(self.counts.get(key, 0))
+
+
+def test_locator_chain_orders_stable_strategies_first():
+    c = bie.locator_chain({"css": ".btn", "id": "submit", "text": "Save", "xpath": "//a"})
+    assert [s for s, _ in c] == ["id", "text", "css", "xpath"]
+    assert bie.locator_chain({}) == []
+
+
+def test_locator_stability_is_reported_not_assumed():
+    assert bie.locator_quality("id") == "high"
+    assert bie.locator_quality("xpath") == "low"
+    assert bie.locator_quality("nonsense") == "unknown"
+
+
+def test_resolve_falls_back_until_one_strategy_matches_uniquely():
+    page = _FakePage({"test_id": 0, "id": 1})
+    r = bie.resolve_locator(page, {"test_id": "t", "id": "submit", "css": ".btn"})
+    assert r["resolved"] is True and r["strategy"] == "id" and r["stability"] == "high"
+    assert [t["strategy"] for t in r["tried"]] == ["test_id", "id"]      # stopped at the first unique hit
+
+
+def test_an_ambiguous_match_is_a_failure_not_a_coin_flip():
+    """Several matches means nothing was identified. Taking the first is how automation clicks the wrong
+    control and then reports evidence about it."""
+    page = _FakePage({"text": 3})
+    r = bie.resolve_locator(page, {"text": "Delete"})
+    assert r["resolved"] is False
+    assert r["tried"][0]["why"] == "ambiguous" and r["tried"][0]["matches"] == 3
+
+
+def test_resolve_reports_an_honest_failure_when_nothing_matches():
+    r = bie.resolve_locator(_FakePage({}), {"id": "nope", "css": ".gone"})
+    assert r["resolved"] is False and r["failure"]["code"] == "element_not_found"
+    assert len(r["tried"]) == 2
+
+
+def test_resolve_with_an_empty_descriptor_fails_cleanly():
+    r = bie.resolve_locator(_FakePage({}), {})
+    assert r["resolved"] is False and r["tried"] == []
+
+
 # ── retest from frozen browser evidence ───────────────────────────────────────
 def _recipe():
     cand, probes, v = _confirmed()
