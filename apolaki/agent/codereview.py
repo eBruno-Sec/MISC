@@ -138,6 +138,78 @@ def scan_comments(text: str) -> list:
     return out[:25]
 
 
+# Any comment, not just a suspicious-keyword one — comments are where credentials get parked.
+# The `//` branch must NOT fire inside a URL: without the lookbehind, `href="http://host/..."` reads as a
+# line comment and the whole rest of the line becomes a "comment body". That produced a false positive on
+# the very first live page this was tested against.
+_ANY_COMMENT = re.compile(
+    r"(?s)(?:<!--(.*?)-->"          # HTML
+    r"|/\*(.*?)\*/"                 # block
+    r"|(?m:(?<![:/])//[ \t]*(.*)$)"  # line comment, not the // in a scheme
+    r"|(?m:^[ \t]*\#[ \t]*(.*)$))")  # shell/python comment at line start only
+
+# Credential-shaped text a developer leaves in prose, which the structured _SECRET_PATTERNS miss because
+# it has no vendor prefix: "the password for X is <32 hex-ish chars>", "password: hunter2".
+_COMMENT_CRED = [
+    ("credential in comment", re.compile(
+        r"(?i)\b(?:pass(?:word|wd)?|pwd|secret|api[_-]?key|token|credential)s?\b[^A-Za-z0-9\r\n]{0,20}"
+        r"(?:for\s+\S{1,32}\s+)?(?:is|=|:)?[^A-Za-z0-9\r\n]{0,6}([A-Za-z0-9!@#$%^&*_\-+.]{8,64})"),
+     "high"),
+]
+
+# Words that make a "credential" a placeholder rather than a secret.
+_PLACEHOLDER_WORD = re.compile(
+    r"(?i)^(your|my|the|a|an|some|example|sample|changeme|change|placeholder|xxx+|todo|fixme|none|null|"
+    r"true|false|password|passwd|pwd|secret|token|apikey|key|value|string|here|goes|redacted|hidden|"
+    r"insert|enter|set|put|real|actual|test|dummy|foo|bar|baz)$")
+
+
+def _is_placeholder(val: str) -> bool:
+    """A documentation placeholder, not a leak. Token-aware, because the common form is hyphen-joined
+    prose — `your-password-here` is three placeholder words, while `my-production-secret-42` is not
+    (production and 42 carry real information)."""
+    v = val.strip()
+    if not v or re.fullmatch(r"[*.\-_x]+", v, re.I):        # masks
+        return True
+    if re.fullmatch(r"<.*>|\{.*\}|\[.*\]|\$\{.*\}", v):     # template slots
+        return True
+    tokens = [t for t in re.split(r"[-_.\s]+", v) if t]
+    return bool(tokens) and all(_PLACEHOLDER_WORD.match(t) for t in tokens)
+
+
+def scan_comment_secrets(text: str) -> list:
+    """Credentials parked in COMMENTS — the class `scan_secrets` cannot see.
+
+    Two blind spots meet here and neither alone catches it. `scan_secrets` matches vendor-shaped tokens
+    (AKIA…, AIza…) and a password written in prose has no such shape. `scan_comments` only surfaces
+    comments containing todo/fixme/hack, and a comment that simply states a password contains none of
+    those words.
+
+    Proven live on OverTheWire Natas level 0, whose served HTML carries
+    `<!--The password for natas1 is scfWG6qNEIdzqVyfRwEGXyNUfFZkZeQ7 -->`. Apolaki read that page, ran
+    both scanners, and reported nothing.
+
+    Placeholders are filtered, because `<!-- password: your-password-here -->` is documentation, not a
+    leak. Pure."""
+    out, seen = [], set()
+    for m in _ANY_COMMENT.finditer(text or ""):
+        body = next((g for g in m.groups() if g), "") or ""
+        if not body.strip():
+            continue
+        for name, rx, sev in _COMMENT_CRED:
+            for cm in rx.finditer(body):
+                val = cm.group(1).strip()
+                if len(val) < 8 or _is_placeholder(val) or val in seen:
+                    continue
+                # a run of identical characters is a mask, not a credential
+                if len(set(val)) <= 2:
+                    continue
+                seen.add(val)
+                out.append({"kind": name, "severity": sev, "value": val,
+                            "comment": body.strip()[:160], "line": _line_of(text, m.start())})
+    return out[:15]
+
+
 # ── Endpoint / path extraction (seed the surface) ────────────────
 _FULL_URL = re.compile(r"https?://[^\s'\"<>()\\]{4,}")
 _PATH = re.compile(r"['\"](/[A-Za-z0-9_\-/.]{2,}(?:\?[^'\"]*)?)['\"]")
@@ -232,6 +304,25 @@ def review(text: str, source: str) -> dict:
             "impact": "Weak/insecure algorithm; impact depends on where it protects data.",
             "reproduction_steps": [f"Review {source} line {w['line']}"], "cwe": "CWE-327",
             "family": "code-review", "tags": ["crypto"], "confidence": "candidate"})
+    # Credentials parked in comments — a distinct class from "revealing comments" (no todo/fixme keyword)
+    # and from scan_secrets (no vendor-shaped token). Confirmed live on Natas level 0.
+    for cs in scan_comment_secrets(text):
+        findings.append({
+            "title": "Credential exposed in a source comment",
+            "severity": cs["severity"], "target": source, "confidence": "confirmed",
+            "family": "sensitive_exposure", "cwe": "CWE-615",
+            "description": ("A comment in %s states a credential in plain text: %r. Comments are served "
+                            "to every client; this is readable by anyone who views the source."
+                            % (source, cs["comment"])),
+            "impact": "The credential is disclosed to anyone who fetches the page or file.",
+            "evidence": "GET %s -> comment at line %s contains a credential-shaped value"
+                        % (source, cs["line"]),
+            "oracle": ("a comment body matches a credential statement and the value is not a placeholder "
+                       "or mask"),
+            "remediation": "Remove the credential from the source and rotate it.",
+            "tags": ["secrets", "comment", "source-disclosure"],
+        })
+
     comments = scan_comments(text)
     if comments:
         joined = "; ".join(f"L{c['line']}: {c['comment']}" for c in comments[:6])
