@@ -437,6 +437,17 @@ def generate_report(program: str, findings: list, scope: dict,
                     _byp = ("  \n  ↳ filter-bypass: " + ", ".join("`%s`" % v for v in _bl[:3])) if _bl else ""
                     lines.append("- **%s** _(%s)_%s%s" % (a.get("id", ""), a.get("family", ""),
                                  (" — " + _act) if _act else "", _byp))
+    # WHAT THIS ASSESSMENT COULD NOT TEST (#125). Placed before Report Integrity so a reader meets the
+    # limits of the run before its guarantees: absence of findings in an untested class is not evidence
+    # of absence, and a report that omits this lets silence read as safety (WYSIATI).
+    try:
+        import capability_preflight as _cp
+        _debt = _cp.coverage_debt()
+        if not _debt["complete"]:
+            lines += ["", _cp.report_section(_debt).rstrip()]
+    except Exception:
+        pass
+
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
@@ -2271,6 +2282,29 @@ def generate_html_report(program: str, findings: list, scope: dict,
     except Exception:
         edb_html = ""
 
+    # WHAT THIS ASSESSMENT COULD NOT TEST (#125) — the anti-WYSIATI section. A clean report makes a
+    # reader assume the absent classes are safe; this says plainly which ones were never examined.
+    capability_html = ""
+    try:
+        import capability_preflight as _cpmod
+        _cdebt = _cpmod.coverage_debt()
+        if not _cdebt["complete"]:
+            _rows = "".join("<li>%s</li>" % e(str(c)) for c in _cdebt["untestable_classes"])
+            _caps = "".join(
+                "<tr><td><code>%s</code></td><td>%s</td><td class='sub'>%s</td></tr>"
+                % (e(c["capability"]), e(", ".join(c["blocks"])), e(c["how_to_enable"]))
+                for c in _cpmod.check() if not c["available"])
+            capability_html = (
+                "<h2 id='capability'>What This Assessment Could Not Test</h2>"
+                "<p class='sub'>%d of %d capabilities were unavailable, so the classes below were "
+                "<b>not tested</b>. This is not a statement that they are secure — it is a statement "
+                "that they were not examined.</p><ul>%s</ul>"
+                "<table class='tbl'><tr><th>Capability</th><th>Classes it would cover</th>"
+                "<th>How to enable</th></tr>%s</table>"
+                % (len(_cdebt["capabilities_missing"]), _cdebt["capabilities_total"], _rows, _caps))
+    except Exception:
+        capability_html = ""
+
     # Intelligence orchestration: show that the code-intelligence recon + the first-class technique
     # knowledge model actually DROVE this scan (not decorative dashboards). Answers "was the intel used".
     orch_html = ""
@@ -2745,6 +2779,7 @@ figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
 {rootcause_html}
 {kev_html}
 {edb_html}
+{capability_html}
 {orch_html}
 {assurance_html}
 {cval_html}
