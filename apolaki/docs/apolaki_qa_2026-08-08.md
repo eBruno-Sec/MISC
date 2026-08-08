@@ -147,3 +147,59 @@ worth a half-wired engine in the meantime.
 Only safe methods auto-fire (GET). State-changing controls become operator leads and are never auto-clicked.
 Every URL passes the caller's scope gate. Session secrets stay server-side — evidence carries cookie and
 storage **names** only, and `redact_headers` masks authorization material. No DoS, no credential-brute loops.
+
+---
+
+# Session 2 — book-driven implementation (#125)
+
+## New standing gates
+
+Three gates now exist that catch classes of failure the test suite cannot:
+
+| Gate | Command | Catches |
+|------|---------|---------|
+| Mutation | `python agent/mutation_gate.py` | a false-positive guard that no test defends |
+| Dead code | `deadcode_gate.scan()` (in the suite) | a function with no caller — unwired engine or superseded duplicate |
+| Bake drift | `sh scripts/bake_drift_check.sh` | running container holding code that was never baked |
+
+`make ship-gate` runs bake-drift + suite + mutation gate together.
+
+**Why each exists — all three were written after the failure they prevent actually happened:**
+
+- The mutation gate's prototype found `blind_benchmark._has_proof` accepting evidence-free findings; every
+  benchmark number Apolaki had reported could have been silently inflated.
+- The dead-code gate found `dom_trace.trace_param`, a complete tracer duplicating the live async engine
+  and emitting identical families — a trap waiting for someone to call the wrong one.
+- The bake-drift gate was written the day five engines and six techniques existed only inside the running
+  container. Git had them; the image did not; a `docker compose up` would have reverted the platform with
+  no error and a green suite.
+
+## Clean-clone verification (mandatory, performed twice)
+
+`git clone` → `docker build agent/` → run, with nothing copied in:
+
+| Check | Result |
+|-------|--------|
+| Full suite | **1251 passed, 0 failed** |
+| Mutation gate | **12/12 mutants killed** |
+| Techniques / islands | **80 / 0** |
+| Dead-code gate | **passed** |
+| Dependencies | hypothesis + playwright resolve from `requirements.txt` |
+| Config | `.env.example` tracked; all 22 compose vars have defaults, so a clone runs with no `.env` |
+
+## Capability honesty
+
+The report now carries **"What This Assessment Could Not Test"**. On a default box that is nine
+vulnerability classes across three unconfigured capabilities. This closed a real misreading: the blind
+benchmark's missed XXE was never an engine weakness — `BBH_OOB_BASE` was unset, so the class was
+untestable and the report said nothing at all.
+
+## Natas (authorized)
+
+Levels 0–4 solved via general techniques. Four map to engines Apolaki already has. Two outputs:
+
+- **Fixed:** credentials in source comments. Natas 0 serves the password in an HTML comment;
+  `scan_secrets` missed it (no vendor-shaped token) and `scan_comments` missed it (no todo/fixme keyword).
+  New `scan_comment_secrets` closes the gap between them, with placeholder filtering and a regression test
+  for the `//`-inside-`http://` false positive that the first live run produced.
+- **Logged gap:** authorization decided by a client-controlled header (Natas 4 uses `Referer`). No engine.
