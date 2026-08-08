@@ -159,6 +159,7 @@ TOOL_PERMISSIONS = {
     "confirm_browser_persona_bola": PermissionLevel.ACTIVE,    # BIE runtime persona-swap BOLA (safe GETs only, #124)
     "run_transport_posture": PermissionLevel.ACTIVE,           # TLS/cookie/header/method posture (read-only, #103)
     "run_external_surface": PermissionLevel.ACTIVE,            # ASN/favicon/permutation/CT candidates (#114)
+    "run_header_trust": PermissionLevel.ACTIVE,                # authz from a client-controlled header (T1)
     "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
     "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
     "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
@@ -2163,6 +2164,70 @@ class ToolRegistry:
         return ToolResult("read_object_idor", base, True,
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
                                       "leads": len(leads), "lead_findings": leads, "details": details}), findings)
+
+    async def _run_header_trust(self, inp: dict) -> ToolResult:
+        """ACTIVE, read-only: does a client-controlled header decide authorization? (T1)
+
+        Two sub-classes. A header that flips a denial into a grant (Referer, X-Forwarded-For, X-Real-IP),
+        and a front-end ACL bypassed by naming the denied path in X-Original-URL / X-Rewrite-URL. Both
+        confirmed by safe GETs, both with a mandatory control: the same header carrying an IMPLAUSIBLE
+        value must be refused, or the server is not trusting the value and nothing is proven.
+
+        Handles the common case where a target answers 200 for everything and signals the decision in the
+        page, via a body differential whose stability check doubles as the false-positive guard."""
+        import header_trust_tool as ht
+        from urllib.parse import urlsplit
+        url = (inp.get("url") or inp.get("target") or "").strip()
+        if not url or not self.scope.validate(url)[0]:
+            return ToolResult("header_trust", url, False, "", [], "SCOPE BLOCK or missing url")
+        p = urlsplit(url)
+        origin = "%s://%s" % (p.scheme or "http", p.netloc)
+        path = p.path or "/"
+        findings, tried = [], []
+
+        async def _get(u, headers=None):
+            try:
+                r, _ = await self._http_send("GET", u, headers or {}, None, True)
+                return {"status": r.status_code, "body": r.text or ""}
+            except Exception:
+                return {"status": 0, "body": ""}
+
+        baseline = await _get(url)
+        for header, value, control_value, why in ht.header_candidates(origin, path, baseline.get("body", "")):
+            with_h = await _get(url, {header: value})
+            ctrl = await _get(url, {header: control_value})
+            v = ht.judge_header_trust(baseline, with_h, ctrl)
+            if v["verdict"] == "not_applicable":          # uniform-200 target -> body differential
+                v = ht.judge_body_differential(baseline, with_h, ctrl)
+            tried.append({"header": header, "verdict": v["verdict"]})
+            if v["verdict"] in ("confirmed", "lead"):
+                findings.append(ht.finding_header_trust(
+                    url, header, value, why,
+                    {"baseline": baseline, "with_header": with_h, "value_control": ctrl}, v))
+
+        # URL override: only meaningful when a path was actually denied.
+        denied_paths = [q for q in (inp.get("denied_paths") or []) if q]
+        if baseline.get("status") in ht.DENIED and path not in denied_paths:
+            denied_paths.append(path)
+        if denied_paths:
+            permitted = await _get(origin + "/")
+            for dp in denied_paths[:3]:
+                direct = await _get(origin + dp) if dp != path else baseline
+                for header in ht.URL_OVERRIDE_HEADERS:
+                    over = await _get(origin + "/", {header: dp})
+                    ov = ht.judge_url_override(direct, permitted, over)
+                    tried.append({"header": header, "path": dp, "verdict": ov["verdict"]})
+                    if ov["verdict"] in ("confirmed", "lead"):
+                        findings.append(ht.finding_url_override(
+                            origin, dp, header,
+                            {"direct": direct, "permitted": permitted, "overridden": over}, ov))
+
+        confirmed = [f for f in findings if f.get("confidence") == "confirmed"]
+        leads = [f for f in findings if f.get("confidence") != "confirmed"]
+        return ToolResult("header_trust", url, True,
+                          json.dumps({"ran": True, "origin": origin, "attempts": tried,
+                                      "confirmed": len(confirmed), "leads": len(leads),
+                                      "lead_findings": leads}), confirmed)
 
     async def _run_external_surface(self, inp: dict) -> ToolResult:
         """PASSIVE/ACTIVE-light external attack-surface expansion (#114): ASN + BGP prefix, favicon pivot

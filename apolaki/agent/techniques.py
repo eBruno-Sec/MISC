@@ -345,6 +345,30 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
     # ── GraphQL (#125, Black Hat GraphQL). The TOOL existed and was planner-reachable; what was missing
     # was registry presence (so it never appeared in coverage or the no-island accounting) and the
     # argument extraction that lets the existing injection engines reach a GraphQL sink at all.
+    _t(id="header_trust_authz", vuln_class="access_control", cwe="CWE-807", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-02",
+       summary="Authorization decided by a client-controlled header (Referer, X-Forwarded-For, X-Real-IP).",
+       detect="Send the request without the header, with a plausible value, and with an implausible value "
+              "(header_trust_tool). Safe GETs only.",
+       exploit="None beyond setting a header the client already controls — that is the point: if the "
+               "decision turns on it, anyone can make the decision.",
+       oracle="Either a status change (denied without, 200 with, denied again on an implausible value) or, "
+              "on uniform-200 targets, a body differential: the two refusals match each other while the "
+              "valid value yields a materially different page. The stability requirement doubles as the "
+              "FP guard — a dynamic page fails it and the oracle declines.",
+       validated_on=["natas"],
+       maps_to={"natas": ["Level 4 (Referer-gated access)"]}),
+    _t(id="url_override_acl_bypass", vuln_class="access_control", cwe="CWE-807", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-02",
+       summary="Front-end ACL bypassed by naming the denied path in X-Original-URL / X-Rewrite-URL.",
+       detect="Request the denied path directly, request a permitted path, then request the permitted path "
+              "while naming the denied one in the override header.",
+       exploit="A single GET carrying the header; nothing is written.",
+       oracle="The denied path is served via the header AND the response differs from the permitted page — "
+              "without that content control a server that IGNORES the header looks identical to one that "
+              "honours it, which is the trap in this class.",
+       validated_on=[]),
+
     _t(id="graphql_introspection", vuln_class="sensitive_exposure", cwe="CWE-200", owasp="A01:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-CONF-05",
        summary="GraphQL introspection enabled: the full schema, and therefore the whole API surface, is public.",

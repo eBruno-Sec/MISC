@@ -91,6 +91,8 @@ ALWAYS_ON = {
                                 "control surface is enumerated on every persona route the swap already visits",
     "client_supplied_identity_param": "Browser Intelligence Engine phase 3, same artery step 5e run: identity params both "
                                 "personas' browsers sent are mutated by route interception on the observed endpoints",
+    "header_trust_authz":       "run_header_trust on every in-scope origin + any denied path the scan met",
+    "url_override_acl_bypass":  "run_header_trust: any path that answered 401/403 is retried behind an override header",
     "graphql_introspection":    "planner phase D enrich: run_graphql on any /graphql endpoint or GraphQL URL hint",
     "graphql_field_suggestions": "planner phase D enrich: run_graphql sends a bogus field on the same pass",
     "graphql_batching_enabled": "planner phase D enrich: run_graphql sends a token-sized array batch",
