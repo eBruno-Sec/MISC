@@ -405,6 +405,62 @@ queries, and good, old-fashioned logic flaws". Alias-based batching is a rate-li
 technique. Apolaki's no-brute rail stands: detecting that batching is permitted is a posture finding;
 using it to run credential attempts is not on the table.
 
+### The Tangled Web (Zalewski)
+
+**TW-1 — a challenge to Apolaki's standards investment, and it deserves an answer.**
+*"Enlightenment Through Taxonomy".* Zalewski is openly sceptical of CWE and CVSS. On CWE's ~800 names he
+notes most are "as discourse-enabling" as *"Failure to Sanitize Data into a Different Plane"*; on CVSS he
+mocks reducing a bug to a 14-dimensional vector to reach "some sort of objective, verifiable, numerical
+conclusion about the significance of the underlying bug (say, '42')". His conclusion: these serve noble
+process goals but *"none has yielded a grand theory of secure software."*
+
+Apolaki maps every finding to CWE, OWASP, ASVS, WSTG, CAPEC and CVSS. Taken at face value this is a
+critique of that entire layer. **The reconciliation, and it is a real distinction rather than a dodge:
+Apolaki uses taxonomy for communication and coverage accounting, never as its detection theory.** Nothing
+is confirmed because it matches a CWE; it is confirmed because an oracle plus negative controls said so,
+and the CWE is attached afterwards for the reader. Zalewski explicitly concedes taxonomy's value for
+"certain security processes implemented by large organizations" — which is exactly the use.
+
+The warning worth keeping: **do not let the taxonomy start driving detection.** The moment a technique
+exists because a CWE exists, rather than because there is an oracle for it, Apolaki has made the mistake
+he is describing. This reinforces MBT-3 from a second direction — coverage is a budget mechanism, not a
+completeness claim.
+
+### Real-World Bug Hunting — priority corrected again
+
+Ranked P3 on the assumption it was anecdote. Its chapter list is a **vulnerability-class index with real
+disclosed reports**: Open Redirect, HTTP Parameter Pollution, HTML Injection/Content Spoofing, CRLF,
+Template Injection, SQLi, XXE, RCE, Subdomain Takeover, Race Conditions, IDOR, OAuth.
+
+Three of those are classes the sealed benchmark missed **today**: `open_redirect` (/blog), `xxe`
+(/catalog/product/stock), and the two `request_url_override` misses, which are most likely
+parameter-pollution or URL-override-header behaviour — HPP has its own chapter. That makes this book the
+most directly benchmark-relevant of the fourteen, and it was ranked third-tier on its title. **Promoted to
+P1.** Its per-class chapters are the next read.
+
+### Books inspected at chapter level, extraction pending
+
+Recorded honestly rather than summarised from the table of contents:
+
+- **Web Browser Engineering** — Parts: Loading Pages, Viewing Documents, Running Applications, Modern
+  Browsers. 4,687 code blocks; it builds a browser from scratch. Likely the deepest available explanation
+  of what BIE is actually driving. Not yet read.
+- **Building Secure and Reliable Systems** — Google SRE-security. Design/defensive framing (reliability vs
+  security tradeoffs, logging, crisis response). Probable yield is remediation quality and evidence
+  retention, not detection. Not yet read.
+- **practical model-based testing** — pairs with MBT Essentials; PDF extraction with pagination artifacts.
+  Expected to add tooling detail to MBT-1/MBT-2 rather than new direction. Not yet read.
+- **Hands-On Selenium WebDriver with Java** — already partially mined in an earlier session for the
+  Browser Intelligence Engine (locator strategies, waits, visibility contract). Remaining value is likely
+  in its grid/parallelism and reporting chapters. Not re-read here.
+- **A Frontend Web Developer's Guide to Testing** — overlaps Selenium/Playwright material already applied.
+  Lowest expected marginal yield of the fourteen, but per the rule adopted above, that stays a hypothesis
+  until its chapters are inspected.
+- **Essential Cybersecurity Science** — scientific method, hypothesis formulation, experimental design,
+  **human cognitive biases**, the role of metrics, pseudoscience. Directly relevant to Apolaki's standing
+  engineering-cognition discipline and to the wrong-ruler failure found in the benchmark today. Ranked P3
+  on its title; on inspection it is closer to P2.
+
 ---
 
 ## Deliverable 5 (running) — cross-book conflicts
@@ -437,18 +493,144 @@ engine establishes which capability, rather than merging engines.
 
 ---
 
-## Deliverables 4–10
+## Deliverable 4 — Gap analysis against Apolaki
 
-Not started. They depend on D3 and will be written only from material actually read:
+| # | Gap | Severity | Evidence |
+|---|-----|----------|----------|
+| G1 | Techniques declare preconditions but **no effects**; planner cannot search | **critical** | AP-1 |
+| G2 | Adding an engine requires editing **4 places**; only 1 is guarded | **high** | BHG-1 |
+| G3 | **No GraphQL techniques at all** despite detection existing | **high** | GQL-1/2 |
+| G4 | Injection engines cannot reach GraphQL argument sinks | high | GQL-2 |
+| G5 | No structural model coverage (blocked by G1) | medium | MBT-1 |
+| G6 | Oracles tested by example only; no property-based tests | medium | RP-2 |
+| G7 | No mutation-testing gate — **one hole already found and fixed** | medium | RP-1 |
+| G8 | Pruning cutoffs never argued safe/strongly-safe | medium | AP-2 |
+| G9 | Negative effects unmodelled → Sussman-anomaly exposure | medium | AP-4 |
+| G10 | Input-vector enumeration narrower than the fuzzing definition | low | FUZZ-3 |
+| G11 | No OOB (DNS) oracle for blind classes such as XXE | medium | BHG-2 + benchmark |
+| G12 | Payload sets are curated lists, not partitioned input domains | low | MBT-2 |
 
-4. Gap analysis against Apolaki's current architecture
-5. Cross-book synthesis and conflict resolution
-6. Proposed architecture changes
-7. Dependency-ordered implementation queue
-8. Deterministic tests and acceptance criteria
-9. Rejected ideas, with reasons
-10. Traceability matrix (task → book → chapter)
+**Non-gaps confirmed by the read** (worth recording so they are not "fixed" later): the oracle-plus-negative
+-control architecture is validated by FUZZ-1; oracle-first monitoring is validated by FUZZ-2; and taxonomy
+use is defensible against TW-1 *provided* it never drives detection.
 
-**Scale note, stated plainly:** this is ~118,000 lines of source. A genuine cover-to-cover read is a
-multi-session effort, and claiming otherwise would be the exact failure this document is supposed to
-prevent. Progress is tracked in the D3 table above; nothing enters D6/D7 without a chapter citation.
+---
+
+## Deliverable 6 — Proposed architecture changes
+
+**PROPOSAL A — one engine descriptor, containing preconditions AND effects.** *(G1 + G2 + G5 + G9;
+Black Hat Go Ch.10, Automated Planning §4.2/§4.4, MBT §8.1)*
+
+Three books converge here, which is why it is the only structural proposal. Each engine module declares
+one record: id, permission, required observations, **established capabilities**, **invalidated
+capabilities**, oracle, and the callable. The router, planner, registry and no-island guard all read that
+single declaration instead of four hand-maintained tables.
+
+This is what turns the planner from a filter into a search (AP-1), makes node/edge coverage definable
+(MBT-1/G5), removes the four-edit problem (BHG-1), and gives somewhere to represent negative effects so
+Apolaki does not reproduce STRIPS's documented failure (AP-4).
+
+Explicitly **not** proposed: shared objects, dynamic loading, or a plugin marketplace. Python needs a
+declaration, not Go's machinery.
+
+**PROPOSAL B — GraphQL as a surface-expansion engine.** *(G3 + G4; Black Hat GraphQL Ch.1–3, Ch.8)*
+Introspection → schema → operations and arguments into the graph → existing injection engines test them.
+Independent of Proposal A and far cheaper; it adds a transport, not an architecture.
+
+**PROPOSAL C — test-strategy gate.** *(G6 + G7; Robust Python Ch.23–24)* Property-based tests over the
+oracle invariants, plus mutation testing as a recurring gate.
+
+---
+
+## Deliverable 7 — Dependency-ordered implementation queue
+
+Ordering is by dependency, then by measured value. **Nothing here is authorised to start** — the read is
+7 of 14 books.
+
+| Step | Work | Depends on | Why here |
+|------|------|-----------|----------|
+| 0 | Adopt mutation gate (mutmut) over oracle modules | — | already proven to find real holes; test-only |
+| 1 | Property-based tests for `judge`, `judge_param_swap`, `judge_client_side_authz` | 0 | protects the invariants before anything is refactored |
+| 2 | GraphQL introspection engine → schema into graph | — | independent, highest capability value |
+| 3 | Wire injection engines to GraphQL arguments | 2 | needs the enumerated surface |
+| 4 | Engine descriptor: **declare** preconditions + effects, no behaviour change | 1 | descriptors first, consumers unchanged |
+| 5 | Router/planner/registry/guard read the descriptor | 4 | removes the four-edit problem |
+| 6 | Planner searches over effects (goal test + successor) | 5 | AP-1 proper |
+| 7 | Structural coverage (node/edge) over the graph | 6 | only definable once 6 exists |
+| 8 | Negative effects + deleted-condition detection | 6 | AP-4 |
+| 9 | Audit cutoffs, label each safe / strongly-safe / neither | 7 | reported in coverage |
+| 10 | OOB DNS oracle assessment for XXE and blind classes | — | closes a measured benchmark miss |
+| 11 | Input-vector enumeration audit (filenames, cookie names, content-type) | — | independent, cheap |
+
+Steps 0–3 and 10–11 are independent of the architecture work and could proceed first without violating the
+analysis-before-architecture rule. Steps 4–9 must wait for the full read.
+
+---
+
+## Deliverable 8 — Deterministic tests and acceptance criteria
+
+| Step | Acceptance criterion (deterministic) |
+|------|--------------------------------------|
+| 0 | **No mutant that weakens a false-positive guard survives.** Enumerated mutant list committed with the gate |
+| 1 | For all generated (status, body) tuples, `judge` returns `confirmed` only when mutation==baseline AND both controls disagree — asserted by Hypothesis, not examples |
+| 2 | Against DVGA: introspection returns a schema; against a server with it disabled, the engine reports disabled and **claims nothing**. Schema node/field counts match a fixture |
+| 3 | A known DVGA injection is confirmed through a GraphQL argument by an existing engine, with its existing oracle unchanged |
+| 4 | Every engine has a descriptor; a test asserts descriptor count == engine count (no engine may exist undeclared) |
+| 5 | The four tables are **derived**, not written: a test asserts the generated routing/ALWAYS_ON sets equal today's hand-maintained ones exactly — a pure refactor with zero behaviour delta |
+| 6 | Given a state where B's precondition is unmet and A establishes it, the planner emits A before B. Given no path, it reports unreachable rather than silently skipping |
+| 7 | Coverage report states exercised/total transitions; the number changes when an engine is disabled |
+| 8 | A sequence where A deletes B's precondition is detected and reported, not silently mis-planned |
+| 9 | Every cutoff is labelled; unsafe cutoffs appear in the coverage report as explicit coverage debt |
+| 10 | A callback carrying our unique token confirms; no callback confirms nothing (never a timeout-based claim) |
+| 11 | Input-vector inventory test enumerates params, form fields, headers, cookie names, filenames, content types |
+
+---
+
+## Deliverable 9 — Rejected ideas, with reasons
+
+| Idea | Source | Reason |
+|------|--------|--------|
+| Command-and-control RAT | Black Hat Go Ch.13 | Implant tradecraft; out of scope for a read-only, oracle-backed scanner |
+| GraphQL DoS exploitation (circular queries/fragments, field duplication, alias overloading, batching) | Black Hat GraphQL Ch.5 | Resource exhaustion; no-DoS rail is absolute. **Salvaged as a posture check** — probe whether limits exist at token levels, never at exhaustion levels |
+| Alias-based batching to defeat auth rate limits | Black Hat GraphQL Ch.7 | Brute-force bypass; no-brute rail. Detecting batching is permitted is fine; using it for credential attempts is not |
+| AI/Copilot/MCP-driven test generation | Playwright books (prior session) | Confirmation must never be stochastic. Generation may be; the oracle may not |
+| Unseeded random test selection | MBT §8.1 | Breaks deterministic replay. **Salvaged** as seeded generation with the seed in evidence |
+| Fuzzing aimed at access control | Fuzzing Ch.2 | The book itself says fuzzers structurally cannot do it; the persona/oracle layer owns it |
+| Go plugin machinery (shared objects, `buildmode=plugin`) | Black Hat Go Ch.10 | The *contract* transfers; the mechanism does not. Python needs a declaration, not dynamic loading |
+| Taxonomy-driven technique creation | The Tangled Web | A technique must exist because there is an oracle, never because a CWE exists |
+
+---
+
+## Deliverable 10 — Traceability matrix
+
+| Task | Gap | Book | Chapter/§ |
+|------|-----|------|-----------|
+| 0 mutation gate | G7 | Robust Python | Ch.24 |
+| 1 property-based oracle tests | G6 | Robust Python; MBT Essentials | Ch.23; §7.1 |
+| 2 GraphQL introspection engine | G3 | Black Hat GraphQL | Ch.1–3 |
+| 3 injection → GraphQL arguments | G4 | Black Hat GraphQL | Ch.8 |
+| 4 engine descriptor | G2 | Black Hat Go | Ch.10 |
+| 5 consumers read descriptor | G2 | Black Hat Go | Ch.10 |
+| 6 planner searches over effects | G1 | Automated Planning | §4.2 |
+| 7 structural coverage | G5 | MBT Essentials | §8.1 |
+| 8 negative effects | G9 | Automated Planning | §4.4 (Sussman anomaly) |
+| 9 cutoff safety labelling | G8 | Automated Planning; MBT | §4.2.1; §8.1.1 |
+| 10 OOB DNS oracle | G11 | Black Hat Go | Ch.5 |
+| 11 input-vector audit | G10 | Fuzzing | Ch.2 "Identify inputs" |
+| — architecture validated, no task | — | Fuzzing | Ch.2 "Access Control Flaws" |
+| — taxonomy caution, no task | — | The Tangled Web | "Enlightenment Through Taxonomy" |
+
+---
+
+## Read state and what remains
+
+**7 of 14 books have yielded extraction** (Black Hat Go, Automated Planning, MBT Essentials, Fuzzing,
+Robust Python, Black Hat GraphQL, The Tangled Web). Seven are inspected at chapter level with extraction
+pending: Web Browser Engineering, Building Secure and Reliable Systems, practical model-based testing,
+Hands-On Selenium WebDriver, A Frontend Web Developer's Guide to Testing, Essential Cybersecurity Science,
+and Real-World Bug Hunting's per-class chapters.
+
+**Two priority rankings were already overturned by inspection** (Black Hat Go P4→P2, Real-World Bug Hunting
+P3→P1, Black Hat GraphQL P2→P1, Essential Cybersecurity Science P3→P2). That failure rate is the argument
+for finishing the read before acting: **D6 and D7 above are provisional and may be reordered by the
+remaining seven books.** Steps 0–3 and 10–11 are the only items whose justification is unlikely to move.
