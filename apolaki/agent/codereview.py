@@ -185,9 +185,11 @@ def scan_comment_secrets(text: str) -> list:
     comments containing todo/fixme/hack, and a comment that simply states a password contains none of
     those words.
 
-    Proven live on OverTheWire Natas level 0, whose served HTML carries
-    `<!--The password for natas1 is scfWG6qNEIdzqVyfRwEGXyNUfFZkZeQ7 -->`. Apolaki read that page, ran
-    both scanners, and reported nothing.
+    Proven live on OverTheWire Natas level 0, whose served HTML carries the next level's password as a
+    bare 32-character value inside an HTML comment (`<!--The password for natas1 is ... -->`). Apolaki
+    read that page, ran both scanners, and reported nothing. The value itself is deliberately not
+    reproduced here — writing a live credential into source is the practice this function exists to
+    flag.
 
     Placeholders are filtered, because `<!-- password: your-password-here -->` is documentation, not a
     leak. Pure."""

@@ -247,6 +247,31 @@ def test_frontier_is_coherent_on_the_shipped_registry():
         assert isinstance(c["unlocks"], list) and isinstance(c["breaks"], list)
 
 
+def test_hitting_the_search_bound_does_not_discard_a_plan_already_found(monkeypatch):
+    """A false negative is the worst answer a planner can give. If the bound is reached AFTER a valid
+    sequence is in hand, return it and say it may not be shortest — never claim unreachable."""
+    # Names chosen so the goal-reaching action is expanded FIRST (actions run in id order), then the
+    # bound trips on the next one — the exact interleaving where the old code threw the plan away.
+    reg = _reg(
+        _d("a_reach_it", requires=["s"], establishes=["goal"]),
+        _d("b_noise", requires=["s"], establishes=["x"]),
+        _d("c_noise", requires=["x"], establishes=["y"]),
+    )
+    monkeypatch.setattr(es, "MAX_EXPANSIONS", 1)
+    r = es.plan(reg, {"s"}, "goal")
+    assert r["reachable"] is True, r
+    assert r["plan"] == ["a_reach_it"]
+    assert "search bound" in r["reason"], "the bound must be disclosed, not hidden"
+
+
+def test_the_bound_still_reports_unreachable_when_nothing_was_found(monkeypatch):
+    """Negative control for the above — the bound must not start inventing plans."""
+    reg = _reg(_d("a", requires=["s"], establishes=["x"]), _d("b", requires=["x"], establishes=["y"]))
+    monkeypatch.setattr(es, "MAX_EXPANSIONS", 1)
+    r = es.plan(reg, {"s"}, "never")
+    assert r["reachable"] is False and r["plan"] == []
+
+
 def test_reachability_endpoint_serves_the_search():
     """The production caller. Without one, this module is an island by Apolaki's own doctrine."""
     import asyncio

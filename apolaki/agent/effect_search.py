@@ -100,6 +100,15 @@ def plan(descriptors, observations, goal, *, max_depth: int = 6) -> dict:
             continue
         for a in acts:
             if expansions >= MAX_EXPANSIONS:
+                # Do not throw away a plan already found. Hitting the bound means the search may not have
+                # proven this one OPTIMAL, but reporting "unreachable" when a valid sequence is in hand
+                # would be a false negative — the worst answer a planner can give.
+                if best:
+                    _, _, step = best
+                    return {"reachable": True, "plan": step, "depth": len(step),
+                            "assumes": _assumes(step),
+                            "reason": "%s establishes %s (search bound reached; may not be shortest)"
+                                      % (step[-1], goal)}
                 return {"reachable": False, "plan": [], "depth": 0, "assumes": [],
                         "reason": "search bound reached (%d expansions)" % MAX_EXPANSIONS}
             # An action is only available where its own preconditions hold in THIS state.

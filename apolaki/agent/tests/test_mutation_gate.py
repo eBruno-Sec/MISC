@@ -18,6 +18,14 @@ def test_every_oracle_module_with_an_fp_guard_has_a_mutant():
     assert required <= covered, "oracle modules with no mutant: %s" % sorted(required - covered)
 
 
+def test_an_empty_mutant_list_runs_nothing_rather_than_everything():
+    """`mutants or MUTANTS` would make an empty list falsy and silently expand to the FULL gate — twelve
+    full suite runs for a caller who asked for none. Caught when a test in this file passed `[]` and
+    quietly turned the normal suite into the slow gate."""
+    res = mg.run([])
+    assert res["results"] == [] and res["killed"] == [] and res["survived"] == []
+
+
 def test_mutants_are_well_formed():
     for module, desc, pattern, repl, tests in mg.MUTANTS:
         assert module.endswith(".py") and tests.startswith("tests/")

@@ -203,3 +203,162 @@ Levels 0–4 solved via general techniques. Four map to engines Apolaki already 
   New `scan_comment_secrets` closes the gap between them, with placeholder filtering and a regression test
   for the `//`-inside-`http://` false positive that the first live run produced.
 - **Logged gap:** authorization decided by a client-controlled header (Natas 4 uses `Referer`). No engine.
+
+---
+
+# Pass 3 — effects model, planner search, mutation-gate recovery
+
+Two commits: `fd463a8` (T6/T8/T10) and `9eaffed` (mutation-gate recovery).
+
+## What the analysis got wrong
+
+The reconciled MoreBooks analysis said Apolaki "has no effects model". That was imprecise in a way that
+mattered. Effects **did** exist — `service_router._PACKS` `enables` lists and free-form
+`state.add_capability` strings. The real defect is narrower and far more fixable:
+
+> **Preconditions and effects spoke different languages.**
+
+Preconditions use the 17-term `technique_planner.OBSERVATIONS` vocabulary. Effects used ad-hoc terms
+(`arbitrary_file_read`, `ot_read`, `bmc_takeover`) that no precondition could ever consume. Nothing
+chained because nothing an engine *produced* was expressible as something another could *require*.
+
+Declaring effects in the precondition vocabulary is the entire fix. Measured result on the shipped
+registry: **13 engines with effects, 50 chains, 5 ordering conflicts** — none of which the planner could
+previously see.
+
+## What shipped
+
+| Module | Role |
+|---|---|
+| `engine_descriptor.py` | One record per engine: preconditions, effects, negative effects. Validates every effect is a real observation. |
+| `effect_search.py` | BFS forward search — goal test + successor, the two thirds of *Automated Planning* §4.2 with no prior representation. |
+| `POST /orchestration/reachability` | Serves the search. |
+| `GET /orchestration/audit` (extended) | Serves the effects layer alongside the no-island audit. |
+| Orchestration UI tab | The no-island north star had **no UI at all**. Now it does, plus an interactive reachability explorer. |
+
+Additive by construction: `plan_techniques` and `_PRECONDITIONS` are untouched, so no answer Apolaki
+already gave can change.
+
+## Defects found this pass
+
+| # | Defect | How it was caught | Why it mattered |
+|---|--------|-------------------|-----------------|
+| 1 | `find_hidden_route` given an `establishes` — but it is a lab-local catalog entry with **no executor and no gate** | own contract test | tells the planner a capability is obtainable by an action it can never take |
+| 2 | `breaks()` reported an engine breaking **itself** (`weak_password_reset` deletes the login it consumed) | synthetic test | true but useless for ordering; buried the five real conflicts |
+| 3 | Among equal-length plans the search returned whichever sorted first | live run against the shipped registry | recommended a plan silently assuming configured credentials over an equally short fully evidence-gated one |
+| 4 | Mutation gate: a crashed run leaves source weakened; next run reports *"guard changed, mutant is stale"* | running the gate | the diagnostic tells the operator to update the **mutant**, cementing the weakened guard — gate then passes while defending nothing. `make mutation-gate` uses `docker exec` against the **live agent**, so the running scanner keeps the disabled guard until rebuild. |
+
+Defect 3 is the one worth remembering: it only appeared against real data. Every synthetic test passed.
+
+## Test results (exact)
+
+| Check | Result |
+|---|---|
+| Full suite | **1334 collected, all pass** (was 1293; +39 effects model, +2 gate recovery) |
+| `test_engine_descriptor.py` | 12/12 |
+| `test_effect_search.py` | 27/27 |
+| `test_mutation_gate.py` | 6 pass, 1 skipped (full gate is env-gated) |
+| Mutation gate (full, on the baked image) | **12/12 mutants killed, passed** |
+| Dead-code gate | passed — `unused: []`, `stale_allowlist: []` |
+| Orchestration audit | **0 islands**, 41 gated / 40 always-on |
+| Bake drift | `bake OK — running container matches the baked image (162 modules, 82 techniques)` |
+| Clean clone (4th) | fresh `git clone` of `fd463a8`, full suite **EXIT=0** |
+
+## Live verification (not inspection)
+
+Against the running service after `docker compose up -d --build agent`:
+
+```
+obs={serves_js}  ->  applicable now: exposed_files_harvest, permissive_crossdomain,
+                     reverse_tabnabbing, target_intel_harvest, weak_session_token
+                     credentials_exposed  1 step   exposed_files_harvest
+                     sql_error_seen       UNREACHABLE  (needs has_search_param)
+obs={has_login}  ->  goal=authenticated   soft_deleted_login   assumes=[]
+obs={}           ->  goal=authenticated   browser_persona_bola assumes=[browser_persona_bola]
+```
+
+The `sql_error_seen` result is the honest-exhausted-path answer, not a gap. The `assumes` split is
+defect 3 fixed: with evidence the search picks the gated plan; with none it falls back and *says so*.
+
+UI verified in-browser: Orchestration tab renders 41/40/0/50/5, reachability picker renders all 17
+observations, plans and conflict tables populate.
+
+## Honest limits, stated rather than hidden
+
+- **T7 is PARTIAL by design.** `/orchestration/audit` and the UI read the descriptor, but the live routing
+  tables are **not** generated from it. That is the only step that can change scan behaviour, so it earns
+  its own reviewed change (task #28).
+- **Always-on engines declare no observations**, so search treats them as applicable everywhere. Plans
+  routed through one carry an `assumes` list rather than pretending the dependency is evidence.
+- **13 of 82 engines have effects.** Conservative on purpose — an over-declared effect makes the planner
+  chase a capability it does not have, which is worse than no model.
+- **`planner_uses_effects: False`** is reported by the endpoint and shown in the UI. The chains are
+  visible; the mission planner does not yet act on them.
+
+## Integration QA — live scan after the change
+
+Mission `cda5972b`, VAmPI (`vampi:5000`), deterministic, active, unauthenticated. Full pipeline
+recon → enum → probe → report.
+
+| Signal | Result |
+|---|---|
+| Completion | `status: complete`, `degraded: null` |
+| Report integrity | `ok: true` |
+| Findings / leads | 0 confirmed, 1 informational lead |
+| Property coverage | 13 confirmed-safe, 0 vulnerable, 2 blocked, 18 not-tested (39.4% tested) |
+| Persona artery | `ran: false` — no credentials configured |
+
+**What this does and does not prove.** It proves the pipeline still composes end to end after the change:
+nothing crashed, the report generated, integrity held, coverage computed, and negative results were
+recorded as *confirmed-safe* rather than as silence. It does **not** demonstrate detection capability —
+the artery did not run, so the cross-user BOLA path VAmPI is known to expose was never exercised. An
+unauthenticated active scan is leads-by-design; reading 0 findings here as "VAmPI is clean" would be
+exactly the WYSIATI error the capability-preflight section exists to prevent.
+
+## API surface regression
+
+114 routes / 72 GET / 43 POST. Both new endpoints registered. Every parameterless GET swept:
+**0 non-200**.
+
+## A fifth defect, found by self-review after the tests were green
+
+`plan()` returned `unreachable` when `MAX_EXPANSIONS` was hit — *even if a valid plan had already been
+found*. A false negative is the worst answer a planner can give: it says "no path exists" when one is in
+hand. Now the found plan is returned with the bound disclosed in `reason` ("may not be shortest"). Two
+tests pin it, including a negative control that the bound must not start inventing plans.
+
+Worth noting how it was caught: every test passed. It took re-reading the loop against the question
+"what does each early return discard?" The first attempt at the test did not even trip the bound — the
+search finished normally — so the test had to be rebuilt around the exact interleaving where the action
+that reaches the goal is expanded first and the bound trips on the next one.
+
+## A sixth defect — found because a test was too slow
+
+`mutation_gate.run(mutants)` used `mutants or MUTANTS`. An **empty list is falsy**, so a caller asking for
+*no* mutants silently got the full gate: twelve complete suite runs. One of the new recovery tests passed
+`[]` and quietly turned the ordinary test suite into the slow gate — noticed only because the suite stopped
+finishing in its usual time.
+
+Fixed to `MUTANTS if mutants is None else mutants`, with a test asserting an empty list runs nothing. The
+recovery test went from minutes to **0.03s**.
+
+This is the second time in this session that a falsy-coalescing default hid a behaviour change, and both
+were invisible to a green suite. Worth treating `x or DEFAULT` as suspect whenever the empty value is a
+meaningful input.
+
+### The recovery fix, validated against a real crash
+
+It did not stay hypothetical. A stray test container was killed while a mutant was applied, and the exact
+predicted state appeared on disk:
+
+```
+agent/bie.py         MODIFIED   -- if _b(shell) == _b(persona):  ->  if False:
+agent/bie.py.mutbak  untracked  -- holding the original
+```
+
+The disabled guard is the SPA-shell false-positive check in `judge_client_side_authz`. Left in place,
+Apolaki would report the application shell as a leaked privileged control — a false positive in the exact
+class the guard exists to prevent. And the *next* gate run would have called the mutant "stale".
+
+`recover()` restored it byte-identically (`recovered: ['bie.py']`, `git status` clean, no `.mutbak`). The
+fix was written from reasoning about the failure mode and then confirmed by the failure mode occurring.

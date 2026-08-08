@@ -105,7 +105,10 @@ def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
     app = app_dir or APP_DIR
     out = {"killed": [], "survived": [], "not_applied": [], "results": [],
            "recovered": recover(app)}
-    for module, desc, pattern, repl, tests in (mutants or MUTANTS):
+    # `is None`, NOT `or`: an empty list means "run no mutants" (recovery only). With `mutants or MUTANTS`
+    # an empty list is falsy and silently expands to the FULL gate — which re-runs the whole suite twelve
+    # times. A caller asking for nothing would get the most expensive thing the module can do.
+    for module, desc, pattern, repl, tests in (MUTANTS if mutants is None else mutants):
         path = os.path.join(app, module)
         if not os.path.exists(path):
             out["not_applied"].append({"module": module, "desc": desc, "why": "module missing"})
