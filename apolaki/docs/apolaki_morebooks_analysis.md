@@ -32,11 +32,29 @@ isolated engines.
 | 11 | Real-World Bug Hunting | 7,353 | 505 KB | P3 — corpus/technique |
 | 12 | A Frontend Web Developer's Guide to Testing | 5,068 | 392 KB | P3 — overlaps #3 |
 | 13 | Essential Cybersecurity Science | 3,667 | 382 KB | P3 — methodology |
-| 14 | Black Hat Go | 11,174 | 700 KB | P4 — language-specific |
+| 14 | Black Hat Go | 11,174 | 700 KB | **P2 — corrected, see below** |
 
 Priority is provisional and derives from the stated goal (state graph → planner → browser executor →
 fuzzer → deterministic oracle). It will be re-ordered in D5 once relevance is measured rather than
 assumed.
+
+### Correction: Black Hat Go was mis-ranked P4 on its title
+
+I initially ranked it lowest on the reasoning "it's Go, Apolaki is Python." That judged the book by its
+language rather than its content, and inspection disproved it immediately. Its chapters are
+**tool-construction methodology**, which is language-agnostic:
+
+- **Ch.10 "Go Plugins and Extendable Tools"** — pluggable vulnerability-scanner architecture. Highest-yield
+  chapter found so far in any of the 14 (see D3 below).
+- **Ch.5 "Exploiting DNS"** — includes *Writing DNS Servers* and *Creating a DNS Server and Proxy*, which
+  is the machinery behind an out-of-band interaction channel. Apolaki has `collaborator.py`, and the blind
+  benchmark's missed `xxe` at `/catalog/product/stock` is precisely the class that usually needs OOB.
+- **Ch.2 TCP scanners/proxies**, **Ch.6 SMB/NTLM**, **Ch.9 porting exploit code** — implementation patterns
+  for engines Apolaki already has hand-rolled.
+
+**Rule adopted for the rest of this read: no book is deprioritised on its title, language, or apparent
+domain. Relevance is assigned only after inspecting its actual chapter list.** The other P3/P4 rankings
+above are therefore also suspect until inspected.
 
 ---
 
@@ -110,12 +128,54 @@ rule already used in `apolaki_book_distillations.md`.
 
 | Book | Read state | Extraction |
 |------|-----------|------------|
+| Black Hat Go | Ch.10 read in full; Ch.2/5/6/9/11 chapter-level inspected | 1 architectural finding, 1 capability lead, 1 rejection — below |
 | Model-Based Testing Essentials | not started | — |
 | Automated Planning | not started | — |
 | Hands-On Selenium WebDriver | not started | — |
 | Fuzzing | not started | — |
 | Robust Python (4 ch.) | not started | — |
-| the other 9 | not started | — |
+| the other 8 | not started | — |
+
+### Black Hat Go
+
+**BHG-1 — `gap`, architectural. Uniform engine contract + self-registration.**
+*Black Hat Go, Ch.10 "Go Plugins and Extendable Tools".* The chapter's core argument: a plugin consumer
+must agree on a **published contract** (there, an exported `New()` returning a `Checker` interface with
+`Check(host, port) -> Result{Vulnerable, Details}`), because otherwise "new plug-ins would require you to
+make changes to the consumer code, defeating the entire purpose of a plug-in-based system." It cites
+Nessus's plugin model and attributes Metasploit's longevity to exactly this.
+
+**This lands directly on a defect in Apolaki, evidenced by today's own work.** Adding one engine currently
+requires editing four separate places: a dispatch branch in `tools.py::_run_service_pack`, an entry in
+`technique_planner.ALWAYS_ON`, a pack in `service_router._PACKS`, and a record in `techniques.py`. I did
+that four times today (dnp3, s7comm, transport_posture, external_surface) and the no-island guard only
+catches the *registry* omission, not the other three. That is precisely the consumer-must-change
+anti-pattern the chapter names.
+
+Candidate change (D6, not yet proposed): a single engine descriptor each module declares — id, ports or
+observations it needs, permission, oracle, and the callable — with the router, planner and registry all
+*reading* that one declaration. Python needs no shared-object machinery for this; entry points or a
+decorator registry suffice. **Deferred until cross-book synthesis**, because Automated Planning and MBT
+Essentials will have opinions on how engines advertise preconditions, and reconciling those first is the
+whole point of the analysis-before-implementation rule.
+
+**BHG-2 — `gap`, capability. Authoritative DNS server as an out-of-band oracle.**
+*Black Hat Go, Ch.5 "Exploiting DNS" — "Writing DNS Servers", "Creating a DNS Server and Proxy".*
+Apolaki has `collaborator.py`, and the sealed blind benchmark just missed `xxe` at
+`/catalog/product/stock` — a class routinely confirmable only by an out-of-band callback. Worth assessing
+whether the collaborator's DNS side is complete enough to serve as a deterministic OOB oracle (a callback
+either arrives with our unique token or it does not — which is a clean, FP-safe oracle).
+
+**BHG-3 — REJECTED. Command-and-control RAT.**
+*Black Hat Go, Ch.13 "Building a Command-and-Control RAT".* Offensive-implant tradecraft: persistence,
+remote control, operator channels. Out of scope for a scanner whose contract is read-only, oracle-backed
+assessment, and not something to build. Recorded here so the decision is visible in D9 rather than looking
+like an oversight.
+
+**Lower-yield, noted not extracted:** Ch.11 crypto is largely a Go-stdlib tour plus offline dictionary
+attacks on MD5/SHA-256 — Apolaki already has offline `run_hash_id`/`run_hash_crack`, and the guardrail
+against live credential brute-forcing is unchanged. Ch.4's HTTP server/router material is superseded by
+Apolaki's FastAPI layer.
 
 ---
 
