@@ -783,7 +783,7 @@ Everything else the read produced is either already shipped, a small independent
 | # | Work | Depends on |
 |---|------|-----------|
 | T6 | ✅ **DONE** — `engine_descriptor.py`: preconditions + **effects** + **negative effects** | — |
-| T7 | ◐ **PARTIAL** — `/orchestration/audit` + the Orchestration UI read the descriptor. The router/planner tables are NOT yet generated from it. | T6 |
+| T7 | ✅ **DONE** — `engine_descriptor` is now the SOURCE OF TRUTH for `OBSERVATIONS` / `PRECONDITIONS` / `ALWAYS_ON`; `technique_planner` re-exports them. Dependency inverted, zero behaviour delta pinned by snapshot. | T6 |
 | T8 | ✅ **DONE** — `effect_search.py`: goal test + successor → it **searches**, additively | T6 |
 | T9 | Structural coverage: all-states / all-transitions / all-round-trips | T8 |
 | T10 | ✅ **DONE** — deleted-condition detection: `conflicts()`, `breaks()`, applied in `successor()` | T8 |

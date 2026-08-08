@@ -362,3 +362,71 @@ class the guard exists to prevent. And the *next* gate run would have called the
 
 `recover()` restored it byte-identically (`recovered: ['bie.py']`, `git status` clean, no `.mutbak`). The
 fix was written from reasoning about the failure mode and then confirmed by the failure mode occurring.
+
+---
+
+# Pass 4 — T7 complete: the descriptor is now the source of truth
+
+`engine_descriptor` now **owns** `OBSERVATIONS`, `PRECONDITIONS` and `ALWAYS_ON`; `technique_planner`
+re-exports them under the same names. The dependency, which previously ran planner → descriptor, now runs
+descriptor → planner. `engine_descriptor` no longer imports `technique_planner` at all.
+
+Every consumer is untouched (`plan`, `orchestration_audit`, the graph projection, `/orchestration/*`,
+`main.py`) because the names and the objects are the same. Verified by identity, not equality:
+
+```
+tp._PRECONDITIONS is ed.PRECONDITIONS   ->  True
+```
+
+`is`, deliberately: an equal-but-separate copy would be a second source of truth, which is the exact thing
+the descriptor exists to remove. A test pins the identity so a future edit cannot fork them. Confirmed
+separately that nothing anywhere mutates these tables, so sharing a reference is safe.
+
+## Why a snapshot test, specifically
+
+The safety of a pure refactor rests on one claim: **routing is byte-identical.** Every other test asserts
+*properties* of the tables (every precondition uses a known observation, every engine is reachable), and a
+refactor that silently altered a precondition would satisfy all of them. So the contents are pinned
+against `tests/t7_tables_snapshot.json`, captured from the running system immediately before the move.
+
+It is a change-detector, not a correctness oracle: a legitimate future change SHOULD fail it, and the
+snapshot gets regenerated in the same commit so the diff shows both halves.
+
+| Check | Result |
+|---|---|
+| Observation vocabulary | 17, unchanged |
+| Precondition gate | 41 entries, unchanged |
+| Always-on reasons | 40 entries, unchanged |
+| Planner re-exports the same objects | `is` holds for all three |
+| Descriptor imports the planner | no (asserted against source, docstring excluded) |
+| Islands | 0 (41 gated / 40 always-on) |
+| Selection from evidence | same techniques for `{has_login}`, `{has_api, serves_js}`, `{authenticated, has_login}`, `{}` |
+| Empty evidence | selects nothing |
+| Circular imports | none — `main.py` imports clean |
+| Dead-code gate | passed |
+
+## What the effects model can and cannot reach — measured, not assumed
+
+With the descriptor as source of truth this became a straightforward query, and the answer bounds how much
+T8's search can ever buy:
+
+```
+observations NO engine can establish (recon must supply them):
+  has_coupon, has_file_upload, has_login, has_redirect_param, has_search_param,
+  has_sensitive_route, has_versions, has_workflow, has_xml_input, reflects_input,
+  saml_sso_detected, serves_js                                          -- 12 of 17
+
+engine-producible: has_api, has_object_id, authenticated, credentials_exposed, sql_error_seen  -- 5
+engines requiring more than one observation: session_fixation (has_login + authenticated)      -- 1
+```
+
+**Consequence, stated plainly:** most plans the search returns are one step long, because only 5 of the 17
+observations are things an *engine* can create — the other 12 are properties of the target that recon
+either finds or does not. The search is therefore not a deep escalation planner today; it is an accurate
+one-hop-and-occasionally-two-hop reachability answer plus the ordering-conflict warning. Deeper chains
+require more engines declaring effects, not a better search algorithm.
+
+**No dead engines:** every precondition set is satisfiable, and the only multi-precondition engine
+(`session_fixation`) needs `has_login` (recon) plus `authenticated` (six engines establish it). An
+unsatisfiable precondition set would be a permanently unreachable engine, which the no-island guard cannot
+detect — it only checks that a gate *exists*, not that it can ever *open*.

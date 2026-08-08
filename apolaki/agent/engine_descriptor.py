@@ -14,25 +14,140 @@ Four books arrive at this from different directions:
 
 THE ACTUAL DEFECT, stated precisely, because it is narrower and more fixable than "no effects model":
 **preconditions and effects already exist but speak different languages.** Preconditions use the 17-term
-observation vocabulary in `technique_planner.OBSERVATIONS` (`has_api`, `authenticated`, …). Effects exist
-as `service_router` pack `enables` lists in an ad-hoc vocabulary (`arbitrary_file_read`, `ot_read`, …) and
-as free-form `state.add_capability` strings. Nothing chains, because nothing an engine PRODUCES is
-expressed in terms another engine can REQUIRE.
+observation vocabulary below (`has_api`, `authenticated`, …). Effects exist as `service_router` pack
+`enables` lists in an ad-hoc vocabulary (`arbitrary_file_read`, `ot_read`, …) and as free-form
+`state.add_capability` strings. Nothing chains, because nothing an engine PRODUCES is expressed in terms
+another engine can REQUIRE.
 
 A descriptor therefore states effects in the SAME vocabulary as preconditions. That single choice is what
 turns the applicability filter into a searchable graph.
 
-**This module declares; it does not yet drive.** T7 makes the router, planner and registry read it, with a
-test asserting the generated tables equal today's hand-maintained ones exactly — a pure refactor with zero
-behaviour delta. Keeping declaration and adoption apart is deliberate: it makes the risky half reviewable
-on its own.
+**T7: this module is now the SOURCE OF TRUTH for the engine contract.** `OBSERVATIONS`, `PRECONDITIONS`
+and `ALWAYS_ON` live here and `technique_planner` re-exports them, inverting a dependency that used to run
+the other way. Nothing else changed: the tables are the same objects, so every consumer
+(`plan_techniques`, `orchestration_audit`, the graph projection, `/orchestration/*`) sees byte-identical
+data. `tests/test_t7_zero_delta.py` pins that against a snapshot taken before the move, because a refactor
+that quietly alters routing would be indistinguishable from one that does not.
+
+Why the contract belongs in one record rather than three tables in two modules: *Black Hat Go* Ch.10's
+point is that a plugin system's value comes from the consumer depending on a PUBLISHED contract, not on
+the plugins. While preconditions lived in the planner and effects lived here, adding an engine meant
+editing whichever module happened to own each half.
 """
 from __future__ import annotations
 
 
+# The deterministic observation vocabulary -- what recon/harvest can establish about a target.
+OBSERVATIONS = (
+    "serves_js", "has_api", "has_search_param", "has_login", "has_object_id", "has_file_upload",
+    "has_xml_input", "has_redirect_param", "has_versions", "has_coupon", "reflects_input",
+    "sql_error_seen", "authenticated", "has_sensitive_route", "has_workflow", "credentials_exposed",
+    "saml_sso_detected",
+)
+
+# technique_id -> observations that must ALL hold for the technique to be applicable (the precondition gate).
+PRECONDITIONS = {
+    "sqli_auth_bypass":        ["has_login"],
+    "sqli_union_extract":      ["has_search_param"],
+    "nosql_injection":         ["has_api"],
+    "reflected_xss":           ["reflects_input"],
+    "stored_xss":              ["has_api"],
+    "idor_bola_read":          ["has_object_id"],
+    "bfla_privileged_action":  ["has_sensitive_route"],
+    "mass_assignment":         ["has_api"],
+    "excessive_data_exposure": ["has_api"],
+    "xxe_file_ssrf":           ["has_xml_input"],
+    "ssrf":                    ["has_api"],
+    "open_redirect":           ["has_redirect_param"],
+    "business_logic_abuse":    ["has_workflow"],
+    "weak_secret_forgery":     ["has_coupon"],
+    "exposed_files_harvest":   ["serves_js"],
+    "target_intel_harvest":    ["serves_js"],
+    "path_traversal":          ["has_api"],
+    "archive_slip":            ["has_file_upload"],
+    "unrestricted_file_upload": ["has_file_upload"],
+    "soft_deleted_login":      ["has_login"],
+    "command_injection":       ["has_api"],
+    "csrf":                    ["has_login"],
+    "jwt_forge":               ["authenticated"],
+    "weak_2fa_bypass":         ["authenticated"],
+    "weak_password_reset":     ["has_login"],
+    "exposed_credentials":     ["credentials_exposed"],
+    # session engines distilled from the books/corpus — gated on existing observations so the planner
+    # (and the graph, which shares this precondition table) reasons about them, not just the blind sweep.
+    "sqli_structural":         ["has_search_param"],   # input in the query STRUCTURE (ORDER BY / column)
+    "weak_session_token":      ["serves_js"],          # any web app issues session cookies to sample
+    "xpath_injection":         ["has_search_param"],   # input concatenated into an XPath query
+    "ldap_injection":          ["has_search_param"],   # input concatenated into an LDAP filter
+    "ssi_injection":           ["reflects_input"],     # input reaches an SSI-parsed response
+    "css_injection":           ["reflects_input"],     # input reflected into a CSS/style context
+    "jwt_key_confusion":       ["authenticated"],      # RS->HS forgery on a captured token
+    "cache_deception":         ["authenticated"],      # needs a private page to leak from the cache
+    "waf_bypass":              ["has_search_param"],   # a parameter to smuggle a blocked signature through
+    "reverse_tabnabbing":      ["serves_js"],          # HTML page with target=_blank links
+    "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
+    "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
+    "session_fixation":        ["has_login", "authenticated"],  # a login + a working credential to drive it
+    "default_credentials":     ["has_sensitive_route"],       # a discovered admin/management interface
+    "saml_signature_bypass":   ["saml_sso_detected"],         # a captured SAMLResponse / SAML ACS on the surface
+}
+
+# Auto-fired, oracle-confirmed techniques that are intentionally NOT evidence-gated in _PRECONDITIONS because an
+# ALWAYS-ON path already reaches them: the deterministic injection/DOM sweep, passive recon, the persona
+# authorization artery, the autonomy/next-best-action path, or a tool-level target gate. Each MUST state HOW it is
+# reached. The orchestration guard (orchestration_audit) treats _PRECONDITIONS ∪ ALWAYS_ON as "wired"; any
+# auto+oracle+transferable technique in NEITHER is an island the engagement can't orchestrate, and fails the guard.
+ALWAYS_ON = {
+    "dom_xss":                  "always-on DOM sweep (run_xss / run_dom_trace on every reflected param + app page)",
+    "csti":                     "always-on DOM audit (run_dom_audit on every page with a discoverable param)",
+    "prototype_pollution":      "always-on DOM audit (run_dom_audit prototype-gadget scan)",
+    "ssti":                     "always-on injection_probes sweep on every parameterized endpoint",
+    "crlf_injection":           "always-on injection_probes sweep (header injection) on every endpoint",
+    "jsonp_info_leak":          "run_jsonp fired from the next-best-action / autonomy path on discovered endpoints",
+    "race_condition":           "run_race probe on single-use actions (probe phase)",
+    "insecure_deser":           "run_deserialization probe on requests carrying serialized blobs (probe phase)",
+    "missing_authentication":   "persona authorization matrix (_do_persona_authz) whenever personas mint",
+    "browser_persona_bola":     "persona authorization artery step 5e (_do_persona_authz -> confirm_browser_persona_bola): "
+                                "the Browser Intelligence Engine's runtime swap fires on the same proven persona pair",
+    "client_side_authz":        "Browser Intelligence Engine phase 2, inside the same artery step 5e run: the rendered "
+                                "control surface is enumerated on every persona route the swap already visits",
+    "client_supplied_identity_param": "Browser Intelligence Engine phase 3, same artery step 5e run: identity params both "
+                                "personas' browsers sent are mutated by route interception on the observed endpoints",
+    "header_trust_authz":       "run_header_trust on every in-scope origin + any denied path the scan met",
+    "url_override_acl_bypass":  "run_header_trust: any path that answered 401/403 is retried behind an override header",
+    "graphql_introspection":    "planner phase D enrich: run_graphql on any /graphql endpoint or GraphQL URL hint",
+    "graphql_field_suggestions": "planner phase D enrich: run_graphql sends a bogus field on the same pass",
+    "graphql_batching_enabled": "planner phase D enrich: run_graphql sends a token-sized array batch",
+    "graphql_argument_injection": "run_graphql introspection enumerates arguments; the existing injection "
+                                "engines consume them via graphql_tool.build_query",
+    "tls_posture":              "run_transport_posture on every in-scope origin during recon "
+                                "(_do_transport_posture -> read-only pinned handshakes + certificate)",
+    "cookie_scope_posture":     "run_transport_posture on every in-scope origin during recon (Set-Cookie read directly)",
+    "http_security_headers":    "run_transport_posture on every in-scope origin during recon (response headers)",
+    "http_methods_audit":       "run_transport_posture on every in-scope origin during recon (OPTIONS + one TRACE)",
+    "vulnerable_component":     "always-on fingerprint / nuclei recon",
+    "security_misconfig_errors": "passive stack-trace / error-signature detection on every response",
+    "encoded_data_decode":      "passive intel harvest at every transport chokepoint",
+    "llm_prompt_injection":     "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
+    "llm_output_handling":      "run_llm_probe, tool-gated on looks_like_chat_endpoint()",
+    "weak_ssh_crypto":          "service_router pack: fingerprint(port 22/SSH) -> _run_service_pack runs the read-only audit",
+    "ldap_anonymous_read":      "service_router pack: fingerprint(port 389/636/LDAP) -> _run_service_pack anonymous read",
+    "smb_null_session":         "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack null-session enum",
+    "snmp_default_community":   "service_router pack: fingerprint(port 161/SNMP) -> _run_service_pack default-community GET",
+    "smb_signing_disabled":     "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack SMB2 negotiate signing check",
+    "modbus_exposed":           "service_router pack: fingerprint(port 502/Modbus) -> _run_service_pack read-only OT probe",
+    "dnp3_exposed":             "service_router pack: fingerprint(port 20000/DNP3) -> _run_service_pack link-status probe",
+    "s7comm_exposed":           "service_router pack: fingerprint(port 102/S7comm) -> _run_service_pack SZL identification",
+    "vnc_no_auth":              "service_router pack: fingerprint(port 5900/VNC) -> _run_service_pack RFB handshake",
+    "rsync_anon":               "service_router pack: fingerprint(port 873/rsync) -> _run_service_pack #list probe",
+    "ntp_monlist":              "service_router pack: fingerprint(port 123/NTP) -> _run_service_pack monlist query",
+    "ipmi_rakp":                "service_router pack: fingerprint(port 623/IPMI) -> _run_service_pack RMCP+ open-session",
+    "rdp_no_nla":               "service_router pack: fingerprint(port 3389/RDP) -> _run_service_pack X.224 negotiation",
+}
+
+
 def _observations():
-    import technique_planner as tp
-    return set(tp.OBSERVATIONS)
+    return set(OBSERVATIONS)
 
 
 # ── effects, declared in the PRECONDITION vocabulary so they can chain ──────────────────────────
@@ -97,13 +212,13 @@ def descriptor(tech: dict, preconditions: dict, always_on: dict) -> dict:
 
 
 def build() -> dict:
-    """{id: descriptor} for every registered technique, assembled from the sources that exist today.
+    """{id: descriptor} for every registered technique, built from THIS module's tables.
 
-    Deliberately a VIEW rather than a new source of truth: nothing is migrated yet, so this cannot drift
-    from the tables the platform actually runs on. T7 inverts that."""
+    Post-T7 these are the tables the platform actually routes on — `technique_planner` re-exports them —
+    so a descriptor cannot drift from live behaviour. Before T7 this read the planner's copies, which made
+    it a read-only view; the dependency now runs the other way."""
     import techniques as T
-    import technique_planner as tp
-    return {t["id"]: descriptor(t, tp._PRECONDITIONS, tp.ALWAYS_ON)
+    return {t["id"]: descriptor(t, PRECONDITIONS, ALWAYS_ON)
             for t in T.TECHNIQUES.values() if t.get("id")}
 
 
