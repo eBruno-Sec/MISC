@@ -15,10 +15,16 @@ COMMON_PATHS = ("/graphql", "/graphiql", "/api/graphql", "/v1/graphql",
                 "/v2/graphql", "/query", "/gql", "/api/gql", "/graphql/console")
 
 # Compact introspection query — enough to enumerate roots + types.
+# NOTE (#125): the args sub-selection must request the argument's TYPE, not only its name. Without it
+# every argument reads as untyped, and a payload aimed at an Int argument is rejected by the type system
+# before it can reach any sink — observed live on DVGA, where paste(id:) returned 'Expected type "Int"'
+# and the probe accomplished nothing. The `type` block after `args` belongs to the FIELD; arguments need
+# their own.
 INTROSPECTION_QUERY = (
     "query IntrospectionQuery { __schema { "
     "queryType { name } mutationType { name } subscriptionType { name } "
-    "types { name kind fields { name args { name } "
+    "types { name kind fields { name "
+    "args { name type { name kind ofType { name kind ofType { name kind } } } } "
     "type { name kind ofType { name kind } } } } } }"
 )
 
@@ -70,6 +76,106 @@ def parse_schema(resp_json: dict) -> dict:
         "subscription_fields": _root_fields(types, (schema.get("subscriptionType") or {}).get("name")),
         "type_count": len([t for t in types if not str(t.get("name", "")).startswith("__")]),
     }
+
+
+# ── argument extraction + injection wiring (#125, Black Hat GraphQL Ch.8) ──
+# parse_schema above returns root field NAMES, which is enough to say "introspection is enabled" but not
+# enough to TEST anything: Ch.8 names query arguments, field arguments, directive arguments and mutations
+# as the injection entry points, and Apolaki's injection engines only ever look at query strings and form
+# fields. Without the argument list they cannot reach a GraphQL sink at all. These functions close that.
+
+# Argument names whose value is worth handing to the injection engines first.
+_INTERESTING_ARG = ("id", "ids", "name", "email", "user", "username", "search", "query", "filter",
+                    "q", "term", "slug", "path", "file", "url", "order", "sort", "where")
+
+
+def _type_name(t) -> str:
+    """Unwrap NON_NULL / LIST wrappers to the underlying named type. Pure."""
+    seen = 0
+    while isinstance(t, dict) and seen < 6:
+        if t.get("name"):
+            return str(t["name"])
+        t = t.get("ofType")
+        seen += 1
+    return ""
+
+
+# Scalars that carry text. A payload sent to an Int/Float/Boolean argument is rejected by the type system
+# before it can reach any sink — proven live on DVGA, where deletePaste(id:) returned
+# 'Expected type "Int"' and the probe accomplished nothing.
+_TEXTUAL_TYPES = {"String", "ID"}
+
+
+def schema_operations(resp_json) -> list:
+    """[{operation, kind, args}] for every root query and mutation, where each arg is
+    {name, type, textual}. Pure.
+
+    This is the surface map: the same introspection response parse_schema already consumes, read for the
+    arguments and TYPES it discards."""
+    schema = ((resp_json or {}).get("data") or {}).get("__schema")
+    if not isinstance(schema, dict):
+        return []
+    types = schema.get("types") or []
+    roots = {(schema.get("queryType") or {}).get("name"): "query",
+             (schema.get("mutationType") or {}).get("name"): "mutation"}
+    out = []
+    for t in types:
+        if not isinstance(t, dict):
+            continue
+        kind = roots.get(t.get("name"))
+        if not kind:
+            continue
+        for f in (t.get("fields") or []):
+            if not isinstance(f, dict) or not f.get("name"):
+                continue
+            args = []
+            for a in (f.get("args") or []):
+                if not isinstance(a, dict) or not a.get("name"):
+                    continue
+                tn = _type_name(a.get("type"))
+                args.append({"name": a["name"], "type": tn, "textual": tn in _TEXTUAL_TYPES})
+            out.append({"operation": f["name"], "kind": kind, "args": args})
+    out.sort(key=lambda o: (o["kind"], o["operation"]))
+    return out
+
+
+def injectable_arguments(operations, max_out: int = 60, include_mutations: bool = False) -> list:
+    """Arguments worth handing to the existing injection engines. Pure.
+
+    Two filters, both learned from a live run against DVGA:
+
+    * **Type.** Only textual arguments (String/ID) can carry a payload; an Int argument rejects it at the
+      type system and the probe proves nothing. Non-textual args are returned marked `injectable=False`
+      so the caller can see them without wasting requests.
+    * **Safety.** Mutations CHANGE STATE — `deletePaste(id:)` is not something to fire a payload at
+      speculatively. Queries are auto-fireable; mutations are excluded unless the caller explicitly opts
+      in (`include_mutations`), which is the operator-gated path."""
+    out = []
+    for op in operations or []:
+        if op.get("kind") == "mutation" and not include_mutations:
+            continue
+        for a in op.get("args") or []:
+            name = a["name"] if isinstance(a, dict) else str(a)
+            tn = a.get("type", "") if isinstance(a, dict) else ""
+            textual = a.get("textual", True) if isinstance(a, dict) else True
+            al = str(name).lower()
+            out.append({"operation": op["operation"], "kind": op["kind"], "arg": name, "type": tn,
+                        "injectable": bool(textual),
+                        "state_changing": op.get("kind") == "mutation",
+                        "interesting": any(al == h or al.endswith(h) for h in _INTERESTING_ARG)})
+    out.sort(key=lambda x: (not x["injectable"], not x["interesting"], x["kind"], x["operation"],
+                            x["arg"]))
+    return out[:max_out]
+
+
+def build_query(operation: str, kind: str, arg: str, value: str) -> str:
+    """A minimal single-argument operation carrying `value` — the vehicle a payload rides in. Pure.
+
+    The value is JSON-encoded so a payload can never break out of the string and restructure the document
+    into a different (possibly far heavier) query. That is a safety property, not just hygiene."""
+    op_kw = "mutation" if kind == "mutation" else "query"
+    import json as _json
+    return "%s { %s(%s: %s) { __typename } }" % (op_kw, operation, arg, _json.dumps(str(value)))
 
 
 def build_batch_array(query: str, n: int = 5) -> list:

@@ -91,6 +91,11 @@ ALWAYS_ON = {
                                 "control surface is enumerated on every persona route the swap already visits",
     "client_supplied_identity_param": "Browser Intelligence Engine phase 3, same artery step 5e run: identity params both "
                                 "personas' browsers sent are mutated by route interception on the observed endpoints",
+    "graphql_introspection":    "planner phase D enrich: run_graphql on any /graphql endpoint or GraphQL URL hint",
+    "graphql_field_suggestions": "planner phase D enrich: run_graphql sends a bogus field on the same pass",
+    "graphql_batching_enabled": "planner phase D enrich: run_graphql sends a token-sized array batch",
+    "graphql_argument_injection": "run_graphql introspection enumerates arguments; the existing injection "
+                                "engines consume them via graphql_tool.build_query",
     "tls_posture":              "run_transport_posture on every in-scope origin during recon "
                                 "(_do_transport_posture -> read-only pinned handshakes + certificate)",
     "cookie_scope_posture":     "run_transport_posture on every in-scope origin during recon (Set-Cookie read directly)",

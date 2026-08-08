@@ -342,6 +342,45 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
+    # ── GraphQL (#125, Black Hat GraphQL). The TOOL existed and was planner-reachable; what was missing
+    # was registry presence (so it never appeared in coverage or the no-island accounting) and the
+    # argument extraction that lets the existing injection engines reach a GraphQL sink at all.
+    _t(id="graphql_introspection", vuln_class="sensitive_exposure", cwe="CWE-200", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CONF-05",
+       summary="GraphQL introspection enabled: the full schema, and therefore the whole API surface, is public.",
+       detect="The standard __schema introspection query returns a parseable schema (graphql_tool).",
+       exploit="None needed — the disclosure IS the finding. Its larger value is as surface expansion: "
+               "every operation and argument becomes testable input for the other engines.",
+       oracle="a parseable __schema with a query type and at least one root operation came back",
+       validated_on=[]),
+    _t(id="graphql_field_suggestions", vuln_class="sensitive_exposure", cwe="CWE-200", owasp="A01:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CONF-05",
+       summary="Schema still discoverable via 'Did you mean' field suggestions when introspection is off.",
+       detect="A deliberately bogus field triggers an error naming real fields (graphql_tool).",
+       exploit="Recovered names are dictionary-driven guesses, so they enter the graph as UNVERIFIED "
+               "candidates, never as confirmed surface.",
+       oracle="an error message for an unknown field names real schema fields",
+       validated_on=[]),
+    _t(id="graphql_batching_enabled", vuln_class="misconfiguration", cwe="CWE-770", owasp="A05:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Array batching permitted: one request can carry many operations.",
+       detect="A small JSON-array batch is answered with an array of results (graphql_tool).",
+       exploit="POSTURE ONLY. Batching is a documented rate-limit and brute-force amplifier, and Apolaki "
+               "does NOT use it that way — the no-brute rail stands. A token-sized batch establishes that "
+               "the control is absent; no credential attempts are made through it.",
+       oracle="an N-item batch returned N results; N is small by construction",
+       validated_on=[]),
+    _t(id="graphql_argument_injection", vuln_class="injection", cwe="CWE-74", owasp="A03:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-INPV-01",
+       summary="GraphQL query/mutation arguments as injection entry points for the existing engines.",
+       detect="Introspection enumerates every operation and its arguments; those arguments are sinks the "
+              "query-string and form-field probes cannot see.",
+       exploit="The existing injection engines supply the payload; graphql_tool.build_query carries it. "
+               "The value is JSON-encoded so a payload can never restructure the document into a "
+               "different — possibly far heavier — query.",
+       oracle="the injecting engine's own oracle, unchanged; only the transport differs",
+       validated_on=[]),
+
     _t(id="dnp3_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
        permission=ACTIVE, transferable=True,
        summary="Unauthenticated DNP3 outstation reachable (ICS/OT).",
@@ -967,6 +1006,8 @@ WSTG_DELIBERATELY_UNMAPPED = {
     "saml_signature_bypass": "WSTG-ATHZ-05 covers OAuth, not SAML assertion handling",
     "exposed_credentials": "credential exposure spans several WSTG tests; none is a clean fit",
     "soft_deleted_login": "no dedicated WSTG v4.2 test",
+    "graphql_batching_enabled": "WSTG v4.2 has no GraphQL-specific tests; batching is a rate-limit "
+                                "control gap with no clean WSTG home",
 }
 # MITRE ATT&CK is an adversary-TTP lens — deliberately coarse for web-app bugs; mapped only
 # where a technique genuinely corresponds, None elsewhere (honest gaps rather than forced fits).
