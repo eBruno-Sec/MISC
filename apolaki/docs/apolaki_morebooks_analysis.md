@@ -133,7 +133,7 @@ rule already used in `apolaki_book_distillations.md`.
 | Model-Based Testing Essentials | §7–8 read; §1–6, 9–10 heading-level | 3 findings + **the first cross-book conflict** — below |
 | Hands-On Selenium WebDriver | not started | — |
 | Fuzzing | Ch.1–2 read (phases, methods, limitations); Ch.3+ heading-level | validates the oracle bet; resolves CONFLICT-1 — below |
-| Robust Python (4 ch.) | not started | — |
+| Robust Python (4 ch.) | Ch.23–24 read | **applied — found a real hole in the test suite** — below |
 | the other 8 | not started | — |
 
 ### Black Hat Go
@@ -307,6 +307,55 @@ vector. That includes headers, filenames, environment variables, registry keys, 
 enumerates query params, form fields and some headers. Filenames (upload names, path segments), cookie
 *names* as opposed to values, and content-type/encoding negotiation are thinner. This is an audit task, not
 an architecture change, and can proceed independently of the effects-model work.
+
+### Robust Python (Ch.23 Property-Based Testing, Ch.24 Mutation Testing)
+
+**RP-1 — APPLIED IMMEDIATELY, and it found something.** *Ch.24 "What Is Mutation Testing?"*: introduce a
+deliberate bug; if the tests still pass, *"the mutant survives"* and the tests are not robust enough. The
+warning that made this worth doing straight away: *"A safety net with fraying, brittle strands is worse
+than no safety net at all; it gives the illusion of safety and provides false confidence."* Apolaki has
+1,208 tests, which is exactly the kind of number that produces that illusion.
+
+I hand-built 9 mutants that each **weaken a false-positive guard** — the guards the platform's core claim
+rests on — and ran the full suite against each:
+
+| Mutant | Verdict |
+|---|---|
+| `bie.judge`: drop the anonymous control (public data would confirm as BOLA) | killed |
+| `bie.judge`: drop the implausible-id control (SPA shell would confirm) | killed |
+| `bie.judge`: accept a different body as proof | killed |
+| `bie.judge`: let a missing control still confirm | killed |
+| `bie.judge_param_swap`: remove the secure-case rejection | killed |
+| `transport_posture.analyze_protocols`: trust a non-discriminating probe | killed |
+| `transport_posture.analyze_methods`: confirm TRACE without the echoed marker | killed |
+| `ics_dnp3_s7.is_write_frame`: default to ALLOW instead of refuse | killed |
+| `blind_benchmark._has_proof`: **accept a finding with no evidence** | **SURVIVED** |
+
+Eight of nine killed is genuine evidence the FP-safety oracles are tested rather than merely covered. The
+survivor is a real hole: `_has_proof` is the guard that stops a bare title match from scoring as a
+confirmed true positive, so weakening it would **silently inflate every benchmark number** — including the
+12/17 recorded today. Closed with a direct test; the mutant is now killed. *(Fixed as a small safe fix, per
+the analysis-first rule — test-only, no architecture touched.)*
+
+**Standing recommendation for D7:** adopt mutation testing against the oracle modules as a recurring gate,
+using `mutmut` (Ch.24's tool) rather than my hand-rolled script. Acceptance criterion: **no mutant that
+weakens a false-positive guard may survive.** That is a far stronger statement than a coverage percentage,
+and it is the only test metric that actually defends the platform's central claim.
+
+**RP-2 — `gap`, queued not applied. Property-based testing of the oracles.**
+*Ch.23*: property-based testing defines **invariants** instead of specific input/output pairs, and
+Hypothesis generates the cases — notably, *"It will find boundary values for you"*, which is the automated
+form of the boundary analysis MBT-2 describes by hand.
+
+Apolaki's oracles *are* invariants and are currently tested with hand-written examples. The natural
+property: **for all (status, body) combinations, `judge` never returns `confirmed` unless the mutation body
+equals the baseline AND both negative controls disagree.** Hypothesis would explore that space far past the
+dozen cases written by hand. This is the join point between MBT-2 (partition the input domain) and Fuzzing
+(generate inputs) — three books converging on one technique, applied to Apolaki's own test suite rather
+than to a target.
+
+Deferred only because it adds a dependency (`hypothesis`) and belongs in the D7 ordering, not because it is
+in doubt.
 
 ---
 

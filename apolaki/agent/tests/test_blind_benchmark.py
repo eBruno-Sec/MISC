@@ -135,3 +135,24 @@ def test_out_of_key_scope_is_not_counted_as_a_false_positive():
     assert s["false_positives"] == 1 and s["out_of_key_scope"] == 2
     # precision reflects only families the ruler actually measures: 1 TP / (1 TP + 1 FP)
     assert s["precision"] == 50.0
+
+
+def test_a_finding_without_evidence_is_never_benchmark_proof():
+    """Found by mutation testing (Robust Python Ch.24): _has_proof could be weakened to accept any
+    'confirmed' finding with no evidence at all and the entire suite still passed. That is the guard
+    stopping a bare title match from scoring as a true positive, so a silent weakening would inflate
+    every benchmark number. It is now held by a test."""
+    import blind_benchmark as bb
+    assert bb._has_proof({"confidence": "confirmed",
+                          "evidence": "GET /x -> 200 with the injected marker reflected"}) is True
+    # confirmed but evidence-free, or too thin to replay -> NOT proof
+    assert bb._has_proof({"confidence": "confirmed"}) is False
+    assert bb._has_proof({"confidence": "confirmed", "evidence": ""}) is False
+    assert bb._has_proof({"confidence": "confirmed", "evidence": "   "}) is False
+    assert bb._has_proof({"confidence": "confirmed", "evidence": "short"}) is False
+    # an oracle string is an acceptable substitute for evidence
+    assert bb._has_proof({"confidence": "confirmed",
+                          "success_oracle": "two-persona ownership differential"}) is True
+    # unconfirmed is never proof no matter how much evidence it carries
+    assert bb._has_proof({"confidence": "lead",
+                          "evidence": "a very long and detailed evidence string"}) is False
