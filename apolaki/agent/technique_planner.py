@@ -107,6 +107,8 @@ ALWAYS_ON = {
     "snmp_default_community":   "service_router pack: fingerprint(port 161/SNMP) -> _run_service_pack default-community GET",
     "smb_signing_disabled":     "service_router pack: fingerprint(port 445/SMB) -> _run_service_pack SMB2 negotiate signing check",
     "modbus_exposed":           "service_router pack: fingerprint(port 502/Modbus) -> _run_service_pack read-only OT probe",
+    "dnp3_exposed":             "service_router pack: fingerprint(port 20000/DNP3) -> _run_service_pack link-status probe",
+    "s7comm_exposed":           "service_router pack: fingerprint(port 102/S7comm) -> _run_service_pack SZL identification",
     "vnc_no_auth":              "service_router pack: fingerprint(port 5900/VNC) -> _run_service_pack RFB handshake",
     "rsync_anon":               "service_router pack: fingerprint(port 873/rsync) -> _run_service_pack #list probe",
     "ntp_monlist":              "service_router pack: fingerprint(port 123/NTP) -> _run_service_pack monlist query",

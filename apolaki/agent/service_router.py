@@ -106,6 +106,17 @@ _PACKS = {
          "oracle": "an unauthenticated Modbus device answers a read-only request (device-id / read-holding)",
          "enables": ["ot_read"]},
     ]},
+    "dnp3": {"graph_kind": "service", "note": "ICS/OT: unauthenticated DNP3 outstation (READ-ONLY link-status probe; never writes).", "checks": [
+        {"id": "dnp3_exposed", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "a DNP3 outstation answers an unauthenticated link-layer status request (no application "
+                   "layer is ever sent, so no point can be operated)",
+         "enables": ["ot_read"]},
+    ]},
+    "s7comm": {"graph_kind": "service", "note": "ICS/OT: unauthenticated Siemens S7 PLC (READ-ONLY SZL identification; never writes).", "checks": [
+        {"id": "s7comm_exposed", "cwe": "CWE-306", "intrusive": False,
+         "oracle": "an S7 PLC returns its module identification (SZL 0x0011) to an unauthenticated caller",
+         "enables": ["ot_read"]},
+    ]},
     "enip": {"graph_kind": "service", "note": "ICS/OT: unauthenticated EtherNet/IP (CIP) device (READ-ONLY ListIdentity; never writes).", "checks": [
         {"id": "enip_exposed", "cwe": "CWE-306", "intrusive": False,
          "oracle": "an unauthenticated EtherNet/IP device answers ListIdentity (0x0063) with a valid identity item",

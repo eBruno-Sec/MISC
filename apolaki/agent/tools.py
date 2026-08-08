@@ -2484,6 +2484,12 @@ class ToolRegistry:
             if out:
                 sev, ev = out
                 findings.append(_mb.finding(host, int(port), sev, ev, res))
+        elif service in ("dnp3", "s7comm"):
+            import ics_dnp3_s7 as _ics                           # ICS/OT: READ-ONLY frames only, rail-checked
+            fn = _ics.probe_dnp3 if service == "dnp3" else _ics.probe_s7
+            res = await asyncio.get_event_loop().run_in_executor(None, fn, host, int(port))
+            if res.get("confirmed"):
+                findings.append(_ics.finding(service, host, int(port), res))
         elif service == "enip":
             import enip_audit_tool as _en                        # ICS/OT: READ-ONLY ListIdentity, never a CIP write
             res = await asyncio.get_event_loop().run_in_executor(None, _en.probe, host, int(port))

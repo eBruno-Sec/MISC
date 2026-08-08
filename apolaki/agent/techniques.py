@@ -342,6 +342,27 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
+    _t(id="dnp3_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Unauthenticated DNP3 outstation reachable (ICS/OT).",
+       detect="A single link-layer Request Link Status frame — no application layer is ever sent, so there "
+              "is no point or object the probe could operate on.",
+       exploit="None. DNP3 has no authentication, so reachability IS the exposure. Apolaki cannot "
+               "construct a control frame: the safety rail is strict-by-default and a unit test asserts "
+               "no builder in the engine produces a frame it accepts.",
+       oracle="the outstation returns a well-formed DNP3 link frame (CRC-verified) to the read-only request",
+       validated_on=[]),
+    _t(id="s7comm_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
+       permission=ACTIVE, transferable=True,
+       summary="Unauthenticated Siemens S7 PLC reachable (ICS/OT).",
+       detect="ISO-on-TCP handshake, S7 setup communication, then a read of SZL 0x0011 (module "
+              "identification) — the vendor-documented way to ask a PLC what it is; it does not touch the "
+              "process image.",
+       exploit="None. Write Var, PLC Stop, PLC Control and the download/upload jobs are catalogued only so "
+               "the safety rail can REFUSE them; they are never built.",
+       oracle="the PLC returns its module identification to an unauthenticated caller",
+       validated_on=[]),
+
     # ── transport + web posture family (#103, distilled from WAHH ch.12/13) ──────────────────────────
     _t(id="tls_posture", vuln_class="crypto_transport", cwe="CWE-327", owasp="A02:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-CRYP-01",
