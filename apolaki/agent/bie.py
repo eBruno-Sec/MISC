@@ -128,29 +128,105 @@ def swap_url(url: str, new_id: str):
     return tmpl.replace("{id}", str(new_id))
 
 
-def object_candidates(owner_urls, attacker_urls, max_n: int = 4) -> list:
-    """Runtime-observed cross-user hypotheses: URLs the OWNER's browser actually requested that share a
-    path template with something the ATTACKER's browser requested, but with a DIFFERENT id. That pairing
-    is what makes the swap meaningful (both personas legitimately use the endpoint; only the id differs),
-    and it is derived from observation -- not from spraying ids. Pure.
+def _split_path(url: str):
+    """(scheme, netloc, [segments], query) or None. Pure."""
+    try:
+        from urllib.parse import urlsplit
+        p = urlsplit(str(url))
+        segs = [s for s in p.path.split("/") if s != ""]
+        if not p.netloc or not segs:
+            return None
+        return p.scheme, p.netloc, segs, p.query
+    except Exception:
+        return None
 
-    Returns [{template, owner_url, owner_id, attacker_url, attacker_id}] ordered by observation order."""
-    atk = {}
-    for u in (attacker_urls or []):
-        t, i = object_template(u)
-        if t:
-            atk.setdefault(t, (u, i))
-    out, seen = [], set()
-    for u in (owner_urls or []):
-        t, i = object_template(u)
-        if not t or t in seen or t not in atk:
+
+def swap_segment(url: str, index: int, value: str):
+    """Replace the path segment at `index` and nothing else. Pure."""
+    parts = _split_path(url)
+    if not parts:
+        return None
+    scheme, netloc, segs, query = parts
+    if not (0 <= index < len(segs)):
+        return None
+    segs = list(segs)
+    segs[index] = str(value)
+    return scheme + "://" + netloc + "/" + "/".join(segs) + (("?" + query) if query else "")
+
+
+def differing_segment(url_a: str, url_b: str):
+    """The single path position where two structurally identical URLs differ, else None.
+
+    This is how an object key is IDENTIFIED without guessing its shape: a numeric id, a uuid, a username
+    and a slug all look different, but "the one segment that changed between two personas' requests to the
+    same endpoint" is the same signal in every case. Pure."""
+    a, b = _split_path(url_a), _split_path(url_b)
+    if not a or not b:
+        return None
+    if (a[0], a[1]) != (b[0], b[1]) or len(a[2]) != len(b[2]):
+        return None
+    diff = [i for i, (x, y) in enumerate(zip(a[2], b[2])) if x != y]
+    if len(diff) != 1:
+        return None
+    i = diff[0]
+    va, vb = a[2][i], b[2][i]
+    if not va or not vb or len(va) > 64 or len(vb) > 64:
+        return None
+    if "." in va and "." in vb:            # both look like filenames -> a static asset, not an object key
+        return None
+    return i
+
+
+def segment_template(url: str, index: int) -> str:
+    """The URL with the object position marked, e.g. http://t/rest/basket/{id}. Pure."""
+    parts = _split_path(url)
+    if not parts:
+        return str(url)
+    scheme, netloc, segs, _q = parts
+    segs = list(segs)
+    if 0 <= index < len(segs):
+        segs[index] = "{id}"
+    return scheme + "://" + netloc + "/" + "/".join(segs)
+
+
+def _no_query(url: str) -> str:
+    return str(url).split("?", 1)[0].rstrip("/")
+
+
+def object_candidates(owner_urls, attacker_urls, max_n: int = 4) -> list:
+    """Runtime-observed cross-user hypotheses: an endpoint both personas' browsers requested, differing in
+    exactly ONE path segment. Pure.
+
+    The object key is identified by OBSERVATION, not by its shape — a numeric id, a uuid, a username and a
+    slug are indistinguishable to a regex but identical to this test, which is why username-keyed APIs
+    (`/users/v1/{name}`) are covered as naturally as `/basket/{n}`.
+
+    The discriminator that keeps it honest: the attacker's URL must be one the OWNER never requested (and
+    vice versa). If both personas fetched it, the differing segment is a route difference — `/api/users/1`
+    vs `/api/orders/1` — not a per-user key, and pairing them would manufacture nonsense.
+
+    Returns [{template, owner_url, owner_id, attacker_url, attacker_id, index}]."""
+    o_urls = [str(u) for u in (owner_urls or [])][:300]
+    a_urls = [str(u) for u in (attacker_urls or [])][:300]
+    o_seen, a_seen = {_no_query(u) for u in o_urls}, {_no_query(u) for u in a_urls}
+    out, templates = [], set()
+    for ou in o_urls:
+        if _no_query(ou) in a_seen:          # both personas fetched this exact object -> nothing to prove
             continue
-        au, ai = atk[t]
-        if str(ai) == str(i):
-            continue                      # same object -> nothing to prove
-        seen.add(t)
-        out.append({"template": t, "owner_url": u, "owner_id": i,
-                    "attacker_url": au, "attacker_id": ai})
+        for au in a_urls:
+            if _no_query(au) in o_seen:      # the "attacker's" url is the owner's too -> route difference
+                continue
+            idx = differing_segment(ou, au)
+            if idx is None:
+                continue
+            tmpl = segment_template(ou, idx)
+            if tmpl in templates:
+                continue
+            templates.add(tmpl)
+            oa, ab = _split_path(ou), _split_path(au)
+            out.append({"template": tmpl, "owner_url": ou, "owner_id": oa[2][idx],
+                        "attacker_url": au, "attacker_id": ab[2][idx], "index": idx})
+            break
         if len(out) >= max_n:
             break
     return out
@@ -233,8 +309,17 @@ def replay_script(cand: dict, owner: str = "owner", attacker: str = "attacker") 
         "curl -sk -o /dev/null -w '   %%{http_code} %%{size_download}B\\n' '%s'" % cand.get("owner_url", ""),
         "echo '4. control   -- implausible id (expect NOT the object; proves the route is object-specific)'",
         "curl -sk -o /dev/null -w '   %%{http_code} %%{size_download}B\\n' -H \"Authorization: $ATTACKER_AUTH\" '%s'"
-        % (swap_url(cand.get("owner_url", ""), _IMPLAUSIBLE_ID) or ""),
+        % (_implausible_url(cand) or ""),
     ])
+
+
+def _implausible_url(cand: dict):
+    """The negative-control URL: the same request with an id no application should own. Pure."""
+    u = cand.get("owner_url", "")
+    idx = cand.get("index")
+    if idx is not None:
+        return swap_segment(u, idx, _IMPLAUSIBLE_ID)
+    return swap_url(u, _IMPLAUSIBLE_ID)
 
 
 def browser_evidence(cand: dict, probes: dict, verdict: dict, *, owner: str = "owner",
@@ -305,6 +390,179 @@ def finding(cand: dict, probes: dict, verdict: dict, *, owner: str = "owner", at
                                              screenshots=screenshots),
         "found_by": "bie",
     }
+
+
+# ──────────────────────────────────────────── pure: RETEST FROM FROZEN BROWSER EVIDENCE
+def _sha(s: str) -> str:
+    import hashlib
+    return hashlib.sha256((s or "").encode("utf8", "replace")).hexdigest()[:32]
+
+
+def har_response_for(har_json, url: str) -> dict:
+    """The recorded response for a URL inside a HAR document. Pure.
+
+    WHAT A HAR CAN AND CANNOT DO — the distinction matters and is easy to get wrong: replaying a HAR as the
+    network layer reproduces the RECORDING, so it can never prove a bug still exists. It is a demonstration
+    (show a client the exploit without touching production) and a FROZEN BASELINE (what the vulnerable
+    response looked like), never a verification. Only a live re-send can decide OPEN or CLOSED."""
+    try:
+        entries = ((har_json or {}).get("log") or {}).get("entries") or []
+    except Exception:
+        return {}
+    for e in entries:
+        try:
+            if same_endpoint((e.get("request") or {}).get("url", ""), url):
+                r = e.get("response") or {}
+                c = r.get("content") or {}
+                return {"url": (e.get("request") or {}).get("url"), "status": int(r.get("status") or 0),
+                        "len": int(c.get("size") or r.get("bodySize") or 0),
+                        "mime": c.get("mimeType") or "", "source": "har"}
+        except Exception:
+            continue
+    return {}
+
+
+def retest_recipe(finding: dict) -> dict:
+    """The replayable recipe frozen from a confirmed BIE run. Pure.
+
+    A generic BOLA finding carries a URL and prose, which is why the retest loop can only call it
+    INCONCLUSIVE. A BIE finding carries the exact request, the persona roles, and the response that proved
+    the bug — enough for the oracle to decide honestly on a re-send."""
+    be = (finding or {}).get("browser_evidence") or {}
+    base = be.get("exact_request") or {}
+    mut = be.get("mutated_request") or {}
+    if not (base.get("url") or mut.get("url")):
+        return {}
+    body = mut.get("body") or base.get("body") or ""
+    return {
+        "schema": "apolaki.bie-retest/1",
+        "url": mut.get("url") or base.get("url"),
+        "method": (mut.get("method") or base.get("method") or "GET").upper(),
+        "as_persona": (be.get("personas") or {}).get("attacker") or "attacker",
+        "vulnerable_status": int(mut.get("status") or base.get("status") or 0),
+        "vulnerable_len": int(mut.get("len") or base.get("len") or 0),
+        "vulnerable_body_sha": _sha(body),
+        "oracle": finding.get("oracle") or "",
+        "note": "re-send this as the same persona; the frozen response below is what the bug looked like",
+    }
+
+
+# Statuses that mean the server now REFUSES the access the finding proved.
+_REFUSED = (401, 403, 404, 405, 410)
+
+
+def retest_verdict(recipe: dict, live) -> dict:
+    """OPEN / CLOSED / INCONCLUSIVE for a re-sent BIE recipe. Pure, deterministic.
+
+    Deliberately conservative in one direction: a 200 whose body merely CHANGED is INCONCLUSIVE, not
+    CLOSED, because ordinary data churn looks exactly like that and a false 'closed' is the worst outcome
+    a retest can produce. Only an explicit refusal, or an empty response where substantive data used to
+    be, closes a finding."""
+    r, l = recipe or {}, live or {}
+    if not r.get("url"):
+        return {"state": "INCONCLUSIVE", "reason": "no replayable recipe was frozen for this finding"}
+    st = int(l.get("status") or 0)
+    body = l.get("body") or ""
+    if st == 0:
+        return {"state": "INCONCLUSIVE", "reason": "the re-send did not complete"}
+    if st in _REFUSED:
+        return {"state": "CLOSED", "reason": "the server now refuses the request (status %d) that "
+                                             "previously returned the other user's object" % st}
+    if st == 200 and _sha(body) == r.get("vulnerable_body_sha"):
+        return {"state": "OPEN", "reason": "the same request still returns the identical object "
+                                           "(%d bytes) — the fix is not in place" % len(body)}
+    if st == 200 and len(body.strip()) < _MIN_BODY:
+        return {"state": "CLOSED", "reason": "the request now returns an empty response where the other "
+                                             "user's object used to be"}
+    if st == 200:
+        return {"state": "INCONCLUSIVE", "reason": "still 200 but the body changed — this is what ordinary "
+                                                   "data churn looks like, so it is not proof of a fix; "
+                                                   "operator retest required"}
+    return {"state": "INCONCLUSIVE", "reason": "unexpected status %d — operator retest required" % st}
+
+
+# ──────────────────────────────────────────────── pure: BROWSER-DRIVING FAILURE TAXONOMY
+# Selenium's exception catalogue (Ch.9) is really a catalogue of the ways a browser can fail to do what a
+# test asked. Apolaki needs it for a different reason: a flow that could not be driven must say WHY, or
+# "we found nothing" silently becomes indistinguishable from "we could not look". Each entry maps a raw
+# driver error to a stable reason code, a human explanation, and whether it is worth retrying.
+_FAILURE_SIGNATURES = (
+    # (matcher substrings, code, meaning, retryable, security_signal)
+    (("element click intercepted", "intercepts pointer events", "is not clickable at point"),
+     "click_intercepted",
+     "another element covers the control, so the click landed on the overlay instead",
+     True, "overlay_over_control"),
+    (("stale element", "element is not attached", "node is detached"),
+     "stale_element",
+     "the page re-rendered and the element reference became invalid",
+     True, ""),
+    (("element not interactable", "not visible", "element is not visible", "not enabled",
+      "element is disabled"),
+     "not_interactable",
+     "the control is present but cannot be interacted with (hidden or disabled)",
+     False, ""),
+    (("unexpected alert", "javascript dialog", "dialog is open"),
+     "unexpected_dialog",
+     "a JavaScript dialog interrupted the flow and must be handled first",
+     True, ""),
+    (("err_cert", "insecure certificate", "ssl error", "certificate verify"),
+     "insecure_certificate",
+     "the target presented a certificate the browser refuses",
+     False, "tls_certificate_rejected"),
+    (("no such element", "waiting for selector", "unable to find element", "locator resolved to 0"),
+     "element_not_found",
+     "no element matched the locator within the wait window",
+     True, ""),
+    (("timeout", "timed out", "exceeded"),
+     "timeout",
+     "the condition never became true within the wait window",
+     True, ""),
+    (("net::err_", "connection refused", "econnrefused", "unreachable", "name_not_resolved"),
+     "unreachable",
+     "the browser could not reach the target at all",
+     False, ""),
+    (("navigation", "frame was detached", "target closed", "browser has been closed"),
+     "navigation_lost",
+     "the page or browser went away mid-operation",
+     True, ""),
+)
+
+
+def classify_failure(err) -> dict:
+    """Turn a raw browser error into an honest, stable outcome. Pure.
+
+    `security_signal` is the interesting part: `click_intercepted` means something was drawn ON TOP of a
+    control, which is the same condition a clickjacking overlay creates. It is reported as a SIGNAL for the
+    planner, never as a finding — an app's own modal does this legitimately every day."""
+    s = str(err or "").lower()
+    if not s.strip():
+        return {"code": "none", "meaning": "no error", "retryable": False, "security_signal": "",
+                "raw": ""}
+    for tokens, code, meaning, retryable, signal in _FAILURE_SIGNATURES:
+        if any(t in s for t in tokens):
+            return {"code": code, "meaning": meaning, "retryable": retryable,
+                    "security_signal": signal, "raw": str(err)[:200]}
+    return {"code": "unknown", "meaning": "the browser failed for a reason Apolaki does not classify",
+            "retryable": False, "security_signal": "", "raw": str(err)[:200]}
+
+
+def drive_report(attempts) -> dict:
+    """Aggregate what the browser could and could not do, so coverage is stated rather than implied. An
+    engagement that says 'no findings' while every navigation timed out is lying by omission. Pure."""
+    att = list(attempts or [])
+    failed = [a for a in att if a.get("failure", {}).get("code") not in ("none", None)]
+    by_code, signals = {}, {}
+    for a in failed:
+        f = a.get("failure") or {}
+        by_code[f.get("code")] = by_code.get(f.get("code"), 0) + 1
+        if f.get("security_signal"):
+            signals[f["security_signal"]] = signals.get(f["security_signal"], 0) + 1
+    return {"attempted": len(att), "succeeded": len(att) - len(failed), "failed": len(failed),
+            "by_code": by_code, "security_signals": signals,
+            "complete": len(failed) == 0,
+            "note": ("every browser action completed" if not failed else
+                     "%d of %d browser actions failed — coverage is INCOMPLETE for those paths"
+                     % (len(failed), len(att)))}
 
 
 # ────────────────────────────── pure: CLIENT-SUPPLIED IDENTITY PARAMETERS (route-interception tampering)
@@ -877,19 +1135,68 @@ def settle(page, timeout_ms: int, expect_object: bool = False) -> str:
     return reason
 
 
-def _goto_awaiting_object(page, url: str, timeout_ms: int) -> str:
+def _goto_awaiting_object(page, url: str, timeout_ms: int, attempts: list = None) -> str:
     """Navigate and wait for the app's OWN object request, registering the expectation BEFORE the
-    navigation so a fast response cannot be missed. Deterministic; never raises."""
+    navigation so a fast response cannot be missed. Deterministic; never raises.
+
+    A navigation that fails is RECORDED (see classify_failure) rather than swallowed — silent failure is
+    how a scan comes to report 'nothing found' about a page it never actually loaded."""
+    def _record(err=None):
+        if attempts is not None:
+            attempts.append({"action": "navigate", "url": url, "failure": classify_failure(err)})
+
     try:
-        with page.expect_response(lambda r: bool(object_template(r.url)[0]), timeout=timeout_ms):
+        with page.expect_response(lambda r: bool(_split_path(r.url)), timeout=timeout_ms):
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        _record()
         return settle(page, timeout_ms) + "+object-response"
     except Exception:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-        except Exception:
-            return "navigation-failed"
+        except Exception as e:
+            _record(e)
+            return "navigation-failed: %s" % classify_failure(e)["code"]
+        _record()
         return settle(page, timeout_ms)
+
+
+def _artifact_dir(har_dir: str = "") -> str:
+    """Where run artifacts (HAR, trace) are written. Defaults under the agent's data volume so they
+    survive the mission and can be attached to the bundle. Never raises."""
+    import os
+    d = har_dir or os.environ.get("BIE_ARTIFACT_DIR") or "/app/data/bie"
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        return ""
+
+
+def start_trace(context, name: str) -> bool:
+    """Begin a Playwright trace: every action, DOM snapshot, console line and network call of the run,
+    scrubable afterwards in the trace viewer. Best-effort; a browser without tracing must not fail a
+    scan."""
+    try:
+        context.tracing.start(name=str(name)[:60], screenshots=True, snapshots=True, sources=False)
+        return True
+    except Exception:
+        return False
+
+
+def stop_trace(context, path: str) -> str:
+    """Finish the trace and return the artifact path (empty when tracing was unavailable). Never raises."""
+    if not path:
+        try:
+            context.tracing.stop()
+        except Exception:
+            pass
+        return ""
+    try:
+        context.tracing.stop(path=path)
+        import os
+        return path if os.path.exists(path) else ""
+    except Exception:
+        return ""
 
 
 def session_fingerprint(context) -> dict:
@@ -1042,6 +1349,8 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
     o_wire, a_wire, n_wire = [], [], []
     out = _empty(base, "")
     out.update({"browser": True, "ran": True, "note": ""})
+    art_dir = _artifact_dir(har_dir)
+    har_dir = har_dir or art_dir
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
@@ -1054,19 +1363,23 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                                                           storage=attacker_storage, har_dir=har_dir)
                 n_ctx, n_page, _nc, _ = _new_persona(browser, base, {}, role="anonymous",
                                                      timeout_ms=timeout_ms, wire=n_wire, har_dir=har_dir)
+                # Trace the ATTACKER context: it is the one that performs every exploit attempt, so its
+                # trace is the scrubable recording a client can replay against a confirmed finding.
+                traced = start_trace(a_ctx, "apolaki-bie-%s" % attacker)
 
                 obs_start = (len(o_wire), len(a_wire))
                 # The control surface must be read while the personas are still ON the application's own
                 # pages — a later navigation to a raw API URL would present an empty DOM and silently
                 # report "no controls". Accumulate across every rendered route.
                 raw_controls, app_page_url = _read_controls(a_page), base
+                attempts = out.setdefault("_attempts", [])
                 for path in (seed_paths or [])[:6]:      # let each app render the pages that fetch objects
                     u = path if "://" in str(path) else base + str(path)
                     if not ok(u):
                         continue
                     for pg in (o_page, a_page):
                         out.setdefault("settle", []).append(
-                            {"url": u, "reason": _goto_awaiting_object(pg, u, timeout_ms)})
+                            {"url": u, "reason": _goto_awaiting_object(pg, u, timeout_ms, attempts)})
                     raw_controls += _read_controls(a_page)
                     app_page_url = u                     # the last APP page that actually drove requests
                 # OBSERVED cross-user hypotheses: the object URLs each persona's OWN browser requested.
@@ -1077,18 +1390,25 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                 # When both personas hit the SAME ids (shared/public data), fall back to the explicit
                 # owner objects the caller supplies -- the artery knows which ids the owner owns.
                 if not cands:
+                    # Caller-supplied owner objects: the caller (the artery) already established ownership,
+                    # so the terminal segment IS the key — no id-shape guess needed, which is what lets a
+                    # username-keyed object through where a regex would refuse it.
                     for u in (extra_owner_urls or [])[:max_candidates]:
-                        t, i = object_template(str(u))
-                        if t and ok(str(u)):
-                            cands.append({"template": t, "owner_url": str(u), "owner_id": i,
-                                          "attacker_url": None, "attacker_id": None})
+                        parts = _split_path(str(u))
+                        if not parts or not ok(str(u)):
+                            continue
+                        idx = len(parts[2]) - 1
+                        cands.append({"template": segment_template(str(u), idx), "owner_url": str(u),
+                                      "owner_id": parts[2][idx], "attacker_url": None,
+                                      "attacker_id": None, "index": idx})
                 out["candidates"] = cands
 
                 for cand in cands:
                     ourl = cand["owner_url"]
                     if not ok(ourl):
                         continue
-                    nonexistent_url = swap_url(ourl, _IMPLAUSIBLE_ID)
+                    nonexistent_url = (swap_segment(ourl, cand["index"], _IMPLAUSIBLE_ID)
+                                       if cand.get("index") is not None else swap_url(ourl, _IMPLAUSIBLE_ID))
                     probes = {
                         "baseline": _fetch(o_page, ourl, owner_headers, owner),
                         "mutation": _fetch(a_page, ourl, attacker_headers, attacker),
@@ -1164,6 +1484,23 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                                  "session": session_fingerprint(a_ctx)},
                     "anonymous": {"role": "anonymous", "auth_seeded": False,
                                   "session": session_fingerprint(n_ctx)}}
+                # Freeze the trace only when something was actually CONFIRMED — a scrubable recording of a
+                # run that proved nothing is noise, and traces are large.
+                import os as _os
+                if traced:
+                    want = any(f.get("confidence") == "confirmed" for f in out["findings"])
+                    tpath = (_os.path.join(art_dir, "bie-trace-%s.zip" % attacker)
+                             if (want and art_dir) else "")
+                    saved = stop_trace(a_ctx, tpath)
+                    if saved:
+                        out["trace"] = {"path": saved, "persona": attacker,
+                                        "bytes": (_os.path.getsize(saved) if _os.path.exists(saved) else 0),
+                                        "viewer": "npx playwright show-trace <file>",
+                                        "contains": "every action, DOM snapshot, console line and network "
+                                                    "call of the confirmed run"}
+                        for f in out["findings"]:
+                            if f.get("confidence") == "confirmed":
+                                f.setdefault("browser_evidence", {})["trace"] = out["trace"]
                 for c in (o_ctx, a_ctx, n_ctx):
                     try:
                         c.close()
@@ -1177,6 +1514,9 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
     except Exception as e:
         return _empty(base, "browser runtime unavailable: %s" % str(e)[:120])
     wire = o_wire + a_wire + n_wire
+    # Coverage honesty: state what the browser could and could not do, so "no findings" is never confused
+    # with "we could not look".
+    out["drive"] = drive_report(out.pop("_attempts", []))
     out["requests"] = sorted({w["url"] for w in wire if w.get("url")})
     out["wire"] = wire[:400]
     out["observations"] = sorted(to_observations({"browser": True, "requests": out["requests"],

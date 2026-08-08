@@ -1051,17 +1051,25 @@ def browser_evidence_html(finding: dict, e) -> str:
                       "<img src='data:image/png;base64,%s' style='max-width:100%%;border:1px solid #2a3b45'/>"
                       "<figcaption class='sub'>%s</figcaption></figure>" % (b64, e(lbl.replace("_", " "))))
     steps = "".join("<li>%s</li>" % e(str(s)) for s in (be.get("reproduction_steps") or []))
+    tr = be.get("trace") or {}
+    trace_html = ""
+    if tr.get("path"):
+        trace_html = ("<p><b>Interactive trace:</b> <code>%s</code> (%s bytes) — open with "
+                      "<code>%s</code> to scrub the confirmed run: every action, DOM snapshot, console "
+                      "line and network call.</p>"
+                      % (e(str(tr.get("path"))), e(str(tr.get("bytes", 0))), e(str(tr.get("viewer", "")))))
     return ("<div class='biz'><h4>Browser runtime proof (Browser Intelligence Engine)</h4>"
             "<p class='sub'>Instrumentation: %s. The browser performed the attempt; the deterministic "
             "oracle decided the verdict.</p>"
             "%s"
             "<table class='tbl'><tr><th>Exchange</th><th>URL</th><th>Status</th><th>Size</th></tr>%s</table>"
             "%s"
+            "%s"
             "<h4>Reproduce (from the actual run)</h4><ol>%s</ol>"
             "<h4>Replay script</h4><pre><code>%s</code></pre></div>"
             % (e(str(be.get("instrumentation", ""))),
                ("<p><b>Verdict:</b> %s</p>" % e(str((be.get("verdict") or {}).get("reason", "")))),
-               trs, shots, steps, e(str(be.get("replay_script", "")))))
+               trs, shots, trace_html, steps, e(str(be.get("replay_script", "")))))
 
 
 def proof_and_retest(finding: dict) -> dict:

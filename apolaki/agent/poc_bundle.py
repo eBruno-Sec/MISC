@@ -159,6 +159,12 @@ def build(finding: dict, exchanges: list = None, *, tool_version: str = "", targ
         out["reproduction"]["replay_script"] = be.get("replay_script") or ""
         shots = be.get("screenshots") or {}
         out["reproduction"]["screenshots"] = sorted(shots) if isinstance(shots, dict) else []
+        tr = be.get("trace") or {}
+        if tr.get("path"):
+            # An interactive recording of the confirmed run — the reviewer scrubs the actual exploit
+            # rather than reading a description of it.
+            out["reproduction"]["trace"] = {"path": tr.get("path"), "viewer": tr.get("viewer"),
+                                            "bytes": tr.get("bytes")}
     return out
 
 

@@ -53,6 +53,17 @@ def plan(finding: dict) -> dict:
     url = str(finding.get("target") or finding.get("url") or "").strip()
     if not url.lower().startswith("http"):
         return {"retestable": False, "family": fam, "reason": "no replayable http(s) target on the finding"}
+    # A finding the Browser Intelligence Engine confirmed carries a FROZEN RECIPE — the exact request, the
+    # persona that made it, and a hash of the response that proved the bug. That is precisely the
+    # "persisted request/marker" whose absence makes every other access-control family inconclusive here,
+    # so these ARE safely auto-retestable by an idempotent re-send as the same persona.
+    if (finding.get("browser_evidence") or {}):
+        import bie
+        recipe = bie.retest_recipe(finding)
+        if recipe.get("url") and recipe.get("method") == "GET":
+            return {"retestable": True, "method": "GET", "url": recipe["url"], "family": fam,
+                    "oracle": "bie_frozen_recipe", "recipe": recipe,
+                    "as_persona": recipe.get("as_persona")}
     oracle = _GET_ORACLE.get(fam)
     if not oracle:
         return {"retestable": False, "family": fam, "url": url,
@@ -74,6 +85,10 @@ def evaluate(finding: dict, status, body: str = "", headers: dict = None, payloa
         return _v("inconclusive", p.get("reason", "not retestable"), url)
     if status is None:
         return _v("inconclusive", "target unreachable on retest", url)
+    if p.get("oracle") == "bie_frozen_recipe":
+        import bie
+        v = bie.retest_verdict(p.get("recipe") or {}, {"status": int(status), "body": body or ""})
+        return _v(str(v["state"]).lower(), v["reason"], url)
     oracle, body, headers = p["oracle"], (body or ""), (headers or {})
     status = int(status)
 

@@ -2221,6 +2221,8 @@ class ToolRegistry:
                    "confirmed": len(findings), "leads": len(leads), "lead_findings": leads,
                    "observations": res.get("observations") or [],
                    "control_surface": res.get("control_surface") or {},
+                   # coverage honesty: what the browser could NOT do is part of the result
+                   "drive": res.get("drive") or {},
                    "settle": res.get("settle") or [],
                    "personas": res.get("personas") or {}}
         self._bie_result = summary

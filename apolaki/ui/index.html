@@ -1039,6 +1039,13 @@ async function loadAssurance(){
         +` <span style="color:var(--text-dim)">(oracle-decided; 3 negative controls each)</span>`),
     row("Client-side control surface", `${esc(bcs.total||0)} controls — ${esc(bcs.offered||0)} offered, ${esc(bcs.withheld||0)} withheld, ${esc(bcs.withheld_privileged||0)} privileged+withheld`),
     row("Runtime observations fed to planner", esc((bie.observations||[]).join(", ")||"—")),
+    row("Browser coverage", (()=>{const d=bie.drive||{};
+      if(!d.attempted) return `<span style="color:var(--text-dim)">—</span>`;
+      const sig=Object.keys(d.security_signals||{});
+      return `${esc(d.succeeded||0)}/${esc(d.attempted)} actions completed`
+        +(d.complete?` <span style="color:var(--ok)">complete</span>`
+                    :` <span style="color:#c98a2b">⚠ ${esc(d.note||"incomplete")}</span>`)
+        +(sig.length?`<br><span style="color:var(--text-dim)">signals: ${esc(sig.join(", "))}</span>`:"");})()),
   ].join(""));
   html+=card("Findings posture",[
     row("Confirmed", `<b>${nConf}</b> (proof-backed only)`),

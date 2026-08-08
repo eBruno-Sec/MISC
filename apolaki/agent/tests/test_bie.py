@@ -46,6 +46,45 @@ def test_object_candidates_skips_identical_ids():
     assert bie.object_candidates(["http://t/rest/basket/1"], ["http://t/rest/basket/1"]) == []
 
 
+def test_object_candidates_cover_username_keyed_apis():
+    """A regex on id SHAPE misses /users/v1/{name} entirely. Observation does not: the key is simply the
+    one segment that differs between two personas' requests to the same endpoint."""
+    c = bie.object_candidates(["http://t/users/v1/alice"], ["http://t/users/v1/bob"])
+    assert len(c) == 1
+    assert c[0]["owner_id"] == "alice" and c[0]["attacker_id"] == "bob"
+    assert c[0]["template"] == "http://t/users/v1/{id}"
+
+
+def test_object_candidates_handle_a_non_terminal_object_key():
+    c = bie.object_candidates(["http://t/users/v1/alice/email"], ["http://t/users/v1/bob/email"])
+    assert len(c) == 1 and c[0]["index"] == 2
+    assert c[0]["template"] == "http://t/users/v1/{id}/email"
+
+
+def test_object_candidates_reject_a_route_difference_not_a_persona_difference():
+    """/api/users/1 vs /api/orders/1 differ in one segment too — but BOTH personas requested BOTH, which
+    proves the difference is the route, not the user. Without this the engine invents nonsense objects."""
+    both = ["http://t/api/users/1", "http://t/api/orders/1"]
+    assert bie.object_candidates(both, both) == []
+
+
+def test_object_candidates_reject_static_asset_pairs():
+    assert bie.object_candidates(["http://t/static/main.a1.js"], ["http://t/static/main.b2.js"]) == []
+
+
+def test_swap_segment_changes_exactly_one_position():
+    assert bie.swap_segment("http://t/users/v1/alice/email", 2, "bob") == "http://t/users/v1/bob/email"
+    assert bie.swap_segment("http://t/a/b?x=1", 0, "z") == "http://t/z/b?x=1"
+    assert bie.swap_segment("http://t/a", 9, "z") is None
+
+
+def test_differing_segment_requires_exactly_one_difference():
+    assert bie.differing_segment("http://t/a/1", "http://t/a/2") == 1
+    assert bie.differing_segment("http://t/a/1", "http://t/b/2") is None      # two differ
+    assert bie.differing_segment("http://t/a/1", "http://t/a/1/b") is None    # different shape
+    assert bie.differing_segment("http://t/a/1", "http://u/a/2") is None      # different host
+
+
 # ── THE ORACLE ────────────────────────────────────────────────────────────────
 def test_confirms_only_with_identical_body_and_both_controls():
     v = bie.judge(_ex(200, OBJ), _ex(200, OBJ), anon=_ex(401, ""), nonexistent=_ex(404, ""),
@@ -156,6 +195,128 @@ def test_replay_script_uses_the_owner_url_and_the_implausible_id_control():
     cand, _, _ = _confirmed()
     s = bie.replay_script(cand)
     assert "http://t/rest/basket/1" in s and "http://t/rest/basket/%s" % bie._IMPLAUSIBLE_ID in s
+
+
+# ── retest from frozen browser evidence ───────────────────────────────────────
+def _recipe():
+    cand, probes, v = _confirmed()
+    return bie.retest_recipe(bie.finding(cand, probes, v, owner="user_a", attacker="user_b"))
+
+
+def test_retest_recipe_is_frozen_from_the_confirmed_run():
+    r = _recipe()
+    assert r["url"] == "http://t/rest/basket/1" and r["method"] == "GET"
+    assert r["as_persona"] == "user_b" and r["vulnerable_body_sha"]
+
+
+def test_retest_open_when_the_identical_object_still_comes_back():
+    v = bie.retest_verdict(_recipe(), {"status": 200, "body": OBJ})
+    assert v["state"] == "OPEN"
+
+
+def test_retest_closed_on_an_explicit_refusal():
+    for st in (401, 403, 404):
+        assert bie.retest_verdict(_recipe(), {"status": st, "body": ""})["state"] == "CLOSED"
+
+
+def test_retest_refuses_to_close_on_a_merely_changed_body():
+    """Ordinary data churn looks exactly like a fix. Calling that CLOSED is the worst thing a retest can
+    do, so it stays INCONCLUSIVE."""
+    v = bie.retest_verdict(_recipe(), {"status": 200, "body": OTHER})
+    assert v["state"] == "INCONCLUSIVE" and "churn" in v["reason"]
+
+
+def test_retest_inconclusive_without_a_recipe_or_a_response():
+    assert bie.retest_verdict({}, {"status": 200, "body": OBJ})["state"] == "INCONCLUSIVE"
+    assert bie.retest_verdict(_recipe(), {"status": 0})["state"] == "INCONCLUSIVE"
+
+
+def test_bie_findings_become_auto_retestable_in_the_retest_loop():
+    """Access-control families are INCONCLUSIVE in retest.plan for want of a persisted request. A BIE
+    finding carries one, so it must flip to retestable — and evaluate must route through the BIE oracle."""
+    import retest
+    cand, probes, v = _confirmed()
+    f = bie.finding(cand, probes, v, owner="user_a", attacker="user_b")
+    p = retest.plan(f)
+    assert p["retestable"] is True and p["oracle"] == "bie_frozen_recipe"
+    assert retest.evaluate(f, 200, OBJ)["verdict"] == "open"
+    assert retest.evaluate(f, 403, "")["verdict"] == "closed"
+    assert retest.evaluate(f, 200, OTHER)["verdict"] == "inconclusive"
+
+    # a finding WITHOUT browser evidence must keep the old, conservative behaviour
+    plain = {k: v2 for k, v2 in f.items() if k != "browser_evidence"}
+    assert retest.plan(plain)["retestable"] is False
+
+
+def test_har_response_lookup_and_its_honest_limits():
+    har = {"log": {"entries": [
+        {"request": {"url": "http://t/rest/basket/1?x=1"},
+         "response": {"status": 200, "content": {"size": 525, "mimeType": "application/json"}}}]}}
+    got = bie.har_response_for(har, "http://t/rest/basket/1")
+    assert got["status"] == 200 and got["len"] == 525 and got["source"] == "har"
+    assert bie.har_response_for(har, "http://t/other") == {}
+    # the docstring must keep stating why a HAR replay is not a verification
+    assert "never a verification" in bie.har_response_for.__doc__
+
+
+# ── trace artifact reaches the bundle ─────────────────────────────────────────
+def test_trace_flows_into_the_poc_bundle_reproduction():
+    import poc_bundle
+    cand, probes, v = _confirmed()
+    f = bie.finding(cand, probes, v, owner="user_a", attacker="user_b")
+    f["browser_evidence"]["trace"] = {"path": "/app/data/bie/bie-trace-user_b.zip", "bytes": 4096,
+                                      "viewer": "npx playwright show-trace <file>"}
+    b = poc_bundle.build(f)
+    assert b["reproduction"]["trace"]["path"].endswith("bie-trace-user_b.zip")
+    assert "show-trace" in b["reproduction"]["trace"]["viewer"]
+
+
+def test_bundle_has_no_trace_key_when_the_run_produced_none():
+    import poc_bundle
+    cand, probes, v = _confirmed()
+    b = poc_bundle.build(bie.finding(cand, probes, v))
+    assert "trace" not in b["reproduction"]
+
+
+# ── browser-driving failure taxonomy ──────────────────────────────────────────
+def test_classify_failure_maps_the_real_driver_errors():
+    assert bie.classify_failure("Element click intercepted: other element would receive the click"
+                                )["code"] == "click_intercepted"
+    assert bie.classify_failure("stale element reference: element is not attached to the page document"
+                                )["code"] == "stale_element"
+    assert bie.classify_failure("Timeout 25000ms exceeded waiting for selector")["code"] in (
+        "element_not_found", "timeout")
+    assert bie.classify_failure("net::ERR_CONNECTION_REFUSED")["code"] == "unreachable"
+    assert bie.classify_failure("")["code"] == "none"
+    assert bie.classify_failure("something nobody has seen before")["code"] == "unknown"
+
+
+def test_click_intercepted_is_a_clickjacking_SIGNAL_not_a_finding():
+    f = bie.classify_failure("element click intercepted")
+    assert f["security_signal"] == "overlay_over_control"
+    assert f["retryable"] is True
+    # it is a signal only — nothing in the taxonomy produces a finding
+    assert "confidence" not in f and "severity" not in f
+
+
+def test_retryable_is_distinguished_from_terminal():
+    assert bie.classify_failure("stale element")["retryable"] is True
+    assert bie.classify_failure("element not interactable")["retryable"] is False
+    assert bie.classify_failure("insecure certificate")["retryable"] is False
+
+
+def test_drive_report_states_incomplete_coverage_instead_of_implying_success():
+    ok_only = bie.drive_report([{"action": "navigate", "failure": bie.classify_failure("")}])
+    assert ok_only["complete"] is True and ok_only["failed"] == 0
+
+    mixed = bie.drive_report([
+        {"action": "navigate", "failure": bie.classify_failure("")},
+        {"action": "navigate", "failure": bie.classify_failure("Timeout 25000ms exceeded")},
+        {"action": "click", "failure": bie.classify_failure("element click intercepted")},
+    ])
+    assert mixed["attempted"] == 3 and mixed["failed"] == 2 and mixed["complete"] is False
+    assert "INCOMPLETE" in mixed["note"]
+    assert mixed["security_signals"] == {"overlay_over_control": 1}
 
 
 # ── client-supplied identity parameters (route-interception tampering) ────────
