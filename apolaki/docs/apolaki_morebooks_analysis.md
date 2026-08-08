@@ -438,6 +438,54 @@ parameter-pollution or URL-override-header behaviour — HPP has its own chapter
 most directly benchmark-relevant of the fourteen, and it was ranked third-tier on its title. **Promoted to
 P1.** Its per-class chapters are the next read.
 
+### Real-World Bug Hunting — extraction
+
+**RWBH-1 — `gap`, and it explains one of the benchmark misses. HPP is a parser-discrepancy bug.**
+*RWBH "HTTP Parameter Pollution", server-side section.* The mechanic is that servers disagree about
+duplicate parameters: *"PHP and Apache use the last occurrence, Apache Tomcat uses the first occurrence,
+ASP and IIS use all occurrences."* The bug appears when a **security control reads one occurrence and the
+sink reads another**.
+
+That gives a clean two-stage design and a strict oracle:
+1. *Fingerprint* — send `?p=A&p=B` on a benign reflected parameter and observe which value the app acts on.
+   This is a posture/stack observation, **not** a vulnerability, and must be reported as such.
+2. *Confirm* — only when a differential is demonstrated: validation accepts based on one occurrence while
+   the effect uses the other. Absent that differential, "last wins" is just how the stack works.
+
+This also corroborates `hpp_hpi`, already listed as a WAHH-derived candidate in
+`apolaki_book_distillations.md` — a second independent book raising the same technique, which is the
+book-level equivalent of the cross-lab validation rule.
+
+**RWBH-2 — corroborates the OOB requirement.** *RWBH "XML External Entity"*: XXE is used *"to extract
+information from a server or to call on a malicious server."* Two books now (with Black Hat Go Ch.5)
+point at an out-of-band channel as the confirming oracle for XXE — the class the sealed benchmark missed
+at `/catalog/product/stock`. This raises step 10 from "worth assessing" to "the identified fix for a
+measured gap."
+
+**RWBH-3 — honest severity framing.** The open-redirect chapter notes Google typically considers them too
+low-risk to reward and OWASP dropped them from the 2017 Top 10, while also noting they chain into OAuth
+token theft. Apolaki already grades open redirect low and models chains; worth keeping the chaining note
+in remediation text rather than inflating the base severity.
+
+### Essential Cybersecurity Science — extraction
+
+**ECS-1 — names the exact failure mode a scanner's report produces.** *ECS "Human Cognitive Biases".*
+Kahneman's **WYSIATI — "what you see is all there is"** — is offered as the definition of overconfidence
+bias: *"we often fail to allow for the possibility that evidence that should be critical to our judgment is
+missing."*
+
+That is precisely what a clean pentest report does to a reader: absence of detection reads as absence of
+risk. Apolaki already has the antidote in pieces — coverage debt, `unsupported` validator states, the
+"DEGRADED run" banner, the explicit "not identified in KEV" wording — and today's wrong-ruler bug was a
+live instance of the same bias inside the *benchmark*. **Recommendation: treat anti-WYSIATI as a stated
+design requirement of the reporting layer — every coverage surface must state what was NOT tested as
+prominently as what passed.** This also supplies the argument for AP-2's cutoff labelling.
+
+**ECS-2 — validates the negative-control doctrine, with a source.** *Same section, confirmation bias:*
+*"scientific thinking should seek and consider evidence that supports a hypothesis as well as evidence that
+falsifies the hypothesis."* Apolaki's negative controls are exactly falsification-seeking, and this is the
+citation for the standing engineering-cognition discipline.
+
 ### Books inspected at chapter level, extraction pending
 
 Recorded honestly rather than summarised from the table of contents:
