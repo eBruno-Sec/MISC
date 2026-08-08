@@ -3659,6 +3659,7 @@ class ToolRegistry:
             bogus_resp = await self._gql_post(c, endpoint, {"query": gql.BOGUS_FIELD_QUERY})
 
         findings = gql.analyze(endpoint, introspection, batch_resp, batch_n, bogus_resp)
+        findings += await self._graphql_argument_injection(endpoint, introspection, headers)
         schema = gql.parse_schema(introspection)
         # seed the surface with the endpoint + enumerated operations
         self._add_urls([endpoint])
@@ -3669,6 +3670,97 @@ class ToolRegistry:
         ops = len(schema.get("query_fields", [])) + len(schema.get("mutation_fields", []))
         return ToolResult("graphql", endpoint, True,
                           f"GraphQL at {endpoint}: {ops} operations, {len(findings)} issue(s)", findings)
+
+    async def _graphql_argument_injection(self, endpoint: str, introspection, headers) -> list:
+        """Fire injection payloads at the ARGUMENTS introspection just enumerated.
+
+        This closes a real island. `graphql_argument_injection` was declared ALWAYS_ON with the reason
+        "run_graphql introspection enumerates arguments; the existing injection engines consume them via
+        graphql_tool.build_query" — and nothing called `schema_operations`, `injectable_arguments` or
+        `build_query`. The technique was reachable on paper only, and the no-island guard passed it
+        because an ALWAYS_ON reason is prose that nothing verifies.
+
+        Safety, all inherited rather than reinvented:
+          * queries only — `injectable_arguments` excludes mutations unless explicitly opted in, so no
+            payload is ever fired speculatively at `deletePaste(id:)`
+          * textual arguments only — an Int argument rejects a payload at the type system, so probing it
+            proves nothing and only costs requests
+          * `build_query` JSON-encodes the value, so a payload cannot break out of the string and
+            restructure the document into a heavier query
+          * `probe_selection.pairwise` bounds the argument x payload grid with a criterion that can state
+            its own coverage, instead of an arbitrary first-N slice
+
+        Honest note on that last point: this grid has only TWO factors, and for two factors pairwise
+        degenerates to the full grid — it buys no combinatorial saving here. What it does buy is that when
+        the cap bites on a large schema the shortfall is MEASURED and printed rather than silent, which is
+        the actual problem T3 set out to fix. The cap is sized so a typical schema is covered completely
+        (a live DVGA run enumerated 8 injectable arguments; 8 x 4 payloads = 32 cases).
+
+        The oracle is `sqli_tool.error_signatures`, which is already a differential: a DBMS error present
+        for the payload and ABSENT from the baseline. A benign control value must also stay clean, so a
+        server that errors on everything cannot manufacture a finding."""
+        import graphql_tool as gql
+        import probe_selection as ps
+        import sqli_tool as sq
+
+        ops = gql.schema_operations(introspection)
+        injectable = [a for a in gql.injectable_arguments(ops) if a.get("injectable")]
+        if not injectable:
+            return []
+
+        payloads = ["'", "\"", "');", "1' OR '1'='1"]
+        grid = {"arg": ["%s.%s" % (a["operation"], a["arg"]) for a in injectable], "payload": payloads}
+        cases = ps.pairwise(grid, max_cases=48)
+        by_key = {"%s.%s" % (a["operation"], a["arg"]): a for a in injectable}
+
+        out, seen = [], set()
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
+                                     headers=headers) as c:
+            for case in cases:
+                a = by_key.get(case["arg"])
+                if not a or case["arg"] in seen:
+                    continue
+                base = await self._gql_post(c, endpoint, {"query": gql.build_query(
+                    a["operation"], a["kind"], a["arg"], "apolaki")})
+                probe = await self._gql_post(c, endpoint, {"query": gql.build_query(
+                    a["operation"], a["kind"], a["arg"], case["payload"])})
+                hits = sq.error_signatures(json.dumps(base or {}), json.dumps(probe or {}))
+                if not hits:
+                    continue
+                # NEGATIVE CONTROL: a second benign value must NOT produce the same signature. Without
+                # this a server that errors on any unexpected input reads as injectable.
+                ctrl = await self._gql_post(c, endpoint, {"query": gql.build_query(
+                    a["operation"], a["kind"], a["arg"], "apolaki2")})
+                if sq.error_signatures(json.dumps(base or {}), json.dumps(ctrl or {})):
+                    continue
+                seen.add(case["arg"])
+                out.append({
+                    "title": "GraphQL argument injection in %s(%s)" % (a["operation"], a["arg"]),
+                    "severity": "high", "target": endpoint, "confidence": "confirmed",
+                    "description": ("The %s argument of the %s operation reaches a backend query. The "
+                                    "payload %r produced a %s error that a benign value does not."
+                                    % (a["arg"], a["operation"], case["payload"], hits[0]["dbms"])),
+                    "impact": ("Attacker-controlled input reaches the datastore through the GraphQL API, "
+                               "which is the same exposure as an injectable REST parameter."),
+                    "reproduction_steps": [
+                        "POST %s" % endpoint,
+                        "query: %s" % gql.build_query(a["operation"], a["kind"], a["arg"], case["payload"]),
+                        "Observe the %s error; the same operation with a benign value returns cleanly."
+                        % hits[0]["dbms"]],
+                    "evidence": "payload=%r dbms=%s pattern=%s" % (case["payload"], hits[0]["dbms"],
+                                                                   hits[0]["pattern"]),
+                    "cwe": "CWE-89", "family": "sqli", "tags": ["graphql", "injection"],
+                    "false_positive_check": ("Baseline and a second benign control value both returned "
+                                             "without the signature; only the payload triggered it."),
+                })
+        if out:
+            out.append({"title": "GraphQL argument surface enumerated", "severity": "info",
+                        "target": endpoint, "confidence": "confirmed", "family": "api_inventory",
+                        "description": "%d injectable textual argument(s) across %d operation(s); %s"
+                                       % (len(injectable), len(ops), ps.describe(grid, cases)),
+                        "impact": "Inventory of the argument surface reachable through the GraphQL API.",
+                        "tags": ["graphql", "coverage"]})
+        return out
 
     async def _run_jwt(self, inp: dict) -> ToolResult:
         import jwt_tool as jt

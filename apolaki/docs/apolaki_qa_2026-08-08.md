@@ -489,3 +489,78 @@ CWE-639 with no `family` field renders the IDOR block).
 | Uncovered family | renders nothing in both renderers |
 | Malformed finding | neither renderer raises (a lost report is worse than a thin one) |
 | HTML escaping | asserted to go through the caller's escaper |
+
+---
+
+# Pass 6 — a declared-reachable engine that was not reachable
+
+## How it surfaced
+
+Checking whether `probe_selection` (T3) had a production caller turned up something worse. The dead-code
+gate reported `unused: []`, but three of its five functions had no caller outside tests. The gate matches
+**bare function NAMES across the whole corpus**, and `coverage` / `describe` collide with same-named
+functions in `main.py`, `report.py`, `wstg_catalog.py` and `stealth.py` — so unrelated code made them
+look used.
+
+Measured: **90 function names are defined in more than one module** (`finding` x30, `analyze` x20,
+`probe` x11). A module-qualified, import-alias-aware probe finds **52 candidate-unused functions** where
+the gate reports 0. Two distinct blind spots:
+
+1. **Name collisions** — any of those 90 names can be masked by an unrelated definition.
+2. **Test usage counts as production usage** — a function only its own test calls passes the gate.
+
+Those 52 are heuristic **candidates, not proven dead**. Bulk-deleting them would violate the rule that
+obsolete code goes only after it is *proven* unused. Filed as its own task.
+
+## The serious one
+
+Spot-checking three of the 52 found `graphql_tool.build_query` referenced **only in prose** — in
+`techniques.py` and in the `ALWAYS_ON` reason itself:
+
+> `graphql_argument_injection`: *"run_graphql introspection enumerates arguments; the existing injection
+> engines consume them via graphql_tool.build_query"*
+
+Nothing called `schema_operations`, `injectable_arguments` or `build_query`. `_run_graphql` did endpoint
+discovery, introspection, batching and the bogus-field probe, then stopped. **The technique was reachable
+on paper only, and I wrote the paper.**
+
+**Why the no-island guard could not catch it:** an `ALWAYS_ON` entry is accepted on the strength of its
+stated reason, and the reason is prose that nothing verifies. The guard proves a technique is *declared*
+reached; it cannot prove the declaration is true. 40 engines rest on that kind of promise. Same shape as
+the earlier finding that the guard checks a gate EXISTS but not that it can ever OPEN.
+
+## Fixed, and confirmed live
+
+`Tools._graphql_argument_injection` now runs on the introspection response `_run_graphql` already has.
+Safety properties are inherited rather than reinvented: queries only (mutations never auto-fired), textual
+arguments only, values JSON-encoded so a payload cannot restructure the document. The oracle is
+`sqli_tool.error_signatures` — already a baseline differential — plus a second benign control value, so a
+server that errors on any unexpected input cannot manufacture a finding.
+
+Live against DVGA (`localhost:42092`, local lab):
+
+```
+operations enumerated   : 19
+injectable textual args : 8
+mutations auto-included : 0          <- the safety property, verified not assumed
+pairwise selection      : 32 cases cover 32/32 value pairs (100.0%)
+CONFIRMED  pastes.filter  payload="');"  dbms=SQLite
+confirmed: 1        (0 false positives; every other argument stayed clean)
+```
+
+A real SQLite injection through the GraphQL argument surface, from an engine that was unreachable an hour
+earlier.
+
+## An honest correction to my own T3 claim
+
+The first live run used `max_cases=24` and reached only 75% pair coverage. Worse, the reasoning behind
+using pairwise here was weak: **this grid has two factors, and for two factors pairwise IS the full
+grid** — it buys no combinatorial saving. What `probe_selection` actually contributes here is that the
+shortfall is *measured and printed* when the cap bites, which is the real problem T3 set out to fix. Cap
+raised to 48 so a typical schema is covered completely, and the code comment now says this plainly
+instead of implying a saving that does not exist.
+
+Wiring `safety_label` into `describe()` also gave it its first caller, so the pruning class is now stated
+in the Automated Planning §4.2.1 vocabulary rather than left to the reader:
+
+> `Pruning class: declared — every value pair is covered; 3-way interactions are not.`

@@ -110,13 +110,19 @@ def coverage(factors: dict, cases: list) -> dict:
 
 def describe(factors: dict, cases: list) -> str:
     """A sentence the coverage report can print. States the criterion AND its limit — an unstated cutoff
-    is the coverage-debt problem this module exists to remove."""
+    is the coverage-debt problem this module exists to remove.
+
+    The Automated Planning §4.2.1 label is included rather than left to the reader: "12 of 48 cases" reads
+    like a shortfall, when the honest statement is that the pruning is DECLARED — it covers every value
+    pair and misses only 3-way interactions. Naming the safety class is the difference between a budget
+    that can be argued and one that merely sounds small."""
     c = coverage(factors, cases)
     return ("pairwise selection: %d cases cover %d/%d value pairs (%.1f%%) versus %d for the full grid. "
             "Every pair of factor values is exercised at least once; combinations requiring THREE specific "
-            "values simultaneously are not, so this is a declared budget, not exhaustive coverage."
+            "values simultaneously are not, so this is a declared budget, not exhaustive coverage. "
+            "Pruning class: %s."
             % (c["cases"], c["pairs_covered"], c["pairs_total"], c["pair_coverage_pct"],
-               c["full_grid_cases"]))
+               c["full_grid_cases"], safety_label("pairwise")))
 
 
 def safety_label(strategy: str) -> str:

@@ -102,3 +102,53 @@ def test_build_query_survives_quotes_and_newlines():
     for payload in ("' OR 1=1 --", '<script>alert(1)</script>', "a\nb", '"', "\\"):
         q = gq.build_query("search", "query", "term", payload)
         assert q.startswith("query {") and q.endswith("} }")
+
+
+# ── the wiring, not just the pieces (island closure) ────────────────────────────────────────────
+
+def test_the_argument_injection_path_is_actually_reachable():
+    """`graphql_argument_injection` was declared ALWAYS_ON with the reason "the existing injection engines
+    consume them via graphql_tool.build_query" — and NOTHING called schema_operations,
+    injectable_arguments or build_query. The technique was reachable on paper only.
+
+    The no-island guard could not catch it: an ALWAYS_ON entry is accepted on the strength of its stated
+    reason, which is prose nothing verifies. This asserts the reason is now true."""
+    import inspect
+    import tools
+    src = inspect.getsource(tools)
+    assert "_graphql_argument_injection" in src
+    body = src.split("async def _graphql_argument_injection", 1)[1].split("\n    async def ", 1)[0]
+    for fn in ("schema_operations", "injectable_arguments", "build_query"):
+        assert fn in body, "%s is still not called by the live path" % fn
+    # and the live GraphQL tool must actually invoke it
+    run = src.split("async def _run_graphql", 1)[1].split("\n    async def ", 1)[0]
+    assert "_graphql_argument_injection" in run, "wired but never called from _run_graphql"
+
+
+def test_the_always_on_reason_names_only_things_that_exist():
+    """The reason string points at graphql_tool.build_query. If that function is ever renamed or removed,
+    the declared reachability silently becomes a lie again."""
+    import graphql_tool
+    import engine_descriptor as ed
+    reason = ed.ALWAYS_ON["graphql_argument_injection"]
+    assert "build_query" in reason
+    assert callable(getattr(graphql_tool, "build_query", None))
+
+
+def test_mutations_are_never_auto_fired_by_the_wired_path():
+    """The safety property that matters most here: the live path must use the queries-only default, so a
+    payload is never fired speculatively at deletePaste(id:)."""
+    import inspect
+    import tools
+    body = inspect.getsource(tools).split("async def _graphql_argument_injection", 1)[1] \
+                                   .split("\n    async def ", 1)[0]
+    assert "include_mutations" not in body, "the live path must not opt in to mutations"
+
+
+def test_the_wired_path_uses_a_negative_control():
+    """A server that errors on ANY unexpected input would otherwise read as injectable everywhere."""
+    import inspect
+    import tools
+    body = inspect.getsource(tools).split("async def _graphql_argument_injection", 1)[1] \
+                                   .split("\n    async def ", 1)[0]
+    assert "apolaki2" in body and "NEGATIVE CONTROL" in body
