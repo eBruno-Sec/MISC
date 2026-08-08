@@ -31,3 +31,40 @@ def test_evasion_flags_survive_the_gate_but_dangerous_ones_do_not():
 def test_describe_non_empty_and_defaults():
     assert stealth.describe("paranoid") and stealth.describe("sneaky")
     assert stealth.describe("bogus") == stealth.describe("off")
+
+
+def test_mission_stealth_reaches_the_nmap_flags(monkeypatch):
+    """#113's real gap was reachability: the profiles existed but no operator could pick one. A stealth
+    level set on the mission must reach the nmap command line without the caller passing it per-call."""
+    import asyncio
+    import stealth
+    from scope import ScopeEngine
+    from tools import ToolRegistry
+
+    scope = ScopeEngine()
+    scope.load_manual(["example.com"], [], "t")
+    reg = ToolRegistry(scope, mission_id="m", stealth="paranoid")
+    seen = {}
+
+    async def fake_cmd(cmd, timeout=180):
+        seen["cmd"] = list(cmd)
+        return "<nmaprun></nmaprun>", ""
+
+    monkeypatch.setattr(reg, "_cmd", fake_cmd)
+    asyncio.run(reg.execute("run_nmap", {"target": "example.com"}, "s"))
+    cmd = " ".join(seen["cmd"])
+    assert "-T0" in cmd and "-f" in cmd and "-D" in cmd, cmd      # the paranoid profile's evasion flags
+    # and the default mission stays exactly as it was
+    reg2 = ToolRegistry(scope, mission_id="m")
+    monkeypatch.setattr(reg2, "_cmd", fake_cmd)
+    asyncio.run(reg2.execute("run_nmap", {"target": "example.com"}, "s"))
+    assert "-T3" in " ".join(seen["cmd"]) and "-D" not in " ".join(seen["cmd"])
+
+
+def test_no_stealth_profile_is_a_denial_of_service():
+    """Evasion, never DoS: no profile may use nmap's most aggressive timing or any flood technique."""
+    import stealth
+    for level, flags in stealth.PROFILES.items():
+        assert "-T5" not in flags and "-T4" not in flags, level
+        for banned in ("--min-rate", "--max-retries 0", "-Pn --script dos", "dos"):
+            assert banned not in flags, (level, banned)

@@ -86,6 +86,9 @@ class EngageRequest(BaseModel):
     # no regression); deep = thorough; insane = maximum coverage (can run for hours).
     # Truth-first is unchanged: heavier flags surface more candidates, not more confirmations.
     intensity: str = "standard"       # standard | deep | insane
+    # IDS-evasion profile for Apolaki's OWN port scan (#113): off | polite | sneaky | paranoid.
+    # Evasion, never DoS — slower timing, fragmentation, decoys, padding. Orthogonal to intensity.
+    stealth: str = "off"
 
 
 class EstimateRequest(BaseModel):
@@ -328,6 +331,12 @@ async def engage(req: EngageRequest):
                                  "Full mode. Select Full mode, or turn off heavy nuclei.")
     if req.intensity not in ("standard", "deep", "insane"):
         raise HTTPException(422, "intensity must be standard | deep | insane")
+    import stealth as _stealth
+    if req.stealth not in _stealth.LEVELS:
+        raise HTTPException(422, "stealth must be one of: %s" % ", ".join(_stealth.LEVELS))
+    if req.stealth != "off" and req.mode == "passive":
+        raise HTTPException(422, "stealth profiles apply to the active port scan; passive mode makes no "
+                                 "live contact, so there is nothing to evade")
     if req.intensity in ("deep", "insane") and req.mode != "full":
         raise HTTPException(422, f"intensity '{req.intensity}' turns the intrusive tools up to heavy settings "
                                  "and only runs in Full mode. Select Full mode, or use standard intensity.")
@@ -363,7 +372,8 @@ async def engage(req: EngageRequest):
             auth_note = res.get("note", "")
 
     tools = ToolRegistry(scope, mission_id=session_id, lab_mode=(req.mode == "full"),
-                         session_headers=session_headers, intensity=req.intensity)
+                         session_headers=session_headers, intensity=req.intensity,
+                         stealth=req.stealth)
     stop_event = asyncio.Event()
     # A fresh agent + stop_event per mission — rescans clone config into a NEW
     # session and never reuse a prior mission's in-memory objects.

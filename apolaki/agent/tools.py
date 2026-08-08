@@ -931,10 +931,13 @@ def _pick_session_token(storage_values, xhr_auth):
 
 class ToolRegistry:
     def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False,
-                 session_headers: dict = None, intensity: str = "standard"):
+                 session_headers: dict = None, intensity: str = "standard", stealth: str = "off"):
         self.scope = scope
         self.mission_id = mission_id
         self.lab_mode = lab_mode
+        # IDS-evasion profile for our own port scan (#113). Mission-wide, so every nmap call inherits the
+        # operator's choice instead of each caller having to remember to pass it.
+        self.stealth = stealth or "off"
         # Intensity dial (orthogonal to mode's permission gate): how HARD each heavy
         # tool hits an in-scope target. standard = today's light/fast flags (default,
         # no regression); deep = thorough; insane = maximum coverage (hours OK).
@@ -3292,7 +3295,9 @@ class ToolRegistry:
         import stealth as _stealth
         # a named stealth level (IDS-evasion: slower timing / fragmentation / decoys — never DoS) picks the
         # flags; an explicit `flags` string still overrides. Both are filtered by the allowlist below.
-        flags = _stealth.stealth_profile(inp["stealth"]) if inp.get("stealth") \
+        # precedence: explicit per-call stealth > explicit flags > the MISSION's stealth profile
+        _lvl = inp.get("stealth") or (None if inp.get("flags") else getattr(self, "stealth", "off"))
+        flags = _stealth.stealth_profile(_lvl) if _lvl \
             else inp.get("flags", "-sT -sV --top-ports 1000 -T3")
         from security import safe_flags
         flag_tokens = safe_flags(flags, ("-s", "-p", "-T", "--top-ports", "-Pn", "-n", "--open")
