@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -172,8 +173,77 @@ def parse_exploitdb(raw):
             code = code.strip().upper()
             if code.startswith("CVE-") and code[4:].replace("-", "").isdigit():
                 by_cve.setdefault(code, []).append(entry)
+    by_pv = {}
+    for entries in by_cve.values():
+        for ent in entries:
+            key = product_version_key(ent["title"])
+            if key:
+                by_pv.setdefault(key, [])
+                if ent not in by_pv[key]:
+                    by_pv[key].append(ent)
     return {"source": "exploitdb", "tier": "A", "count": n,
-            "cve_count": len(by_cve), "by_cve": {k: v[:10] for k, v in by_cve.items()}}
+            "cve_count": len(by_cve), "by_cve": {k: v[:10] for k, v in by_cve.items()},
+            "pv_count": len(by_pv), "by_product_version": {k: v[:10] for k, v in by_pv.items()}}
+
+
+_PV_RE = re.compile(r"^(?P<product>[A-Za-z][A-Za-z0-9 ._+-]{1,48}?)\s+"
+                    r"(?P<version>\d+(?:\.\d+){1,3})\b")
+
+
+def product_version_key(title: str) -> str:
+    """"WordPress Plugin Foo 1.2.3 - SQLi" -> "wordpress plugin foo|1.2.3", else "". Pure.
+
+    Deliberately conservative, and deliberately WEAKER than a CVE match. Exploit-DB titles are free text,
+    so a product+version match is a plausible lead, never proof that a specific exploit applies to a
+    specific host — consumers must label it as such."""
+    m = _PV_RE.match(str(title or "").strip())
+    if not m:
+        return ""
+    product = " ".join(m.group("product").lower().split())
+    if len(product) < 3:
+        return ""
+    return "%s|%s" % (product, m.group("version"))
+
+
+def exploitdb_for_product(snapshots, product: str, version: str) -> list:
+    """Public exploit entries whose TITLE names this product at this exact version. A LEAD — see
+    product_version_key. Returns [] when either part is missing."""
+    p, v = " ".join(str(product or "").lower().split()), str(version or "").strip()
+    if not p or not v:
+        return []
+    idx = (snapshots.get("exploitdb") or {}).get("by_product_version") or {}
+    out = list(idx.get("%s|%s" % (p, v)) or [])
+    if not out:                       # a plugin/module title often prefixes the product name
+        for k, entries in idx.items():
+            name, _, ver = k.rpartition("|")
+            if ver == v and (name.startswith(p + " ") or name.endswith(" " + p)):
+                out.extend(entries)
+                if len(out) >= 10:
+                    break
+    return out[:10]
+
+
+def exploits_for_finding(snapshots, finding: dict) -> dict:
+    """Public-exploit intel for ONE finding. Exact CVE first (strong), product+version second (lead).
+    Pure. {available, match, cves, entries} — `match` is "" when nothing was found.
+
+    HARD RULE, unchanged: this is the Exploit-DB INDEX. No exploit code is ever fetched or executed; the
+    value is knowing a public exploit EXISTS so the operator and Apolaki's own oracles can prioritise."""
+    f = finding or {}
+    blob = "%s %s %s %s" % (f.get("cve") or "", f.get("cves") or "", f.get("evidence") or "",
+                            f.get("title") or "")
+    cves = sorted({m.upper() for m in re.findall(r"CVE-\d{4}-\d{3,7}", blob, re.I)})
+    entries = []
+    for c in cves[:8]:
+        entries.extend(exploitdb_for_cve(snapshots, c)[:3])
+    if entries:
+        return {"available": True, "match": "cve", "cves": cves, "entries": entries[:10],
+                "confidence": "exact — matched by CVE id"}
+    ent = exploitdb_for_product(snapshots, f.get("product") or "", f.get("version") or "")
+    if ent:
+        return {"available": True, "match": "product_version", "cves": cves, "entries": ent,
+                "confidence": "lead — matched on product and version in the exploit title, not a CVE"}
+    return {"available": False, "match": "", "cves": cves, "entries": []}
 
 
 _PARSERS = {"kev": parse_kev, "capec": parse_capec, "attack": parse_attack, "exploitdb": parse_exploitdb}

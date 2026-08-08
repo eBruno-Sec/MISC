@@ -2000,6 +2000,18 @@ def generate_html_report(program: str, findings: list, scope: dict,
         _std = _pbmod.standards(f)
         _asvs_chip = ("<span>ASVS: " + e(", ".join(a["cid"] for a in _std["asvs"][:3])) + "</span>") if _std.get("asvs") else ""
         _wstg_chip = f"<span>WSTG: {e(str(_std['wstg']))}</span>" if _std.get("wstg") else ""
+        # "a public exploit exists for this" belongs ON the finding, not only in a section at the end
+        _edb_chip = ""
+        try:
+            import intel_feeds as _ifm
+            _x = _ifm.exploits_for_finding(_ifm.load(), f)
+            if _x.get("available"):
+                _exact = _x["match"] == "cve"
+                _edb_chip = ("<span style='background:%s;color:#fff' title='%s'>PUBLIC EXPLOIT%s</span>"
+                             % ("#e5484d" if _exact else "#c98a2b",
+                                e(str(_x.get("confidence", ""))), "" if _exact else " (lead)"))
+        except Exception:
+            _edb_chip = ""
         cards.append(f"""
         <article class="finding" style="--c:{color}">
           <div class="fh"><span class="sev">{e(sev.upper())}</span><h3>{i}. {e(str(f.get('title','Untitled')))}</h3></div>
@@ -2012,7 +2024,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {cvss_vec}
             {prov_html}
             <span class="tag-conf">CONFIRMED</span>
-            {_fp_chip}{_asvs_chip}{_wstg_chip}
+            {_fp_chip}{_asvs_chip}{_wstg_chip}{_edb_chip}
           </div>
           {cvss_basis}
           {biz_html}
@@ -2221,6 +2233,43 @@ def generate_html_report(program: str, findings: list, scope: dict,
                         "Known Exploited Vulnerabilities catalog (%d finding(s) had a CVE checked by exact id; %d "
                         "carry no CVE and cannot be KEV-listed). KEV status is matched by exact CVE only, never "
                         "inferred from CWE class.</p>" % (_checked, _no_cve))
+
+    # PUBLIC EXPLOIT AVAILABILITY (#112). A defect with a working public exploit is a different
+    # operational emergency from one without: it is reachable by anyone, today, with no development
+    # effort. Matched by EXACT CVE (strong) or by product+version in the exploit title (a lead, and
+    # labelled as one). Index only — no exploit code is ever fetched or run by Apolaki.
+    edb_html = ""
+    try:
+        import intel_feeds as _if
+        _snaps = _if.load()
+        if (_snaps.get("exploitdb") or {}).get("by_cve"):
+            _rows, _lead = [], 0
+            for f in findings:
+                x = _if.exploits_for_finding(_snaps, f)
+                if not x.get("available"):
+                    continue
+                if x["match"] != "cve":
+                    _lead += 1
+                _rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td class='sub'>%s</td></tr>"
+                             % (e(str(f.get("title", ""))[:70]),
+                                ("<b style='color:#e5484d'>EXACT CVE</b>" if x["match"] == "cve"
+                                 else "<span style='color:#c98a2b'>product+version (lead)</span>"),
+                                e(", ".join(x.get("cves") or []) or "—"),
+                                e("; ".join("EDB-%s %s" % (n["edb_id"] if "edb_id" in n else n.get("id"),
+                                                           n.get("title", ""))
+                                            for n in x["entries"][:3]))))
+            if _rows:
+                edb_html = ("<h2 id='exploits'>Public Exploit Available</h2>"
+                            "<p class='sub'>%d confirmed finding(s) correspond to a PUBLIC exploit in the "
+                            "Exploit-DB index — no attacker needs to develop anything. %d matched by exact "
+                            "CVE; %d are product+version leads from the exploit title and are NOT proof "
+                            "that the exploit applies to this host. Apolaki indexes exploit metadata only: "
+                            "it never downloads or runs exploit code.</p>"
+                            "<table class='tbl'><tr><th>Finding</th><th>Match</th><th>CVE</th>"
+                            "<th>Public exploit</th></tr>%s</table>"
+                            % (len(_rows), len(_rows) - _lead, _lead, "".join(_rows)))
+    except Exception:
+        edb_html = ""
 
     # Intelligence orchestration: show that the code-intelligence recon + the first-class technique
     # knowledge model actually DROVE this scan (not decorative dashboards). Answers "was the intel used".
@@ -2695,6 +2744,7 @@ figure.shot figcaption{{font-size:.72rem;color:var(--dim);margin-top:.25rem}}
 {intel_html}
 {rootcause_html}
 {kev_html}
+{edb_html}
 {orch_html}
 {assurance_html}
 {cval_html}

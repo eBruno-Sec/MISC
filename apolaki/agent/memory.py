@@ -144,12 +144,27 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
         if fp in seen_fp:
             continue
         seen_fp.add(fp)
-        finds.append({
+        rec = {
             "fp": fp,
             "title": f.get("title", "Finding"),
             "severity": (f.get("severity") or "info").lower(),
             "target": f.get("target") or f.get("surface") or "",
-        })
+        }
+        # #112: persist "a public exploit exists for this" into the target's warm-start memory, so a
+        # later mission knows this defect is exploitable-by-anyone before it re-derives anything.
+        # Metadata only (edb id + match strength) — never exploit code, and never fetched here.
+        try:
+            import intel_feeds as _if
+            x = _if.exploits_for_finding(_if.load(), f)
+            if x.get("available"):
+                rec["public_exploit"] = {
+                    "match": x["match"],
+                    "cves": x.get("cves") or [],
+                    "edb_ids": [str(n.get("id") or n.get("edb_id")) for n in x["entries"][:5]],
+                }
+        except Exception:
+            pass
+        finds.append(rec)
 
     return {
         "hosts": sorted(hosts),
