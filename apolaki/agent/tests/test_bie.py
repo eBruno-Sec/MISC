@@ -236,11 +236,24 @@ def _ctl(**kw):
 
 
 def test_classify_splits_offered_from_withheld():
-    c = classify = None
-    c = bie.classify_controls([_ctl(), _ctl(visible=True, reason=""), _ctl(visible=True, disabled=True,
-                                                                          reason="disabled")])
+    c = bie.classify_controls([_ctl(hidden_by="self"), _ctl(visible=True, reason=""),
+                               _ctl(visible=True, disabled=True, reason="disabled")])
     assert c["counts"]["offered"] == 1 and c["counts"]["withheld"] == 2
     assert c["counts"]["withheld_privileged"] == 2      # both mention "admin"/"user"
+
+
+def test_a_control_in_a_collapsed_menu_is_not_withheld():
+    """The user opens the hamburger and it is there. Counting it as withheld would flag every menu item
+    in every SPA as a potential authorization bug — observed live on Juice Shop's closed side nav."""
+    c = bie.classify_controls([_ctl(hidden_by="collapsed-container")])
+    assert c["counts"]["collapsed"] == 1 and c["counts"]["withheld"] == 0
+    assert bie.probe_targets(c, "http://t") == []
+
+
+def test_a_disabled_control_stays_withheld_even_inside_a_menu():
+    # disabled is an explicit refusal by the app, not merely "the container is closed"
+    c = bie.classify_controls([_ctl(hidden_by="collapsed-container", disabled=True, reason="disabled")])
+    assert c["counts"]["withheld"] == 1 and c["counts"]["collapsed"] == 0
 
 
 def test_privilege_hint_ranks_only_privileged_words():

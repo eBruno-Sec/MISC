@@ -2212,7 +2212,11 @@ class ToolRegistry:
         leads = [f for f in (res.get("findings") or []) if f.get("confidence") != "confirmed"]
         summary = {"ran": bool(res.get("ran")), "note": res.get("note") or "",
                    "counts": res.get("counts") or {}, "candidates": res.get("candidates") or [],
-                   "verdicts": [{"url": p["candidate"].get("owner_url"), **p["verdict"]}
+                   # every phase reports under its own candidate shape: object swap + param tamper carry
+                   # owner_url, the control-surface phase carries probe_url
+                   "verdicts": [{"url": p["candidate"].get("owner_url") or p["candidate"].get("probe_url"),
+                                 "param": p["candidate"].get("param"),
+                                 "method": p.get("mutation_method"), **p["verdict"]}
                                 for p in (res.get("probes") or [])],
                    "confirmed": len(findings), "leads": len(leads), "lead_findings": leads,
                    "observations": res.get("observations") or [],

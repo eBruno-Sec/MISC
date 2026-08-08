@@ -516,6 +516,24 @@ _PRIV_HINTS = ("admin", "manage", "moderat", "approve", "audit", "config", "sett
 CONTROL_SURFACE_JS = """() => {
   const out = [];
   const sel = 'a[href],button,input[type=submit],input[type=button],[role=button],[routerlink]';
+  // A control inside a COLLAPSED CONTAINER (closed nav drawer, accordion, inactive tab, closed dialog) is
+  // not withheld from the user -- they open the menu and it is there. Only a control the application
+  // suppressed in its own right is a candidate for "the UI withheld this". Distinguishing the two is the
+  // difference between a real CWE-602 finding and flagging every item in a hamburger menu.
+  const CONTAINERISH = /(nav|menu|drawer|sidenav|sidebar|accordion|collapse|dropdown|tab-|panel|dialog|modal|offcanvas)/i;
+  const hiddenBy = (el) => {
+    let node = el.parentElement, depth = 0;
+    while (node && depth < 12) {
+      let s = {};
+      try { s = getComputedStyle(node); } catch (e) {}
+      if (s.display === 'none' || s.visibility === 'hidden' || node.hasAttribute('hidden')) {
+        const sig = (node.tagName + ' ' + (node.className || '') + ' ' + (node.getAttribute('role') || ''));
+        return CONTAINERISH.test(sig) ? 'collapsed-container' : 'ancestor';
+      }
+      node = node.parentElement; depth++;
+    }
+    return 'self';
+  };
   for (const el of document.querySelectorAll(sel)) {
     if (out.length >= 300) break;
     let cs = {};
@@ -525,6 +543,7 @@ CONTROL_SURFACE_JS = """() => {
     const visible = displayed && r.width > 0 && r.height > 0 && !el.hasAttribute('hidden');
     const disabled = el.disabled === true || el.getAttribute('aria-disabled') === 'true' ||
                      el.classList.contains('disabled');
+    const by = visible ? '' : hiddenBy(el);
     out.push({
       tag: el.tagName.toLowerCase(),
       text: (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80),
@@ -532,7 +551,7 @@ CONTROL_SURFACE_JS = """() => {
       resolved: (el.tagName.toLowerCase() === 'a' && el.href) ? el.href : '',
       routerlink: el.getAttribute('routerlink') || '',
       id: el.id || '', name: el.getAttribute('name') || '',
-      visible: visible, disabled: !!disabled,
+      visible: visible, disabled: !!disabled, hidden_by: by,
       reason: !displayed ? 'not-displayed' : (r.width <= 0 || r.height <= 0) ? 'zero-size'
               : el.hasAttribute('hidden') ? 'hidden-attr' : (disabled ? 'disabled' : '')
     });
@@ -570,16 +589,23 @@ def dedupe_controls(controls) -> list:
 
 
 def classify_controls(controls) -> dict:
-    """Split the rendered control surface into what the UI OFFERS this persona and what it WITHHOLDS.
-    A withheld control is the interesting one: the application decided this user may not have it. Pure."""
-    offered, withheld = [], []
+    """Split the rendered control surface three ways. A withheld control is the interesting one — the
+    application decided this user may not have it. A control sitting in a COLLAPSED CONTAINER (closed nav
+    drawer, accordion, inactive tab) is NOT withheld: the user opens the menu and it is there, so treating
+    it as withheld would flag every hamburger-menu item as a potential authorization bug. Pure."""
+    offered, withheld, collapsed = [], [], []
     for c in (controls or []):
-        (offered if (c.get("visible") and not c.get("disabled")) else withheld).append(c)
+        if c.get("visible") and not c.get("disabled"):
+            offered.append(c)
+        elif c.get("hidden_by") == "collapsed-container" and not c.get("disabled"):
+            collapsed.append(c)
+        else:
+            withheld.append(c)
     priv = [c for c in withheld if privilege_hint(c)]
     return {"total": len(controls or []), "offered": offered, "withheld": withheld,
-            "withheld_privileged": priv,
+            "collapsed": collapsed, "withheld_privileged": priv,
             "counts": {"total": len(controls or []), "offered": len(offered), "withheld": len(withheld),
-                       "withheld_privileged": len(priv)}}
+                       "collapsed": len(collapsed), "withheld_privileged": len(priv)}}
 
 
 def probe_targets(classified: dict, base: str, max_n: int = 6) -> list:
@@ -1033,7 +1059,7 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                 # The control surface must be read while the personas are still ON the application's own
                 # pages — a later navigation to a raw API URL would present an empty DOM and silently
                 # report "no controls". Accumulate across every rendered route.
-                raw_controls = _read_controls(a_page)
+                raw_controls, app_page_url = _read_controls(a_page), base
                 for path in (seed_paths or [])[:6]:      # let each app render the pages that fetch objects
                     u = path if "://" in str(path) else base + str(path)
                     if not ok(u):
@@ -1042,6 +1068,7 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                         out.setdefault("settle", []).append(
                             {"url": u, "reason": _goto_awaiting_object(pg, u, timeout_ms)})
                     raw_controls += _read_controls(a_page)
+                    app_page_url = u                     # the last APP page that actually drove requests
                 # OBSERVED cross-user hypotheses: the object URLs each persona's OWN browser requested.
                 owner_urls = [w["url"] for w in o_wire[obs_start[0]:] if w.get("url")]
                 attacker_urls = [w["url"] for w in a_wire[obs_start[1]:] if w.get("url")]
@@ -1088,8 +1115,11 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                 for pc in param_candidates(owner_urls, attacker_urls):
                     if not ok(pc["owner_url"]) or not ok(pc["attacker_url"]):
                         continue
+                    # Re-drive an APP page (phase 1's screenshots may have parked the page on a raw API
+                    # URL), so the application genuinely re-issues the request we intend to intercept.
                     mut, how = route_mutate(o_ctx, o_page, pc["owner_url"], pc["param"],
-                                            pc["attacker_value"], persona=owner, timeout_ms=timeout_ms)
+                                            pc["attacker_value"], persona=owner, timeout_ms=timeout_ms,
+                                            trigger_url=app_page_url)
                     pprobes = {"self_baseline": _fetch(o_page, pc["owner_url"], owner_headers, owner),
                                "other_baseline": _fetch(a_page, pc["attacker_url"], attacker_headers,
                                                         attacker),
