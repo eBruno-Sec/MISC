@@ -323,16 +323,32 @@ def match(expected: list, findings: list, candidates: list = None) -> dict:
         e2 = dict(e, status="discovered_unconfirmed" if disc else "missed")
         (discovered_only if disc else missed).append(e2)
         matched_expected.append(e2)
-    # confirmed findings that matched NO expected entry -> potential false positives (family+path novel)
+    # Confirmed findings that matched NO expected entry. These split into two very different things, and
+    # conflating them makes precision meaningless:
+    #
+    #   false positive     — the answer key DOES enumerate this family, and we claimed it somewhere the
+    #                        key does not list it. That is a precision miss and must be counted.
+    #   out of key scope   — the answer key never enumerates this family AT ALL. A published
+    #                        vulnerability list for a deliberately-vulnerable app enumerates injectable
+    #                        defects; it does not list missing HSTS, a vulnerable dependency, or working
+    #                        credentials. Those findings are TRUE — scoring them as false positives
+    #                        punishes the scanner for being more thorough than the ruler, which is
+    #                        exactly the wrong-ruler failure this harness exists to avoid.
     exp_keys = {(e["family"], e["path"]) for e in expected}
-    false_pos = []
+    key_families = set()
+    for e in expected:
+        key_families |= set(_equiv(e["family"]))
+    false_pos, out_of_scope = [], []
     for f in conf:
         fam = finding_family(f)
         fps = _finding_paths(f)
-        if fam and not any(_path_match(ep, fps) for ef, ep in exp_keys if ef in _equiv(fam)):
-            false_pos.append({"family": fam, "paths": sorted(fps), "title": str(f.get("title"))[:80]})
+        if not fam or any(_path_match(ep, fps) for ef, ep in exp_keys if ef in _equiv(fam)):
+            continue
+        rec = {"family": fam, "paths": sorted(fps), "title": str(f.get("title"))[:80]}
+        (false_pos if fam in key_families else out_of_scope).append(rec)
     return {"expected": matched_expected, "true_positives": true_pos, "missed": missed,
-            "discovered_unconfirmed": discovered_only, "false_positives": false_pos}
+            "discovered_unconfirmed": discovered_only, "false_positives": false_pos,
+            "out_of_key_scope": out_of_scope}
 
 
 # ── 5. score: recall / precision / coverage with the full CHAD breakdown ───────
@@ -343,6 +359,7 @@ def score(expected: list, m: dict, candidates: list = None, validations: dict = 
     missed = len(m["missed"])
     disc_unconf = len(m["discovered_unconfirmed"])
     fp = len(m["false_positives"])
+    oos = len(m.get("out_of_key_scope") or [])
     exp_paths = {e["path"] for e in expected}
     exp_fams = {e["family"] for e in expected}
     tp_paths = {e["path"] for e in m["true_positives"]}
@@ -357,6 +374,8 @@ def score(expected: list, m: dict, candidates: list = None, validations: dict = 
         "confirmed_true_positives": tp,
         "missed_vulnerabilities": missed,
         "false_positives": fp,
+        # reported, never counted against precision — see match() for why
+        "out_of_key_scope": oos,
         "dismissed_candidates": int(validations.get("dismissed", 0)),
         "unsupported_techniques": int(validations.get("unsupported", 0)),
         "blocked_validations": int(validations.get("blocked", 0)),

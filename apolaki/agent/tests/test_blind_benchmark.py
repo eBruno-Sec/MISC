@@ -104,3 +104,34 @@ def test_finding_family_canonicalizes_across_emitters():
     assert bb.finding_family({"family": "dom_xss"}) == "dom_xss"
     assert bb.finding_family({"cwe": "CWE-601"}) == "open_redirect"
     assert bb.finding_family({"title": "Client-side template injection (CSTI, via search)"}) == "csti"
+
+
+def test_out_of_key_scope_is_not_counted_as_a_false_positive():
+    """The wrong-ruler guard. A published vulnerability list enumerates injectable defects; it does not
+    list missing HSTS or a vulnerable dependency. Scoring those as false positives punishes the scanner
+    for being more thorough than the ruler — measured live on ginandjuice, where 6 of 10 'false
+    positives' were true transport-posture findings."""
+    import blind_benchmark as bb
+    expected = [{"family": "sqli", "path": "/catalog", "method": "GET", "benchmark_id": "bm-1"}]
+    conf = [
+        {"title": "SQL injection in id", "family": "sqli", "target": "https://t/catalog",
+         "confidence": "confirmed", "evidence": "GET -> payload reflected in SQL error"},
+        # same family the key enumerates, but a path the key never lists -> a real precision miss
+        {"title": "SQL injection in q", "family": "sqli", "target": "https://t/other",
+         "confidence": "confirmed", "evidence": "GET -> payload reflected in SQL error"},
+        # families the key never enumerates at all -> out of key scope, not wrong
+        {"title": "HSTS not enabled", "family": "security_misconfig", "target": "https://t/",
+         "confidence": "confirmed", "evidence": "GET -> payload reflected in SQL error"},
+        {"title": "Vulnerable component angular", "family": "vulnerable_component",
+         "target": "https://t/a.js", "confidence": "confirmed", "evidence": "GET -> payload reflected in SQL error"},
+    ]
+    m = bb.match(expected, conf, conf)
+    fams = {x["family"] for x in m["false_positives"]}
+    oos = {x["family"] for x in m["out_of_key_scope"]}
+    assert fams == {"sqli"}, m["false_positives"]
+    assert oos == {"security_misconfig", "vulnerable_component"}, m["out_of_key_scope"]
+
+    s = bb.score(expected, m, candidates=conf)
+    assert s["false_positives"] == 1 and s["out_of_key_scope"] == 2
+    # precision reflects only families the ruler actually measures: 1 TP / (1 TP + 1 FP)
+    assert s["precision"] == 50.0
