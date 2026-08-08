@@ -207,3 +207,54 @@ def test_a_clean_target_produces_no_findings():
 def test_probe_tls_degrades_cleanly_on_a_dead_host():
     r = tp.probe_tls("127.0.0.1", 1, timeout=1.0)
     assert r["reachable"] is False and r["protocols"] == {} and r["note"]
+
+
+# ── cookie SCOPE breadth (T2; Web Browser Engineering §10.5) ──────────────────
+def test_domain_widening_is_reported():
+    """SOP compares scheme+host+port; cookies ignore scheme and port, so Domain is the only lever the
+    application has — and widening it hands the cookie to every subdomain."""
+    iss = tp.analyze_cookie_scope(["sessionid=x; Domain=example.com; Path=/; Secure"],
+                                  host="app.example.com")
+    ids = {i["id"] for i in iss}
+    assert "cookie_domain_too_broad" in ids
+    broad = [i for i in iss if i["id"] == "cookie_domain_too_broad"][0]
+    assert broad["severity"] == "high", "the registrable domain is the widest scope available"
+
+
+def test_a_host_scoped_cookie_is_not_flagged_for_breadth():
+    iss = tp.analyze_cookie_scope(["sessionid=x; Secure; Path=/session"], host="app.example.com")
+    assert not [i for i in iss if i["id"] in ("cookie_domain_too_broad", "cookie_scope_widest")]
+
+
+def test_plaintext_reachability_is_reported_because_cookies_ignore_scheme():
+    iss = tp.analyze_cookie_scope(["sid=x; Domain=app.example.com"], host="app.example.com")
+    assert "cookie_reachable_over_plaintext" in {i["id"] for i in iss}
+    assert "ignore" in [i for i in iss if i["id"] == "cookie_reachable_over_plaintext"][0]["detail"]
+
+
+def test_secure_cookie_is_not_flagged_for_plaintext():
+    iss = tp.analyze_cookie_scope(["sid=x; Secure"], host="app.example.com")
+    assert "cookie_reachable_over_plaintext" not in {i["id"] for i in iss}
+
+
+def test_scope_analysis_only_concerns_session_cookies():
+    assert tp.analyze_cookie_scope(["theme=dark; Domain=example.com"], host="app.example.com") == []
+
+
+def test_subdomain_scope_is_medium_not_high():
+    iss = tp.analyze_cookie_scope(["sid=x; Domain=corp.example.com; Secure"],
+                                  host="app.corp.example.com")
+    broad = [i for i in iss if i["id"] == "cookie_domain_too_broad"]
+    assert broad and broad[0]["severity"] == "medium"
+
+
+def test_scope_findings_reach_findings_for_and_pass_the_proof_contract():
+    import proof_schema
+    fs = tp.findings_for("https://app.example.com", hostname="app.example.com", is_https=True,
+                         set_cookies=["sessionid=x; Domain=example.com; Path=/"], now=NOW)
+    ids = {f["tags"][2] for f in fs}
+    assert "cookie_domain_too_broad" in ids
+    for f in fs:
+        if f["confidence"] == "confirmed":
+            ok, missing = proof_schema.validate_confirmed(f)
+            assert ok, (f["title"], missing)

@@ -190,6 +190,53 @@ def is_session_cookie(name: str) -> bool:
     return any(h in n for h in _SESSION_COOKIE_HINTS)
 
 
+def _registrable_suffix(host: str) -> str:
+    """The last two labels of a host — a crude eTLD+1 that is deliberately conservative. Pure."""
+    parts = [p for p in str(host or "").lower().strip(".").split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) >= 2 else ""
+
+
+def analyze_cookie_scope(set_cookie_headers, *, host: str = "") -> list:
+    """How WIDELY a session cookie is scoped — a different question from which attributes it carries.
+
+    *Web Browser Engineering §10.5* makes the incongruity explicit: the same-origin policy compares scheme,
+    host and port, while cookies *"don't care about scheme or port… an oversight or incongruity left over
+    from the messy early web."* So a cookie is reachable from places SOP would treat as separate origins,
+    and the only lever an application has over that is Domain, Path and Secure.
+
+    Reports breadth, not attributes (`analyze_cookies` owns those). Pure."""
+    issues = []
+    reg = _registrable_suffix(host)
+    for raw in (set_cookie_headers or []):
+        c = parse_set_cookie(raw)
+        if not c or not c.get("name") or not is_session_cookie(c["name"]):
+            continue
+        dom = (c.get("domain") or "").lstrip(".").lower()
+        if dom and host and dom != str(host).lower():
+            sev = "medium"
+            detail = ("session cookie '%s' is scoped to Domain=%s rather than the issuing host %s, so it "
+                      "is sent to every subdomain of %s — one weak or attacker-controlled subdomain is "
+                      "enough to receive it" % (c["name"], dom, host, dom))
+            if reg and dom == reg:
+                sev = "high"
+                detail += "; that is the registrable domain, the widest scope available"
+            issues.append({"id": "cookie_domain_too_broad", "severity": sev, "cookie": c["name"],
+                           "detail": detail})
+        if not c.get("secure"):
+            issues.append({"id": "cookie_reachable_over_plaintext", "severity": "medium",
+                           "cookie": c["name"],
+                           "detail": ("session cookie '%s' has no Secure attribute, and cookies ignore "
+                                      "scheme, so the browser will attach it to a plaintext http:// "
+                                      "request to the same host even when the site is served over HTTPS"
+                                      % c["name"])})
+        path = c.get("path") or "/"
+        if path == "/" and dom:
+            issues.append({"id": "cookie_scope_widest", "severity": "low", "cookie": c["name"],
+                           "detail": ("session cookie '%s' combines Domain=%s with Path=/, the broadest "
+                                      "reach a cookie can have" % (c["name"], dom))})
+    return issues
+
+
 def analyze_cookies(set_cookie_headers, *, is_https: bool) -> list:
     """Attribute gaps on SESSION cookies only. Pure. Directly observable — no inference, so no FPs."""
     issues = []
@@ -289,6 +336,9 @@ _FINDING_META = {
     "cookie_missing_secure": ("CWE-614", "Session cookie without the Secure attribute", "high"),
     "cookie_missing_httponly": ("CWE-1004", "Session cookie without HttpOnly", "medium"),
     "cookie_missing_samesite": ("CWE-1275", "Session cookie without a restrictive SameSite", "low"),
+    "cookie_domain_too_broad": ("CWE-565", "Session cookie scoped to a broader domain than its issuer", "medium"),
+    "cookie_reachable_over_plaintext": ("CWE-614", "Session cookie reachable over plaintext (cookies ignore scheme)", "medium"),
+    "cookie_scope_widest": ("CWE-565", "Session cookie at the broadest possible scope", "low"),
     "header_missing_framing_control": ("CWE-1021", "Page can be framed by any origin", "medium"),
     "header_missing_csp": ("CWE-693", "No Content-Security-Policy", "low"),
     "header_missing_strict_transport_security": ("CWE-319", "HSTS not enabled on an HTTPS origin", "medium"),
@@ -396,6 +446,8 @@ def findings_for(target: str, *, protocols=None, cipher: str = "", cert: dict = 
     for iss in analyze_certificate(cert or {}, hostname, now=now, key_bits=key_bits):
         out.append(finding(iss, target, kind="cert"))
     for iss in analyze_cookies(set_cookies or [], is_https=is_https):
+        out.append(finding(iss, target, kind="cookie"))
+    for iss in analyze_cookie_scope(set_cookies or [], host=hostname):
         out.append(finding(iss, target, kind="cookie"))
     for iss in analyze_security_headers(headers or {}, is_https=is_https):
         out.append(finding(iss, target, kind="header"))
