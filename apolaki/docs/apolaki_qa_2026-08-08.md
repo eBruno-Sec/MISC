@@ -710,3 +710,25 @@ meaningful, which is its own change. Recorded rather than half-wired.
 `dom_trace.trace_param` case this gate's own docstring already documents: a superseded implementation
 sitting beside the live one, waiting to be called by mistake. Left in place pending proof it is safe to
 remove; `is_write_frame` from the same module IS live and is the safety authority for OT writes.
+
+## A third blind spot, and the right division of labour
+
+Wiring `run_header_trust` did **not** change the qualified-unused count (47 → 47), and the reason matters:
+both `scan()` and `scan_qualified()` walk `tree.body` only, so they see **module-level functions and no
+class methods at all**. Apolaki's engines are overwhelmingly `Tools` methods (`_run_header_trust`,
+`_run_graphql`, `_run_service_pack`), so the dead-code gate is blind to exactly the layer engines live in.
+
+That is why neither unreachable engine was found by the gate. Both were found by following an ALWAYS_ON
+reason to the code it names.
+
+The honest division of labour, now explicit:
+
+| Checker | Covers | Blind to |
+|---|---|---|
+| `scan_qualified()` | module-level helper functions | class methods; dynamic dispatch |
+| `verify_always_on()` | engines named in an always-on reason | engines with no reason to check |
+| `orchestration_audit()` | that a technique is *declared* reachable | whether the declaration is true |
+
+Each catches what the others cannot, and none of them alone would have caught either island. Extending
+the qualified scan to methods is worthwhile but is not a small change — method calls resolve through
+`self`, so an AST-level receiver analysis is needed rather than a regex.

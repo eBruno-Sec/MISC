@@ -18,10 +18,21 @@ CONTAINER="${APOLAKI_CONTAINER:-apolaki-agent-1}"
 IMAGE="${APOLAKI_IMAGE:-apolaki-agent}"
 
 probe='
-import json, os, sys
+import hashlib, json, os, sys
 sys.path.insert(0, "/app")
 mods = sorted(f for f in os.listdir("/app") if f.endswith(".py"))
-out = {"modules": len(mods), "module_list": mods}
+# CONTENT hashes, not just names. The first version of this gate compared module NAMES and technique IDs,
+# so editing the body of an existing module changed neither and the drift was invisible. That is not
+# hypothetical: _do_header_trust was added to agent.py, the image was rebuilt correctly, the container was
+# NOT recreated, and this check printed "bake OK" while the running platform lacked the method entirely.
+# Most changes edit an existing file, so the old check was blind to the common case.
+digests = {}
+for f in mods:
+    try:
+        digests[f] = hashlib.sha256(open(os.path.join("/app", f), "rb").read()).hexdigest()[:16]
+    except Exception:
+        digests[f] = "unreadable"
+out = {"modules": len(mods), "module_list": mods, "digests": digests}
 try:
     import techniques as T
     out["techniques"] = len(T.TECHNIQUES)
@@ -52,6 +63,14 @@ if only_bake:
 t_run, t_bake = set(run.get("technique_ids") or []), set(bake.get("technique_ids") or [])
 if t_run - t_bake:
     drift.append("techniques never baked: %s" % ", ".join(sorted(t_run - t_bake)))
+
+# THE load-bearing comparison: same filename, different CONTENT. This is the common case (editing an
+# existing module) and the one the name-only check could never see.
+d_run, d_bake = run.get("digests") or {}, bake.get("digests") or {}
+changed = sorted(f for f in set(d_run) & set(d_bake) if d_run[f] != d_bake[f])
+if changed:
+    drift.append("%d module(s) differ in CONTENT between container and image: %s"
+                 % (len(changed), ", ".join(changed[:8]) + (" ..." if len(changed) > 8 else "")))
 
 if drift:
     print("BAKE DRIFT — the running container does not match the image:")

