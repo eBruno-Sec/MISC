@@ -130,9 +130,9 @@ rule already used in `apolaki_book_distillations.md`.
 |------|-----------|------------|
 | Black Hat Go | Ch.10 read in full; Ch.2/5/6/9/11 chapter-level inspected | 1 architectural finding, 1 capability lead, 1 rejection — below |
 | Automated Planning | Ch.3–4 read in full; Ch.5–7 heading-level | 4 findings incl. the largest structural gap found — below |
-| Model-Based Testing Essentials | TOC + §1–5 headings inspected | pending |
+| Model-Based Testing Essentials | §7–8 read; §1–6, 9–10 heading-level | 3 findings + **the first cross-book conflict** — below |
 | Hands-On Selenium WebDriver | not started | — |
-| Fuzzing | not started | — |
+| Fuzzing | Ch.1–2 read (phases, methods, limitations); Ch.3+ heading-level | validates the oracle bet; resolves CONFLICT-1 — below |
 | Robust Python (4 ch.) | not started | — |
 | the other 8 | not started | — |
 
@@ -232,6 +232,111 @@ proves insufficient. Reading those before proposing anything is the point of the
 listings for Forward-search, Backward-search and Ground-STRIPS came through as readable text in §4.1–4.4,
 so nothing above is reconstructed — but the search-tree diagrams are not available, and any later claim
 that depends on one will be flagged.
+
+### Model-Based Testing Essentials (ISTQB CMBT)
+
+**MBT-1 — `have` (partially). Apolaki does exactly one of the six selection-criteria families.**
+*MBT Essentials §8.1, "Taxonomy of Selection Criteria".* The ISTQB syllabus names six families:
+requirements coverage, structural model coverage, data coverage, random selection, scenario/pattern-based
+selection, and project-driven selection.
+
+Mapped honestly onto Apolaki:
+
+| Family | Apolaki today |
+|---|---|
+| Requirements coverage | **have** — the ASVS/WSTG coverage engine is this, with standards objectives as the requirements |
+| Structural model coverage | **missing, and blocked by AP-1** — there is no state model to cover |
+| Data coverage | **weak** — payload sets are curated lists, not partitioned input domains (see MBT-2) |
+| Random selection | **deliberately absent** — see the conflict below |
+| Scenario/pattern-based | **partial** — packs and playbooks are scenarios, not derived from a model |
+| Project-driven | **have** — mode/intensity/scope are exactly this |
+
+The gap that matters is structural model coverage, and it is the *same* blocker as AP-1: node and edge
+coverage over the engagement graph only become definable once techniques declare effects, because only
+then are there transitions to count. Three findings from two books now point at one missing model.
+
+**MBT-2 — `gap`. Equivalence partitioning and boundary values as the fuzzer's input model.**
+*§7.1 "Equivalence Partitioning and Boundary Value Analysis"; §8.1 data coverage.* Apolaki's injection
+payloads are curated lists. MBT frames input selection as partitioning the domain and testing boundaries,
+which is a *model* of the input space rather than a bag of strings — and it is the natural join point with
+Fuzzing (book 4), whose generation-based chapters address the same problem from the offensive side. Do not
+act on this until both are read; the two books are likely to disagree about how much structure is worth it.
+
+**MBT-3 — the cost argument, quoted because it is the honest one.** §8.1.1 on why full path coverage is
+not the goal: *"The answer is 'no,' simply because 'yes' will ruin your company."* Coverage criteria are a
+**budget mechanism**, not a completeness claim. Apolaki's coverage view should be read the same way, and
+this pairs directly with AP-2: state which cutoffs are safe, and stop implying that unchecked area is
+absent risk.
+
+### Fuzzing: Brute Force Vulnerability Discovery (Sutton, Greene, Amini)
+
+**FUZZ-1 — validation, not a gap. The book states that fuzzers structurally CANNOT find access-control
+flaws, and Apolaki's persona-swap engine is the answer to exactly that objection.**
+*Fuzzing, Ch.2 "Fuzzing Limitations and Expectations" → "Access Control Flaws".* On why a fuzzer misses an
+admin-area bypass: *"the fuzzer does not have an understanding of the logic of the program. There is no way
+for the fuzzer to know that the admin area should not be accessible to a regular user."* And on the obvious
+fix: *"Implementing logic-aware functionality into the fuzzer is plausible but can be extremely complex and
+most likely cannot be reapplied when testing other targets without significant modification."*
+
+Apolaki's whole access-control line answers both halves, and it is worth stating plainly because it
+justifies the architecture rather than adding to it:
+
+- **The semantic problem** — a scanner cannot know the admin area is forbidden — is dissolved by using a
+  **differential between two identities** instead of understanding. The oracle never needs to know what
+  *should* be allowed; it only needs persona B to receive persona A's object while three negative controls
+  disagree. Understanding is replaced by comparison.
+- **The reusability objection** — logic-awareness "cannot be reapplied to other targets without significant
+  modification" — is answered by deriving candidates from observation (what two personas' browsers actually
+  requested) rather than from per-target rules. That is precisely why the id-shape regex was replaced with
+  observational key detection.
+
+**Consequence for the queue:** do not build fuzzing toward access control. Fuzzing owns malformed-input and
+memory-safety classes; the persona/oracle layer owns authorization. Blurring them would degrade both.
+
+**FUZZ-2 — `have`, and Apolaki is unusually strong here. "Monitor for exceptions" is the oracle.**
+*Ch.2 "Fuzzing Phases".* The six phases are identify target → identify inputs → generate fuzzed data →
+execute → **monitor for exceptions** → determine exploitability, and the book calls monitoring *"a vital but
+often overlooked step"* — noting that crashing a server is *"a useless endeavor if we are unable to pinpoint
+the packet responsible."* Apolaki is oracle-first by construction, so it is already aligned with the phase
+most fuzzers under-serve. Worth keeping as the framing for any fuzzing work: the generator is the cheap
+half; the monitor is the product.
+
+**FUZZ-3 — `gap`, cheap and concrete. Input-vector enumeration is narrower than the book's definition.**
+*Ch.2 "Identify inputs".* *"Anything sent from the client to the target should be considered an input
+vector. That includes headers, filenames, environment variables, registry keys, and so on."* Apolaki
+enumerates query params, form fields and some headers. Filenames (upload names, path segments), cookie
+*names* as opposed to values, and content-type/encoding negotiation are thinner. This is an audit task, not
+an architecture change, and can proceed independently of the effects-model work.
+
+---
+
+## Deliverable 5 (running) — cross-book conflicts
+
+**CONFLICT-1 — MBT's "random test selection" vs Apolaki's deterministic-first doctrine.**
+*MBT Essentials §8.1 lists random test selection as one of six industrially-common families.* Apolaki's
+architecture forbids nondeterminism in the confirmation path, and the Playwright books' AI-driven test
+generation was rejected on the same grounds.
+
+**Proposed resolution (for D5 sign-off):** randomness is admissible for *candidate generation* but never
+for *confirmation*, and only via a seeded PRNG whose seed is recorded in the evidence — which makes a
+"random" selection exactly reproducible on retest. That preserves deterministic replay while gaining the
+coverage-diversity benefit MBT is pointing at. This is consistent with the line already held for LLMs:
+generation may be stochastic, confirmation is always a deterministic oracle. This is consistent with the
+line already held for LLMs.
+
+**RESOLVED.** Fuzzing was the other stakeholder and does not contest it. Its own emphasis lands on the
+*monitor* phase (FUZZ-2) rather than on generation, and it lists brute-force/random as merely one of four
+methods alongside pregenerated cases and protocol-aware generation. Both books are therefore satisfied by:
+**seeded randomness in generation, deterministic oracle in confirmation, seed recorded in evidence.**
+Accepted as the standing rule for D6.
+
+**CONFLICT-2 — where does access-control testing live?**
+*Fuzzing Ch.2 says fuzzers cannot do it; MBT §8.1 implies model coverage should reach it; Automated
+Planning implies a goal-directed search could target it.* **Resolved by division of labour, not
+precedence:** fuzzing owns malformed input and memory safety, the persona/oracle layer owns authorization
+(FUZZ-1), and the planner's job is only to *route* to whichever engine owns the class — never to test it
+itself. This keeps each engine's oracle intact and is the reason the effects model (AP-1) must record which
+engine establishes which capability, rather than merging engines.
 
 ---
 
