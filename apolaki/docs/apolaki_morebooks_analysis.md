@@ -129,8 +129,8 @@ rule already used in `apolaki_book_distillations.md`.
 | Book | Read state | Extraction |
 |------|-----------|------------|
 | Black Hat Go | Ch.10 read in full; Ch.2/5/6/9/11 chapter-level inspected | 1 architectural finding, 1 capability lead, 1 rejection — below |
-| Model-Based Testing Essentials | not started | — |
-| Automated Planning | not started | — |
+| Automated Planning | Ch.3–4 read in full; Ch.5–7 heading-level | 4 findings incl. the largest structural gap found — below |
+| Model-Based Testing Essentials | TOC + §1–5 headings inspected | pending |
 | Hands-On Selenium WebDriver | not started | — |
 | Fuzzing | not started | — |
 | Robust Python (4 ch.) | not started | — |
@@ -176,6 +176,62 @@ like an oversight.
 attacks on MD5/SHA-256 — Apolaki already has offline `run_hash_id`/`run_hash_crack`, and the guardrail
 against live credential brute-forcing is unchanged. Ch.4's HTTP server/router material is superseded by
 Apolaki's FastAPI layer.
+
+### Automated Planning: Theory and Practice (Ghallab, Nau, Traverso)
+
+**AP-1 — `gap`, THE structural finding. Apolaki's techniques declare preconditions but not EFFECTS, so
+the planner cannot search — it can only filter.**
+*Automated Planning §4.2, Forward-search.* The book states the minimum contract for planning: the same
+algorithm works for any problem where you can (1) test whether a state satisfies the goal, (2) find the
+set of all actions applicable to a state, and (3) compute the successor state produced by applying an
+action.
+
+Apolaki has (2) and nothing else. `technique_planner._PRECONDITIONS` maps a technique to the observations
+it requires, which is applicability — but no technique declares what it *establishes*, and there is no
+goal test. The consequence is precise, and explains a limitation I have been working around all session:
+**the planner is a one-shot applicability filter over a fixed observation set, not a search over states.**
+It cannot reason that running engine A would satisfy the precondition of engine B.
+
+Crucially, **the missing half already exists in fragments**: `service_router._PACKS` entries carry an
+`enables` list (`["ot_read"]`, `["arbitrary_file_read"]`, `["user_enumeration"]`), the persona artery calls
+`state.add_capability(...)`, and the Browser Intelligence Engine emits `runtime:*` capabilities. Those are
+effects — unmodelled, unused by the planner, and not connected to any precondition vocabulary. Unifying
+them into a declared effects model is what would turn the filter into a planner.
+
+This is the same wound Black Hat Go's BHG-1 touched from the other side: BHG-1 says engines should declare
+themselves in one place; AP-1 says what that declaration must *contain* (preconditions **and** effects).
+The two findings are almost certainly one change.
+
+**AP-2 — `have`, but now with correct vocabulary. Safe vs strongly-safe pruning.**
+*§4.2.1.* A pruning technique is **safe** if it is guaranteed not to prune every solution, and **strongly
+safe** if at least one optimal solution survives. Apolaki prunes aggressively (precondition gates, the
+`sig_seen` param-signature cap in the browser crawl, `max_candidates` bounds). None of those cutoffs has
+ever been argued as safe or unsafe. This gives the exact vocabulary to audit them, and is a cheap, honest
+improvement to the coverage story: a cutoff that is *not* safe should say so in the coverage report.
+
+**AP-3 — `have`, informally. Loop-checking on repeated states.**
+*§4.2.2.* Depth-first forward search must detect revisited states or it will not terminate; the fix is to
+record the state sequence on the current path and fail on repetition. Apolaki's recon cycles already stop
+"once a cycle stops finding new surface", which is this idea applied to a surface set rather than a state.
+Worth formalising once AP-1 gives it a real state to compare.
+
+**AP-4 — `gap`, a real risk the book names. Deleted-condition interactions.**
+*§4.4, the Sussman anomaly.* STRIPS is incomplete because it only works on the preconditions of the last
+operator added and never backtracks over that commitment; it therefore breaks when achieving one goal
+*deletes* a previously achieved condition. Apolaki has exactly this hazard and does not model it: a
+state-changing action (acquiring a fresh session, a create-object test, a write test that restores) can
+invalidate a condition another engine already relied on. Today nothing detects that. Any effects model
+built for AP-1 must represent negative effects, or it will reproduce STRIPS's known failure.
+
+**Deferred, not rejected:** §4.3 backward search from the goal is interesting for objective-driven
+engagements ("prove a cross-user read" → work backward to the capabilities required), and §5–7
+(plan-space, planning graphs, SAT encodings) are heavier machinery to evaluate only if AP-1 lands and
+proves insufficient. Reading those before proposing anything is the point of the analysis-first rule.
+
+**Extraction caveat:** this book's figures are gone (255 captions survive, no images). The algorithm
+listings for Forward-search, Backward-search and Ground-STRIPS came through as readable text in §4.1–4.4,
+so nothing above is reconstructed — but the search-tree diagrams are not available, and any later claim
+that depends on one will be flagged.
 
 ---
 
