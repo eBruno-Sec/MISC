@@ -430,3 +430,62 @@ require more engines declaring effects, not a better search algorithm.
 (`session_fixation`) needs `has_login` (recon) plus `authenticated` (six engines establish it). An
 unsatisfiable precondition set would be a permanently unreachable engine, which the no-island guard cannot
 detect — it only checks that a gate *exists*, not that it can ever *open*.
+
+---
+
+# Pass 5 — T5: design-level remediation (BSRS Ch.5/6/8/9)
+
+Apolaki already answered "how do I fix this bug" three ways: a tactical one-liner (`report._FAMILY_FIX`),
+copy-paste secure snippets (`remediation.CATALOG`), and a Fix Now / Fix If / Strengthen band. All three
+are about the DEFECT. BSRS is a design book, and the gap it exposes is the set of questions asked *after*
+the patch, none of which any layer answered:
+
+| Field | BSRS chapter | The question |
+|---|---|---|
+| `structural` | Ch.5 Least Privilege, Ch.6 Understandability | what boundary or construction removes the CLASS, not the instance |
+| `blast_radius` | Ch.8 Resilience | what bounds the damage when the fix is bypassed |
+| `recovery` | Ch.9 Recovery | **assume it was already exploited** — what now |
+| `verify` | — | how to prove the fix landed, naming the partial-fix trap for that class |
+
+`recovery` is the one with no equivalent anywhere in the platform and the most likely to be acted on: a
+confirmed finding is evidence the door was open, and the report never previously said what that implies
+for the data behind it. "You have SQLi" without "treat the credential store as disclosed" describes a bug,
+not an incident.
+
+15 families covered — the ones with confirming oracles and real exploitability. Families with no
+meaningful design-level answer get **no entry**, with the reason recorded in `NO_DEPTH_REASON` so the
+omission is a decision on the record rather than an oversight.
+
+## The tests are about quality, not just correctness
+
+The failure mode for a remediation section is not being wrong, it is being FILLER — advice that applies to
+everything, or the tactical fix restated at greater length. That trains readers to skip the section
+including the parts that matter. So the load-bearing tests are:
+
+- **no entry may paraphrase the tactical fix** for the same family (content-word overlap < 60%)
+- **every entry must be specific to its family** (per-family concreteness markers)
+- **`recovery` must read as response, not prevention** (asserted against a response-posture vocabulary)
+- **every omission must carry a recorded reason**
+
+The paraphrase check **caught two of my own entries** — `path_traversal.structural` at 60% and
+`deserialization.structural` at 62% overlap. Both were rewritten to carry only what the tactical line does
+not: OS-level confinement so application correctness is not the sole boundary, and treating the parser as
+a trust boundary to be moved rather than a blocklist to be maintained. A reviewer would very likely have
+passed both.
+
+## Integration — both renderers
+
+The markdown and HTML reports are **separate renderers**. Shipping this in one only would give two
+different answers to the same question depending on export format, so both carry it, and both are tested.
+Family resolution reuses `report._family_of`, so a finding carrying only a CWE still resolves (verified:
+CWE-639 with no `family` field renders the IDOR block).
+
+| Check | Result |
+|---|---|
+| Module tests | 17/17 |
+| Markdown report, real generation | design block + recovery line present |
+| HTML report, real generation | design block + recovery line present |
+| CWE-only finding | resolves via `_family_of` |
+| Uncovered family | renders nothing in both renderers |
+| Malformed finding | neither renderer raises (a lost report is worse than a thin one) |
+| HTML escaping | asserted to go through the caller's escaper |

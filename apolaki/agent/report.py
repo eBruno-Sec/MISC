@@ -90,6 +90,44 @@ def _ot_context_md(finding: dict) -> list:
             "- %s" % imp["statement"], ""]
 
 
+def _remediation_depth_md(finding: dict) -> list:
+    """Design-level remediation for a finding (T5, BSRS Ch.5/6/8/9) as report lines.
+
+    The tactical fix says how to close the defect. This says what removes the class, what bounds the
+    damage when the fix fails, and — the part nothing else in the platform answers — what to do assuming
+    the finding was already exploited. Family resolution goes through `_family_of`, so a finding carrying
+    only a CWE still resolves. A family with no substantive guidance renders NOTHING; a padded
+    remediation section is the failure mode this avoids."""
+    try:
+        import remediation_depth as _rd
+        md = _rd.markdown(finding, family=_family_of(finding))
+    except Exception:
+        return []
+    return md.split("\n") if md else []
+
+
+def _remediation_depth_html(finding: dict, esc) -> str:
+    """The T5 design-level block for the HTML report. `esc` is the caller's escaper, passed in so this
+    cannot accidentally emit unescaped text. Empty string when the family has no substantive guidance."""
+    try:
+        import remediation_depth as _rd
+        d = _rd.depth_for(finding, family=_family_of(finding))
+    except Exception:
+        return ""
+    if not d:
+        return ""
+    rows = [("Remove the class", "least privilege / by construction", d["structural"]),
+            ("Bound the blast radius", "if the fix is bypassed", d["blast_radius"]),
+            ("Assume it was already exploited", "recovery posture", d["recovery"]),
+            ("Verify the fix", "what a real check looks like", d["verify"])]
+    return ("<h4>Design-level remediation</h4>"
+            "<p class='sub'>The tactical fix closes this instance. These close the class, bound the "
+            "damage when it recurs, and state what to do on the assumption it was already used.</p><ul>"
+            + "".join("<li><b>%s</b> <span class='sub'>(%s)</span><br>%s</li>"
+                      % (esc(t), esc(s), esc(b)) for t, s, b in rows)
+            + "</ul>")
+
+
 def _defense_controls_md(finding: dict) -> list:
     """Curated defensive-control mapping for a finding (Codex Tier-1 #3): the structured complement to the
     remediation line — each control + the attacker CAPABILITY it reduces. Honest: curated, not official
@@ -361,6 +399,12 @@ def generate_report(program: str, findings: list, scope: dict,
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
         lines += _ot_context_md(f)
         lines += ["**Remediation**", "", remediation_line(f), ""]
+        # BSRS Ch.5/6/8/9 (T5): the design-level answer under the tactical one — what removes the CLASS,
+        # what bounds the blast radius, and what to do ASSUMING it was already exploited. Renders only for
+        # families with substantive guidance; `_family_of` is reused so a finding carrying only a CWE
+        # still resolves. Empty string for everything else, by design — padding this section teaches
+        # readers to skip it.
+        lines += _remediation_depth_md(f)
         lines += _defense_controls_md(f)
         if f.get("evidence"):
             lines += ["**Supporting Material**", "", "```", str(f["evidence"]), "```", ""]
@@ -1978,6 +2022,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
             cvss_basis = ("<span class='sub'>CVSS reflects the vulnerability class's full potential; the impact "
                           "<b>demonstrated in this test was read-only</b> (write/RCE not attempted per rules of engagement).</span>")
         rem = f"<h4>Remediation</h4><p>{e(remediation_line(f))}</p>"
+        # T5: the design-level layer, in the HTML deliverable too — the markdown and HTML reports are
+        # separate renderers, so shipping this in only one would give two different answers to the same
+        # question depending on export format.
+        rem += _remediation_depth_html(f, e)
         val = f"<h4>Validation After Fix (regression test)</h4><p>{e(validation_line(f))}</p>"
         inst = [x for x in (f.get("instances") or []) if x and x != f.get("target")]
         inst_html = ("<h4>Affected instances (" + str(len(inst) + 1) + ")</h4><ul>"

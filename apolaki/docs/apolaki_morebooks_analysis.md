@@ -776,7 +776,7 @@ Everything else the read produced is either already shipped, a small independent
 | T2 | Cookie scope breadth (Domain widening, scheme/port reach) | WBE §10.5 | extends an engine shipped today; directly observable |
 | T3 | Pairwise probe selection replacing flat caps | practical MBT §4.2.3 + AP §4.2.1 | makes the budget defensible instead of arbitrary |
 | T4 | Configure `BBH_OOB_BASE` | capability preflight | unlocks 5 blind classes currently reported as untested |
-| T5 | Remediation depth from BSRS for the top finding families | BSRS Ch.5–9 | improves the deliverable, touches no engine |
+| T5 | ✅ **DONE** — `remediation_depth.py`: design-level layer under the tactical fix, in BOTH renderers | BSRS Ch.5–9 | improves the deliverable, touches no engine |
 
 **Tier 2 — the one architecture change, now unblocked**
 
