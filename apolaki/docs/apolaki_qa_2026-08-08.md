@@ -21,8 +21,8 @@ the agent image, so no new dependency.
 
 | Check | Result |
 |-------|--------|
-| Full suite, baked `python:3.12` image | **1104 passed, 0 failed** |
-| BIE unit tests | 41 passed |
+| Full suite, baked `python:3.12` image | **1106 passed, 0 failed** |
+| BIE unit tests | 43 passed |
 | Orchestration audit | 41 gated + 28 always-on, **0 islands** |
 | Technique registry | 70 techniques |
 | Endpoint sweep (from OpenAPI, 113 routes / 72 GET) | 64 ok · 8 expected (need a caller-supplied id) · **0 defects** |
@@ -69,6 +69,19 @@ Verified hop by hop:
 4. **Fixed sleeps.** Replaced with condition-based waits (see §6).
 5. **Phase-3 trigger page.** Route interception could not see the app re-issue a request because the page
    had been parked on an API URL; now an application page is re-driven first.
+
+### Regression proof for defect 3
+
+**Mission d2a651ca**, run on the rebuilt image after the `impact` fix, end to end:
+
+```
+DB     -> confirmed   CWE-639   impact set: True
+REPORT -> confirmed   CWE-639   proof_gap: None      (was "lead" before the fix)
+ARTERY -> BIE ran, 1 confirmed, candidate from observation
+UI     -> Findings posture: Confirmed 1              (was 0 before the fix)
+```
+
+UI driven in a real browser (load mission → Assurance panel), **0 console errors**.
 
 ## 5. Honest limitations
 
