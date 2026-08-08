@@ -91,6 +91,11 @@ ALWAYS_ON = {
                                 "control surface is enumerated on every persona route the swap already visits",
     "client_supplied_identity_param": "Browser Intelligence Engine phase 3, same artery step 5e run: identity params both "
                                 "personas' browsers sent are mutated by route interception on the observed endpoints",
+    "tls_posture":              "run_transport_posture on every in-scope origin during recon "
+                                "(_do_transport_posture -> read-only pinned handshakes + certificate)",
+    "cookie_scope_posture":     "run_transport_posture on every in-scope origin during recon (Set-Cookie read directly)",
+    "http_security_headers":    "run_transport_posture on every in-scope origin during recon (response headers)",
+    "http_methods_audit":       "run_transport_posture on every in-scope origin during recon (OPTIONS + one TRACE)",
     "vulnerable_component":     "always-on fingerprint / nuclei recon",
     "security_misconfig_errors": "passive stack-trace / error-signature detection on every response",
     "encoded_data_decode":      "passive intel harvest at every transport chokepoint",

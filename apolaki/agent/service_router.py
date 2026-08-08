@@ -97,6 +97,10 @@ _PACKS = {
          "oracle": "an anonymous bind can read directory entries from the naming context (not just RootDSE)",
          "enables": ["directory_read", "user_enumeration"]},
     ]},
+    # NOTE: no "https" pack on purpose. `https` is a WEB service and the router's contract is that web
+    # services carry no service-pack checks — the web engine owns them. TLS posture is therefore reached
+    # by _do_transport_posture (every in-scope origin, during recon), not by bolting a pack onto https and
+    # breaking that separation.
     "modbus": {"graph_kind": "service", "note": "ICS/OT: unauthenticated Modbus/TCP device (READ-ONLY audit; never writes).", "checks": [
         {"id": "modbus_exposed", "cwe": "CWE-306", "intrusive": False,
          "oracle": "an unauthenticated Modbus device answers a read-only request (device-id / read-holding)",

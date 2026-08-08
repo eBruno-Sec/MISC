@@ -342,6 +342,46 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["View Basket"]}),
 
+    # ── transport + web posture family (#103, distilled from WAHH ch.12/13) ──────────────────────────
+    _t(id="tls_posture", vuln_class="crypto_transport", cwe="CWE-327", owasp="A02:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CRYP-01",
+       summary="TLS transport posture: deprecated protocol versions accepted, weak cipher, or a bad certificate.",
+       detect="Read-only TLS handshakes against the origin, one pinned to each protocol version, plus the "
+              "certificate the server actually presents.",
+       exploit="None — this is an observation, not an attack. Apolaki never attempts a downgrade or a "
+               "padding-oracle; it records what the server agrees to.",
+       oracle="A version is reported supported only when a handshake PINNED to it completes; a version "
+              "this client cannot speak is reported unknown, never 'absent'. A probe where every pinned "
+              "version succeeds is treated as non-discriminating and reports nothing. Certificate defects "
+              "are read from the presented certificate against the hostname requested and the clock.",
+       validated_on=[]),
+    _t(id="cookie_scope_posture", vuln_class="session", cwe="CWE-614", owasp="A05:2021",
+       permission=PASSIVE, transferable=True, wstg="WSTG-SESS-02",
+       summary="Session cookie missing Secure / HttpOnly / a restrictive SameSite.",
+       detect="The Set-Cookie headers the server sends, parsed directly.",
+       exploit="None needed — the attribute is present or it is not.",
+       oracle="Directly observed in Set-Cookie. Scoped to SESSION cookies only, so a preference cookie "
+              "without HttpOnly is never reported; Secure is not demanded on a plaintext origin.",
+       validated_on=[]),
+    _t(id="http_security_headers", vuln_class="misconfiguration", cwe="CWE-693", owasp="A05:2021",
+       permission=PASSIVE, transferable=True, wstg="WSTG-CONF-12",
+       summary="Missing protective response headers (framing control, HSTS, CSP, sniffing, referrer).",
+       detect="Response headers, read directly.",
+       exploit="None — defence-in-depth posture.",
+       oracle="Present or absent in the response. Graded honestly: framing/HSTS are real weaknesses, "
+              "hygiene headers are reported at info; clickjacking is only flagged when BOTH "
+              "X-Frame-Options and a CSP frame-ancestors directive are absent.",
+       validated_on=[]),
+    _t(id="http_methods_audit", vuln_class="misconfiguration", cwe="CWE-650", owasp="A05:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CONF-06",
+       summary="Dangerous HTTP methods advertised, and TRACE (Cross-Site Tracing) confirmed.",
+       detect="The Allow header from OPTIONS, plus a single TRACE carrying a random marker.",
+       exploit="TRACE only. Write methods (PUT/DELETE/WebDAV) are NEVER sent — they are reported as an "
+               "untested lead from the Allow header.",
+       oracle="TRACE is confirmed only when the response echoes the exact random marker sent, which "
+              "nothing else can produce; advertised methods stay a lead.",
+       validated_on=[]),
+
     _t(id="client_supplied_identity_param", vuln_class="access_control", cwe="CWE-639", owasp="API1:2023",
        permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-04",
        summary="Server derives identity from a client-supplied parameter — proven by mutating the app's own request.",

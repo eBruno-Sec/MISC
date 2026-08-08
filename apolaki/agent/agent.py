@@ -1894,6 +1894,39 @@ class BBHAgent:
             self._auth_artery = {"ran": True, "note": "artery ran; evidence capture degraded"}
         return events
 
+    async def _do_transport_posture(self, session_id: str):
+        """#103: run the transport + web posture family on each in-scope origin. Read-only (TLS
+        handshakes, GET/OPTIONS/TRACE). Best-effort — any failure degrades to a no-op, never a
+        broken scan."""
+        from urllib.parse import urlsplit as _us
+        origins, seen = [], set()
+        for e in (self.scope.to_dict().get("in_scope") or []):
+            s = str(e)
+            u = s if "://" in s else "https://" + s.split("/")[0]
+            o = "%s://%s" % (_us(u).scheme, _us(u).netloc)
+            if o and o not in seen:
+                seen.add(o)
+                origins.append(o)
+        total = 0
+        for o in origins[:3]:
+            try:
+                res = await self._exec_internal("run_transport_posture", {"url": o}, session_id)
+            except Exception:
+                continue
+            for f in (res.findings or []):
+                if self.mission_id:
+                    try:
+                        f["id"] = db.add_finding(self.mission_id, f)
+                    except Exception:
+                        pass
+                self.findings.append(f)
+                yield {"type": "finding", "finding": f}
+                total += 1
+        if origins:
+            yield {"type": "info", "content": "Transport posture: audited %d origin(s) — TLS protocol + "
+                   "certificate, session-cookie attributes, protective headers, HTTP methods. %d "
+                   "finding(s)." % (min(len(origins), 3), total)}
+
     def _runtime_seed_paths(self, limit: int = 6) -> list:
         """The authenticated app routes worth RENDERING so the SPA fetches the logged-in user's own
         objects (which is what gives the Browser Intelligence Engine real cross-user hypotheses).
@@ -2044,6 +2077,11 @@ class BBHAgent:
                     yield ev
             except Exception:
                 pass
+
+            # Transport + web posture (#103): TLS protocol/certificate, session-cookie attributes,
+            # protective headers and HTTP methods for every in-scope origin. Read-only.
+            async for ev in self._do_transport_posture(session_id):
+                yield ev
 
         # Authenticated scanning: discover credentials the target exposes (or inherit them from a prior
         # scan) and log in, so the whole assessment runs as a real user (every strategy, active/full only).

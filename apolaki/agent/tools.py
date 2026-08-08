@@ -157,6 +157,7 @@ TOOL_PERMISSIONS = {
     "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
     "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
     "confirm_browser_persona_bola": PermissionLevel.ACTIVE,    # BIE runtime persona-swap BOLA (safe GETs only, #124)
+    "run_transport_posture": PermissionLevel.ACTIVE,           # TLS/cookie/header/method posture (read-only, #103)
     "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
     "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
     "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
@@ -2158,6 +2159,69 @@ class ToolRegistry:
         return ToolResult("read_object_idor", base, True,
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
                                       "leads": len(leads), "lead_findings": leads, "details": details}), findings)
+
+    async def _run_transport_posture(self, inp: dict) -> ToolResult:
+        """ACTIVE, read-only: the transport + web posture family (#103) for one origin — TLS protocol and
+        certificate posture, session-cookie attributes, protective headers, and HTTP methods.
+
+        Safe by construction: TLS handshakes are read-only, the HTTP side sends only GET / OPTIONS /
+        TRACE, and dangerous write methods are read from the Allow header rather than attempted. TRACE is
+        confirmed only when the response echoes the exact random marker sent."""
+        import transport_posture as _tp
+        from urllib.parse import urlsplit
+        url = (inp.get("url") or inp.get("target") or "").strip()
+        if not url:
+            return ToolResult("transport_posture", url, False, "", [], "no target url")
+        if not self.scope.validate(url)[0]:
+            return ToolResult("transport_posture", url, False, "", [], "SCOPE BLOCK")
+        p = urlsplit(url)
+        host, is_https = p.hostname or "", (p.scheme == "https")
+        port = p.port or (443 if is_https else 80)
+        origin = "%s://%s" % (p.scheme or "http", p.netloc)
+
+        probe = {}
+        if is_https:
+            probe = await asyncio.get_event_loop().run_in_executor(None, _tp.probe_tls, host, int(port))
+        # GET for cookies + protective headers
+        headers, set_cookies = {}, []
+        try:
+            r, _ = await self._http_send("GET", origin + "/", {}, None, True)
+            headers = dict(r.headers or {})
+            try:                       # multi-valued Set-Cookie must not collapse to one
+                set_cookies = list(r.headers.get_list("set-cookie"))
+            except Exception:
+                sc = r.headers.get("set-cookie")
+                set_cookies = [sc] if sc else []
+        except Exception:
+            pass
+        allow, trace_status, trace_body = "", 0, ""
+        marker = _tp.trace_marker()
+        try:
+            ro, _ = await self._http_send("OPTIONS", origin + "/", {}, None, True)
+            allow = (ro.headers or {}).get("allow", "") or (ro.headers or {}).get("Allow", "")
+        except Exception:
+            pass
+        try:                            # TRACE is a safe, non-state-changing echo
+            rt, _ = await self._http_send("TRACE", origin + "/", {"X-Apolaki-Probe": marker}, None, True)
+            trace_status, trace_body = rt.status_code, (rt.text or "")
+        except Exception:
+            pass
+
+        findings = _tp.findings_for(origin, protocols=probe.get("protocols"),
+                                    cipher=probe.get("cipher", ""), cert=probe.get("cert"),
+                                    hostname=host, key_bits=probe.get("key_bits", 0),
+                                    set_cookies=set_cookies, headers=headers, is_https=is_https,
+                                    allow_header=allow, trace_status=trace_status,
+                                    trace_body=trace_body, trace_marker=marker)
+        confirmed = [f for f in findings if f.get("confidence") != "lead"]
+        leads = [f for f in findings if f.get("confidence") == "lead"]
+        summary = {"ran": True, "origin": origin, "https": is_https,
+                   "tls": {"reachable": probe.get("reachable", False),
+                           "negotiated": probe.get("protocol", ""), "cipher": probe.get("cipher", ""),
+                           "protocols": probe.get("protocols", {}), "note": probe.get("note", "")},
+                   "cookies_seen": len(set_cookies), "allow": allow,
+                   "findings": len(confirmed), "leads": len(leads), "lead_findings": leads}
+        return ToolResult("transport_posture", origin, True, json.dumps(summary), confirmed)
 
     async def _confirm_browser_persona_bola(self, inp: dict) -> ToolResult:
         """ACTIVE (read-only, GETs only): the Browser Intelligence Engine's RUNTIME cross-user proof (#124).
