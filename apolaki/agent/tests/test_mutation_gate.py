@@ -44,6 +44,52 @@ def test_the_gate_restores_every_file_it_touches():
     assert not os.path.exists(path + ".mutbak")
 
 
+def test_a_crashed_run_is_recovered_before_the_next_one_applies_anything():
+    """The dangerous failure mode, simulated. A run killed between apply and restore leaves the source
+    weakened and a `.mutbak` holding the original. The next run then cannot match its pattern and reports
+    "guard changed, mutant is stale" — which tells the operator to update the MUTANT, cementing the
+    weakened guard as the new baseline. The gate would pass while defending nothing.
+
+    `make mutation-gate` runs `docker exec` against the LIVE agent, so the weakened guard would also be
+    what the running scanner uses until someone rebuilds."""
+    path = os.path.join(mg.APP_DIR, "bie.py")
+    original = open(path, encoding="utf8").read()
+    module, desc, pattern, repl, tests = mg.MUTANTS[0]
+    assert module == "bie.py", "this test pins MUTANTS[0]; update it if the order changed"
+
+    # Simulate the crash: apply the mutant, then do NOT restore.
+    assert mg._apply(path, pattern, repl)
+    assert open(path, encoding="utf8").read() != original, "the mutant did not actually change the file"
+    assert os.path.exists(path + ".mutbak")
+
+    try:
+        recovered = mg.recover()
+        assert "bie.py" in recovered, recovered
+        assert open(path, encoding="utf8").read() == original, "recover() did not restore the original"
+        assert not os.path.exists(path + ".mutbak")
+    finally:
+        mg._restore(path)                       # belt-and-braces if an assert above fired
+        if open(path, encoding="utf8").read() != original:
+            open(path, "w", encoding="utf8").write(original)
+
+
+def test_a_recovery_is_reported_not_silent():
+    """Recovering is not the same as nothing having gone wrong — the run must say so."""
+    path = os.path.join(mg.APP_DIR, "bie.py")
+    original = open(path, encoding="utf8").read()
+    module, desc, pattern, repl, tests = mg.MUTANTS[0]
+    assert mg._apply(path, pattern, repl)
+    try:
+        res = mg.run([])                        # no mutants: exercises only the recovery step
+        assert res["recovered"] == ["bie.py"], res["recovered"]
+        assert "recovered" in res["summary"], res["summary"]
+    finally:
+        mg._restore(path)
+        if open(path, encoding="utf8").read() != original:
+            open(path, "w", encoding="utf8").write(original)
+    assert open(path, encoding="utf8").read() == original
+
+
 @pytest.mark.skipif(os.environ.get("APOLAKI_MUTATION_GATE") != "1",
                     reason="full mutation gate is slow; set APOLAKI_MUTATION_GATE=1 (ship-gate runs it)")
 def test_no_mutant_weakening_a_false_positive_guard_survives():

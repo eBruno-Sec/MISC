@@ -75,13 +75,36 @@ def _restore(path: str) -> None:
         shutil.move(path + ".mutbak", path)
 
 
+def recover(app_dir: str = None) -> list:
+    """Undo any mutation a previous run left behind. MUST run before applying anything.
+
+    A run killed between `_apply` and `_restore` leaves the source weakened and a `.mutbak` holding the
+    original. Without this, the next run is actively harmful: `_apply` cannot match its pattern against
+    the already-mutated source, so the gate reports "pattern not found — guard changed, mutant is stale"
+    and points the operator at updating the mutant — which would cement the weakened guard as the new
+    baseline. The gate would then pass while defending nothing.
+
+    Worse in the container: `make mutation-gate` runs `docker exec` against the LIVE agent, so an
+    interrupted run leaves the running scanner with a disabled false-positive guard until someone
+    rebuilds. Returns the files it restored, so a recovery is reported rather than silent."""
+    app = app_dir or APP_DIR
+    restored = []
+    for fn in sorted(os.listdir(app)):
+        if fn.endswith(".mutbak"):
+            target = os.path.join(app, fn[:-len(".mutbak")])
+            shutil.move(os.path.join(app, fn), target)
+            restored.append(os.path.basename(target))
+    return restored
+
+
 def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
     """Apply each mutant, run its tests, restore. A mutant is KILLED when the tests fail.
 
     Returns {killed, survived, not_applied, results}. `survived` MUST be empty — a survivor means the
     suite does not defend that guard."""
     app = app_dir or APP_DIR
-    out = {"killed": [], "survived": [], "not_applied": [], "results": []}
+    out = {"killed": [], "survived": [], "not_applied": [], "results": [],
+           "recovered": recover(app)}
     for module, desc, pattern, repl, tests in (mutants or MUTANTS):
         path = os.path.join(app, module)
         if not os.path.exists(path):
@@ -106,7 +129,10 @@ def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
         (out["killed"] if killed else out["survived"]).append(rec)
     out["passed"] = not out["survived"] and not out["not_applied"]
     out["summary"] = ("%d/%d mutants killed" % (len(out["killed"]), len(out["results"]))
-                      + ("" if out["passed"] else " — GATE FAILED"))
+                      + ("" if out["passed"] else " — GATE FAILED")
+                      + ("" if not out["recovered"] else
+                         "  [recovered %d file(s) a previous run left mutated: %s]"
+                         % (len(out["recovered"]), ", ".join(out["recovered"]))))
     return out
 
 
