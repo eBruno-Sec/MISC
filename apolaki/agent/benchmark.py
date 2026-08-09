@@ -77,6 +77,23 @@ MANIFESTS = {
         # GraphQL surface: injection (SQLi/OS), IDOR, stored/reflected XSS, info disclosure via introspection.
         "expected": ["sqli", "command_injection", "xss", "access_control", "sensitive_exposure"],
     },
+    # The beyond-web labs are NOT web apps, so they carry no url_hint that bench_all could scan over HTTP.
+    # They are listed so a `validated_on` entry names a lab the platform actually knows, and so the
+    # network_service classes are visible in coverage rather than being proven in a place nothing records.
+    "openldap": {
+        "name": "OpenLDAP directory (beyond-web lab)", "url_hint": "openldap",
+        "expected": ["network_service"],
+    },
+    "smb": {
+        "name": "Samba file server (beyond-web lab)", "url_hint": "smb",
+        "expected": ["network_service"],
+    },
+    "snmpd": {
+        "name": "Net-SNMP agent (beyond-web lab)", "url_hint": "snmpd",
+        # A stock Net-SNMP agent, unrelated to Conpot's ICS stack: the second implementation that makes
+        # snmp_default_community transferable rather than shaped to one lab.
+        "expected": ["network_service"],
+    },
     "conpot": {
         "name": "Conpot ICS/OT honeypot (Honeynet Project)", "url_hint": "conpot",
         # A FOREIGN protocol stack, which is the point: a simulator built from our own frame code would

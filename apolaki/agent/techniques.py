@@ -142,7 +142,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Anonymous bind, then a read-only SUBTREE search of the naming context returns directory entries "
               "(RootDSE-only read is normal and NOT flagged).",
        exploit="Enumerate users/groups/computers pre-auth to seed password spraying, Kerberoasting, lateral movement.",
-       oracle="An anonymous session receives directory ENTRIES (person/OU/group objects) from the naming context."),
+       oracle="An anonymous session receives directory ENTRIES (person/OU/group objects) from the naming context.",
+       validated_on=["openldap"]),
     # beyond web (AD/file-server pentest): SMB null-session share enumeration.
     _t(id="smb_null_session", vuln_class="network_service", cwe="CWE-306", owasp="A01:2021", wstg="WSTG-ATHN-01",
        permission=ACTIVE, transferable=True,
@@ -150,7 +151,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Connect with an EMPTY username/password (null session) and call listShares; a hardened server "
               "refuses the anonymous session and returns nothing.",
        exploit="Map the file-server layout pre-auth and read any guest-exposed non-administrative share.",
-       oracle="A null session connects and listShares returns a share (a non-admin share escalates to high)."),
+       oracle="A null session connects and listShares returns a share (a non-admin share escalates to high).",
+       validated_on=["smb"]),
     # beyond web (AD relay): SMB message signing not required -> NTLM relay.
     _t(id="smb_signing_disabled", vuln_class="network_service", cwe="CWE-347", owasp="A02:2021", wstg="WSTG-CONF-11",
        permission=ACTIVE, transferable=True,
@@ -158,7 +160,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Read the server SecurityMode from an SMB2 NEGOTIATE response (no auth); SIGNING_REQUIRED (0x0002) "
               "is not set.",
        exploit="Coerce/capture an authentication and NTLM-relay it to this host to act as the victim.",
-       oracle="The SMB2 NEGOTIATE SecurityMode lacks the SIGNING_REQUIRED flag."),
+       oracle="The SMB2 NEGOTIATE SecurityMode lacks the SIGNING_REQUIRED flag.",
+       validated_on=["smb"]),
     # beyond web (ICS/OT pentest): unauthenticated Modbus/TCP device exposure. READ-ONLY — never writes to OT.
     _t(id="modbus_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A05:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,
@@ -229,7 +232,9 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "an agent ignores a wrong community, so a GetResponse with error-status 0 proves the default is live.",
        exploit="Read device config/interfaces/routes/ARP (RO 'public'); a RW 'private' community rewrites config.",
        oracle="A GET with a default community returns a GetResponse (error-status 0) with a sysDescr value.",
-       validated_on=["conpot"]),
+       # Two unrelated implementations — an ICS stack and a stock Net-SNMP agent — which is the bar for
+       # calling the technique transferable rather than shaped to one lab's quirks.
+       validated_on=["conpot", "snmpd"]),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",
