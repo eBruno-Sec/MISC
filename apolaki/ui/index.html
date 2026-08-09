@@ -358,7 +358,8 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
               <div class="hint">Higher = the agent repeats recon, learning from discovered hosts / URLs / tech to widen the surface before scanning. Intrusive tools are never looped.</div>
             </div>
             <div class="field"><label>Vulnerability classes to test</label>
-              <div id="scopeCats" class="tx-lenses" style="margin:.15rem 0 .5rem"></div>
+              <!-- styled by #scopeCats rules above; deliberately NOT class="tx-lenses" (that CSS is scoped to #p-taxonomy and never applied here) -->
+              <div id="scopeCats" style="margin:.15rem 0 .5rem"></div>
               <div class="hint" id="scopeHint">All classes tested by default. Unchecking genuinely skips those
                 techniques — and anything they would have unlocked is shown, because an untested class is
                 <b>not</b> a clean one.</div>
@@ -717,6 +718,24 @@ X-Requested-With: </textarea>
     #p-taxonomy .tx-sum{color:var(--text-dim);font-size:.8rem;margin:.25rem 0 .5rem;line-height:1.5;max-width:80ch}
     #p-taxonomy .tx-tags{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
     #p-taxonomy .tx-chip{font-family:var(--mono);font-size:.66rem;padding:.12rem .45rem;border-radius:5px;background:var(--surface2);border:1px solid var(--border2);color:var(--text-dim)}
+    /* Vulnerability-class picker (scan setup). It used to reuse class="tx-lenses"/"tx-lens", but those
+       rules are scoped to #p-taxonomy and this control lives in #p-launch — so NONE of the styling ever
+       applied and it rendered as raw default buttons wrapping ragged-right. Styled here by id, panel
+       agnostic, so it cannot silently lose its CSS again by moving panel.
+       Grid, not inline-wrap: labels align in columns and every count sits in the same place. */
+    #scopeCats{display:grid;grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr));gap:.35rem}
+    #scopeCats .vc-chip{display:flex;align-items:center;gap:.5rem;width:100%;text-align:left;
+      font-family:var(--sans);font-size:.76rem;font-weight:600;color:var(--text-dim);
+      background:var(--surface2);border:1px solid var(--border2);border-radius:8px;
+      padding:.42rem .6rem;cursor:pointer;transition:.15s}
+    #scopeCats .vc-chip:hover{color:var(--text-bright);border-color:var(--accent)}
+    #scopeCats .vc-chip .vc-box{flex:0 0 auto;font-size:.85rem;line-height:1}
+    #scopeCats .vc-chip .vc-label{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* tabular-nums so the counts form a straight column instead of jittering with digit width */
+    #scopeCats .vc-chip .vc-n{flex:0 0 auto;font-variant-numeric:tabular-nums;opacity:.55;font-weight:700}
+    #scopeCats .vc-chip.on{color:var(--text-bright);border-color:color-mix(in srgb,var(--ok) 45%,transparent);
+      background:color-mix(in srgb,var(--ok) 8%,var(--surface2))}
+    #scopeCats .vc-chip.off{opacity:.55;border-style:dashed;text-decoration:line-through}
     #p-taxonomy .tx-badge{font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:.14rem .5rem;border-radius:999px;white-space:nowrap}
     #p-taxonomy .tx-badge.proven{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
     #p-taxonomy .tx-badge.catalogued{background:transparent;color:var(--text-dim);border:1px dashed var(--border2)}
@@ -2159,9 +2178,12 @@ async function loadScopeCategories(){
   }catch(e){ bar.innerHTML=`<span class="muted">scope options unavailable</span>`; return; }
   if(d.error){ bar.innerHTML=`<span class="muted">${esc(d.error)}</span>`; return; }
   bar.innerHTML=(d.categories||[]).map(c=>
-    `<button type="button" class="tx-lens ${c.excluded?"":"active"}" onclick="scopeToggle('${esc(c.id)}')"
-       title="${esc(c.label)} — ${c.techniques} technique(s)">${c.excluded?"☐":"☑"} ${esc(c.label.split(" (")[0])}
-       <span style="opacity:.6">${c.techniques}</span></button>`).join("");
+    `<button type="button" class="vc-chip ${c.excluded?"off":"on"}" onclick="scopeToggle('${esc(c.id)}')"
+       aria-pressed="${c.excluded?"false":"true"}"
+       title="${esc(c.label)} — ${c.techniques} technique(s). ${c.excluded?"Excluded: these techniques will NOT run.":"Included."}"
+       ><span class="vc-box">${c.excluded?"☐":"☑"}</span
+       ><span class="vc-label">${esc(c.label.split(" (")[0])}</span
+       ><span class="vc-n">${c.techniques}</span></button>`).join("");
   let h=`<div class="tx-sum" style="padding:.45rem .7rem">
     <b>${d.will_run}</b> of ${d.total_techniques} techniques will run`;
   if(d.skipped_count) h+=` — <span style="color:var(--warn)">${d.skipped_count} skipped by your scoping</span>`;
