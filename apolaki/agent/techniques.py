@@ -1188,7 +1188,7 @@ def taxonomy_view(lens: str = "owasp") -> dict:
             "cwe": t["cwe"], "owasp": t["owasp"], "wstg": t.get("wstg"), "mitre": t.get("mitre"),
             "permission": t["permission"], "transferable": t["transferable"],
             "generalized": is_generalized(t), "validated_on": t.get("validated_on", []),
-            "status": "proven" if t.get("validated_on") else "catalogued",
+            "status": technique_status(t),
             "maps_to": t.get("maps_to") or {}, "refs": t.get("refs", []),
             "execution": t.get("execution", "auto"),
             # the in-app lesson — learn the method without leaving Apolaki
@@ -1203,7 +1203,51 @@ def taxonomy_view(lens: str = "owasp") -> dict:
         "lens": lens, "lenses": [{"id": lid, "label": lbl} for lid, lbl, _f in _LENSES],
         "groups": out,
         "total": len(TECHNIQUES),
-        "proven": sum(1 for t in TECHNIQUES.values() if t.get("validated_on")),
+        # THE HEADLINE NUMBER. ui/index.html renders this as a green "Proven" stat, so it must count
+        # only what a liveness run actually confirmed — not what a hand-written backfill dict asserted.
+        # `claimed` keeps the old number visible rather than hiding the gap: the distance between the two
+        # IS the honesty debt, and burying it would repeat the mistake.
+        "proven": sum(1 for t in TECHNIQUES.values() if technique_status(t) == "proven"),
+        "unverified": sum(1 for t in TECHNIQUES.values() if technique_status(t) == "unverified"),
+        "solver_only": sum(1 for t in TECHNIQUES.values() if technique_status(t) == "solver_only"),
+        "claimed": sum(1 for t in TECHNIQUES.values() if t.get("validated_on")),
         "transferable": sum(1 for t in TECHNIQUES.values() if t["transferable"]),
         "generalized": len(generalized()),
     }
+
+
+# ── what the UI is allowed to call "proven" ──────────────────────────────────────────────────
+def _liveness_verified() -> set:
+    """Technique ids an end-to-end liveness run has actually confirmed. Empty on any error, which
+    deliberately degrades every claim to 'unverified' rather than silently back to 'proven'."""
+    import json
+    import os
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests", "liveness_baseline.json")
+        with open(p, encoding="utf8") as fh:
+            return set(json.load(fh).get("live") or [])
+    except Exception:
+        return set()
+
+
+def technique_status(t: dict) -> str:
+    """proven | unverified | solver_only | catalogued.
+
+    "proven" USED TO MEAN "validated_on is non-empty", and validated_on is written by hand: four
+    backfill dicts append a lab id with nothing checking the claim. The UI renders that count as a green
+    "Proven" badge and a headline stat, so lab-solver behaviour and never-re-checked entries were being
+    shown to a reader as capability. Commit 2e551ea backfilled 9 techniques "whose oracle actually fired
+    on the live board" — honest in intent, but weak_password_reset has no production executor at all, so
+    what fired was the Juice Shop solver, not the technique's oracle.
+
+    Now the word is earned by an end-to-end liveness run and nothing else:
+      proven      — a liveness CHECK confirmed it against a standing lab
+      unverified  — claims validated_on, but no liveness check has ever confirmed it
+      solver_only — demonstrated only by lab-specific solver code; never transferable capability
+      catalogued  — known technique, not demonstrated
+    """
+    if t.get("solver_only"):
+        return "solver_only"
+    if t["id"] in _liveness_verified():
+        return "proven"
+    return "unverified" if t.get("validated_on") else "catalogued"

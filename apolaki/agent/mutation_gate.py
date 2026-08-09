@@ -27,36 +27,48 @@ import sys
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# (module, description, pattern, replacement, tests-that-must-catch-it)
-# Each mutant WEAKENS an FP guard. `tests` narrows the run so the gate stays fast enough to use.
+# (module, description, pattern, replacement, exact-test-that-must-catch-it)
+# Each mutant WEAKENS an FP guard. The exact node id is load-bearing: a collection error, broken fixture,
+# or unrelated failing test must not be credited with killing the mutant.
 MUTANTS = [
     ("bie.py", "judge: drop the anonymous control — public data would confirm as BOLA",
-     r'if _s\(anon\) == 200 and _b\(anon\) == base_b:', 'if False:', "tests/test_bie.py"),
+     r'if _s\(anon\) == 200 and _b\(anon\) == base_b:', 'if False:',
+     "tests/test_bie.py::test_rejects_public_resource"),
     ("bie.py", "judge: drop the implausible-id control — an SPA shell would confirm as BOLA",
-     r'if _s\(nonexistent\) == 200 and _b\(nonexistent\) == base_b:', 'if False:', "tests/test_bie.py"),
+     r'if _s\(nonexistent\) == 200 and _b\(nonexistent\) == base_b:', 'if False:',
+     "tests/test_bie.py::test_rejects_spa_shell_catch_all"),
     ("bie.py", "judge: accept a non-matching body as proof of a cross-user read",
-     r'if _b\(mutation\) != base_b:', 'if False:', "tests/test_bie.py"),
+     r'if _b\(mutation\) != base_b:', 'if False:',
+     "tests/test_bie.py::test_rejects_when_attacker_body_differs"),
     ("bie.py", "judge: let a MISSING negative control still produce a confirmation",
-     r'if missing:', 'if False:', "tests/test_bie.py"),
+     r'if missing:', 'if False:',
+     "tests/test_bie.py::test_missing_negative_control_is_a_lead_never_a_confirmation"),
     ("bie.py", "judge_param_swap: remove the SECURE-case rejection (server ignoring the parameter)",
-     r'if _b\(mutation\) == _b\(self_baseline\):', 'if False:', "tests/test_bie.py"),
+     r'if _b\(mutation\) == _b\(self_baseline\):', 'if False:',
+     "tests/test_bie.py::test_param_swap_rejects_the_SECURE_case_of_a_server_ignoring_the_param"),
     ("bie.py", "judge_client_side_authz: stop rejecting the SPA shell",
-     r'if _b\(shell\) == _b\(persona\):', 'if False:', "tests/test_bie.py"),
+     r'if _b\(shell\) == _b\(persona\):', 'if False:',
+     "tests/test_bie.py::test_client_side_authz_rejects_the_spa_shell"),
     ("transport_posture.py", "analyze_protocols: trust a probe that accepts every pinned version",
      r'trustworthy = not \(tested and all\(sup\.get\(p\) for p in tested\) and len\(tested\) >= 4\)',
-     'trustworthy = True', "tests/test_transport_posture.py"),
+     'trustworthy = True',
+     "tests/test_transport_posture.py::test_a_probe_that_accepts_everything_is_not_trusted"),
     ("transport_posture.py", "analyze_methods: confirm TRACE without the echoed marker",
      r'if trace_marker and int\(trace_status or 0\) == 200 and trace_marker in str\(trace_body or ""\):',
-     'if int(trace_status or 0) == 200:', "tests/test_transport_posture.py"),
+     'if int(trace_status or 0) == 200:',
+     "tests/test_transport_posture.py::test_trace_confirmed_only_by_the_echoed_marker"),
     ("transport_posture.py", "analyze_cookies: demand Secure even on a plaintext origin (false positive)",
-     r'if is_https and not c\["secure"\]:', 'if not c["secure"]:', "tests/test_transport_posture.py"),
+     r'if is_https and not c\["secure"\]:', 'if not c["secure"]:',
+     "tests/test_transport_posture.py::test_secure_is_not_demanded_on_a_plaintext_origin"),
     ("ics_dnp3_s7.py", "is_write_frame: default to ALLOW instead of refuse for an unknown protocol",
      r'    return True                                           # unknown protocol -> refuse',
-     '    return False', "tests/test_ics_dnp3_s7.py"),
+     '    return False', "tests/test_ics_dnp3_s7.py::test_the_rail_is_strict_by_default"),
     ("blind_benchmark.py", "_has_proof: accept a finding carrying no evidence",
-     r'return conf and len\(proof\) >= 12', 'return conf', "tests/test_blind_benchmark.py"),
+     r'return conf and len\(proof\) >= 12', 'return conf',
+     "tests/test_blind_benchmark.py::test_a_finding_without_evidence_is_never_benchmark_proof"),
     ("proof_schema.py", "demote_unproven: stop demoting confirmed-but-unproven findings",
-     r'if not ok:', 'if False:', "tests/test_proof_schema.py"),
+     r'if not ok:', 'if False:',
+     "tests/test_proof_schema.py::test_demote_downgrades_weak_access_control_confirm"),
 ]
 
 
@@ -97,8 +109,25 @@ def recover(app_dir: str = None) -> list:
     return restored
 
 
+def _expected_test_failed(stdout: str, stderr: str, expected_test: str) -> bool:
+    """True only when pytest reports the selected test itself as FAILED.
+
+    Collection, import, fixture, and infrastructure failures are reported as ERROR even though they
+    return non-zero. Requiring the exact FAILED node id stops those failures impersonating an oracle kill.
+    """
+    expected = expected_test.replace("\\", "/")
+    for raw in (str(stdout or "") + "\n" + str(stderr or "")).splitlines():
+        line = raw.strip().replace("\\", "/")
+        if line == "FAILED " + expected or line.startswith("FAILED " + expected + " - "):
+            return True
+    return False
+
+
 def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
-    """Apply each mutant, run its tests, restore. A mutant is KILLED when the tests fail.
+    """Apply each mutant, run its exact test, restore.
+
+    A mutant is KILLED only when that test's call phase fails. A non-zero pytest exit by itself is not
+    evidence: import, collection, setup, teardown, and infrastructure errors all return non-zero too.
 
     Returns {killed, survived, not_applied, results}. `survived` MUST be empty — a survivor means the
     suite does not defend that guard."""
@@ -108,7 +137,7 @@ def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
     # `is None`, NOT `or`: an empty list means "run no mutants" (recovery only). With `mutants or MUTANTS`
     # an empty list is falsy and silently expands to the FULL gate — which re-runs the whole suite twelve
     # times. A caller asking for nothing would get the most expensive thing the module can do.
-    for module, desc, pattern, repl, tests in (MUTANTS if mutants is None else mutants):
+    for module, desc, pattern, repl, expected_test in (MUTANTS if mutants is None else mutants):
         path = os.path.join(app, module)
         if not os.path.exists(path):
             out["not_applied"].append({"module": module, "desc": desc, "why": "module missing"})
@@ -119,15 +148,30 @@ def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
             out["not_applied"].append({"module": module, "desc": desc,
                                        "why": "pattern not found — guard changed, mutant is stale"})
             continue
+        returncode = None
+        outcome = "pytest did not run"
         try:
-            p = subprocess.run([sys.executable, "-m", "pytest", tests, "-x", "-q", "-p", "no:warnings",
+            p = subprocess.run([sys.executable, "-m", "pytest", expected_test, "-x", "-q",
+                                "-p", "no:warnings",
                                 "--tb=no"], cwd=app, capture_output=True, text=True, timeout=timeout)
-            killed = p.returncode != 0
-        except Exception:
+            returncode = p.returncode
+            killed = _expected_test_failed(p.stdout, p.stderr, expected_test)
+            if killed:
+                outcome = "expected test failed"
+            elif p.returncode == 0:
+                outcome = "expected test passed"
+            else:
+                outcome = "pytest errored without the expected test failing"
+        except subprocess.TimeoutExpired:
             killed = False
+            outcome = "pytest timed out"
+        except Exception as e:
+            killed = False
+            outcome = "pytest invocation failed: %s" % str(e)[:160]
         finally:
             _restore(path)
-        rec = {"module": module, "desc": desc, "tests": tests, "killed": killed}
+        rec = {"module": module, "desc": desc, "tests": expected_test, "killed": killed,
+               "pytest_returncode": returncode, "outcome": outcome}
         out["results"].append(rec)
         (out["killed"] if killed else out["survived"]).append(rec)
     out["passed"] = not out["survived"] and not out["not_applied"]

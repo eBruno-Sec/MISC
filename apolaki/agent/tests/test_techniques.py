@@ -148,3 +148,43 @@ def test_lab_local_rows_are_kept_visible_not_deleted():
     assert "find_hidden_route" in [r["id"] for r in m["lab_local_rows"]]
     assert len(m["lab_local_rows"]) == m["lab_local_total"]
     assert len(m["rows"]) == m["transferable_total"]
+
+
+def test_proven_is_earned_by_a_liveness_run_not_by_a_backfill_dict():
+    """THE HEADLINE NUMBER. ui/index.html:2090 renders taxonomy_view()["proven"] as a green "Proven"
+    stat and :2103 badges each technique. It used to mean "validated_on is non-empty" — a field written
+    by four hand-maintained backfill dicts with nothing checking the claim. Commit 2e551ea backfilled 9
+    techniques "whose oracle actually fired on the live board"; honest in intent, but weak_password_reset
+    has no production executor, so what fired was the Juice Shop solver, not the technique's oracle.
+
+    Measured when this landed: 56 claimed, 15 liveness-verified, 41 unverified."""
+    import json
+    import os
+    v = tq.taxonomy_view("owasp")
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "liveness_baseline.json")
+    live = set(json.load(open(base, encoding="utf8"))["live"])
+
+    assert v["proven"] == len([t for t in tq.TECHNIQUES if t in live])
+    assert v["proven"] + v["unverified"] + v["solver_only"] == v["claimed"] + v["solver_only"]
+    assert v["claimed"] >= v["proven"], "claimed can never be below what liveness confirmed"
+
+
+def test_the_gap_between_claimed_and_proven_stays_visible():
+    """`claimed` exists so the honesty debt is reportable rather than buried. Removing it would hide the
+    very gap this change exposed."""
+    v = tq.taxonomy_view("owasp")
+    assert "claimed" in v and "unverified" in v
+    assert v["unverified"] == v["claimed"] - v["proven"]
+
+
+def test_a_missing_liveness_baseline_degrades_to_unverified_not_to_proven(monkeypatch):
+    """Fail-closed. If the baseline cannot be read, every claim must drop to unverified — the opposite
+    default would silently restore the old, unearned number."""
+    monkeypatch.setattr(tq, "_liveness_verified", lambda: set())
+    proven = [t for t in tq.TECHNIQUES.values() if tq.technique_status(t) == "proven"]
+    assert proven == []
+
+
+def test_solver_only_never_counts_as_proven():
+    assert tq.technique_status({"id": "x", "validated_on": ["juiceshop"], "solver_only": "juiceshop"}) \
+        == "solver_only"

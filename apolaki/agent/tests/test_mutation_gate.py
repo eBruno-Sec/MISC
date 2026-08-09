@@ -3,6 +3,7 @@
 The full gate re-runs the suite once per mutant, so it is opt-in via APOLAKI_MUTATION_GATE=1 (and in the
 ship-gate). These tests keep the harness honest cheaply, so a broken gate cannot quietly pass.
 """
+import ast
 import os
 
 import pytest
@@ -10,12 +11,66 @@ import pytest
 import mutation_gate as mg
 
 
-def test_every_oracle_module_with_an_fp_guard_has_a_mutant():
-    """A new oracle without a mutant is an unguarded guard. This is the list that must grow."""
+AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# MEASURED 2026-08-09: 48 modules explicitly produce a {"confidence": "confirmed"} finding and only
+# two of those modules have a mutant, leaving 46 uncovered. This ceiling may fall, never rise.
+_KNOWN_UNMUTATED_CONFIRMED_PRODUCERS = 46
+
+
+def _literal(node, value):
+    return isinstance(node, ast.Constant) and node.value == value
+
+
+def _produces_confirmed_finding(tree):
+    """Find explicit confirmed-finding writes without counting modules that merely consume the string."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            if any(_literal(k, "confidence") and _literal(v, "confirmed")
+                   for k, v in zip(node.keys, node.values)):
+                return True
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "dict":
+            if any(k.arg == "confidence" and _literal(k.value, "confirmed") for k in node.keywords):
+                return True
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and _literal(node.value, "confirmed"):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Subscript) and _literal(t.slice, "confidence") for t in targets):
+                return True
+    return False
+
+
+def _confirmed_producer_modules():
+    producers = set()
+    for fname in sorted(os.listdir(AGENT_DIR)):
+        if not fname.endswith(".py"):
+            continue
+        path = os.path.join(AGENT_DIR, fname)
+        with open(path, encoding="utf8") as src:
+            tree = ast.parse(src.read(), filename=path)
+        if _produces_confirmed_finding(tree):
+            producers.add(fname)
+    return producers
+
+
+def test_the_original_oracle_modules_keep_their_mutants():
     covered = {m[0] for m in mg.MUTANTS}
     required = {"bie.py", "transport_posture.py", "ics_dnp3_s7.py", "blind_benchmark.py",
                 "proof_schema.py"}
     assert required <= covered, "oracle modules with no mutant: %s" % sorted(required - covered)
+
+
+def test_confirmed_producers_without_a_mutant_never_grow():
+    """RATCHET. Adding a confirmed-producing module must add a mutant or consume existing debt."""
+    producers = _confirmed_producer_modules()
+    named_uncovered = {"sqli_tool.py", "cmdi_tool.py", "graphql_tool.py", "ssrf_tool.py",
+                       "xxe_tool.py", "dom_trace.py", "encoding_probe.py", "exposure_tool.py"}
+    assert named_uncovered <= producers, "producer scan became vacuous: %s" % sorted(named_uncovered - producers)
+
+    covered = {m[0] for m in mg.MUTANTS}
+    uncovered = producers - covered
+    assert len(uncovered) <= _KNOWN_UNMUTATED_CONFIRMED_PRODUCERS, (
+        "confirmed-producing modules without a mutant rose to %d (measured ceiling %d): %s" % (
+            len(uncovered), _KNOWN_UNMUTATED_CONFIRMED_PRODUCERS, sorted(uncovered)))
 
 
 def test_an_empty_mutant_list_runs_nothing_rather_than_everything():
@@ -28,9 +83,30 @@ def test_an_empty_mutant_list_runs_nothing_rather_than_everything():
 
 def test_mutants_are_well_formed():
     for module, desc, pattern, repl, tests in mg.MUTANTS:
-        assert module.endswith(".py") and tests.startswith("tests/")
+        assert module.endswith(".py") and tests.startswith("tests/") and "::test_" in tests
         assert len(desc) > 20, desc
         assert pattern and repl and pattern != repl
+
+
+def test_an_import_error_does_not_impersonate_an_oracle_kill(tmp_path):
+    """Regression: the old `returncode != 0` predicate credited this broken import as a killed mutant."""
+    app = tmp_path / "synthetic_app"
+    tests = app / "tests"
+    tests.mkdir(parents=True)
+    victim = app / "victim.py"
+    original = b"VALUE = 1\n"
+    victim.write_bytes(original)
+    (tests / "test_victim.py").write_text(
+        "import victim\n\ndef test_oracle_guard():\n    assert victim.VALUE == 1\n", encoding="utf8")
+    mutant = [("victim.py", "break import instead of weakening the oracle guard",
+               r"VALUE = 1", "VALUE = (", "tests/test_victim.py::test_oracle_guard")]
+
+    res = mg.run(mutant, app_dir=str(app), timeout=60)
+    record = res["results"][0]
+    assert record["pytest_returncode"] != 0, "the synthetic import break did not make pytest fail"
+    assert record["killed"] is False, "a collection/import error was credited as an oracle kill"
+    assert record["outcome"] == "pytest errored without the expected test failing"
+    assert victim.read_bytes() == original and not (app / "victim.py.mutbak").exists()
 
 
 def test_a_stale_mutant_fails_the_gate_rather_than_passing_silently():
