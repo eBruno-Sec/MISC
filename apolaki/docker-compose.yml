@@ -214,6 +214,33 @@ services:
       - "127.0.0.1:42093:8080"
     restart: unless-stopped
 
+  # OWASP Benchmark -- the only target here with per-test-case ground truth that includes DELIBERATE
+  # FALSE POSITIVES (1415 real / 1325 fake across 2740 cases). ginandjuice's key lists only real
+  # vulnerabilities, so precision there is inferred; this measures it directly.
+  #
+  # Serves HTTPS on 8443 (NOT http/8080 -- 8080 is refused). Reachable at https://owaspbench:8443/benchmark/
+  # on the compose network; host 42095. Self-signed cert, so scans need verify=False.
+  #
+  # 1639 of the 2740 cases are crawlable black-box, all linked from <category>-Index.html:
+  #   sqli 504 | xss 455 | pathtraver 268 | cmdi 251 | securecookie 67 | ldapi 59 | xpathi 35
+  # The other 1101 (weakrand, crypto, hash, trustbound) are code-level properties no black-box scanner
+  # can observe -- they are SAST cases and Apolaki should never be scored against them.
+  #
+  # BLIND BY CONSTRUCTION: expectedresults-1.2.csv is a file in the container, NOT served over HTTP
+  # (verified: 404 on every path). The scanner cannot crawl the answers even in principle, so unlike
+  # ginandjuice no answer-key path needs blocking. Read it with `docker exec`, after the mission seals.
+  #
+  # Startup runs `mvn clean package cargo:run`, ~90s before it answers. Not a fast lab.
+  owaspbench:
+    image: owasp/benchmark@sha256:a05b4659d3b489222cc1552c58497171819cc541a22568895c9134cfbf725908
+    profiles: ["labs"]
+    working_dir: /owasp/BenchmarkJava
+    entrypoint: ["sh", "-c", "./runRemoteAccessibleBenchmark.sh -q"]
+    ports:
+      - "127.0.0.1:42095:8443"
+    restart: unless-stopped
+    mem_limit: 2g
+
   # domsource -- validation lab for client-side sources that never reach the server. dom_trace gained the
   # URL FRAGMENT as a source; everything after '#' is absent from the access log, from a proxy capture and
   # from any request replay, so the engine cannot be validated by checking what the server received --
