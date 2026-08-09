@@ -44,14 +44,23 @@ def test_coverage_matrix_reports_both_honest_numbers():
     assert m["transferable_total"] >= 1
     assert m["generalized_total"] == len(tq.generalized())
     assert m["transferable_total"] + m["lab_local_total"] == m["techniques_total"]
-    assert isinstance(m["rows"], list) and len(m["rows"]) == len(tq.TECHNIQUES)
+    # `rows` is the CAPABILITY view and now excludes lab-local trivia, so the registry total is the two
+    # lists together. Asserting rows == every technique is what let find_hidden_route sit in the
+    # capability view in the first place.
+    assert isinstance(m["rows"], list)
+    assert len(m["rows"]) + len(m["lab_local_rows"]) == len(tq.TECHNIQUES)
 
 
 def test_lab_local_techniques_are_flagged_not_counted_as_capability():
     # find_hidden_route (score board) is lab trivia: solves a challenge, not a real-world method.
     t = tq.get("find_hidden_route")
     assert t is not None and t["transferable"] is False
-    assert "find_hidden_route" not in [r["id"] for r in tq.coverage_matrix()["rows"] if False]
+    # `if False` used to make this filter an empty list, so the membership assertion was trivially true
+    # and a test named "not counted as capability" had never checked anything. Assert the real property:
+    # a lab-local technique must not appear in the capability rows at all.
+    rows = tq.coverage_matrix()["rows"]
+    assert rows, "coverage_matrix returned no rows — the assertion below would be vacuous again"
+    assert "find_hidden_route" not in [r["id"] for r in rows]
 
 
 def test_techniques_for_lab_juiceshop_nonempty():
@@ -130,3 +139,12 @@ def test_unmapped_techniques_are_a_recorded_decision_not_an_omission():
 def test_access_control_techniques_map_to_authorization_tests_not_traversal():
     assert tq.get("client_side_authz")["wstg"] == "WSTG-ATHZ-02"
     assert tq.get("path_traversal")["wstg"] == "WSTG-ATHZ-01"     # ATHZ-01 IS the traversal test
+
+
+def test_lab_local_rows_are_kept_visible_not_deleted():
+    """Excluding lab trivia from the capability view must not lose it — the count in lab_local_total has
+    to stay reconcilable against something."""
+    m = tq.coverage_matrix()
+    assert "find_hidden_route" in [r["id"] for r in m["lab_local_rows"]]
+    assert len(m["lab_local_rows"]) == m["lab_local_total"]
+    assert len(m["rows"]) == m["transferable_total"]

@@ -940,11 +940,16 @@ def coverage_matrix(lab_ids: list[str] | None = None) -> dict:
     numbers: transferable-capability count vs generalized (>=2 lab) count.
     """
     labs = lab_ids or all_labs()
-    rows = []
+    rows, lab_local_rows = [], []
     for t in TECHNIQUES.values():
         maps = t.get("maps_to") or {}
         validated = set(t.get("validated_on", []))
-        rows.append({
+        # LAB TRIVIA IS NOT CAPABILITY, and `rows` is the capability view. find_hidden_route is declared
+        # transferable=False precisely because solving a scoreboard challenge is not a real-world method,
+        # yet it sat in these rows anyway — the test meant to catch that filtered with `if False`, so the
+        # leak survived behind a guard that had never checked anything. Kept, separately, under
+        # lab_local_rows so nothing is lost and the count in lab_local_total stays reconcilable.
+        (rows if t["transferable"] else lab_local_rows).append({
             "id": t["id"], "vuln_class": t["vuln_class"], "transferable": t["transferable"],
             "execution": t.get("execution", "auto"),
             "targets": {lab: maps.get(lab, []) for lab in labs if lab in maps},
@@ -959,7 +964,8 @@ def coverage_matrix(lab_ids: list[str] | None = None) -> dict:
         "transferable_total": sum(1 for t in TECHNIQUES.values() if t["transferable"]),
         "generalized_total": len(generalized()),
         "lab_local_total": sum(1 for t in TECHNIQUES.values() if not t["transferable"]),
-        "rows": rows,
+        "rows": rows,                       # capability view: transferable techniques only
+        "lab_local_rows": lab_local_rows,   # kept visible, never counted as capability
     }
 
 
