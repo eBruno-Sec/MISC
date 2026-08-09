@@ -57,9 +57,30 @@ def test_registry_seed_projects_a_planner_ready_registry():
     assert len(seed) >= 30
     by_id = {t["id"]: t for t in seed}
     s = by_id["sqli_auth_bypass"]
-    # generalized (>=2 labs) -> proven + top confidence; shape is exactly what plan() consumes
-    assert s["status"] == "proven" and s["confidence"]["score"] == 60
     assert isinstance(s["cwe"], list) and s["vuln_class"] == "sql_injection"
+    # Assert the MECHANISM (>=2 declared labs -> top confidence), not a technique that happened to
+    # qualify. sqli_auth_bypass used to be pinned here at score 60; it only reached two labs because a
+    # hand-written backfill dict appended "dvwa" to validated_on. Moving those unverified claims to
+    # `backfill_claim` correctly dropped it to one lab and score 40 — the test was measuring the
+    # backfill, not the planner.
+    # MONOTONIC: more declared labs must never score lower. This holds regardless of which techniques
+    # happen to be generalized today, which is the point — the previous version pinned one technique at
+    # 60 and silently became a test of the backfill dict rather than of the planner.
+    for t in seed:
+        n = len(set(t.get("validated_on") or []))
+        for u in seed:
+            if len(set(u.get("validated_on") or [])) > n:
+                assert u["confidence"]["score"] >= t["confidence"]["score"], (u["id"], t["id"])
+    # a technique with at least one lab is proven and outranks one with none
+    # NOTE: after the backfill dicts stopped writing validated_on, the seeded (precondition-gated) set
+    # may legitimately contain no lab-declared technique at all. That is information, not a failure —
+    # it says the planner's gated engines are not yet liveness-earned. Only assert the ordering when
+    # both groups actually exist, rather than requiring a proven one to be present.
+    lab = [t for t in seed if t.get("validated_on")]
+    nolab = [t for t in seed if not t.get("validated_on")]
+    assert all(t["status"] == "proven" for t in lab)
+    if lab and nolab:
+        assert min(t["confidence"]["score"] for t in lab) > max(t["confidence"]["score"] for t in nolab)
     # the seed actually drives a gated plan
     p = TP.plan({"has_login", "has_object_id"}, seed)
     assert any(a["id"] == "sqli_auth_bypass" for a in p)

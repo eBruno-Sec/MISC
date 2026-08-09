@@ -43,6 +43,13 @@ def _t(**kw) -> dict:
             raise ValueError("technique '%s' missing required field '%s'" % (kw.get("id"), k))
     kw.setdefault("pack", None)             # packs.py workflow id, if the exploit is one
     kw.setdefault("validated_on", [])       # lab ids where the ORACLE has actually confirmed it
+    # A HAND-WRITTEN BACKFILL IS NOT A PROOF. The four _*_PROVEN dicts below record labs where someone
+    # once observed a technique work; they used to append straight into validated_on, which is the field
+    # the UI renders as a green "Proven" badge. Nothing re-checked those entries, and at least one
+    # (weak_password_reset) has no production executor at all — what fired was the lab SOLVER. The claim
+    # is kept here, separate, so it stays visible and can be re-earned by a liveness run instead of
+    # masquerading as verification.
+    kw.setdefault("backfill_claim", [])
     kw.setdefault("maps_to", {})            # lab_id -> [challenge names this technique targets]
     kw.setdefault("needs_fixture", [])      # per-run data the technique consumes (never hardcoded)
     kw.setdefault("execution", "auto")      # "auto" | "operator" (operator = gated, never auto-fired)
@@ -1000,8 +1007,8 @@ _JUICESHOP_PROVEN = {
 for _tid, _chs in _JUICESHOP_PROVEN.items():
     _rec = TECHNIQUES.get(_tid)
     if _rec:
-        if "juiceshop" not in _rec["validated_on"]:
-            _rec["validated_on"] = _rec["validated_on"] + ["juiceshop"]
+        if "juiceshop" not in _rec["backfill_claim"]:
+            _rec["backfill_claim"] = _rec["backfill_claim"] + ["juiceshop"]
         _m = dict(_rec.get("maps_to") or {})
         _m["juiceshop"] = sorted(set(_m.get("juiceshop", []) + _chs))
         _rec["maps_to"] = _m
@@ -1019,8 +1026,8 @@ _DVWA_PROVEN = {
 for _tid, _chs in _DVWA_PROVEN.items():
     _rec = TECHNIQUES.get(_tid)
     if _rec:
-        if "dvwa" not in _rec["validated_on"]:
-            _rec["validated_on"] = _rec["validated_on"] + ["dvwa"]
+        if "dvwa" not in _rec["backfill_claim"]:
+            _rec["backfill_claim"] = _rec["backfill_claim"] + ["dvwa"]
         _m = dict(_rec.get("maps_to") or {})
         _m["dvwa"] = sorted(set(_m.get("dvwa", []) + _chs))
         _rec["maps_to"] = _m
@@ -1038,8 +1045,8 @@ _BWAPP_PROVEN = {
 for _tid, _chs in _BWAPP_PROVEN.items():
     _rec = TECHNIQUES.get(_tid)
     if _rec:
-        if "bwapp" not in _rec["validated_on"]:
-            _rec["validated_on"] = _rec["validated_on"] + ["bwapp"]
+        if "bwapp" not in _rec["backfill_claim"]:
+            _rec["backfill_claim"] = _rec["backfill_claim"] + ["bwapp"]
         _m = dict(_rec.get("maps_to") or {})
         _m["bwapp"] = sorted(set(_m.get("bwapp", []) + _chs))
         _rec["maps_to"] = _m
@@ -1056,8 +1063,8 @@ _MUTILLIDAE_PROVEN = {
 for _tid, _chs in _MUTILLIDAE_PROVEN.items():
     _rec = TECHNIQUES.get(_tid)
     if _rec:
-        if "mutillidae" not in _rec["validated_on"]:
-            _rec["validated_on"] = _rec["validated_on"] + ["mutillidae"]
+        if "mutillidae" not in _rec["backfill_claim"]:
+            _rec["backfill_claim"] = _rec["backfill_claim"] + ["mutillidae"]
         _m = dict(_rec.get("maps_to") or {})
         _m["mutillidae"] = sorted(set(_m.get("mutillidae", []) + _chs))
         _rec["maps_to"] = _m
