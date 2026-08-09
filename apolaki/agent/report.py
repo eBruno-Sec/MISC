@@ -1183,8 +1183,19 @@ def proof_and_retest(finding: dict) -> dict:
 def risk_score(findings: list) -> dict:
     """Honest risk posture from CONFIRMED findings only (leads never inflate it —
     that is Apolaki's truth-first edge over tools that score off unconfirmed
-    signal). 0-100 with a label + colour."""
-    score = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in findings))
+    signal). 0-100 with a label + colour.
+
+    THE FILTER IS THE CONTRACT, and it was missing. This summed severity over EVERY item handed to it,
+    while `proof_schema.demote_unproven` is deliberately non-destructive: it rewrites a confirmed-but-
+    unproven finding's confidence to "lead" and LEAVES IT IN THE LIST. So exactly the findings the proof
+    gate had just rejected went on contributing their full severity weight to the headline number — the
+    docstring's claim was the one thing the code did not do. Filtering here rather than at each call site
+    means the guarantee holds for every caller, including any added later."""
+    confirmed = [f for f in (findings or [])
+                 if str((f or {}).get("confidence") or "confirmed").lower() not in ("lead", "unconfirmed",
+                                                                                    "informational")]
+    score = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in confirmed))
+    findings = confirmed
     if score >= 70:
         label, color = "Critical", SEV_COLORS["critical"]
     elif score >= 40:
