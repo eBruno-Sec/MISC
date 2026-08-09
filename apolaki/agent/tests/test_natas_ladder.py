@@ -141,3 +141,47 @@ def test_content_paths_is_bounded_and_pure():
 def test_recon_targets_includes_text_named_paths():
     html = '<p>include("lib/config.inc")</p><img src="assets/logo.png">'
     assert "lib/config.inc" in n.recon_targets(html)
+
+
+# ── interaction: forms, parameters, decode chains ───────────────────────────────────────────────
+
+def test_a_submit_button_is_carried_in_the_payload():
+    """Server handlers routinely GATE on the submit button (`array_key_exists("submit", $_POST)`).
+    Dropping it means the request is silently rejected no matter how right the other values are — the
+    form was submitted and nothing happened, which reads as "the value was wrong"."""
+    html = ('<form method="post"><input name="secret">'
+            '<input type="submit" name="submit" value="Go"></form>')
+    form = n.forms_in(html)[0]
+    assert "submit" in form["fields"], "submit button must be in the payload"
+    assert "submit" not in form["interesting"], "…but never varied — a tester does not control its meaning"
+
+
+def test_hidden_fields_are_carried_unchanged():
+    """Hidden inputs are usually state the server expects back."""
+    html = '<form><input type="hidden" name="tok" value="abc"><input name="q"></form>'
+    form = n.forms_in(html)[0]
+    assert form["fields"]["tok"] == "abc"
+    assert form["interesting"] == ["q"]
+
+
+def test_one_field_is_varied_at_a_time():
+    """A success must attribute to a single substitution, not a lucky combination."""
+    html = '<form><input name="a"><input name="b"></form>'
+    for _label, _form, payload in n.form_submissions(html, ["VALUE"]):
+        assert list(payload.values()).count("VALUE") == 1
+
+
+def test_absolute_paths_reads_what_the_target_discloses():
+    """A hint, stack trace or config dump names where something lives. The target supplies the address."""
+    got = n.absolute_paths("hint: the password is in /etc/natas_webpass/natas8 on this host")
+    assert got == ["/etc/natas_webpass/natas8"]
+
+
+def test_param_substitution_varies_one_parameter():
+    subs = n.param_substitutions(["http://h/i.php?page=home&lang=en"], ["/etc/passwd"])
+    assert any("page=%2Fetc%2Fpasswd" in u and "lang=en" in u for _l, u in subs)
+    assert any("lang=%2Fetc%2Fpasswd" in u and "page=home" in u for _l, u in subs)
+
+
+def test_param_substitution_ignores_urls_without_parameters():
+    assert n.param_substitutions(["http://h/plain"], ["/etc/passwd"]) == []

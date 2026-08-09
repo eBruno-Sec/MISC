@@ -167,6 +167,48 @@ def decode_candidate(blob: str):
     return None
 
 
+def decode_chains(blob: str, depth: int = 4, want=None) -> list:
+    """Every value reachable by applying decode steps REPEATEDLY. Returns [(value, recipe)].
+
+    `decode_candidate` handles ONE step, and real applications routinely stack them —
+    `base64(strrev(bin2hex(x)))` is an ordinary obfuscation, and each layer alone looks like noise. A
+    single-step decoder reports nothing on such a value, which is indistinguishable from "not encoded".
+
+    Reversal is included as a step because it is the cheapest and most common thing put between two
+    encodings, and it is free to try.
+
+    Breadth-first to `depth`, deduplicated, and bounded — an unbounded search over a long blob is a
+    denial of service against ourselves. `want` optionally filters to results matching a predicate, so a
+    caller looking for a specific shape does not wade through intermediates. Pure, no network."""
+    seen, out = {blob}, []
+    frontier = [(blob, "")]
+    for _ in range(max(1, depth)):
+        nxt = []
+        for value, recipe in frontier:
+            if len(value) > 4096:
+                continue
+            for step, fn in (("b64", lambda s: decode_candidate(s)),
+                             ("rev", lambda s: s[::-1]),
+                             ("hex", lambda s: (bytes.fromhex(s).decode("utf-8", "strict")
+                                                if re.fullmatch(r"[0-9A-Fa-f]+", s) and len(s) % 2 == 0
+                                                else None))):
+                try:
+                    got = fn(value)
+                except Exception:
+                    got = None
+                if not got or got in seen:
+                    continue
+                seen.add(got)
+                rec = (recipe + "+" + step).lstrip("+")
+                if want is None or want(got):
+                    out.append((got, rec))
+                nxt.append((got, rec))
+        frontier = nxt
+        if not frontier:
+            break
+    return out[:40]
+
+
 # Credential DISCOVERY: pairs the target itself publishes/leaks (e.g. a demo app's documented test
 # account, a leaked "user: x pass: y" in a comment/page). Zero-width chars are stripped first because
 # apps (Gin & Juice Shop) obfuscate published creds with them. This is DISCOVERY of exposed creds, never

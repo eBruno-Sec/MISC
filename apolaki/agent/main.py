@@ -1516,11 +1516,30 @@ async def natas_ladder_run(payload: dict = None):
             except Exception:
                 return 0, "", ""
 
+        def post(u, h, payload):
+            """Form submission — the step that turns observation into interaction. Levels 0-5 fall to
+            observation alone; the first level needing a discovered value SUBMITTED is where an
+            observation-only harness stops."""
+            from urllib.parse import urlencode
+            data = urlencode(payload or {}).encode()
+            hh = dict(h)
+            hh["Content-Type"] = "application/x-www-form-urlencoded"
+            try:
+                r = urllib.request.urlopen(urllib.request.Request(u, data=data, headers=hh), timeout=20)
+                return r.getcode(), r.read().decode("utf-8", "replace"), str(r.headers)
+            except urllib.error.HTTPError as e:
+                try:
+                    return e.code, e.read().decode("utf-8", "replace"), str(e.headers)
+                except Exception:
+                    return e.code, "", ""
+            except Exception:
+                return 0, "", ""
+
         pw, results, creds = "natas0", [], {}
         for lvl in range(0, last + 1):
             # ONE implementation: natas_ladder.solve_level. Two copies of a solver drift and then
             # disagree about what the benchmark measured.
-            r = nl.solve_level(lvl, pw, fetch)
+            r = nl.solve_level(lvl, pw, fetch, post=post)
             results.append(r)
             if not r.get("solved"):
                 break

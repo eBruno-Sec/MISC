@@ -1010,3 +1010,51 @@ outmatched, when in fact they surfaced everything and the harness had no way to 
 `http://cdn.test/x.js` matches only as `cdn.test/x.js` — and a `startswith("http")` guard sees nothing
 wrong with that. Offsite hosts would have entered the crawl frontier disguised as relative paths. Fixed
 by judging the characters that **precede** the match rather than the match itself.
+
+---
+
+# Pass 12 — Natas 9/10: interaction, local-file read, stacked decodes
+
+Pushing the ladder past observation required three general capabilities, each of which is a real
+Apolaki improvement rather than a benchmark trick.
+
+| Added | Level it earned | Why it is general |
+|---|---|---|
+| **Form interaction** — submit discovered values into discovered forms, one field at a time | natas6 | a value recovered in one part of a target is exactly what a tester feeds into a form elsewhere |
+| **Local-file read** — substitute disclosed absolute paths into observed URL parameters | natas7 | a parameter that names a resource may name any resource; targets disclose paths in hints, errors, config dumps |
+| **Stacked decode chains** (`intel.decode_chains`) | natas8 | `base64(strrev(bin2hex(x)))` is ordinary obfuscation; each layer alone looks like noise |
+
+```
+natas0  scan_comment_secrets       natas5  cookie loggedin=1
+natas1  scan_comment_secrets       natas6  form secret=FOEIUWGH...
+natas2  files/users.txt            natas7  param page=/etc/natas_webpass/natas8
+natas3  s3cr3t/users.txt           natas8  form secret=oubWYf2k...   (decoded b64+rev+b64)
+natas4  Referer header (T1)        natas9  not solved — command injection
+
+9/10 — surface 8/8, injection 1/2
+```
+
+**The entire surface class now falls to general engines.** `intel.decode_chains` is the notable one: it
+extends an engine whose own docstring called itself "the general find-encoded-data → identify → decode
+technique" but which only ever did ONE step. Real applications stack them.
+
+## Four bugs, and what each one teaches
+
+1. **The submit button was dropped from the payload.** Server handlers routinely gate on it
+   (`array_key_exists("submit", $_POST)`), so the request was silently rejected regardless of how correct
+   the other values were — which reads exactly like "the value was wrong". Now carried, never varied.
+   *Found because the discovered-token list contained `array_key_exists` — the target's own source
+   naming its own guard.*
+2. **Candidate ranking by position, not by signal.** The right secret was fetched and never submitted,
+   because landing-page boilerplate filled the candidate budget. Fixed with **rarity**: a secret appears
+   in one page, furniture appears in all of them.
+3. **An improvement caused a regression.** Prepending decoded values pushed the rarest raw token out of
+   the budget and broke natas6, which had been passing. Caught on the very next run. Ordering now keeps
+   the rarest originals ahead of derived values.
+4. **The budget silently excluded the most expensive candidates.** A decoded value necessarily sits
+   behind the raw token it came from, so a tight cap discards precisely what the decode chain worked to
+   produce — the chain ran, found the answer, and nothing submitted it.
+
+Bugs 2–4 are the same shape in three costumes: **a bound that looks like a performance choice is a
+correctness choice when it decides which evidence gets used.** That is the T3 pairwise argument again,
+arriving from the opposite direction.

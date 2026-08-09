@@ -146,3 +146,36 @@ def test_params_feed_the_planner_observations():
     harvest = {"candidates": {"param": ["redirect_url", "q", "userid"]}, "by_kind": {"param": 3}}
     obs = TP.derive_observations(harvest=harvest)
     assert {"has_redirect_param", "has_search_param", "has_object_id"} <= obs
+
+
+# ── stacked encodings ───────────────────────────────────────────────────────────────────────────
+
+def test_decode_chains_walks_stacked_encodings():
+    """`base64(strrev(bin2hex(x)))` is an ordinary obfuscation and each layer alone looks like noise.
+    A single-step decoder reports only the intermediate, which is indistinguishable from "not encoded"."""
+    import base64 as _b64
+    import intel
+    secret = "oubWYf2kBq"
+    enc = _b64.b64encode(secret.encode().hex().encode()[::-1]).decode()
+    assert intel.decode_candidate(enc) != secret, "single step must not already reach it"
+    assert any(v == secret for v, _r in intel.decode_chains(enc, depth=4)), "chain must reach it"
+
+
+def test_decode_chains_reports_the_recipe():
+    import base64 as _b64
+    import intel
+    enc = _b64.b64encode(b"hello world").decode()
+    got = [r for v, r in intel.decode_chains(enc, depth=2) if v == "hello world"]
+    assert got and "b64" in got[0]
+
+
+def test_decode_chains_is_bounded_and_terminates():
+    import intel
+    assert len(intel.decode_chains("A" * 300, depth=4)) <= 40
+    assert intel.decode_chains("", depth=4) == []
+
+
+def test_decode_chains_is_pure():
+    import intel
+    a = intel.decode_chains("aGVsbG8=", depth=3)
+    assert a == intel.decode_chains("aGVsbG8=", depth=3)
