@@ -2015,7 +2015,7 @@ async def get_report_json(session_id: str):
 @app.get("/report/{session_id}/poc")
 async def get_report_poc(session_id: str, redact: bool = True):
     m = _require_mission(session_id)
-    findings = db.get_findings(session_id)
+    findings = db.get_findings_gated(session_id)
     ex_by_f = {f.get("id"): db.get_exchanges(session_id, f.get("id")) for f in findings}
     md = poc.mission_markdown(m["program"], findings, ex_by_f, redact=redact)
     _fn = _report_fname(m, m.get("scope") or {}, "poc.md")
@@ -2027,7 +2027,7 @@ async def get_report_poc(session_id: str, redact: bool = True):
 def _graph_inputs(session_id: str):
     """(recon, urls, findings) for graph/surface — from the live agent if the
     session is in memory, else from the snapshot persisted at mission end."""
-    findings = db.get_findings(session_id)
+    findings = db.get_findings_gated(session_id)
     if session_id in sessions:
         t = sessions[session_id]["tools"]
         return t.recon, t.urls, findings
@@ -2048,7 +2048,7 @@ def _record_memory(session_id: str) -> None:
         if not m:
             return
         tools = sessions[session_id]["tools"]
-        findings = db.get_findings(session_id)
+        findings = db.get_findings_gated(session_id)
         tkey = memory_mod.target_key(m["scope"])
         snap = memory_mod.snapshot(tools.recon, tools.urls, findings)
         # stash a credential the scan DISCOVERED (target-exposed) so the NEXT scan of this target can
@@ -2564,7 +2564,7 @@ async def retest_findings(session_id: str, finding_id: str = ""):
     import retest as _rt
     import attack_chain as _ac
     m = _require_mission(session_id)
-    findings = db.get_findings(session_id) or []
+    findings = db.get_findings_gated(session_id) or []
     if finding_id:
         findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
     # in-scope guard: a retest may only re-hit a target the mission was scoped to. Rebuild the mission's
@@ -2621,7 +2621,7 @@ async def poc_bundle_export(session_id: str, finding_id: str = ""):
     reproduce + re-verify, nothing external required."""
     import poc_bundle as _pb
     m = _require_mission(session_id)
-    findings = db.get_findings(session_id) or []
+    findings = db.get_findings_gated(session_id) or []
     if finding_id:
         findings = [f for f in findings if str(f.get("id")) == str(finding_id)]
     # scope lives at m["scope"]["in_scope"] — m.get("in_scope") is the wrong shape and always empty

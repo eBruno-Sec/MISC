@@ -30,11 +30,14 @@ _RAW_IS_CORRECT = {
 }
 
 # Raw `db.get_findings(` call sites remaining. THIS NUMBER MAY ONLY FALL.
+# 20 -> 15: the PoC export, PoC bundle, retest planner, cross-session memory snapshot and graph inputs
+# now read get_findings_gated (Codex batch 2 #5, #6, #11). Five consumers that presented proof-demoted
+# rows as confirmed.
 # MEASURED, not estimated — I first wrote 11 from memory and the real count was 20, which is exactly the
 # kind of invented baseline that makes a ratchet meaningless. Two consumers (the AI wrap-up prompt and the
 # coverage counts) are already migrated; the rest are tracked in tasks #50/#51 and are recorded here
 # rather than silently tolerated. Lower this as each is moved to get_findings_gated().
-_KNOWN_UNGATED = 20
+_KNOWN_UNGATED = 15
 
 
 def _raw_call_count():
