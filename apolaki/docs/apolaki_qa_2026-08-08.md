@@ -1058,3 +1058,36 @@ technique" but which only ever did ONE step. Real applications stack them.
 Bugs 2–4 are the same shape in three costumes: **a bound that looks like a performance choice is a
 correctness choice when it decides which evidence gets used.** That is the T3 pairwise argument again,
 arriving from the opposite direction.
+
+## natas9 forced a distinction the benchmark was missing
+
+The general cmdi engine **confirms the vulnerability**:
+
+```
+payload : apolaki; echo cmi$(( 421 * 619 ))
+oracle  : {'kind': 'computed-echo', 'match': 'cmi260599'}
+```
+
+That oracle fires only on the *computed product* — evidence of EXECUTION — never on a reflected payload.
+The bug is found, and proven.
+
+The flag is still not captured, and the reason is not a scanner gap: **natas9 discloses no absolute
+path.** `absolute_paths` returns `[]` for both the landing page and the disclosed source. Knowing to read
+`/etc/natas_webpass/natas10` is Natas knowledge, not a capability — inferring it from the pattern seen on
+natas7 would be exactly the level-specific reasoning this benchmark forbids.
+
+So `solve_level` now reports `vulnerability_confirmed` separately from `solved`, and `summarise` tracks
+`vulnerability_confirmed_only`:
+
+```
+natas9  no  vulnerability CONFIRMED (command_injection) but the flag's location
+            is not disclosed — operator knowledge, not a scanner gap
+```
+
+**Finding the vulnerability and capturing the flag are different claims.** A pentest tool's job is the
+first; the second needs someone who knows where the prize sits. Reporting only "unsolved" understates the
+tool and, worse, points future work at the wrong problem — it would suggest the injection engine needs
+improving when it performed perfectly.
+
+Same discipline as `capability_preflight`'s "What This Assessment Could Not Test" and the `blocked` vs
+`not_solved` split: **the reason a thing did not happen is part of the result.**

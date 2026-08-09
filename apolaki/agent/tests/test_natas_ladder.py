@@ -185,3 +185,34 @@ def test_param_substitution_varies_one_parameter():
 
 def test_param_substitution_ignores_urls_without_parameters():
     assert n.param_substitutions(["http://h/plain"], ["/etc/passwd"]) == []
+
+
+# ── found the bug vs captured the flag ──────────────────────────────────────────────────────────
+
+def test_cmdi_read_payloads_terminate_the_remaining_command():
+    """The injection point is usually mid-command, so the rest of the line would be a syntax error that
+    discards everything — the injection succeeds and returns nothing, which is indistinguishable from
+    not being injectable."""
+    import cmdi_tool
+    got = [d["payload"] for d in cmdi_tool.read_file_payloads("x", "/etc/passwd")]
+    assert any(p.endswith("#") for p in got), "at least one variant must comment out the remainder"
+    assert all("/etc/passwd" in p for p in got)
+
+
+def test_cmdi_read_payloads_need_a_path():
+    import cmdi_tool
+    assert cmdi_tool.read_file_payloads("x", "") == []
+    assert cmdi_tool.read_file_payloads("x", "   ") == []
+
+
+def test_summary_separates_vulnerability_found_from_flag_captured():
+    """natas9 forced this: the cmdi engine CONFIRMS the injection with its FP-safe oracle, but the target
+    discloses nowhere the password lives. Reporting only 'unsolved' understates the tool and points
+    future work at the wrong problem — it would suggest the injection engine needs improving when it
+    performed perfectly."""
+    s = n.summarise([{"level": 8, "solved": True},
+                     {"level": 9, "solved": False, "vulnerability_confirmed": "command_injection"},
+                     {"level": 10, "solved": False}])
+    assert s["vulnerability_confirmed_only"] == [9]
+    assert s["solved"] == 1
+    assert s["not_solved"] == 2, "a confirmed vulnerability is still not a captured flag"
