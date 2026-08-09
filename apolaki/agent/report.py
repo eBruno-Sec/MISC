@@ -90,6 +90,24 @@ def _ot_context_md(finding: dict) -> list:
             "- %s" % imp["statement"], ""]
 
 
+def _scope_exclusion_md(scope: dict) -> list:
+    """Record vulnerability classes the operator excluded (#34). Empty when nothing was excluded.
+
+    Delegates to `scan_scope.report_block` so the wording an operator saw in the UI preview is the
+    wording that reaches the report — two phrasings of the same decision is how a client and a tester end
+    up disagreeing about what was tested."""
+    cats = (scope or {}).get("exclude_categories") or []
+    if not cats:
+        return []
+    try:
+        import scan_scope as ss
+        import techniques as T
+        return ss.report_block(cats, [T.get(t["id"]) for t in T.list_techniques()])
+    except Exception:
+        return ["**Excluded from this assessment (operator scoping):** %s — not tested."
+                % ", ".join(str(c) for c in cats), ""]
+
+
 def _remediation_depth_md(finding: dict) -> list:
     """Design-level remediation for a finding (T5, BSRS Ch.5/6/8/9) as report lines.
 
@@ -324,6 +342,11 @@ def generate_report(program: str, findings: list, scope: dict,
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",
     ]
+    # Operator scoping (#34) goes NEAR THE TOP, not in an appendix. A reader who skims the summary and
+    # sees no injection findings must learn on the same screen that injection was never tested — an
+    # excluded class reads as a clean one otherwise, which is the most consequential misreading a
+    # pentest report can invite.
+    lines += _scope_exclusion_md(scope)
     if ai_block:
         lines += [ai_block.rstrip(), ""]
     lines += [

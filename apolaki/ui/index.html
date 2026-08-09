@@ -357,6 +357,13 @@ svg text{font-family:var(--mono);font-size:9px;fill:var(--text-dim)}
               </select>
               <div class="hint">Higher = the agent repeats recon, learning from discovered hosts / URLs / tech to widen the surface before scanning. Intrusive tools are never looped.</div>
             </div>
+            <div class="field"><label>Vulnerability classes to test</label>
+              <div id="scopeCats" class="tx-lenses" style="margin:.15rem 0 .5rem"></div>
+              <div class="hint" id="scopeHint">All classes tested by default. Unchecking genuinely skips those
+                techniques — and anything they would have unlocked is shown, because an untested class is
+                <b>not</b> a clean one.</div>
+              <div id="scopeCost" style="margin-top:.35rem"></div>
+            </div>
             <div class="field"><label>In-scope domains</label>
               <textarea id="inScope" placeholder="*.shopify.com&#10;shopify.com" oninput="refreshEstimate();checkAuthAvailable()"></textarea>
               <div class="hint">One per line. Wildcards allowed: <code class="inline">*.domain.com</code></div>
@@ -1292,6 +1299,7 @@ async function startHunt(){
     mode:document.getElementById("mode").value,auto_approve:document.getElementById("autoApprove").checked,
     auth_headers:parseHeaders(document.getElementById("authHeaders").value),
     parent_id:pendingParent||null,recon_cycles:cycles,strategy:strategy,
+    exclude_categories:[..._scopeExcluded],
     enable_zap:document.getElementById("enableZap").checked,
     zap_policy:document.getElementById("zapPolicy").value,
     zap_speed:document.getElementById("zapSpeed").value,
@@ -2118,6 +2126,44 @@ function renderTaxonomy(d){
   return h;
 }
 
+/* ── Scan scoping (#34): include/exclude vulnerability classes, with the COST shown.
+   Functional, not decorative — the selection is sent with the scan and gates the planner. The cost half
+   comes from the effects model: excluding one class can leave a class you KEPT unreachable. ── */
+let _scopeExcluded=new Set();
+function scopeToggle(id){ _scopeExcluded.has(id)?_scopeExcluded.delete(id):_scopeExcluded.add(id); loadScopeCategories(); }
+async function loadScopeCategories(){
+  const bar=document.getElementById("scopeCats"), cost=document.getElementById("scopeCost");
+  if(!bar) return;
+  let d={};
+  try{
+    d=await(await fetch(`${API}/scope/categories`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({exclude:[..._scopeExcluded]})})).json();
+  }catch(e){ bar.innerHTML=`<span class="muted">scope options unavailable</span>`; return; }
+  if(d.error){ bar.innerHTML=`<span class="muted">${esc(d.error)}</span>`; return; }
+  bar.innerHTML=(d.categories||[]).map(c=>
+    `<button type="button" class="tx-lens ${c.excluded?"":"active"}" onclick="scopeToggle('${esc(c.id)}')"
+       title="${esc(c.label)} — ${c.techniques} technique(s)">${c.excluded?"☐":"☑"} ${esc(c.label.split(" (")[0])}
+       <span style="opacity:.6">${c.techniques}</span></button>`).join("");
+  let h=`<div class="tx-sum" style="padding:.45rem .7rem">
+    <b>${d.will_run}</b> of ${d.total_techniques} techniques will run`;
+  if(d.skipped_count) h+=` — <span style="color:var(--warn)">${d.skipped_count} skipped by your scoping</span>`;
+  h+=`.</div>`;
+  if((d.collateral_unreachable||[]).length){
+    h+=`<div class="tx-sum" style="padding:.45rem .7rem;color:var(--danger)">
+      ⚠ Also now UNREACHABLE (nothing left establishes what they need):
+      ${(d.collateral_unreachable||[]).map(e=>`<code>${esc(e)}</code>`).join(", ")}</div>`;
+  } else if((d.starved_observations||[]).length){
+    h+=`<div class="tx-sum" style="padding:.45rem .7rem;color:var(--text-dim)">
+      No longer establishable: ${(d.starved_observations||[]).map(o=>`<code>${esc(o)}</code>`).join(", ")} —
+      nothing you kept depends on them.</div>`;
+  }
+  if(d.skipped_count){
+    h+=`<div class="tx-sum" style="padding:.45rem .7rem;color:var(--text-dim)">
+      The report will record these as <b>untested</b>, not clean.</div>`;
+  }
+  cost.innerHTML=h;
+}
+
 /* ── Orchestration: the no-island invariant + the effects layer, visible rather than CI-only ── */
 async function loadOrchestration(){
   const el=document.getElementById("orchestrationBody"); if(!el)return;
@@ -2822,13 +2868,14 @@ renderHelp();
 Object.assign(window,{topoClick,topoSelectId,topoAction,topoReset,loadMission,rescan,delMission,switchTab,
   showView,resumeLast,prefillWorkbench,toCurl,prefillAccess,refreshEstimate,
   delSelectedMissions,toggleAllMissions,updateMissionSel,
-  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadOrchestration,loadReach,reachToggle,loadCodeReview,runCodeReview,runHarvest,
+  loadConquest,solveThenConquest,cqToggle,loadTaxonomy,txLens,loadOrchestration,loadReach,reachToggle,loadScopeCategories,scopeToggle,loadCodeReview,runCodeReview,runHarvest,
   loadIntel,intelReview,intelMerge,intelExtractCapec,intelRefreshFeeds,intelExtractProse,intelFilter,intelSearch,
   setFindFilter,confirmLead,dismissLead,showAddFinding,submitAddFinding});
 
 /* land on the Launch view */
 showView("launch");
 refreshEstimate();
+loadScopeCategories();
 refreshZapStatus();
 </script>
 </body>

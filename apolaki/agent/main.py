@@ -59,6 +59,10 @@ class EngageRequest(BaseModel):
     authenticated_scan: bool = False
     parent_id: Optional[str] = None  # rescan: link this new mission to the one it was cloned from
     recon_cycles: int = 1            # iterative recon: 1 (default, unchanged) .. 3
+    # Operator scoping (#34): vulnerability CATEGORIES to leave untested. Empty = test everything, which
+    # stays the default so an unscoped scan is unchanged. Excluded classes are recorded in the report,
+    # because an untested class is not a clean one.
+    exclude_categories: list = []
     strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: deterministic)
     max_ai_calls: Optional[int] = None  # override the per-strategy AI-call budget
     # OWASP ZAP DAST — opt-in from the scan setup UI. enable_zap OFF (default) means
@@ -384,7 +388,8 @@ async def engage(req: EngageRequest):
                      enable_zap=enable_zap, zap_policy=req.zap_policy,
                      zap_speed=req.zap_speed, zap_aggression=req.zap_aggression,
                      enable_nmap_vuln=req.enable_nmap_vuln, enable_nuclei_heavy=req.enable_nuclei_heavy,
-                     authenticated_scan=req.authenticated_scan)
+                     authenticated_scan=req.authenticated_scan,
+                     exclude_categories=list(req.exclude_categories or []))
 
     # ── warm-start from cross-session memory ─────────────────────────
     # If a prior mission on the SAME target (keyed by scope, not id) left intel,
@@ -406,7 +411,13 @@ async def engage(req: EngageRequest):
                "intensity": req.intensity}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
-    db.create_mission(session_id, req.program_name, req.mode, objective, scope.to_dict(), context)
+    # Operator scoping travels WITH the scope, because that is what it is. The report reads
+    # m["scope"], so recording it here is what makes an excluded class appear as UNTESTED rather than
+    # silently absent.
+    _scope_dict = scope.to_dict()
+    if req.exclude_categories:
+        _scope_dict = dict(_scope_dict, exclude_categories=list(req.exclude_categories))
+    db.create_mission(session_id, req.program_name, req.mode, objective, _scope_dict, context)
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
                             "status": "created", "events": [], "task": None, "done": False}
@@ -955,6 +966,42 @@ async def orchestration_audit():
                              "them: it still filters by preconditions only, so these chains are visible "
                              "here and not yet acted on."),
                 }}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/scope/categories")
+async def scope_categories(payload: dict = None):
+    """Vulnerability categories an operator can include/exclude, and what excluding them COSTS (#34).
+
+    The cost half is the point. Engines do not stand alone: `engine_descriptor` knows which establish the
+    observations others require, so excluding one category can leave a category you kept UNREACHABLE.
+    Showing the count without that turns scoping into guesswork.
+
+    Read-only and side-effect free — this is the preview an operator sees BEFORE committing a scan."""
+    import scan_scope as ss
+    import techniques as T
+    try:
+        techs = [T.get(t["id"]) for t in T.list_techniques()]
+        excluded = (payload or {}).get("exclude") or []
+        r = ss.resolve(excluded, techs)
+        con = ss.consequences(excluded, techs)
+        cats = []
+        for name, spec in sorted(ss.CATEGORIES.items()):
+            ids = ss.technique_ids_in([name], techs)
+            cats.append({"id": name, "label": spec["label"], "techniques": len(ids),
+                         "excluded": name in r["excluded_categories"]})
+        total = len(techs)
+        return {"categories": cats, "total_techniques": total,
+                "skipped_technique_ids": r["skipped_technique_ids"],
+                "skipped_count": r["skipped_count"],
+                "will_run": total - r["skipped_count"],
+                "unknown_categories": r["unknown_categories"],
+                "starved_observations": con["starved_observations"],
+                "collateral_unreachable": con["unreachable_engines"],
+                "note": ("Excluded classes are recorded in the report as UNTESTED. Absence of findings "
+                         "in an excluded class means nothing."),
+                "report_preview": ss.report_block(excluded, techs)}
     except Exception as e:
         return {"error": str(e)}
 

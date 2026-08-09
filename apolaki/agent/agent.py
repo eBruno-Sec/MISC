@@ -181,6 +181,7 @@ class BBHAgent:
     def __init__(self, scope: ScopeEngine, tools: ToolRegistry, stop_event: asyncio.Event,
                  mode: str = "active", auto_approve: bool = False, mission_id: str = None,
                  recon_cycles: int = 1, strategy: str = "low_ai", max_ai_calls: int = None,
+                 exclude_categories=None,
                  enable_zap: bool = False, zap_policy: str = "safe_active",
                  zap_speed: str = "normal", zap_aggression: str = "normal",
                  enable_nmap_vuln: bool = False, enable_nuclei_heavy: bool = False,
@@ -220,6 +221,18 @@ class BBHAgent:
         self.auto_approve = auto_approve
         self.mission_id = mission_id
         self.recon_cycles = max(1, min(int(recon_cycles or 1), 3))
+        # Operator scoping (#34). Resolved ONCE to concrete technique ids so every planner call gates on
+        # the same set -- resolving per call would let a later caller silently disagree about the scope.
+        self.exclude_categories = list(exclude_categories or [])
+        self.skip_technique_ids = []
+        if self.exclude_categories:
+            try:
+                import scan_scope as _ss, techniques as _T
+                self.skip_technique_ids = _ss.resolve(
+                    self.exclude_categories,
+                    [_T.get(t["id"]) for t in _T.list_techniques()])["skipped_technique_ids"]
+            except Exception:
+                self.skip_technique_ids = []
         self.strategy = strategy if strategy in self._DEFAULT_BUDGET else "low_ai"
         self.ai_calls = 0
         self.ai_degraded = False
@@ -1087,7 +1100,10 @@ class BBHAgent:
                 obs |= _proxy.to_observations()
             except Exception:
                 pass
-            p = TP.plan(obs, _seed, kev_cwes=kev)
+            # getattr, not attribute access: this method is also invoked unbound on lighter agent objects,
+            # and a hard dependency here turned the whole autonomy loop into a silent no-op. An agent
+            # without the attribute simply has no exclusions.
+            p = TP.plan(obs, _seed, kev_cwes=kev, skip_ids=getattr(self, "skip_technique_ids", None))
             try:
                 import learning
                 rel = learning.reliability()

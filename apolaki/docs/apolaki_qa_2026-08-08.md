@@ -1091,3 +1091,63 @@ improving when it performed perfectly.
 
 Same discipline as `capability_preflight`'s "What This Assessment Could Not Test" and the `blocked` vs
 `not_solved` split: **the reason a thing did not happen is part of the result.**
+
+---
+
+# Pass 13 — operator scan scoping (#34), functional not decorative
+
+Three things make selection real rather than a set of checkboxes:
+
+**1. It gates.** `exclude_categories` resolves ONCE, at agent construction, into concrete technique ids,
+and `technique_planner.plan()` gained a `skip_ids` parameter applied at the single place every
+planner-driven technique passes through. Resolving per call would let a later caller silently disagree
+about the scope. Default `None` keeps an unscoped scan byte-identical.
+
+```
+UI checkbox → exclude_categories → BBHAgent.skip_technique_ids → TP.plan(skip_ids=…) → report
+```
+
+**2. It shows the cost, computed rather than guessed.** Engines do not stand alone. `scan_scope.
+consequences()` uses the effects model to find observations whose every producer was excluded, then the
+engines gated on them that the operator *kept*. Presenting a skip count without that is how someone
+concludes a class was tested when nothing could reach it.
+
+**3. It reaches the report, near the top.** A reader who skims the summary and sees no injection findings
+must learn on the same screen that injection was never tested. The same wording appears in the UI preview
+and the report, because two phrasings of one decision is how a client and a tester end up disagreeing
+about what was assessed.
+
+## Two design decisions worth recording
+
+**Every technique is selectable.** Grouping 39 internal `vuln_class` values into 10 operator categories
+left `llm_prompt_injection`, `llm_output_handling` and `misc` homeless. A class in no category is one an
+operator cannot knowingly exclude — and excluding "everything" would still run it. Added an `llm`
+category and an explicit `other` bucket; a test asserts nothing is ungrouped.
+
+**An unknown category is reported, never ignored.** A typo that silently excludes nothing would let an
+operator believe they had narrowed a scan when they had not — invisible, and the worst kind of scoping
+bug. `resolve()` returns `unknown_categories` and the report flags them.
+
+## A measured result, pinned by test
+
+On the current registry, category exclusions are **largely self-contained**: excluding every producer of
+`authenticated` starves the observation, but every consumer of it also sits in an excluded category, so
+there is no collateral damage. That is good news and worth pinning — if a future engine breaks the
+property, an operator's exclusion starts silently disabling things they kept, and they should be told.
+The collateral logic itself is proven on a synthetic registry where the case does arise.
+
+## A regression my own change caused, caught by an existing test
+
+`test_autonomy_loop_records_evidence_and_demotes_confirmed` failed. The cause was mine: I wrote
+`self.skip_technique_ids` inside `_close_autonomy_loop`, and that method is also invoked **unbound** on
+lighter agent objects that do not carry the attribute. The `AttributeError` was swallowed and the
+generator yielded nothing — **the entire autonomy loop became a silent no-op**, which is far worse than
+the feature not working.
+
+Fixed with `getattr(self, "skip_technique_ids", None)`: an agent without the attribute simply has no
+exclusions. The test was not weakened; it was right.
+
+Worth naming the pattern, because it is the third time this session: **a new hard dependency inside an
+existing code path turns that path off silently.** The GraphQL island, the `_do_header_trust` summary
+that counted targets instead of executions, and now this — each failed quietly and each looked like
+"nothing to report" rather than "something broke."

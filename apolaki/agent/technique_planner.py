@@ -175,14 +175,21 @@ def registry_seed(enrich=None):
     return out
 
 
-def plan(observations, techniques, kev_cwes=None):
+def plan(observations, techniques, kev_cwes=None, skip_ids=None):
     """Ordered plan: only techniques whose preconditions ALL hold, ranked by confidence x KEV x proven.
     Deterministic and explainable -- each entry says which preconditions matched. Returns [] if the
-    evidence supports nothing (an honest 'exhausted path', not an invented action)."""
+    evidence supports nothing (an honest 'exhausted path', not an invented action).
+
+    `skip_ids` is the OPERATOR'S scoping decision (#34) applied at the single place every planner-driven
+    technique passes through, so an exclusion cannot be bypassed by a caller that forgot to filter.
+    Default None keeps an unscoped scan byte-identical."""
     obs = set(observations or [])
     kev_cwes = {str(c).upper() for c in (kev_cwes or [])}
+    skip = set(skip_ids or ())
     out = []
     for t in techniques:
+        if t.get("id") in skip:
+            continue                                  # operator excluded this class from the assessment
         pre = _PRECONDITIONS.get(t.get("id"))
         if pre is None:
             continue                                  # not a planner-driven technique
