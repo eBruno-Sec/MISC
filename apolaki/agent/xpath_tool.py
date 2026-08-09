@@ -15,11 +15,31 @@ from __future__ import annotations
 
 import re
 
+import semantic_differential as sd
+
 # quote-break probes (single- and double-quoted XPath string contexts) + an XPath-function break. Any of
 # these, in a value concatenated into an XPath expression, provokes a parser error from the XPath engine.
 def probes(orig: str) -> dict:
     o = orig or ""
     return {"sq": o + "'", "dq": o + '"', "fn": o + "']|//*['"}
+
+
+def boolean_pairs(orig: str) -> list:
+    """XPath-specific truth/contradiction pairs for silent processors.
+
+    Every XML document has exactly one document element, so count(/*)=1 is true and count(/*)=0 is a
+    contradiction. The payload shape is otherwise identical, and the XPath-only count(/*) expression avoids
+    claiming an ordinary SQL boolean split as XPath.
+    """
+    o = orig or "apolaki"
+    return [
+        {"name": "single_quote",
+         "true": o + "' or count(/*)=1 or '1'='2",
+         "false": o + "' or count(/*)=0 or '1'='2"},
+        {"name": "double_quote",
+         "true": o + '" or count(/*)=1 or "1"="2',
+         "false": o + '" or count(/*)=0 or "1"="2'},
+    ]
 
 
 # error signatures emitted by common XPath processors — present in a broken-XPath response, absent from a
@@ -53,6 +73,15 @@ def evaluate(baseline_body: str, probe_body: str) -> dict:
         return {"confirmed": True, "oracle": "XPath-processor error signature appeared after a quote/function "
                 "break ('%s') — the input is concatenated into an XPath expression" % sig}
     return {"confirmed": False, "oracle": ""}
+
+
+def evaluate_boolean(true_body: str, false_body: str, true_payload: str, false_payload: str) -> dict:
+    ev = sd.evaluate(true_body, false_body, true_payload, false_payload)
+    if not ev["confirmed"]:
+        return {"confirmed": False, "oracle": ""}
+    return {"confirmed": True,
+            "oracle": ("an XPath-specific boolean differential split on count(/*)=1 versus the otherwise "
+                       "identical contradiction count(/*)=0; %s" % ev["oracle"])}
 
 
 def finding(url: str, param: str, where: str, oracle: str) -> dict:

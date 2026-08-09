@@ -4136,6 +4136,7 @@ class ToolRegistry:
         `' or '1'='1` / `' or '1'='2` pair splits (boolean). Tests GET query params AND POST form fields."""
         import xpath_tool as xp
         import httpx
+        import semantic_differential as sd
         from urllib.parse import urlparse, parse_qsl, urlencode
         url = inp["url"]
         if not self.scope.validate(url)[0]:
@@ -4156,11 +4157,25 @@ class ToolRegistry:
         for name, val in parse_qsl(pr0.query, keep_blank_values=True):
             p = xp.probes(val)
             base = await _body(url)
+            hit = False
             for key in ("sq", "dq", "fn"):
                 ev = xp.evaluate(base, await _body(_setq(name, p[key])))
                 if ev["confirmed"]:
                     findings.append(self._attach_poc(xp.finding(url, name, "parameter", ev["oracle"]),
                                                      _setq(name, p[key]), None))
+                    hit = True
+                    break
+            if hit:
+                continue
+            for pair in xp.boolean_pairs(val):
+                bodies, urls = {}, {}
+                for label, payload in sd.randomized_pair(pair["true"], pair["false"]):
+                    urls[label] = _setq(name, payload)
+                    bodies[label] = await _body(urls[label])
+                ev = xp.evaluate_boolean(bodies["true"], bodies["false"], pair["true"], pair["false"])
+                if ev["confirmed"]:
+                    findings.append(self._attach_poc(xp.finding(url, name, "parameter", ev["oracle"]),
+                                                     urls["true"], None))
                     break
 
         # 2) POST form text fields (XML-backed login is the classic XPath injection surface) — session-aware
@@ -4190,11 +4205,26 @@ class ToolRegistry:
                         seen.add((act, field))
                         p = xp.probes("x")
                         base = await _pbody(act, field, "x")
+                        hit = False
                         for key in ("sq", "dq", "fn"):
                             ev = xp.evaluate(base, await _pbody(act, field, p[key]))
                             if ev["confirmed"]:
                                 findings.append(self._attach_poc(
                                     xp.finding(act, field, "form field", ev["oracle"]), act, None, method="POST"))
+                                hit = True
+                                break
+                        if hit:
+                            continue
+                        for pair in xp.boolean_pairs("x"):
+                            bodies = {}
+                            for label, payload in sd.randomized_pair(pair["true"], pair["false"]):
+                                bodies[label] = await _pbody(act, field, payload)
+                            ev = xp.evaluate_boolean(
+                                bodies["true"], bodies["false"], pair["true"], pair["false"])
+                            if ev["confirmed"]:
+                                findings.append(self._attach_poc(
+                                    xp.finding(act, field, "form field", ev["oracle"]),
+                                    act, None, method="POST"))
                                 break
         except Exception:
             pass
@@ -4207,6 +4237,8 @@ class ToolRegistry:
         collides with SQLi/XPath. Tests GET query params AND POST form fields."""
         import ldap_tool as lp
         import httpx
+        import os as _os
+        import semantic_differential as sd
         from urllib.parse import urlparse, parse_qsl, urlencode
         url = inp["url"]
         if not self.scope.validate(url)[0]:
@@ -4225,11 +4257,25 @@ class ToolRegistry:
         for name, val in parse_qsl(pr0.query, keep_blank_values=True):
             p = lp.probes(val)
             base = await _body(url)
+            hit = False
             for key in ("paren", "star_group", "amp", "pipe"):
                 ev = lp.evaluate(base, await _body(_setq(name, p[key])))
                 if ev["confirmed"]:
                     findings.append(self._attach_poc(lp.finding(url, name, "parameter", ev["oracle"]),
                                                      _setq(name, p[key]), None))
+                    hit = True
+                    break
+            if hit:
+                continue
+            for pair in lp.boolean_pairs(val, _os.urandom(4).hex()):
+                bodies, urls = {}, {}
+                for label, payload in sd.randomized_pair(pair["true"], pair["false"]):
+                    urls[label] = _setq(name, payload)
+                    bodies[label] = await _body(urls[label])
+                ev = lp.evaluate_boolean(bodies["true"], bodies["false"], pair["true"], pair["false"])
+                if ev["confirmed"]:
+                    findings.append(self._attach_poc(lp.finding(url, name, "parameter", ev["oracle"]),
+                                                     urls["true"], None))
                     break
 
         try:
@@ -4258,11 +4304,26 @@ class ToolRegistry:
                         seen.add((act, field))
                         p = lp.probes("x")
                         base = await _pbody(act, field, "x")
+                        hit = False
                         for key in ("paren", "star_group", "amp", "pipe"):
                             ev = lp.evaluate(base, await _pbody(act, field, p[key]))
                             if ev["confirmed"]:
                                 findings.append(self._attach_poc(
                                     lp.finding(act, field, "form field", ev["oracle"]), act, None, method="POST"))
+                                hit = True
+                                break
+                        if hit:
+                            continue
+                        for pair in lp.boolean_pairs("x", _os.urandom(4).hex()):
+                            bodies = {}
+                            for label, payload in sd.randomized_pair(pair["true"], pair["false"]):
+                                bodies[label] = await _pbody(act, field, payload)
+                            ev = lp.evaluate_boolean(
+                                bodies["true"], bodies["false"], pair["true"], pair["false"])
+                            if ev["confirmed"]:
+                                findings.append(self._attach_poc(
+                                    lp.finding(act, field, "form field", ev["oracle"]),
+                                    act, None, method="POST"))
                                 break
         except Exception:
             pass
@@ -7358,6 +7419,39 @@ class ToolRegistry:
         return ToolResult("rdp_audit", "%s:%d" % (host, port), True,
                           "%d rdp-no-nla finding(s)" % len(findings), findings)
 
+    async def _cssom_custom_property_probe(self, url: str, token: str) -> dict:
+        """Load the reflected payload and ask Chromium whether its custom property reached computed style."""
+        chrome = _chrome_path()
+        if not chrome:
+            return {"available": False, "matched": False, "error": "Chromium unavailable"}
+        try:
+            from playwright.async_api import async_playwright
+        except Exception as e:
+            return {"available": False, "matched": False, "error": str(e)[:120]}
+        import css_injection_tool as css
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+        launched = False
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True, executable_path=chrome,
+                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                launched = True
+                ctx = await browser.new_context(ignore_https_errors=True)
+                if self.session_headers:
+                    hdrs = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
+                    if hdrs:
+                        await ctx.set_extra_http_headers(hdrs)
+                await self._ctx_add_cookies(ctx)
+                page = await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                hit = await css.read_cssom(page, token)
+                await browser.close()
+                return {"available": True, "matched": bool(hit.get("matched")),
+                        "tag": hit.get("tag", ""), "id": hit.get("id", ""), "error": ""}
+        except Exception as e:
+            return {"available": launched, "matched": False, "error": str(e)[:120]}
+
     async def _run_css_injection(self, inp: dict) -> ToolResult:
         """ACTIVE: CSS injection (CWE-74 / WSTG-CLNT-05) — user input reflected into a <style> block or a
         style="" attribute with the CSS structural chars unescaped lets an attacker inject rules (data
@@ -7378,11 +7472,20 @@ class ToolRegistry:
 
         for name, _v in parse_qsl(pr0.query, keep_blank_values=True):
             t = _os.urandom(3).hex()
-            r = await self._http(_setq(name, css.payload(t)), "GET", capture=False)
+            probe_url = _setq(name, css.payload(t))
+            r = await self._http(probe_url, "GET", capture=False)
             ev = css.evaluate(r.get("body", "") or "", t)
             if ev["confirmed"]:
+                cssom = await self._cssom_custom_property_probe(probe_url, t)
+                if cssom["available"] and not cssom["matched"]:
+                    continue
+                if cssom["matched"]:
+                    node = cssom.get("tag") or "element"
+                    ev["oracle"] = ("Chromium CSSOM read %s=%s from computed style on <%s>, proving the "
+                                    "browser parsed the reflected input as CSS"
+                                    % (css.custom_property(t), css.cssom_value(t), node))
                 findings.append(self._attach_poc(css.finding(url, name, ev["where"], ev["oracle"]),
-                                                 _setq(name, css.payload(t)), None))
+                                                 probe_url, None))
         return ToolResult("css_injection", url, True, "%d CSS injection finding(s)" % len(findings), findings)
 
     async def _run_llm_probe(self, inp: dict) -> ToolResult:

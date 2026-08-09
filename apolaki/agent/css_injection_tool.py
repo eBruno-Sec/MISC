@@ -14,10 +14,20 @@ import re
 _MARK = "apolcss"
 
 
+def custom_property(token: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_-]", "", token or "")
+    return "--apolaki-%s" % (clean or "probe")
+
+
+def cssom_value(token: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_-]", "", token or "")
+    return "v%s" % (clean or "probe")
+
+
 def payload(token: str) -> str:
-    """A marker plus a CSS rule fragment. In a <style> block the `{...}` injects a rule; in a style="" attr
-    the `;prop:val` adds a declaration. Carrying both lets one probe confirm either context."""
-    return "%s%s;x{color:red}" % (_MARK, token)
+    """Set a nonce custom property in a declaration list or a new :root rule."""
+    prop, value = custom_property(token), cssom_value(token)
+    return "%s%s;%s:%s;} :root{%s:%s}" % (_MARK, token, prop, value, prop, value)
 
 
 def _in_style_block(body: str, idx: int) -> bool:
@@ -41,22 +51,40 @@ def evaluate(body: str, token: str) -> dict:
     """Confirmed when the marker reflects inside a CSS context with the breakout chars unescaped."""
     mark = _MARK + token
     body = body or ""
-    i = body.find(mark)
-    if i < 0:
-        return {"confirmed": False, "oracle": "", "where": ""}
-    tail = body[i:i + len(mark) + 24]          # the reflected marker + what follows it
-    # entity-encoded structural chars mean the value was safely encoded -> not injectable
-    if "&#" in tail or "&lt;" in tail or "&#123" in tail:
-        return {"confirmed": False, "oracle": "", "where": ""}
-    if _in_style_block(body, i) and "{" in tail and "}" in tail:
-        return {"confirmed": True, "where": "style block",
-                "oracle": "input reflects inside a <style> block with '{' and '}' unescaped — arbitrary CSS "
-                          "rules can be injected (data exfiltration via attribute-selector url() leaks)"}
-    if _in_style_attr(body, i) and ";" in tail and ":" in tail:
-        return {"confirmed": True, "where": "style attribute",
-                "oracle": "input reflects inside a style=\"...\" attribute with ';' and ':' unescaped — extra "
-                          "CSS declarations can be injected"}
+    start = 0
+    while True:
+        i = body.find(mark, start)
+        if i < 0:
+            break
+        start = i + len(mark)
+        tail = body[i:i + len(payload(token)) + 16]
+        # One safe reflection must not hide a later unsafe one, or vice versa.
+        if "&#" in tail or "&lt;" in tail or "&#123" in tail:
+            continue
+        if _in_style_block(body, i) and "{" in tail and "}" in tail:
+            return {"confirmed": True, "where": "style block",
+                    "oracle": "input reflects inside a <style> block with CSS structure unescaped"}
+        if _in_style_attr(body, i) and ";" in tail and ":" in tail:
+            return {"confirmed": True, "where": "style attribute",
+                    "oracle": "input reflects inside a style=\"...\" attribute with a declaration unescaped"}
     return {"confirmed": False, "oracle": "", "where": ""}
+
+
+async def read_cssom(page, token: str) -> dict:
+    """Read the nonce property from computed style, proving that the browser parsed the injected CSS."""
+    return await page.evaluate(
+        """({prop, expected}) => {
+            const nodes = [document.documentElement, ...document.querySelectorAll('*')];
+            for (const node of nodes) {
+                const value = getComputedStyle(node).getPropertyValue(prop).trim();
+                if (value === expected) {
+                    return {matched: true, tag: node.tagName.toLowerCase(), id: node.id || ''};
+                }
+            }
+            return {matched: false, tag: '', id: ''};
+        }""",
+        {"prop": custom_property(token), "expected": cssom_value(token)},
+    )
 
 
 def finding(url: str, param: str, where: str, oracle: str) -> dict:
