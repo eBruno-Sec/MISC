@@ -65,7 +65,10 @@ def test_orchestration_audit_still_reports_no_islands():
     import techniques as T
     a = tp.orchestration_audit([T.get(t["id"]) for t in T.list_techniques()])
     assert a["islands"] == [], a["islands"]
-    assert len(a["gated"]) == 41 and len(a["always_on"]) == 40, (len(a["gated"]), len(a["always_on"]))
+    # always_on went 40 -> 41 with enip_exposed (T14): the EtherNet/IP engine was already shipping
+    # findings through _run_service_pack while missing from the registry entirely, so it had no
+    # taxonomy entry, no coverage credit and no planner reachability.
+    assert len(a["gated"]) == 41 and len(a["always_on"]) == 41, (len(a["gated"]), len(a["always_on"]))
 
 
 def test_planning_from_evidence_produces_the_same_selection():
@@ -88,5 +91,5 @@ def test_snapshot_covers_every_table_the_planner_exposes():
     """Guard against the snapshot silently going out of date by omission rather than by mismatch."""
     snap = _snap()
     assert set(snap) == {"OBSERVATIONS", "PRECONDITIONS", "ALWAYS_ON"}
-    assert len(snap["PRECONDITIONS"]) == 41 and len(snap["ALWAYS_ON"]) == 40
+    assert len(snap["PRECONDITIONS"]) == 41 and len(snap["ALWAYS_ON"]) == 41   # +enip_exposed (T14)
     assert len(snap["OBSERVATIONS"]) == 17

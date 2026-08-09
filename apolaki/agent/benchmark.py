@@ -77,6 +77,12 @@ MANIFESTS = {
         # GraphQL surface: injection (SQLi/OS), IDOR, stored/reflected XSS, info disclosure via introspection.
         "expected": ["sqli", "command_injection", "xss", "access_control", "sensitive_exposure"],
     },
+    "conpot": {
+        "name": "Conpot ICS/OT honeypot (Honeynet Project)", "url_hint": "conpot",
+        # A FOREIGN protocol stack, which is the point: a simulator built from our own frame code would
+        # test each parser against its own encoder. Speaks Modbus / S7comm / EtherNet-IP / SNMP / IPMI.
+        "expected": ["ics_ot"],
+    },
     "clientauthz": {
         "name": "clientauthz (BIE validation lab)", "url_hint": "clientauthz",
         # Purpose-built rather than borrowed: the two browser-runtime access-control engines had no target

@@ -18,6 +18,7 @@ LAB_URLS = {
     "vampi": "http://vampi:5000",
     "dvga": "http://dvga:5013",
     "clientauthz": "http://clientauthz:8080",
+    "conpot": "http://conpot:8800",          # HTTP face; the ICS engines address the protocol ports directly
 }
 
 # The minimum gate a change must not regress (labs that must always be reachable + scored in CI-adjacent runs).

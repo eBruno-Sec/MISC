@@ -145,7 +145,13 @@ def s7_setup_communication(pdu_ref: int = 0x0100) -> bytes:
     return cotp_data(header + param)
 
 
-def s7_read_szl(szl_id: int = 0x0011, index: int = 0x0000, pdu_ref: int = 0x0200) -> bytes:
+# The two identification System Status Lists, named because the choice between them is load-bearing:
+# a real PLC answered MODULE_ID with an empty payload and COMPONENT_ID with its full identity.
+S7_SZL_MODULE_ID = 0x0011        # module identification (order number, firmware)
+S7_SZL_COMPONENT_ID = 0x001C     # component identification (plant designation, module type, serial)
+
+
+def s7_read_szl(szl_id: int = S7_SZL_MODULE_ID, index: int = 0x0000, pdu_ref: int = 0x0200) -> bytes:
     """Read a System Status List — SZL 0x0011 is Module Identification (order number, firmware). This is
     the vendor-documented way to ask a PLC what it is; it does not touch the process image. Pure."""
     data = struct.pack(">BBHH", 0xff, 0x09, 0x0004, szl_id) + struct.pack(">H", index)
@@ -256,14 +262,39 @@ def probe_dnp3(host: str, port: int = DNP3_PORT, timeout: float = 5.0) -> dict:
 
 
 def probe_s7(host: str, port: int = S7_PORT, timeout: float = 5.0) -> dict:
-    """Read-only S7comm identity probe: COTP connect, S7 setup, then read SZL 0x0011. Never raises."""
+    """Read-only S7comm identity probe: COTP connect, S7 setup, then read the identification SZLs.
+
+    TWO SZLs, and the second is not redundant. A real PLC answered SZL 0x0011 (module identification)
+    with a well-formed but EMPTY payload, which produced a `confirmed` verdict carrying the evidence
+    string "S7 module identification: " — a confirmation with nothing in it. The same device answered
+    SZL 0x001C (component identification) with the plant designation, module type and serial. Both are
+    vendor-documented read-only System Status Lists, so asking for the one that actually carries the
+    identity costs a single extra frame and is the difference between naming the device and not.
+
+    The handshake succeeding is itself the finding — these protocols have no authentication — so a
+    device that answers but discloses nothing is still `confirmed`; `identified` is what separates the
+    two, and the summary never claims an identity it does not have. Never raises."""
     frames = [cotp_connection_request(), s7_setup_communication(), s7_read_szl()]
     r = _send_recv(host, port, frames, timeout=timeout, proto="s7comm")
     parsed = parse_s7_szl(r.get("response") or b"")
+    if r["reachable"] and not parsed.get("module"):
+        # 0x0011 disclosed nothing -- ask for component identification before giving up on a name.
+        r2 = _send_recv(host, port,
+                        [cotp_connection_request(), s7_setup_communication(),
+                         s7_read_szl(szl_id=S7_SZL_COMPONENT_ID)],
+                        timeout=timeout, proto="s7comm")
+        p2 = parse_s7_szl(r2.get("response") or b"")
+        if p2.get("module") or p2.get("strings"):
+            parsed, r = p2, r2
+    module, strings = parsed.get("module", ""), parsed.get("strings", [])
     return {"host": host, "port": int(port), "proto": "s7comm", "reachable": r["reachable"],
             "error": r["error"], "confirmed": bool(parsed.get("valid")),
-            "module": parsed.get("module", ""), "strings": parsed.get("strings", []),
-            "summary": ("S7 module identification: %s" % parsed.get("module")) if parsed.get("valid") else ""}
+            "identified": bool(module or strings),
+            "module": module, "strings": strings,
+            "summary": (("S7 module identification: %s" % module) if module else
+                        ("S7 device identification: %s" % "; ".join(strings[:4])) if strings else
+                        ("S7comm handshake completed; the device answered but disclosed no identification"
+                         if parsed.get("valid") else ""))}
 
 
 # ── findings ────────────────────────────────────────────────────────────────────────────────────

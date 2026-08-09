@@ -60,23 +60,54 @@ def parse_list_identity(data: bytes):
             "revision": "%d.%d" % (rev_major, rev_minor), "serial": serial, "product_name": name}
 
 
-def probe(host: str, port: int = 44818, timeout: float = 4.0) -> dict:
-    """Read-only ListIdentity round-trip over UDP. Returns {reachable, device_info} or {reachable: False}.
-    NEVER writes."""
+def _list_identity_udp(host: str, port: int, timeout: float) -> bytes:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(timeout)
     try:
         s.sendto(build_list_identity(), (host, int(port)))
-        data, _ = s.recvfrom(2048)
-        info = parse_list_identity(data)
-        return {"reachable": True, "device_info": info} if info else {"reachable": False}
+        return s.recvfrom(2048)[0]
     except Exception:
-        return {"reachable": False}
+        return b""
     finally:
         try:
             s.close()
         except Exception:
             pass
+
+
+def _list_identity_tcp(host: str, port: int, timeout: float) -> bytes:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout) as s:
+            s.settimeout(timeout)
+            s.sendall(build_list_identity())
+            return s.recv(2048)
+    except Exception:
+        return b""
+
+
+def probe(host: str, port: int = 44818, timeout: float = 4.0) -> dict:
+    """Read-only ListIdentity round-trip, UDP then TCP. NEVER writes.
+
+    BOTH TRANSPORTS, because 44818 is a TCP port that also answers ListIdentity over UDP. UDP is the
+    discovery path and the natural first try, but explicit messaging is TCP, and a controller behind a
+    firewall that permits only TCP — or a stack that simply does not bind UDP — answers on TCP alone. A
+    UDP-only probe reports such a device as unreachable, which reads in the report as "no ICS device
+    here". This was not hypothetical: a real EtherNet/IP stack answered TCP with a full identity while
+    the shipping probe returned reachable=False.
+
+    `answered_unparsed` keeps a parser gap distinguishable from silence. Returning reachable=False for a
+    device that replied with bytes we could not decode makes a decoding bug look exactly like an empty
+    network, and the FP-safe oracle then hides its own failures."""
+    for transport, fn in (("udp", _list_identity_udp), ("tcp", _list_identity_tcp)):
+        data = fn(host, port, timeout)
+        if not data:
+            continue
+        info = parse_list_identity(data)
+        if info:
+            return {"reachable": True, "transport": transport, "device_info": info}
+        return {"reachable": False, "transport": transport, "answered_unparsed": True,
+                "bytes": len(data)}
+    return {"reachable": False}
 
 
 def finding(host: str, port: int, info: dict) -> dict:

@@ -214,6 +214,28 @@ services:
       - "127.0.0.1:42093:8080"
     restart: unless-stopped
 
+  # Conpot (Honeynet Project) -- the ICS/OT validation target. The beyond-web engines had only ever been
+  # exercised against mocks: their frame BUILDERS are unit-proven, but parsing a reply from a stack that is
+  # not ours had never happened. A simulator written with our own frame code would test the parser against
+  # its own encoder and prove nothing, so this is deliberately a FOREIGN implementation.
+  #
+  # It speaks Modbus, S7comm, SNMP, IPMI, BACnet and EtherNet/IP, presenting as a Siemens SIMATIC S7-200
+  # with a Rockwell 1756-L61/B LOGIX5561. Ports are Conpot's own unprivileged defaults, NOT the protocols'
+  # standard ports, so the agent addresses them explicitly:
+  #     modbus 5020 | s7comm 10201 | enip 44818 | snmp 16100/udp | ipmi 6230/udp | bacnet 47808/udp
+  # DNP3 is NOT among them -- see the dnp3_exposed entry in techniques.py, which stays validated_on: []
+  # rather than borrowing this lab's credibility.
+  conpot:
+    image: honeynet/conpot@sha256:cd93e88d9e44b020db691fc4c75cb29e76b5e90ddbc408aca26e6c78c5646976
+    profiles: ["labs"]
+    ports:
+      - "127.0.0.1:42502:5020"      # modbus/tcp
+      - "127.0.0.1:42102:10201"     # s7comm/tcp
+      - "127.0.0.1:42818:44818"     # ethernet-ip/tcp
+      - "127.0.0.1:42162:16100/udp" # snmp/udp
+      - "127.0.0.1:42623:6230/udp"  # ipmi/udp
+    restart: unless-stopped
+
   # DVNA (Damn Vulnerable NodeJS Application) is a valid Node lab in benchmark.MANIFESTS but is NOT wired here:
   # appsecco/dvna hard-requires a linked MySQL sibling (it wait-for-it blocks and crash-loops without one). Add a
   # `dvna` + `dvna-mysql` pair under a dedicated profile when Node/deserialization cross-validation is needed.

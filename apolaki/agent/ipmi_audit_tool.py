@@ -47,27 +47,48 @@ def parse_open_session_response(resp: bytes):
         return None
 
 
+_UDP_ATTEMPTS = 3
+
+
 def probe(host: str, port: int = 623, timeout: float = 4.0) -> dict:
-    """One READ-ONLY RMCP+ Open Session Request. Returns {ipmi2: True, bmc_session_id, status} or {reachable:
-    False}. Never sends RAKP Message 1 (which would elicit the crackable hash) and never tries a credential."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(timeout)
-    try:
-        s.sendto(build_open_session_request(os.urandom(4)), (host, int(port)))
-        data, _ = s.recvfrom(1024)
-        parsed = parse_open_session_response(data)
-        if not parsed:
-            return {"reachable": False}
-        return {"ipmi2": True, "bmc_session_id": parsed[1], "status": parsed[2]}
-    except socket.timeout:
-        return {"reachable": False}
-    except Exception as e:
-        return {"error": str(e)[:120]}
-    finally:
+    """READ-ONLY RMCP+ Open Session Request, retried over UDP. Returns {ipmi2: True, bmc_session_id,
+    status} or {reachable: False}. Never sends RAKP Message 1 (which would elicit the crackable hash) and
+    never tries a credential.
+
+    RETRIED BECAUSE UDP IS LOSSY AND SILENCE IS THE VERDICT. A single unanswered datagram is
+    indistinguishable from "there is no BMC on this host", and that conclusion lands in the report as an
+    absence of risk. One dropped packet must not be able to retire a whole finding class. Observed
+    concretely against a real IPMI stack that answered only every other request: a single-shot probe
+    reported the BMC missing half the time.
+
+    `answered_unparsed` keeps a decoding gap distinguishable from silence — returning the same
+    reachable=False for both lets the FP-safe oracle hide its own failures.
+
+    Each attempt carries a FRESH random console session id (never a fixed one), so a retry is a new
+    session negotiation rather than a replay the BMC could reject as a duplicate."""
+    last_len = 0
+    for _ in range(_UDP_ATTEMPTS):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
         try:
-            s.close()
-        except Exception:
-            pass
+            s.sendto(build_open_session_request(os.urandom(4)), (host, int(port)))
+            data, _addr = s.recvfrom(1024)
+            parsed = parse_open_session_response(data)
+            if parsed:
+                return {"ipmi2": True, "bmc_session_id": parsed[1], "status": parsed[2]}
+            last_len = len(data or b"")
+        except socket.timeout:
+            continue
+        except Exception as e:
+            return {"error": str(e)[:120]}
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+    if last_len:
+        return {"reachable": False, "answered_unparsed": True, "bytes": last_len}
+    return {"reachable": False}
 
 
 def analyze(res: dict):

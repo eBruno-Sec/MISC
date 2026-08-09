@@ -167,7 +167,21 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "well-formed response echoing the transaction id + protocol 0 proves a live, unauthenticated device.",
        exploit="Read process/register data with no auth; an attacker who reaches TCP/502 could also WRITE to "
                "manipulate the physical process (out of scope for Apolaki — read-only, never writes to OT).",
-       oracle="A Modbus response (0x2B/0x03 or its exception) matching our transaction id returns without auth."),
+       oracle="A Modbus response (0x2B/0x03 or its exception) matching our transaction id returns without auth.",
+       validated_on=["conpot"]),
+    # beyond web (ICS/OT): unauthenticated EtherNet/IP (CIP) controller.
+    _t(id="enip_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A05:2021", wstg="WSTG-CONF-01",
+       permission=ACTIVE, transferable=True,
+       summary="An unauthenticated EtherNet/IP (CIP) industrial controller is reachable on the network.",
+       detect="A single ListIdentity request (encapsulation command 0x0063) over UDP and then TCP 44818. "
+              "Both transports are tried: UDP is the discovery path, but explicit messaging is TCP, and a "
+              "controller that answers only on TCP would otherwise be reported as absent.",
+       exploit="None. This engine builds ONLY ListIdentity — no CIP write, no ForwardOpen, no "
+               "SendRRData carrying a Set_Attribute. A CIP write to a live PLC can move an actuator, so "
+               "writes are categorically absent from the code rather than merely gated.",
+       oracle="an encapsulation response echoing command 0x0063 with status 0 and a well-formed Identity "
+              "item (type 0x000C) disclosing vendor / product / serial / revision",
+       validated_on=["conpot"]),
     # beyond web (infra pentest): unauthenticated VNC remote desktop.
     _t(id="vnc_no_auth", vuln_class="network_service", cwe="CWE-306", owasp="A07:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,
@@ -197,7 +211,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Send one read-only RMCP+ Open Session Request; an Open Session Response confirms IPMI 2.0 "
               "(CVE-2013-4786). Detection only — never request the RAKP hash or try a credential.",
        exploit="Capture + crack the RAKP HMAC offline -> BMC admin -> out-of-band host takeover (power/console/vmedia).",
-       oracle="The BMC returns an RMCP+ Open Session Response (payload type 0x11)."),
+       oracle="The BMC returns an RMCP+ Open Session Response (payload type 0x11).",
+       validated_on=["conpot"]),
     # beyond web (infra pentest): RDP without Network Level Authentication.
     _t(id="rdp_no_nla", vuln_class="network_service", cwe="CWE-287", owasp="A07:2021", wstg="WSTG-CONF-01",
        permission=ACTIVE, transferable=True,
@@ -213,7 +228,8 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="One read-only SNMPv2c GET for sysDescr.0 per default community (single known values, no wordlist); "
               "an agent ignores a wrong community, so a GetResponse with error-status 0 proves the default is live.",
        exploit="Read device config/interfaces/routes/ARP (RO 'public'); a RW 'private' community rewrites config.",
-       oracle="A GET with a default community returns a GetResponse (error-status 0) with a sysDescr value."),
+       oracle="A GET with a default community returns a GetResponse (error-status 0) with a sysDescr value.",
+       validated_on=["conpot"]),
 
     # distilled from WAHH ch9 — structural/ORDER BY SQLi (unquoted, prepared statements do NOT protect it).
     _t(id="sqli_structural", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021", wstg="WSTG-INPV-05",
@@ -414,17 +430,23 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                "construct a control frame: the safety rail is strict-by-default and a unit test asserts "
                "no builder in the engine produces a frame it accepts.",
        oracle="the outstation returns a well-formed DNP3 link frame (CRC-verified) to the read-only request",
+       # DELIBERATELY STILL EMPTY. The sibling ICS engines were confirmed against Conpot, which speaks
+       # Modbus / S7comm / EtherNet/IP / SNMP / IPMI but has NO DNP3 listener. Marking this validated on
+       # the strength of the lab that validated its neighbours would be borrowing their credibility: the
+       # link-frame parser has still never met an outstation. It stays unproven until a real DNP3 stack is
+       # available.
        validated_on=[]),
     _t(id="s7comm_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
        permission=ACTIVE, transferable=True,
        summary="Unauthenticated Siemens S7 PLC reachable (ICS/OT).",
        detect="ISO-on-TCP handshake, S7 setup communication, then a read of SZL 0x0011 (module "
-              "identification) — the vendor-documented way to ask a PLC what it is; it does not touch the "
-              "process image.",
+              "identification) and, when that discloses nothing, SZL 0x001C (component identification). "
+              "Both are vendor-documented System Status Lists and neither touches the process image — a "
+              "real PLC answered 0x0011 with an empty payload and 0x001C with its full identity.",
        exploit="None. Write Var, PLC Stop, PLC Control and the download/upload jobs are catalogued only so "
                "the safety rail can REFUSE them; they are never built.",
-       oracle="the PLC returns its module identification to an unauthenticated caller",
-       validated_on=[]),
+       oracle="the PLC returns its module or component identification to an unauthenticated caller",
+       validated_on=["conpot"]),
 
     # ── transport + web posture family (#103, distilled from WAHH ch.12/13) ──────────────────────────
     _t(id="tls_posture", vuln_class="crypto_transport", cwe="CWE-327", owasp="A02:2021",
