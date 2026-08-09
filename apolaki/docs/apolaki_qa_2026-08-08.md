@@ -1151,3 +1151,48 @@ Worth naming the pattern, because it is the third time this session: **a new har
 existing code path turns that path off silently.** The GraphQL island, the `_do_header_trust` summary
 that counted targets instead of executions, and now this — each failed quietly and each looked like
 "nothing to report" rather than "something broke."
+
+---
+
+# Pass 14 — T4: the blind classes are now confirmable against local labs
+
+`BBH_OOB_BASE` was unset, so five vulnerability classes were **untestable in every run** — blind XXE,
+blind SSRF, blind command injection, second-order injection and out-of-band SQL injection. They have no
+in-band signal by definition: the only proof is a callback arriving from the target.
+
+The unlock turned out to be free. The agent already serves `/oob/{token}`, and a lab container on the
+same Docker network can reach it. Verified end to end:
+
+```
+vampi -> http://agent:8000/oob/vampitoken789          200
+GET /api/oob/vampitoken789
+  {"interactions":[{"source_ip":"172.22.0.13","method":"GET",
+                    "path":"/oob/vampitoken789","host":"agent:8000"}]}
+```
+
+So `BBH_OOB_BASE` now defaults to `http://agent:8000` in compose, and the blind classes are confirmable
+against the local labs out of the box.
+
+## The part that would have been a lie
+
+Shipping only that default would have created exactly the false-capability claim this whole module exists
+to prevent. **`http://agent:8000` is invisible from the internet.** On an external engagement Apolaki
+would inject OOB probes, no callback could ever arrive, and the resulting silence would be reported as
+"not vulnerable" — a false negative dressed as a clean result, across five classes at once.
+
+`collaborator.reachable_from(target)` asks the question that actually matters: *can the TARGET reach the
+collaborator?* It fails in both directions, and both are real:
+
+| collaborator | local lab target | external target |
+|---|---|---|
+| `http://agent:8000` (in-network default) | **available** | **not available** — invisible from outside |
+| `https://oob.public.example` | **not available** — internal host may not egress | **available** |
+| `BBH_OOB_DOMAIN` (wildcard DNS) | available | available — resolves from anywhere |
+
+`capability_preflight.check()` now takes the target and reports the honest verdict, with a note naming
+the configured collaborator and why this target cannot use it. Without a target it reports the configured
+state, which is the most that can be said.
+
+**Configured is not available.** That distinction is the same one as natas9's *found the bug* vs
+*captured the flag*, and the same one as the ALWAYS_ON reasons: a declaration about capability is not
+evidence of capability.

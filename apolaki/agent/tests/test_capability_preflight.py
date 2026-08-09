@@ -62,3 +62,56 @@ def test_coverage_debt_counts_are_consistent():
     d = cp.coverage_debt(ch)
     assert d["capabilities_total"] == len(ch)
     assert d["capabilities_available"] + len(d["capabilities_missing"]) == len(ch)
+
+
+# ── OOB availability is a question about the TARGET, not about configuration ─────────────────────
+
+def _oob(target="", base="http://agent:8000", domain=""):
+    import os
+    import capability_preflight as cp
+    old = (os.environ.get("BBH_OOB_BASE"), os.environ.get("BBH_OOB_DOMAIN"))
+    os.environ["BBH_OOB_BASE"] = base
+    os.environ["BBH_OOB_DOMAIN"] = domain
+    try:
+        return [c for c in cp.check(target=target) if c["capability"] == "oob_collaborator"][0]
+    finally:
+        for k, v in zip(("BBH_OOB_BASE", "BBH_OOB_DOMAIN"), old):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_in_network_collaborator_serves_a_local_lab():
+    """The in-network default is what unlocks blind SSRF/XXE/cmdi against the local labs out of the box —
+    verified end to end: a lab container reached /oob/<token> and the hit was recorded with source IP."""
+    assert _oob("http://juice-shop:3000")["available"] is True
+
+
+def test_in_network_collaborator_is_NOT_claimed_for_an_external_target():
+    """THE honesty check. `http://agent:8000` is invisible from the internet. Treating "configured" as
+    "available" would inject probes whose callback could never arrive, and report the resulting silence
+    as "not vulnerable" — the exact misreading this module exists to prevent."""
+    r = _oob("https://acme.example.com")
+    assert r["available"] is False
+    assert "cannot reach it" in r.get("unreachable_note", "")
+
+
+def test_a_public_collaborator_is_not_claimed_for_an_internal_target():
+    """The failure runs both ways: a public collaborator may be blocked from an internal host."""
+    assert _oob("http://internal-app:8080", base="https://oob.public.example")["available"] is False
+
+
+def test_a_dns_collaborator_is_reachable_from_anywhere():
+    """A wildcard domain resolves from either side, so it is exempt from the reachability question."""
+    assert _oob("https://acme.example.com", domain="oob.example.net")["available"] is True
+
+
+def test_without_a_target_the_configured_state_is_reported():
+    """No target means no reachability claim can be made; reporting the configured state is the most
+    that can honestly be said."""
+    assert _oob("")["available"] is True
+
+
+def test_no_collaborator_configured_is_unavailable_everywhere():
+    assert _oob("http://juice-shop:3000", base="")["available"] is False

@@ -18,7 +18,12 @@ services:
       # advisory. Set to the agent's externally-reachable base URL so targets can
       # call back, e.g. https://oob.you.example . Optional wildcard-DNS domain in
       # BBH_OOB_DOMAIN enables DNS-triggerable subdomain probes.
-      - BBH_OOB_BASE=${BBH_OOB_BASE:-}
+      # Default to the agent's IN-NETWORK address so the blind classes (blind SSRF/XXE/cmdi,
+      # second-order + OOB SQLi) are confirmable against the local labs out of the box. This URL is
+      # only reachable from inside this network -- collaborator.reachable_from() enforces that, so an
+      # EXTERNAL engagement still reports those classes as untestable rather than silently untested.
+      # Override with a public collaborator URL for external work.
+      - BBH_OOB_BASE=${BBH_OOB_BASE:-http://agent:8000}
       - BBH_OOB_DOMAIN=${BBH_OOB_DOMAIN:-}
       # GitHub recon: YOUR OWN read-only PAT (no scopes needed), only to lift the
       # code-search rate limit. Empty = run_github_recon skips cleanly.

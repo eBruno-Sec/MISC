@@ -43,6 +43,49 @@ def domain() -> str:
     return os.getenv("BBH_OOB_DOMAIN", "").strip().strip(".")
 
 
+# Hostname shapes that only resolve INSIDE the deployment: compose service names, loopback, RFC1918,
+# link-local and .local/.internal suffixes.
+_PRIVATE_HOST = __import__("re").compile(
+    r"^(localhost|agent|host\.docker\.internal|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)"
+    r"|\.(local|internal|localdomain)$", __import__("re").I)
+
+
+def _is_private(host: str) -> bool:
+    """True when a hostname can only be resolved from inside the deployment network. Pure."""
+    h = (host or "").split(":")[0].strip().lower()
+    return bool(h) and (bool(_PRIVATE_HOST.match(h)) or "." not in h)
+
+
+def reachable_from(target: str) -> bool:
+    """Can `target` actually call our collaborator back? Pure.
+
+    THE QUESTION THAT MAKES OOB HONEST. A collaborator URL is useless unless the TARGET can reach it, and
+    the two common configurations fail in opposite directions:
+
+      * an in-network base (`http://agent:8000`) works for a lab container on the same Docker network and
+        is unreachable from anywhere else
+      * a public base works for an internet-facing target and may be blocked from an internal one
+
+    Defaulting the base to the in-network address unlocks the blind classes for local labs — but claiming
+    the capability for an EXTERNAL target on that basis would be a false-capability claim of exactly the
+    kind the preflight exists to prevent. The probe would be injected, no callback could ever arrive, and
+    "no finding" would read as "not vulnerable".
+
+    A DNS collaborator is exempt: a wildcard domain resolves from anywhere."""
+    if domain():
+        return True
+    b = base()
+    if not b:
+        return False
+    from urllib.parse import urlsplit
+    base_private = _is_private(urlsplit(b if "//" in b else "//" + b).netloc or b)
+    tgt_private = _is_private(urlsplit(target if "//" in (target or "") else "//" + (target or "")).netloc
+                              or target)
+    # An in-network collaborator is reachable only by an in-network target; a public one only by a target
+    # that can egress to it, which we assume for public targets and cannot assume for internal ones.
+    return base_private == tgt_private
+
+
 def new_token() -> str:
     return os.urandom(6).hex()
 

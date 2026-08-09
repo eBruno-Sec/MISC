@@ -76,16 +76,39 @@ _CAPABILITIES = (
 )
 
 
-def check(env_only: bool = False) -> list:
-    """Per-capability availability. Pure inspection; never raises."""
+def check(env_only: bool = False, target: str = "") -> list:
+    """Per-capability availability. Pure inspection; never raises.
+
+    `target` makes the OOB verdict HONEST rather than merely configured. A collaborator URL is useless
+    unless the TARGET can reach it: the in-network default (`http://agent:8000`) works for a local lab
+    and is unreachable from an external host. Treating "configured" as "available" would inject probes
+    whose callback could never arrive, and report the resulting silence as "not vulnerable" — the exact
+    misreading this module exists to prevent. Without a target the configured state is reported, which
+    is the most that can be said."""
     out = []
     for name, probe, classes, how, why in _CAPABILITIES:
         try:
             ok = bool(probe())
         except Exception:
             ok = False
-        out.append({"capability": name, "available": ok, "blocks": list(classes),
-                    "how_to_enable": how, "why_it_matters": why})
+        note = ""
+        if ok and target and name == "oob_collaborator":
+            try:
+                import collaborator
+                if not collaborator.reachable_from(target):
+                    ok = False
+                    note = ("a collaborator IS configured (%s) but this target cannot reach it — an "
+                            "in-network callback URL is invisible to an external host, and a public one "
+                            "may be blocked from an internal target. Set BBH_OOB_BASE to a collaborator "
+                            "reachable FROM this target, or BBH_OOB_DOMAIN for a DNS probe."
+                            % collaborator.base())
+            except Exception:
+                pass
+        rec = {"capability": name, "available": ok, "blocks": list(classes),
+               "how_to_enable": how, "why_it_matters": why}
+        if note:
+            rec["unreachable_note"] = note
+        out.append(rec)
     return out
 
 
