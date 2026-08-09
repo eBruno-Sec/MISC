@@ -1,7 +1,12 @@
 """Username-enumeration analyzer (WAHH ch6, CWE-204 / WSTG-IDNT-04). Confirms a login that leaks account
 existence via a status or message discrepancy; a generic-failure login that treats existing and non-existent
 accounts identically yields nothing (no FP), even with per-request nonce noise + a reflected username echo."""
+import asyncio
+import json
+
 import blind_benchmark as bb
+import scope
+import tools
 import username_enum_tool as ue
 
 _USERS = ["zqx7nonexistent9", "wvk3nobody2", "real.user@site.test"]
@@ -99,3 +104,97 @@ def test_timing_finding_is_proof_with_cvss():
     f = ue.timing_finding("https://x/login", "median 210ms vs 20ms", "real.user@site.test", "email")
     assert f["family"] == "username_enumeration" and f["cwe"] == "CWE-208" and bb._has_proof(f)
     assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05
+
+
+# ── JSON login APIs (no server-rendered <form>) ───────────────────────────────────────────────────────
+# The analyzer above was already correct; the engine still reported nothing against a single-page app,
+# because parse_login_form found no <form> and _run_username_enum returned early. These cover the
+# DELIVERY path — that the right requests go out and their responses reach the unchanged oracle.
+
+def test_shape_rejection_separates_a_refused_body_from_refused_credentials():
+    assert ue.shape_rejected(400, '{"error":"email is required"}')
+    assert ue.shape_rejected(422, "{}") and ue.shape_rejected(404, "") and ue.shape_rejected(415, "")
+    assert ue.shape_rejected(200, '{"error":"missing required field: username"}')   # 200 + complaint
+    # 401/403 mean the endpoint READ our body and judged the credentials — the shape was fine.
+    assert not ue.shape_rejected(401, '{"error":"invalid email or password"}')
+    assert not ue.shape_rejected(403, "") and not ue.shape_rejected(200, "{}")
+    # Unrecognised/garbage status is treated as ACCEPTED-unless-proven: abandoning a real login endpoint
+    # would report a clean bill of health for a vulnerable app, which is the failure that matters here.
+    assert ue.shape_rejected(None, "") and ue.shape_rejected("weird", "")
+
+
+def test_json_bodies_are_flat_or_enveloped_and_always_carry_the_password():
+    shapes = ue.json_login_shapes()
+    assert shapes[0] == ("flat:username", "username", "flat")           # most common first
+    labels = [s[0] for s in shapes]
+    assert "flat:email" in labels and "nested_user:email" in labels
+    assert ue.json_login_body(("flat:email", "email", "flat"), "a@b.c", "pw") == \
+        {"email": "a@b.c", "password": "pw"}
+    assert ue.json_login_body(("nested_user:email", "email", "user"), "a@b.c", "pw") == \
+        {"user": {"email": "a@b.c", "password": "pw"}}
+    for s in shapes:
+        assert "pw" in json.dumps(ue.json_login_body(s, "u", "pw"))     # a shape that drops it proves nothing
+
+
+def _json_login_registry(known: str, uniform: bool):
+    """A single-page app: the login page has no <form>, and the API accepts ONLY {"email":…,"password":…}."""
+    sc = scope.ScopeEngine()
+    sc.load_manual(["target.tld"], [], "T")
+    reg = tools.ToolRegistry(sc, mission_id=None, lab_mode=True)
+    sent = []
+
+    async def _http(url, method="GET", headers=None, body=None, capture=False, **kw):
+        if str(method).upper() == "GET":
+            return {"status": 200, "headers": {}, "body": "<html><h1>Sign in</h1><div id='app'></div></html>"}
+        payload = json.loads(body or "{}")
+        if "email" not in payload:                       # rejects every other candidate shape
+            return {"status": 400, "headers": {}, "body": '{"error":"email is required"}'}
+        sent.append(payload["email"])
+        if uniform:
+            return {"status": 401, "headers": {}, "body": '{"error":"invalid email or password"}'}
+        if payload["email"] == known:
+            return {"status": 401, "headers": {}, "body": '{"error":"password is incorrect"}'}
+        return {"status": 401, "headers": {}, "body": '{"error":"no account with that email"}'}
+
+    reg._http = _http
+    # Isolate the CONTENT differential: the timing side channel has its own tests and would otherwise fire
+    # 30 unmeasurable requests against this fake.
+    reg._timing_enum_done = True
+    return reg, sent
+
+
+def test_json_login_api_is_enumerated_after_shape_discovery():
+    known = "real.user@site.test"
+    reg, sent = _json_login_registry(known, uniform=False)
+    res = asyncio.run(reg._run_username_enum({"url": "https://target.tld/login", "known_username": known}))
+    assert res.findings, res.output
+    f = res.findings[0]
+    assert f["family"] == "username_enumeration" and bb._has_proof(f)
+    # The pinned shape must be the one the API accepts, not the first one tried.
+    assert "email" in f["title"] or "email" in f.get("evidence", "")
+    assert known in sent and len([u for u in sent if u != known]) >= 2   # 1 known + 2 non-existent
+
+
+def test_json_login_api_with_uniform_failure_yields_nothing():
+    """Negative control. Same delivery path, same discovery, generic failure -> no finding."""
+    known = "real.user@site.test"
+    reg, sent = _json_login_registry(known, uniform=True)
+    res = asyncio.run(reg._run_username_enum({"url": "https://target.tld/login", "known_username": known}))
+    assert res.findings == [], res.findings
+    assert known in sent            # it really did run the differential, it just found no discrepancy
+
+
+def test_endpoint_that_refuses_every_shape_reports_no_finding():
+    """An endpoint that is not a login API at all must produce nothing, and must not crash."""
+    sc = scope.ScopeEngine()
+    sc.load_manual(["target.tld"], [], "T")
+    reg = tools.ToolRegistry(sc, mission_id=None, lab_mode=True)
+
+    async def _http(url, method="GET", headers=None, body=None, capture=False, **kw):
+        if str(method).upper() == "GET":
+            return {"status": 200, "headers": {}, "body": "<html>no form here</html>"}
+        return {"status": 404, "headers": {}, "body": "not found"}
+
+    reg._http = _http
+    res = asyncio.run(reg._run_username_enum({"url": "https://target.tld/login", "known_username": "a@b.c"}))
+    assert res.findings == [] and "no JSON login shape" in res.output

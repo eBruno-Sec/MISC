@@ -53,6 +53,52 @@ def parse_login_form(html_text: str, base_url: str):
                 "user_field": user_field or "username", "pass_field": pass_field, "method": method}
     return None
 
+
+# ── JSON login APIs ───────────────────────────────────────────────────────────────────────────────────
+# A single-page app posts {"email":…,"password":…} to /api/login; there is no server-rendered <form>, so
+# parse_login_form returns None and the engine used to answer "no login form here" and report nothing.
+# That is a FALSE NEGATIVE indistinguishable from a hardened app: the differential was never attempted.
+# The oracle below is unchanged — enumerable() still does the confirming — only the delivery changes.
+_JSON_USER_FIELDS = ("username", "email", "user", "login", "userName")
+
+# Statuses that mean the endpoint rejected our REQUEST SHAPE (or is not a login route at all) rather than
+# rejecting the CREDENTIALS. 401/403 are the opposite: they prove the endpoint read our body and judged it.
+_SHAPE_REJECT_STATUS = (400, 404, 405, 406, 409, 415, 422, 501)
+_SHAPE_REJECT_TEXT = re.compile(
+    r"(?i)(is required|required field|missing (?:required )?(?:field|parameter|property)|"
+    r"must be provided|cannot be (?:null|blank|empty)|unexpected (?:field|property)|"
+    r"invalid (?:request|payload|body|json)|malformed)")
+
+
+def json_login_shapes() -> list:
+    """Candidate JSON login body shapes, most common first. Returns (label, user_field, envelope)."""
+    out = [("flat:%s" % uf, uf, "flat") for uf in _JSON_USER_FIELDS]
+    out.append(("nested_user:email", "email", "user"))
+    out.append(("nested_credentials:username", "username", "credentials"))
+    return out
+
+
+def json_login_body(shape, username: str, password: str) -> dict:
+    _label, user_field, envelope = shape
+    inner = {user_field: username, "password": password}
+    return inner if envelope == "flat" else {envelope: inner}
+
+
+def shape_rejected(status, body: str) -> bool:
+    """True when the API refused the SHAPE, so this candidate proves nothing about the account.
+
+    Deliberately conservative: an unrecognised status is treated as ACCEPTED, because the cost of wrongly
+    accepting is one useless differential that finds nothing, while the cost of wrongly rejecting is
+    abandoning a real login endpoint and reporting a clean bill of health for a vulnerable app.
+    """
+    try:
+        code = int(status)
+    except Exception:
+        return True
+    if code in _SHAPE_REJECT_STATUS:
+        return True
+    return bool(_SHAPE_REJECT_TEXT.search(str(body or "")[:2000]))
+
 # margin the existing/absent divergence must EXCEED the absent/absent noise floor before we call it a leak
 _MARGIN = 0.06
 _AUTH_HINT = re.compile(r"(?i)(set-cookie|\bwelcome\b|dashboard|logout|sign\s*out|redirect|location:)")

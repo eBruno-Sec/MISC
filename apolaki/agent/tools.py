@@ -6991,19 +6991,43 @@ class ToolRegistry:
             return ToolResult("username_enumeration", url, True, "no known account to differential against", [])
         page = await self._http(url, "GET", capture=False)
         form = ue.parse_login_form(page.get("body", "") or "", url)
+        wrong_pw = "Wr0ng_" + _os.urandom(8).hex()          # deliberately-wrong, never a real credential
+        json_shape = None
         if not form:
-            return ToolResult("username_enumeration", url, True, "no server-rendered login form here", [])
+            # JSON LOGIN API. A single-page app posts {"email":…,"password":…} to /api/login and renders no
+            # <form>, so the old code answered "no login form here" and reported nothing — a false negative
+            # that looks exactly like a hardened app. Pin the body shape the endpoint actually PROCESSES
+            # (401/200) rather than one it refuses (400/422), using a throwaway non-existent account so the
+            # discovery step itself cannot disturb the differential that follows.
+            probe_user = "shp" + _os.urandom(4).hex()
+            for cand in ue.json_login_shapes():
+                pr = await self._http(url, "POST", headers={"Content-Type": "application/json"},
+                                      body=json.dumps(ue.json_login_body(cand, probe_user, wrong_pw)),
+                                      capture=False)
+                if not ue.shape_rejected(pr.get("status"), pr.get("body", "") or ""):
+                    json_shape = cand
+                    break
+            if not json_shape:
+                return ToolResult("username_enumeration", url, True,
+                                  "no server-rendered login form, and no JSON login shape was accepted", [])
+            form = {"action": url, "user_field": json_shape[1], "pass_field": "password", "method": "post"}
         if not self.scope.validate(form["action"])[0]:
             return ToolResult("username_enumeration", url, True, "form action out of scope", [])
-        wrong_pw = "Wr0ng_" + _os.urandom(8).hex()          # deliberately-wrong, never a real credential
         a1, a2 = "zqx" + _os.urandom(4).hex(), "wvk" + _os.urandom(4).hex()   # two DIFFERENT non-existent users
         users = [a1, a2, known]
         hdr = {"Content-Type": "application/x-www-form-urlencoded"}
 
         async def _submit(u):
-            body = urlencode({form["user_field"]: u, form["pass_field"]: wrong_pw})
-            r = await self._http(form["action"], form["method"].upper() if form["method"] in ("post", "get") else "POST",
-                                 headers=hdr, body=body, capture=False)
+            # Same accounts, same wrong password, same oracle — only the encoding differs between an HTML
+            # form and a JSON API, so enumerable() still does all the confirming.
+            if json_shape:
+                r = await self._http(form["action"], "POST", headers={"Content-Type": "application/json"},
+                                     body=json.dumps(ue.json_login_body(json_shape, u, wrong_pw)), capture=False)
+            else:
+                body = urlencode({form["user_field"]: u, form["pass_field"]: wrong_pw})
+                r = await self._http(form["action"],
+                                     form["method"].upper() if form["method"] in ("post", "get") else "POST",
+                                     headers=hdr, body=body, capture=False)
             return {"status": r.get("status"), "headers": r.get("headers", {}), "body": r.get("body", "")}
 
         r_a1, r_a2, r_pr = await _submit(a1), await _submit(a2), await _submit(known)
