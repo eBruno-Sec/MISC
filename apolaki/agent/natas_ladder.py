@@ -175,6 +175,39 @@ def directories_of(refs) -> list:
     return out
 
 
+_CONTENT_PATH_RE = re.compile(r"[A-Za-z0-9_\-./]{2,60}\.[A-Za-z0-9]{2,6}\b")
+_SKIP_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".css", ".woff", ".woff2", ".svg", ".map")
+
+
+def content_paths(text: str) -> list:
+    """Path-like strings appearing as TEXT in served content. Pure.
+
+    Mirrors what Apolaki already does in `agent.py` when it mines a served blob for paths, and what
+    `codeintel` does to served JS: a file that discloses source, a stack trace, a config dump or a
+    comment often names a path that is not linked anywhere. `same_origin_refs` only sees href/src, so a
+    path revealed as prose is invisible to it — which is a general blind spot, not a Natas one.
+
+    Static assets are skipped: they are noise, and fetching them proves nothing."""
+    out = []
+    src = text or ""
+    for m in _CONTENT_PATH_RE.finditer(src):
+        # An absolute URL must be judged by what PRECEDES the match, not by the match itself: the
+        # character class excludes ':', so `http://cdn.test/x.js` matches only as `cdn.test/x.js` and a
+        # `startswith("http")` test sees nothing wrong. Left unfixed, offsite hosts enter the crawl
+        # frontier disguised as relative paths.
+        before = src[max(0, m.start() - 3):m.start()]
+        if "//" in before or before.endswith(("@", ":")):
+            continue
+        p = m.group(0).strip(".").lstrip("/")
+        if not p or p.lower().endswith(_SKIP_EXT) or p.startswith(("http", "www.")):
+            continue
+        if "/" not in p and "." not in p:
+            continue
+        if p not in out:
+            out.append(p)
+    return out[:20]
+
+
 def robots_paths(text: str) -> list:
     """Paths named by robots.txt — which exists to name them. Pure."""
     return list(dict.fromkeys(p.lstrip("/") for p in _DISALLOW_RE.findall(text or "")
@@ -185,7 +218,7 @@ def recon_targets(html: str, robots_text: str = "") -> list:
     """Everything ordinary recon would fetch next, in priority order. Pure."""
     refs = same_origin_refs(html)
     return list(dict.fromkeys(list(GENERAL_RECON_PATHS) + robots_paths(robots_text)
-                              + directories_of(refs) + refs))
+                              + directories_of(refs) + refs + content_paths(html)))
 
 
 # A client-controlled boolean set to 0 — `loggedin=0`, `admin=0`. Word-anchored so `x_0` or a longer
@@ -255,7 +288,10 @@ def solve_level(level: int, password: str, fetch, budget: int = 45) -> dict:
             fetches += 1
             if s == 200:
                 pages[u] = b
+                # Links AND paths named in the content. A source-disclosure page, stack trace or config
+                # dump names files that are linked from nowhere; href/src extraction cannot see them.
                 nxt += [urljoin(u, r) for r in same_origin_refs(b)]
+                nxt += [urljoin(u, r) for r in content_paths(b)]
         frontier = nxt
 
     for label, extra in retry_variants(body, base.rstrip("/"), "/", hdrs):

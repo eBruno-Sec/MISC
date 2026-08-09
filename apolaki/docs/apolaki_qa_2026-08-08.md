@@ -984,3 +984,29 @@ invisible — and a repo-wide sweep confirmed no other file carries stray contro
 
 **Standing lesson: do not write code through nested shell quoting.** Every escape passes through two
 interpreters, and the corruption is invisible to `grep`.
+
+## The precise ceiling at natas6 — and a general blind spot found reaching it
+
+`same_origin_refs` reads only `href`/`src`. A source-disclosure page, stack trace, config dump or comment
+names files that are **linked from nowhere**, and those were invisible. That is a general blind spot, not
+a Natas-specific one — Apolaki already mines served blobs for paths in `agent.py` and `codeintel`, and the
+ladder harness was not doing the equivalent.
+
+`content_paths()` closes it, and it works: on natas6's disclosed source it extracts
+`includes/secret.inc` — the file holding the secret — while skipping static-asset noise.
+
+**natas6 still does not fall, and the reason is worth stating exactly:**
+
+> The secret is reachable. Turning it into the password requires **submitting it through a form**. The
+> harness does passive recon and client-trust probes; it does not interact with forms.
+
+That is a capability boundary, not an engine failure. Levels 0–5 fall to *observation*; level 6 is the
+first that needs *interaction*. Reporting "6/7" without that sentence would imply the engines were
+outmatched, when in fact they surfaced everything and the harness had no way to use it.
+
+### A scope bug caught by its own test
+
+`content_paths` initially let absolute URLs through. The character class excludes `:`, so
+`http://cdn.test/x.js` matches only as `cdn.test/x.js` — and a `startswith("http")` guard sees nothing
+wrong with that. Offsite hosts would have entered the crawl frontier disguised as relative paths. Fixed
+by judging the characters that **precede** the match rather than the match itself.

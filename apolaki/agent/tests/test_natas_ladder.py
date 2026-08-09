@@ -107,3 +107,37 @@ def test_retry_variants_are_all_general_classes():
     for label, headers in n.retry_variants("<p>x</p>", "http://t.test", "/", "Set-Cookie: admin=0"):
         assert isinstance(headers, dict) and headers
         assert any(k in label for k in ("Referer", "X-", "cookie")), label
+
+
+# ── paths revealed as TEXT, not as links ────────────────────────────────────────────────────────
+
+def test_content_paths_finds_a_path_named_only_in_prose():
+    """`same_origin_refs` sees only href/src. A source-disclosure page, stack trace or config dump names
+    files that are linked from nowhere — a general blind spot, not a Natas-specific one. Mirrors the path
+    mining Apolaki already does on served blobs in agent.py and codeintel."""
+    src = 'require("includes/secret.inc"); $cfg = "/etc/app/settings.conf";'
+    got = n.content_paths(src)
+    assert "includes/secret.inc" in got
+    assert "etc/app/settings.conf" in got
+
+
+def test_content_paths_skips_static_asset_noise():
+    """Fetching an image proves nothing and burns the budget."""
+    src = '"a/logo.png" "b/style.css" "c/font.woff2" "d/app.map" "e/data.json"'
+    got = n.content_paths(src)
+    assert got == ["e/data.json"], got
+
+
+def test_content_paths_skips_absolute_urls():
+    assert n.content_paths('src="http://cdn.test/x.js" and "www.test/y.js"') == []
+
+
+def test_content_paths_is_bounded_and_pure():
+    many = " ".join('dir%d/file%d.txt' % (i, i) for i in range(50))
+    assert len(n.content_paths(many)) <= 20
+    assert n.content_paths(many) == n.content_paths(many)
+
+
+def test_recon_targets_includes_text_named_paths():
+    html = '<p>include("lib/config.inc")</p><img src="assets/logo.png">'
+    assert "lib/config.inc" in n.recon_targets(html)
