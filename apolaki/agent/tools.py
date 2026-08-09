@@ -4132,8 +4132,8 @@ class ToolRegistry:
     async def _run_xpath(self, inp: dict) -> ToolResult:
         """INTRUSIVE: XPath injection (CWE-643) — distilled from *Beginner Web Application Pentester*. Apps
         that query an XML document (often XML-backed LOGIN forms) concatenate input into an XPath expression.
-        Confirmed truth-first like SQLi: a stray quote flips the HTTP status class (error-based), or the
-        `' or '1'='1` / `' or '1'='2` pair splits (boolean). Tests GET query params AND POST form fields."""
+        Confirms an XPath processor error, or a randomized XPath-only true/contradiction pair that changes
+        auth state, protected content, or a record set. Tests GET query params AND POST form fields."""
         import xpath_tool as xp
         import httpx
         import semantic_differential as sd
@@ -4152,8 +4152,7 @@ class ToolRegistry:
             r = await self._http(u, "GET", capture=False)
             return r.get("body", "") or ""
 
-        # 1) GET query params — confirm ONLY on an XPath-specific processor error (never a bare 500/boolean,
-        # which would collide with SQLi).
+        # 1) GET query params: precise processor error first, then an XPath-only semantic differential.
         for name, val in parse_qsl(pr0.query, keep_blank_values=True):
             p = xp.probes(val)
             base = await _body(url)
@@ -4233,8 +4232,8 @@ class ToolRegistry:
     async def _run_ldap(self, inp: dict) -> ToolResult:
         """INTRUSIVE: LDAP injection (CWE-90) — distilled from *Beginner Web Application Pentester*. Apps that
         authenticate/look up against a directory concatenate input into an LDAP search filter. Confirmed
-        LDAP-SPECIFICALLY (an LDAP directory error signature on an unbalanced filter break), so it never
-        collides with SQLi/XPath. Tests GET query params AND POST form fields."""
+        LDAP-SPECIFICALLY: a directory error, or a randomized true/impossible filter pair that changes auth
+        state, protected content, or a record set. Tests GET query params AND POST form fields."""
         import ldap_tool as lp
         import httpx
         import os as _os
@@ -5877,9 +5876,17 @@ class ToolRegistry:
             query = {k: v for k, v in query.items() if k in only}
         cookies = self._parse_cookies(inp.get("cookies"))
         inputs = deser.find_serialized_inputs(query, cookies)
+        # FORM BODIES. A serialized object round-tripped through a hidden field — the commonest real
+        # carrier — is never in the query string and never in a cookie, so the scan above returned nothing
+        # and the endpoint was reported clean without being tested.
+        import crawl as _crawl
+        _page = await self._http(url, "GET", capture=False)
+        for _fi in deser.find_serialized_form_inputs(_crawl.extract_forms(_page.get("body", "") or "", url)):
+            if self.scope.validate(_fi["action"])[0]:     # never replay a form to an out-of-scope host
+                inputs.append(_fi)
         if not inputs:
             return ToolResult("deserialization", url, True,
-                              "No serialized objects found in query params or cookies", [])
+                              "No serialized objects found in query params, cookies or form fields", [])
 
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         all_q = dict(parse_qsl(p.query, keep_blank_values=True))
@@ -5892,6 +5899,13 @@ class ToolRegistry:
             jar = dict(cookies); jar[name] = value
             return "; ".join(f"{k}={v}" for k, v in jar.items())
 
+        def form_values(it, value):
+            """Every sibling field at its discovered default, with ONE field swapped. Sending the blob on
+            its own would change two things at once and the error differential would prove nothing."""
+            d = dict(it.get("form_fields") or {})
+            d[it["name"]] = value
+            return d
+
         findings = []
         async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
             for it in inputs:
@@ -5901,6 +5915,16 @@ class ToolRegistry:
                     if it["location"] == "query":
                         base = await c.get(q_url(it["name"], orig), headers=headers)
                         probe = await c.get(q_url(it["name"], bad), headers=headers)
+                    elif it["location"] == "form":
+                        if it["method"] == "GET":
+                            base = await c.get(it["action"], params=form_values(it, orig), headers=headers)
+                            probe = await c.get(it["action"], params=form_values(it, bad), headers=headers)
+                        else:
+                            fh = {**headers, "Content-Type": "application/x-www-form-urlencoded"}
+                            base = await c.post(it["action"], content=urlencode(form_values(it, orig)),
+                                                headers=fh)
+                            probe = await c.post(it["action"], content=urlencode(form_values(it, bad)),
+                                                 headers=fh)
                     else:  # cookie
                         h_ok = {**headers, "Cookie": cookie_header(it["name"], orig)}
                         h_bad = {**headers, "Cookie": cookie_header(it["name"], bad)}

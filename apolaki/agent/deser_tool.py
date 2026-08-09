@@ -97,6 +97,36 @@ def find_serialized_inputs(params: dict, cookies: dict) -> list:
     return out
 
 
+def find_serialized_form_inputs(forms) -> list:
+    """Scan DISCOVERED HTML FORM default values for serialized blobs.
+
+    The query+cookie scan above misses the most common real carrier: a serialized object parked in a hidden
+    field and round-tripped through a POST — `<input type="hidden" name="prefs" value="a:1:{...}">`. It is
+    never in the query string and never in a cookie, so the engine answered "no serialized objects found"
+    and the endpoint was never tested — a false negative shaped exactly like a clean app.
+
+    Each item carries the whole form (action, method, sibling field values) because confirming requires
+    REPLAYING the form with one field corrupted; sending the field alone would change two things at once
+    and the error differential would prove nothing.
+    """
+    out = []
+    for form in forms or []:
+        inputs = form.get("inputs") or []
+        siblings = {str(f.get("name") or ""): (f.get("value") or "")
+                    for f in inputs if str(f.get("name") or "")}
+        for f in inputs:
+            name, value = str(f.get("name") or ""), f.get("value")
+            if not name or not isinstance(value, str) or not value:
+                continue
+            fmt = detect_format(value)
+            if fmt:
+                out.append({"location": "form", "name": name, "value": value,
+                            "action": form.get("action") or "",
+                            "method": str(form.get("method") or "POST").upper(),
+                            "form_fields": dict(siblings), **fmt})
+    return out
+
+
 # ── corrupt a blob to elicit a deserialization error (no gadget) ──
 def corrupt(value: str, fmt: dict) -> str:
     """Return a benign-but-malformed copy that a deserializer will choke on."""

@@ -8,6 +8,7 @@ persona, SPA/XHR capture, session refresh) runs in the agent using this to choos
 """
 from __future__ import annotations
 
+import html
 import re
 from urllib.parse import urlparse
 
@@ -27,6 +28,19 @@ _FORM_RE = re.compile(r"<form\b[^>]*>(.*?)</form>", re.I | re.S)
 _ACTION_RE = re.compile(r"""\baction\s*=\s*["']?([^"'\s>]+)""", re.I)
 _METHOD_RE = re.compile(r"""\bmethod\s*=\s*["']?([a-zA-Z]+)""", re.I)
 _FIELD_RE = re.compile(r"""<(?:input|textarea|select)\b[^>]*\bname\s*=\s*["']?([^"'\s>]+)""", re.I)
+# Bounded on purpose: an unbounded [^>]* inside a repeated group is how a parser becomes a ReDoS target on
+# hostile markup. 2000 chars is far past any real form control.
+_TAG_RE = re.compile(r"<(?:input|textarea|select)\b[^>]{0,2000}?>", re.I)
+
+
+def _tag_attr(tag: str, name: str) -> str:
+    """One attribute off a single tag, quoted or bare. Entity-decoded, because a serialized blob parked in
+    a value attribute arrives HTML-escaped (a:1:{s:4:&quot;x&quot;;}) and must be compared as its real bytes."""
+    for pat in (r'\b%s\s*=\s*"([^"]*)"', r"\b%s\s*=\s*'([^']*)'", r"\b%s\s*=\s*([^\s>]+)"):
+        m = re.search(pat % re.escape(name), tag, re.I)
+        if m:
+            return html.unescape(m.group(1))
+    return ""
 
 
 def extract_forms(html: str, base: str) -> list:
@@ -42,11 +56,21 @@ def extract_forms(html: str, base: str) -> list:
         action = urljoin(base, am.group(1)) if am and am.group(1) else base
         mm = _METHOD_RE.search(head)
         method = (mm.group(1).upper() if mm else "GET")
-        fields = []
-        for fm in _FIELD_RE.finditer(inner):
-            if fm.group(1) not in fields:
-                fields.append(fm.group(1))
-        out.append({"action": action, "method": method, "fields": fields})
+        # `fields` stays a de-duplicated list of NAMES (unchanged for existing consumers). `inputs` adds
+        # the default VALUE and type, which the name-only scan threw away — and a serialized object parked
+        # in a hidden field is exactly a value: <input type=hidden name=prefs value="a:1:{...}">. Without
+        # it, insecure_deser can never see the most common real-world carrier.
+        fields, inputs = [], []
+        for tm in _TAG_RE.finditer(inner):
+            tag = tm.group(0)
+            nm = _tag_attr(tag, "name")
+            if not nm:
+                continue
+            if nm not in fields:
+                fields.append(nm)
+            inputs.append({"name": nm, "value": _tag_attr(tag, "value"),
+                           "type": _tag_attr(tag, "type").lower()})
+        out.append({"action": action, "method": method, "fields": fields, "inputs": inputs})
     return out
 
 
