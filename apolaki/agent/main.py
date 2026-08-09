@@ -1480,6 +1480,62 @@ async def benchmark_fixture(fixture: str, session: str = ""):
     return benchmark.evaluate(fixture, findings, leads)
 
 
+@app.post("/benchmark/natas")
+async def natas_ladder_run(payload: dict = None):
+    """Climb the OverTheWire Natas ladder with Apolaki's GENERAL engines and report an honest ceiling.
+
+    Natas is uniquely good as a benchmark because each level hides the NEXT level's password, so the
+    oracle is not a judgement call: a recovered value either authenticates or it does not.
+
+    SAFETY. The target host family is FIXED to `natas.labs.overthewire.org` and cannot be overridden by
+    the caller — this endpoint makes outbound requests to a third party, and a benchmark runner that can
+    be pointed anywhere is an SSRF primitive with a friendly name. Only `last_level` is tunable.
+
+    HONESTY. `solved` counts only levels where a general engine surfaced a credential that then
+    authenticated. Results are bucketed by class (surface / injection / session_logic / specialist)
+    because a scanner missing a hash-extension forgery is a different fact from one missing a SQL
+    injection, and one percentage covering both says nothing.
+
+    Discovered credentials are returned to the caller but NEVER written to the repository."""
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urljoin
+    import natas_ladder as nl
+    try:
+        last = max(0, min(int((payload or {}).get("last_level", 10)), nl.LAST_LEVEL))
+
+        def fetch(u, h):
+            try:
+                r = urllib.request.urlopen(urllib.request.Request(u, headers=h), timeout=20)
+                return r.getcode(), r.read().decode("utf-8", "replace"), str(r.headers)
+            except urllib.error.HTTPError as e:
+                try:
+                    return e.code, e.read().decode("utf-8", "replace"), str(e.headers)
+                except Exception:
+                    return e.code, "", ""
+            except Exception:
+                return 0, "", ""
+
+        pw, results, creds = "natas0", [], {}
+        for lvl in range(0, last + 1):
+            # ONE implementation: natas_ladder.solve_level. Two copies of a solver drift and then
+            # disagree about what the benchmark measured.
+            r = nl.solve_level(lvl, pw, fetch)
+            results.append(r)
+            if not r.get("solved"):
+                break
+            creds["natas%d" % (lvl + 1)] = r["next_password"]
+            pw = r["next_password"]
+        summary = nl.summarise(results)
+        safe = [{k: v for k, v in r.items() if k != "next_password"} for r in results]
+        return {"summary": summary, "report": nl.report_line(summary), "levels": safe,
+                "credentials_recovered": len(creds),
+                "note": "Credentials are returned here but never written to the repository. "
+                        "General engines only — no level-specific logic."}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/benchmark/blind/{session_id}")
 async def blind_benchmark_run(session_id: str, answer_key_url: str = ""):
     """BLIND benchmark (CHAD): score a SEALED mission against the target's published answer key WITHOUT

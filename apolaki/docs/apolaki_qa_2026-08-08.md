@@ -920,3 +920,67 @@ Final state of the three checkers:
 | `scan()` | module-level functions, bare-name match, tests count | 0 unused, 0 stale |
 | `scan_qualified()` | module-level functions, import-resolved, production only | 37 (ratchet), 8 justified |
 | `scan_methods()` | class methods — 321 of them, invisible to both others | 14 (ratchet) |
+
+---
+
+# Pass 11 — the Natas ladder (#33): 6/7 with zero level-specific logic
+
+Natas is an unusually good benchmark because each level hides the NEXT level's password, so the oracle is
+not a judgement call: a recovered value either authenticates to level N+1 or it does not.
+
+**Result on the live ladder** (`POST /benchmark/natas`, authorized target):
+
+```
+natas0  SOLVED  engine:scan_comment_secrets
+natas1  SOLVED  engine:scan_comment_secrets
+natas2  SOLVED  recon@files/users.txt                 (directory index, one hop from a referenced asset)
+natas3  SOLVED  recon@s3cr3t/users.txt                (robots.txt Disallow)
+natas4  SOLVED  recon@ [Referer: http://natas5...]    (header-trust engine, T1)
+natas5  SOLVED  recon@ [cookie loggedin=1]            (client-controlled boolean cookie)
+natas6  no      no general engine surfaced a credential
+```
+
+**Two of those were earned by engines built earlier the same day.** `scan_comment_secrets` (from the
+Natas 0 gap) takes levels 0 and 1. Level 4 falls to `header_trust_tool.expected_values_from_denial` —
+the function that reads the values the REFUSAL ITSELF names. Natas 4 says *"authorized users should come
+only from http://natas5..."*, which hands over the exact value needed. That engine was unreachable until
+this session wired it; it now earns a level on a live external target.
+
+## Disciplines, enforced in tests not prose
+
+- **No level-specific logic.** `test_natas_ladder.py` asserts the module contains no hardcoded deep path,
+  no level hostname, no `s3cr3t`-style tell. Everything that narrows the search comes from Apolaki's own
+  general engines plus ordinary recon (robots.txt, referenced directories, depth-2 crawl).
+- **No credentials in the repository.** The module carries no 32-char literal (asserted), the endpoint
+  strips `next_password` from what it returns, and the runner writes only to gitignored `agent/data/`.
+- **Honest ceiling.** Levels are bucketed surface / injection / session_logic / specialist, because a
+  scanner missing a hash-extension forgery is a different fact from one missing a SQL injection.
+  `blocked` (unreachable) is counted separately from `not_solved` (engines had their chance).
+
+## Three self-inflicted defects, all caught
+
+1. **Depth-1 recon** found the `files/` index but not `users.txt` inside it. A directory listing is one
+   hop from its contents; depth-2 crawling is ordinary and fixed levels 2 and 3.
+2. **The cookie probe read only the response BODY.** A `Set-Cookie` header is the ordinary place a server
+   hands the client an authorization input — the probe could see half its own input surface. Level 5 fell
+   immediately once headers were included.
+3. **I truncated my own module.** A `partition`-and-rewrite dropped every function defined *after*
+   `solve_level` — all five recon helpers. The endpoint failed with `name 'recon_targets' is not defined`.
+   Same class as the near-miss on `graphql_tool.py` earlier: destructive rewrite instead of targeted edit.
+
+## A bug worth remembering: an invisible character
+
+After restoring the helpers through nested shell quoting, the cookie probe silently matched nothing.
+`grep` showed the line as correct. The regex actually contained a literal **0x08 BACKSPACE** where `\b`
+was intended — the shell had interpreted the escape:
+
+```
+repr: 'for m in re.finditer(r"\x08([A-Za-z_][A-Za-z0-9_]{2,20})\s*=\s*0\x08", source):'
+```
+
+A pattern that can never match, in a file that reads correctly. Fixed by lifting it to a named
+`_BOOL_ZERO_RE` constant — a control character hidden inside a long inline regex is exactly what made it
+invisible — and a repo-wide sweep confirmed no other file carries stray control characters.
+
+**Standing lesson: do not write code through nested shell quoting.** Every escape passes through two
+interpreters, and the corruption is invisible to `grep`.
