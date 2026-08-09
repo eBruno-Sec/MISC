@@ -124,18 +124,27 @@ def build_probes(url: str, extra_params=None) -> list:
     # ── CSTI first (highest value): reflected template expression into own + common params ──
     for pn in csti_params:
         probes.append({"class": "csti", "nav": _add_query(url, pn, "{{7*7}}" + MARK), "src": pn})
+    # …and from the FRAGMENT. proto/redirect/xss below already probe the hash; CSTI did not, which left a
+    # gap for the common SPA shape where a hash-router segment is interpolated into a template. The hash
+    # is never sent to the server, so no reflected-parameter probe can reach this sink. One probe.
+    probes.append({"class": "csti", "nav": _set_fragment(url, "{{7*7}}" + MARK), "src": "hash"})
     # ── prototype pollution: hash (deparam/hash routers) + query ──
     for src, nav in (("hash", _set_fragment(url, f"__proto__[{PP_KEY}]={MARK}")),
                      ("query", _add_query(url, f"__proto__[{PP_KEY}]", MARK)),
                      ("hash", _set_fragment(url, f"constructor[prototype][{PP_KEY}]={MARK}"))):
         probes.append({"class": "proto", "nav": nav, "src": src})
+    # ── DOM XSS: hash execution (covers hashchange/render sinks) ──
+    # ORDERED BEFORE the redirect fan-out, and that ordering is load-bearing rather than cosmetic. The
+    # list is truncated to a fixed cap below, and the redirect block grows with every discovered
+    # parameter while the XSS block is a fixed 2. Left last, a page with enough parameters would push
+    # script-execution testing off the end — silently trading the highest-severity check for another
+    # redirect probe. Whatever the cap cuts should be the least valuable thing, not the most.
+    for pl in EXEC_PAYLOADS:
+        probes.append({"class": "xss", "nav": _set_fragment(url, pl), "src": "hash"})
     # ── DOM open redirect: hash + redirect-ish + own params ──
     probes.append({"class": "redirect", "nav": _set_fragment(url, f"https://{EVIL}/"), "src": "hash"})
     for pn in redir_params:
         probes.append({"class": "redirect", "nav": _add_query(url, pn, f"https://{EVIL}/"), "src": pn})
-    # ── DOM XSS: hash execution (covers hashchange/render sinks) ──
-    for pl in EXEC_PAYLOADS:
-        probes.append({"class": "xss", "nav": _set_fragment(url, pl), "src": "hash"})
     # de-dup by nav URL, keep order (CSTI-on-own-params prioritised), cap for a bounded pass
     seen, out = set(), []
     for p in probes:

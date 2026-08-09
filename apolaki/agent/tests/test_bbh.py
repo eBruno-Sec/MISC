@@ -4184,3 +4184,30 @@ def test_every_advertised_tool_has_a_permission_level():
     import tools
     missing = [s["name"] for s in tools.CLAUDE_TOOLS if s["name"] not in tools.TOOL_PERMISSIONS]
     assert missing == [], f"advertised but ungated: {missing}"
+
+
+# ── DOM probe budget: what the cap cuts must be the least valuable thing ──────
+def test_script_execution_probes_survive_the_probe_cap_on_a_busy_page():
+    """REGRESSION. build_probes truncates to a fixed cap. The redirect block grows with every discovered
+    parameter while the XSS block is a fixed 2, so while XSS was emitted LAST a page with enough
+    parameters pushed script-execution testing off the end entirely — trading the highest-severity check
+    for one more redirect probe. Measured before the fix: 0 xss probes on this input."""
+    import dom_tool as dt
+    from collections import Counter
+    many = ["p%d" % i for i in range(20)]
+    probes = dt.build_probes("http://t/x?a=1", extra_params=many)
+    counts = Counter(p["class"] for p in probes)
+    assert counts["xss"] == len(dt.EXEC_PAYLOADS), counts
+    assert counts["proto"] >= 1, counts
+
+
+def test_csti_is_probed_from_the_fragment_too():
+    """proto/redirect/xss already probed the hash; CSTI did not, leaving the SPA shape where a hash-router
+    segment is interpolated into a template unreachable. The fragment is never sent to the server, so no
+    reflected-parameter probe can substitute for this one."""
+    import dom_tool as dt
+    probes = dt.build_probes("http://t/catalog?category=x")
+    csti_hash = [p for p in probes if p["class"] == "csti" and p["src"] == "hash"]
+    assert len(csti_hash) == 1, [p["src"] for p in probes if p["class"] == "csti"]
+    assert "#" in csti_hash[0]["nav"] and "{{7*7}}" in csti_hash[0]["nav"]
+    assert "{{7*7}}" not in csti_hash[0]["nav"].split("#", 1)[0], "must not leak into the query string"
