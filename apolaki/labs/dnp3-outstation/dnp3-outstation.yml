@@ -1,0 +1,25 @@
+---
+name: "apolaki-dnp3-lab"
+file:
+  id: openfmb-adapter-template
+  edition: "2.1"
+  version: "2.1.0.0"
+  plugin: dnp3-outstation
+channel:
+  listen-adapter: "0.0.0.0"
+  port: 20000
+protocol:
+  master-address: 1
+  outstation-address: 0
+  enable-unsolicited: false
+  confirm-timeout-ms: 5000
+  default-static-variations:
+    binary-input: Group1Var2
+    analog-input: Group30Var1
+    counter: Group20Var1
+  default-event-variations:
+    binary-input: Group2Var2
+    analog-input: Group32Var1
+    counter: Group22Var1
+profiles: []
+...

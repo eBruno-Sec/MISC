@@ -488,12 +488,15 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                "construct a control frame: the safety rail is strict-by-default and a unit test asserts "
                "no builder in the engine produces a frame it accepts.",
        oracle="the outstation returns a well-formed DNP3 link frame (CRC-verified) to the read-only request",
-       # DELIBERATELY STILL EMPTY. The sibling ICS engines were confirmed against Conpot, which speaks
-       # Modbus / S7comm / EtherNet/IP / SNMP / IPMI but has NO DNP3 listener. Marking this validated on
-       # the strength of the lab that validated its neighbours would be borrowing their credibility: the
-       # link-frame parser has still never met an outstation. It stays unproven until a real DNP3 stack is
-       # available.
-       validated_on=[]),
+       # EARNED 2026-08-09, having deliberately stayed empty until it was. Conpot speaks Modbus /
+       # S7comm / EtherNet-IP / SNMP / IPMI but has NO DNP3 listener, so claiming this on the strength of
+       # the lab that validated its neighbours would have been borrowing their credibility.
+       # Open Energy Solutions' OpenFMB Adapter (opendnp3) now supplies a real outstation: probe_dnp3
+       # parses its link-status reply with crc_ok=True — a CRC produced by THEIR encoder and verified by
+       # ours, which is the property a self-built simulator could never provide — and _run_service_pack
+       # confirms it end to end. A liveness CHECK re-runs that on every gate, so the claim expires the
+       # moment it stops being true.
+       validated_on=["openfmb"]),
     _t(id="s7comm_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
        permission=ACTIVE, transferable=True,
        summary="Unauthenticated Siemens S7 PLC reachable (ICS/OT).",

@@ -280,6 +280,19 @@ services:
       - "127.0.0.1:42623:6230/udp"  # ipmi/udp
     restart: unless-stopped
 
+  # Open Energy Solutions' OpenFMB Adapter supplies a FOREIGN DNP3 outstation, independent of
+  # Apolaki's frame builder and parser. It listens on DNP3/TCP 20000 as outstation address 0;
+  # the host mapping is 42200 so probe_dnp3 can be exercised unchanged from either network.
+  dnp3-outstation:
+    image: oesinc/openfmb.adapters@sha256:9ddbfad4dbd51e418c92e38df5ea1000002f6e24d5be4202318f4611f96515f7
+    profiles: ["labs"]
+    command: ["-c", "/config/config.yml"]
+    volumes:
+      - ./labs/dnp3-outstation:/config:ro
+    ports:
+      - "127.0.0.1:42200:20000"
+    restart: unless-stopped
+
   # DVNA (Damn Vulnerable NodeJS Application) is a valid Node lab in benchmark.MANIFESTS but is NOT wired here:
   # appsecco/dvna hard-requires a linked MySQL sibling (it wait-for-it blocks and crash-loops without one). Add a
   # `dvna` + `dvna-mysql` pair under a dedicated profile when Node/deserialization cross-validation is needed.

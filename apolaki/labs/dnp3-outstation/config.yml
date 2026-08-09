@@ -1,0 +1,24 @@
+---
+logging:
+  logger-name: "dnp3-outstation"
+  log-level: "info"
+  console:
+    enabled: true
+  rotating-file:
+    enabled: false
+    path: "adapter.log"
+    max-size: 1048576
+    max-files: 3
+file:
+  id: openfmb-adapter-main
+  edition: "2.1"
+  version: "openfmb-adapter-main"
+  plugin: ""
+plugins:
+  dnp3-outstation:
+    thread-pool-size: 1
+    outstations:
+      - path: "/config/dnp3-outstation.yml"
+        overrides: []
+    enabled: true
+...

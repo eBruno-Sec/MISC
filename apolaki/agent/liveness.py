@@ -44,6 +44,12 @@ CHECKS = (
      "title": "EtherNet/IP"},
     {"technique": "ipmi_rakp", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "conpot", "port": 6230, "service": "ipmi"}, "family": "ipmi_rakp"},
+    # DNP3 needed its own foreign stack: Conpot speaks five ICS protocols but has no DNP3 outstation, so
+    # this technique stayed unproven while its neighbours were validated. OpenFMB Adapter (opendnp3)
+    # supplies a link-status reply whose CRC our parser verifies — their encoder, our decoder.
+    {"technique": "dnp3_exposed", "lab": "dnp3", "kind": "tool", "tool": "_run_service_pack",
+     "input": {"host": "dnp3-outstation", "port": 20000, "service": "dnp3"}, "family": "ics_ot",
+     "title": "DNP3"},
     # ── beyond-web network services ───────────────────────────────────────────────────────────
     {"technique": "snmp_default_community", "lab": "snmpd", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "snmpd", "port": 161, "service": "snmp"}, "family": "snmp_default_community"},

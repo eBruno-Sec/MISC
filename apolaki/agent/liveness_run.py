@@ -26,6 +26,7 @@ _LAB_ADDR = {
     "conpot": ("conpot", 5020), "snmpd": ("snmpd", 161), "openldap": ("openldap", 389),
     "smb": ("smb", 445), "dvga": ("dvga", 5013), "domsource": ("domsource", 8080),
     "clientauthz": ("clientauthz", 8080),
+    "dnp3": ("dnp3-outstation", 20000),
 }
 
 
