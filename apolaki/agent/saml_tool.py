@@ -159,3 +159,57 @@ def plan_leads(xml: str, acs_url: str = "") -> list:
                       "reproduction_steps": ["Wrap a forged unsigned assertion before the signed original and "
                                              "replay; if consumed, the SP trusts the wrong element."]})
     return leads
+
+
+def harvest(urls=None, bodies=None) -> list:
+    """[{value, xml, source}] — SAMLResponse/SAMLRequest values found on the surface. Pure, no network.
+
+    THE MISSING HALF. `saml_signature_bypass` is gated on `saml_sso_detected` (derived from `saml`,
+    `/sso`, `/acs` path keywords) and its `execution` defaults to `auto`, so the orchestration audit
+    counted it wired. But nothing called this module, AND nothing ever captured a SAMLResponse to feed it.
+    An executor alone would have had no input; this is what makes one meaningful.
+
+    Two bindings, two places to look:
+      * HTTP-Redirect — the value rides in a query string, base64 + DEFLATE
+      * HTTP-POST     — the value is a hidden form input, base64, no DEFLATE
+
+    Only values that `decode()` turns into real SAML XML are returned, so a parameter that merely happens
+    to be called SAMLResponse cannot manufacture a finding."""
+    import re as _re
+    from urllib.parse import parse_qs, urlsplit
+
+    out, seen = [], set()
+
+    def _take(value, source):
+        if not value or value in seen:
+            return
+        seen.add(value)
+        xml = decode(value)
+        # `decode` returns something for most base64; require it to actually look like SAML.
+        if xml and ("Assertion" in xml or "Response" in xml) and "<" in xml:
+            out.append({"value": value, "xml": xml, "source": source})
+
+    # RAW query extraction, NOT parse_qs. Base64 contains `+`, and form-decoding turns `+` into a space,
+    # which corrupts the payload so `decode()` yields nothing. The first version of this used parse_qs and
+    # silently harvested zero values from the Redirect binding while the POST binding worked — a partial
+    # failure that looks like "this target has no SAML". `decode()` does its own unquoting, so the raw
+    # substring is what it needs.
+    for u in (urls or []):
+        try:
+            query = urlsplit(str(u)).query
+        except Exception:
+            continue
+        for key in ("SAMLResponse", "SAMLRequest"):
+            for m in _re.finditer(r"(?:^|&)%s=([^&]*)" % key, query):
+                _take(m.group(1), "query:%s" % key)
+
+    # POST binding: <input type="hidden" name="SAMLResponse" value="...">. Attribute order varies, so
+    # locate the input by its name and then read whichever value attribute it carries.
+    tag_re = _re.compile(r"<input\b[^>]*\bname\s*=\s*[\"']?(SAMLResponse|SAMLRequest)[\"']?[^>]*>", _re.I)
+    val_re = _re.compile(r"\bvalue\s*=\s*[\"']([^\"']+)[\"']", _re.I)
+    for b in (bodies or []):
+        for m in tag_re.finditer(str(b) or ""):
+            mv = val_re.search(m.group(0))
+            if mv:
+                _take(mv.group(1), "form:%s" % m.group(1))
+    return out

@@ -2021,6 +2021,33 @@ class BBHAgent:
                        "Treat this class as untested, not as clean."
                        % (min(len(targets), 6), first_error or "no reason captured")}
 
+    async def _do_saml(self, session_id: str):
+        """SAML assertion posture, where the surface actually shows SSO.
+
+        Gated on the SAME signal the planner uses (`saml_sso_detected`: a `saml` / `/sso` / `/acs` /
+        `simplesaml` / `/adfs` path), so it stays silent on the overwhelming majority of targets rather
+        than logging a no-op everywhere. Passive: `run_saml` issues no request, it reads the surface the
+        scan already has."""
+        urls = [str(u) for u in (getattr(self.tools, "urls", None) or [])]
+        if not any(w in u.lower() for u in urls
+                   for w in ("saml", "/sso", "/acs", "simplesaml", "/adfs")):
+            return
+        try:
+            res = await self._exec_internal("run_saml", {"urls": urls}, session_id)
+        except Exception as e:
+            yield {"type": "info", "content": "SAML posture check did not run (%s: %s). Treat SAML "
+                   "assertion handling as untested, not as clean." % (type(e).__name__, str(e)[:100])}
+            return
+        for f in (res.findings or []):
+            if self.mission_id:
+                try:
+                    f["id"] = db.add_finding(self.mission_id, f)
+                except Exception:
+                    pass
+            self.findings.append(f)
+            yield {"type": "lead", "lead": f}
+        yield {"type": "info", "content": "SAML: %s" % (res.output or "checked")}
+
     def _runtime_seed_paths(self, limit: int = 6) -> list:
         """The authenticated app routes worth RENDERING so the SPA fetches the logged-in user's own
         objects (which is what gives the Browser Intelligence Engine real cross-user hypotheses).
@@ -2180,6 +2207,11 @@ class BBHAgent:
             # Header-trust (T1): authorization decided by a client-controlled header. Read-only GETs on
             # each in-scope origin plus any path the scan met a 401/403 on.
             async for ev in self._do_header_trust(session_id):
+                yield ev
+
+            # SAML assertion posture: harvest + analyze only, no request of its own. Fires only where the
+            # surface actually shows SSO, so it stays silent on the vast majority of targets.
+            async for ev in self._do_saml(session_id):
                 yield ev
 
         # Authenticated scanning: discover credentials the target exposes (or inherit them from a prior

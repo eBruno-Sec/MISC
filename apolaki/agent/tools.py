@@ -160,6 +160,10 @@ TOOL_PERMISSIONS = {
     "run_transport_posture": PermissionLevel.ACTIVE,           # TLS/cookie/header/method posture (read-only, #103)
     "run_external_surface": PermissionLevel.ACTIVE,            # ASN/favicon/permutation/CT candidates (#114)
     "run_header_trust": PermissionLevel.ACTIVE,                # authz from a client-controlled header (T1)
+    # PASSIVE: harvest + analyze only. Decoding a SAMLResponse already on the surface and describing its
+    # signing posture sends no request and tampers with nothing. The INTRUSIVE half (replaying a stripped
+    # or wrapped assertion to the SP) is deliberately NOT auto-fired from here.
+    "run_saml": PermissionLevel.PASSIVE,
     "confirm_authz_write": PermissionLevel.INTRUSIVE,          # cross-user WRITE test (restores, but state-changing)
     "run_authz_matrix": PermissionLevel.ACTIVE,               # per-role differential auth requests (reads)
     "run_service_pack": PermissionLevel.ACTIVE,               # network service audits (read-only oracles)
@@ -2164,6 +2168,41 @@ class ToolRegistry:
         return ToolResult("read_object_idor", base, True,
                           json.dumps({"ran": True, "collections": len(colls), "confirmed": len(findings),
                                       "leads": len(leads), "lead_findings": leads, "details": details}), findings)
+
+    async def _run_saml(self, inp: dict) -> ToolResult:
+        """PASSIVE: find a SAMLResponse already on the surface, describe its signing posture, raise leads.
+
+        `saml_signature_bypass` was gated on `saml_sso_detected` and counted as wired by the orchestration
+        audit, yet `saml_tool` had NO caller and nothing ever captured a SAMLResponse to feed it. The
+        engine was doubly disconnected: no executor, and no input for one.
+
+        This closes the safe half. It sends no request of its own — it reads URLs the scan already
+        discovered plus any bodies handed to it, decodes both SSO bindings, and emits `plan_leads` output,
+        which by construction raises LEADS and never a confirmed finding.
+
+        The INTRUSIVE half stays out on purpose: `wrap_assertion` + `confirm_bypass` replay a tampered
+        assertion to the SP, which is a state-changing authentication attempt. That belongs behind the
+        operator gate, not in a passive pass."""
+        import saml_tool as st
+        urls = list(inp.get("urls") or getattr(self, "urls", None) or [])
+        bodies = list(inp.get("bodies") or [])
+        found = st.harvest(urls=urls, bodies=bodies)
+        if not found:
+            return ToolResult("saml", inp.get("url") or "", True,
+                              "No SAMLResponse/SAMLRequest on the observed surface — "
+                              "SAML assertion posture UNTESTED (not clean).", [])
+        findings, acs = [], str(inp.get("url") or (urls[0] if urls else ""))
+        for rec in found[:3]:
+            for lead in st.plan_leads(rec["xml"], acs) or []:
+                lead.setdefault("family", "broken_auth")
+                lead["evidence"] = "%s (source: %s)" % (str(lead.get("evidence", ""))[:160], rec["source"])
+                findings.append(lead)
+        posture = st.analyze(found[0]["xml"])
+        return ToolResult("saml", acs, True,
+                          "SAML: %d response(s) harvested; response_signed=%s assertion_signed=%s; "
+                          "%d lead(s)." % (len(found), posture.get("response_signed"),
+                                           posture.get("assertion_signed"), len(findings)),
+                          findings)
 
     async def _run_header_trust(self, inp: dict) -> ToolResult:
         """ACTIVE, read-only: does a client-controlled header decide authorization? (T1)

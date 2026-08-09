@@ -808,3 +808,115 @@ reports `tested N of M`, and on zero executions says so explicitly:
 
 Which is the same discipline as the capability-preflight section: **untested is not clean**, and a
 summary that cannot distinguish the two is worse than no summary.
+
+---
+
+# Pass 9 — the method blind spot, closed (#32)
+
+`scan()` and `scan_qualified()` walk `tree.body`, so they see **zero class methods**. This codebase keeps
+**321 methods in classes, 147 of them in `ToolRegistry`** — every engine Apolaki runs. Neither
+unreachable engine found today was caught by a dead-code scan; both came from following an ALWAYS_ON
+reason to the code it named.
+
+`scan_methods()` closes it. Resolution is conservative by design (a false negative costs nothing; a false
+positive costs someone's afternoon): `self.name`, any `.name` attribute access, or a string literal
+matching the name — the last because dispatch is `getattr(self, "_" + tool_name)`, and without that rule
+all 147 tool methods would be flagged as noise.
+
+**53 → 20 → 14, and 39 of the 53 were my own checker being wrong:**
+
+| Fix | Removed | What was wrong |
+|---|---|---|
+| lookbehind before the dot | 33 | `(?<![\w])\.name` rejects the ordinary `self.tools.execute(...)` — the char before the dot is a word char. It flagged `ToolRegistry.execute`, the dispatcher itself |
+| base-class overrides | 6 | `_FormParser.handle_starttag` is invoked by `html.parser.HTMLParser`. Recognised by walking the real MRO, not a callback-name list that would rot |
+
+A checker whose obvious false positives are that visible gets ignored wholesale — worse than not having
+one. Both fixes are pinned by tests, including a negative control (a genuinely orphaned method must be
+caught) and a string-dispatch control.
+
+## What the 14 actually are
+
+The interesting cluster is six `AssetGraph` methods — `plan_next`, `apply_result`, `add_enable`,
+`enabling`, `mark_consumed`, `neighbors` — **called only by tests**.
+
+`AssetGraph` turns out to have **two planning APIs**:
+
+- `to_observations()` + `next_best_actions()` — used by `plan_graph_authoritative`. **Wired.**
+- `plan_next()` / `apply_result()` / `add_enable()` / `enabling()` / `mark_consumed()` — a stateful
+  plan → execute → feed-back-capability loop. **Tests only.**
+
+That second loop is a capability-chaining planner, which is exactly what `engine_descriptor` +
+`effect_search` (T6/T8) now do with declared effects and a searchable vocabulary. The graph loop reads as
+the earlier attempt at the same idea.
+
+**Verdict: record, do not wire.** Wiring it means choosing which planner is authoritative — a design
+decision, not a cleanup, and the effects model is the better-specified successor. Deleting it needs the
+same decision first. This is the `waf_bypass_tool.pad` lesson again: *"has no caller" and "the capability
+is missing" are different claims*, and a third variant appears here — *"has no caller because something
+better replaced it"*.
+
+---
+
+# Pass 10 — SAML wired (#31), and the ratchet earned its keep
+
+`saml_signature_bypass` was gated on `saml_sso_detected`, `execution` defaults to `auto`, so the
+orchestration audit counted it wired. It was **doubly disconnected**: nothing called `saml_tool`, and
+nothing ever captured a SAMLResponse to feed it. An executor alone would have had no input.
+
+`saml_tool.harvest()` supplies the missing half — pure, no network. Two bindings, two places to look:
+HTTP-Redirect (query string, base64 + DEFLATE) and HTTP-POST (hidden form input, base64). Only values
+that `decode()` turns into real SAML XML are returned, so `?SAMLResponse=hello` cannot manufacture a
+finding.
+
+**A bug my own test caught immediately:** the first version used `parse_qs`, which form-decodes — and
+base64 contains `+`, which form-decoding turns into a space. The payload was corrupted, `decode()`
+returned nothing, and the **Redirect binding silently harvested zero while the POST binding worked.** A
+partial failure that reads exactly like "this target has no SAML". Fixed by extracting the raw query
+substring; `decode()` does its own unquoting.
+
+`run_saml` is **PASSIVE** and auto-fires only harvest + analyse + `plan_leads` (which by construction
+raises leads, never confirmations). The intrusive half — `wrap_assertion` + `confirm_bypass`, which
+replay a tampered assertion to the SP — stays operator-gated and is now allowlisted with that reason.
+Absence is reported as *"SAML assertion posture UNTESTED (not clean)"*, not as a pass.
+
+## A test that checked prose instead of code
+
+`test_the_intrusive_half_is_not_auto_fired` initially failed — because it matched the **docstring**
+explaining why those functions are excluded, which necessarily names them. Checking code against prose is
+the precise mistake that let `graphql_argument_injection` ship as reachable-on-paper. The test now strips
+the docstring before looking.
+
+## The ratchet caught me mid-change
+
+Adding `harvest()` before wiring it pushed the qualified count 40 → 41 and **failed the suite** — exactly
+the intended behaviour, on its first real opportunity. The fix was to finish the wiring, not to raise the
+baseline.
+
+```
+40  →  41  (harvest added, unwired)     <- ratchet FAILED the build
+    →  39  (harvest + plan_leads wired)
+    →  37  (intrusive half allowlisted with a stated reason)
+```
+
+Baseline tightened to 37 at each step. This is the difference between a ratchet and a number: it only
+ever moved down, and it refused a change that would have moved it up.
+
+## Two allowlists, because the two scans disagree about "unused"
+
+Putting the SAML justifications into `ALLOWED_UNUSED` broke `test_the_allowlist_does_not_rot`, and the
+failure was correct. `scan()` counts a mention anywhere — including tests — as a use;
+`scan_qualified()` requires a production caller through a resolved import. `saml_tool.confirm_bypass` is
+therefore *used* to the first scan and *unused* to the second, so a shared allowlist is wrong for
+whichever one disagrees, and the staleness check keeps flagging it forever.
+
+Split into `ALLOWED_UNUSED` (bare names, `scan()`) and `ALLOWED_UNUSED_QUALIFIED` (keyed
+`module.function`, `scan_qualified()`), with a test asserting the two never overlap — an entry in both
+means the distinction was not understood and one of them will rot.
+
+Final state of the three checkers:
+
+| Checker | Sees | Result |
+|---|---|---|
+| `scan()` | module-level functions, bare-name match, tests count | 0 unused, 0 stale |
+| `scan_qualified()` | module-level functions, import-resolved, production only | 37 (ratchet), 8 justified |
+| `scan_methods()` | class methods — 321 of them, invisible to both others | 14 (ratchet) |

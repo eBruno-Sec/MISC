@@ -54,6 +54,21 @@ ALLOWED_UNUSED = {
 }
 
 
+# Justifications for the QUALIFIED scan only. Kept SEPARATE from ALLOWED_UNUSED on purpose: the two
+# scans disagree about what "unused" means -- `scan()` counts a mention anywhere (including tests) as a
+# use, `scan_qualified()` requires a production caller through a resolved import. An entry that is
+# unused-to-one and used-to-the-other makes a shared list wrong for whichever scan disagrees, and
+# `scan()`'s staleness check will keep flagging it. Learned by putting two SAML entries in the wrong
+# list and failing test_the_allowlist_does_not_rot.
+ALLOWED_UNUSED_QUALIFIED = {
+    "saml_tool.confirm_bypass": "judges a REPLAYED tampered assertion; the replay is a state-changing "
+                                "authentication attempt, so it stays operator-gated. run_saml auto-fires "
+                                "only the passive harvest+analyze half",
+    "saml_tool.wrap_assertion": "builds the XML-signature-wrapping variant; generating a forged "
+                                "assertion is not something to auto-fire. Same gate as confirm_bypass",
+}
+
+
 def _decorated(node) -> bool:
     return bool(getattr(node, "decorator_list", None))
 
@@ -117,9 +132,9 @@ def scan(app_dir: str = None) -> dict:
 #
 # 52 when first measured; 47 after wiring `probe_selection` (pairwise/safety_label) and the GraphQL
 # argument functions into live paths; 40 once the check started honouring ALLOWED_UNUSED, which removed
-# six entries that already carried a written justification. Lower it whenever the real number drops, so
+# six entries that already carried a written justification; 37 after wiring saml_tool.harvest/plan_leads and allowlisting the operator-gated intrusive half. Lower it whenever the real number drops, so
 # the ratchet stays tight enough to catch the next regression.
-QUALIFIED_BASELINE = 40
+QUALIFIED_BASELINE = 37
 
 
 def _module_bindings(tree, known_modules):
@@ -210,7 +225,107 @@ def scan_qualified(app_dir: str = None) -> dict:
     # justification counted toward the ratchet, which both inflates the number and makes it mean two
     # different things at once ("unwired" vs "unwired and unexplained"). Matched on the bare name because
     # ALLOWED_UNUSED is keyed that way.
-    allowed = [u for u in unused if u.split(".")[-1] in ALLOWED_UNUSED]
-    flagged = [u for u in unused if u.split(".")[-1] not in ALLOWED_UNUSED]
+    def _justified(entry):
+        return entry.split(".")[-1] in ALLOWED_UNUSED or entry in ALLOWED_UNUSED_QUALIFIED
+
+    allowed = [u for u in unused if _justified(u)]
+    flagged = [u for u in unused if not _justified(u)]
     return {"unused": flagged, "allowed": allowed, "count": len(flagged),
             "baseline": QUALIFIED_BASELINE, "ok": len(flagged) <= QUALIFIED_BASELINE}
+
+
+# Methods flagged by `scan_methods` that are deliberately kept. Same rule as ALLOWED_UNUSED: a reason or
+# it does not belong here.
+ALLOWED_UNUSED_METHODS = {}
+
+# Current `scan_methods` count. Ratchet, same contract as QUALIFIED_BASELINE: may fall, never rise.
+#
+# 53 on the first run, but 39 of those were MY OWN checker being wrong, in two ways worth remembering:
+#   * a lookbehind before the dot (`(?<![\w])\.name`) rejected the ordinary `self.tools.execute(...)`,
+#     because the character before the dot is a word char -- it flagged ToolRegistry.execute as uncalled
+#   * HTMLParser callbacks (handle_starttag/handle_endtag) are invoked by the BASE class, not by us
+# 14 after both fixes. A checker whose obvious false positives are that visible gets ignored wholesale,
+# which is worse than not having one at all.
+METHOD_BASELINE = 14
+
+
+def scan_methods(app_dir: str = None) -> dict:
+    """Uncalled CLASS METHODS — the layer both other scans cannot see at all.
+
+    `scan()` and `scan_qualified()` walk `tree.body`, so they only ever see module-level functions. This
+    codebase keeps 348 methods in classes, 147 of them in `ToolRegistry` — which is to say **every engine
+    Apolaki runs is in the blind spot**. Neither unreachable engine found on 2026-08-08
+    (`graphql_argument_injection`, `run_header_trust`) was caught by a dead-code scan; both were found by
+    following an ALWAYS_ON reason to the code it named.
+
+    Resolution is deliberately CONSERVATIVE — it under-reports rather than inventing work:
+
+      * `self.name` anywhere counts (the ordinary call, including from a subclass)
+      * `.name` as an attribute on any receiver counts — the receiver's type is not inferred, so a
+        same-named method elsewhere can mask a dead one. Accepted: a false negative here costs nothing,
+        a false positive costs someone's afternoon.
+      * a STRING literal matching the name counts, because dispatch is
+        `getattr(self, "_" + tool_name)` — and for a private `_run_x` the dispatch string is `"run_x"`,
+        so both spellings are checked. This is the rule that stops all 147 tool methods being flagged.
+      * dunder, `test_`, decorated (framework-invoked) names are skipped
+
+    Returns {unused, allowed, count, baseline, ok, methods_examined}."""
+    app = app_dir or APP_DIR
+    srcs, trees = {}, {}
+    for fn in sorted(os.listdir(app)):
+        if not fn.endswith(".py"):
+            continue
+        try:
+            s = open(os.path.join(app, fn), encoding="utf8").read()
+            trees[fn] = ast.parse(s)
+            srcs[fn] = s
+        except Exception:
+            continue
+    corpus = "\n".join(srcs.values())
+
+    methods = []
+    for fn, tree in trees.items():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for m in node.body:
+                if not isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) or _decorated(m):
+                    continue
+                if _FRAMEWORK_PREFIX.match(m.name) or m.name.startswith("__"):
+                    continue
+                methods.append((fn, node.name, m.name))
+
+    def _is_override(module_file, class_name, method_name):
+        """True when the method OVERRIDES something a base class defines — so the BASE invokes it, not us.
+
+        `_FormParser.handle_starttag` is called by `html.parser.HTMLParser`, never by Apolaki. Resolved by
+        walking the real MRO rather than keeping a list of callback names, which would rot the moment
+        someone subclasses something new. Import failures fall through to "not an override": a checker
+        that cannot import a module should under-claim, not silently exclude."""
+        try:
+            mod = __import__(module_file[:-3])
+            c = getattr(mod, class_name, None)
+            return bool(c) and any(hasattr(b, method_name) for b in c.__mro__[1:])
+        except Exception:
+            return False
+
+    unused = []
+    for fn, cls, name in sorted(methods):
+        stem = name.lstrip("_")
+        # Strip definitions of this name so `def name(` never counts as a use.
+        body = re.sub(r"^\s*(async\s+)?def\s+%s\s*\(" % re.escape(name), "", corpus, flags=re.M)
+        # NO lookbehind before the dot. The first version used `(?<![\w])\.name`, which rejects the
+        # ordinary `self.tools.execute(...)` — the character before the dot is `s`, a word char — and so
+        # flagged `ToolRegistry.execute` as uncalled. A checker whose obvious false positives are that
+        # visible gets ignored wholesale, which is worse than not having it.
+        used = (re.search(r"self\s*\.\s*%s\b" % re.escape(name), body)
+                or re.search(r"\.\s*%s\b" % re.escape(name), body)
+                or re.search(r"[\"']_?%s[\"']" % re.escape(stem), body))
+        if not used and not _is_override(fn, cls, name):
+            unused.append("%s::%s.%s" % (fn, cls, name))
+
+    allowed = [u for u in unused if u.split(".")[-1] in ALLOWED_UNUSED_METHODS]
+    flagged = [u for u in unused if u.split(".")[-1] not in ALLOWED_UNUSED_METHODS]
+    return {"unused": flagged, "allowed": allowed, "count": len(flagged),
+            "baseline": METHOD_BASELINE, "ok": len(flagged) <= METHOD_BASELINE,
+            "methods_examined": len(methods)}
