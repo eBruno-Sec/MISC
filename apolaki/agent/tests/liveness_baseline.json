@@ -1,0 +1,20 @@
+{
+  "live": [
+    "client_side_authz",
+    "client_supplied_identity_param",
+    "dom_data_manipulation",
+    "dom_link_manipulation",
+    "dom_xss",
+    "enip_exposed",
+    "graphql_argument_injection",
+    "graphql_introspection",
+    "ipmi_rakp",
+    "ldap_anonymous_read",
+    "modbus_exposed",
+    "s7comm_exposed",
+    "smb_null_session",
+    "smb_signing_disabled",
+    "snmp_default_community"
+  ],
+  "note": "Engines proven end-to-end against a standing lab. Add by running liveness_run.py --update; a REGRESSION fails before the file is written, so this can only ratchet up."
+}

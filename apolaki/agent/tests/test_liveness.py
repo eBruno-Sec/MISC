@@ -1,0 +1,131 @@
+"""The engine-liveness ratchet (#125).
+
+`validated_on` records that an engine was once proven; nothing re-checked it. Three engines were found
+silently dead in one night with the whole suite green, because the suite tests pure helpers and the
+wiring is untested by construction. This gate asks one question per engine — did the shipping code path
+carry a real target all the way to a confirmed finding — and refuses to let a previously-live engine go
+quiet without failing.
+
+The scoring is pure and tested here; the end-to-end run lives in liveness_run.py and needs the labs up.
+"""
+import json
+import os
+
+import liveness as lv
+
+
+def _r(tech, verdict, lab="lab"):
+    return {"technique": tech, "lab": lab, "verdict": verdict, "detail": ""}
+
+
+# ── the ratchet ───────────────────────────────────────────────────────────────
+def test_an_engine_that_was_live_and_is_now_dead_fails_the_gate():
+    ev = lv.evaluate([_r("a", lv.CONFIRMED), _r("b", lv.DEAD)], ["a", "b"])
+    assert ev["regressions"] == ["b"] and ev["ok"] is False
+    assert "REGRESSION" in ev["statement"]
+
+
+def test_a_newly_confirmed_engine_raises_the_baseline():
+    ev = lv.evaluate([_r("a", lv.CONFIRMED), _r("b", lv.CONFIRMED)], ["a"])
+    assert ev["ok"] is True and ev["gained"] == ["b"]
+    assert ev["new_baseline"] == ["a", "b"]
+
+
+def test_a_skipped_lab_does_not_clear_a_regression():
+    """THE load-bearing property. If a down lab counted as a pass, the whole gate could be silenced by
+    stopping a container — the exact declaration-instead-of-fact failure it exists to catch."""
+    ev = lv.evaluate([_r("a", lv.SKIPPED)], ["a"])
+    assert ev["regressions"] == ["a"] and ev["ok"] is False
+
+
+def test_a_skipped_lab_for_an_engine_never_proven_is_not_a_failure():
+    """Honest the other way too: not asking a question about an engine with no baseline is not a
+    regression, and must not block the gate."""
+    ev = lv.evaluate([_r("a", lv.CONFIRMED), _r("z", lv.SKIPPED)], ["a"])
+    assert ev["ok"] is True and ev["regressions"] == []
+    assert "z" not in ev["new_baseline"]
+
+
+def test_a_harness_error_fails_the_gate_rather_than_being_read_as_dead():
+    """An engine reported dead when the HARNESS broke would send someone hunting a bug that isn't there
+    — and worse, an error silently treated as a pass would hide a real one."""
+    ev = lv.evaluate([_r("a", lv.ERROR)], [])
+    assert ev["ok"] is False and ev["errors"] == ["a"]
+
+
+def test_the_baseline_never_shrinks_through_evaluate():
+    ev = lv.evaluate([_r("a", lv.CONFIRMED)], ["a", "b"])
+    assert "b" in ev["new_baseline"]          # still recorded…
+    assert ev["regressions"] == ["b"]         # …and still failing
+
+
+# ── what counts as proof ──────────────────────────────────────────────────────
+_CHECK = {"technique": "t", "lab": "l", "family": "sqli"}
+
+
+def test_only_a_confirmed_finding_with_real_evidence_satisfies_a_check():
+    ok = {"family": "sqli", "confidence": "confirmed", "evidence": "a DBMS error absent from baseline"}
+    assert lv._match(ok, _CHECK) is True
+
+
+def test_a_lead_never_satisfies_a_liveness_check():
+    """The point is that the ORACLE still fires. A lead means it did not."""
+    assert lv._match({"family": "sqli", "confidence": "lead", "evidence": "x" * 40}, _CHECK) is False
+
+
+def test_a_confirmed_finding_with_no_evidence_does_not_count():
+    """This is not hypothetical: the GraphQL introspection finding shipped confirmed-by-construction with
+    no confidence and no evidence field, so every proof filter silently dropped it."""
+    assert lv._match({"family": "sqli", "confidence": "confirmed"}, _CHECK) is False
+    assert lv._match({"family": "sqli", "confidence": "confirmed", "evidence": "short"}, _CHECK) is False
+
+
+def test_the_wrong_family_does_not_satisfy_a_check():
+    assert lv._match({"family": "xss", "confidence": "confirmed", "evidence": "x" * 40}, _CHECK) is False
+
+
+def test_a_cwe_keyed_check_matches_on_cwe_not_family():
+    chk = {"technique": "t", "lab": "l", "cwe": "CWE-602"}
+    f = {"cwe": "CWE-602", "family": "access_control", "confidence": "confirmed", "evidence": "x" * 40}
+    assert lv._match(f, chk) is True
+    assert lv._match({**f, "cwe": "CWE-639"}, chk) is False
+
+
+def test_verdict_reports_a_down_lab_as_skipped_never_confirmed():
+    v = lv.verdict(_CHECK, [], lab_up=False)
+    assert v["verdict"] == lv.SKIPPED and "NOT a pass" in v["detail"]
+
+
+# ── the checks table itself ───────────────────────────────────────────────────
+def test_every_check_names_a_real_technique():
+    import techniques as T
+    for c in lv.CHECKS:
+        assert c["technique"] in T.TECHNIQUES, c["technique"]
+
+
+def test_every_check_has_a_lab_the_runner_can_reach():
+    """A check whose lab has no address would be unreachable forever and skip silently — a gate entry
+    that can never run is worse than no entry, because it looks like coverage."""
+    import liveness_run as lr
+    for c in lv.CHECKS:
+        assert c["lab"] in lr._LAB_ADDR, c["lab"]
+
+
+def test_every_check_states_what_would_prove_it():
+    for c in lv.CHECKS:
+        assert c.get("family") or c.get("cwe"), c["technique"]
+        assert c["kind"] in ("tool", "call")
+
+
+def test_the_committed_baseline_only_names_techniques_the_table_checks():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "liveness_baseline.json")
+    live = json.load(open(path, encoding="utf8"))["live"]
+    covered = {c["technique"] for c in lv.CHECKS}
+    assert set(live) <= covered, sorted(set(live) - covered)
+
+
+def test_the_baseline_records_the_engines_proven_so_far():
+    """A ratchet with an empty baseline enforces nothing."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "liveness_baseline.json")
+    live = json.load(open(path, encoding="utf8"))["live"]
+    assert len(live) >= 15, live

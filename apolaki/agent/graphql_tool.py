@@ -217,6 +217,10 @@ def analyze(endpoint: str, introspection_resp, batch_resp, batch_n, bogus_resp) 
             "reproduction_steps": [f"POST an introspection query to {endpoint}",
                                    "Observe the __schema in the response"],
             "cwe": "CWE-200", "family": "graphql", "tags": ["graphql", "api"],
+            # Confirmed BY CONSTRUCTION: this finding is only built after a parseable __schema came
+            # back. Leaving confidence unset made every proof filter (report gating, the benchmark's
+            # _has_proof, the liveness gate) silently drop a fact the oracle had already established.
+            "confidence": "confirmed",
             "remediation": "Disable introspection in production; enforce per-field authorization.",
         })
     elif detect_field_suggestion(bogus_resp):
@@ -241,6 +245,9 @@ def analyze(endpoint: str, introspection_resp, batch_resp, batch_n, bogus_resp) 
             "reproduction_steps": [f"POST a JSON array of {batch_n} queries to {endpoint}",
                                    "Observe an array of results returned"],
             "cwe": "CWE-770", "family": "graphql", "tags": ["graphql", "api"],
+            "confidence": "confirmed",   # only built after an N-item batch returned N results
+            "evidence": f"a JSON array of {batch_n} operations POSTed to {endpoint} returned {batch_n} results",
+            "success_oracle": "an N-item batch returned N results; N is small by construction",
             "remediation": "Disable array batching or apply per-operation rate limiting + query cost limits.",
         })
     return findings
