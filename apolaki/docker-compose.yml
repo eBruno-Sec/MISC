@@ -214,6 +214,23 @@ services:
       - "127.0.0.1:42093:8080"
     restart: unless-stopped
 
+  # domsource -- validation lab for client-side sources that never reach the server. dom_trace gained the
+  # URL FRAGMENT as a source; everything after '#' is absent from the access log, from a proxy capture and
+  # from any request replay, so the engine cannot be validated by checking what the server received --
+  # the server received nothing. The only observation point is the rendered DOM, which is why this lab
+  # exists. Carries an executable sink, a data-only sink, a query-attribution control and an inert page.
+  # Reachable at http://domsource:8080 on the compose network; host 42094.
+  domsource:
+    image: python:3.12-slim
+    profiles: ["labs"]
+    working_dir: /lab
+    command: python app.py
+    volumes:
+      - ./labs/domsource:/lab:ro
+    ports:
+      - "127.0.0.1:42094:8080"
+    restart: unless-stopped
+
   # Conpot (Honeynet Project) -- the ICS/OT validation target. The beyond-web engines had only ever been
   # exercised against mocks: their frame BUILDERS are unit-proven, but parsing a reply from a stack that is
   # not ours had never happened. A simulator written with our own frame code would test the parser against

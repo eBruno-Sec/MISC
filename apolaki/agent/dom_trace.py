@@ -19,7 +19,6 @@ import re
 import secrets
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
-import browser_engine as be
 
 _REDIRECTISH = ("back", "url", "return", "returnurl", "returnto", "next", "goto", "dest",
                 "destination", "redirect", "redir", "continue", "callback", "to", "link", "out",
@@ -28,39 +27,32 @@ _REDIRECTISH = ("back", "url", "return", "returnurl", "returnto", "next", "goto"
                 "endpoint", "api", "src", "uri", "path", "load", "fetch", "resource", "feed",
                 "host", "target", "data", "json", "proxy", "file", "u", "domain", "origin")
 
-_TRACE_JS = r'''
-export default async function ({ page }) {
-  const C = %CANARY%;
-  const TARGET = %URL%;
-  const res = { executed:false, redirect:"", req_override:"", in_href:"", in_src:"", in_attr:"", in_text:false, note:"" };
-  page.on("dialog", async d => { try { if (String(d.message()).indexOf(C) >= 0) res.executed = true; await d.dismiss(); } catch(e){} });
-  const isEvilHost = (u) => { try { return /^evilc[0-9a-z]+\.example$/i.test(new URL(u).hostname); } catch(e){ return false; } };
-  page.on("framenavigated", f => { try { if (isEvilHost(f.url())) res.redirect = f.url().slice(0,140); } catch(e){} });
-  page.on("request", r => { try { if (!isEvilHost(r.url())) return; const nav = r.isNavigationRequest ? r.isNavigationRequest() : true; const rt = r.resourceType ? r.resourceType() : ""; if (nav) res.redirect = res.redirect || r.url().slice(0,140); else if (rt === "fetch" || rt === "xhr") res.req_override = res.req_override || r.url().slice(0,140); } catch(e){} });
-  await page.evaluateOnNewDocument((c) => {
-    try {
-      const oa = window.alert; window.alert = (m) => { try { if (String(m).indexOf(c) >= 0) window.__hit = true; } catch(e){} try { return oa && oa(m); } catch(e){} };
-      const op = window.print; window.print = () => { window.__hit = true; };
-    } catch(e){}
-  }, C);
-  try { await page.goto(TARGET, { waitUntil:"domcontentloaded", timeout:12000 }); } catch(e){ res.note = "nav:"+String(e).slice(0,40); }
-  try { await page.waitForTimeout(700); } catch(e){}
-  try { res.executed = res.executed || !!(await page.evaluate(() => window.__hit)); } catch(e){}
-  try {
-    const dom = await page.evaluate((c) => {
-      const o = { in_href:"", in_src:"", in_attr:"", in_text:false };
-      for (const e of document.querySelectorAll("a[href],area[href],link[href],base[href],form[action]")) {
-        const h = e.getAttribute("href") || e.getAttribute("action") || ""; if (h.indexOf(c) >= 0) { o.in_href = e.tagName+":"+h.slice(0,140); break; } }
-      for (const e of document.querySelectorAll("[src]")) { const s = e.getAttribute("src") || ""; if (s.indexOf(c) >= 0) { o.in_src = e.tagName+":"+s.slice(0,140); break; } }
-      for (const e of document.querySelectorAll("*")) { let hit=false; const at=e.attributes||[]; for (let i=0;i<at.length;i++){ const a=at[i]; if (a.name!=="value" && a.value && a.value.indexOf(c)>=0){ o.in_attr=e.tagName+"@"+a.name; hit=true; break; } } if(hit) break; }
-      try { o.in_text = !!(document.body && document.body.innerHTML.indexOf(c) >= 0); } catch(e){}
-      return o;
-    }, C);
-    Object.assign(res, dom);
-  } catch(e){}
-  return res;
-}
-'''
+# THE DOM SINK SCAN. `tools._run_dom_trace` evaluates this in the rendered page with the canary as its
+# argument and merges the result into the runtime signals.
+#
+# THIS CONSTANT WAS MISSING AND THE CALL SITE STILL REFERENCED IT. The evaluate is wrapped in a bare
+# `except Exception: pass`, so `AttributeError: module 'dom_trace' has no attribute 'DOM_SCAN_JS'` was
+# swallowed on EVERY render: in_href / in_src / in_attr / in_text were never populated, which silently
+# retired dom_link_manipulation and dom_data_manipulation entirely — and, because the XSS pass only runs
+# where the canary `reflected`, it also stopped every DOM-XSS payload render from ever firing. A dead
+# `_TRACE_JS` (the older browser_engine flow, referenced by nothing) sat next to it carrying the same
+# logic, which is how the mismatch survived: the code LOOKED present.
+DOM_SCAN_JS = r"""(c) => {
+  const o = { in_href:"", in_src:"", in_attr:"", in_text:false };
+  for (const e of document.querySelectorAll("a[href],area[href],link[href],base[href],form[action]")) {
+    const h = e.getAttribute("href") || e.getAttribute("action") || "";
+    if (h.indexOf(c) >= 0) { o.in_href = e.tagName+":"+h.slice(0,140); break; } }
+  for (const e of document.querySelectorAll("[src]")) {
+    const s = e.getAttribute("src") || "";
+    if (s.indexOf(c) >= 0) { o.in_src = e.tagName+":"+s.slice(0,140); break; } }
+  for (const e of document.querySelectorAll("*")) {
+    let hit=false; const at=e.attributes||[];
+    for (let i=0;i<at.length;i++){ const a=at[i];
+      if (a.name!=="value" && a.value && a.value.indexOf(c)>=0){ o.in_attr=e.tagName+"@"+a.name; hit=true; break; } }
+    if(hit) break; }
+  try { o.in_text = !!(document.body && document.body.innerHTML.indexOf(c) >= 0); } catch(e){}
+  return o;
+}"""
 
 
 
@@ -78,6 +70,58 @@ def params_of(url: str) -> list:
     return [k for k, _ in parse_qsl(urlparse(url).query, keep_blank_values=True)]
 
 
+# ── client-side SOURCES ─────────────────────────────────────────────────────────────────────────
+# THE FRAGMENT IS NOT A QUERY PARAMETER, AND THAT IS THE WHOLE POINT. Everything after '#' is never
+# transmitted to the server, so no server-side reflection test can observe it and no proxy log records
+# it — a fragment-sourced DOM bug is invisible to every engine that reasons about request/response
+# pairs. It is only reachable by rendering the page and watching the sink, which is exactly what this
+# module does. SPA routers, deparam-style hash parsers and "#!"-style navigation all read it.
+#
+# Two shapes, because applications parse the hash two different ways:
+#   fragment      #name=value  — the hash parsed as a query string (deparam / router query)
+#   fragment_raw  #value       — the whole hash consumed as one value (router path, anchor target)
+SOURCES = ("query", "fragment", "fragment_raw")
+
+
+def set_fragment(url: str, name: str, value: str) -> str:
+    """Put `name=value` in the URL fragment, preserving any existing fragment pairs. Pure."""
+    p = urlparse(url)
+    pairs = parse_qsl(p.fragment, keep_blank_values=True)
+    if any(k == name for k, _ in pairs):
+        pairs = [(k, value if k == name else v) for k, v in pairs]
+    else:
+        pairs.append((name, value))
+    return urlunparse(p._replace(fragment=urlencode(pairs, doseq=True)))
+
+
+def set_raw_fragment(url: str, value: str) -> str:
+    """Replace the whole fragment with `value`. Pure."""
+    return urlunparse(urlparse(url)._replace(fragment=str(value)))
+
+
+def probe_url(url: str, param: str, value: str, source: str = "query") -> str:
+    """Build the probe URL for one client-side source. Pure.
+
+    Centralised so a finding's `target` and reproduction steps describe the source that was ACTUALLY
+    injected. Rebuilding the URL as a query parameter after probing the fragment would hand the reader
+    steps that cannot reproduce the bug."""
+    if source == "fragment":
+        return set_fragment(url, param, value)
+    if source == "fragment_raw":
+        return set_raw_fragment(url, value)
+    return set_param(url, param, value)
+
+
+_SOURCE_PHRASE = {"query": "query parameter '%s'", "fragment": "URL fragment '#%s='",
+                  "fragment_raw": "URL fragment"}
+
+
+def source_phrase(source: str, param: str) -> str:
+    """Human wording for the injected source, for evidence lines. Pure."""
+    fmt = _SOURCE_PHRASE.get(source, _SOURCE_PHRASE["query"])
+    return fmt % param if "%s" in fmt else fmt
+
+
 
 def is_evil_host(u: str) -> bool:
     try:
@@ -86,27 +130,35 @@ def is_evil_host(u: str) -> bool:
         return False
 
 
-def classify(url: str, param: str, canary: str, sig: dict) -> list:
-    """PURE: given the collected runtime signals for a parameter, return the confirmed-family hits.
-    sig = {executed, redirect, in_href, in_src, in_attr, in_text}. Most-severe first."""
+def classify(url: str, param: str, canary: str, sig: dict, source: str = "query") -> list:
+    """PURE: given the collected runtime signals for one SOURCE, return the confirmed-family hits.
+    sig = {executed, redirect, in_href, in_src, in_attr, in_text}. Most-severe first.
+
+    `source` defaults to "query" so existing callers are unchanged; it selects how the probe URL is
+    rebuilt and how the evidence names the injection point."""
     hits, s = [], sig or {}
+    here = probe_url(url, param, canary, source)
+    where_from = source_phrase(source, param)
     if s.get("executed"):
-        hits.append({"family": "dom_xss", "param": param, "target": s.get("xss_target") or set_param(url, param, canary),
-                     "canary": canary, "evidence": "browser executed alert(%s) via param '%s' (%s)" % (canary, param, s.get("xss_payload", "breakout"))})
+        hits.append({"family": "dom_xss", "param": param, "source": source,
+                     "target": s.get("xss_target") or here,
+                     "canary": canary, "evidence": "browser executed alert(%s) via %s (%s)" % (canary, where_from, s.get("xss_payload", "breakout"))})
     if (s.get("redirect") or "").strip():
-        hits.append({"family": "open_redirect", "param": param, "target": s.get("redir_target") or set_param(url, param, canary),
-                     "canary": canary, "evidence": "navigation to attacker host from param '%s': %s" % (param, s["redirect"])})
+        hits.append({"family": "open_redirect", "param": param, "source": source,
+                     "target": s.get("redir_target") or here,
+                     "canary": canary, "evidence": "navigation to attacker host from %s: %s" % (where_from, s["redirect"])})
     if (s.get("req_override") or "").strip():
-        hits.append({"family": "request_url_override", "param": param, "target": s.get("reqov_target") or set_param(url, param, canary),
-                     "canary": canary, "evidence": "param '%s' overrides a client-side fetch/XHR request target at runtime: %s" % (param, str(s["req_override"])[:120])})
+        hits.append({"family": "request_url_override", "param": param, "source": source,
+                     "target": s.get("reqov_target") or here,
+                     "canary": canary, "evidence": "%s overrides a client-side fetch/XHR request target at runtime: %s" % (where_from, str(s["req_override"])[:120])})
     if s.get("in_href") or s.get("in_src"):
         sink = s.get("in_href") or s.get("in_src")
-        hits.append({"family": "dom_link_manipulation", "param": param, "target": set_param(url, param, canary),
-                     "canary": canary, "evidence": "param '%s' controls a link/resource URL at runtime (%s)" % (param, str(sink)[:120])})
+        hits.append({"family": "dom_link_manipulation", "param": param, "source": source, "target": here,
+                     "canary": canary, "evidence": "%s controls a link/resource URL at runtime (%s)" % (where_from, str(sink)[:120])})
     if s.get("in_attr") or s.get("in_text"):
         where = s.get("in_attr") or "DOM text"
-        hits.append({"family": "dom_data_manipulation", "param": param, "target": set_param(url, param, canary),
-                     "canary": canary, "evidence": "param '%s' reflects into rendered DOM content at runtime (%s)" % (param, where)})
+        hits.append({"family": "dom_data_manipulation", "param": param, "source": source, "target": here,
+                     "canary": canary, "evidence": "%s reflects into rendered DOM content at runtime (%s)" % (where_from, where)})
     return hits
 
 
@@ -153,16 +205,24 @@ def finding(hit: dict) -> dict:
     """Build a CONFIRMED finding from a trace hit (runtime oracle fired)."""
     fam = hit["family"]
     vec, score = _CVSS.get(fam, ("", None))
+    src = hit.get("source") or "query"
+    # Name the source in the title only when it is NOT the ordinary query parameter, so existing
+    # query-sourced titles are unchanged while a fragment-sourced bug is never mistaken for one a
+    # server-side retest could reproduce.
+    where = "" if src == "query" else " (via the URL fragment)"
     return {
-        "title": "%s in '%s'" % (_TITLE.get(fam, fam), hit["param"]),
+        "title": "%s in '%s'%s" % (_TITLE.get(fam, fam), hit["param"], where),
         "severity": ("medium" if (score or 0) >= 4 else "low"),
-        "family": fam, "confidence": "confirmed", "target": hit["target"],
+        "family": fam, "confidence": "confirmed", "target": hit["target"], "source": src,
         "cwe": _CWE.get(fam, "CWE-79"), "cvss_vector": vec, "cvss_score": score,
         "evidence": hit["evidence"],
         "success_oracle": "a unique per-request canary reached the DOM sink at runtime in a real browser "
                           "(source→sink confirmed live), with vendor-library-only reflections self-dismissed.",
         "reproduction_steps": ["Load %s in a browser" % hit["target"],
-                               "Observe the attacker-controlled canary reach the DOM sink / execute"],
+                               "Observe the attacker-controlled canary reach the DOM sink / execute"]
+        + ([] if src == "query" else
+           ["NOTE: the payload is in the URL FRAGMENT, which the browser never sends to the server — "
+            "this cannot be reproduced from a server-side request log or by replaying the request."]),
         "impact": {"dom_xss": "Arbitrary script executes in the victim's browser (session/credential theft).",
                    "open_redirect": "The app redirects victims to an attacker-controlled host (phishing/token leak).",
                    "request_url_override": "Attacker controls the URL the page fetches at runtime (client-side request forgery): "

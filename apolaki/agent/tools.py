@@ -1397,8 +1397,15 @@ class ToolRegistry:
             else:
                 hdrs[k] = v[:300]
         body = (r.text if r is not None else "")[: self._RESP_CAP]
+        # `poc.redact` NEVER EXISTED. The hasattr guard meant this silently evaluated to `body` on every
+        # call, so the "redacted body" this method's docstring promises was never redacted — response
+        # bodies went to the model with any API key, token or password they contained intact. The header
+        # redaction above worked, which is what made the gap easy to miss.
+        # sarif_io.redact_snippet is the real redactor (it applies codereview's secret patterns and
+        # over-redacts by design); reuse it rather than adding a second, weaker one.
         try:
-            body = _poc.redact(body) if hasattr(_poc, "redact") else body
+            import sarif_io as _sarif
+            body = _sarif.redact_snippet(body)
         except Exception:
             pass
         return {"status": r.status_code if r is not None else 0,
@@ -4789,6 +4796,32 @@ class ToolRegistry:
                                     break
                         for hit in dt.classify(url, p, canary, s):
                             key = (hit["family"], hit["param"])
+                            if key not in seen:
+                                seen.add(key)
+                                findings.append(dt.finding(hit))
+                    # 4) THE URL FRAGMENT as a source. Everything after '#' is never sent to the server,
+                    #    so a fragment-sourced DOM bug is invisible to every request/response engine and
+                    #    to the proxy log — only a render can see it. Bounded deliberately: the whole-hash
+                    #    probe once per page, and the '#name=' shape only for DOM-sink-ish names, because
+                    #    each probe is a browser render. A family already confirmed via the query source
+                    #    is skipped, so this can only ADD recall, never re-report the same bug twice.
+                    frag_params = [p for p in params if p.lower() in dt._REDIRECTISH][:2]
+                    for p, src in [("(hash)", "fragment_raw")] + [(p, "fragment") for p in frag_params]:
+                        canary = "domfr" + os.urandom(4).hex()
+                        fu = dt.probe_url(url, p, canary, src)
+                        s = await _render(fu, canary)
+                        reflected = bool(s["in_href"] or s["in_src"] or s["in_attr"] or s["in_text"])
+                        if reflected:
+                            for pl in dt._XSS_PAYLOADS[:3]:
+                                xu = dt.probe_url(url, p, pl.replace("%C%", canary), src)
+                                xs = await _render(xu, canary)
+                                if xs["executed"]:
+                                    s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
+                                    break
+                        for hit in dt.classify(url, p, canary, s, source=src):
+                            if (hit["family"], hit["param"]) in seen:
+                                continue            # already proven via the query source; not a 2nd bug
+                            key = (hit["family"], hit["param"], src)
                             if key not in seen:
                                 seen.add(key)
                                 findings.append(dt.finding(hit))
