@@ -7,3 +7,8 @@ agent/data/
 
 # generated benchmark artifacts (final proof force-added)
 benchmark_results/
+
+# Raw blind-benchmark mission dumps: full HTTP exchanges including Set-Cookie / Authorization /
+# password material captured during a scan. The scored comparison artifact beside them is committed;
+# these are not.
+Pentest_Reports/**/blind_*.json
