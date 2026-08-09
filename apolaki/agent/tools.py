@@ -4722,16 +4722,24 @@ class ToolRegistry:
         params = params[:8]
         findings, seen = [], set()
 
-        async def _render(u, canary):
-            """Load u in a fresh context; return the runtime signals for `canary`."""
-            sig = {"executed": False, "redirect": "", "req_override": "", "in_href": "", "in_src": "", "in_attr": "", "in_text": False}
+        async def _render(u, canary, anon: bool = False):
+            """Load u in a fresh context; return the runtime signals for `canary`.
+
+            `anon` drops the session entirely. An AUTHENTICATED scan cannot see the pre-auth DOM surface:
+            a logged-in browser asking for /login is bounced to the account page, so the login page's own
+            sources never render and its DOM bugs are invisible. Carrying the session is right by default
+            (it reaches the post-login surface); the caller retries anonymously when the app navigates
+            away from the page that was asked for."""
+            sig = {"executed": False, "redirect": "", "req_override": "", "in_href": "", "in_src": "",
+                   "in_attr": "", "in_text": False, "final_url": ""}
             ctx = await browser.new_context(ignore_https_errors=True)
             try:
-                if self.session_headers:
+                if self.session_headers and not anon:
                     hh = {k: v for k, v in self.session_headers.items() if k.lower() != "cookie"}
                     if hh:
                         await ctx.set_extra_http_headers(hh)
-                await self._ctx_add_cookies(ctx)
+                if not anon:
+                    await self._ctx_add_cookies(ctx)
                 page = await ctx.new_page()
                 page.on("dialog", lambda d: (sig.__setitem__("executed", sig["executed"] or (canary in str(d.message))),
                                              asyncio.ensure_future(d.dismiss())))
@@ -4757,6 +4765,10 @@ class ToolRegistry:
                 except Exception:
                     pass
                 try:
+                    sig["final_url"] = page.url or ""
+                except Exception:
+                    pass
+                try:
                     dom = await page.evaluate(dt.DOM_SCAN_JS, canary)
                     sig.update({k: dom.get(k, sig[k]) for k in ("in_href", "in_src", "in_attr", "in_text")})
                 except Exception:
@@ -4770,10 +4782,35 @@ class ToolRegistry:
                 browser = await pw.chromium.launch(headless=True, executable_path=chrome,
                                                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
                 try:
+                    _want_path = urlparse(url).path.rstrip("/")
+                    _has_session = bool(self.session_headers) or bool(getattr(self, "cookies", None))
+
+                    def _navigated_away(sig):
+                        """The app sent us somewhere else than the page we asked for."""
+                        fu = sig.get("final_url") or ""
+                        return bool(fu) and urlparse(fu).path.rstrip("/") != _want_path
+
                     for p in params:
                         canary = "domtr" + os.urandom(4).hex()
                         # 1) plain-canary render -> link/data signals
                         s = await _render(dt.set_param(url, p, canary), canary)
+                        # An AUTHENTICATED scan is blind to the pre-auth DOM surface: a logged-in browser
+                        # asking for /login is redirected to the account page, so the login page's own
+                        # sources never render and its DOM bugs cannot be seen. This was measured, not
+                        # guessed — dom_trace found /login's redirect-param dom_data standalone and missed
+                        # it in-mission, and /my-account appeared in the traced paths. Retry anonymously
+                        # only when the app actually navigated away AND we were carrying a session, so a
+                        # normal page costs no extra render.
+                        _anon = False
+                        if _has_session and _navigated_away(s) and not (
+                                s["in_href"] or s["in_src"] or s["in_attr"] or s["in_text"]):
+                            s2 = await _render(dt.set_param(url, p, canary), canary, anon=True)
+                            if not _navigated_away(s2):
+                                s, _anon = s2, True
+                        # Every LATER render for this param must drop the session too. Confirming the
+                        # reflection anonymously and then firing the XSS payloads with the session back on
+                        # would bounce them to the account page again — the engine would prove the sink
+                        # exists and then fail to prove it executes, reporting the weaker family only.
                         reflected = bool(s["in_href"] or s["in_src"] or s["in_attr"] or s["in_text"])
                         # 2) attacker-host render -> open_redirect (navigation) AND request_url_override
                         #    (script-initiated fetch/XHR). Gated on a URL/redirect/request-ish param NAME or a
@@ -4781,7 +4818,7 @@ class ToolRegistry:
                         #    so this keeps the (costly) extra render off every benign param.
                         if p.lower() in dt._REDIRECTISH or s["in_href"] or s["in_src"]:
                             rv = "https://evilc%s.example/" % canary
-                            rs = await _render(dt.set_param(url, p, rv), canary)
+                            rs = await _render(dt.set_param(url, p, rv), canary, anon=_anon)
                             if rs["redirect"]:
                                 s["redirect"], s["redir_target"] = rs["redirect"], dt.set_param(url, p, rv)
                             if rs["req_override"]:
@@ -4790,7 +4827,7 @@ class ToolRegistry:
                         if reflected:
                             for pl in dt._XSS_PAYLOADS[:4]:
                                 xu = dt.set_param(url, p, pl.replace("%C%", canary))
-                                xs = await _render(xu, canary)
+                                xs = await _render(xu, canary, anon=_anon)
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
                                     break

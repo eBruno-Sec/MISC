@@ -72,8 +72,21 @@ _NOQUERY = _HEAD + """<h1>query ignored</h1><div id="out">this page never reads 
 _INERT = _HEAD + """<h1>inert</h1><div id="out">static content, no script reads any URL component</div>
 """ + _TAIL
 
+# AUTHENTICATED-SCAN BLIND SPOT. This page reflects ?redirect= into the DOM, but only for an ANONYMOUS
+# visitor: presenting a session cookie bounces the browser to /account, exactly as a real login page
+# does. An authenticated scan therefore never renders this page and never sees its DOM bug — measured on
+# a live target, where dom_trace found /login's redirect-param finding standalone and missed it
+# in-mission while /my-account showed up in the traced paths.
+_AUTHBOUNCE = _HEAD + """<h1>login</h1><div id="out">…</div>
+<script>
+  var p = new URLSearchParams(location.search);
+  document.getElementById("out").innerHTML = p.get("redirect") || "no redirect";
+</script>""" + _TAIL
+
+_ACCOUNT = _HEAD + "<h1>account</h1><p>signed in; this page has no user-controlled sink</p>" + _TAIL
+
 _ROUTES = {"/hash": _HASH, "/hashparam": _HASHPARAM, "/safehash": _SAFEHASH,
-           "/noquery": _NOQUERY, "/inert": _INERT}
+           "/noquery": _NOQUERY, "/inert": _INERT, "/account": _ACCOUNT}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -86,6 +99,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # The fragment is NOT in self.path — the browser strips it before sending. Nothing here can see
         # it, which is the property the lab exists to demonstrate.
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path == "/authbounce":
+            if "sess=" in (self.headers.get("Cookie") or ""):
+                self.send_response(302)
+                self.send_header("Location", "/account")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = _AUTHBOUNCE
+            data = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         body = _ROUTES.get(path)
         if body is None:
             body = _HEAD + "<h1>domsource</h1><ul>" + "".join(
