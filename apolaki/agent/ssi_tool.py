@@ -21,8 +21,29 @@ import re
 # NEVER runs a command (unlike #exec) — safe to fire on a live target.
 _DIRECTIVE = '<!--#echo var="DATE_GMT" -->'
 
-# A DATE_GMT render always carries a 4-digit year and (in the default timefmt) a month abbrev / time. We
-# require a year so a stray reflected number can't confirm; the marker sandwich already rules out coincidence.
+# WE SET THE FORMAT RATHER THAN GUESSING IT. The old oracle required a month ABBREVIATION in the output,
+# which is only present under the DEFAULT timefmt. A server configured with a numeric format —
+# `2026-08-09 17:42:01` is entirely ordinary — executed the directive and still failed confirmation: a
+# false negative caused by the oracle assuming a server setting it had no reason to assume.
+#
+# `#config timefmt` is part of the same SSI vocabulary as `#echo` (Apache mod_include, nginx, IIS), so we
+# can declare the format we want and then require exactly that shape back. %Y-%j (year + day-of-year) is
+# used because it cannot be confused with an ordinary date already on the page, and the token makes the
+# whole string unique per request.
+_FMT_PREFIX = "APO"
+
+
+def _fmt_directive(token: str) -> str:
+    return '<!--#config timefmt="%s-%s-%%Y-%%j" -->' % (_FMT_PREFIX, token)
+
+
+def _expanded_re(token: str):
+    """What an EXECUTED directive must produce: our prefix+token, then a real year and day-of-year."""
+    return re.compile(r"%s-%s-((?:19|20)\d{2})-(\d{1,3})\b" % (_FMT_PREFIX, re.escape(token)))
+
+
+# Legacy fallback: a server that ignores #config but honours #echo still renders the default format.
+# Kept so the format-setting change can only ADD confirmations, never remove one.
 _DATE_RE = re.compile(r"\b(19|20)\d{2}\b")
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
@@ -34,7 +55,7 @@ def marker(token: str) -> str:
 def payload(token: str) -> str:
     """The injection value: benign #echo directive sandwiched between two copies of the unique marker."""
     m = marker(token)
-    return m + _DIRECTIVE + m
+    return m + _fmt_directive(token) + _DIRECTIVE + m
 
 
 def _between(body: str, token: str) -> str:
@@ -54,6 +75,22 @@ def evaluate(body: str, token: str) -> dict:
     # still contains the directive (literal reflection) or an encoded copy -> NOT executed
     if "#echo" in low or "<!--" in low or "&lt;!--" in low:
         return {"confirmed": False, "oracle": ""}
+    # The raw format string coming back means it was REFLECTED, not expanded — never a confirmation.
+    if "%Y" in mid or "%j" in mid:
+        return {"confirmed": False, "oracle": ""}
+    # PRIMARY: the format we asked the server to adopt, expanded. Format-independent by construction, and
+    # the token makes it unforgeable — nothing but SSI expansion puts APO-<token>-YYYY-DDD in the body.
+    exp = _expanded_re(token).search(mid)
+    if exp:
+        year, doy = int(exp.group(1)), int(exp.group(2))
+        if 1 <= doy <= 366:
+            return {"confirmed": True,
+                    "oracle": "the SSI directives #config timefmt + #echo var=\"DATE_GMT\" were EXECUTED: "
+                              "the server adopted our requested time format and rendered '%s' (year %d, "
+                              "day-of-year %d) between our unique markers. The literal format string "
+                              "%%Y-%%j is absent, so this is expansion and not reflection."
+                              % (exp.group(0), year, doy)}
+    # FALLBACK: a server that ignores #config but honours #echo still emits the default format.
     if _DATE_RE.search(mid) and any(mo in low for mo in _MONTHS):
         got = mid.strip()[:60]
         return {"confirmed": True, "oracle": "the SSI directive #echo var=\"DATE_GMT\" was executed by the "
