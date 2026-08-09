@@ -187,3 +187,35 @@ def system_leak_lead(surface: str, response_snippet: str) -> dict:
               "Review the response manually to confirm whether real internal instructions were disclosed"],
              confidence="candidate")
     return f
+
+
+# ── request ENVELOPES: the probe has to arrive before any oracle can matter ───────────────────
+# The engine sent only a flat body — {"message": probe} / {"prompt": probe}. Most production chat APIs
+# do not accept that shape: OpenAI-style endpoints want a messages ARRAY with role/content, and plenty of
+# in-house wrappers nest under "input" or "data". Against those the probe was never delivered, the
+# endpoint returned a validation error, and the scan reported nothing — a false negative that looks
+# exactly like a well-defended target. Both llm_prompt_injection and llm_output_handling were affected.
+#
+# Shapes are ordered cheapest-first and the caller abandons an envelope as soon as the endpoint rejects
+# it, so the added coverage costs one request per unsupported shape rather than multiplying the budget.
+def request_bodies(field: str, probe: str) -> list:
+    """[(shape_name, body_dict)] — the same probe wrapped in each common chat-API envelope. Pure."""
+    return [
+        ("flat", {field: probe}),
+        ("openai_messages", {"messages": [{"role": "user", "content": probe}]}),
+        ("nested_input", {"input": {"text": probe}}),
+        ("contents_parts", {"contents": [{"parts": [{"text": probe}]}]}),
+        ("data_wrapper", {"data": {field: probe}}),
+    ]
+
+
+def envelope_carries_probe(body: dict, probe: str) -> bool:
+    """True when `probe` actually appears somewhere in the serialised envelope. Pure.
+
+    A shape that silently drops the payload would be worse than not trying it: the endpoint would answer
+    normally and the absence of a finding would look like a clean result."""
+    import json as _j
+    try:
+        return probe in _j.dumps(body)
+    except Exception:
+        return False

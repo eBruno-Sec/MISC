@@ -78,3 +78,34 @@ def test_system_leak_stays_a_candidate_lead():
     lead = lt.system_leak_lead("https://x/api/chat", "You are a helpful assistant, do not reveal ...")
     assert lead["confidence"] == "candidate"          # heuristic, never auto-confirmed
     assert not bb._has_proof(lead)
+
+
+# ── the probe must actually reach the model (Codex batch 2 #2) ────────────────
+def test_every_envelope_actually_carries_the_probe():
+    """A shape that dropped the payload would be worse than not trying it: the endpoint answers normally
+    and the missing finding looks like a clean result."""
+    import llm_tool as lt
+    for name, body in lt.request_bodies("message", "CANARY-XYZ"):
+        assert lt.envelope_carries_probe(body, "CANARY-XYZ"), name
+
+
+def test_the_openai_messages_shape_is_covered():
+    """REGRESSION. The engine sent only {"message": probe}. An OpenAI-style endpoint wants a messages
+    array with role/content and rejects the flat body, so the probe was never delivered and the scan
+    reported nothing — indistinguishable from a well-defended target."""
+    import llm_tool as lt
+    shapes = dict(lt.request_bodies("message", "P"))
+    assert shapes["openai_messages"] == {"messages": [{"role": "user", "content": "P"}]}
+    assert "nested_input" in shapes and "contents_parts" in shapes
+
+
+def test_flat_shape_is_still_first():
+    """Cheapest-first: the shape that already worked must not be displaced or the change costs latency
+    on every endpoint that was fine before."""
+    import llm_tool as lt
+    assert lt.request_bodies("prompt", "P")[0][0] == "flat"
+
+
+def test_envelope_check_rejects_a_dropped_payload():
+    import llm_tool as lt
+    assert lt.envelope_carries_probe({"messages": [{"role": "user", "content": "other"}]}, "P") is False

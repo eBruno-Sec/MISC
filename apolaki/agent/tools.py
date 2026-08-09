@@ -7408,6 +7408,7 @@ class ToolRegistry:
         # Bounded: a field that errors on the first (direct) probe is abandoned; total probes hard-capped.
         variants = lt.canary_variants(token)
         done, tried, MAXTRIES = False, 0, 26
+        _llm_shape = ""      # the request envelope this endpoint accepted; pinned after the first success
         for field in field_candidates:
             if done or tried >= MAXTRIES:
                 break
@@ -7415,10 +7416,25 @@ class ToolRegistry:
                 if tried >= MAXTRIES:
                     break
                 tried += 1
-                body = _json.dumps({field: probe})
-                r = await self._http(url, "POST", headers, body, capture=False)
-                if r.get("error"):
-                    break   # this field is not accepted by the endpoint — move to the next field
+                # ENVELOPE, not just field name. A flat {field: probe} is rejected outright by most
+                # production chat APIs (OpenAI-style wants a messages array), so the probe never reached
+                # the model and the scan reported nothing — a false negative that reads as a clean
+                # target. Try each shape, abandon one the moment the endpoint refuses it, and remember
+                # the shape that worked so later variants cost one request each rather than five.
+                r, body = None, None
+                for _shape, _b in lt.request_bodies(field, probe):
+                    if _llm_shape and _shape != _llm_shape:
+                        continue           # an envelope already worked here; do not re-probe the others
+                    if not lt.envelope_carries_probe(_b, probe):
+                        continue           # a shape that drops the payload would make a clean-looking
+                        # response meaningless — never send one and never count its silence as evidence
+                    body = _json.dumps(_b)
+                    r = await self._http(url, "POST", headers, body, capture=False)
+                    if not r.get("error"):
+                        _llm_shape = _shape
+                        break
+                if r is None or r.get("error"):
+                    break   # no envelope was accepted for this field — move to the next field
                 if lt.canary_confirmed(r.get("body", ""), token):
                     findings.append(lt.injection_confirmed_finding(url, token, r.get("body", ""), technique=tech))
                     await self._http(url, "POST", headers, body, capture=True)
