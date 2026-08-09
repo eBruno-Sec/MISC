@@ -721,6 +721,12 @@ X-Requested-With: </textarea>
     #p-taxonomy .tx-badge.proven{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
     #p-taxonomy .tx-badge.catalogued{background:transparent;color:var(--text-dim);border:1px dashed var(--border2)}
     #p-taxonomy .tx-badge.lablocal{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+    /* "unverified" = claims validated_on but NO liveness run has ever re-confirmed it. Deliberately not
+       green and not the same as "catalogued": catalogued means we never claimed anything, unverified
+       means we claimed it and cannot currently back it. Collapsing the two would hide the honesty debt. */
+    #p-taxonomy .tx-badge.unverified{background:color-mix(in srgb,var(--warn) 10%,transparent);color:var(--warn);border:1px dashed color-mix(in srgb,var(--warn) 50%,transparent)}
+    /* demonstrated only by lab-solver code — never transferable capability */
+    #p-taxonomy .tx-badge.solveronly{background:transparent;color:var(--warn);border:1px dotted color-mix(in srgb,var(--warn) 55%,transparent)}
     #p-taxonomy .tx-ev{margin-top:.45rem;font-size:.72rem;color:var(--text-dim)}
     #p-taxonomy .tx-ev b{color:var(--text);font-weight:600}
     #p-taxonomy .tx-thead{display:flex;align-items:center;gap:.5rem;cursor:pointer}
@@ -2087,7 +2093,9 @@ async function loadTaxonomy(lens){
 }
 function renderTaxonomy(d){
   let h=`<div class="tx-bar">
-    <div class="tx-stat"><span class="v acc">${d.proven}</span><span class="k">Proven</span></div>
+    <div class="tx-stat"><span class="v acc" title="Confirmed end-to-end by a liveness run against a standing lab">${d.proven}</span><span class="k">Proven</span></div>
+    ${d.unverified ? `<div class="tx-stat"><span class="v" style="color:var(--warn)" title="Claim validated_on but no liveness run has re-confirmed them. This number is the honesty debt — it is shown, not hidden, so it can be driven down.">${d.unverified}</span><span class="k">Unverified</span></div>` : ""}
+    ${d.solver_only ? `<div class="tx-stat"><span class="v" style="color:var(--warn)" title="Demonstrated only by lab-solver code; not transferable capability">${d.solver_only}</span><span class="k">Solver-only</span></div>` : ""}
     <div class="tx-stat"><span class="v">${d.total}</span><span class="k">Techniques</span></div>
     <div class="tx-stat"><span class="v">${d.transferable}</span><span class="k">Transferable</span></div>
     <div class="tx-stat"><span class="v">${d.generalized}</span><span class="k">Generalized ≥2 labs</span></div>
@@ -2098,9 +2106,19 @@ function renderTaxonomy(d){
   (d.groups||[]).forEach(g=>{
     h+=`<div class="tx-group"><div class="tx-ghead"><span class="tx-gkey">${esc(g.key)}</span><span class="tx-gcount">${g.count}</span></div>`;
     g.techniques.forEach(t=>{
-      const col = t.status==="proven" ? "var(--ok)" : (!t.transferable ? "var(--warn)" : "var(--border2)");
+      const col = t.status==="proven" ? "var(--ok)" : (!t.transferable || t.status==="unverified" || t.status==="solver_only" ? "var(--warn)" : "var(--border2)");
+      // Four states, because "proven or not" hid the honesty debt. `proven` is now earned by an
+      // end-to-end liveness run; `unverified` means the registry CLAIMS validated_on but nothing has
+      // re-confirmed it; `solver_only` means a lab solver demonstrated it and no general engine exists.
+      // Rendering the last two as "catalogued" would understate a claim we already made.
+      const _BADGE = {
+        proven:      `<span class="tx-badge proven" title="An end-to-end liveness run confirmed this against a standing lab">proven</span>`,
+        unverified:  `<span class="tx-badge unverified" title="Claims validated_on, but no liveness run has re-confirmed it — treat as unproven">unverified</span>`,
+        solver_only: `<span class="tx-badge solveronly" title="Demonstrated only by lab-specific solver code; not transferable capability">solver-only</span>`,
+        catalogued:  `<span class="tx-badge catalogued" title="Known technique, never demonstrated">catalogued</span>`,
+      };
       const badge = !t.transferable ? `<span class="tx-badge lablocal">lab-local</span>`
-                    : (t.status==="proven" ? `<span class="tx-badge proven">proven</span>` : `<span class="tx-badge catalogued">catalogued</span>`);
+                    : (_BADGE[t.status] || _BADGE.catalogued);
       const kev = t.known_exploited ? `<span class="tx-badge" style="background:var(--danger);color:#fff;border-color:var(--danger)" title="This weakness class is in CISA's Known Exploited Vulnerabilities catalog${t.kev_ransomware?', ransomware-associated':''}">KEV exploited</span>` : "";
       const caps = (t.capec||[]).slice(0,4).map(c=>`<span class="tx-chip" title="CAPEC: ${esc(c.name)}${c.severity?' · '+esc(c.severity)+' severity':''}">${esc(c.id)}</span>`).join("");
       const tags = [["CWE",t.cwe],["OWASP",t.owasp],["WSTG",t.wstg],["ATT&CK",t.mitre]]
