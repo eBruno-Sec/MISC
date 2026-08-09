@@ -1644,7 +1644,14 @@ async def blind_benchmark_run(session_id: str, answer_key_url: str = ""):
 
     # 1) SEAL the mission output BEFORE the answer key is ever fetched (hash + timestamp)
     blind = bb.blind_artifact(session_id, host, findings, candidates, validations, code_rev)
-    outdir = os.path.join(os.path.dirname(__file__), "benchmark_results")
+    # ON THE DATA VOLUME, NOT BESIDE THE CODE. This used to resolve to /app/benchmark_results, which is
+    # INSIDE the image: every `docker compose build agent` + recreate deleted it. For ordinary output that
+    # is annoying; for these two files it destroys the evidence itself. The sealed artifact and its hash
+    # are the proof that the mission was frozen BEFORE the answer key was fetched — lose them and the
+    # claim that a benchmark ran blind is unfalsifiable, which is worth nothing. Observed for real: the
+    # 2026-08-09 ginandjuice artifacts were gone after the next rebuild and survive only because they had
+    # been copied out by hand. Same BBH_DATA_DIR convention every other writer here already follows.
+    outdir = os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "benchmark_results")
     os.makedirs(outdir, exist_ok=True)
     bpath = os.path.join(outdir, "blind_%s_%s.json" % (session_id, blind["content_hash"][:12]))
     with open(bpath, "w", encoding="utf-8") as fh:
