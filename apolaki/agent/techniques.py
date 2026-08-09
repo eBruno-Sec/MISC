@@ -397,7 +397,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="None needed — the disclosure IS the finding. Its larger value is as surface expansion: "
                "every operation and argument becomes testable input for the other engines.",
        oracle="a parseable __schema with a query type and at least one root operation came back",
-       validated_on=[]),
+       validated_on=["dvga"]),
     _t(id="graphql_field_suggestions", vuln_class="sensitive_exposure", cwe="CWE-200", owasp="A01:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-CONF-05",
        summary="Schema still discoverable via 'Did you mean' field suggestions when introspection is off.",
@@ -414,7 +414,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                "does NOT use it that way — the no-brute rail stands. A token-sized batch establishes that "
                "the control is absent; no credential attempts are made through it.",
        oracle="an N-item batch returned N results; N is small by construction",
-       validated_on=[]),
+       validated_on=["dvga"]),
     _t(id="graphql_argument_injection", vuln_class="injection", cwe="CWE-74", owasp="A03:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-INPV-01",
        summary="GraphQL query/mutation arguments as injection entry points for the existing engines.",
@@ -424,7 +424,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
                "The value is JSON-encoded so a payload can never restructure the document into a "
                "different — possibly far heavier — query.",
        oracle="the injecting engine's own oracle, unchanged; only the transport differs",
-       validated_on=[]),
+       validated_on=["dvga"]),
 
     _t(id="dnp3_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
        permission=ACTIVE, transferable=True,

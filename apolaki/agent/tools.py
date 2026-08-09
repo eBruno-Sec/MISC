@@ -3738,6 +3738,7 @@ class ToolRegistry:
         The oracle is `sqli_tool.error_signatures`, which is already a differential: a DBMS error present
         for the payload and ABSENT from the baseline. A benign control value must also stay clean, so a
         server that errors on everything cannot manufacture a finding."""
+        import httpx
         import graphql_tool as gql
         import probe_selection as ps
         import sqli_tool as sq
