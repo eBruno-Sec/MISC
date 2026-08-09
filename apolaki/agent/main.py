@@ -63,6 +63,10 @@ class EngageRequest(BaseModel):
     # stays the default so an unscoped scan is unchanged. Excluded classes are recorded in the report,
     # because an untested class is not a clean one.
     exclude_categories: list = []
+    # Blind benchmarking: extra published-ground-truth paths to HARD-BLOCK from the scanner, for a target
+    # whose answer key does not live at the default /vulnerabilities. Blocked at the scope choke point,
+    # so no crawl, browser, JS-route harvest or candidate generator can reach it mid-mission.
+    answer_key_paths: list = []
     strategy: Optional[str] = None   # manual | deterministic | low_ai | agentic (default: deterministic)
     max_ai_calls: Optional[int] = None  # override the per-strategy AI-call budget
     # OWASP ZAP DAST — opt-in from the scan setup UI. enable_zap OFF (default) means
@@ -359,6 +363,10 @@ async def engage(req: EngageRequest):
     session_id = uuid.uuid4().hex[:8]
     scope = ScopeEngine()
     scope.load_manual(req.in_scope, req.out_of_scope, req.program_name)
+    # Blind benchmarking against a target whose published ground truth does NOT live at the default
+    # /vulnerabilities path: name it here and it is blocked at the same choke point, so the scanner can
+    # never crawl the answers it is about to be scored against.
+    scope.answer_key_paths = [str(p) for p in (req.answer_key_paths or []) if str(p).strip()]
 
     # authenticated scanning: raw headers first, then optional auto-login (scoped).
     # Drop empty-value headers (e.g. the UI's prefilled template names) so they

@@ -97,6 +97,13 @@ class ScopeEngine:
         self.in_scope: list = []
         self.out_of_scope: list = []
         self.program_name: str = ""
+        # Extra answer-key surfaces to hard-block, beyond the default. Every benchmark target publishes
+        # its ground truth somewhere different — /vulnerabilities for a PortSwigger-style page, an
+        # expectedresults index elsewhere — and a keyed target whose key is NOT blocked would have its
+        # answers crawled into the mission, silently destroying the blind property while every artifact
+        # still reported ordering_ok. Carried on the scope because the choke point is the only place
+        # that sees every URL the scanner touches.
+        self.answer_key_paths: list = []
 
     def load_manual(self, in_scope: list, out_of_scope: list, program_name: str = "Program") -> None:
         self.program_name = program_name
@@ -128,7 +135,7 @@ class ScopeEngine:
         # The benchmark driver fetches it separately (its own httpx), only AFTER the mission is sealed.
         try:
             import blind_benchmark as _bb
-            if _bb.is_answer_key(target):
+            if _bb.is_answer_key(target, self.answer_key_paths):
                 return False, "BLIND BENCHMARK: answer-key surface is blocked from the scanner"
         except Exception:
             pass
