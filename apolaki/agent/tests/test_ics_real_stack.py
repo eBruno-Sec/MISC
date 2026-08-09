@@ -191,3 +191,31 @@ def test_dnp3_stays_unproven_because_the_lab_has_no_outstation():
     validated its neighbours would be borrowing their credibility."""
     import techniques as T
     assert T.TECHNIQUES["dnp3_exposed"]["validated_on"] == []
+
+
+# ── the fallback sweep must reach the ports these engines live on ─────────────
+def test_the_self_contained_service_sweep_probes_ics_ports():
+    """REGRESSION (Codex audit). The sweep exists so service packs still run when nmap did NOT — that is
+    its whole stated purpose — but it omitted every industrial port, so modbus/s7comm/enip/dnp3 were
+    reachable only if nmap happened to seed them first. Four engines with a validated_on entry each,
+    silently unreachable on the very path meant to guarantee them."""
+    import re
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agent.py"),
+               encoding="utf8").read()
+    i = src.find("probe = [p for p in (")
+    assert i > 0
+    ports = {int(n) for n in re.findall(r"\d+", src[i:src.find(")", i)])}
+    for port, proto in ((502, "modbus"), (102, "s7comm"), (20000, "dnp3"),
+                        (44818, "ethernet/ip"), (47808, "bacnet")):
+        assert port in ports, "%s port %d missing from the self-contained sweep" % (proto, port)
+
+
+def test_ot_safety_registry_covers_every_protocol_the_router_routes():
+    """The registry must not understate what the tool touches. dnp3/s7comm shipped as read-only engines
+    and were routed by service_router while ot_context still reported them as not routeable."""
+    import ot_context as ot
+    import service_router as sr
+    for proto in ("modbus", "enip", "dnp3", "s7comm"):
+        assert sr.pack_for(proto), "%s is not routed at all" % proto
+        assert ot.PROTOCOL_SAFETY.get(proto) == "read_only", proto

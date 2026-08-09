@@ -5388,8 +5388,16 @@ class ToolRegistry:
                     if v:
                         self.recon["misc"].append({"type": "CORS Misconfiguration", "url": url,
                                                    "severity": v["severity"], "detail": v["detail"]})
+                        # Confirmed by construction: analyze_cors already decided, and its detail IS the
+                        # evidence. Shipping these without confidence/evidence meant _is_confirmed
+                        # rejected them, so a real finding could never become a reported one.
                         findings.append({"title": "CORS misconfiguration", "severity": v["severity"].lower(),
                                          "target": url, "description": f"Endpoint {v['detail']} (ACAO={v.get('acao')}).",
+                                         "confidence": "confirmed", "cwe": "CWE-942",
+                                         "evidence": "the server answered a cross-origin request with "
+                                                     "Access-Control-Allow-Origin=%s (%s)" % (v.get("acao"), v["detail"]),
+                                         "success_oracle": "an ACAO header that reflects or over-permits the "
+                                                           "requesting origin, returned by the server itself",
                                          "family": "cors", "tags": ["cors"]})
                 except Exception:
                     pass
@@ -5401,6 +5409,12 @@ class ToolRegistry:
                     if v:
                         findings.append({"title": "Host header injection", "severity": v["severity"].lower(),
                                          "target": url, "description": v["detail"],
+                                         "confidence": "confirmed", "cwe": "CWE-644",
+                                         "evidence": "an attacker-supplied Host/X-Forwarded-Host (%s) came "
+                                                     "back in the response or its Location: %s"
+                                                     % (ws._EVIL_HOST, v["detail"]),
+                                         "success_oracle": "the injected host appears in the response body "
+                                                           "or redirect target, so the app trusts the Host header",
                                          "family": "host_header", "tags": ["hostheader"]})
                 except Exception:
                     pass
@@ -5414,7 +5428,13 @@ class ToolRegistry:
                         if v:
                             findings.append({"title": f"Open redirect on '{probe.parameter}'",
                                              "severity": v["severity"].lower(), "target": probe.url,
-                                             "description": v["detail"], "family": "open_redirect",
+                                             "description": v["detail"],
+                                             "confidence": "confirmed", "cwe": "CWE-601",
+                                             "evidence": "setting '%s' redirected off-origin: %s"
+                                                         % (probe.parameter, v["detail"]),
+                                             "success_oracle": "a 3xx whose Location host is the attacker "
+                                                               "host, produced by that parameter alone",
+                                             "family": "open_redirect",
                                              "tags": ["redirect"]})
                             break
                     except Exception:
@@ -5429,7 +5449,14 @@ class ToolRegistry:
                         if v:
                             findings.append({"title": f"Server-side template injection on '{probe.parameter}'",
                                              "severity": v["severity"].lower(), "target": probe.url,
-                                             "description": v["detail"], "family": "ssti", "tags": ["ssti"]})
+                                             "description": v["detail"],
+                                             "confidence": "confirmed", "cwe": "CWE-1336",
+                                             "evidence": "the template expression injected into '%s' was "
+                                                         "EVALUATED by the server, not echoed: %s"
+                                                         % (probe.parameter, v["detail"]),
+                                             "success_oracle": "the arithmetic result of the expression "
+                                                               "appears in the response and is absent from baseline",
+                                             "family": "ssti", "tags": ["ssti"]})
                             break
                     except Exception:
                         pass

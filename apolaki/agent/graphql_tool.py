@@ -221,6 +221,10 @@ def analyze(endpoint: str, introspection_resp, batch_resp, batch_n, bogus_resp) 
             # back. Leaving confidence unset made every proof filter (report gating, the benchmark's
             # _has_proof, the liveness gate) silently drop a fact the oracle had already established.
             "confidence": "confirmed",
+            "evidence": (f"a parseable __schema returned from {endpoint}: {schema.get('type_count')} types, "
+                         f"{q} root queries, {m} mutations"),
+            "success_oracle": ("the introspection query returned a schema with a query type and at least "
+                               "one root operation"),
             "remediation": "Disable introspection in production; enforce per-field authorization.",
         })
     elif detect_field_suggestion(bogus_resp):
@@ -233,6 +237,12 @@ def analyze(endpoint: str, introspection_resp, batch_resp, batch_n, bogus_resp) 
             "reproduction_steps": [f"POST {BOGUS_FIELD_QUERY} to {endpoint}",
                                    "Read the 'Did you mean' hint in the error"],
             "cwe": "CWE-200", "family": "graphql", "tags": ["graphql", "api"],
+            # Same confirmed-by-construction reasoning as introspection: this branch is only reached when
+            # detect_field_suggestion() already matched a real "Did you mean" hint naming schema fields.
+            "confidence": "confirmed",
+            "evidence": (f"the server answered an unknown-field query at {endpoint} with a 'Did you mean' "
+                         "hint naming real schema fields"),
+            "success_oracle": "an error message for an unknown field names real schema fields",
             "remediation": "Disable field suggestions (e.g. Apollo: set introspection and suggestions off in prod).",
         })
 

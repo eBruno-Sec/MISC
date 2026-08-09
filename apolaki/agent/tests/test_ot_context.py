@@ -40,11 +40,17 @@ def test_ot_write_pack_is_rejected_by_default():
 
 
 def test_future_protocol_needs_declared_safety_class_before_routing():
+    """The GATE, tested with a protocol Apolaki does not route. This used dnp3 as its undeclared example
+    and started failing the moment dnp3 was legitimately declared read-only — the test was coupled to
+    which real protocols happen to be enabled rather than to the mechanism. `profinet` is a real
+    industrial protocol with no engine here, so it stays undeclared and the gate stays testable.
+    That dnp3/s7comm ARE now declared is asserted separately, in test_ics_real_stack."""
     assert O.can_route_protocol("modbus") is True and O.can_route_protocol("enip") is True
-    assert O.can_route_protocol("dnp3") is False              # not declared yet
-    assert O.declare_protocol_safety("dnp3", "ot_write") is False   # only read_only is ever accepted
-    assert O.declare_protocol_safety("dnp3", "read_only") is True
-    assert O.can_route_protocol("dnp3") is True
+    assert O.can_route_protocol("profinet") is False           # no engine, so never routable
+    assert O.declare_protocol_safety("profinet", "ot_write") is False   # only read_only is ever accepted
+    assert O.declare_protocol_safety("profinet", "read_only") is True
+    assert O.can_route_protocol("profinet") is True
+    O.PROTOCOL_SAFETY.pop("profinet", None)                    # do not leak into other tests
 
 
 def test_classify_asset_hints():

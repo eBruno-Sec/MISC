@@ -39,7 +39,12 @@ _ROLE_HINTS = (
 
 SAFETY_CLASSES = ("read_only", "ot_write", "state_change", "firmware")
 # protocols with a DECLARED safety class Apolaki may route (read-only only)
-PROTOCOL_SAFETY = {"modbus": "read_only", "enip": "read_only"}
+# Kept in step with what service_router ACTUALLY routes. dnp3 and s7comm shipped as read-only engines
+# (#107) but were never added here, so /intel/ot-context told an operator those protocols were not
+# routeable while production service packs were routing them — the registry disagreeing with reality in
+# the direction that understates what the tool touches, which is the worse direction for OT.
+PROTOCOL_SAFETY = {"modbus": "read_only", "enip": "read_only",
+                   "dnp3": "read_only", "s7comm": "read_only"}
 
 
 def classify_asset(port: int = None, product_name: str = "", banner: str = "") -> dict:

@@ -1392,8 +1392,15 @@ class BBHAgent:
             return events
         services = _sr.parse_nmap_ports((recon.get("nmap") or {}).get("open_ports") or [], host)
         known = {s["port"] for s in services}
-        probe = [p for p in (21, 22, 23, 25, 53, 110, 143, 389, 445, 873, 1433, 1521, 2049, 2375,
-                             3306, 3389, 5432, 5900, 5985, 6379, 9200, 11211, 27017) if p not in known]
+        # ICS/OT PORTS BELONG HERE TOO. This sweep is documented as self-contained — it exists so the
+        # service packs still run when nmap did not — but it omitted every industrial port, so
+        # modbus_exposed / s7comm_exposed / enip_exposed / dnp3_exposed were reachable ONLY if nmap
+        # happened to run and seed them first. Four engines with a validated_on entry each, silently
+        # unreachable on the fallback path they were supposed to be guaranteed by.
+        # Read-only identify frames only; the safety rail in each engine is unchanged.
+        probe = [p for p in (21, 22, 23, 25, 53, 102, 110, 143, 389, 445, 502, 873, 1433, 1521, 2049,
+                             2375, 3306, 3389, 5432, 5900, 5985, 6379, 9200, 11211, 20000, 27017,
+                             44818, 47808) if p not in known]
 
         async def _open(p):
             try:

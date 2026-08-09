@@ -129,3 +129,62 @@ def test_the_baseline_records_the_engines_proven_so_far():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "liveness_baseline.json")
     live = json.load(open(path, encoding="utf8"))["live"]
     assert len(live) >= 15, live
+
+
+# ── family alone is not enough to identify an engine ──────────────────────────
+_GQL_CHECK = {"technique": "graphql_introspection", "lab": "dvga", "family": "graphql",
+              "title": "introspection enabled"}
+
+
+def test_a_sibling_finding_in_the_same_family_cannot_satisfy_the_check():
+    """REGRESSION, and the gate's own false pass. GraphQL introspection, field-suggestion leakage and
+    batching all carry family "graphql". Matching on family alone let the BATCHING finding satisfy the
+    graphql_introspection check — so the gate reported that engine green while introspection was in fact
+    emitting no evidence and being dropped by every proof filter. A gate that cannot tell two engines
+    apart is not checking either of them."""
+    batching = {"title": "GraphQL request batching enabled", "family": "graphql",
+                "confidence": "confirmed", "evidence": "x" * 40}
+    assert lv._match(batching, _GQL_CHECK) is False
+
+
+def test_the_right_finding_still_satisfies_it():
+    intro = {"title": "GraphQL introspection enabled", "family": "graphql",
+             "confidence": "confirmed", "evidence": "y" * 40}
+    assert lv._match(intro, _GQL_CHECK) is True
+
+
+def test_the_right_finding_without_evidence_still_fails():
+    intro = {"title": "GraphQL introspection enabled", "family": "graphql", "confidence": "confirmed"}
+    assert lv._match(intro, _GQL_CHECK) is False
+
+
+def test_checks_sharing_a_family_must_disambiguate_by_title():
+    """Guard the table itself: if two checks share a family and neither names a title, one of them is
+    provable by the other's finding and at least one engine is unguarded."""
+    from collections import defaultdict
+    by_family = defaultdict(list)
+    for c in lv.CHECKS:
+        if c.get("family"):
+            by_family[c["family"]].append(c)
+    for fam, checks in by_family.items():
+        if len(checks) > 1:
+            untitled = [c["technique"] for c in checks if not c.get("title")]
+            assert len(untitled) <= 1, (
+                "family %r is claimed by %d checks with no title to tell them apart: %s"
+                % (fam, len(untitled), untitled))
+
+
+def test_graphql_findings_all_carry_proof():
+    """All three GraphQL findings are confirmed BY CONSTRUCTION — each branch is only reached after its
+    oracle already matched — so all three must carry confidence AND evidence or they are silently
+    unreportable."""
+    import graphql_tool as gql
+    src = open(gql.__file__, encoding="utf8").read()
+    for marker in ("GraphQL introspection enabled", "GraphQL field suggestions leak schema",
+                   "GraphQL request batching enabled"):
+        i = src.find(marker)
+        assert i > 0, marker
+        block = src[i:i + 1600]
+        block = block[:block.find("})") if "})" in block else 1600]
+        assert '"confidence"' in block, "%s has no confidence" % marker
+        assert '"evidence"' in block, "%s has no evidence" % marker

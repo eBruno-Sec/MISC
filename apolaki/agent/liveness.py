@@ -37,9 +37,11 @@ CHECKS = (
     {"technique": "modbus_exposed", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "conpot", "port": 5020, "service": "modbus"}, "family": "modbus_exposed"},
     {"technique": "s7comm_exposed", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
-     "input": {"host": "conpot", "port": 10201, "service": "s7comm"}, "family": "ics_ot"},
+     "input": {"host": "conpot", "port": 10201, "service": "s7comm"}, "family": "ics_ot",
+     "title": "S7comm"},
     {"technique": "enip_exposed", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
-     "input": {"host": "conpot", "port": 44818, "service": "enip"}, "family": "ics_ot"},
+     "input": {"host": "conpot", "port": 44818, "service": "enip"}, "family": "ics_ot",
+     "title": "EtherNet/IP"},
     {"technique": "ipmi_rakp", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "conpot", "port": 6230, "service": "ipmi"}, "family": "ipmi_rakp"},
     # ── beyond-web network services ───────────────────────────────────────────────────────────
@@ -53,7 +55,10 @@ CHECKS = (
      "input": {"host": "smb", "port": 445, "service": "smb"}, "family": "smb_signing_disabled"},
     # ── GraphQL: the tool that was raising on every real endpoint ──────────────────────────────
     {"technique": "graphql_introspection", "lab": "dvga", "kind": "tool", "tool": "_run_graphql",
-     "input": {"url": "http://dvga:5013/graphql"}, "family": "graphql"},
+     "input": {"url": "http://dvga:5013/graphql"}, "family": "graphql",
+     # title, not family alone: batching and field-suggestion are also family "graphql", and matching on
+     # family let the BATCHING finding satisfy this check while introspection emitted no evidence at all.
+     "title": "introspection enabled"},
     {"technique": "graphql_argument_injection", "lab": "dvga", "kind": "tool", "tool": "_run_graphql",
      "input": {"url": "http://dvga:5013/graphql"}, "family": "sqli"},
     # ── runtime DOM source→sink: the families the dead sink scan silently retired ──────────────
@@ -85,13 +90,23 @@ CONFIRMED, DEAD, SKIPPED, ERROR = "confirmed", "dead", "skipped", "error"
 
 
 def _match(finding: dict, check: dict) -> bool:
-    """Does this finding prove the check? Family OR cwe, and it must be CONFIRMED with real evidence.
-    Pure. A 'lead' never satisfies a liveness check — the point is that the oracle still fires."""
+    """Does this finding prove the check? Family (or cwe) plus an optional title fragment, and it must be
+    CONFIRMED with real evidence. Pure. A 'lead' never satisfies a liveness check — the point is that the
+    oracle still fires.
+
+    `title` EXISTS BECAUSE FAMILY ALONE GAVE A FALSE PASS. Several engines share one family: GraphQL
+    introspection, field-suggestion leakage and batching are all `family: "graphql"`. The
+    graphql_introspection check was therefore satisfied by the BATCHING finding, and reported green while
+    introspection was in fact emitting no evidence at all and being dropped by every proof filter. A gate
+    that cannot tell two engines apart is not checking either of them."""
     f = finding or {}
     conf = str(f.get("confidence") or "").lower()
     if conf not in ("confirmed", "high") and not f.get("confirmed"):
         return False
     if len(str(f.get("evidence") or f.get("success_oracle") or "").strip()) < 12:
+        return False
+    want_title = str(check.get("title") or "").lower()
+    if want_title and want_title not in str(f.get("title") or "").lower():
         return False
     if check.get("cwe"):
         return str(f.get("cwe") or "") == check["cwe"]
