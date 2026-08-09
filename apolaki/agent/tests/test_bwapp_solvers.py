@@ -1,10 +1,43 @@
-"""Tests for the bWAPP lab prover -- structure, lab wiring, and the generalized flip. No live bWAPP needed
-(graceful degrade covers the network path)."""
+"""Tests for the bWAPP lab prover -- structure, lab wiring, and response-oracle behaviour. No live bWAPP
+needed (graceful degrade covers the network path)."""
 from __future__ import annotations
 
 import bwapp_solvers
+import httpx
 import labs
-import techniques as T
+
+
+_VULNERABLE_RESPONSES = {
+    ("POST", "/commandi.php", (), (("form", "submit"), ("target", "127.0.0.1; id"))):
+        "PING 127.0.0.1 followed by uid=33(www-data) gid=33(www-data)",
+    ("GET", "/directory_traversal_1.php", (("page", "../../../../../../etc/passwd"),), ()):
+        "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin",
+    ("GET", "/xss_get.php",
+     (("firstname", "<script>alert(1)</script>"), ("form", "submit"), ("lastname", "z")), ()):
+        "Welcome <script>alert(1)</script> z",
+    ("GET", "/sqli_1.php", (("action", "search"), ("title", "iron'")), ()):
+        "You have an error in your SQL syntax near iron",
+}
+
+
+class _ResponseClient:
+    def __init__(self, responses):
+        self.responses = responses
+
+    @staticmethod
+    def _key(method, path, params=None, data=None):
+        return method, path, tuple(sorted((params or {}).items())), tuple(sorted((data or {}).items()))
+
+    def get(self, path, params=None, **_kwargs):
+        text = self.responses.get(self._key("GET", path, params=params), "clean response")
+        return type("Response", (), {"text": text})()
+
+    def post(self, path, params=None, data=None, **_kwargs):
+        text = self.responses.get(self._key("POST", path, params=params, data=data), "clean response")
+        return type("Response", (), {"text": text})()
+
+    def close(self):
+        pass
 
 
 def test_prove_degrades_when_unreachable():
@@ -24,9 +57,25 @@ def test_bwapp_registered_as_a_lab():
     assert r.get("lab") == "bwapp"
 
 
-def test_bwapp_generalizes_command_injection_and_path_traversal():
-    for tid in ("command_injection", "path_traversal", "reflected_xss"):
-        assert "bwapp" in T.TECHNIQUES[tid]["validated_on"], tid
-    # command_injection + path_traversal were DVWA-only; bWAPP is the 2nd lab -> generalized
-    assert T.is_generalized(T.TECHNIQUES["command_injection"])
-    assert T.is_generalized(T.TECHNIQUES["path_traversal"])
+def test_synthetic_vulnerable_responses_fire_each_oracle(monkeypatch):
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: _ResponseClient(_VULNERABLE_RESPONSES))
+    result = bwapp_solvers.prove("http://bwapp.test")
+    assert result["probes"] == {
+        "command_injection": True,
+        "path_traversal": True,
+        "reflected_xss": True,
+        "sqli": True,
+    }
+    assert result["confirmed"] == ["command_injection", "path_traversal", "reflected_xss", "sqli"]
+
+
+def test_clean_responses_fire_no_oracle(monkeypatch):
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: _ResponseClient({}))
+    result = bwapp_solvers.prove("http://bwapp.test")
+    assert result["probes"] == {
+        "command_injection": False,
+        "path_traversal": False,
+        "reflected_xss": False,
+        "sqli": False,
+    }
+    assert result["confirmed"] == []

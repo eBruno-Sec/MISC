@@ -2,12 +2,12 @@
 
 The frame BUILDERS were already unit-proven. What had never happened is the other half: parsing a reply
 produced by an implementation that is not ours. A simulator written with our own frame code would test
-each parser against its own encoder and prove nothing, so every byte below was captured off the wire from
-Conpot (Honeynet Project) — a foreign stack presenting as a Siemens SIMATIC S7-200 and a Rockwell
-1756-L61/B controller.
+each parser against its own encoder and prove nothing. The bytes below were captured off the wire from
+Conpot (Honeynet Project) and Open Energy Solutions' OpenFMB Adapter, two foreign implementations.
 
-Replaying recorded bytes keeps the proof in the suite with no container and no network, so the validation
-these techniques' `validated_on: ["conpot"]` claims is one this file actually re-executes.
+Replaying recorded bytes keeps the parser proof in the suite with no container and no network. The Conpot
+captures back the existing `validated_on: ["conpot"]` claims; the OpenFMB capture is the independent DNP3
+proof required before that technique can earn a claim of its own.
 
 Three defects were found by pointing the SHIPPING engines at that stack; each has a regression test here:
 
@@ -44,6 +44,8 @@ ENIP_LIST_IDENTITY_TCP = _b(
     "QiBMT0dJWDU1NjH/")
 # IPMI 2.0 RMCP+ Open Session Response.
 IPMI_OPEN_SESSION_RESPONSE = _b("BgD/BwYRAAAAAAAAAAAkAAAABADv2C60O4Jj4AAAAAgBAAAAAQAACAEAAAACAAAIAQAAAA==")
+# OpenFMB Adapter DNP3 outstation, address 0, replying to Request Link Status from master address 1.
+DNP3_LINK_STATUS_OPENFMB = _b("BWQFCwEAAAAcmQ==")
 
 
 # ── S7comm: the empty-0x0011 trap ─────────────────────────────────────────────
@@ -186,11 +188,17 @@ def test_validated_on_conpot_is_backed_by_a_recorded_reply():
         assert "conpot" in T.TECHNIQUES[tid]["validated_on"], tid
 
 
-def test_dnp3_stays_unproven_because_the_lab_has_no_outstation():
-    """Conpot speaks five of these protocols and NOT DNP3. Marking dnp3_exposed validated on the lab that
-    validated its neighbours would be borrowing their credibility."""
-    import techniques as T
-    assert T.TECHNIQUES["dnp3_exposed"]["validated_on"] == []
+def test_real_dnp3_outstation_returns_crc_verified_link_status():
+    parsed = ics.parse_dnp3_link(DNP3_LINK_STATUS_OPENFMB)
+    assert parsed == {
+        "valid": True,
+        "func": 11,
+        "dest": 1,
+        "src": 0,
+        "is_link_status": True,
+        "crc_ok": True,
+        "has_application_layer": False,
+    }
 
 
 # ── the fallback sweep must reach the ports these engines live on ─────────────

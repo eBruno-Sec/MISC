@@ -156,12 +156,7 @@ def run(mutants=None, app_dir: str = None, timeout: int = 900) -> dict:
                                 "--tb=no"], cwd=app, capture_output=True, text=True, timeout=timeout)
             returncode = p.returncode
             killed = _expected_test_failed(p.stdout, p.stderr, expected_test)
-            if killed:
-                outcome = "expected test failed"
-            elif p.returncode == 0:
-                outcome = "expected test passed"
-            else:
-                outcome = "pytest errored without the expected test failing"
+            outcome = "expected test failed" if killed else "expected test did not fail"
         except subprocess.TimeoutExpired:
             killed = False
             outcome = "pytest timed out"

@@ -105,7 +105,7 @@ def test_an_import_error_does_not_impersonate_an_oracle_kill(tmp_path):
     record = res["results"][0]
     assert record["pytest_returncode"] != 0, "the synthetic import break did not make pytest fail"
     assert record["killed"] is False, "a collection/import error was credited as an oracle kill"
-    assert record["outcome"] == "pytest errored without the expected test failing"
+    assert record["outcome"] == "expected test did not fail"
     assert victim.read_bytes() == original and not (app / "victim.py.mutbak").exists()
 
 
