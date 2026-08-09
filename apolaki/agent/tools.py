@@ -5097,6 +5097,18 @@ class ToolRegistry:
                 if (g["title"], g["target"]) not in seen_comp:
                     seen_comp.add((g["title"], g["target"]))
                     findings.append(g)
+            # requests whose TARGET is read from the page rather than from a constant. dom_trace confirms
+            # the runtime case by injecting a client-side source; it cannot see the case where the source
+            # is a server-rendered attribute no parameter controls, because there is nothing to inject
+            # into. Reading the script is the only way to SEE that one, and a LEAD is the only honest way
+            # to report it — the runtime reachability is genuinely unproven.
+            import client_request_source as crs
+            for hit in crs.scan(text, label):
+                key = ("crs", hit["call"], hit["expression"][:60])
+                if key in seen_comp:
+                    continue
+                seen_comp.add(key)
+                findings.append(crs.lead(hit, label))
 
         # resolve + seed in-scope endpoints into the surface
         src_host = next((urlparse(l).netloc for l, _ in sources if l.startswith("http")), "")

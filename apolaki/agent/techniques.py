@@ -426,6 +426,52 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        oracle="the injecting engine's own oracle, unchanged; only the transport differs",
        validated_on=["dvga"]),
 
+    # ── runtime DOM source→sink families (dom_trace) + encoded-parameter injection ──────────────
+    # These four ENGINES were already shipping confirmed findings and the blind benchmark was already
+    # counting them as true positives, but none of them had a registry record: no taxonomy entry, no
+    # coverage credit, no planner reachability, no remediation mapping. Same gap enip_exposed had.
+    _t(id="request_url_override", vuln_class="client_side", cwe="CWE-441", owasp="A10:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CLNT-06",
+       summary="The page builds a request TARGET from a client-side source instead of a constant.",
+       detect="Two complementary views. dom_trace injects a canary into a client-side source and renders "
+              "the page; client_request_source reads the script statically for a request whose target "
+              "expression resolves to a DOM attribute or the URL. The static view exists because a "
+              "server-rendered attribute that no parameter controls offers nothing to inject into, so a "
+              "render alone would report the class absent.",
+       exploit="None is fired. Safe methods only; the runtime probe points the source at a sink host and "
+               "observes where the page's own fetch/XHR goes.",
+       oracle="RUNTIME: a script-initiated fetch/XHR reaches the probe host, distinguished from a "
+              "navigation (which is open_redirect). STATIC: the target expression is demonstrably not a "
+              "constant — reported as a LEAD, never confirmed, because reachability of the DOM node is "
+              "not proven by reading the code.",
+       validated_on=["domsource"]),
+    _t(id="dom_link_manipulation", vuln_class="client_side", cwe="CWE-79", owasp="A03:2021",
+       permission=ACTIVE, transferable=True, wstg="WSTG-CLNT-06",
+       summary="A client-side source controls a link or resource URL the page requests or a victim clicks.",
+       detect="Inject a per-request canary into a client-side source (query parameter or URL fragment) "
+              "and render the page in a real browser.",
+       exploit="None. The canary is inert; only its arrival at the sink is observed.",
+       oracle="the canary appears in an href/src/action attribute in the RENDERED DOM at runtime — a "
+              "static match in the response body is not accepted.",
+       validated_on=["domsource"]),
+    _t(id="dom_data_manipulation", vuln_class="client_side", cwe="CWE-79", owasp="A03:2021",
+       permission=ACTIVE, transferable=True,
+       summary="A client-side source controls rendered DOM content or attributes (UI redress, spoofing).",
+       detect="Same runtime canary as dom_link_manipulation, observed at a content/attribute sink rather "
+              "than a URL sink.",
+       exploit="None. Where the same sink also EXECUTES, the finding is raised as dom_xss instead; a sink "
+               "that renders text but cannot execute stays this class.",
+       oracle="the canary reaches rendered DOM content or a non-value attribute at runtime.",
+       validated_on=["domsource"]),
+    _t(id="base64_param", vuln_class="injection", cwe="CWE-20", owasp="A03:2021",
+       permission=ACTIVE, transferable=True,
+       summary="An encoded parameter or cookie carries an inner structure that reaches an injection sink.",
+       detect="Decode base64/JSON-shaped parameter and cookie values, then re-encode a probe into the "
+              "INNER field — the outer encoding is what hides the sink from an ordinary parameter sweep.",
+       exploit="The existing injection engines supply the payload; only the transport differs.",
+       oracle="the injecting engine's own oracle, unchanged, on the decoded inner field.",
+       validated_on=["ginandjuice"]),
+
     _t(id="dnp3_exposed", vuln_class="ics_ot", cwe="CWE-306", owasp="A07:2021",
        permission=ACTIVE, transferable=True,
        summary="Unauthenticated DNP3 outstation reachable (ICS/OT).",
@@ -1045,6 +1091,10 @@ _WSTG = {
 # forced mapping is worse than an honest blank — it tells a reader a standard covers something it does
 # not. Revisit when WSTG adds the coverage.
 WSTG_DELIBERATELY_UNMAPPED = {
+    "dom_data_manipulation": "PortSwigger taxonomy, not OWASP's: WSTG has no test for attacker-controlled "
+                             "rendered CONTENT that cannot execute (CLNT-01 is DOM XSS, CLNT-03 is HTML "
+                             "injection); mapping it to either would overstate what the standard covers",
+    "base64_param": "the TRANSPORT, not the defect - the inner injection carries the WSTG mapping",
     "llm_prompt_injection": "WSTG v4.2 predates LLM testing",
     "llm_output_handling": "WSTG v4.2 predates LLM testing",
     "dnp3_exposed": "WSTG is web-only; ICS/OT is out of its scope",

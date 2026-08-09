@@ -65,10 +65,12 @@ def test_orchestration_audit_still_reports_no_islands():
     import techniques as T
     a = tp.orchestration_audit([T.get(t["id"]) for t in T.list_techniques()])
     assert a["islands"] == [], a["islands"]
-    # always_on went 40 -> 41 with enip_exposed (T14): the EtherNet/IP engine was already shipping
-    # findings through _run_service_pack while missing from the registry entirely, so it had no
-    # taxonomy entry, no coverage credit and no planner reachability.
-    assert len(a["gated"]) == 41 and len(a["always_on"]) == 41, (len(a["gated"]), len(a["always_on"]))
+    # always_on 40 -> 41 (enip_exposed, T14) -> 45 (request_url_override, dom_link_manipulation,
+    # dom_data_manipulation, base64_param). Every one of these engines was ALREADY shipping confirmed
+    # findings — the blind benchmark was even scoring them as true positives — while having no registry
+    # record at all: no taxonomy entry, no coverage credit, no planner reachability, no remediation
+    # mapping. The count rising is the gap closing, not new engines appearing.
+    assert len(a["gated"]) == 41 and len(a["always_on"]) == 45, (len(a["gated"]), len(a["always_on"]))
 
 
 def test_planning_from_evidence_produces_the_same_selection():
@@ -91,5 +93,5 @@ def test_snapshot_covers_every_table_the_planner_exposes():
     """Guard against the snapshot silently going out of date by omission rather than by mismatch."""
     snap = _snap()
     assert set(snap) == {"OBSERVATIONS", "PRECONDITIONS", "ALWAYS_ON"}
-    assert len(snap["PRECONDITIONS"]) == 41 and len(snap["ALWAYS_ON"]) == 41   # +enip_exposed (T14)
+    assert len(snap["PRECONDITIONS"]) == 41 and len(snap["ALWAYS_ON"]) == 45   # +enip_exposed, +4 DOM/encoding families
     assert len(snap["OBSERVATIONS"]) == 17
