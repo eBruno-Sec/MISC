@@ -6,6 +6,7 @@ import html
 import blind_benchmark as bb
 import css_injection_tool as css
 import pytest
+import scope
 import tools
 from report import cvss31_base_score
 
@@ -13,18 +14,19 @@ from report import cvss31_base_score
 def test_payload_carries_css_breakout():
     p = css.payload("dead")
     assert "apolcssdead" in p and "{" in p and "}" in p and ";" in p
+    assert css.custom_property("dead") in p and css.cssom_value("dead") in p
 
 
 def test_confirms_in_style_block_when_braces_survive():
     t = "dead"
-    body = "<html><style> .x { color:blue } .%s;x{color:red} </style></html>" % ("apolcss" + t)
+    body = "<html><style> .x { color:blue } %s </style></html>" % css.payload(t)
     ev = css.evaluate(body, t)
     assert ev["confirmed"] and ev["where"] == "style block"
 
 
 def test_confirms_in_style_attribute():
     t = "beef"
-    body = '<div style="width:10px; apolcss%s;x{color:red}">hi</div>' % t
+    body = '<div style="width:10px; %s">hi</div>' % css.payload(t)
     ev = css.evaluate(body, t)
     assert ev["confirmed"] and ev["where"] == "style attribute"
 
@@ -38,6 +40,42 @@ def test_does_not_confirm_outside_css_or_when_encoded():
     assert not css.evaluate(enc, t)["confirmed"]
     # not reflected at all
     assert not css.evaluate("<style>.a{color:red}</style>", t)["confirmed"]
+
+
+def test_safe_first_reflection_does_not_hide_later_style_sink():
+    t = "f00d"
+    p = css.payload(t)
+    body = "<html><p>%s</p><style>%s</style></html>" % (p, p)
+    ev = css.evaluate(body, t)
+    assert ev["confirmed"] and ev["where"] == "style block"
+
+
+def test_shipping_css_tool_requires_cssom_when_browser_is_available(monkeypatch):
+    engine = scope.ScopeEngine()
+    engine.load_manual(["fixture.test"], [], "fixture")
+    registry = tools.ToolRegistry(engine, lab_mode=True)
+
+    async def fake_http(url, method="GET", **_kwargs):
+        from urllib.parse import parse_qs, urlparse
+        value = parse_qs(urlparse(url).query)["q"][0]
+        return {"status": 200, "headers": {}, "body": "<p>%s</p><style>%s</style>" % (value, value),
+                "final_url": url, "error": ""}
+
+    registry._http = fake_http
+
+    async def parsed(_url, _token):
+        return {"available": True, "matched": True, "tag": "html", "id": "", "error": ""}
+
+    monkeypatch.setattr(registry, "_cssom_custom_property_probe", parsed)
+    result = asyncio.run(registry._run_css_injection({"url": "http://fixture.test/page?q=seed"}))
+    assert len(result.findings) == 1 and "CSSOM read" in result.findings[0]["evidence"]
+
+    async def not_parsed(_url, _token):
+        return {"available": True, "matched": False, "tag": "", "id": "", "error": ""}
+
+    monkeypatch.setattr(registry, "_cssom_custom_property_probe", not_parsed)
+    clean = asyncio.run(registry._run_css_injection({"url": "http://fixture.test/page?q=seed"}))
+    assert clean.findings == []
 
 
 def test_finding_is_proof_with_consistent_cvss():

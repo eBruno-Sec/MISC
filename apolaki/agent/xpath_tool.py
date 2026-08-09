@@ -2,12 +2,10 @@
 "Testing for XPath injection"). Apps that authenticate/search against an XML document build an XPath query
 by concatenating user input (e.g. //users/user[username/text()='USER' and password/text()='PASS']).
 
-CONFIRMATION IS XPATH-SPECIFIC — this is the whole point. A stray quote breaks MANY things (SQL, LDAP, a
-generic 500), so a bare status-class change or a boolean split does NOT prove XPath and would collide with
-SQLi (mis-labelling a SQLi endpoint as XPath). We therefore confirm ONLY when the response leaks an XPath
-PROCESSOR error signature (Saxon/libxml2/.NET/Jaxen/javax.xml.xpath ...) that a stray quote produced but
-the baseline did not — content-based, the same discipline the SQLi engine uses for DBMS errors. Precise
-over greedy: better to miss a silent XPath sink than to cry "XPath" on a SQLi bug.
+CONFIRMATION IS XPATH-SPECIFIC. An exposed processor error remains proof. A silent processor gets an
+XPath-only `count(/*)=1` predicate and its otherwise identical contradiction `count(/*)=0`, accepted only
+when application semantics change (authenticated state, protected controls, or a strict record-set
+superset). Status, response size, and error text do not participate in that boolean decision.
 
 Pure logic here (payloads + XPath-error oracle + finding); the HTTP transport lives in tools.
 """
@@ -91,9 +89,9 @@ def finding(url: str, param: str, where: str, oracle: str) -> dict:
         "cwe": "CWE-643", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N", "cvss_score": 8.2,
         "evidence": "The %s '%s' is concatenated into an XPath query over an XML document. %s" % (where, param, oracle),
         "success_oracle": oracle,
-        "reproduction_steps": ["Send a request with a stray quote in '%s'" % param,
-                               "Observe an XPath-processor error in the response (the query broke)",
-                               "Escalate with an XPath tautology (' or '1'='1) against an XML-backed login"],
+        "reproduction_steps": ["Send the recorded XPath probe in '%s'" % param,
+                               "Replay its structurally identical contradiction as a negative control",
+                               "Confirm the recorded processor error or semantic auth/record-set split"],
         "impact": ("XPath injection lets an attacker read any part of the backing XML document (XPath has no "
                    "per-node ACLs) and, on XML-backed login forms, bypass authentication via a tautology."),
         "remediation": ("Never build XPath from string concatenation; use parameterized XPath / precompiled "

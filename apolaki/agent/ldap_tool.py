@@ -3,11 +3,10 @@
 search filter by concatenating input, e.g. `(&(uid=USER)(userPassword=PASS))`. Unsanitised input lets an
 attacker inject filter metacharacters ( ) * & | ! and break or subvert the filter.
 
-CONFIRMATION IS LDAP-SPECIFIC — the same discipline as the XPath engine. A stray metacharacter breaks many
-things (SQL, XPath, a generic 500), so a bare status change or boolean split does NOT prove LDAP and would
-collide with SQLi/XPath. We confirm ONLY when the response leaks an LDAP DIRECTORY error signature
-(javax.naming / JNDI / OpenLDAP / AD / ldap_* C-API) that an unbalanced filter provoked but the baseline did
-not — content-based, like the SQLi DBMS-error and XPath-processor-error oracles. Precise over greedy.
+CONFIRMATION IS LDAP-SPECIFIC. An exposed directory error remains proof. A silent directory gets an LDAP
+filter predicate that is universally true and an otherwise identical impossible assertion, accepted only
+when application semantics change (authenticated state, protected controls, or a strict record-set
+superset). Status, response size, and error text do not participate in that boolean decision.
 
 Pure logic here (payloads + LDAP-error oracle + finding); the HTTP transport lives in tools.
 """
@@ -89,9 +88,9 @@ def finding(url: str, param: str, where: str, oracle: str) -> dict:
         "cwe": "CWE-90", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N", "cvss_score": 8.2,
         "evidence": "The %s '%s' is concatenated into an LDAP search filter. %s" % (where, param, oracle),
         "success_oracle": oracle,
-        "reproduction_steps": ["Send a request with an unbalanced filter metacharacter in '%s' (e.g. `)` or `*)(`)" % param,
-                               "Observe an LDAP directory error in the response (the search filter broke)",
-                               "Escalate on an LDAP-backed login with a filter tautology `*)(uid=*))(|(uid=*`"],
+        "reproduction_steps": ["Send the recorded LDAP filter probe in '%s'" % param,
+                               "Replay its structurally identical impossible assertion as a negative control",
+                               "Confirm the recorded directory error or semantic auth/record-set split"],
         "impact": ("LDAP injection lets an attacker subvert the directory query to bypass authentication (filter "
                    "tautology), enumerate directory objects, or read attributes they should not see."),
         "remediation": ("Escape LDAP filter metacharacters per RFC 4515 (use the platform's LDAP encoder), bind "

@@ -3,10 +3,10 @@
 unescaped, an attacker can inject CSS rules. That enables data exfiltration (attribute selectors +
 `background:url()` leak CSRF tokens / input values character-by-character) even where script is blocked by CSP.
 
-CONFIRMATION IS A REFLECTION-CONTEXT ORACLE (same discipline as reflected XSS, but for the STYLE context): a
-unique marker carrying CSS breakout characters must reflect back inside a style context with those characters
-INTACT (not HTML-entity-encoded). Reflection alone is not enough — the `{ } ;` must survive, else the value
-is safely encoded. Pure logic here (payload + oracle + finding); the HTTP transport lives in tools."""
+Every marker occurrence is checked. The HTTP response identifies a possible style context, then Chromium
+reads a nonce custom property from computed style. That CSSOM read proves the browser parsed the input as
+CSS rather than merely reflecting bytes. Without Chromium, the all-occurrence context oracle preserves the
+existing fallback. Pure payload/context logic lives here; HTTP and browser transport live in tools."""
 from __future__ import annotations
 
 import re
