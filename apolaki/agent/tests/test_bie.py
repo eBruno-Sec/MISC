@@ -598,3 +598,64 @@ def test_run_persona_swap_degrades_when_out_of_scope():
 def test_observe_degrades_without_a_base_url():
     r = bie.observe("")
     assert r["ran"] is False and r["requests"] == []
+
+
+# ── clientauthz lab: the RECORDED validation of the two engines that shipped unproven ─────────
+# `client_side_authz` (CWE-602) and `client_supplied_identity_param` (CWE-639) both carried
+# `validated_on: []` — written, wired, unit-proven, never confirmed against a target that actually has
+# the bug. The bodies below are not hand-written: they are the exchanges captured from a real
+# `run_persona_swap` against labs/clientauthz (owner=bob-admin, attacker=alice-user), so this replays
+# recorded evidence rather than a restatement of the oracle's own logic.
+#
+# The REJECT halves carry the weight. An engine that confirms the vulnerable case is unproven until it
+# also declines the secure one, or "it found something" cannot be told apart from "it flags everything".
+_ALICE = '{"uid": "1", "username": "alice", "role": "user", "private_note": "alice-private-note-AAA"}'
+_BOB = '{"uid": "2", "username": "bob", "role": "admin", "private_note": "bob-private-note-BBB"}'
+_LOGIN_REQUIRED = '{"error": "login required"}'
+_NOT_FOUND = '{"error": "not found"}'
+_ADMIN_EXECUTED = ('{"ok": true, "action": "delete-all", "result": "ADMIN ACTION EXECUTED", '
+                   '"deleted_records": 4127, "actor": "alice"}')
+_FORBIDDEN = '{"error": "forbidden: admin role required"}'
+
+
+def test_clientauthz_lab_confirms_identity_param_trusted_by_the_server():
+    """/profile?uid= — bob's own request, rewritten to alice's uid, returns alice's record verbatim."""
+    v = bie.judge_param_swap({"status": 200, "body": _BOB}, {"status": 200, "body": _ALICE},
+                             {"status": 200, "body": _ALICE, "param": "uid"},
+                             anon={"status": 401, "body": _LOGIN_REQUIRED})
+    assert v["verdict"] == "confirmed" and "uid" in v["reason"]
+
+
+def test_clientauthz_lab_rejects_the_secure_identity_param_counterpart():
+    """/account?uid= — the parameter is accepted and IGNORED; the session decides. Must not be reported."""
+    v = bie.judge_param_swap({"status": 200, "body": _BOB}, {"status": 200, "body": _ALICE},
+                             {"status": 200, "body": _BOB, "param": "uid"},
+                             anon={"status": 401, "body": _LOGIN_REQUIRED})
+    assert v["verdict"] == "rejected" and "ignored" in v["reason"]
+
+
+def test_clientauthz_lab_confirms_control_hidden_only_in_the_browser():
+    """/admin-action — CSS-hidden for a non-admin, and the server never re-checks the role."""
+    ctl = {"visible": False, "disabled": False, "reason": "not-displayed",
+           "probe_url": "http://clientauthz:8080/admin-action?do=delete-all"}
+    v = bie.judge_client_side_authz(ctl, {"status": 200, "body": _ADMIN_EXECUTED},
+                                    anon={"status": 401, "body": _LOGIN_REQUIRED},
+                                    shell={"status": 404, "body": _NOT_FOUND})
+    assert v["verdict"] == "confirmed" and "only in the browser" in v["reason"]
+
+
+def test_clientauthz_lab_rejects_the_secure_hidden_control_counterpart():
+    """/audit-action — hidden the same way, but the server enforces the role. Hidden AND enforced."""
+    ctl = {"visible": False, "disabled": False, "reason": "not-displayed",
+           "probe_url": "http://clientauthz:8080/audit-action?do=export"}
+    v = bie.judge_client_side_authz(ctl, {"status": 403, "body": _FORBIDDEN},
+                                    anon={"status": 403, "body": _FORBIDDEN},
+                                    shell={"status": 404, "body": _NOT_FOUND})
+    assert v["verdict"] == "rejected" and "enforced" in v["reason"]
+
+
+def test_clientauthz_lab_is_the_recorded_proof_behind_validated_on():
+    """The registry must not claim a validation this suite does not actually replay."""
+    import techniques as T
+    for tid in ("client_side_authz", "client_supplied_identity_param"):
+        assert "clientauthz" in T.TECHNIQUES[tid]["validated_on"], tid

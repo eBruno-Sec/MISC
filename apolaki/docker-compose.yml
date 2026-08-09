@@ -194,6 +194,26 @@ services:
       - "127.0.0.1:42092:5013"
     restart: unless-stopped
 
+  # clientauthz -- the validation lab for the two BIE engines that had no target exhibiting their bug:
+  # client_side_authz (CWE-602) and client_supplied_identity_param (CWE-639). Juice Shop cannot serve as one
+  # (Angular REMOVES privileged controls from the DOM rather than hiding them, and identifies objects by path
+  # segment, not by an identity parameter), so both engines correctly reported zero there -- which proves
+  # nothing either way. Reachable at http://clientauthz:8080 on the compose network; host 42093.
+  #
+  # It carries a VULNERABLE and a SECURE variant of each class, deliberately paired, so a run exercises the
+  # oracles' false-positive guards and not just their detection. Stdlib-only Python: no build, no
+  # dependency to install, nothing that can rot from an upstream change.
+  clientauthz:
+    image: python:3.12-slim
+    profiles: ["labs"]
+    working_dir: /lab
+    command: python app.py
+    volumes:
+      - ./labs/clientauthz:/lab:ro
+    ports:
+      - "127.0.0.1:42093:8080"
+    restart: unless-stopped
+
   # DVNA (Damn Vulnerable NodeJS Application) is a valid Node lab in benchmark.MANIFESTS but is NOT wired here:
   # appsecco/dvna hard-requires a linked MySQL sibling (it wait-for-it blocks and crash-loops without one). Add a
   # `dvna` + `dvna-mysql` pair under a dedicated profile when Node/deserialization cross-validation is needed.

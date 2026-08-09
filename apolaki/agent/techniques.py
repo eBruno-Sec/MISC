@@ -480,7 +480,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "secure behaviour (server ignores the parameter and answers about the session's own user) has "
               "a distinct signature and is explicitly rejected, as are public content and personas whose "
               "views are already identical.",
-       validated_on=[],
+       validated_on=["clientauthz"],
        maps_to={}),
 
     _t(id="client_side_authz", vuln_class="access_control", cwe="CWE-602", owasp="A01:2021",
@@ -496,7 +496,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        oracle="bie.judge_client_side_authz — the server returns a substantive body for a control the UI "
               "withheld, and that body is neither the SPA shell (unknown-path control) nor public content "
               "(anonymous control).",
-       validated_on=[],
+       validated_on=["clientauthz"],
        maps_to={}),
 
     _t(id="bfla_privileged_action", vuln_class="access_control", cwe="CWE-285", owasp="A01:2021",

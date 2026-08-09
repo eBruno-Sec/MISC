@@ -77,6 +77,15 @@ MANIFESTS = {
         # GraphQL surface: injection (SQLi/OS), IDOR, stored/reflected XSS, info disclosure via introspection.
         "expected": ["sqli", "command_injection", "xss", "access_control", "sensitive_exposure"],
     },
+    "clientauthz": {
+        "name": "clientauthz (BIE validation lab)", "url_hint": "clientauthz",
+        # Purpose-built rather than borrowed: the two browser-runtime access-control engines had no target
+        # exhibiting their bug (Angular REMOVES privileged controls instead of hiding them, and Juice Shop
+        # keys objects by path segment, not by an identity parameter), so both correctly reported zero on
+        # every existing lab — which proves nothing either way. Carries a VULNERABLE and a SECURE variant of
+        # each class so a run exercises the oracles' false-positive guards, not only their detection.
+        "expected": ["access_control"],
+    },
 }
 
 # Map the many tool-emitted finding families onto the benchmark's canonical classes.

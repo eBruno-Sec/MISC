@@ -17,6 +17,7 @@ LAB_URLS = {
     "webgoat": "http://webgoat:8080/WebGoat",
     "vampi": "http://vampi:5000",
     "dvga": "http://dvga:5013",
+    "clientauthz": "http://clientauthz:8080",
 }
 
 # The minimum gate a change must not regress (labs that must always be reachable + scored in CI-adjacent runs).
