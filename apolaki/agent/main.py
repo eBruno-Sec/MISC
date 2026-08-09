@@ -673,7 +673,10 @@ def _coverage(session_id: str) -> dict:
             tools_run[l.get("tool")] = tools_run.get(l.get("tool"), 0) + 1
     return {"tools_invoked": sum(tools_run.values()), "distinct_tools": len(tools_run),
             "surface_urls": len(sessions.get(session_id, {}).get("tools").urls) if session_id in sessions else "n/a",
-            "findings": len(db.get_findings(session_id))}
+            # GATED: rendered as "Assessment Coverage -> Findings" beside a proof-gated Total Findings,
+            # so counting raw rows here made the two numbers disagree with the demoted set.
+            "findings": len([f for f in db.get_findings_gated(session_id)
+                             if str((f or {}).get("confidence") or "confirmed").lower() != "lead"])}
 
 
 def _tool_ledger(session_id: str) -> dict:

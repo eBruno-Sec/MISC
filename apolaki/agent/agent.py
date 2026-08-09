@@ -2829,7 +2829,11 @@ class BBHAgent:
         """AI call #2: turn the deterministic evidence into an executive summary +
         prioritized next leads, stored on the mission for the report."""
         inv = self.tools.surface_inventory()
-        findings = db.get_findings(self.mission_id) if self.mission_id else []
+        # GATED: this list is asserted to the model as "confirmed findings", so a proof-demoted lead
+        # reaching it would put an unproven claim into the executive summary a human reads first.
+        findings = db.get_findings_gated(self.mission_id) if self.mission_id else []
+        findings = [f for f in findings
+                    if str((f or {}).get("confidence") or "confirmed").lower() != "lead"]
         pb = []
         if self.mission_id:
             m = db.get_mission(self.mission_id)

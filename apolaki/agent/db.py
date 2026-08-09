@@ -183,8 +183,34 @@ def add_lead(mid: str, lead: dict) -> str:
 
 
 def get_findings(mid: str) -> list:
+    """RAW findings, exactly as the engines stored them — the proof gate has NOT been applied.
+
+    Prefer `get_findings_gated()` for anything a human or a model will read. See its docstring for why
+    this distinction is load-bearing."""
     return [json.loads(r["data"]) for r in _query(
         "SELECT data FROM findings WHERE mission_id=? ORDER BY created_at", (mid,))]
+
+
+def get_findings_gated(mid: str, enforce_families=None) -> list:
+    """Findings with the truth-first proof gate applied: a confirmed-but-unproven item is demoted to a
+    lead before any consumer sees it.
+
+    WHY THIS EXISTS AS A SEPARATE ACCESSOR. `proof_schema.demote_unproven` is deliberately
+    non-destructive — it rewrites confidence and leaves the row in place — so the gate only helps a
+    consumer that actually calls it. It was called in exactly ONE of fourteen places that read findings,
+    which meant the risk score, the coverage counts, the AI wrap-up prompt, the retest planner, the
+    cross-session memory snapshot and the SARIF/PoC exports all presented demoted rows as confirmed. The
+    gate ran, correctly rejected a finding, and almost every consumer ignored the verdict.
+
+    Anything that PRESENTS findings — to a report, an export, a model, a future scan — must read through
+    here. Raw access stays available under `get_findings()` for scan-time work (storage, dedupe,
+    benchmark sealing) where the un-gated set is the correct input."""
+    rows = get_findings(mid)
+    try:
+        import proof_schema as _ps
+        return _ps.demote_unproven(rows, enforce_families)
+    except Exception:
+        return rows
 
 
 def get_finding(mid: str, fid: str):
