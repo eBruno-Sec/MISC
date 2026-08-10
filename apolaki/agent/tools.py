@@ -6155,8 +6155,9 @@ class ToolRegistry:
         from urllib.parse import parse_qsl
         url = inp["url"]
         params = (inp.get("params") or xt.params_of(url))[:self._ni(8, 16, 40)]
-        if not params:
-            return ToolResult("sqli", url, True, "No query parameters to test", [])
+        # NO early return on an empty query string. A page whose only injectable input is a POST form
+        # field has no query params at all, and bailing here is what made every such target report clean
+        # without a single payload being delivered. The form pass below is the whole point.
         seconds = max(3, min(int(inp.get("delay", 5)), 15))
         qvals = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
@@ -6243,6 +6244,59 @@ class ToolRegistry:
                             timing=f"control={ctl:.1f}s vs injected-SLEEP({seconds}s)={slp:.1f}s"))
                         ev.append(_req)
                         break
+
+            # 4) POST FORM FIELDS. Everything above reaches GET query params only, so an app whose
+            # injectable parameter arrives in a form body was reported clean without being tested — the
+            # payload never arrived. Same oracles, different carrier (the pattern _run_ldap/_run_xpath
+            # already use). Error-based and boolean only: time-based would multiply a multi-second sleep
+            # across every field, and the UNION escalation builds GET URLs. Both stay query-only for now.
+            try:
+                import form_xss as fx
+                r0 = await c.get(url)
+                for form in fx.parse_forms(r0.text, url):
+                    if not self.scope.validate(form["action"])[0]:
+                        continue
+                    for field in (form.get("text_fields") or [])[:self._ni(4, 8, 16)]:
+                        async def _post(value, _f=form, _fld=field):
+                            try:
+                                return await c.post(_f["action"], data=fx.body_with(_f, _fld, value))
+                            except Exception:
+                                return None
+                        # The field's OWN value, never an invented one. These forms default to "" and the
+                        # app's real value often rides in the query string, so probing a made-up "1" can
+                        # break the query before the sink and make baseline and probe fail IDENTICALLY —
+                        # a dead differential that reports clean on a genuinely injectable field.
+                        forig = (form.get("fields") or {}).get(field) or qvals.get(field) or "1"
+                        fbase = await _post(forig)
+                        if fbase is None:
+                            continue
+                        fbody, hit = fbase.text, False
+                        for probe in sqli.ERROR_PROBES[:self._ni(3, 6, len(sqli.ERROR_PROBES))]:
+                            rp = await _post(forig + probe)
+                            if rp is None:
+                                continue
+                            hits = sqli.error_signatures(fbody, rp.text)
+                            if hits:
+                                _req = "%s [POST %s]" % (form["action"], field)
+                                findings.append(self._attach_poc(
+                                    sqli.error_finding(form["action"], field, probe, hits), _req, rp))
+                                ev.append(form["action"]); hit = True
+                                break
+                        if hit:
+                            continue
+                        for pair in sqli.boolean_payloads(forig):
+                            rt, rf = await _post(pair["true"]), await _post(pair["false"])
+                            if rt is None or rf is None:
+                                continue
+                            if sqli.analyze_boolean(fbody, rt.text, rf.text):
+                                _req = "%s [POST %s]" % (form["action"], field)
+                                findings.append(self._attach_poc(
+                                    sqli.boolean_finding(form["action"], field, pair), _req, rf,
+                                    timing="TRUE payload tracked the baseline; FALSE payload diverged"))
+                                ev.append(form["action"])
+                                break
+            except Exception:
+                pass
 
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
