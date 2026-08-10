@@ -218,7 +218,31 @@ the run log. Regression tests cover all three directions — the root is refused
 seeded, and a bare-host scope seeds nothing extra so this cannot invent targets.
 Result: **0 → 2 findings.**
 
-### S11b — the crawler only runs for AUTHENTICATED scans · **OPEN, CRITICAL**
+### S11c — document-relative links were silently dropped · **CRITICAL** · RESOLVED (`57afc3f`)
+
+**The root cause of the entire orchestration failure.** `_http_probe`:
+
+```python
+if l.startswith("http") or l.startswith("/"):
+    abs_links.append(urljoin(base_url, l))
+```
+
+`cmdi-Index.html`, `./x`, `../y` — discarded. **Apolaki could not crawl any site that links relatively.**
+The Benchmark landing page links to all 11 category indexes relatively, so every one was thrown away
+along with all 2740 test cases, and the mission reported "coverage completed".
+
+The guard existed to fix a protocol-relative doubled-host bug — but `urljoin` *was* that fix. The guard
+was redundant the moment it was written and cost the crawler most of the web. Now `urljoin` resolves
+everything; only non-navigable schemes (`mailto:`, `javascript:`, `tel:`, `data:`, …) are excluded.
+
+### S11d — robots.txt / sitemap.xml never read · **HIGH** · RESOLVED (`57afc3f`)
+
+Found by auditing surface sources against what a mature scanner uses. Both appeared in exactly two
+places: a **noise-exclusion list** (actively filtered out) and the Natas CTF solver. A general scan read
+neither. `crawl.parse_robots` / `parse_sitemap` now feed `_surface_crawl`. `Disallow` is harvested as
+**recon, not obeyed** — that is the entire value.
+
+### S11b — the crawler only ran for AUTHENTICATED scans · **CRITICAL** · RESOLVED (`57afc3f`)
 
 `crawl.bfs_frontier` has exactly one caller in the entire codebase: `_authenticated_recrawl`
 (`agent.py:1572`). There is no unauthenticated crawl path at all.
