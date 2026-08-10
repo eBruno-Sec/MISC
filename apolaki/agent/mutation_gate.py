@@ -69,6 +69,14 @@ MUTANTS = [
     ("proof_schema.py", "demote_unproven: stop demoting confirmed-but-unproven findings",
      r'if not ok:', 'if False:',
      "tests/test_proof_schema.py::test_demote_downgrades_weak_access_control_confirm"),
+    # Appended, not prepended: the crash-recovery self-tests read MUTANTS[0] while hardcoding bie.py as
+    # the file they restore, so inserting at the front breaks them.
+    ("prng_disclosure.py", "drop the strong-generator control — SecureRandom would confirm as weak",
+     r'if _STRONG\.search\(text\):', 'if False:',
+     "tests/test_prng_disclosure.py::test_strong_generator_suppresses_the_finding"),
+    ("prng_disclosure.py", "drop the security-context gate — a display-only PRNG would confirm",
+     r'if not ctx:', 'if False:',
+     "tests/test_prng_disclosure.py::test_weak_generator_without_security_meaning_is_not_a_vulnerability"),
 ]
 
 

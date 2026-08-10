@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import csv
 import json
+import os
 import random
 import re
 import sys
@@ -49,6 +50,7 @@ ENGINES = {
     "ldapi": "_run_ldap",
     "xpathi": "_run_xpath",
     "cmdi": "_run_form_cmdi",
+    "weakrand": "_run_web_probes",
     # Python v0.1 adds four categories the Java suite does not have.
     "xxe": "_run_xxe",
     "deserialization": "_run_deserialization",
@@ -69,6 +71,7 @@ FAMILIES = {
     "ldapi": {"ldap_injection"},
     "xpathi": {"xpath_injection"},
     "cmdi": {"command_injection", "cmdi"},
+    "weakrand": {"weak_random"},
     "xxe": {"xxe"},
     "deserialization": {"deserialization"},
     "redirect": {"open_redirect"},
@@ -96,7 +99,27 @@ def case_urls(client, category: str, base: str = "") -> list:
     return out
 
 
-async def scan(per_category: int, categories: list, seed: int, base: str = "") -> dict:
+def _load_done(path: str) -> dict:
+    """Cases already recorded in a checkpoint file, so a killed run resumes instead of restarting."""
+    done = {}
+    if not path or not os.path.exists(path):
+        return done
+    with open(path, encoding="utf8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue          # a half-written final line is expected after a kill; drop it
+            if row.get("test"):
+                done[row["test"]] = row
+    return done
+
+
+async def scan(per_category: int, categories: list, seed: int, base: str = "",
+               checkpoint: str = "") -> dict:
     import httpx
     import scope as scope_mod
     import tools as tools_mod
@@ -107,17 +130,30 @@ async def scan(per_category: int, categories: list, seed: int, base: str = "") -
     sc.load_manual([host], [], host)
     reg = tools_mod.ToolRegistry(sc, mission_id=None, lab_mode=True)
     rng = random.Random(seed)
+    done = _load_done(checkpoint)
+    ck = open(checkpoint, "a", encoding="utf8") if checkpoint else None
     results, client = [], httpx.Client(verify=False, timeout=30, follow_redirects=True)
     for cat in categories:
         cases = case_urls(client, cat, base)
         picked = sorted(rng.sample(cases, min(per_category, len(cases))))
         method = ENGINES.get(cat)
         for name, url in picked:
+            if name in done:
+                results.append(done[name]); continue
             row = {"test": name, "category": cat, "url": url, "engine": method,
                    "families": [], "error": ""}
+            def _checkpoint(r):
+                """FLUSH AND FSYNC PER CASE. The first full-suite attempt was SIGKILLed after ~700 cases
+                and lost every one of them, because output was written only at the end."""
+                if ck:
+                    ck.write(json.dumps(r) + "\n")
+                    ck.flush()
+                    os.fsync(ck.fileno())
+
             if not method:
                 row["error"] = "no engine mapped"
                 results.append(row)
+                _checkpoint(row)
                 continue
             try:
                 # MIRROR THE PLANNER instead of calling the engine on the bare page URL. A real mission
@@ -146,8 +182,11 @@ async def scan(per_category: int, categories: list, seed: int, base: str = "") -
             except Exception as e:
                 row["error"] = "%s: %s" % (type(e).__name__, str(e)[:120])
             results.append(row)
+            _checkpoint(row)
             print("  %-8s %-18s %s" % (cat, name, row["families"] or row["error"] or "-"),
                   file=sys.stderr, flush=True)
+    if ck:
+        ck.close()
     return {"seed": seed, "per_category": per_category, "results": results}
 
 
@@ -279,19 +318,34 @@ def main(argv=None) -> int:
     sc.add_argument("--per-category", type=int, default=12)
     sc.add_argument("--seed", type=int, default=1337)
     sc.add_argument("--base", default="java", choices=sorted(BASES))
+    sc.add_argument("--checkpoint", default="", help="append one JSON row per case; resumes if it exists")
     sc.add_argument("--categories", default="sqli,xss,pathtraver,ldapi,xpathi")
     so = sub.add_parser("score")
     so.add_argument("--run", required=True)
     so.add_argument("--key", required=True)
+    so.add_argument("--base", default="java", choices=sorted(BASES))
     a = ap.parse_args(argv)
     if a.cmd == "scan":
         out = asyncio.run(scan(a.per_category, [c for c in a.categories.split(",") if c],
-                              a.seed, BASES[a.base]))
+                              a.seed, BASES[a.base], a.checkpoint))
         out["target"] = a.base
         print(json.dumps(out, indent=1))
         return 0
     with open(a.run, encoding="utf8") as fh:
-        run = json.load(fh)
+        text = fh.read()
+    try:
+        run = json.loads(text)
+    except Exception:
+        # a checkpoint file: one JSON row per line, possibly truncated mid-line by a kill
+        rows = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    pass
+        run = {"results": rows, "target": a.base}
     print(report(score(run, load_key(a.key))))
     return 0
 

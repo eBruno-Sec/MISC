@@ -5368,6 +5368,16 @@ class ToolRegistry:
             return ToolResult("web_probes", url, False, "", [], baseline["error"])
         findings = []
 
+        # A response that NAMES the generator behind a security value (stack trace, debug banner,
+        # verbose error page) states the weakness outright — CWE-330 read off a CWE-209 disclosure.
+        try:
+            import prng_disclosure as _prng
+            _pv = _prng.evaluate(baseline.get("body", "") or "")
+            if _pv.get("confirmed"):
+                findings.append(self._attach_poc(
+                    _prng.finding(url, _pv["api"], _pv["oracle"]), url, None))
+        except Exception:
+            pass
         # traversal
         for probe in ws.build_traversal_probes(url, lab_mode=lab):
             if not self.scope.validate(probe.url)[0]:
