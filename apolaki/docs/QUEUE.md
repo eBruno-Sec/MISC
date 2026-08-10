@@ -41,6 +41,32 @@ admitting a URL only if it was FETCHED and carries `?`, making coverage O(pages 
 O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing alone between a
 2756-URL surface and the engines. **Blocked on `tools.py` until the Builder releases it.**
 
+#### Q-019 refinements — MEASURED by the Coordinator, 2026-08-10 (read before implementing)
+
+1. **The crawl is CLEAN. The hostless URLs come from a different producer.** Ran the surface liveness
+   check standalone against the same lab:
+   `VERDICT: confirmed | surface grew to 2756 URL(s) (needed 8), all addressable` — **zero** hostless
+   entries out of 2756. So `_surface_crawl` is not the producer of `https:///benchmark/...`; something
+   on the mission path is (candidates: `crawl.parse_sitemap`/`parse_robots` with a hostless `at`, or
+   the seeding path). **Do not "fix" `_surface_crawl` — it would be a null change against a green
+   test.** Find the producer first; the `_add_urls` ingress guard in the ticket is still right because
+   it names whoever it is.
+2. **The hard cap is `limit=20`, not the frontier.** `agent.py:175` — `sweep_targets(urls, forms,
+   in_scope, limit: int = 20)` — and `agent.py:2829` calls it **without passing `limit`**. The
+   deterministic injection sweep therefore probes at most **20** endpoints against a 2756-URL surface.
+   That single default explains the 36 distinct URLs better than the frontier cap does.
+3. **Throughput, not just selection, is a ceiling.** The probe phase ran 50 s → 3720 s for 433
+   `tool_call` events ≈ **8.5 s per tool call**, ≈ 12 calls per URL, ≈ **100 s per URL**. Even with a
+   perfect funnel, 2740 cases at 100 s/URL is ~76 hours. **So "raise the cap" is not by itself the
+   fix, and anyone who raises it and declares victory will have built a mission that never finishes.**
+   Q-019 must ship with a budget-aware selection (representative-per-signature under an explicit
+   time/count budget) and a separate ticket for probe concurrency. Add both numbers — URLs probed and
+   wall-clock — to the acceptance oracle, not just findings.
+4. Root cause #2 stands and is the deepest one: a discovered URL that was never FETCHED can never
+   become a target, because `sweep_targets` keeps a URL only when `"?" in u` or a captured form names
+   it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
+   O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
+
 ### Q-010 · Why does a whole-product mission find 2 things on a 1415-vuln target? — **ANSWERED by Q-019**
 **MEASURED**: mission `90cee81c`, 3720s, 2 findings, neither a benchmark case, count static from
 t=50s. Harness on the same target: 41.3%. Five orchestration fixes did not move it.

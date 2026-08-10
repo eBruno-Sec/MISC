@@ -98,8 +98,12 @@ def test_verdict_reports_a_down_lab_as_skipped_never_confirmed():
 
 # ── the checks table itself ───────────────────────────────────────────────────
 def test_every_check_names_a_real_technique():
+    """Engine checks must name a technique that exists. A `surface` check is exempt because it proves
+    REACH, not a vulnerability class — but it is not exempt from accountability; see the test below."""
     import techniques as T
     for c in lv.CHECKS:
+        if c["kind"] == "surface":
+            continue
         assert c["technique"] in T.TECHNIQUES, c["technique"]
 
 
@@ -112,9 +116,18 @@ def test_every_check_has_a_lab_the_runner_can_reach():
 
 
 def test_every_check_states_what_would_prove_it():
+    """Every entry declares its own success condition up front, so a check can never be scored against
+    a bar invented after the fact. Engine checks say which family/CWE would prove them; a surface check
+    says how much reach is enough AND that the reach is addressable — a URL with no host is refused by
+    scope, so counting it as coverage is exactly the Q-019 defect."""
     for c in lv.CHECKS:
+        assert c["kind"] in ("tool", "call", "surface"), c["technique"]
+        if c["kind"] == "surface":
+            assert c.get("seed"), c["technique"]
+            assert int(c.get("min_urls") or 0) > 0, c["technique"]
+            assert c.get("max_hostless") is not None, c["technique"]
+            continue
         assert c.get("family") or c.get("cwe"), c["technique"]
-        assert c["kind"] in ("tool", "call")
 
 
 def test_the_committed_baseline_only_names_techniques_the_table_checks():

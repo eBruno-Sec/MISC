@@ -33,6 +33,20 @@ from __future__ import annotations
 #   "tool" -> a ToolRegistry coroutine, invoked with `input`
 #   "call" -> a module-level function, invoked with `kwargs`
 CHECKS = (
+    # ── SURFACE DISCOVERY: can the product still REACH a target at all? ───────────────────────────
+    # Five orchestration defects shipped while 1645 unit tests stayed green, because every one of them
+    # tested an engine and none asserted that Apolaki can find anything to point an engine at:
+    #   recon seeded the host root while scope pinned /benchmark  -> scope correctly refused it
+    #   crawl.bfs_frontier's only caller was the AUTHENTICATED pass -> unauth scans never followed a link
+    #   document-relative links were dropped                       -> could not crawl most of the web
+    #   robots.txt / sitemap.xml were never read
+    #   the browser sensor returned browser:False on every run
+    # A mission against a 1415-vulnerability target returned ZERO findings in 40 seconds and reported
+    # "coverage completed". This check is the missing guarantee: point the crawl at a lab whose app is
+    # mounted on a SUBPATH and whose links are RELATIVE, and require the surface to actually grow.
+    {"technique": "surface_discovery", "lab": "owaspbench", "kind": "surface",
+     "seed": "https://owaspbench:8443/benchmark/", "min_urls": 8, "max_hostless": 0},
+
     # ── ICS / OT: read-only identity probes against a foreign protocol stack (Conpot) ──────────
     {"technique": "modbus_exposed", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "conpot", "port": 5020, "service": "modbus"}, "family": "modbus_exposed"},
@@ -127,6 +141,31 @@ def verdict(check: dict, findings, lab_up: bool, error: str = "") -> dict:
     if not lab_up:
         return {"technique": check["technique"], "lab": check["lab"], "verdict": SKIPPED,
                 "detail": "lab %s is not reachable — NOT a pass" % check["lab"]}
+    # A surface check asserts REACH, not a finding: the runner passes the discovered URLs as `findings`.
+    # Kept in the same table and ratchet as the engines because "can we still reach a target" belongs in
+    # exactly the gate that already refuses to treat an absent lab as success.
+    if check.get("kind") == "surface":
+        urls = list(findings or [])
+        n, need = len(urls), int(check.get("min_urls") or 1)
+        # Q-019: a big surface is not the same as a USABLE one. Mission 90cee81c discovered 2756 URLs
+        # and probed 36, because `urljoin("https://", "/benchmark/x.html")` yields
+        # `https:///benchmark/x.html` — scheme, EMPTY netloc — which ScopeEngine then correctly refuses.
+        # Those hostless entries were the category index pages linking to all 2740 test cases, so the
+        # crawl "succeeded" by count while losing the only pages that mattered. A reach check that
+        # counts URLs without checking they are addressable would have passed that mission.
+        from urllib.parse import urlparse
+        hostless = [u for u in urls if not (urlparse(str(u)).netloc or "")]
+        cap = check.get("max_hostless")
+        if cap is not None and len(hostless) > int(cap):
+            return {"technique": check["technique"], "lab": check["lab"], "verdict": DEAD,
+                    "detail": "%d URL(s) on the surface have no host (e.g. %s) — scope will refuse every "
+                              "one of them" % (len(hostless), str(hostless[0])[:60])}
+        if n >= need:
+            return {"technique": check["technique"], "lab": check["lab"], "verdict": CONFIRMED,
+                    "detail": "surface grew to %d URL(s) (needed %d), all addressable" % (n, need)}
+        return {"technique": check["technique"], "lab": check["lab"], "verdict": DEAD,
+                "detail": "crawl reached only %d URL(s), needed %d — the product cannot see the target"
+                          % (n, need)}
     hit = next((f for f in (findings or []) if _match(f, check)), None)
     if hit:
         return {"technique": check["technique"], "lab": check["lab"], "verdict": CONFIRMED,
