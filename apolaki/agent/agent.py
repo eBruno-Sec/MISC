@@ -172,6 +172,46 @@ def _is_generic_objective(objective: str) -> bool:
     return (not o) or o.startswith("perform comprehensive bug bounty recon")
 
 
+def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
+    """Endpoints the deterministic injection sweep will probe.
+
+    Query-bearing URLs, one representative per (path, param-signature) — PLUS the page that carries each
+    captured POST form. That second half is the point: the selection used to keep only URLs containing
+    "?", so a page whose only injectable input is a form body was never handed to ANY injection engine,
+    however capable that engine was. sqli and path traversal now have POST form passes and would still
+    have gone unused, because nothing ever scheduled them against such a page.
+
+    A form contributes its `page` (the document the form was parsed out of) and NOT its `action`: the
+    engines re-parse the page to rebuild the form, and fetching a bare action usually returns a handler
+    response with no <form> in it. Pure and order-stable so a re-run picks the same surface.
+    """
+    from urllib.parse import urlparse, parse_qs
+    seen_sig, seen_paths, targets = set(), set(), []
+    for u in (urls or []):
+        if "?" not in u or not in_scope(u):
+            continue
+        pr = urlparse(u)
+        sig = (pr.path, tuple(sorted(parse_qs(pr.query).keys())))
+        if sig in seen_sig:
+            continue
+        seen_sig.add(sig)
+        seen_paths.add(pr.path)
+        targets.append(u)
+    for fm in (forms or []):
+        page = (fm or {}).get("page") or (fm or {}).get("action")
+        if not page or not in_scope(page):
+            continue
+        # Dedupe form pages BY PATH, including against the query targets above: the engines run their
+        # form pass on whatever page they are given, so if this path is already scheduled the form is
+        # already going to be parsed there. Adding it twice only spends the budget.
+        path = urlparse(page).path
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        targets.append(page)
+    return targets[:limit]
+
+
 class BBHAgent:
     # execution strategies (how tools are chosen), orthogonal to `mode` (which
     # tiers of tool are allowed). Default budgets: manual/deterministic use no AI,
@@ -2556,7 +2596,9 @@ class BBHAgent:
             names = [n for n in (fm.get("inputs") or []) if n]
             if method == "POST":
                 if action not in seen_actions:
-                    store.append({"action": action, "method": "POST", "fields": names})
+                    # `page` is what the injection sweep schedules: the engines re-parse the document to
+                    # rebuild the form, and a bare action usually answers without a <form> in it.
+                    store.append({"action": action, "method": "POST", "fields": names, "page": page_url})
                     seen_actions.add(action)
             elif names:
                 sep = "&" if "?" in action else "?"
@@ -2621,17 +2663,8 @@ class BBHAgent:
                 pass
             if len(_seen_psig) >= 25:
                 break
-        seen_sig, targets = set(), []
-        for u in (self.tools.urls or []):
-            if "?" not in u or not self.scope.validate(u)[0]:
-                continue
-            pr = urlparse(u)
-            sig = (pr.path, tuple(sorted(parse_qs(pr.query).keys())))
-            if sig in seen_sig:
-                continue
-            seen_sig.add(sig)
-            targets.append(u)
-        targets = targets[:20]
+        targets = sweep_targets(self.tools.urls, self.tools.recon.get("forms"),
+                                lambda u: self.scope.validate(u)[0])
         swept_paths = {urlparse(t).path for t in targets}   # paths the param sweep already DOM-traced
         if not targets:
             return
