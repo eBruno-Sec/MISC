@@ -193,9 +193,23 @@ def test_access_verdict_intact_when_403():
 
 
 # ── web_security: probes + scope + sensitive-path validation ─────
-def test_traversal_probes_only_pathlike_params():
+def test_traversal_probes_prioritise_pathlike_params_without_skipping_the_rest():
+    """CONTRACT CHANGED DELIBERATELY. This used to assert that ONLY path-like params were probed, which
+    made looks_pathlike a filter: any parameter with an opaque name was silently never tested, and
+    `?id=SafeText` reaching a file read is still a file read. The heuristic exists to stop probe blowup
+    on a wide query string, and max_probes already bounds that -- so it now ORDERS the work instead."""
     probes = ws.build_traversal_probes("https://t/a?file=x.txt&id=1")
-    assert probes and all(p.parameter == "file" for p in probes)
+    assert probes
+    assert probes[0].parameter == "file"                      # path-like still goes FIRST
+    assert {p.parameter for p in probes} == {"file", "id"}    # ...but the opaque one is not skipped
+
+    # An entirely opaque query string must still be probed -- this is the false negative that mattered.
+    opaque = ws.build_traversal_probes("https://t/a?BenchmarkTest00011=SafeText")
+    assert opaque and {p.parameter for p in opaque} == {"BenchmarkTest00011"}
+
+    # The budget is what keeps this bounded, and it must still hold with the filter gone.
+    wide = ws.build_traversal_probes("https://t/a?" + "&".join("p%d=v" % i for i in range(40)))
+    assert 0 < len(wide) <= 12
 
 
 def test_idor_probes_numeric_only():

@@ -214,9 +214,15 @@ def build_traversal_probes(url: str, *, lab_mode: bool = False, max_probes: int 
     if lab_mode:
         payloads.extend(TRAVERSAL_LAB_PAYLOADS)
     probes: list = []
-    for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
-        if not looks_pathlike(name, value):
-            continue
+    pairs = parse_qsl(urlparse(url).query, keep_blank_values=True)
+    # looks_pathlike ORDERS the work, it does not gate it. As a filter it silently skipped every
+    # parameter with an opaque name -- `?id=SafeText` reaching a file read is still a file read, and the
+    # heuristic only ever existed to stop probe blowup on a wide query string. max_probes already bounds
+    # that, so path-like parameters go first and the rest still get tested with whatever budget is left.
+    # On a narrow query string, which is the common case, every parameter is now reached.
+    ordered = ([pv for pv in pairs if looks_pathlike(pv[0], pv[1])]
+               + [pv for pv in pairs if not looks_pathlike(pv[0], pv[1])])
+    for name, value in ordered:
         for payload in payloads:
             probes.append(WebProbe(
                 url=_replace_query_value(url, name, payload),
