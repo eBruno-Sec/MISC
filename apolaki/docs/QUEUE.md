@@ -19,14 +19,27 @@ Related: [LEDGERS.md](LEDGERS.md) · [CODEBASE_REVIEW.md](CODEBASE_REVIEW.md) ·
 No two agents may edit overlapping files. A ticket needing a file owned elsewhere is
 `blocked (file conflict)` until the owner releases it.
 
-| owner | files | ticket |
+**Cycle 2 — assigned 2026-08-10 after the first squad was killed by API session limits.** Four lanes,
+deliberately disjoint. Cross-lane needs are written here as **hand-off notes**, never applied directly.
+
+| owner | files it may WRITE | ticket |
 |---|---|---|
-| **Builder** | `tools.py` · `personas.py` · `register.py` · `techniques.py` · `engine_descriptor.py` · `dom_tool.py` | Q-001, then Q-003 |
-| **Breaker** | test files only, plus verdicts in `CODEBASE_REVIEW.md` | Q-000, Q-00A, FPR audit |
-| **Main thread / Coordinator** | `report.py` · `bie.py` · `proof_schema.py` · `liveness.py` · `browser_engine.py` · `main.py` · `LEDGERS.md` · `QUEUE.md` · `STATUS.md` | uncommitted fixes |
-| **Watcher** | `docs/research/INBOX.md` | research only, read-only on code |
-| **Analyst** | QUEUE tickets (`proposed` only) | verification of Q-007/8/9 |
-| **Conductor** | `CODEBASE_REVIEW.md` findings | audits only, read-only on code |
+| **Builder · funnel** | `agent/agent.py` · `agent/crawl.py` | **Q-019** — the funnel (2756 → 36) |
+| **Builder · engine** | `agent/tools.py` · `personas.py` · `register.py` · `session_lifecycle_tool.py` · `techniques.py` · `engine_descriptor.py` · `wstg_catalog.py` · `deadcode_gate.py` | **Q-001** — session lifecycle + the deadcode-gate failure it inherited |
+| **Breaker** | test files only · `CODEBASE_REVIEW.md` | verify Q-00A (BIE), the 0% FPR claim, and today's four commits |
+| **Watcher** | `docs/research/INBOX.md` | ZAP orchestration · the 8.5 s/call throughput ceiling · Q-021 feed quality |
+| **Coordinator (main thread)** | `report.py` · `proof_schema.py` · `liveness.py` · `browser_engine.py` · `main.py` · all `docs/` | ledgers, sequencing, Codex-audit intake |
+
+Known-conflict hand-offs, already issued:
+- Q-019 may need an `_add_urls` ingress guard in `tools.py` (owned by the engine lane) → the funnel
+  Builder writes the patch here instead of applying it.
+- Q-001 needs a `liveness.py` CHECKS entry (owned by the Coordinator) → same rule.
+- Q-001 may need an `agent.py` change (owned by the funnel lane) → same rule.
+
+**Known failing test that belongs to the engine lane, not to anyone else**:
+`tests/test_deadcode_gate.py::test_the_method_ratchet_holds`. Baseline otherwise 1670 passed,
+2 skipped. Nobody but the engine-lane Builder touches it, and it must be fixed by wiring the code —
+not by silencing the gate.
 
 ---
 
