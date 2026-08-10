@@ -73,7 +73,33 @@ by family: {'sensitive_exposure': 1, 'vulnerable_component': 1}
 appear on almost any target. Note also that the count was already 2 at the 50-second mark and did not
 change over the following 61 minutes — the run spent an hour producing nothing.
 
-**What this falsifies.** Five orchestration defects were found and fixed (S11a scoped-path seed,
+**ANSWERED, same day — the funnel was measured, not guessed** (replayed from the mission's 908-row
+persisted event log):
+
+```
+Surface crawl: probed 12 page(s), surface 5 -> 2756 URL(s)
+tool_call events 433 · scope_block events 34
+DISTINCT URLs any tool_call aimed at        : 66
+DISTINCT URLs http_probe/http_read touched  : 36
+findings: 2 (both from JS recon on the index page)
+```
+
+**2756 discovered, 36 probed.** Discovery is NOT the gap — S11b/S11c/S11d genuinely work, the crawl
+found all 2740 cases. Three compounding causes downstream, each independently measured:
+1. **Hostless URLs.** 10 of 36 probed URLs are `https:///benchmark/cmdi-Index.html` — scheme, empty
+   netloc. `urljoin("https://", "/benchmark/x.html")` produces exactly that, and
+   `ScopeEngine.validate()` correctly refuses it. Those are the 34 `scope_block` events, and they are
+   precisely the category index pages that link to all 2740 cases. The scope engine is right; the
+   producer hands it garbage and nothing names the producer.
+2. **Only a FETCHED url can become a target.** `sweep_targets` keeps a URL only if `"?" in u` or it
+   carries a captured form. The 2740 cases are plain `.html` with no query. Coverage is therefore
+   O(pages fetched), not O(surface discovered).
+3. **`depth(2) × frontier(30)` = 60 visits** is the only gate between a 2756-URL surface and the
+   engines; 12 survived cause (1).
+
+Tracked as **Q-019** (CRITICAL, ready). This supersedes the "fix a sixth suspected defect" plan.
+
+**What the 2-finding result falsifies.** Five orchestration defects were found and fixed (S11a scoped-path seed,
 S11b auth-only crawl, S11c relative links dropped, S11d robots/sitemap unread, S12 dead browser
 sensor) on the hypothesis that recon was starving the engines. The engines score **41.3%** on this
 exact target when handed case URLs directly. The fixes shipped and the whole-product number **did not
