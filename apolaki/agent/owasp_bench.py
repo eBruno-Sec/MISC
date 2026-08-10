@@ -194,8 +194,17 @@ def score(run: dict, key: dict) -> dict:
     for b in per.values():
         for k in total:
             total[k] += b[k]
-    return {"per_category": {c: _rates(b) for c, b in sorted(per.items())},
-            "overall": _rates(total), "unscored": unscored}
+    cats = {c: _rates(b) for c, b in sorted(per.items())}
+    # OFFICIAL SCORING IS A MACRO-AVERAGE of the per-category scores -- BenchmarkUtils averages the
+    # category rates, it does not pool the cases. Pooling (micro) silently weights whichever category we
+    # happened to sample most and is NOT comparable to a published Benchmark figure. Both are reported:
+    # `official_macro` is the comparable number, `micro` is kept because it is the better description of
+    # this run's raw hit rate when sampling is uneven.
+    scored = [b["youden"] for b in cats.values() if b["youden"] is not None]
+    macro = (sum(scored) / len(scored)) if scored else None
+    return {"per_category": cats, "overall": _rates(total),
+            "official_macro": macro, "categories_scored": len(scored),
+            "unscored": unscored}
 
 
 def _rates(b: dict) -> dict:
@@ -224,6 +233,10 @@ def report(s: dict) -> str:
     lines.append("%-13s %5d %5d %5d %5d   %s %s %s"
                  % ("OVERALL", o["tp"], o["fn"], o["fp"], o["tn"],
                     _fmt(o["tpr"]), _fmt(o["fpr"]), _fmt(o["youden"])))
+    lines.append("")
+    lines.append("OFFICIAL SCORE (macro-average of %d category scores, the BenchmarkUtils method): %s"
+                 % (s.get("categories_scored") or 0, _fmt(s.get("official_macro"))))
+    lines.append("  the OVERALL row above is a micro-average (pooled cases) and is NOT the official number")
     if s["unscored"]:
         lines.append("unscored (no key entry or no engine mapped): %d" % len(s["unscored"]))
     return "\n".join(lines)
