@@ -24,6 +24,10 @@ from agent import BBHAgent, ai_status
 from scope import ScopeEngine
 from tools import ToolRegistry
 
+# Strong references to fire-and-forget background tasks; asyncio only holds weak ones, so a task
+# without a reference here can be collected mid-execution.
+_BACKGROUND_TASKS: set = set()
+
 app = FastAPI(title="Apolaki")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -3349,4 +3353,18 @@ async def startup():
         proc = await asyncio.create_subprocess_exec(
             "nuclei", "-update-templates", "-silent",
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        asyncio.create_task(proc.communicate())
+        # Hold a reference. asyncio keeps only a WEAK reference to a task, so a fire-and-forget
+        # create_task() can be garbage-collected mid-run and the update silently never completes.
+        # Bounded too: an unbounded communicate() on a hung child would leak the task for the life of
+        # the process.
+        async def _bounded_update(p):
+            try:
+                await asyncio.wait_for(p.communicate(), timeout=300)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        _t = asyncio.create_task(_bounded_update(proc))
+        _BACKGROUND_TASKS.add(_t)
+        _t.add_done_callback(_BACKGROUND_TASKS.discard)

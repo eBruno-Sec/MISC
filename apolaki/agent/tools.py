@@ -941,6 +941,12 @@ class ToolRegistry:
         self.scope = scope
         self.mission_id = mission_id
         self.lab_mode = lab_mode
+        # SWALLOWED-ERROR LEDGER. A scanner's worst failure mode is a check that crashed, because it
+        # produces no finding and no finding is indistinguishable from a clean target. Defensive
+        # `except: pass` around an optional probe is reasonable; SILENT defensive handling is not.
+        # Every engine-path handler records here instead of vanishing, so a run can report "N checks
+        # failed to execute" and a benchmark miss can be attributed to a crash rather than an oracle.
+        self.swallowed = []
         # IDS-evasion profile for our own port scan (#113). Mission-wide, so every nmap call inherits the
         # operator's choice instead of each caller having to remember to pass it.
         self.stealth = stealth or "off"
@@ -3128,6 +3134,20 @@ class ToolRegistry:
         if timing:
             f["timing"] = timing
         return f
+
+    def _swallow(self, exc: BaseException, where: str, target: str = "") -> None:
+        """Record a defensively-caught engine error instead of discarding it.
+
+        Use this in place of a bare `pass`. The handler still swallows -- an optional probe must not
+        abort a mission -- but the failure stops being invisible. Without it, a crashed check and a clean
+        target produce byte-identical output, which is how DOM_SCAN_JS silently disabled three families
+        and how an unimported name nearly shipped a traversal pass that always reported clean.
+
+        Bounded so a pathological target cannot grow this without limit.
+        """
+        if len(self.swallowed) < 500:
+            self.swallowed.append({"where": where, "target": target[:200],
+                                   "error": "%s: %s" % (type(exc).__name__, str(exc)[:160])})
 
     def _ni(self, std: int, deep: int, insane: int) -> int:
         """Intensity-scaled cap: the native probes widen their parameter/payload breadth
@@ -5379,8 +5399,8 @@ class ToolRegistry:
                 findings.append(self._attach_poc(
                     _cfl.finding(url, _cv["cookies"], _cv["oracle"],
                                  session=bool(_cv.get("session_cookies"))), url, None))
-        except Exception:
-            pass
+        except Exception as _e:
+            self._swallow(_e, "web_probes.cookie_flags", url)
         # A response that NAMES the generator behind a security value (stack trace, debug banner,
         # verbose error page) states the weakness outright — CWE-330 read off a CWE-209 disclosure.
         try:
@@ -5389,8 +5409,8 @@ class ToolRegistry:
             if _pv.get("confirmed"):
                 findings.append(self._attach_poc(
                     _prng.finding(url, _pv["api"], _pv["oracle"]), url, None))
-        except Exception:
-            pass
+        except Exception as _e:
+            self._swallow(_e, "web_probes.prng_disclosure", url)
         # traversal
         for probe in ws.build_traversal_probes(url, lab_mode=lab):
             if not self.scope.validate(probe.url)[0]:
@@ -5480,8 +5500,8 @@ class ToolRegistry:
                                 "confidence": _v["confidence"], "family": "path_traversal",
                                 "tags": ["lfi", "traversal"]})
                             break
-        except Exception:
-            pass
+        except Exception as _e:
+            self._swallow(_e, "web_probes.traversal_header", url)
         # idor
         for probe in ws.build_idor_probes(url):
             if not self.scope.validate(probe.url)[0]:
@@ -5528,8 +5548,16 @@ class ToolRegistry:
                     "tags": ["http-methods", "xst", "trace"]})
         except Exception:
             pass
-        return ToolResult("web_probes", url, True,
-                          f"{len(findings)} anomaly signal(s)", findings)
+        # Report checks that FAILED TO EXECUTE alongside the ones that ran. "0 signals" with two crashed
+        # probes is a completely different statement from "0 signals" with everything green, and until
+        # now they printed identically.
+        _failed = [s for s in self.swallowed if s["where"].startswith("web_probes.")
+                   and s["target"] == url]
+        _note = (f"{len(findings)} anomaly signal(s)"
+                 + (f" — WARNING: {len(_failed)} check(s) failed to execute: "
+                    + ", ".join(sorted({s['where'].split('.', 1)[1] for s in _failed}))
+                    if _failed else ""))
+        return ToolResult("web_probes", url, True, _note, findings)
 
     async def _run_injection_probes(self, inp: dict) -> ToolResult:
         import httpx
