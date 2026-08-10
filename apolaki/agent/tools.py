@@ -6894,6 +6894,35 @@ class ToolRegistry:
                         findings.append(f); done = True; break
                 if done:
                     break
+            # BLIND form cmdi. A sink that runs the command but returns nothing to echo is invisible to
+            # the output oracle above, and that is the common shape in the wild -- the injection succeeds
+            # and the response never changes. Time is the only remaining signal.
+            # Bounded exactly like the username-enumeration timing channel: ONCE PER MISSION, only after
+            # the cheap oracle found nothing, and only the first two fields -- so a form-heavy scan cannot
+            # fill up with 5s sleeps, which is why this was originally left out altogether.
+            if not done and not getattr(self, "_timing_cmdi_done", False):
+                self._timing_cmdi_done = True
+                _secs = 5
+                for field in fields[:2]:
+                    for item in cmdi.time_payloads("127.0.0.1", _secs):
+                        _t0 = time.perf_counter()
+                        await self._http(action, "POST", headers, body(field, item["control"]),
+                                         capture=False)
+                        _ctl = time.perf_counter() - _t0
+                        _t0 = time.perf_counter()
+                        await self._http(action, "POST", headers, body(field, item["payload"]),
+                                         capture=False)
+                        _slp = time.perf_counter() - _t0
+                        if cmdi.analyze_time(_ctl, _slp, _secs):
+                            f = cmdi.time_finding(action, field, item, _ctl, _slp, _secs)
+                            f["target"] = action
+                            findings.append(f)
+                            done = True
+                            break
+                    if done:
+                        break
+            if done:
+                break
         summary = (f"command injection CONFIRMED in the form body ({findings[0]['target']})" if findings
                    else "no body command injection in the page's forms")
         return ToolResult("form_cmdi", url, True, summary, findings)
