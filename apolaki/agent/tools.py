@@ -5382,6 +5382,48 @@ class ToolRegistry:
                     "evidence": f"{probe.payload}: {verdict['reason']}",
                     "confidence": verdict["confidence"], "family": "path_traversal",
                     "tags": ["lfi", "traversal"]})
+        # traversal through POST FORM BODIES. The probes above only rewrite query params, so an app whose
+        # filename arrives in a form body was never tested — and a query string on the PAGE url does not
+        # mean the sink is reachable by GET: it is routinely decorative while the real handler is a POST
+        # to the same path. Same oracle, different carrier; bounded so a form-heavy page cannot blow up.
+        try:
+            import form_xss as fx
+            from urllib.parse import parse_qsl, urlencode as _ue
+            _tp = list(ws.TRAVERSAL_SAFE_PAYLOADS) + (list(ws.TRAVERSAL_LAB_PAYLOADS) if lab else [])
+            _qv = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+            _budget = 12
+            for fm in fx.parse_forms(baseline.get("body", "") or "", url):
+                if _budget <= 0 or not self.scope.validate(fm["action"])[0]:
+                    continue
+                hdrs = {"Content-Type": "application/x-www-form-urlencoded"}
+                for field in (fm.get("text_fields") or [])[:4]:
+                    if _budget <= 0:
+                        break
+                    # The field's OWN value, never an invented one — an unexpected value can fail the
+                    # request before the file read, making baseline and probe fail identically.
+                    forig = (fm.get("fields") or {}).get(field) or _qv.get(field) or "1"
+                    fbase = await self._http(fm["action"], "POST", hdrs,
+                                             _ue(fx.body_with(fm, field, forig)), capture=False)
+                    if fbase.get("error"):
+                        continue
+                    for payload in _tp:
+                        if _budget <= 0:
+                            break
+                        _budget -= 1
+                        rp = await self._http(fm["action"], "POST", hdrs,
+                                              _ue(fx.body_with(fm, field, payload)), capture=False)
+                        verdict = ws.analyze_traversal_pair(fbase, rp, payload, lab_mode=lab)
+                        if verdict:
+                            findings.append({
+                                "title": f"Path traversal signal on form field '{field}'",
+                                "severity": verdict["severity"], "target": fm["action"],
+                                "description": f"Traversal probe ({payload}) in a POST body — {verdict['reason']}",
+                                "evidence": f"POST {fm['action']} {field}={payload}: {verdict['reason']}",
+                                "confidence": verdict["confidence"], "family": "path_traversal",
+                                "tags": ["lfi", "traversal"]})
+                            break
+        except Exception:
+            pass
         # idor
         for probe in ws.build_idor_probes(url):
             if not self.scope.validate(probe.url)[0]:
