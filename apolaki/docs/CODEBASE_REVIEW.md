@@ -186,3 +186,57 @@ Ranked by effect on findings:
 | date | commit | change |
 |---|---|---|
 | 2026-08-10 | `40f59b7` | S1 mechanism: swallow ledger + `_run_web_probes` reporting; S3 orphaned task |
+
+---
+
+## S11 — Full-mission orchestration · **CRITICAL** · two defects, one fixed
+
+Found by running Apolaki **as a product** (`/engage` → `/run`, deterministic, ZAP enabled) instead of
+calling engines directly. Every measurement before this bypassed the orchestrator and could not see it.
+
+**Baseline result: a real mission against a target carrying 1,415 known vulnerabilities returned ZERO
+findings in 40 seconds and reported "coverage completed."** The harness scores 41.3% on the same target.
+That gap was never in the engines.
+
+### S11a — recon seeds the host root, not the scoped path · RESOLVED
+
+```
+ScopeEntry(value='owaspbench', base='https://owaspbench:8443', path='/benchmark')
+validate('https://owaspbench:8443/benchmark/')  -> True
+validate('https://owaspbench:8443/')            -> False
+    "host is in scope, but the request path is outside the pinned scope path"
+```
+
+Recon started at the host root; scope **correctly refused it**; the crawl got nothing; the planner
+scheduled nothing. Scope was right — nothing seeded a URL satisfying it.
+
+Not a benchmark quirk: **any engagement scoped to `example.com/app/` returns zero findings and calls the
+target clean.** That is the worst outcome a scanner can produce, and it was shipping.
+
+Fixed in `agent.run()`: seed each scope entry's `base + pinned path`, validated before use, reported in
+the run log. Regression tests cover all three directions — the root is refused, the pinned path IS
+seeded, and a bare-host scope seeds nothing extra so this cannot invent targets.
+Result: **0 → 2 findings.**
+
+### S11b — the crawler only runs for AUTHENTICATED scans · **OPEN, CRITICAL**
+
+`crawl.bfs_frontier` has exactly one caller in the entire codebase: `_authenticated_recrawl`
+(`agent.py:1572`). There is no unauthenticated crawl path at all.
+
+So an unauthenticated mission fetches its seed URLs, mines served JS, and **never follows a link**. The
+fixed mission above reached `/benchmark/` and still found only 2 incidental issues (a jQuery CVE and a
+credential in a comment, both from JS recon on the index page) because it never walked to any of the
+2,740 test-case pages.
+
+Consequence: **unauthenticated black-box scanning — the default mode and the one most engagements start
+with — has no surface discovery.** Coverage is whatever the operator typed in, plus JS mining.
+
+Fix: hoist the depth-bounded BFS out of `_authenticated_recrawl` into a mode-independent crawl phase,
+running for authenticated and unauthenticated missions alike, with the same depth/frontier caps
+(`BBH_CRAWL_DEPTH`, frontier 30) and the same scope gate. The authenticated pass then becomes what its
+name says — the persona-specific *extra* — rather than the only way surface is ever discovered.
+
+**Why the test suite never caught either.** 1,634 tests, all green, throughout. They test engines and
+pure logic; nothing asserted that a mission against a known-vulnerable target finds anything. A
+whole-product smoke test — engage a mission against a standing lab, assert findings > 0 — would have
+caught both instantly, and is the single highest-value test missing from this repo.

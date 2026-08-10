@@ -2245,6 +2245,24 @@ class BBHAgent:
     # ── entry ────────────────────────────────────────────────────
     async def run(self, objective: str, session_id: str) -> AsyncGenerator[dict, None]:
         yield {"type": "phase", "phase": "recon"}
+        # SEED THE SCOPED PATH, NOT JUST THE HOST. An app mounted on a subpath -- example.com/app/,
+        # or the OWASP Benchmark on /benchmark/ -- has a host root that 404s. Recon started there,
+        # scope CORRECTLY refused it ("host is in scope, but the request path is outside the pinned
+        # scope path"), the crawl found nothing, the planner had nothing to schedule, and the mission
+        # completed in 40 seconds with ZERO findings against a target carrying 1415 real ones.
+        # Scope already records the pinned path; nothing was seeding a URL that satisfies it.
+        _seeded = []
+        for _e in (self.scope.in_scope or []):
+            _b, _p = (getattr(_e, "base", "") or ""), (getattr(_e, "path", "") or "")
+            if _b and _p and _p != "/":
+                _u = _b.rstrip("/") + "/" + _p.strip("/") + "/"
+                if self.scope.validate(_u)[0]:
+                    _seeded.append(_u)
+        if _seeded:
+            self.tools._add_urls(_seeded)
+            yield {"type": "info", "content": "Seeded %d scoped base URL(s) whose path is pinned: %s — the "
+                   "host root is out of scope for these, so nothing else would have reached the app."
+                   % (len(_seeded), ", ".join(_seeded[:3]))}
         if self.recon_cycles > 1:
             yield {"type": "info", "content": f"Iterative recon enabled: up to {self.recon_cycles} cycles "
                    "(refine from discovered assets each pass; intrusive tools are not looped)."}
