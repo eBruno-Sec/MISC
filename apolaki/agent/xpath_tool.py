@@ -49,6 +49,13 @@ XPATH_ERRORS = [
     r"net\.sf\.saxon", r"MS\.Internal\.Xml", r"A location step was expected",
     r"Expected token '.*' (?:in|at) XPath", r"SimpleXMLElement::xpath", r"DOMXPath::query",
     r"unterminated string literal.*xpath", r"XPathEvalError",
+    # APPLICATION-LEVEL WRAPPERS. Plenty of apps catch the processor exception and re-emit their own
+    # message -- "Error parsing XPath input: …" -- so none of the vendor signatures above appear and a
+    # genuine break reads clean. Both directions of the phrasing, and still XPath-SPECIFIC: the word
+    # XPath must appear WITH a failure word close by, so ordinary prose that merely mentions XPath does
+    # not confirm, and a SQL error can never match. Bounded spans keep this linear on hostile input.
+    r"(?:error|failure|failed|invalid|malformed|unable|cannot|could not)[^.\n<]{0,40}XPath",
+    r"XPath[^.\n<]{0,30}(?:error|failure|failed|invalid|malformed|not[- ]?valid|could not be parsed)",
 ]
 _XPATH_RE = [re.compile(p, re.IGNORECASE) for p in XPATH_ERRORS]
 

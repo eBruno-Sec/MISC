@@ -48,3 +48,28 @@ def test_finding_is_benchmark_proof():
     assert f["family"] == "xpath_injection" and f["cwe"] == "CWE-643"
     assert f["confidence"] == "confirmed" and f["cvss_score"] == 8.2
     assert bb._has_proof(f)
+
+
+def test_application_level_xpath_wrappers_confirm_but_prose_does_not():
+    """Many apps catch the processor exception and re-emit their own message, so none of the vendor
+    signatures appear and a genuine break reads clean. Still XPath-SPECIFIC: the word XPath must sit
+    close to a failure word, so this can never claim a SQL error or an ordinary mention of XPath."""
+    assert xp.xpath_error("Error parsing XPath input: 'x'")
+    assert xp.xpath_error("The XPath expression is invalid")
+    assert xp.xpath_error("Unable to evaluate XPath")
+    assert xp.xpath_error("javax.xml.xpath.XPathExpressionException")      # vendor path still works
+
+    # negative controls — each of these appearing as a confirmation would be a false positive
+    assert not xp.xpath_error("This page explains how XPath queries work in our API docs.")
+    assert not xp.xpath_error("java.sql.SQLSyntaxErrorException: unexpected end of statement")
+    assert not xp.xpath_error("HTTP Status 500 - Internal Server Error")
+    assert not xp.xpath_error("An error occurred. " + "z" * 80 + " XPath is supported.")
+    assert not xp.xpath_error("")
+
+
+def test_wrapper_signatures_are_linear_on_hostile_input():
+    """Bounded spans, because an unbounded gap between the two words is a backtracking foothold."""
+    import time
+    t0 = time.perf_counter()
+    xp.xpath_error(("error " + "a" * 200) * 500)
+    assert time.perf_counter() - t0 < 2.0
