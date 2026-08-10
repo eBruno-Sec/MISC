@@ -138,6 +138,21 @@ def validate_confirmed(finding: dict) -> tuple:
 _DEFAULT_ENFORCE = ("idor", "access_control", "missing_authentication", "bola_idor", "bfla")
 
 
+#: The vocabulary of a confidence value that is NOT a proof. `demote_unproven` writes "lead" into this
+#: set; producers elsewhere use the neighbouring words. Anything that renders, counts, scores or exports
+#: a finding must consult ONE definition of "confirmed" — three private copies is how the HTML report
+#: came to stamp CONFIRMED on rows the proof gate had already demoted.
+UNPROVEN_CONFIDENCE = frozenset({"lead", "candidate", "unconfirmed", "informational", "info", "tentative"})
+
+
+def is_confirmed(finding: dict) -> bool:
+    """True when this finding still carries a confirmed verdict. A finding with no `confidence` key at
+    all is confirmed by convention (most engines only set the field when demoting). Pure."""
+    if not isinstance(finding, dict):
+        return False
+    return str(finding.get("confidence") or "confirmed").strip().lower() not in UNPROVEN_CONFIDENCE
+
+
 def demote_unproven(findings: list, enforce_families=None) -> list:
     """Return findings with any confirmed-but-unproven item demoted to a lead + tagged, so a weak
     'confirmed' can never reach a report. Non-destructive: copies, never drops. `enforce_families`

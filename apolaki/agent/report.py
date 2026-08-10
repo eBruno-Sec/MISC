@@ -22,12 +22,50 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _confirmed(f: dict) -> bool:
+    """One definition of 'confirmed', shared with the risk score, the counts and the badge.
+
+    `proof_schema.demote_unproven` runs on the way into EVERY report format and is deliberately
+    non-destructive: it rewrites a weak finding's `confidence` to "lead" and leaves the row in the
+    list. Every consumer therefore has to read that field. The HTML card did not — it stamped a
+    hardcoded CONFIRMED on every row — so the proof gate demoted a finding and the report un-demoted
+    it two function calls later. Import through proof_schema so the vocabulary can never fork."""
+    try:
+        import proof_schema as _ps
+        return _ps.is_confirmed(f)
+    except Exception:
+        return str((f or {}).get("confidence") or "confirmed").strip().lower() not in (
+            "lead", "candidate", "unconfirmed", "informational", "info", "tentative")
+
+
+def _conf_badge(f: dict) -> str:
+    """The confidence chip on a finding card. Amber LEAD when the proof gate demoted this row."""
+    if _confirmed(f):
+        return '<span class="tag-conf">CONFIRMED</span>'
+    gap = ", ".join(str(x) for x in (f.get("proof_gap") or [])[:3])
+    title = _html.escape("proof gate: missing %s" % gap) if gap else "demoted by the proof gate"
+    return ("<span class='tag-conf' style='background:#c98a2b;color:#fff;border-color:#c98a2b' "
+            "title='%s'>LEAD &mdash; unproven</span>" % title)
+
+
 def _counts(findings: list) -> dict:
+    """Raw severity tally over whatever list it is handed. Used for the LEADS tally too, where every row
+    is unproven by definition — filtering here would zero it out. Use `_confirmed_counts` for the
+    findings headline."""
     counts = {}
     for f in findings:
         s = (f.get("severity") or "informational").lower()
         counts[s] = counts.get(s, 0) + 1
     return counts
+
+
+def _confirmed_counts(findings: list) -> dict:
+    """Severity tally over CONFIRMED findings only — the same contract risk_score() carries. A row the
+    proof gate demoted must not inflate the headline 'N critical'.
+
+    Deliberately separate from `_counts`: that one also tallies the leads list, where every row is
+    unproven by definition, so filtering inside it silently reported zero leads of every severity."""
+    return _counts([f for f in (findings or []) if _confirmed(f)])
 
 
 # ── Markdown (original H1/BC format, enhanced) ───────────────────
@@ -330,7 +368,7 @@ def generate_report(program: str, findings: list, scope: dict,
         )
 
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
-    counts = _counts(findings)
+    counts = _confirmed_counts(findings)
 
     lines = [
         f"# Security Assessment Report: {program}", "",
@@ -1777,7 +1815,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
     # each group's `instances` and listed in the affected-instances appendix.
     findings = group_findings(raw_findings)
     findings = sorted(findings, key=lambda f: SEV_ORDER.get((f.get("severity") or "informational").lower(), 5))
-    counts = _counts(findings)
+    counts = _confirmed_counts(findings)
     rk = risk_score(findings)
     engagement = _ENGAGEMENT.get((mode or "").lower(), "Security Assessment")
     # Metric consistency: the Assessment Coverage tile must report the same UNIQUE finding
@@ -1787,7 +1825,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
         coverage = {**coverage, "findings": len(findings)}
 
     # severity distribution bars (confirmed only)
-    total_conf = len(findings) or 1
+    # Denominator must match the numerator: `counts` tallies confirmed rows only, so summing it is the
+    # only total that makes the bars add to 100%. len(findings) still includes proof-gate demotions.
+    total_conf = sum(counts.values()) or 1
     dist_rows = ""
     for s in ("critical", "high", "medium", "low", "info"):
         n = counts.get(s, 0) + (counts.get("informational", 0) if s == "info" else 0)
@@ -2116,7 +2156,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
             {f"<span>OWASP: {e(_owasp_of(f))}</span>" if _owasp_of(f) else ''}
             {cvss_vec}
             {prov_html}
-            <span class="tag-conf">CONFIRMED</span>
+            {_conf_badge(f)}
             {_fp_chip}{_asvs_chip}{_wstg_chip}{_edb_chip}
           </div>
           {cvss_basis}
@@ -2949,7 +2989,9 @@ def findings_json(program: str, findings: list, scope: dict,
         "scope": scope,
         # ── risk calculation (confirmed findings only) ──
         "risk": risk_score(findings),
-        "counts": _counts(findings),
+        # Confirmed-only, matching `risk` directly above. `lead_counts` stays a RAW tally — every lead
+        # is unproven by definition, so filtering it reports zero of every severity.
+        "counts": _confirmed_counts(findings),
         "lead_counts": _counts(leads),
         # Fix Now / Fix If / Strengthen action-priority header (counts across findings+leads) — the
         # developer-facing triage lens next to technical severity.
