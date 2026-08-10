@@ -1,0 +1,1073 @@
+{
+ "seed": 21,
+ "per_category": 14,
+ "results": [
+  {
+   "test": "BenchmarkTest00515",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00515.html?BenchmarkTest00515=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00515.html?BenchmarkTest00515=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00515?BenchmarkTest00515=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00593",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00593.html?BenchmarkTest00593=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00593.html?BenchmarkTest00593=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00593?BenchmarkTest00593=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00675",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00675.html?BenchmarkTest00675=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00675.html?BenchmarkTest00675=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00675?BenchmarkTest00675=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00848",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00848.html?BenchmarkTest00848=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00848.html?BenchmarkTest00848=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-01/BenchmarkTest00848?BenchmarkTest00848=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01302",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-02/BenchmarkTest01302.html?BenchmarkTest01302=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-02/BenchmarkTest01302.html?BenchmarkTest01302=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-02/BenchmarkTest01302?BenchmarkTest01302=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01393",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01393.html?BenchmarkTest01393=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01393.html?BenchmarkTest01393=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01393?BenchmarkTest01393=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01395",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01395.html?BenchmarkTest01395=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01395.html?BenchmarkTest01395=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01395?BenchmarkTest01395=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01474",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01474.html?BenchmarkTest01474=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01474.html?BenchmarkTest01474=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01474?BenchmarkTest01474=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01819",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01819.html?BenchmarkTest01819=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01819.html?BenchmarkTest01819=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01819?BenchmarkTest01819=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01972",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01972.html?BenchmarkTest01972=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01972.html?BenchmarkTest01972=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest01972?BenchmarkTest01972=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02281",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02281.html?BenchmarkTest02281=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02281.html?BenchmarkTest02281=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02281?BenchmarkTest02281=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02353",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02353.html?BenchmarkTest02353=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02353.html?BenchmarkTest02353=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02353?BenchmarkTest02353=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02450",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02450.html?BenchmarkTest02450=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02450.html?BenchmarkTest02450=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02450?BenchmarkTest02450=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02730",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-06/BenchmarkTest02730.html?BenchmarkTest02730=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/sqli-06/BenchmarkTest02730.html?BenchmarkTest02730=SafeText",
+    "https://owaspbench:8443/benchmark/sqli-06/BenchmarkTest02730?BenchmarkTest02730=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00014",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00014.html?BenchmarkTest00014=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00014.html?BenchmarkTest00014=SafeText",
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00014?BenchmarkTest00014=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00049",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00049.html?BenchmarkTest00049=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00049.html?BenchmarkTest00049=SafeText",
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00049?BenchmarkTest00049=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00288",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00288.html?BenchmarkTest00288=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00288.html?BenchmarkTest00288=SafeText",
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00288?BenchmarkTest00288=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00479",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00479.html?BenchmarkTest00479=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00479.html?BenchmarkTest00479=SafeText",
+    "https://owaspbench:8443/benchmark/xss-00/BenchmarkTest00479?BenchmarkTest00479=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00724",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00724.html?BenchmarkTest00724=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00724.html?BenchmarkTest00724=SafeText",
+    "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00724?BenchmarkTest00724=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00726",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00726.html?BenchmarkTest00726=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00726.html?BenchmarkTest00726=SafeText",
+    "https://owaspbench:8443/benchmark/xss-01/BenchmarkTest00726?BenchmarkTest00726=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01257",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01257.html?BenchmarkTest01257=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01257.html?BenchmarkTest01257=SafeText",
+    "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01257?BenchmarkTest01257=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01352",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01352.html?BenchmarkTest01352=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01352.html?BenchmarkTest01352=SafeText",
+    "https://owaspbench:8443/benchmark/xss-02/BenchmarkTest01352?BenchmarkTest01352=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01593",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01593.html?BenchmarkTest01593=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01593.html?BenchmarkTest01593=SafeText",
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01593?BenchmarkTest01593=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01662",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01662.html?BenchmarkTest01662=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01662.html?BenchmarkTest01662=SafeText",
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01662?BenchmarkTest01662=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01921",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01921.html?BenchmarkTest01921=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01921.html?BenchmarkTest01921=SafeText",
+    "https://owaspbench:8443/benchmark/xss-03/BenchmarkTest01921?BenchmarkTest01921=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02402",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-04/BenchmarkTest02402.html?BenchmarkTest02402=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-04/BenchmarkTest02402.html?BenchmarkTest02402=SafeText",
+    "https://owaspbench:8443/benchmark/xss-04/BenchmarkTest02402?BenchmarkTest02402=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02490",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02490.html?BenchmarkTest02490=SafeText",
+   "engine": "_run_xss",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02490.html?BenchmarkTest02490=SafeText",
+    "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02490?BenchmarkTest02490=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02493",
+   "category": "xss",
+   "url": "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02493.html?BenchmarkTest02493=SafeText",
+   "engine": "_run_xss",
+   "families": [
+    "xss"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02493.html?BenchmarkTest02493=SafeText",
+    "https://owaspbench:8443/benchmark/xss-05/BenchmarkTest02493?BenchmarkTest02493=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00065",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00065",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00065"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00136",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00136.html?BenchmarkTest00136=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00136.html?BenchmarkTest00136=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00136?BenchmarkTest00136=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00217",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00217.html?BenchmarkTest00217=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00217.html?BenchmarkTest00217=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00217?BenchmarkTest00217=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00457",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00457.html?BenchmarkTest00457=SafeText",
+   "engine": "_run_web_probes",
+   "families": [
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00457.html?BenchmarkTest00457=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00457?BenchmarkTest00457=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00624",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00624.html?BenchmarkTest00624=SafeText",
+   "engine": "_run_web_probes",
+   "families": [
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00624.html?BenchmarkTest00624=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00624?BenchmarkTest00624=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00628",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00628.html?BenchmarkTest00628=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00628.html?BenchmarkTest00628=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00628?BenchmarkTest00628=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00865",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00865.html?BenchmarkTest00865=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00865.html?BenchmarkTest00865=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-00/BenchmarkTest00865?BenchmarkTest00865=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01160",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest01160.html?BenchmarkTest01160=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest01160.html?BenchmarkTest01160=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest01160?BenchmarkTest01160=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01751",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01751.html?BenchmarkTest01751=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01751.html?BenchmarkTest01751=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01751?BenchmarkTest01751=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01987",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01987.html?BenchmarkTest01987=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01987.html?BenchmarkTest01987=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01987?BenchmarkTest01987=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02110",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02110.html?BenchmarkTest02110=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02110.html?BenchmarkTest02110=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02110?BenchmarkTest02110=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02300",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02300.html?BenchmarkTest02300=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02300.html?BenchmarkTest02300=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02300?BenchmarkTest02300=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02303",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02303.html?BenchmarkTest02303=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02303.html?BenchmarkTest02303=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02303?BenchmarkTest02303=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02563",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-03/BenchmarkTest02563.html?BenchmarkTest02563=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/pathtraver-03/BenchmarkTest02563.html?BenchmarkTest02563=SafeText",
+    "https://owaspbench:8443/benchmark/pathtraver-03/BenchmarkTest02563?BenchmarkTest02563=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00021",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00021.html?BenchmarkTest00021=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00021.html?BenchmarkTest00021=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00021?BenchmarkTest00021=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00044",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00044.html?BenchmarkTest00044=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00044.html?BenchmarkTest00044=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00044?BenchmarkTest00044=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00695",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00695.html?BenchmarkTest00695=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection",
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00695.html?BenchmarkTest00695=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00695?BenchmarkTest00695=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00701",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00701.html?BenchmarkTest00701=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00701.html?BenchmarkTest00701=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00701?BenchmarkTest00701=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00860",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00860.html?BenchmarkTest00860=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00860.html?BenchmarkTest00860=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00860?BenchmarkTest00860=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01243",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01243.html?BenchmarkTest01243=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01243.html?BenchmarkTest01243=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01243?BenchmarkTest01243=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01490",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01490.html?BenchmarkTest01490=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection",
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01490.html?BenchmarkTest01490=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01490?BenchmarkTest01490=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01568",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01568.html?BenchmarkTest01568=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection",
+    "ldap_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01568.html?BenchmarkTest01568=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01568?BenchmarkTest01568=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01569",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01569.html?BenchmarkTest01569=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01569.html?BenchmarkTest01569=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01569?BenchmarkTest01569=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01743",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01743.html?BenchmarkTest01743=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01743.html?BenchmarkTest01743=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01743?BenchmarkTest01743=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01756",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01756.html?BenchmarkTest01756=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01756.html?BenchmarkTest01756=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01756?BenchmarkTest01756=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02036",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02036.html?BenchmarkTest02036=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02036.html?BenchmarkTest02036=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02036?BenchmarkTest02036=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02115",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02115.html?BenchmarkTest02115=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02115.html?BenchmarkTest02115=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02115?BenchmarkTest02115=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02305",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02305.html?BenchmarkTest02305=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02305.html?BenchmarkTest02305=SafeText",
+    "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02305?BenchmarkTest02305=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00118",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00118",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00118"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00207",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00207.html?BenchmarkTest00207=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00207.html?BenchmarkTest00207=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00207?BenchmarkTest00207=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00442",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00442.html?BenchmarkTest00442=SafeText",
+   "engine": "_run_xpath",
+   "families": [
+    "xpath_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00442.html?BenchmarkTest00442=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00442?BenchmarkTest00442=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01223",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01223.html?BenchmarkTest01223=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01223.html?BenchmarkTest01223=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01223?BenchmarkTest01223=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01224",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01224.html?BenchmarkTest01224=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01224.html?BenchmarkTest01224=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01224?BenchmarkTest01224=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01316",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01316.html?BenchmarkTest01316=SafeText",
+   "engine": "_run_xpath",
+   "families": [
+    "xpath_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01316.html?BenchmarkTest01316=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01316?BenchmarkTest01316=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01479",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01479.html?BenchmarkTest01479=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01479.html?BenchmarkTest01479=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01479?BenchmarkTest01479=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01632",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01632.html?BenchmarkTest01632=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01632.html?BenchmarkTest01632=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01632?BenchmarkTest01632=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01734",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01734.html?BenchmarkTest01734=SafeText",
+   "engine": "_run_xpath",
+   "families": [
+    "xpath_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01734.html?BenchmarkTest01734=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01734?BenchmarkTest01734=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01735",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01735.html?BenchmarkTest01735=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01735.html?BenchmarkTest01735=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01735?BenchmarkTest01735=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01736",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01736.html?BenchmarkTest01736=SafeText",
+   "engine": "_run_xpath",
+   "families": [
+    "xpath_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01736.html?BenchmarkTest01736=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01736?BenchmarkTest01736=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01821",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01821.html?BenchmarkTest01821=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01821.html?BenchmarkTest01821=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01821?BenchmarkTest01821=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01893",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01893",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01893"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01974",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01974.html?BenchmarkTest01974=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01974.html?BenchmarkTest01974=SafeText",
+    "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01974?BenchmarkTest01974=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00410",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00410.html?BenchmarkTest00410=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00410.html?BenchmarkTest00410=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00410?BenchmarkTest00410=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00567",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00567.html?BenchmarkTest00567=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00567.html?BenchmarkTest00567=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00567?BenchmarkTest00567=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00816",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00816.html?BenchmarkTest00816=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00816.html?BenchmarkTest00816=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00816?BenchmarkTest00816=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00909",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest00909.html?BenchmarkTest00909=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest00909.html?BenchmarkTest00909=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest00909?BenchmarkTest00909=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00979",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest00979",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest00979"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01065",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01065.html?BenchmarkTest01065=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01065.html?BenchmarkTest01065=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01065?BenchmarkTest01065=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01189",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01189.html?BenchmarkTest01189=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01189.html?BenchmarkTest01189=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01189?BenchmarkTest01189=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01362",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01362.html?BenchmarkTest01362=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01362.html?BenchmarkTest01362=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01362?BenchmarkTest01362=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01528",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01528.html?BenchmarkTest01528=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01528.html?BenchmarkTest01528=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01528?BenchmarkTest01528=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01600",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01600.html?BenchmarkTest01600=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01600.html?BenchmarkTest01600=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-01/BenchmarkTest01600?BenchmarkTest01600=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02252",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02252.html?BenchmarkTest02252=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02252.html?BenchmarkTest02252=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02252?BenchmarkTest02252=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02429",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02429.html?BenchmarkTest02429=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02429.html?BenchmarkTest02429=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02429?BenchmarkTest02429=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02513",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02513.html?BenchmarkTest02513=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02513.html?BenchmarkTest02513=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-02/BenchmarkTest02513?BenchmarkTest02513=SafeText"
+   ]
+  },
+  {
+   "test": "BenchmarkTest02612",
+   "category": "cmdi",
+   "url": "https://owaspbench:8443/benchmark/cmdi-03/BenchmarkTest02612.html?BenchmarkTest02612=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://owaspbench:8443/benchmark/cmdi-03/BenchmarkTest02612.html?BenchmarkTest02612=SafeText",
+    "https://owaspbench:8443/benchmark/cmdi-03/BenchmarkTest02612?BenchmarkTest02612=SafeText"
+   ]
+  }
+ ]
+}

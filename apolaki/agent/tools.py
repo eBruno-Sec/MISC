@@ -6923,6 +6923,50 @@ class ToolRegistry:
                         break
             if done:
                 break
+        # CUSTOM REQUEST HEADERS. Third carrier, after query params (_run_cmdi) and the form body above.
+        # An app that shells out with a value taken from a request header is reached by neither, so the
+        # command runs and nothing we send ever arrives. Same oracles: computed output first (an echoed
+        # arithmetic result cannot false-positive), then the bounded blind timing fallback.
+        if not findings:
+            try:
+                import header_vector as _hv
+                _pg = await self._http(url, "GET", capture=False)
+                _hnames = _hv.discover_header_names(_pg.get("body", "") or "")[:2]
+                _htgt = forms[0][0] if forms else url
+                if _hnames and self.scope.validate(_htgt)[0]:
+                    _hbase = await self._http(_htgt, "POST", {_hnames[0]: "127.0.0.1"}, "", capture=False)
+                    _hbody = _hbase.get("body", "")
+                    for _hn in _hnames:
+                        for item in cmdi.output_payloads("127.0.0.1"):
+                            _r = await self._http(_htgt, "POST", {_hn: item["payload"]}, "", capture=False)
+                            if _r.get("error"):
+                                continue
+                            _hit = cmdi.analyze_output(_hbody, _r.get("body", ""))
+                            if _hit:
+                                f = cmdi.output_finding(_htgt, "header:" + _hn, item["payload"], _hit)
+                                f["target"] = _htgt
+                                findings.append(f)
+                                break
+                        if findings:
+                            break
+                        if not getattr(self, "_timing_cmdi_hdr_done", False):
+                            self._timing_cmdi_hdr_done = True
+                            for item in cmdi.time_payloads("127.0.0.1", 5):
+                                _t0 = time.perf_counter()
+                                await self._http(_htgt, "POST", {_hn: item["control"]}, "", capture=False)
+                                _ctl = time.perf_counter() - _t0
+                                _t0 = time.perf_counter()
+                                await self._http(_htgt, "POST", {_hn: item["payload"]}, "", capture=False)
+                                _slp = time.perf_counter() - _t0
+                                if cmdi.analyze_time(_ctl, _slp, 5):
+                                    f = cmdi.time_finding(_htgt, "header:" + _hn, item, _ctl, _slp, 5)
+                                    f["target"] = _htgt
+                                    findings.append(f)
+                                    break
+                        if findings:
+                            break
+            except Exception:
+                pass
         summary = (f"command injection CONFIRMED in the form body ({findings[0]['target']})" if findings
                    else "no body command injection in the page's forms")
         return ToolResult("form_cmdi", url, True, summary, findings)
