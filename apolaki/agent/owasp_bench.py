@@ -85,11 +85,26 @@ async def scan(per_category: int, categories: list, seed: int) -> dict:
                 results.append(row)
                 continue
             try:
-                inp = {"url": url}
-                if method == "_run_web_probes":
-                    inp["lab_mode"] = True
-                res = await getattr(reg, method)(inp)
-                row["families"] = [str(f.get("family") or "") for f in (res.findings or [])]
+                # MIRROR THE PLANNER instead of calling the engine on the bare page URL. A real mission
+                # runs sweep_targets, which expands a page into its form pages and replays the page's
+                # query against the form's ACTION -- a benchmark page is usually a static wrapper whose
+                # parameter is only injectable on the handler. Measuring direct calls would score a code
+                # path no scan actually takes.
+                import agent as agent_mod
+                import crawl as crawl_mod
+                page = client.get(url).text
+                forms = [{"action": f.get("action"), "page": url}
+                         for f in crawl_mod.extract_forms(page, url)]
+                targets = agent_mod.sweep_targets([url], forms, lambda u: "owaspbench" in u) or [url]
+                fams = []
+                for t in targets:
+                    inp = {"url": t}
+                    if method == "_run_web_probes":
+                        inp["lab_mode"] = True
+                    res = await getattr(reg, method)(inp)
+                    fams += [str(f.get("family") or "") for f in (res.findings or [])]
+                row["targets"] = targets
+                row["families"] = fams
             except Exception as e:
                 row["error"] = "%s: %s" % (type(e).__name__, str(e)[:120])
             results.append(row)

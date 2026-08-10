@@ -205,10 +205,22 @@ def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
         # form pass on whatever page they are given, so if this path is already scheduled the form is
         # already going to be parsed there. Adding it twice only spends the budget.
         path = urlparse(page).path
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        targets.append(page)
+        if path not in seen_paths:
+            seen_paths.add(path)
+            targets.append(page)
+        # THE PAGE'S QUERY, REPLAYED AGAINST THE FORM'S ACTION. A page is often a static wrapper whose
+        # own query string is meant for the endpoint its form posts to -- the wrapper ignores the
+        # parameter entirely, so probing it there reads clean while the SAME parameter on the action is
+        # injectable. Without this the engines test a document instead of a handler.
+        action = (fm or {}).get("action") or ""
+        pq = urlparse(page).query
+        if action and pq and in_scope(action):
+            merged = action + ("&" if urlparse(action).query else "?") + pq
+            sig = (urlparse(action).path, tuple(sorted(parse_qs(pq).keys())))
+            if sig not in seen_sig:
+                seen_sig.add(sig)
+                seen_paths.add(urlparse(action).path)
+                targets.append(merged)
     return targets[:limit]
 
 
