@@ -51,16 +51,12 @@ ENGINES = {
     "xpathi": "_run_xpath",
     "cmdi": "_run_form_cmdi",
     "weakrand": "_run_web_probes",
+    "securecookie": "_run_web_probes",
     # Python v0.1 adds four categories the Java suite does not have.
     "xxe": "_run_xxe",
     "deserialization": "_run_deserialization",
     "redirect": "_run_injection_probes",
     "codeinj": "_run_injection_probes",
-    # securecookie is DELIBERATELY UNMAPPED. The nearest engine (_run_transport_posture) emits ~9
-    # findings on EVERY page here -- TLS-cert and header misconfigs from the lab's self-signed cert --
-    # identical on vulnerable and safe cases. Mapping it would score ~100% TPR AND ~100% FPR: a fake
-    # spike in detections and a real collapse in precision. It stays in `unscored` until there is a
-    # cookie-flag-SPECIFIC signal to match on.
 }
 # families each category legitimately confirms through. A finding of any other family on a case is
 # NOT credited -- detecting XSS on a SQLi case is not a SQLi detection.
@@ -72,6 +68,7 @@ FAMILIES = {
     "xpathi": {"xpath_injection"},
     "cmdi": {"command_injection", "cmdi"},
     "weakrand": {"weak_random"},
+    "securecookie": {"insecure_cookie"},
     "xxe": {"xxe"},
     "deserialization": {"deserialization"},
     "redirect": {"open_redirect"},

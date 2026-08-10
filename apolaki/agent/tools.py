@@ -5368,6 +5368,19 @@ class ToolRegistry:
             return ToolResult("web_probes", url, False, "", [], baseline["error"])
         findings = []
 
+        # CWE-614 from the RAW Set-Cookie header. Never from the body: a response can claim the secure
+        # flag is off while the header sets it, and vice versa.
+        try:
+            import cookie_flags as _cfl
+            _hdrs = baseline.get("headers") or {}
+            _sc = next((v for k, v in _hdrs.items() if k.lower() == "set-cookie"), None)
+            _cv = _cfl.evaluate(_sc)
+            if _cv.get("confirmed"):
+                findings.append(self._attach_poc(
+                    _cfl.finding(url, _cv["cookies"], _cv["oracle"],
+                                 session=bool(_cv.get("session_cookies"))), url, None))
+        except Exception:
+            pass
         # A response that NAMES the generator behind a security value (stack trace, debug banner,
         # verbose error page) states the weakness outright — CWE-330 read off a CWE-209 disclosure.
         try:
