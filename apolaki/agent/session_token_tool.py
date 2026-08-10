@@ -102,3 +102,49 @@ def finding(url: str, kind: str, evidence: str, cwe: str, cookie_name: str) -> d
                         "data (username/role) in the token; issue a fresh token on login and privilege change."),
         "tags": ["session", "predictable-token", cwe.lower()],
     }
+
+
+# ── tokens carried in the RESPONSE BODY, not Set-Cookie ───────────────────────────────────────────────
+# A cookie is not the only carrier. An API that answers {"access_token":"…"} or {"data":{"sessionId":"…"}}
+# issues a session token the Set-Cookie scan never sees, so a perfectly sequential token was invisible and
+# the endpoint was reported clean. The ANALYSER is unchanged — these samples join the same pipeline, and
+# the harvested key name is kept verbatim so is_sessionish() judges it exactly as it judges a cookie name.
+_TOKEN_KEY = re.compile(r"(?i)(token|session|sid|jwt|auth|apikey|api_key)")
+_MAX_BODY = 400_000          # a body larger than this is not a login response; do not spend time parsing it
+_MIN_TOK, _MAX_TOK = 8, 512  # below 8 chars it is a flag or a status, above 512 it is a document
+
+
+def tokens_from_body(body: str, _depth: int = 6) -> dict:
+    """Harvest token-shaped values from a JSON response body -> {key: value}.
+
+    Keys are returned verbatim (dotted for nested objects) so the caller's sessionish test and the
+    finding's cookie_name field both read naturally. Non-JSON bodies yield nothing rather than guessing:
+    a regex over HTML would collect CSRF nonces and asset hashes and manufacture findings.
+    """
+    import json as _json
+    text = str(body or "")
+    if not text or len(text) > _MAX_BODY:
+        return {}
+    try:
+        doc = _json.loads(text)
+    except Exception:
+        return {}
+    out = {}
+
+    def walk(node, path, depth):
+        if depth <= 0:
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                key = "%s.%s" % (path, k) if path else str(k)
+                if isinstance(v, str):
+                    if _TOKEN_KEY.search(str(k)) and _MIN_TOK <= len(v) <= _MAX_TOK:
+                        out[key] = v
+                else:
+                    walk(v, key, depth - 1)
+        elif isinstance(node, list):
+            for i, v in enumerate(node[:20]):
+                walk(v, "%s[%d]" % (path, i), depth - 1)
+
+    walk(doc, "", _depth)
+    return out

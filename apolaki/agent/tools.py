@@ -6972,6 +6972,10 @@ class ToolRegistry:
                         ck.load(sc)
                         for name, morsel in ck.items():
                             samples.setdefault(name, []).append(morsel.value)
+                    # Same request, second carrier: a JSON API hands back {"access_token":"…"} and never
+                    # sets a cookie, so a sequential token there was invisible to a Set-Cookie-only scan.
+                    for tname, tval in stt.tokens_from_body(r.text).items():
+                        samples.setdefault(tname, []).append(tval)
         except Exception:
             pass
         findings = []

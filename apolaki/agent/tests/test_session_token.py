@@ -40,3 +40,39 @@ def test_finding_is_proof_with_cvss():
     f = stt.finding("https://x/", "sequential/predictable", "increments by 1", "CWE-330", "SESSIONID")
     assert f["family"] == "weak_session_token" and bb._has_proof(f)
     assert abs(cvss31_base_score(f["cvss_vector"]) - f["cvss_score"]) < 0.05
+
+
+# ── tokens carried in the response BODY ───────────────────────────────────────────────────────────────
+# The sampler read Set-Cookie only, so an API issuing {"access_token":"…"} was invisible and a sequential
+# token there produced no finding at all — a false negative shaped like a CSPRNG.
+
+def test_tokens_are_harvested_from_json_bodies_including_nested():
+    got = stt.tokens_from_body('{"access_token":"abcdef123456","data":{"sessionId":"QUJDREVGMTIz"},'
+                               '"user":{"name":"bob"},"ok":true,"count":7}')
+    assert got == {"access_token": "abcdef123456", "data.sessionId": "QUJDREVGMTIz"}
+
+
+def test_body_harvest_declines_what_would_manufacture_findings():
+    # Non-JSON yields nothing: a regex over HTML would collect CSRF nonces and asset hashes.
+    assert stt.tokens_from_body("<html><input name=csrf value=9f8e7d6c5b4a3210></html>") == {}
+    assert stt.tokens_from_body("") == {} and stt.tokens_from_body(None) == {}
+    # Right key, useless value: too short to be a session token.
+    assert stt.tokens_from_body('{"token":"1"}') == {}
+    # Right shape, wrong key: not every long string is a session token.
+    assert stt.tokens_from_body('{"description":"a fairly long ordinary sentence value"}') == {}
+    # A body too large to be a login response is not parsed at all.
+    assert stt.tokens_from_body('{"token":"%s"}' % ("a" * 500_000)) == {}
+
+
+def test_harvested_names_survive_the_sessionish_gate():
+    """Both halves: harvesting is useless if the pipeline then discards the name it produced."""
+    for key in stt.tokens_from_body('{"access_token":"abcdef123456","data":{"sessionId":"QUJDREVG"}}'):
+        assert stt.is_sessionish(key), key
+
+
+def test_sequential_body_token_is_confirmed_through_the_unchanged_analyzer():
+    """End of the pipeline: body-carried samples must reach the same oracle a cookie would."""
+    vals = [stt.tokens_from_body('{"access_token":"sess-%08d"}' % n)["access_token"] for n in range(1, 9)]
+    assert len(set(vals)) == 8
+    res = stt.analyze(vals)
+    assert res and res[0] == "sequential/predictable", res
