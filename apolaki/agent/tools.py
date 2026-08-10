@@ -337,6 +337,13 @@ CLAUDE_TOOLS = [
     {"name": "run_subfinder",
      "description": "PASSIVE: Enumerate subdomains via OSINT sources. Zero direct target contact.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    # Registered in PermissionLevel and fully implemented (#114) but absent from this spec AND from the
+    # deterministic planner, so nothing could ever invoke it -- a completed feature that never ran once.
+    {"name": "run_external_surface",
+     "description": "ACTIVE: External attack-surface expansion for a host — ASN/netblock neighbours, "
+                    "favicon hash pivot, hostname permutations and certificate-transparency candidates. "
+                    "Widens the target set before deep probing; scope-gated like every other engine.",
+     "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
     {"name": "run_crtsh",
      "description": "PASSIVE: Certificate-transparency log enumeration. Zero direct target contact.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
