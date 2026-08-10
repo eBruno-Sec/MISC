@@ -85,6 +85,14 @@ services:
   zap:
     image: ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2
     profiles: ["dast"]              # ~1GB idle; opt-in. Enable with: docker compose --profile dast up -d zap
+    # MEASURED 2026-08-10: after ONE scan of the OWASP Benchmark, ZAP held 7.34 GiB. Unbounded, it will
+    # take the whole WSL VM and starve the agent, the target labs and the host -- the comment above
+    # ("~1GB idle") describes an idle daemon, not a working one. The JVM heap is capped BELOW the
+    # container limit on purpose: a JVM that hits a hard cgroup ceiling is OOM-killed mid-scan, whereas
+    # one that hits its own -Xmx garbage-collects and keeps running.
+    mem_limit: 6g
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx4g"
     command: >
       zap.sh -daemon -host 0.0.0.0 -port 8090
       -config api.key=${ZAP_API_KEY:-bbh-zap}
