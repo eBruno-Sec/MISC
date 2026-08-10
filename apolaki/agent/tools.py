@@ -5424,6 +5424,41 @@ class ToolRegistry:
                             break
         except Exception:
             pass
+        # traversal through a CUSTOM REQUEST HEADER. Third carrier, same oracle: an app that reads its
+        # filename from a header is invisible to probes that only rewrite the URL or the body.
+        try:
+            import header_vector as _hv
+            import form_xss as _fxh
+            _hnames = _hv.discover_header_names(baseline.get("body", "") or "")[:2]
+            if _hnames:
+                _tp2 = list(ws.TRAVERSAL_SAFE_PAYLOADS) + (list(ws.TRAVERSAL_LAB_PAYLOADS) if lab else [])
+                _hforms = _fxh.parse_forms(baseline.get("body", "") or "", url)
+                _htgt = (_hforms[0]["action"] if _hforms and self.scope.validate(_hforms[0]["action"])[0]
+                         else url)
+                _hbudget = 8
+                for _hn in _hnames:
+                    if _hbudget <= 0:
+                        break
+                    _hbase = await self._http(_htgt, "POST", {_hn: "1"}, "", capture=False)
+                    if _hbase.get("error"):
+                        continue
+                    for _pl in _tp2:
+                        if _hbudget <= 0:
+                            break
+                        _hbudget -= 1
+                        _hr = await self._http(_htgt, "POST", {_hn: _pl}, "", capture=False)
+                        _v = ws.analyze_traversal_pair(_hbase, _hr, _pl, lab_mode=lab)
+                        if _v:
+                            findings.append({
+                                "title": f"Path traversal signal in request header '{_hn}'",
+                                "severity": _v["severity"], "target": _htgt,
+                                "description": f"Traversal probe ({_pl}) in request header — {_v['reason']}",
+                                "evidence": f"header {_hn}: {_pl} — {_v['reason']}",
+                                "confidence": _v["confidence"], "family": "path_traversal",
+                                "tags": ["lfi", "traversal"]})
+                            break
+        except Exception:
+            pass
         # idor
         for probe in ws.build_idor_probes(url):
             if not self.scope.validate(probe.url)[0]:
