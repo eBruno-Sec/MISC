@@ -54,7 +54,33 @@ This is the measurement that matters, and the one that was never taken until 08-
 | 08-10 | *(pre-fix)* | **0** | mission against 1415 real vulns returned nothing in 40s |
 | 08-10 | `3642c6c` | 2 | S11a: seed the scoped path |
 | 08-10 | `3642c6c` | 2 | S11b alone did not move it |
-| 08-10 | `57afc3f` | *pending* | S11c relative links + robots/sitemap |
+| 08-10 | `57afc3f` | **2** | S11c relative links + robots/sitemap — **did not move it either** |
+
+**MEASURED, 08-10 — the most important negative result in this ledger.** Mission `90cee81c`
+(`owaspbench-clean`, active mode) ran **3720 seconds** against `https://owaspbench:8443/benchmark/`
+and finished `complete` with **2 findings**:
+
+```
+[    0s] running/recon  findings=0
+[   50s] running/probe  findings=2
+[ 3720s] complete/report findings=2
+by family: {'sensitive_exposure': 1, 'vulnerable_component': 1}
+   [high]   Credential exposed in a source comment
+   [medium] Vulnerable component: jquery@2.1.4 (CVE-2020-11022, +2 more)
+```
+
+**Neither finding is one of the 1415 benchmark cases.** Both are generic hygiene findings that would
+appear on almost any target. Note also that the count was already 2 at the 50-second mark and did not
+change over the following 61 minutes — the run spent an hour producing nothing.
+
+**What this falsifies.** Five orchestration defects were found and fixed (S11a scoped-path seed,
+S11b auth-only crawl, S11c relative links dropped, S11d robots/sitemap unread, S12 dead browser
+sensor) on the hypothesis that recon was starving the engines. The engines score **41.3%** on this
+exact target when handed case URLs directly. The fixes shipped and the whole-product number **did not
+move**. So the funnel collapses somewhere *after* discovery, or discovery is still failing for a
+reason none of the five addressed. Do not claim the orchestration gap is closed. The next step is to
+measure the funnel stage by stage — URLs discovered, URLs parameterized, probes selected, oracles
+fired — rather than fixing a sixth suspected defect blind.
 
 **Why the two columns disagree.** The harness hands engines exact URLs; the mission has to *find* them.
 41.3% vs 0 findings was never an engine gap — it was three orchestration defects that only a
