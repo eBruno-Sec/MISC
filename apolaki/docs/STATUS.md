@@ -27,6 +27,29 @@ hash 236, weakrand 493, trustbound 126) have no externally observable signal; ZA
 all of them and the 11-tool mean is 0.0%. Closing them needs a declared IAST/runtime lane, labelled
 as such — never folded into a DAST figure.
 
+## The funnel — ANSWERED (was the top unknown)
+
+```
+surface discovered .......... 2756   (all addressable — proven by the liveness reach check)
+pages actually FETCHED ......   12
+distinct URLs any tool aimed at 66
+distinct URLs probed ........   36
+findings ....................    2
+```
+Every stage after discovery is arithmetic on **12 fetched pages**. Three causes, ranked by leverage:
+`sweep_targets(limit=20)` called without a limit · a URL must be FETCHED and carry `?` to become a
+target · `depth(2)×frontier(30)` = 60 visits. Plus a hard throughput ceiling: **~100 s per URL**, so
+2740 cases would take ~76 hours even with a perfect funnel. Tracked as **Q-019** (CRITICAL, ready).
+
+## Squad state
+
+All six agents hit the API session limit and terminated early (resets 16:50 PT). They wrote before
+dying: the Analyst's verification pass and tickets Q-011…Q-020 are in `QUEUE.md`; the Builder left
+`agent/session_lifecycle_tool.py` plus edits to `tools.py`/`personas.py`/`agent.py` **uncommitted and
+failing `test_deadcode_gate::test_the_method_ratchet_holds`** — do not commit that work until its
+owner finishes it or the Breaker verifies it. The Coordinator (main thread) has committed its own
+four changes.
+
 ## Active agents
 
 | role | agent | assignment | owns |
