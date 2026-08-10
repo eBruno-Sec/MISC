@@ -28,6 +28,17 @@ BASES = {"java": "https://owaspbench:8443/benchmark/",
          "python": "https://benchmarkpython:8443/benchmark/"}
 BASE = BASES["java"]
 
+# EVERY category the suite contains. The official macro-average divides by ALL of them, so a category we
+# cannot detect scores 0 and still counts against us. Averaging only over the categories we happened to
+# map would be grading on a denominator of our own choosing -- exactly the mistake that made an earlier
+# run read 58.1% when the comparable figure was 30.5%.
+SUITE_CATEGORIES = {
+    "java": ["cmdi", "crypto", "hash", "ldapi", "pathtraver", "securecookie",
+             "sqli", "trustbound", "weakrand", "xpathi", "xss"],
+    "python": ["cmdi", "codeinj", "deserialization", "hash", "ldapi", "pathtraver", "redirect",
+               "securecookie", "sqli", "trustbound", "weakrand", "xpathi", "xss", "xxe"],
+}
+
 # category -> the SHIPPING registry method that owns it. Anything absent here is reported as
 # "no engine mapped" rather than silently counted as a miss, so an unmapped category can never be
 # mistaken for a detection failure.
@@ -202,8 +213,21 @@ def score(run: dict, key: dict) -> dict:
     # this run's raw hit rate when sampling is uneven.
     scored = [b["youden"] for b in cats.values() if b["youden"] is not None]
     macro = (sum(scored) / len(scored)) if scored else None
+    # OFFICIAL: divide by every category the SUITE has, not by the ones we measured. A category with no
+    # engine, or one we skipped, contributes 0 -- it is a real miss, not an exemption.
+    suite = SUITE_CATEGORIES.get(run.get("target") or "", [])
+    suite_macro, missing = None, []
+    if suite:
+        vals = []
+        for c in suite:
+            y = cats.get(c, {}).get("youden")
+            vals.append(y if y is not None else 0.0)
+            if c not in cats:
+                missing.append(c)
+        suite_macro = sum(vals) / len(vals)
     return {"per_category": cats, "overall": _rates(total),
             "official_macro": macro, "categories_scored": len(scored),
+            "suite_macro": suite_macro, "suite_size": len(suite), "suite_missing": missing,
             "unscored": unscored}
 
 
@@ -234,9 +258,15 @@ def report(s: dict) -> str:
                  % ("OVERALL", o["tp"], o["fn"], o["fp"], o["tn"],
                     _fmt(o["tpr"]), _fmt(o["fpr"]), _fmt(o["youden"])))
     lines.append("")
-    lines.append("OFFICIAL SCORE (macro-average of %d category scores, the BenchmarkUtils method): %s"
+    if s.get("suite_macro") is not None:
+        lines.append("OFFICIAL SUITE SCORE (macro over ALL %d suite categories, unmeasured = 0): %s"
+                     % (s.get("suite_size"), _fmt(s.get("suite_macro"))))
+        lines.append("   ^ THIS is the number comparable to a published tool score")
+        if s.get("suite_missing"):
+            lines.append("   counted as 0 (no engine / not scanned): %s" % ", ".join(s["suite_missing"]))
+    lines.append("measured-categories macro (%d cats, NOT comparable): %s"
                  % (s.get("categories_scored") or 0, _fmt(s.get("official_macro"))))
-    lines.append("  the OVERALL row above is a micro-average (pooled cases) and is NOT the official number")
+    lines.append("micro / pooled (NOT the official number): %s" % _fmt((s.get("overall") or {}).get("youden")))
     if s["unscored"]:
         lines.append("unscored (no key entry or no engine mapped): %d" % len(s["unscored"]))
     return "\n".join(lines)
