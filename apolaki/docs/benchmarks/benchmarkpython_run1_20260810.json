@@ -1,0 +1,783 @@
+{
+ "seed": 11,
+ "per_category": 6,
+ "results": [
+  {
+   "test": "BenchmarkTest00285",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00285.html?BenchmarkTest00285=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00285.html?BenchmarkTest00285=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00285?BenchmarkTest00285=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00286",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00286.html?BenchmarkTest00286=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00286.html?BenchmarkTest00286=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00286?BenchmarkTest00286=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00455",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00455.html?BenchmarkTest00455=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00455.html?BenchmarkTest00455=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00455?BenchmarkTest00455=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00755",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00755.html?BenchmarkTest00755=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00755.html?BenchmarkTest00755=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest00755?BenchmarkTest00755=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01021",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01021.html?BenchmarkTest01021=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01021.html?BenchmarkTest01021=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01021?BenchmarkTest01021=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01203",
+   "category": "sqli",
+   "url": "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01203.html?BenchmarkTest01203=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01203.html?BenchmarkTest01203=SafeText",
+    "https://benchmarkpython:8443/benchmark/sqli-00/BenchmarkTest01203?BenchmarkTest01203=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00357",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00357.html?BenchmarkTest00357=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00357.html?BenchmarkTest00357=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00357?BenchmarkTest00357=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00358",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00358.html?BenchmarkTest00358=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00358.html?BenchmarkTest00358=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-00/BenchmarkTest00358?BenchmarkTest00358=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00907",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00907.html?BenchmarkTest00907=SafeText",
+   "engine": "_run_web_probes",
+   "families": [
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00907.html?BenchmarkTest00907=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00907?BenchmarkTest00907=SafeText"
+   ],
+   "conf": [
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00916",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00916.html?BenchmarkTest00916=SafeText",
+   "engine": "_run_web_probes",
+   "families": [
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00916.html?BenchmarkTest00916=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00916?BenchmarkTest00916=SafeText"
+   ],
+   "conf": [
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "possible",
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "possible"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00917",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00917.html?BenchmarkTest00917=SafeText",
+   "engine": "_run_web_probes",
+   "families": [
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal",
+    "path_traversal"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00917.html?BenchmarkTest00917=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest00917?BenchmarkTest00917=SafeText"
+   ],
+   "conf": [
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "confirmed",
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest01108",
+   "category": "pathtraver",
+   "url": "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest01108.html?BenchmarkTest01108=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest01108.html?BenchmarkTest01108=SafeText",
+    "https://benchmarkpython:8443/benchmark/pathtraver-01/BenchmarkTest01108?BenchmarkTest01108=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00266",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00266.html?BenchmarkTest00266=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00266.html?BenchmarkTest00266=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00266?BenchmarkTest00266=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00427",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00427.html?BenchmarkTest00427=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00427.html?BenchmarkTest00427=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00427?BenchmarkTest00427=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00733",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00733.html?BenchmarkTest00733=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00733.html?BenchmarkTest00733=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00733?BenchmarkTest00733=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00897",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00897.html?BenchmarkTest00897=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00897.html?BenchmarkTest00897=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00897?BenchmarkTest00897=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00990",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00990.html?BenchmarkTest00990=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00990.html?BenchmarkTest00990=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest00990?BenchmarkTest00990=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01170",
+   "category": "ldapi",
+   "url": "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest01170.html?BenchmarkTest01170=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest01170.html?BenchmarkTest01170=SafeText",
+    "https://benchmarkpython:8443/benchmark/ldapi-00/BenchmarkTest01170?BenchmarkTest01170=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00113",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00113.html?BenchmarkTest00113=SafeText",
+   "engine": "_run_xpath",
+   "families": [
+    "xpath_injection"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00113.html?BenchmarkTest00113=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00113?BenchmarkTest00113=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00208",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00208.html?BenchmarkTest00208=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00208.html?BenchmarkTest00208=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00208?BenchmarkTest00208=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00465",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00465.html?BenchmarkTest00465=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00465.html?BenchmarkTest00465=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-00/BenchmarkTest00465?BenchmarkTest00465=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00927",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-01/BenchmarkTest00927.html?BenchmarkTest00927=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-01/BenchmarkTest00927.html?BenchmarkTest00927=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-01/BenchmarkTest00927?BenchmarkTest00927=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01033",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01033.html?BenchmarkTest01033=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01033.html?BenchmarkTest01033=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01033?BenchmarkTest01033=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01125",
+   "category": "xpathi",
+   "url": "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01125.html?BenchmarkTest01125=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01125.html?BenchmarkTest01125=SafeText",
+    "https://benchmarkpython:8443/benchmark/xpathi-02/BenchmarkTest01125?BenchmarkTest01125=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00165",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00165.html?BenchmarkTest00165=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00165.html?BenchmarkTest00165=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00165?BenchmarkTest00165=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00166",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00166.html?BenchmarkTest00166=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00166.html?BenchmarkTest00166=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00166?BenchmarkTest00166=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00268",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00268.html?BenchmarkTest00268=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00268.html?BenchmarkTest00268=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00268?BenchmarkTest00268=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00607",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00607.html?BenchmarkTest00607=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [
+    "cmdi"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00607.html?BenchmarkTest00607=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00607?BenchmarkTest00607=SafeText"
+   ],
+   "conf": [
+    "confirmed"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00736",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00736.html?BenchmarkTest00736=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00736.html?BenchmarkTest00736=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00736?BenchmarkTest00736=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00899",
+   "category": "cmdi",
+   "url": "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00899.html?BenchmarkTest00899=SafeText",
+   "engine": "_run_form_cmdi",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00899.html?BenchmarkTest00899=SafeText",
+    "https://benchmarkpython:8443/benchmark/cmdi-00/BenchmarkTest00899?BenchmarkTest00899=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00204",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00204.html?BenchmarkTest00204=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00204.html?BenchmarkTest00204=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00204?BenchmarkTest00204=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00205",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00205.html?BenchmarkTest00205=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00205.html?BenchmarkTest00205=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00205?BenchmarkTest00205=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00293",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00293.html?BenchmarkTest00293=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00293.html?BenchmarkTest00293=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00293?BenchmarkTest00293=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00294",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00294.html?BenchmarkTest00294=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00294.html?BenchmarkTest00294=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00294?BenchmarkTest00294=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00678",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00678.html?BenchmarkTest00678=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00678.html?BenchmarkTest00678=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest00678?BenchmarkTest00678=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01122",
+   "category": "xxe",
+   "url": "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest01122.html?BenchmarkTest01122=SafeText",
+   "engine": "_run_xxe",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest01122.html?BenchmarkTest01122=SafeText",
+    "https://benchmarkpython:8443/benchmark/xxe-00/BenchmarkTest01122?BenchmarkTest01122=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00079",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00079",
+   "engine": "_run_deserialization",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00079"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00609",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00609.html?BenchmarkTest00609=SafeText",
+   "engine": "_run_deserialization",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00609.html?BenchmarkTest00609=SafeText",
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00609?BenchmarkTest00609=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00826",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00826.html?BenchmarkTest00826=SafeText",
+   "engine": "_run_deserialization",
+   "families": [
+    "deserialization"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00826.html?BenchmarkTest00826=SafeText",
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00826?BenchmarkTest00826=SafeText"
+   ],
+   "conf": [
+    "candidate"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00827",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00827.html?BenchmarkTest00827=SafeText",
+   "engine": "_run_deserialization",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00827.html?BenchmarkTest00827=SafeText",
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00827?BenchmarkTest00827=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00994",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00994.html?BenchmarkTest00994=SafeText",
+   "engine": "_run_deserialization",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00994.html?BenchmarkTest00994=SafeText",
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest00994?BenchmarkTest00994=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest01172",
+   "category": "deserialization",
+   "url": "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest01172.html?BenchmarkTest01172=SafeText",
+   "engine": "_run_deserialization",
+   "families": [
+    "deserialization"
+   ],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest01172.html?BenchmarkTest01172=SafeText",
+    "https://benchmarkpython:8443/benchmark/deserialization-00/BenchmarkTest01172?BenchmarkTest01172=SafeText"
+   ],
+   "conf": [
+    "candidate"
+   ]
+  },
+  {
+   "test": "BenchmarkTest00067",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00067",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00067"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00596",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00596.html?BenchmarkTest00596=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00596.html?BenchmarkTest00596=SafeText",
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00596?BenchmarkTest00596=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00598",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00598.html?BenchmarkTest00598=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00598.html?BenchmarkTest00598=SafeText",
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00598?BenchmarkTest00598=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00654",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00654.html?BenchmarkTest00654=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00654.html?BenchmarkTest00654=SafeText",
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00654?BenchmarkTest00654=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00723",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00723.html?BenchmarkTest00723=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00723.html?BenchmarkTest00723=SafeText",
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00723?BenchmarkTest00723=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00815",
+   "category": "redirect",
+   "url": "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00815.html?BenchmarkTest00815=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00815.html?BenchmarkTest00815=SafeText",
+    "https://benchmarkpython:8443/benchmark/redirect-00/BenchmarkTest00815?BenchmarkTest00815=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00158",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00158.html?BenchmarkTest00158=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00158.html?BenchmarkTest00158=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00158?BenchmarkTest00158=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00346",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00346.html?BenchmarkTest00346=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00346.html?BenchmarkTest00346=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00346?BenchmarkTest00346=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00599",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00599.html?BenchmarkTest00599=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00599.html?BenchmarkTest00599=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00599?BenchmarkTest00599=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00602",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00602.html?BenchmarkTest00602=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00602.html?BenchmarkTest00602=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00602?BenchmarkTest00602=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00819",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00819.html?BenchmarkTest00819=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00819.html?BenchmarkTest00819=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00819?BenchmarkTest00819=SafeText"
+   ],
+   "conf": []
+  },
+  {
+   "test": "BenchmarkTest00892",
+   "category": "codeinj",
+   "url": "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00892.html?BenchmarkTest00892=SafeText",
+   "engine": "_run_injection_probes",
+   "families": [],
+   "error": "",
+   "targets": [
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00892.html?BenchmarkTest00892=SafeText",
+    "https://benchmarkpython:8443/benchmark/codeinj-00/BenchmarkTest00892?BenchmarkTest00892=SafeText"
+   ],
+   "conf": []
+  }
+ ],
+ "target": "python"
+}

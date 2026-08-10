@@ -23,7 +23,10 @@ import random
 import re
 import sys
 
-BASE = "https://owaspbench:8443/benchmark/"
+# Both suites are served the same way, so one harness scores either. --base selects the target.
+BASES = {"java": "https://owaspbench:8443/benchmark/",
+         "python": "https://benchmarkpython:8443/benchmark/"}
+BASE = BASES["java"]
 
 # category -> the SHIPPING registry method that owns it. Anything absent here is reported as
 # "no engine mapped" rather than silently counted as a miss, so an unmapped category can never be
@@ -35,6 +38,16 @@ ENGINES = {
     "ldapi": "_run_ldap",
     "xpathi": "_run_xpath",
     "cmdi": "_run_form_cmdi",
+    # Python v0.1 adds four categories the Java suite does not have.
+    "xxe": "_run_xxe",
+    "deserialization": "_run_deserialization",
+    "redirect": "_run_injection_probes",
+    "codeinj": "_run_injection_probes",
+    # securecookie is DELIBERATELY UNMAPPED. The nearest engine (_run_transport_posture) emits ~9
+    # findings on EVERY page here -- TLS-cert and header misconfigs from the lab's self-signed cert --
+    # identical on vulnerable and safe cases. Mapping it would score ~100% TPR AND ~100% FPR: a fake
+    # spike in detections and a real collapse in precision. It stays in `unscored` until there is a
+    # cookie-flag-SPECIFIC signal to match on.
 }
 # families each category legitimately confirms through. A finding of any other family on a case is
 # NOT credited -- detecting XSS on a SQLi case is not a SQLi detection.
@@ -45,36 +58,47 @@ FAMILIES = {
     "ldapi": {"ldap_injection"},
     "xpathi": {"xpath_injection"},
     "cmdi": {"command_injection", "cmdi"},
+    "xxe": {"xxe"},
+    "deserialization": {"deserialization"},
+    "redirect": {"open_redirect"},
+    # CWE-94 in a Python app is typically an eval()/exec() sink. Our nearest oracle is the SSTI
+    # expression probe, which confirms by evaluated arithmetic -- the same proof shape. If it does not
+    # reach eval() sinks the category simply scores 0, which is an honest gap to report rather than a
+    # reason to credit some unrelated family.
+    "codeinj": {"ssti", "code_injection"},
 }
 _TESTNO = re.compile(r"(BenchmarkTest\d+)")
 
 
-def case_urls(client, category: str) -> list:
+def case_urls(client, category: str, base: str = "") -> list:
     """Real hrefs from the category index. Never hand-build these: a constructed path 404s/500s
     because the live URL carries `.html` plus a per-case query string."""
-    idx = client.get(BASE + "%s-Index.html" % category).text
+    base = base or BASE
+    idx = client.get(base + "%s-Index.html" % category).text
     seen, out = set(), []
     for href in re.findall(r"href=[\"']([^\"']*BenchmarkTest\d+[^\"']*)", idx):
         m = _TESTNO.search(href)
         if not m or m.group(1) in seen:
             continue
         seen.add(m.group(1))
-        out.append((m.group(1), BASE + href.lstrip("/").replace("benchmark/", "", 1)))
+        out.append((m.group(1), base + href.lstrip("/").replace("benchmark/", "", 1)))
     return out
 
 
-async def scan(per_category: int, categories: list, seed: int) -> dict:
+async def scan(per_category: int, categories: list, seed: int, base: str = "") -> dict:
     import httpx
     import scope as scope_mod
     import tools as tools_mod
 
+    from urllib.parse import urlparse
+    host = urlparse(base or BASE).hostname or "owaspbench"
     sc = scope_mod.ScopeEngine()
-    sc.load_manual(["owaspbench"], [], "owaspbench")
+    sc.load_manual([host], [], host)
     reg = tools_mod.ToolRegistry(sc, mission_id=None, lab_mode=True)
     rng = random.Random(seed)
     results, client = [], httpx.Client(verify=False, timeout=30, follow_redirects=True)
     for cat in categories:
-        cases = case_urls(client, cat)
+        cases = case_urls(client, cat, base)
         picked = sorted(rng.sample(cases, min(per_category, len(cases))))
         method = ENGINES.get(cat)
         for name, url in picked:
@@ -95,16 +119,19 @@ async def scan(per_category: int, categories: list, seed: int) -> dict:
                 page = client.get(url).text
                 forms = [{"action": f.get("action"), "page": url}
                          for f in crawl_mod.extract_forms(page, url)]
-                targets = agent_mod.sweep_targets([url], forms, lambda u: "owaspbench" in u) or [url]
-                fams = []
+                targets = agent_mod.sweep_targets([url], forms, lambda u: host in u) or [url]
+                fams, confs = [], []
                 for t in targets:
                     inp = {"url": t}
                     if method == "_run_web_probes":
                         inp["lab_mode"] = True
                     res = await getattr(reg, method)(inp)
                     fams += [str(f.get("family") or "") for f in (res.findings or [])]
+                    confs += [str(f.get("confidence") or "confirmed").lower()
+                              for f in (res.findings or [])]
                 row["targets"] = targets
                 row["families"] = fams
+                row["conf"] = confs
             except Exception as e:
                 row["error"] = "%s: %s" % (type(e).__name__, str(e)[:120])
             results.append(row)
@@ -122,6 +149,22 @@ def load_key(path: str) -> dict:
                 continue
             key[row[0].strip()] = (row[1].strip().lower(), row[2].strip().lower() == "true")
     return key
+
+
+# Confidences the product does NOT report as a confirmed vulnerability. The proof gate demotes these to
+# leads, so counting one as a detection scores something the tool would never actually claim -- it
+# inflates TPR and, on a safe case, invents a false positive out of thin air. This is exactly what
+# happened on the first Python run: two `candidate` deserialization leads scored as FPs.
+_UNPROVEN = {"lead", "candidate", "unconfirmed", "informational", "tentative", "info"}
+
+
+def _detected(row: dict, cat: str) -> bool:
+    """True only when a CONFIRMED finding of this category's own family came back."""
+    fams = row.get("families") or []
+    # Older runs predate the confidence capture; treat them as confirmed so their numbers do not shift.
+    confs = row.get("conf") or ["confirmed"] * len(fams)
+    want = FAMILIES.get(cat, set())
+    return any(f in want and c not in _UNPROVEN for f, c in zip(fams, confs))
 
 
 def score(run: dict, key: dict) -> dict:
@@ -142,7 +185,7 @@ def score(run: dict, key: dict) -> dict:
         b = per.setdefault(cat, {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0})
         if r.get("error"):
             b["errors"] += 1
-        detected = bool(set(r.get("families") or []) & FAMILIES.get(cat, set()))
+        detected = _detected(r, cat)
         if is_vuln:
             b["tp" if detected else "fn"] += 1
         else:
@@ -192,13 +235,16 @@ def main(argv=None) -> int:
     sc = sub.add_parser("scan")
     sc.add_argument("--per-category", type=int, default=12)
     sc.add_argument("--seed", type=int, default=1337)
+    sc.add_argument("--base", default="java", choices=sorted(BASES))
     sc.add_argument("--categories", default="sqli,xss,pathtraver,ldapi,xpathi")
     so = sub.add_parser("score")
     so.add_argument("--run", required=True)
     so.add_argument("--key", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "scan":
-        out = asyncio.run(scan(a.per_category, [c for c in a.categories.split(",") if c], a.seed))
+        out = asyncio.run(scan(a.per_category, [c for c in a.categories.split(",") if c],
+                              a.seed, BASES[a.base]))
+        out["target"] = a.base
         print(json.dumps(out, indent=1))
         return 0
     with open(a.run, encoding="utf8") as fh:

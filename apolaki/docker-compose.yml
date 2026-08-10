@@ -241,6 +241,31 @@ services:
     restart: unless-stopped
     mem_limit: 2g
 
+  # benchmarkpython -- OWASP Benchmark for PYTHON v0.1, the foreign-stack counterpart to the Java suite
+  # above. Reachable at https://benchmarkpython:8443/benchmark/Index.html on the compose network, host
+  # 42096. Self-signed adhoc cert, so scans need verify=False.
+  #
+  # 1230 cases. 514 of them (weakrand 326, hash 151, trustbound 37) are code-level properties no
+  # black-box scanner can observe -- SAST cases, never score against them. That leaves ~716 crawlable:
+  #   xpathi 186 | pathtraver 168 | xss 89 | deserialization 54 | codeinjection 53 | securecookie 39
+  #   redirect 34 | ldapi 29 | xxe 28 | cmdi 20 | sqli 16
+  # Four of those categories do NOT exist in the Java suite (xxe, redirect, deserialization,
+  # codeinjection), so this widens what we can measure, not just where.
+  #
+  # BLIND BY CONSTRUCTION, same as the Java suite: expectedresults-0.1.csv is a file in the container
+  # and is never served over HTTP. Its columns are identical, so agent/owasp_bench.py scores it unchanged.
+  #
+  # v0.1 is PRELIMINARY -- OWASP states the true/false-positive balance per category is not yet evened
+  # out, so treat Java v1.2 as the headline number and this as the generalization check. Report both.
+  benchmarkpython:
+    build:
+      context: ./labs/benchmarkpython
+    profiles: ["labs"]
+    ports:
+      - "127.0.0.1:42096:8443"
+    restart: unless-stopped
+    mem_limit: 1g
+
   # domsource -- validation lab for client-side sources that never reach the server. dom_trace gained the
   # URL FRAGMENT as a source; everything after '#' is absent from the access log, from a proxy capture and
   # from any request replay, so the engine cannot be validated by checking what the server received --
