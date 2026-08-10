@@ -5399,13 +5399,38 @@ class ToolRegistry:
         # flag is off while the header sets it, and vice versa.
         try:
             import cookie_flags as _cfl
-            _hdrs = baseline.get("headers") or {}
-            _sc = next((v for k, v in _hdrs.items() if k.lower() == "set-cookie"), None)
-            _cv = _cfl.evaluate(_sc)
-            if _cv.get("confirmed"):
-                findings.append(self._attach_poc(
-                    _cfl.finding(url, _cv["cookies"], _cv["oracle"],
-                                 session=bool(_cv.get("session_cookies"))), url, None))
+            _cookie_sources = [(url, baseline)]
+            # THE SETUP COOKIE IS NOT THE SCORED COOKIE. A GET often sets a well-formed cookie to prime
+            # the page while the SUBMISSION sets the one that matters -- here a GET returns
+            # "...; Secure" and the POST returns "SomeCookie=...; HttpOnly" with no Secure at all.
+            # Judging the GET alone declines a genuinely insecure cookie.
+            # Only a form the APP ITSELF advertises is submitted; never a blind POST to a discovered URL,
+            # which on a real target could change state.
+            try:
+                # crawl.extract_forms, NOT form_xss.parse_forms: the latter is XSS-oriented and returns
+                # only forms that have TEXT fields, so a submit-only form (exactly the shape that sets
+                # the scored cookie here) is invisible to it.
+                import crawl as _ccr
+                for _cf in _ccr.extract_forms(baseline.get("body", "") or "", url)[:2]:
+                    _ca = _cf.get("action") or ""
+                    if _ca and self.scope.validate(_ca)[0]:
+                        _cr = await self._http(_ca, "POST",
+                                               {"Content-Type": "application/x-www-form-urlencoded"},
+                                               "", capture=False)
+                        if not _cr.get("error"):
+                            _cookie_sources.append((_ca, _cr))
+            except Exception as _e:
+                self._swallow(_e, "web_probes.cookie_form_submit", url)
+            _seen_ck = set()
+            for _cu, _cresp in _cookie_sources:
+                _hdrs = _cresp.get("headers") or {}
+                _sc = next((v for k, v in _hdrs.items() if k.lower() == "set-cookie"), None)
+                _cv = _cfl.evaluate(_sc)
+                if _cv.get("confirmed") and not set(_cv["cookies"]) <= _seen_ck:
+                    _seen_ck |= set(_cv["cookies"])
+                    findings.append(self._attach_poc(
+                        _cfl.finding(_cu, _cv["cookies"], _cv["oracle"],
+                                     session=bool(_cv.get("session_cookies"))), _cu, None))
         except Exception as _e:
             self._swallow(_e, "web_probes.cookie_flags", url)
         # A response that NAMES the generator behind a security value (stack trace, debug banner,
