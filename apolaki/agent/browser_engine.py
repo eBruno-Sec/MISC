@@ -47,10 +47,26 @@ export default async function ({ page }) {
       : (window.Vue || document.querySelector('#app[data-v-app]')) ? 'vue' : '';
     return { title: document.title, forms, inputs, links, scripts, framework,
       buttons: [...document.querySelectorAll('button')].map(b => (b.innerText || '').trim()).filter(Boolean).slice(0, 40),
-      storage: { local: Object.keys(localStorage || {}), session: Object.keys(sessionStorage || {}) },
-      cookies: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [] };
+      // GUARDED. Reading localStorage throws SecurityError on an opaque origin — a failed navigation,
+      // a sandboxed frame, about:blank. Unguarded, that exception escaped evaluate() and browserless
+      // answered 400, so ONE inaccessible storage object discarded the ENTIRE observation: links,
+      // forms, scripts, CSP, all of it. That is why the browser sensor returned nothing on every run.
+      storage: (function () {
+        try { return { local: Object.keys(localStorage || {}), session: Object.keys(sessionStorage || {}) }; }
+        catch (e) { return { local: [], session: [], denied: true }; }
+      })(),
+      cookies: (function () {
+        try { return document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : []; }
+        catch (e) { return []; }
+      })() };
   });
-  return { ...dom, runtime_api: [...api], runtime_ws: [...ws], graphql: [...gql], csp };
+  // BROWSERLESS v2 REQUIRES THE { data, type } ENVELOPE. Returning a bare object is rejected with
+  // HTTP 400, which drive() reported as "headless browser returned 400" and observe() turned into an
+  // empty result -- so the browser sensor produced NOTHING against the pinned browserless/chromium v2
+  // image, for every mission, silently. drive() already unwraps data.get("data", data), so only the
+  // script side was wrong.
+  return { data: { ...dom, runtime_api: [...api], runtime_ws: [...ws], graphql: [...gql], csp },
+           type: "application/json" };
 }
 """
 
@@ -78,14 +94,20 @@ def drive(target_url, js, browser_url=None, timeout=45):
     code = js.replace("%TARGET_JSON%", json.dumps(target_url))
     # Route the headless browser through the intercept proxy when one is configured, so every request the
     # browser makes is captured + rule-rewritable (browserless v2 accepts Chrome launch args via ?launch=).
-    params = {}
+    # ignoreHTTPSErrors is ALWAYS on. Staging, internal and lab targets routinely serve a self-signed or
+    # expired certificate; without this, page.goto() fails, the script's `catch (e) {}` swallows it, and
+    # we "successfully" observe a blank page — zero links, zero forms, no error. The HTTP engine already
+    # runs verify=False for the same reason; the browser must match it or the two disagree about what
+    # is reachable. Certificate problems are reported by the TLS engine, not by refusing to look.
+    launch = {"ignoreHTTPSErrors": True}
     try:
         import proxy as _proxy
         args = _proxy.browser_launch_args()
         if args:
-            params["launch"] = json.dumps({"args": args})
+            launch["args"] = args
     except Exception:
         pass
+    params = {"launch": json.dumps(launch)}
     try:
         r = httpx.post(browser + "/function", headers={"Content-Type": "application/javascript"},
                        content=code, params=params or None, timeout=timeout)

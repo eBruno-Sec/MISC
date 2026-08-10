@@ -264,3 +264,54 @@ name says — the persona-specific *extra* — rather than the only way surface 
 pure logic; nothing asserted that a mission against a known-vulnerable target finds anything. A
 whole-product smoke test — engage a mission against a standing lab, assert findings > 0 — would have
 caught both instantly, and is the single highest-value test missing from this repo.
+
+---
+
+## S12 — The browser sensor has never worked · **CRITICAL** · mostly RESOLVED
+
+Found while researching whether SPA/XHR discovery had the same auth-gating as S11b. It did not — but the
+browser path was broken in a different and worse way.
+
+`browser_engine.observe()` is the browser-as-sensor used by `_browser_harvest_surface` (JS-rendered
+links, forms, XHR/GraphQL endpoints, CSP, storage). It drives the **browserless sidecar over CDP**, a
+separate path from `bie.py`, which uses local Playwright and works fine — which is why the liveness gate
+stayed green while this was dark.
+
+Three defects, in the order they were peeled back:
+
+| # | defect | evidence | status |
+|---|---|---|---|
+| a | sidecar not running by default | `CDP_BROWSER_URL=http://headless-chrome:3000`, profile `browser` opt-in → `Errno -5 No address associated with hostname` | started |
+| b | script returned a bare object | browserless v2 requires a `{data, type}` envelope → HTTP 400 | FIXED |
+| c | unguarded `localStorage` read | `SecurityError: Access is denied for this document` on an opaque origin → **the whole observation discarded** | FIXED |
+| d | no `ignoreHTTPSErrors` | `ERR_CERT_AUTHORITY_INVALID`, `url = chrome-error://chromewebdata/` | FIXED |
+
+**(c) is the instructive one.** One inaccessible storage object threw out of `page.evaluate()`, browserless
+answered 400, `drive()` turned that into an empty result, and `observe()` reported `browser: False`. Links,
+forms, scripts, CSP — all discarded because of a property read that is *expected* to fail on a blank page.
+
+**(d) proved by measurement**, not assumption:
+
+```
+no launch params      -> err=ERR_CERT_AUTHORITY_INVALID  url=chrome-error://chromewebdata/  anchors=6
+ignoreHTTPSErrors:true -> err=None  url=https://owaspbench:8443/benchmark/  anchors=11
+```
+
+The 6 "anchors" without the flag were **Chrome's own error page**. With it, 11 — exactly the 11 category
+indexes. The HTTP engine already runs `verify=False`; the browser must match it or the two disagree about
+what is reachable. Certificate problems are the TLS engine's job to report, not a reason to refuse to look.
+
+`observe()` now returns `browser: True` where it previously always returned `False`.
+
+### Still OPEN
+
+`_OBSERVE_JS` navigates with `waitUntil: 'networkidle2'` (25s). The direct probe above used
+`domcontentloaded` and got 11 anchors; `observe()` still returns 0 links on the same page, so
+networkidle2 most likely never settles and the nav times out into the script's `catch (e) {}`.
+**Next step:** `domcontentloaded` with a short settle, rather than waiting for network silence a busy
+page may never reach.
+
+### Pattern
+
+S12c is S1 again at a different layer: a failure that is *expected* in normal operation, swallowed, and
+reported as a clean empty result. Third instance today (`DOM_SCAN_JS`, `parse_qsl`, now this).
