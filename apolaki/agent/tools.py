@@ -3416,8 +3416,21 @@ class ToolRegistry:
             # (//host/x) links correctly. The old manual `scheme://netloc + l` concat turned a
             # protocol-relative src ("//host/x", which also startswith "/") into a DOUBLED host
             # (scheme://host//host/x) — the malformed Angular URL CHAD flagged (final-audit #3).
-            if l.startswith("http") or l.startswith("/"):
-                abs_links.append(urljoin(base_url, l))
+            # DOCUMENT-RELATIVE LINKS ARE THE COMMON CASE AND WERE BEING DROPPED. The old guard kept
+            # only "http…" and "/…", so `cmdi-Index.html`, `./x` and `../y` never entered the surface —
+            # Apolaki could not crawl any site that links relatively, which is most of them. On the
+            # OWASP Benchmark this discarded all 11 category indexes and with them all 2740 test cases,
+            # leaving a mission that reported "coverage completed" having walked nothing.
+            # urljoin already resolves absolute, root-relative, protocol-relative AND document-relative
+            # correctly — it was the fix for the doubled-host bug the guard was written for, so the
+            # guard was redundant from the start. Keep only the non-navigable schemes out.
+            ls = str(l).strip()
+            if not ls or ls.lower().startswith(("mailto:", "javascript:", "tel:", "sms:", "data:",
+                                                "callto:", "about:", "blob:")):
+                continue
+            joined = urljoin(base_url, ls)
+            if joined.startswith(("http://", "https://")):
+                abs_links.append(joined)
         self._add_urls([url] + abs_links)
         # Forms feed the injection surface. POST forms are stored so the planner can
         # reach POST-body sinks (e.g. the XML stock-check form → run_xxe). GET forms are

@@ -89,3 +89,63 @@ def bfs_frontier(candidates, base: str, seen, limit: int = 40) -> list:
         if len(out) >= limit:
             break
     return out
+
+
+# ── robots.txt / sitemap.xml: the two highest-yield free surface sources ──────────────────────────────
+# A general scan never fetched either (they appeared only in a NOISE exclusion list, and in the Natas
+# CTF solver). robots.txt is a list of paths the owner wants hidden -- admin panels, backups, staging
+# consoles -- published by the owner. sitemap.xml is an enumerated index of the site. Reading them is
+# passive, cheap, and standard practice for every mature scanner.
+_ROBOTS_PATH = re.compile(r"(?im)^\s*(?:dis)?allow\s*:\s*(\S+)")
+_ROBOTS_SITEMAP = re.compile(r"(?im)^\s*sitemap\s*:\s*(\S+)")
+_SITEMAP_LOC = re.compile(r"(?is)<loc>\s*([^<\s]+)\s*</loc>")
+_MAX_DOC = 2_000_000
+
+
+def parse_robots(text: str, base: str, limit: int = 200) -> dict:
+    """{'urls': [...], 'sitemaps': [...]} from robots.txt.
+
+    BOTH Allow and Disallow are harvested. A Disallow is not an instruction we are obeying here -- it is
+    the owner telling us where the interesting paths are, which is exactly the recon value. A wildcard
+    pattern (`/admin/*`) is reduced to its literal prefix; a bare `/` is skipped because it names the
+    whole site and adds nothing.
+    """
+    from urllib.parse import urljoin
+    out, maps = [], []
+    t = str(text or "")[:_MAX_DOC]
+    for m in _ROBOTS_PATH.finditer(t):
+        p = m.group(1).split("*")[0].split("$")[0].strip()
+        if not p or p == "/":
+            continue
+        u = urljoin(base, p)
+        if u.startswith(("http://", "https://")) and u not in out:
+            out.append(u)
+        if len(out) >= limit:
+            break
+    for m in _ROBOTS_SITEMAP.finditer(t):
+        s = urljoin(base, m.group(1).strip())
+        if s.startswith(("http://", "https://")) and s not in maps:
+            maps.append(s)
+    return {"urls": out, "sitemaps": maps}
+
+
+def parse_sitemap(xml: str, base: str, limit: int = 500) -> dict:
+    """{'urls': [...], 'sitemaps': [...]} from a sitemap or sitemap-index document.
+
+    A <loc> inside <sitemapindex> points at another sitemap; inside <urlset> it is a page. Both appear
+    as <loc>, so they are separated by suffix rather than by trusting the wrapper element, which lets a
+    malformed document still yield useful URLs.
+    """
+    from urllib.parse import urljoin
+    urls, maps = [], []
+    t = str(xml or "")[:_MAX_DOC]
+    for m in _SITEMAP_LOC.finditer(t):
+        u = urljoin(base, html.unescape(m.group(1).strip()))
+        if not u.startswith(("http://", "https://")):
+            continue
+        target = maps if u.lower().endswith((".xml", ".xml.gz")) else urls
+        if u not in target:
+            target.append(u)
+        if len(urls) >= limit:
+            break
+    return {"urls": urls, "sitemaps": maps}

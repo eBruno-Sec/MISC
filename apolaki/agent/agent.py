@@ -1526,6 +1526,67 @@ class BBHAgent:
             yield {"type": "info", "content": "Probed %d discovered cloud-storage URL(s) for public "
                    "listing (run_cloud_probe)." % probed}
 
+    async def _surface_crawl(self, session_id, base: str = "") -> int:
+        """Breadth-first surface discovery for EVERY mode, authenticated or not.
+
+        The pieces already existed and nothing drove them: `_http_probe` extracts href/src/action and
+        seeds them, `crawl.bfs_frontier` picks the next level. But bfs_frontier's only caller was
+        `_authenticated_recrawl`, so an UNAUTHENTICATED mission fetched its seeds, mined served JS and
+        never followed a single link. Against the OWASP Benchmark that meant reaching /benchmark/ and
+        never walking to any of the 2740 test cases -- the default scanning mode had no surface
+        discovery at all.
+
+        Same bounds as the authenticated pass (BBH_CRAWL_DEPTH, default 2, capped 4; frontier 30 per
+        round) and the same scope gate on every visit, so this widens reach without widening risk.
+        """
+        import os as _os
+
+        import crawl as _crawl
+        depth = max(1, min(int(_os.environ.get("BBH_CRAWL_DEPTH", "2") or 2), 4))
+        seen, visited = set(), 0
+
+        # robots.txt and sitemap.xml FIRST — the owner's own index of the site, and of the paths they
+        # would rather you did not visit. Free, passive, and standard for every mature scanner; Apolaki
+        # read neither in a general scan (they appeared only in a noise-exclusion list and the Natas
+        # solver). A Disallow is treated as recon, not as an instruction we are following.
+        try:
+            from urllib.parse import urljoin
+            _origin = base or (getattr(self.tools, "urls", None) or [""])[0]
+            if _origin:
+                for _doc, _parse in (("robots.txt", _crawl.parse_robots),
+                                     ("sitemap.xml", _crawl.parse_sitemap)):
+                    _du = urljoin(_origin, "/" + _doc)
+                    if not self.scope.validate(_du)[0]:
+                        continue
+                    _r = await self.tools._http(_du, "GET", capture=False)
+                    if _r.get("error") or int(_r.get("status") or 0) != 200:
+                        continue
+                    _got = _parse(_r.get("body", "") or "", _du)
+                    _new = [u for u in _got.get("urls", []) if self.scope.validate(u)[0]]
+                    if _new:
+                        self.tools._add_urls(_new)
+        except Exception as e:
+            self.tools._swallow(e, "surface_crawl.robots_sitemap", base or "")
+        for _round in range(depth):
+            cands = [u for u in (getattr(self.tools, "urls", None) or []) if u not in seen]
+            if not cands:
+                break
+            frontier = _crawl.bfs_frontier(cands, base or cands[0], seen, limit=30)
+            if not frontier:
+                break
+            for u in frontier:
+                seen.add(u)
+                if self.stop_event.is_set():
+                    return visited
+                if not self.scope.validate(u)[0]:
+                    continue
+                try:
+                    await self.tools.execute("http_probe", {"url": u}, session_id)
+                    visited += 1
+                except Exception as e:
+                    self.tools._swallow(e, "surface_crawl.http_probe", u)
+        return visited
+
     async def _authenticated_recrawl(self, roles, base, session_id) -> list:
         """Per-persona authenticated pass. For EACH session persona, GET a set of common authed routes
         (harvesting object ids + endpoints into the surface/intel/LIVE graph) and, when a headless
@@ -2282,6 +2343,16 @@ class BBHAgent:
             yield {"type": "info", "content": "PASSIVE mode: skipping served-JS code-intelligence and the "
                    "network service-pack sweep (both make live target contact)."}
         else:
+            # Walk the site BEFORE code-intelligence and the planner, so both see the real surface
+            # rather than only the seed URLs the operator typed.
+            _before_urls = len(getattr(self.tools, "urls", None) or [])
+            _visited = await self._surface_crawl(session_id, base=(_seeded[0] if _seeded else ""))
+            _gained = len(getattr(self.tools, "urls", None) or []) - _before_urls
+            if _visited:
+                yield {"type": "info", "content": "Surface crawl: probed %d page(s), surface %d -> %d URL(s). "
+                       "This runs for unauthenticated scans too; previously only authenticated missions "
+                       "followed links at all." % (_visited, _before_urls, _before_urls + _gained)}
+
             async for ev in self._recon_code_intelligence(session_id):
                 yield ev
 
