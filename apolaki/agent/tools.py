@@ -6711,11 +6711,12 @@ class ToolRegistry:
         import time
         import cmdi_tool as cmdi
         import csrf_tool as csrf
-        from urllib.parse import urlencode
+        from urllib.parse import parse_qsl, urlencode
         url = inp["url"]
         _SKIP = {"submit", "btn", "button", "send", "login", "user_token", "csrf",
                  "csrf_token", "_token", "authenticity_token"}
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        _qv = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
         # Forms to test: caller-supplied fields (a pre-captured form) OR self-discover
         # by fetching the page and parsing its forms — so this works whether or not the
         # form was captured earlier.
@@ -6736,8 +6737,13 @@ class ToolRegistry:
             if not fields:
                 continue
 
+            # SIBLING FIELDS GET THE APP'S OWN VALUES, not a made-up "1". Filling them with a literal
+            # can break the request before it ever reaches the command sink, so baseline and probe fail
+            # IDENTICALLY and the differential goes dead — the engine then reports clean on a genuinely
+            # injectable form. Prefer the page's query-string value for a same-named field (many apps
+            # render the form pre-filled from it) and fall back to "1" only when nothing was observed.
             def body(field, val):
-                return urlencode({k: (val if k == field else "1") for k in all_fields})
+                return urlencode({k: (val if k == field else (_qv.get(k) or "1")) for k in all_fields})
 
             rb = await self._http(action, "POST", headers, body(fields[0], "127.0.0.1"), capture=False)
             base_body = rb.get("body", "")
