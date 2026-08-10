@@ -6340,6 +6340,59 @@ class ToolRegistry:
             except Exception:
                 pass
 
+            # 5) CUSTOM REQUEST HEADERS. Some apps route the value through a request header instead of a
+            # URL or a body -- routine in SPAs and APIs (tenant id, user id, trace context). The payload
+            # then never arrives, the response never varies, and the endpoint reads as clean. Third
+            # carrier, same oracle. Bounded to 3 discovered names.
+            try:
+                import crawl as _cr
+                import form_xss as _fx
+                import header_vector as _hv
+                _pg = await c.get(url)
+                _names = _hv.discover_header_names(_pg.text)[:3]
+                _forms = _cr.extract_forms(_pg.text, url)
+                # Header value comes from the page's own control when there is one; an invented value can
+                # fail the request before the sink and kill the differential (the recurring trap).
+                _vals = {i.get("name"): (i.get("value") or "")
+                         for f in _forms for i in (f.get("inputs") or []) if i.get("name")}
+                _tgt, _post = url, False
+                _ff = _fx.parse_forms(_pg.text, url)
+                if _ff and self.scope.validate(_ff[0]["action"])[0]:
+                    _tgt, _post = _ff[0]["action"], True
+
+                async def _hsend(hname, val):
+                    h = {**headers, hname: val}
+                    return await (c.post(_tgt, headers=h) if _post else c.get(_tgt, headers=h))
+
+                for _hn in _names:
+                    _hv0 = _vals.get(_hn) or "1"
+                    _hb = await _hsend(_hn, _hv0)
+                    _hhit = False
+                    for probe in sqli.ERROR_PROBES[:self._ni(3, 6, len(sqli.ERROR_PROBES))]:
+                        _rp = await _hsend(_hn, _hv0 + probe)
+                        _hits = sqli.error_signatures(_hb.text, _rp.text)
+                        if _hits:
+                            _req = "%s [request header %s]" % (_tgt, _hn)
+                            findings.append(self._attach_poc(
+                                sqli.error_finding(_tgt, "header:" + _hn, probe, _hits), _req, _rp))
+                            ev.append(_tgt); _hhit = True
+                            break
+                    if _hhit:
+                        continue
+                    # Quote-break with doubled-quote RECOVERY. A container whose error page carries no
+                    # DBMS text defeats the message oracle above while still proving the break by status:
+                    # base OK -> one quote errors -> two quotes repair the string and it is OK again.
+                    _sq = await _hsend(_hn, _hv0 + "'")
+                    _dq = await _hsend(_hn, _hv0 + "''")
+                    if sqli.quote_break_recovers(_hb.status_code, _sq.status_code, _dq.status_code):
+                        _req = "%s [request header %s]" % (_tgt, _hn)
+                        findings.append(self._attach_poc(sqli.quote_recovery_finding(
+                            _tgt, "header:" + _hn, _hb.status_code, _sq.status_code, _dq.status_code),
+                            _req, _sq))
+                        ev.append(_tgt)
+            except Exception:
+                pass
+
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
         # DB-METADATA ENRICHMENT: a CONFIRMED native SQLi gets read-only DB proof

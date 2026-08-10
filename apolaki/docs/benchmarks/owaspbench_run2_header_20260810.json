@@ -1,0 +1,266 @@
+{
+ "seed": 1337,
+ "per_category": 8,
+ "results": [
+  {
+   "test": "BenchmarkTest01088",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-02/BenchmarkTest01088.html?BenchmarkTest01088=SafeText",
+   "engine": "_run_sqli",
+   "families": [
+    "sqli"
+   ],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01559",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01559.html?BenchmarkTest01559=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01717",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01717.html?BenchmarkTest01717=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01724",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01724.html?BenchmarkTest01724=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01810",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-03/BenchmarkTest01810.html?BenchmarkTest01810=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02095",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest02095.html?BenchmarkTest02095=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02175",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-04/BenchmarkTest02175.html?BenchmarkTest02175=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02641",
+   "category": "sqli",
+   "url": "https://owaspbench:8443/benchmark/sqli-05/BenchmarkTest02641.html?BenchmarkTest02641=SafeText",
+   "engine": "_run_sqli",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest00951",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest00951",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01109",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest01109.html?BenchmarkTest01109=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01644",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-01/BenchmarkTest01644.html?BenchmarkTest01644=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01833",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01833",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01983",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01983.html?BenchmarkTest01983=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01985",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest01985.html?BenchmarkTest01985=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02029",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02029.html?BenchmarkTest02029=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02033",
+   "category": "pathtraver",
+   "url": "https://owaspbench:8443/benchmark/pathtraver-02/BenchmarkTest02033.html?BenchmarkTest02033=SafeText",
+   "engine": "_run_web_probes",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest00139",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00139.html?BenchmarkTest00139=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest00530",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00530.html?BenchmarkTest00530=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01490",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01490.html?BenchmarkTest01490=SafeText",
+   "engine": "_run_ldap",
+   "families": [
+    "ldap_injection"
+   ],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01492",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01492.html?BenchmarkTest01492=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01753",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01753.html?BenchmarkTest01753=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01909",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01909.html?BenchmarkTest01909=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02104",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02104.html?BenchmarkTest02104=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02306",
+   "category": "ldapi",
+   "url": "https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest02306.html?BenchmarkTest02306=SafeText",
+   "engine": "_run_ldap",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest00116",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest00116",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01014",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01014",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01561",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01561.html?BenchmarkTest01561=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01632",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01632.html?BenchmarkTest01632=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01633",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01633.html?BenchmarkTest01633=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01736",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01736.html?BenchmarkTest01736=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest01821",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest01821.html?BenchmarkTest01821=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  },
+  {
+   "test": "BenchmarkTest02370",
+   "category": "xpathi",
+   "url": "https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest02370.html?BenchmarkTest02370=SafeText",
+   "engine": "_run_xpath",
+   "families": [],
+   "error": ""
+  }
+ ]
+}
