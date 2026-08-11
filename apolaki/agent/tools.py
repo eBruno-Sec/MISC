@@ -5066,7 +5066,14 @@ class ToolRegistry:
                         fu = sig.get("final_url") or ""
                         return bool(fu) and urlparse(fu).path.rstrip("/") != _want_path
 
-                    for p in params:
+                    async def _trace_param(p):
+                        """Everything the serial loop did for ONE parameter, returned as its hit list.
+
+                        Independent by inspection: the chain below reads only `p`, `url` and its own
+                        renders. The single piece of shared state in the serial version was the `seen`
+                        dedup set, and that is applied by the caller afterwards in PARAMETER ORDER — so
+                        the parameters can render together while the findings stay exactly the ones the
+                        serial loop produced, in exactly its order."""
                         canary = "domtr" + os.urandom(4).hex()
                         # 1) plain-canary render -> link/data signals
                         s = await _render(dt.set_param(url, p, canary), canary)
@@ -5107,7 +5114,18 @@ class ToolRegistry:
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
                                     break
-                        for hit in dt.classify(url, p, canary, s):
+                        return list(dt.classify(url, p, canary, s))
+
+                    # Render the parameters CONCURRENTLY, browser_concurrency() at a time. MEASURED:
+                    # this engine cost 7.95 s per call in-mission and nearly all of it is the fixed
+                    # 600 ms settle after each render, paid one parameter at a time. bounded_map hands
+                    # the results back in PARAMETER order, so folding them below reproduces the serial
+                    # loop's dedup exactly — same findings, same order, same number of renders.
+                    for p, hits in await bounded_map(params, _trace_param, browser_concurrency()):
+                        if isinstance(hits, BaseException):
+                            self._swallow(hits, "dom_trace.param", "%s?%s" % (url, p))
+                            continue
+                        for hit in hits:
                             key = (hit["family"], hit["param"])
                             if key not in seen:
                                 seen.add(key)
@@ -5119,7 +5137,9 @@ class ToolRegistry:
                     #    each probe is a browser render. A family already confirmed via the query source
                     #    is skipped, so this can only ADD recall, never re-report the same bug twice.
                     frag_params = [p for p in params if p.lower() in dt._REDIRECTISH][:2]
-                    for p, src in [("(hash)", "fragment_raw")] + [(p, "fragment") for p in frag_params]:
+
+                    async def _trace_fragment(ps):
+                        p, src = ps
                         canary = "domfr" + os.urandom(4).hex()
                         fu = dt.probe_url(url, p, canary, src)
                         s = await _render(fu, canary)
@@ -5131,7 +5151,17 @@ class ToolRegistry:
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
                                     break
-                        for hit in dt.classify(url, p, canary, s, source=src):
+                        return list(dt.classify(url, p, canary, s, source=src))
+
+                    # Concurrent like the query pass, and folded in the SAME order. It runs AFTER the
+                    # query pass, not alongside it, because its dedup deliberately reads `seen`: a family
+                    # already proven via the query source must not be re-reported here.
+                    _frag = [("(hash)", "fragment_raw")] + [(p, "fragment") for p in frag_params]
+                    for (p, src), hits in await bounded_map(_frag, _trace_fragment, browser_concurrency()):
+                        if isinstance(hits, BaseException):
+                            self._swallow(hits, "dom_trace.fragment", "%s#%s" % (url, p))
+                            continue
+                        for hit in hits:
                             if (hit["family"], hit["param"]) in seen:
                                 continue            # already proven via the query source; not a 2nd bug
                             key = (hit["family"], hit["param"], src)
