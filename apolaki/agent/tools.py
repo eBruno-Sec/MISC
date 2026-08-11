@@ -206,6 +206,66 @@ def _chrome_path():
     return None
 
 
+# ── bounded, deterministic concurrency ────────────────────────────────────────
+# MEASURED (docs/handoff/throughput.md): on the OWASP Benchmark lab, run_xss cost 58.8 s per call and
+# was 60.7% of a whole 5329 s mission. Of one 10.4 s call: 0.82 s was browser startup, 1.03 s was real
+# page navigation, and 8.40 s (82%) was `await page.wait_for_timeout(350)` -- a fixed settle window
+# after every goto, executed strictly serially. Across the mission that single sleep is roughly HALF
+# the wall clock, and wall clock is what caps benchmark recall.
+#
+# The settle window is NOT the bug: an async payload (<img src=x onerror=alert()>) needs it to fire.
+# Shortening it would trade recall for speed silently. So the sleeps OVERLAP instead -- every payload
+# still gets its full 350 ms, they just wait at the same time.
+#
+# Concurrency here is a ceiling on in-flight work, NOT a simultaneity guarantee. The platform's
+# synchronized-parallel primitive (a gate-release burst for TOCTOU races) is ToolRegistry._run_race and
+# stays the only one of its kind; do not re-implement it here.
+BROWSER_CONCURRENCY_MAX = 16      # a hard ceiling no configuration can raise: never unbounded
+
+
+def browser_concurrency() -> int:
+    """How many browser pages / probes may be in flight at once. Configurable via
+    BBH_BROWSER_CONCURRENCY, clamped to 1..BROWSER_CONCURRENCY_MAX.
+
+    The default is 6 on purpose: it is what an ordinary browser already opens per host, so a scan at
+    this width is no ruder to a staging environment than a human loading the page. A scanner that melts
+    a client's environment is worse than a slow one -- hence the clamp rather than a bare int()."""
+    try:
+        w = int(os.getenv("BBH_BROWSER_CONCURRENCY", "6") or 6)
+    except (TypeError, ValueError):
+        w = 6
+    return max(1, min(w, BROWSER_CONCURRENCY_MAX))
+
+
+async def bounded_map(items, worker, width: int, skip=None) -> list:
+    """Run `worker(item)` over `items` with at most `width` of them in flight.
+
+    Deterministic BY CONSTRUCTION -- the same input must produce the same findings and the same
+    verdicts, so parallelism is only allowed where it cannot be observed:
+
+      * items are consumed in FIXED-SIZE chunks in list order, so which items run together is a
+        function of the list and the width alone -- never of who finished first;
+      * results are returned in ITEM order, never completion order;
+      * `skip(item)` (optional) is evaluated once per item at its chunk's dispatch, so state set by an
+        earlier chunk takes effect at the next chunk boundary and nowhere in between. Applying it the
+        instant a sibling finished would make the number of requests issued timing-dependent, and two
+        identical runs could then hit the target a different number of times.
+
+    Returns [(item, result), ...] for the items that actually ran; an item whose worker raised comes
+    back as (item, exception) rather than vanishing -- a probe that crashed must be visible, because a
+    silent crash is indistinguishable from a clean target.
+    """
+    width = max(1, min(int(width or 1), BROWSER_CONCURRENCY_MAX))
+    out = []
+    for start in range(0, len(items), width):
+        chunk = [it for it in items[start:start + width] if not (skip and skip(it))]
+        if not chunk:
+            continue
+        results = await asyncio.gather(*[worker(it) for it in chunk], return_exceptions=True)
+        out.extend(zip(chunk, results))
+    return out
+
+
 # Cached result of the startup XSS-confirmer probe. None = not probed yet.
 # Presence of a chrome binary is NOT enough on slim images (missing shared libs);
 # the only honest signal is "a headless launch actually succeeds".
