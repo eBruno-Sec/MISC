@@ -92,6 +92,35 @@ This is the measurement that matters, and the one that was never taken until 08-
 | 08-10 | `3642c6c` | 2 | S11a: seed the scoped path |
 | 08-10 | `3642c6c` | 2 | S11b alone did not move it |
 | 08-10 | `57afc3f` | **2** | S11c relative links + robots/sitemap — **did not move it either** |
+| 08-11 | Q-019 WIP (uncommitted) | **25** | the funnel fix — **12.5×**, and the first time engines reached benchmark cases |
+
+**MEASURED, 08-11 — the funnel fix worked.** Mission `ebd96f45` (`owaspbench-q019`), same target,
+same active mode, completed:
+
+```
+total findings: 25   (27 high + 2 medium raw, 3 leads)
+by family: {'sqli': 21, 'ldap_injection': 1, 'dom_data_manipulation': 1,
+            'sensitive_exposure': 1, 'vulnerable_component': 1}
+by confidence: {'confirmed': 25}
+  high | sqli            | SQL injection (error-recovery) in 'header:BenchmarkTest00018'
+  high | sqli            | SQL injection (boolean-blind) in 'BenchmarkTest00033'
+  high | ldap_injection  | LDAP injection in form field 'BenchmarkTest00630'
+```
+
+Two things make this different from the previous 2:
+1. **The findings are ON benchmark cases.** `BenchmarkTest00018`, `00033`, `00630` are real case
+   identifiers. The previous run's two findings were generic hygiene (a source-comment credential,
+   jquery@2.1.4) that any target would produce; both are still here, so 23 of the 25 are new.
+2. **No `path_traversal`.** That matters specifically, because the same day's verification proved the
+   pathtraver oracle confirms on mere reflection. A funnel that probes ~10× more URLs would have
+   multiplied that false positive if it were firing. It is not in this result.
+
+**NOT YET VERIFIED, and it is the whole question:** whether those 21 sqli hits land on *vulnerable*
+cases or *clean* ones. The finding count is not the score. The oracles involved are two-sided
+(`boolean-blind` compares a true-condition against a false-condition response; `error-recovery`
+compares against a recovery baseline), which is a reason for optimism and not evidence. **Do not
+quote 25 as an improvement in accuracy until it is scored against the answer key with the blind-seal
+discipline** — and score it with cross-family false positives counted, per the retraction above.
 
 **MEASURED, 08-10 — the most important negative result in this ledger.** Mission `90cee81c`
 (`owaspbench-clean`, active mode) ran **3720 seconds** against `https://owaspbench:8443/benchmark/`

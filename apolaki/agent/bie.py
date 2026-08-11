@@ -253,6 +253,21 @@ def judge(baseline, mutation, *, anon=None, nonexistent=None, control=None) -> d
     def _s(x):
         return int((x or {}).get("status") or 0)
 
+    def _ran(x):
+        """Did this control actually reach the server?
+
+        `is None` was the only liveness test, but the live producer NEVER returns None on failure --
+        _FETCH_JS catches its own exception and returns {status: 0, body: '', error: '...'}. That dict
+        satisfies `is not None`, so an ERRORED control passed as a SATISFIED control and the oracle
+        walked straight to `confirmed`. The anonymous control is the most fragile of the three (empty
+        headers, a persona that may be sitting on about:blank, a WAF dropping unauthenticated
+        requests) -- so the common failure was: anon control dies, public resource is reported as a
+        confirmed cross-user read. A false positive produced by a control that never ran.
+        """
+        if not isinstance(x, dict):
+            return False
+        return _s(x) != 0 and not x.get("error")
+
     base_b = _b(baseline)
     if _s(baseline) != 200 or len(base_b.strip()) < _MIN_BODY:
         return {"verdict": "not_applicable",
@@ -264,7 +279,7 @@ def judge(baseline, mutation, *, anon=None, nonexistent=None, control=None) -> d
     if _b(mutation) != base_b:
         return {"verdict": "rejected", "reason": "the attacker's response is not the owner's object "
                                                  "(%d vs %d bytes)" % (len(_b(mutation)), len(base_b))}
-    missing = [n for n, c in (("anonymous", anon), ("implausible-id", nonexistent)) if c is None]
+    missing = [n for n, c in (("anonymous", anon), ("implausible-id", nonexistent)) if not _ran(c)]
     if missing:
         return {"verdict": "lead", "reason": "cross-user read observed but the %s negative control did not "
                                              "run -- not provable" % " and ".join(missing)}
@@ -274,6 +289,18 @@ def judge(baseline, mutation, *, anon=None, nonexistent=None, control=None) -> d
     if _s(nonexistent) == 200 and _b(nonexistent) == base_b:
         return {"verdict": "rejected", "reason": "the route is not object-specific -- an implausible id "
                                                  "returns the identical body (SPA shell / catch-all)"}
+    # THE THIRD CONTROL HAD THE SAME HOLE, and the first fix missed it. An ERRORED control fails
+    # `_s(control) == 200` exactly like a control that legitimately differs, so the indistinguishable-
+    # objects rejection never fired and the verdict fell through to `confirmed`. Reproduced with two
+    # personas holding byte-identical objects: control alive -> rejected, control errored -> confirmed.
+    #
+    # `control is None` is a different thing and stays permitted: it means no second object existed to
+    # compare, which is a known limit of the setup. An errored control means we TRIED and failed, and
+    # that cannot rule out indistinguishability -- so it is a lead, not a confirmation.
+    if control is not None and not _control_ran(control):
+        return {"verdict": "lead", "reason": "the owner's object was returned, but the attacker's-own-object "
+                                             "control did not run, so two byte-identical objects cannot be "
+                                             "ruled out -- not provable"}
     if control is not None and _s(control) == 200 and _b(control) == base_b:
         return {"verdict": "rejected", "reason": "the attacker's own object is byte-identical to the "
                                                  "owner's -- the objects are not distinguishable"}
@@ -778,6 +805,15 @@ def _path_key(url: str) -> str:
         return str(url)
 
 
+def _control_ran(x):
+    """Shared liveness test for a negative control. A control that ERRORED is not a control that PASSED.
+    _FETCH_JS returns {status: 0, body: "", error: ...} on failure, so every `is not None` guard in this
+    module silently accepted a dead probe as a satisfied one."""
+    if not isinstance(x, dict):
+        return False
+    return int(x.get("status") or 0) != 0 and not x.get("error")
+
+
 def judge_param_swap(self_baseline, other_baseline, mutation, anon=None) -> dict:
     """Decide whether the server derived identity from a CLIENT-SUPPLIED parameter. Pure, deterministic.
 
@@ -806,8 +842,15 @@ def judge_param_swap(self_baseline, other_baseline, mutation, anon=None) -> dict
         return {"verdict": "rejected", "reason": "SECURE: the server ignored the client-supplied parameter "
                                                  "and answered about the session's own user"}
     if _b(mutation) == _b(other_baseline):
-        if anon is not None and _s(anon) == 200 and _b(anon) == _b(other_baseline):
+        if _control_ran(anon) and _s(anon) == 200 and _b(anon) == _b(other_baseline):
             return {"verdict": "rejected", "reason": "the content is PUBLIC — anonymous receives it too"}
+        # Same trap as judge_client_side_authz: an errored anon control already failed the 200 test, so
+        # it never fired the PUBLIC rejection and fell straight through to `confirmed`. Public has to be
+        # ruled OUT by a control that ran, not left unexamined.
+        if not _control_ran(anon):
+            return {"verdict": "lead", "reason": "the other persona's data was returned, but the anonymous "
+                                                 "control did not run, so PUBLIC content cannot be ruled "
+                                                 "out -- not provable"}
         return {"verdict": "confirmed",
                 "reason": "the server derived identity from the client-supplied '%s' parameter: changing "
                           "only that value returned the other persona's data verbatim (%d bytes)"
@@ -1037,15 +1080,23 @@ def judge_client_side_authz(control: dict, persona, anon=None, shell=None) -> di
     if _s(persona) != 200 or len(_b(persona).strip()) < _MIN_BODY:
         return {"verdict": "rejected", "reason": "the server also refuses it (status %s) -- the control is "
                                                  "hidden AND enforced" % _s(persona)}
-    if shell is None:
+    if not _control_ran(shell):
         return {"verdict": "lead", "reason": "server served the withheld control but the SPA-shell control "
                                              "did not run -- not provable"}
     if _b(shell) == _b(persona):
         return {"verdict": "rejected", "reason": "the response is the application shell (an unknown path "
                                                  "returns the same body) -- nothing privileged was served"}
-    if anon is not None and _s(anon) == 200 and _b(anon) == _b(persona):
+    if _control_ran(anon) and _s(anon) == 200 and _b(anon) == _b(persona):
         return {"verdict": "rejected", "reason": "the resource is PUBLIC -- anonymous receives the same "
                                                  "body, so no authorization boundary exists"}
+    # A DEAD anonymous control cannot clear a resource of being public. Tightening the condition above
+    # is not enough on its own: an errored control already failed `_s(anon) == 200`, so it never fired
+    # the rejection and fell through to `confirmed` anyway. The public-resource question has to be
+    # ANSWERED, not merely not-answered-negatively.
+    if not _control_ran(anon):
+        return {"verdict": "lead", "reason": "server served the withheld control, but the anonymous "
+                                             "control did not run, so PUBLIC cannot be ruled out -- "
+                                             "not provable"}
     return {"verdict": "confirmed",
             "reason": "the interface withheld this control (%s) yet the server served it to the same "
                       "persona (200, %d bytes): the restriction is enforced only in the browser"
