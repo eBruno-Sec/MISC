@@ -4151,7 +4151,19 @@ class ToolRegistry:
 
     async def _xss_execute(self, url: str, params: list) -> list:
         """Load payloads in headless Chromium; an alert() firing = confirmed XSS.
-        Best-effort: returns [] if Playwright/Chromium is unavailable."""
+        Best-effort: returns [] if Playwright/Chromium is unavailable.
+
+        MEASURED (docs/handoff/throughput.md): this was 60.7% of a 5329 s benchmark mission, and 82% of
+        one 10.4 s call was `wait_for_timeout(350)` after every navigation, executed serially — 8.4 s of
+        sleeping against 1.0 s of actual page loading. The settle window is what an async payload
+        (`<img src=x onerror=alert()>`) needs in order to fire, so shortening it would trade recall for
+        speed silently. The waits OVERLAP instead: browser_concurrency() tabs in the ONE browser this
+        call already launches, each payload still getting its full 350 ms.
+
+        The finding set is unchanged by the width. Targets are dispatched in fixed-size chunks in list
+        order, and the finding for a (where, param) is the FIRST payload in EXEC_PAYLOADS order that
+        fired — exactly the one the serial loop's break selected — never whichever tab happened to
+        finish first."""
         chrome = _chrome_path()
         if not chrome:
             return []
@@ -4165,6 +4177,10 @@ class ToolRegistry:
         targets = [("query", p, pl, xt.set_param(url, p, pl))
                    for p in (params or []) for pl in xt.EXEC_PAYLOADS]
         targets += [("fragment", "<fragment>", pl, xt.set_fragment(url, pl)) for pl in xt.EXEC_PAYLOADS]
+        # scope filter hoisted out of the loop — same targets are dropped, just decided once
+        targets = [t for t in targets if self.scope.validate(t[3])[0]]
+        if not targets:
+            return findings
 
         try:
             async with async_playwright() as pw:
@@ -4177,33 +4193,67 @@ class ToolRegistry:
                     if hdrs:
                         await ctx.set_extra_http_headers(hdrs)
                 await self._ctx_add_cookies(ctx)      # load authed pages logged-in
-                page = await ctx.new_page()
-                fired = {"msg": None}
 
-                async def on_dialog(d):
-                    fired["msg"] = d.message
+                # One tab per concurrent slot, each with its OWN dialog slot. The serial version kept a
+                # single `fired` dict across every navigation, so a dialog arriving late could be read
+                # against the next payload; per-tab state removes that coupling as well as serialising.
+                def _bind(state):
+                    async def on_dialog(d):
+                        state["msg"] = d.message
+                        try:
+                            await d.dismiss()
+                        except Exception:
+                            pass
+                    return lambda d: asyncio.ensure_future(on_dialog(d))
+
+                pool, tabs = asyncio.Queue(), []
+                for _ in range(max(1, min(browser_concurrency(), len(targets)))):
                     try:
-                        await d.dismiss()
+                        pg = await ctx.new_page()
                     except Exception:
-                        pass
-                page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
+                        break                       # degrade to however many tabs we did get
+                    st = {"msg": None}
+                    pg.on("dialog", _bind(st))
+                    tabs.append(pg)
+                    pool.put_nowait((pg, st))
+                if not tabs:
+                    await browser.close()
+                    return findings
 
-                done = set()
-                for where, p, pl, tu in targets:
-                    if (where, p) in done or not self.scope.validate(tu)[0]:
+                done = set()                        # (where, param) already confirmed
+
+                async def probe(t):
+                    _where, _p, _pl, tu = t
+                    pg, st = await pool.get()
+                    try:
+                        st["msg"] = None
+                        try:
+                            await pg.goto(tu, wait_until="load", timeout=8000)
+                            await pg.wait_for_timeout(350)
+                        except Exception:
+                            pass
+                        msg = st["msg"]
+                    finally:
+                        pool.put_nowait((pg, st))
+                    if msg and xt.MARK in str(msg):
+                        # takes effect at the NEXT chunk boundary, so which payloads get skipped is a
+                        # function of the target list and the width — never of who finished first.
+                        done.add((_where, _p))
+                    return msg
+
+                results = await bounded_map(targets, probe, len(tabs),
+                                            skip=lambda t: (t[0], t[1]) in done)
+
+                claimed = set()
+                for (where, p, pl, tu), msg in results:      # results are in TARGET order
+                    if isinstance(msg, BaseException) or (where, p) in claimed:
                         continue
-                    fired["msg"] = None
-                    try:
-                        await page.goto(tu, wait_until="load", timeout=8000)
-                        await page.wait_for_timeout(350)
-                    except Exception:
-                        pass
-                    if fired["msg"] and xt.MARK in str(fired["msg"]):
+                    if msg and xt.MARK in str(msg):
+                        claimed.add((where, p))
                         findings.append(self._attach_poc(
                             xt.execution_finding(url, p, pl, where), tu, None,
                             timing=f"headless Chromium executed the payload — alert() fired carrying marker {xt.MARK!r} "
                                    f"(load the URL in a browser to reproduce)"))
-                        done.add((where, p))
                 await browser.close()
         except Exception:
             return findings
