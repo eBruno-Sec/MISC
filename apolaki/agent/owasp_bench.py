@@ -127,7 +127,7 @@ def _load_done(path: str) -> dict:
 
 
 async def scan(per_category: int, categories: list, seed: int, base: str = "",
-               checkpoint: str = "") -> dict:
+               checkpoint: str = "", shard: int = 0, shards: int = 1) -> dict:
     import httpx
     import scope as scope_mod
     import tools as tools_mod
@@ -144,6 +144,13 @@ async def scan(per_category: int, categories: list, seed: int, base: str = "",
     for cat in categories:
         cases = case_urls(client, cat, base)
         picked = sorted(rng.sample(cases, min(per_category, len(cases))))
+        # SHARDING SPLITS WORK, NEVER THE SAMPLE. The sample is drawn first, from the same seed, so
+        # `shards` workers over the same category cover exactly the cases one worker would have --
+        # a stride slice, so no worker gets a contiguous run of test numbers and a shard that dies
+        # leaves a spread-out gap rather than a block. Sampling per shard instead would give each
+        # worker its own denominator, which is a different (and unstated) experiment.
+        if shards > 1:
+            picked = picked[shard::shards]
         method = ENGINES.get(cat)
         for name, url in picked:
             if name in done:
@@ -242,6 +249,102 @@ def scan_source(source_root: str, categories: list, base: str = "") -> dict:
             "source_error": tree.get("error") or "", "results": results}
 
 
+_UNMEASURED_ERRORS = ("no engine mapped", "no source provided")
+
+
+def load_run(path: str, target: str = "") -> dict:
+    """Read a scan artifact: either a full JSON document or a per-case checkpoint (one row per line).
+
+    A checkpoint truncated mid-line by a kill is expected, so a row that will not parse is dropped
+    rather than aborting the load -- losing one case is a smaller error than losing the whole run.
+    """
+    with open(path, encoding="utf8") as fh:
+        text = fh.read()
+    try:
+        run = json.loads(text)
+        if isinstance(run, dict) and "results" in run:
+            return run
+    except Exception:
+        pass
+    rows = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            pass
+    return {"results": rows, "target": target}
+
+
+def merge_runs(runs: list) -> dict:
+    """UNION several scan artifacts into one HYBRID run, one row per case.
+
+    A real engagement runs more than one lane and the client receives the UNION of what they report,
+    so the union is what must be scored -- including the union of their false positives. Merging is
+    therefore deliberately symmetric: every family from every lane is carried onto the merged row, and
+    nothing is dropped for being inconvenient.
+
+    Two rules keep the merge from inventing a result:
+
+    1. A case is UNSCORED only when EVERY contributing lane failed to measure it ("no engine mapped",
+       "no source provided"). If one lane measured it, the case is measured -- booking it unscored
+       would let a hybrid quietly narrow its own denominator, which is the exact mistake that made an
+       earlier run read 58.1% when the comparable figure was 30.5%.
+    2. The merged row records `lane: hybrid` and the contributing lanes by name, so the code-assisted
+       contribution can never be silently reported as a DAST number. `score` surfaces those lanes and
+       `report` prints the mixed-lane banner above the table.
+    """
+    merged: dict = {}
+    order: list = []
+    for run in runs:
+        for r in run.get("results", []):
+            test = r.get("test")
+            if not test:
+                continue
+            lane = str(r.get("lane") or "dast")
+            unmeasured = str(r.get("error") or "").startswith(_UNMEASURED_ERRORS)
+            row = merged.get(test)
+            if row is None:
+                row = {"test": test, "category": r.get("category"), "url": r.get("url"),
+                       "families": [], "conf": [], "error": "", "lanes": [], "engines": []}
+                merged[test] = row
+                order.append(test)
+            fams = list(r.get("families") or [])
+            confs = list(r.get("conf") or ["confirmed"] * len(fams))
+            confs = (confs + ["confirmed"] * len(fams))[:len(fams)]
+            row["families"] += fams
+            row["conf"] += confs
+            if r.get("engine"):
+                row["engines"].append(r["engine"])
+            if unmeasured:
+                # Record the excuse VERBATIM; a later lane that DID measure this case clears it below.
+                # It must stay verbatim: `score` decides a case is unmeasured by matching the start of
+                # this string, so decorating it with the lane name (an earlier version of this function
+                # wrote "dast: no engine mapped") makes the check miss and books a case NOTHING ever
+                # analysed as a false negative. Lane attribution goes in its own field.
+                row.setdefault("_unmeasured", []).append(str(r.get("error") or ""))
+                row.setdefault("unmeasured_by", []).append("%s: %s" % (lane, r.get("error")))
+            else:
+                row["_measured"] = True
+                if lane not in row["lanes"]:
+                    row["lanes"].append(lane)
+    out = []
+    for test in order:
+        row = merged[test]
+        if row.pop("_measured", False):
+            row["error"] = ""
+            row.pop("unmeasured_by", None)
+        else:
+            row["error"] = (row.get("_unmeasured") or ["no engine mapped"])[0] or "no engine mapped"
+        row.pop("_unmeasured", None)
+        lanes = row["lanes"]
+        row["lane"] = "hybrid" if len(lanes) > 1 else (lanes[0] if lanes else "dast")
+        out.append(row)
+    return {"results": out, "merged_from": len(runs)}
+
+
 def load_key(path: str) -> dict:
     """test name -> (category, is_real_vulnerability)."""
     key = {}
@@ -306,7 +409,10 @@ def score(run: dict, key: dict) -> dict:
                                                                   "no source provided")):
             unscored.append(r["test"])
             continue
-        lanes.add(str(r.get("lane") or "dast"))
+        # A merged row carries EVERY lane that contributed to it. Recording only the row's summary
+        # label would let a hybrid print as a single-lane result, and the banner is the one part of
+        # this report that survives being copy/pasted into someone else's document.
+        lanes.update(str(x) for x in (r.get("lanes") or [r.get("lane") or "dast"]))
         _cat_in_key, is_vuln = entry
         cat = r["category"]
         b = per.setdefault(cat, {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0,
@@ -395,9 +501,11 @@ def _lane_banner(lanes: list) -> list:
         return []
     out = []
     if len(lanes) > 1:
-        out += ["!! MIXED LANES IN ONE RUN: %s" % ", ".join(lanes),
-                "   These do not average. A source-derived detection and an HTTP-proven one are not",
-                "   the same evidence; score them separately or the combined figure means nothing.",
+        out += ["!! MIXED LANES IN ONE RUN (HYBRID RESULT): %s" % ", ".join(lanes),
+                "   A source-derived detection and an HTTP-proven one are NOT the same evidence.",
+                "   This figure is only meaningful quoted as a HYBRID (DAST + code-assisted) number,",
+                "   printed next to the DAST-only figure. It may NEVER be compared against a published",
+                "   DAST score (ZAP 17.99%, best-published 26%) -- those tools were never given source.",
                 ""]
     if "code-assisted" in lanes:
         out += ["CODE-ASSISTED (SAST) LANE — findings are SOURCE-DERIVED from operator-supplied code.",
@@ -452,20 +560,32 @@ def main(argv=None) -> int:
     sc.add_argument("--seed", type=int, default=1337)
     sc.add_argument("--base", default="java", choices=sorted(BASES))
     sc.add_argument("--checkpoint", default="", help="append one JSON row per case; resumes if it exists")
+    sc.add_argument("--shard", default="0/1",
+                    help="k/n -- run only every n-th case of the SAME sample, for parallel workers")
     sc.add_argument("--categories", default="sqli,xss,pathtraver,ldapi,xpathi")
     ss = sub.add_parser("scan-source", help="CODE-ASSISTED (SAST) lane: grade operator-supplied source")
     ss.add_argument("--source", required=True, help="path to the source tree; explicit, never inferred")
     ss.add_argument("--base", default="java", choices=sorted(BASES))
     ss.add_argument("--categories", default="crypto,hash,weakrand")
+    mg = sub.add_parser("merge", help="UNION scan artifacts (DAST + code-assisted) into one hybrid run")
+    mg.add_argument("--run", action="append", required=True,
+                    help="repeatable; a scan JSON or a per-case checkpoint file")
+    mg.add_argument("--base", default="java", choices=sorted(BASES))
     so = sub.add_parser("score")
-    so.add_argument("--run", required=True)
+    so.add_argument("--run", action="append", required=True,
+                    help="repeatable; more than one merges them into a hybrid run first")
     so.add_argument("--key", required=True)
     so.add_argument("--base", default="java", choices=sorted(BASES))
     a = ap.parse_args(argv)
     if a.cmd == "scan":
+        k, _, n = a.shard.partition("/")
+        shard, shards = int(k or 0), int(n or 1)
+        if shards < 1 or not (0 <= shard < shards):
+            ap.error("--shard must be k/n with 0 <= k < n")
         out = asyncio.run(scan(a.per_category, [c for c in a.categories.split(",") if c],
-                              a.seed, BASES[a.base], a.checkpoint))
+                              a.seed, BASES[a.base], a.checkpoint, shard, shards))
         out["target"] = a.base
+        out["shard"] = a.shard
         print(json.dumps(out, indent=1))
         return 0
     if a.cmd == "scan-source":
@@ -475,21 +595,17 @@ def main(argv=None) -> int:
             print("SOURCE NOT USABLE: %s" % out["source_error"], file=sys.stderr)
         print(json.dumps(out, indent=1))
         return 0
-    with open(a.run, encoding="utf8") as fh:
-        text = fh.read()
-    try:
-        run = json.loads(text)
-    except Exception:
-        # a checkpoint file: one JSON row per line, possibly truncated mid-line by a kill
-        rows = []
-        for line in text.splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    rows.append(json.loads(line))
-                except Exception:
-                    pass
-        run = {"results": rows, "target": a.base}
+    runs = [load_run(p, a.base) for p in a.run]
+    if a.cmd == "merge":
+        out = merge_runs(runs)
+        out["target"] = a.base
+        print(json.dumps(out, indent=1))
+        return 0
+    run = runs[0] if len(runs) == 1 else merge_runs(runs)
+    # A scan artifact records the suite it ran against; keep it. `--base` only fills the gap for a
+    # checkpoint file or a merge, which carry no target of their own. Overriding a recorded target
+    # would silently score a Python run against the 11-category Java denominator.
+    run["target"] = run.get("target") or a.base
     print(report(score(run, load_key(a.key))))
     return 0
 

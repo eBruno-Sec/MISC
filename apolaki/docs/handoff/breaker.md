@@ -2,6 +2,10 @@
 
 Status: IN PROGRESS. Written incrementally; whatever is here is the contribution.
 
+> SESSION 2 (2026-08-11) picks up at the exact line session 1 died on: "now the mutation check on my
+> own tests". Session-2 sections are appended at the bottom: MUTATION CHECK, TARGET 3 (code-assisted
+> lane), and ENVIRONMENT WARNING. Session-1 findings below are unchanged.
+
 Baseline claimed by Coordinator: 1792 passed, 9 skipped, 0 failed.
 Owned by me: test files + this file. Production code is READ-ONLY to me.
 
@@ -371,3 +375,98 @@ cases; false positives went down, not up, on both scorers; replay is determinist
 re-run); reproduced from the committed tree inside the baked image; all surfaces agree
 (`family=path_traversal, confidence=lead, severity=info, oracle=reflection`); and it generalises to
 a category it was not written against (`securecookie`, 45 unseen cases).
+
+---
+---
+
+# SESSION 2
+
+# MUTATION CHECK on `test_sqli_oracle_negative_controls.py` — the question session 1 died on
+
+"Do my own tests actually kill the mutants?" Answer: **8 of 11 did; 2 of the 3 survivors were real
+holes in my tests and are now closed; the third is a provably equivalent mutant.**
+
+## Method (production code never touched)
+
+Each mutant is a one-line weakening of an FP guard in `sqli_tool.py`, written to a scratch copy and
+**mounted over** `/app/sqli_tool.py` — the repo working tree is never modified:
+
+```
+docker run --rm -v "<repo>/agent:/app" -v "<scratch>/m/<ID>.py:/app/sqli_tool.py:ro" -w /app \
+  apolaki-agent:latest python -m pytest tests/test_sqli_oracle_negative_controls.py -q -rfX
+```
+
+Check 2 is graded strictly: only a FAILED/XPASS on the **named** test counts. A collection error,
+import error or unrelated failure would not have been credited.
+
+## Result matrix
+
+| mutant | weakening | killed by | verdict |
+|---|---|---|---|
+| M1 `analyze_boolean` drop divergence leg (`return st >= thresh`) | TRUE/FALSE need not differ | `test_identical_responses_never_confirm_blind_sqli` + `test_a_parameter_that_merely_echoes...` | KILLED |
+| M2 `analyze_boolean` drop baseline leg (`return stf < thresh`) | TRUE need not track baseline | **SURVIVED -> now killed by new `test_a_page_with_a_per_response_nonce_cannot_confirm_blind_sqli`** | HOLE, CLOSED |
+| M3 threshold `0.95 -> 0.90` | | `test_an_unstable_page_must_not_confirm_blind_sqli` (strict xfail XPASSes) | KILLED |
+| M3b threshold `0.95 -> 0.99` | looks like a tightening, is a weakening of leg 2 | **SURVIVED -> now killed by new `test_a_small_dynamic_block_is_not_a_diverged_page`** | HOLE, CLOSED |
+| M4 `quote_break_recovers` `>=500 -> >=400` | a 4xx counts as a break | `test_a_404_or_a_400_is_not_a_break` | KILLED |
+| M5 drop recovery leg | a bare 500 confirms | `test_a_page_that_errors_on_every_input...` + `test_error_recovery_needs_both_legs` | KILLED |
+| M6 drop baseline leg | baseline may already be 5xx | `test_a_500_unrelated_to_the_payload...` | KILLED |
+| M7 `analyze_time` drop the control differential | absolute latency confirms | `test_an_endpoint_that_is_slow_for_everything...` | KILLED |
+| M8 `analyze_time` drop `sleep_elapsed >= need` | (none) | SURVIVED | **EQUIVALENT MUTANT — proven, see below** |
+| M9 `error_signatures` drop baseline exclusion | pre-existing error text is evidence | `test_error_text_already_in_the_baseline_is_not_evidence` | KILLED |
+| M10 `structural_confirmed` drop the ok-leg | no differential needed | `test_structural_oracle_needs_a_differential_not_just_an_error` | KILLED |
+
+## The two holes that were real, and why they mattered
+
+**M2 — the baseline leg was untested.** Every existing negative control used a page where TRUE and
+FALSE were *too similar* to diverge, so leg 2 alone repelled all of them and leg 1 was never
+load-bearing in any test. `return stf < thresh` therefore passed the whole file. That mutant is an
+oracle that confirms whenever two responses merely differ from each other — on any page carrying a
+per-request nonce, request-id or timestamp, that is **every** request. The new test uses exactly that
+shape (MEASURED `st=0.7484`, `stf=0.8571`; both legs below threshold, so only leg 1 rejects it).
+
+**M3b — raising 0.95 to 0.99 is a weakening, not a tightening.** `analyze_boolean` uses the same
+constant for both legs in opposite directions: `st >= thresh and stf < thresh`. Raising it makes the
+divergence leg *easier*, so a rotating ad slot, a "generated in 0.04s" footer or any ~2% dynamic
+block starts counting as "FALSE returned a different page". MEASURED on a 2099-byte page with a
+50-byte rotating block: `st=0.9969`, `stf=0.9851` — 0.95 rejects, 0.99 confirms. No existing test
+pinned the constant from the false-positive side; one does now.
+
+## M8 is equivalent, not a hole — proof
+
+`sleep - control >= need` implies `sleep >= need` whenever `control >= 0`, and `control` is a
+measured elapsed time. Brute-forced rather than argued (`/w/equiv.py` in the agent image):
+
+```
+non-negative elapsed: 804005 input triples (control 0..40s x sleep 0..40s x seconds in {1,3,5,10,30})
+   disagreements between analyze_time and the mutant: 0
+NEGATIVE control_elapsed (physically impossible):     disagreements: 3150
+```
+
+The only inputs that separate them cannot occur. No test is owed for it.
+
+## Post-change state of the file
+
+```
+docker run --rm -v <repo>/agent:/app -w /app apolaki-agent:latest \
+  python -m pytest tests/test_sqli_oracle_negative_controls.py -q
+.x...........                                           [100%]   12 passed, 1 xfailed
+```
+
+Full suite, `--ignore=tests/test_dom_audit_concurrency.py` (uncommitted, known-broken, not mine):
+
+```
+1904 passed, 9 skipped, 1 xfailed, 9 warnings in 244.32s     EXIT=0
+```
+
+**VERDICT on `test_sqli_oracle_negative_controls.py`: CONFIRMED as a real safety net after the two
+additions.** Before them it had a hole precisely where the live defect lives — the baseline leg of
+`analyze_boolean`, the same leg whose *stability* is the 00494 false positive.
+
+## GAP FOR THE OWNER — `sqli_tool.py` has ZERO entries in `agent/mutation_gate.py`
+
+`mutation_gate.py` carries 18 mutants: 6 `bie.py`, 3 `transport_posture.py`, 3 `web_security.py`,
+2 `prng_disclosure.py`, 1 each `ics_dnp3_s7`/`blind_benchmark`/`proof_schema`/`cookie_flags`.
+**None for `sqli_tool.py`** — the module behind 21 of the product's 22 true positives. Its own
+docstring says "Adding an oracle means adding its mutant." I did not edit the gate (not my lane),
+but M1, M2, M4, M5, M6, M7, M9, M10 above are all verified-killing pairs and can be pasted in as-is,
+each with the exact node id recorded in the matrix.

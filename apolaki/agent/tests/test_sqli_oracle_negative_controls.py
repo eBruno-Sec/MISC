@@ -80,6 +80,43 @@ def test_identical_responses_never_confirm_blind_sqli():
     assert not sqli.analyze_boolean(same, same, same)
 
 
+def test_a_page_with_a_per_response_nonce_cannot_confirm_blind_sqli():
+    """A request-id/nonce makes EVERY response differ, including from the baseline.
+
+    Written to kill a specific mutant: dropping the baseline leg (`return stf < thresh`) leaves an
+    oracle that confirms whenever TRUE and FALSE merely differ from each other -- which on a page
+    carrying a nonce is always. The baseline leg is what makes "FALSE diverged" mean "diverged from
+    the page the application normally returns". MEASURED: st=0.7484, stf=0.8571, both below 0.95.
+    """
+    page = "<html><body>Request-ID: %s<br>Results for %s</body></html>"
+    base = page % ("3f1a9c2e5b7d4086", "1")
+    true_ = page % ("a20e77c4d9f31b5e", "1' AND 1=1-- -")
+    false_ = page % ("cc84b1f60a7e2d93", "1' AND 1=2-- -")
+    assert sqli.similar(true_, false_) < 0.95, "fixture: TRUE and FALSE must look divergent"
+    assert sqli.similar(base, true_) < 0.95, "fixture: TRUE must NOT track the baseline"
+    assert not sqli.analyze_boolean(base, true_, false_)
+
+
+def test_a_small_dynamic_block_is_not_a_diverged_page():
+    """The premise of boolean-blind is that FALSE returns a DIFFERENT PAGE, not a page that differs.
+
+    Written to kill a specific mutant: raising the divergence threshold 0.95 -> 0.99 looks like a
+    tightening but is a weakening of the SECOND leg -- it lets a rotating banner, an ad slot, a
+    "generated in 0.04s" footer or any ~2% dynamic block count as divergence. MEASURED on a 2099-byte
+    page with a 50-byte rotating block: st=0.9969, stf=0.9851, so 0.95 rejects it and 0.99 confirms.
+    """
+    common = "<html><body>" + ("Product listing row with some filler text here. " * 42)
+    ad1 = "<div id=ad>Summer sale on garden furniture!!</div>"
+    ad2 = "<div id=ad>Winter clearance on office chairs!</div>"
+    base = common + ad1 + "echo: 1</body></html>"
+    true_ = common + ad1 + "echo: 1' AND 1=1-- -</body></html>"
+    false_ = common + ad2 + "echo: 1' AND 1=2-- -</body></html>"
+    stf = sqli.similar(true_, false_)
+    assert 0.95 <= stf < 0.99, ("fixture must sit between the real threshold and the mutant's", stf)
+    assert sqli.similar(base, true_) >= 0.99, "fixture: TRUE tracks the baseline on both thresholds"
+    assert not sqli.analyze_boolean(base, true_, false_)
+
+
 def test_a_page_that_errors_on_every_input_is_not_error_recovery():
     """A generic error page has no RECOVERY leg: doubling the quote does not repair anything."""
     assert not sqli.quote_break_recovers(500, 500, 500)
