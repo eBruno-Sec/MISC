@@ -9,7 +9,8 @@ ledger wins and this file is stale.
 
 | track | figure | denominator | FPR |
 |---|---:|---|---:|
-| OWASP Benchmark Java v1.2 — **harness** | **41.3%** | 11-category macro, 2132 cases | **0.0%** |
+| OWASP Benchmark Java v1.2 — **product claim** | **34.9%** | 11-cat macro, cross-family FPs counted | **2.1%** |
+| OWASP Benchmark Java v1.2 — harness, official CWE-matching convention | 41.3% | 11-category macro, 2132 cases | 0.0% |
 | OWASP Benchmark Python v0.1 — harness | 34.8% | 14-category macro, 54 cases | 0.0% |
 | **Whole-product mission** (the real number) | **2 findings** | owaspbench, 1415 vulnerable cases | — |
 
@@ -70,6 +71,44 @@ programme backlog: 10 · verification: 2 · blocked: 0
 
 - **Mission `90cee81c` is running** (owaspbench-clean, probe phase). `docker compose build agent`
   SIGKILLs it. No rebuild until it finishes — code edits and tests only.
+
+## Rejected claims — verified by the Breaker, 2026-08-10
+
+- **0.0% FPR: REJECTED as a product claim.** The scorer only credits findings within a case's own
+  family, so 22 clean `securecookie` cases carrying CONFIRMED `path_traversal` findings all scored as
+  true negatives. Real figures 34.9% / 2.1%. See the retraction in [LEDGERS.md](LEDGERS.md).
+- **The pathtraver 69.2% is a signature, not a capability.** Its oracle confirms on *reflection* — a
+  payload with no `../`, and even a string that is not a filename, both "confirm". It reads clean only
+  because the clean pathtraver cases happen not to echo.
+- **`1709f59` (the `max_hostless` reach guard) shipped UNTESTED.** Deleting the whole branch still
+  left 30 passing. My own commit, my own miss — the Breaker wrote the negative control I should have.
+- **`707b3b9` was incomplete**, in four ways; fixed in `5af0af8`. CSV had no confidence column at all;
+  SARIF still emits `level=error` / `security-severity=9.5` for demoted rows with the demotion buried
+  in `properties.confidence`, which GitHub code scanning and DefectDojo do not read. **SARIF is still
+  open.**
+- **BIE errored-control fix: PLAUSIBLE, not confirmed.** The two "surviving mutants" were proven
+  *equivalent* (the producer writes `error` on exactly one path and that path hardcodes `status 0`,
+  so `_control_ran()==False with status==200` is unreachable). But a **residual live defect** remains
+  at `bie.py:292` — `judge()`'s third control still reads `if control is not None and _s(control) == 200`,
+  the identical fall-through, reproduced with two personas: control alive → `rejected`, control errored
+  → `confirmed`. And the fix is live only via `docker cp`; `grep -c _control_ran` inside the baked
+  image returns **0**, so it dies on the next rebuild.
+
+## ZAP — answered, and it is not what anyone assumed
+
+**`run_zap` has never executed in any Apolaki mission.** MEASURED across 150 missions and 25,619
+recorded tool calls: zero `run_zap` rows. ZAP's own daemon reports `numberOfMessages: 0` after 10h up.
+Three independent gates each suffice to prevent it: the API model default `enable_zap: bool = False`
+(`main.py:81`), a mode gate that 422s ZAP outside Full mode (`main.py:336`), and
+`PermissionLevel.INTRUSIVE` which is outside the active/passive tiers (`tools.py:138`). The only
+writer of `enable_zap=True` in the tree is a UI checkbox that starts unticked.
+
+The planner branch is **not** dead — driving `next_batch` to exhaustion with `mode=full, zap=True`
+does schedule the step. Four missions in July did carry `enable_zap=True` and still produced zero
+`run_zap` calls; that residue is **UNVERIFIED** and means "flip the flag" is not sufficient without an
+end-to-end test asserting a `run_zap` row lands. `recon["zap"]` is a confirmed **dead write** — sole
+occurrence in the tree, no reader, no dynamic access. Targeted rescan is **NOT WIRED** (one ZAP call
+per host per mission, ever), and the AJAX spider is wrapped in a bare `except: pass`.
 
 ## Unproven claims
 

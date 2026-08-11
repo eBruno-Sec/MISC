@@ -39,6 +39,43 @@ Every scored run. Sealed = the result artifact was hashed **before** the answer 
 Peer context, recomputed from raw artifacts: **ZAP 17.99%**, best published full-suite DAST **26%**,
 11-tool DAST mean **~11%**. See PEER_BASELINES.md.
 
+> ### ⚠ RETRACTION, 2026-08-10 — 41.3% / 0.0% FPR is not the product claim
+>
+> Adversarial verification **REJECTED** the headline pair. Two separate problems, both MEASURED.
+>
+> **1. The FPR is 0.0% only because the scorer never looks across families.** `_detected` credits a
+> finding only within the case's own category — correct for TPR, wrong for FPR. Measured: **22 clean
+> `securecookie` cases carry CONFIRMED `path_traversal` findings** and every one of them scored as a
+> true negative. Counting cross-family false positives:
+>
+> | | 11-cat macro | FPR | securecookie |
+> |---|---:|---:|---:|
+> | as previously reported | 41.3% | 0.0% | 52.8% |
+> | with cross-family FPs counted | **34.9%** | **2.1%** | **−18.2%** (FPR 71.0%) |
+>
+> **2. The path-traversal oracle confirms on REFLECTION, not traversal.** The negative controls that
+> should have caught this were never written:
+> ```
+> ../bbh-canary.txt            reflected=True
+> bbh-canary.txt   (no ../)    reflected=True   <- no traversal at all
+> APOLAKI-NOT-A-FILE-9182      reflected=True   <- not even a filename
+> ../../../../etc/passwd       body contains 'root:x:0:0'?  False
+> ```
+> Sampling the pathtraver true positives gives an oracle tally of `{'reflection-only': 22}` — **the
+> entire 69.2% pathtraver score rests on reflection.** It reads FPR 0.0% only because the clean
+> pathtraver cases happen not to echo (8/8 measured `reflects=False`). That is a signature that
+> survives by luck, not a capability.
+>
+> **What is still defensible.** 41.3% / 0.0% is a correct *Benchmark* figure under the official
+> CWE-matching convention, and the lead handling is clean on both sides (a lead is not a TP, and clean
+> cases are not dropped from the denominator: `clean cases DROPPED: 0`). **It is not defensible as a
+> product claim**, because a real client's report would carry those 22 false positives. Quote **34.9%
+> / 2.1%** whenever the question is "how good is Apolaki", and say which convention any other number
+> uses.
+>
+> Standing rule this adds: **a within-family scorer cannot measure a whole-product false-positive
+> rate.** Any future FPR must count every confirmed finding on a clean case, whatever family it claims.
+
 ### OWASP Benchmark Python v0.1 — foreign-stack generalization check
 
 | date | commit | cases | official | FPR | note |
