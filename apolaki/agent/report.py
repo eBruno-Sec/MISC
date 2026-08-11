@@ -209,8 +209,11 @@ def business_logic_view(findings: list, leads: list) -> dict:
     the workflow STRUCTURE (bizlogic.py). Pure — reads the business_logic/race signals already in the report."""
     import re
     fams = {"business_logic", "race"}
+    # `== "confirmed"` is the OPPOSITE fork of the badge: a finding with no confidence key at all --
+    # which is most of them, since engines only set the field when demoting -- read as NOT confirmed
+    # here while rendering as CONFIRMED on its card. One shared predicate, both directions.
     conf = [f for f in (findings or []) if str(f.get("family") or "").lower() in fams
-            and str(f.get("confidence") or "").lower() == "confirmed"]
+            and _confirmed(f)]
     hyp = [x for x in (leads or []) if str(x.get("family") or "").lower() in fams]
     flows, cats = set(), set()
     for item in conf + hyp:
@@ -1126,7 +1129,7 @@ def graded_business_impact(finding: dict):
     if not grade:
         return None
     dem, plaus, unv = grade
-    confirmed = str(finding.get("confidence") or "").strip().lower() == "confirmed"
+    confirmed = _confirmed(finding)          # shared predicate; a missing key means confirmed
     return {
         "confidence": finding.get("confidence") or "unconfirmed",
         "demonstrated": ("Confirmed on this target: " + dem) if confirmed
@@ -1229,9 +1232,12 @@ def risk_score(findings: list) -> dict:
     gate had just rejected went on contributing their full severity weight to the headline number — the
     docstring's claim was the one thing the code did not do. Filtering here rather than at each call site
     means the guarantee holds for every caller, including any added later."""
-    confirmed = [f for f in (findings or [])
-                 if str((f or {}).get("confidence") or "confirmed").lower() not in ("lead", "unconfirmed",
-                                                                                    "informational")]
+    # Use the SHARED predicate, not a private subset. This list used to omit "candidate", "info" and
+    # "tentative", so a candidate finding rendered as an amber LEAD chip and counted 0 in the severity
+    # tally while still contributing its full weight here — the badge said unproven and the headline
+    # risk number said High. `sarif_io.import_sarif()` writes confidence="candidate", so that fork was
+    # live, not hypothetical.
+    confirmed = [f for f in (findings or []) if _confirmed(f)]
     score = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in confirmed))
     findings = confirmed
     if score >= 70:
@@ -2632,7 +2638,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
     aa = auth_artery or {}
     prov = intel_provenance or {}
     if aa.get("ran") or prov.get("by_source"):
-        n_conf = sum(1 for f in (findings or []) if str(f.get("confidence")) == "confirmed")
+        n_conf = sum(1 for f in (findings or []) if _confirmed(f))
         n_lead = len(findings or []) - n_conf + len(leads or [])
         rows = []
         if aa.get("ran"):
@@ -2939,7 +2945,13 @@ evidence; unconfirmed leads are advisory and must be verified before submission.
 
 
 # ── CSV / JSON export ────────────────────────────────────────────
-_CSV_FIELDS = ["title", "severity", "target", "cvss_score", "cwe", "capec", "owasp", "impact", "description"]
+# "confidence" is NOT optional. Without it a proof-gate demotion exports as a bare `critical` row with
+# nothing to distinguish it from a proven one -- the CSV is the format that gets pasted into a tracker.
+# APPENDED, not inserted. A CSV header is a contract: anything reading these columns positionally
+# breaks if the prefix shifts, and the existing test asserts the leading `title,severity,target`.
+# Adding at the end is strictly additive for every consumer.
+_CSV_FIELDS = ["title", "severity", "target", "cvss_score", "cwe", "capec", "owasp", "impact",
+               "description", "confidence"]
 
 
 def findings_csv(findings: list) -> str:
@@ -2947,7 +2959,9 @@ def findings_csv(findings: list) -> str:
     w = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
     w.writeheader()
     for f in sorted(_with_capec(findings), key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)):
-        w.writerow({k: f.get(k, "") for k in _CSV_FIELDS})
+        row = {k: f.get(k, "") for k in _CSV_FIELDS}
+        row["confidence"] = "confirmed" if _confirmed(f) else (f.get("confidence") or "lead")
+        w.writerow(row)
     return buf.getvalue()
 
 
