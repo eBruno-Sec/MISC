@@ -110,3 +110,51 @@ def test_behaviour_proof_ok_is_pure_and_reports_its_gaps():
     assert not ok and gaps == ["behaviour_probe_not_run"]
     ok, gaps = dep.behaviour_proof_ok(_proof(cve="CVE-2023-26118"), ["CVE-2023-26118"])
     assert ok and gaps == []
+
+
+# ── slice 2: the proof gate must inspect SCA findings ────────────────────────
+import proof_schema
+
+
+def test_proof_gate_demotes_a_presence_only_sca_confirm():
+    """The pre-Q-021A shape: family=vulnerable_component, confidence=confirmed, evidence naming only
+    the served version. `demote_unproven` used to pass it straight through because
+    `vulnerable_component` was absent from _DEFAULT_ENFORCE, so the false CONFIRMED reached the
+    client report intact."""
+    stale = {"title": "Vulnerable component: angular@1.7.7", "family": "vulnerable_component",
+             "confidence": "confirmed", "severity": "medium",
+             "evidence": "angular@1.7.7 from script-filename: https://t/js/angular_1-7-7.js",
+             "impact": "Known-vulnerable dependency.",
+             "reproduction_steps": ["Load the script", "Confirm the banner"]}
+    out = proof_schema.demote_unproven([stale])
+    assert out[0]["confidence"] == "lead"
+    assert out[0]["proof_gap"] and "needs-confirmation" in out[0]["tags"]
+
+
+def test_proof_gate_demotes_a_bare_cwe1104_confirm_with_no_family():
+    only_cwe = {"title": "outdated lib", "cwe": "CWE-1104", "confidence": "confirmed",
+                "evidence": "server banner reports nginx 1.14.0", "impact": "x",
+                "reproduction_steps": ["curl -i https://t/"]}
+    assert proof_schema.family_of(only_cwe) == "vulnerable_component"
+    assert proof_schema.demote_unproven([only_cwe])[0]["confidence"] == "lead"
+
+
+def test_proof_gate_does_not_demote_the_real_behaviour_confirmed_sca_finding():
+    """NEGATIVE CONTROL for slice 2 — enforcing a new family must not create a false negative.
+    The producer's own behaviour-differential output has to survive the gate untouched."""
+    comp = _angular()
+    f = dep.vulnerable_component_finding(comp, dep.assess_component(comp), behaviour_proof=_proof())
+    assert f["confidence"] == "confirmed"
+    ok, missing = proof_schema.validate_confirmed(f)
+    assert ok, missing
+    assert proof_schema.demote_unproven([f])[0]["confidence"] == "confirmed"
+
+
+def test_proof_gate_still_ignores_families_outside_the_enforce_set():
+    """NEGATIVE CONTROL — the deliberately narrow default is preserved for every other family; this
+    slice widens it by exactly one entry, not to 'all'."""
+    other = {"title": "weak random", "family": "weak_random", "confidence": "confirmed",
+             "evidence": "short", "impact": ""}
+    assert proof_schema.demote_unproven([other])[0]["confidence"] == "confirmed"
+    assert "vulnerable_component" in proof_schema._DEFAULT_ENFORCE
+    assert "weak_random" not in proof_schema._DEFAULT_ENFORCE

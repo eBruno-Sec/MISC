@@ -23,6 +23,7 @@ _CWE_FAMILY = {
     "CWE-862": "access_control", "CWE-863": "access_control", "CWE-306": "missing_authentication",
     "CWE-89": "sql_injection", "CWE-79": "xss", "CWE-200": "sensitive_exposure",
     "CWE-201": "sensitive_exposure", "CWE-264": "sensitive_exposure", "CWE-918": "ssrf",
+    "CWE-1104": "vulnerable_component", "CWE-1035": "vulnerable_component",
 }
 
 # Per-family proof contract. `signals` = groups of interchangeable substrings; the evidence must
@@ -70,6 +71,18 @@ _FAMILY = {
         ["valid", "authenticated session", "session cookie", "token issued", "session issued",
          "logged in", "working", "issued", "exposed", "harvested", "reused"],
     ]},
+    # SCA (Q-021A). A version falling inside a published range is a DATABASE MATCH, not an
+    # observation — the old producer stamped `confirmed` on exactly that while its own impact text
+    # said reachability was never proven. The proof here is the CVE's OWN BEHAVIOUR: the exact CVE,
+    # a behaviour differential, and the structurally identical TRIGGER-ABSENT control that did not
+    # reproduce it. Presence evidence ("angular@1.7.7 from script-filename: …") carries none of
+    # these three and is correctly demoted to a lead.
+    "vulnerable_component": {"impact": True, "signals": [
+        ["cve-"],                                                   # the exact CVE exercised
+        ["behaviour differential", "behavior differential", "negative control", "trigger-absent",
+         "trigger absent"],                                         # a probe, not a table lookup
+        ["trigger", "observed", "reproduced", "fired"],             # what was actually seen
+    ]},
 }
 
 # Default for any other family: still require a non-trivial evidence string + an impact.
@@ -81,7 +94,8 @@ _MIN_EVIDENCE_LEN = 20
 # Normalize the family names Apolaki's various tools emit to the canonical proof-rule keys.
 _ALIAS = {"sqli": "sql_injection", "nosqli": "sql_injection", "bola_idor": "idor", "bola": "idor",
           "broken_auth": "access_control", "broken_access_control": "access_control",
-          "information_disclosure": "sensitive_exposure", "info_disclosure": "sensitive_exposure"}
+          "information_disclosure": "sensitive_exposure", "info_disclosure": "sensitive_exposure",
+          "vuln_component": "vulnerable_component", "sca": "vulnerable_component"}
 
 
 def family_of(finding: dict) -> str:
@@ -135,7 +149,16 @@ def validate_confirmed(finding: dict) -> tuple:
 # the most damaging, and Apolaki's real producers for these already emit the required proof. Other
 # families are validated by the benchmark asserter but only demoted live when APOLAKI_ENFORCE_PROOF=all,
 # so a producer whose evidence phrasing isn't yet audited can't be silently downgraded (no new FN bug).
-_DEFAULT_ENFORCE = ("idor", "access_control", "missing_authentication", "bola_idor", "bfla")
+#
+# `vulnerable_component` joins the set (Q-021A). The narrow default is a sequencing rule, not a
+# permanent one: a family is enforceable once its producers' evidence phrasing HAS been audited. This
+# family has exactly one production producer (`dependency_intel.vulnerable_component_finding`), it was
+# audited in slice 1, and it now emits the behaviour-differential evidence on the confirmed path and a
+# `lead` otherwise. So enforcement cannot manufacture a false negative here — the only row it can
+# demote is one claiming `confirmed` on presence evidence alone, which is precisely the defect. The
+# set is widened by ONE entry; every other family keeps the deliberate no-new-FN default.
+_DEFAULT_ENFORCE = ("idor", "access_control", "missing_authentication", "bola_idor", "bfla",
+                    "vulnerable_component")
 
 
 #: The vocabulary of a confidence value that is NOT a proof. `demote_unproven` writes "lead" into this

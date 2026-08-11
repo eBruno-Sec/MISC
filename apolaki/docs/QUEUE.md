@@ -59,7 +59,7 @@ the baked image.
 | # | slice | state |
 |---|---|---|
 | 1 | `dependency_intel` — split version-certainty from exploitability-certainty | **done** |
-| 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | todo |
+| 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | **done** |
 | 3 | `retest` — a patched component must CLOSE, not stay OPEN | todo |
 | 4 | structured `cves` on the SCA finding so KEV can match it | todo |
 | 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | todo |
@@ -85,6 +85,23 @@ Preserved deliberately: the MEDIUM severity cap and its scanner-inflation commen
 Hand-off note (files owned elsewhere) — none for slice 1; `tools.py:5210` calls
 `vulnerable_component_finding(comp, vulns)` positionally and keeps working unchanged, now emitting a
 lead instead of a false confirm.
+
+### Slice 2 — the proof gate now inspects SCA findings
+`_DEFAULT_ENFORCE` omitted `vulnerable_component`, so `demote_unproven` never looked at an SCA row
+and the slice-1 defect reached the client report intact even after the producer was fixed (any other
+producer, or a persisted pre-fix finding, still slipped through).
+
+* new `_FAMILY["vulnerable_component"]` proof contract: the exact CVE **and** a behaviour
+  differential / negative control **and** what was observed. Presence evidence carries none of them.
+* `_CWE_FAMILY` gains `CWE-1104` / `CWE-1035`; `_ALIAS` gains `vuln_component` / `sca`, so a row
+  carrying only the CWE routes to the same contract.
+* `_DEFAULT_ENFORCE` widened by exactly ONE entry. The narrow default is a **sequencing** rule, not
+  a permanent one — a family becomes enforceable once its producers' evidence phrasing has been
+  audited. This family has one production producer, audited in slice 1, so enforcement cannot
+  manufacture a false negative; the only row it can demote is a presence-only `confirmed`.
+
+Mutation test: reverting `_DEFAULT_ENFORCE`, and separately weakening the family rule to the CVE
+signal alone, both leave the stale row `confirmed` — the targeted tests fail in both cases.
 
 ---
 
