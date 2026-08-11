@@ -38,6 +38,20 @@ def _confirmed(f: dict) -> bool:
             "lead", "candidate", "unconfirmed", "informational", "info", "tentative")
 
 
+def _oracle_of(f: dict) -> str:
+    """This finding's success oracle, whichever spelling its producer used — same rule as
+    `_confirmed`: import through proof_schema so the vocabulary cannot fork a third time."""
+    try:
+        import proof_schema as _ps
+        return _ps.oracle_of(f)
+    except Exception:
+        for k in ("success_oracle", "oracle"):
+            v = str((f or {}).get(k) or "").strip()
+            if v:
+                return v
+        return ""
+
+
 def _conf_badge(f: dict) -> str:
     """The confidence chip on a finding card. Amber LEAD when the proof gate demoted this row."""
     if _confirmed(f):
@@ -1699,7 +1713,10 @@ def report_integrity_check(findings: list, chains: list = None, candidate_valida
             if not (vec or score or str(f.get("cvss_rationale") or "").strip()):
                 issues.append("HIGH/CRITICAL finding without a CVSS vector or scoring rationale: %s" % title)
         if conf == "confirmed":
-            has_oracle = bool(str(f.get("success_oracle") or "").strip()) or any("oracle" in str(s).lower() for s in reps)
+            # Read through the canonical accessor: this used to read `success_oracle` only, so every
+            # family whose producer spells it `oracle` was reported as having no success oracle at
+            # all — the mirror image of the bug in poc_bundle, which read only the other spelling.
+            has_oracle = bool(_oracle_of(f)) or any("oracle" in str(s).lower() for s in reps)
             if not reps:
                 issues.append("confirmed finding without reproduction steps: %s" % title)
             elif not has_oracle:

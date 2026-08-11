@@ -62,7 +62,7 @@ the baked image.
 | 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | **done** |
 | 3 | `retest` — a patched component must CLOSE, not stay OPEN | **done** |
 | 4 | structured `cves` on the SCA finding so KEV can match it | **done** |
-| 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | todo |
+| 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | **done** |
 | 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | todo |
 
 ### Slice 1 — `confidence` no longer answers two questions with one word
@@ -143,6 +143,37 @@ affected lead cannot read as a confirmation just because its CVE is in the catal
 
 Mutation test: drop `cves` and restore the pre-slice-1 presence-only evidence -> the SCA finding
 misses KEV again.
+
+### Slice 5 — one canonical oracle key (platform-wide, not an SCA bug)
+Re-measured on this tree: **38** modules mention `success_oracle`, **87** sites write a plain
+`"oracle"`. Both are alive, so neither was declared dead. The real defect is that the two CONSUMERS
+disagreed with each other — `poc_bundle` read only `oracle`, `report_integrity_check` read only
+`success_oracle`, so each was blind to exactly the families the other could see.
+
+* canonical key: `proof_schema.ORACLE_KEY = "success_oracle"`.
+* one reader: `proof_schema.oracle_of(finding)` — canonical spelling wins, legacy accepted.
+* one chokepoint: `normalize_oracle()` applied inside `demote_unproven`, which is what
+  `db.get_findings_gated` (the documented "anything that PRESENTS a finding reads through here"
+  accessor) already routes every consumer through. Additive and non-destructive: the legacy key is
+  left in place, so both producer spellings keep working.
+* consumers fixed: `poc_bundle.py` (both sites) and `report.py:1702`, the latter via a local
+  `_oracle_of()` that imports through proof_schema — same discipline as `_confirmed()`, so the
+  vocabulary cannot fork a third time.
+
+**Scope note, important for whoever picks this up next**: `oracle` is *also* a key on techniques,
+candidate-validation records, retest plans and evidence dicts. Those are different objects with
+their own meaning and were deliberately left alone. This slice is about FINDINGS only.
+
+**Hand-off notes — readers in files this lane must not touch:**
+- `agent/bie.py:601` writes `"oracle": finding.get("oracle") or ""` into the BIE evidence block. It
+  should read `proof_schema.oracle_of(finding)`. One-line change, owned by the BIE lane.
+- `agent/agent.py:792` reads `already.get("success_oracle")` only; `proof_schema.oracle_of` would
+  also catch legacy-spelling producers. Owned by the funnel lane.
+- `agent/blind_benchmark.py:266` and `agent/liveness.py:126` both read `success_oracle` only. Both
+  already fall back to `evidence`, so neither is currently wrong — worth switching for consistency.
+
+Mutation test: restrict `_ORACLE_ALIASES` to either spelling alone -> the normalisation returns
+`None` and the PoC bundle's oracle goes empty again.
 
 ---
 

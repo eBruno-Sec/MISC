@@ -114,9 +114,15 @@ def build(finding: dict, exchanges: list = None, *, tool_version: str = "", targ
     import report
     import remediation
     import technique_model
+    import proof_schema
     fam = str(finding.get("family") or "").lower()
+    # Read the oracle through the ONE canonical accessor. This used to read `finding["oracle"]`
+    # directly, so every family whose producer spells it `success_oracle` (SCA, the DOM tools, ...)
+    # reached the bundle with an empty confirmation oracle — while report.py read only the other
+    # spelling. Both spellings are live; `oracle_of` is the single place that knows that.
+    _oracle = proof_schema.oracle_of(finding)
     contract = technique_model.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""),
-                                               "oracle": str(finding.get("oracle") or "")})
+                                               "oracle": _oracle})
     grade = report.graded_business_impact(finding)
     rplan = retest.plan(finding)
     out = {
@@ -134,7 +140,7 @@ def build(finding: dict, exchanges: list = None, *, tool_version: str = "", targ
             "markdown": poc.finding_markdown(finding, exchanges or [], redact=True),
         },
         "confirmation": {          # how it was kept honest (#115) — the FP-safety contract
-            "oracle": str(finding.get("oracle") or ""),
+            "oracle": _oracle,
             "negative_control": contract.get("negative_control"),
             "evidence_requirements": contract.get("evidence_requirements"),
             "safety": contract.get("safety"),

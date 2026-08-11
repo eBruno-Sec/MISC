@@ -176,6 +176,45 @@ def is_confirmed(finding: dict) -> bool:
     return str(finding.get("confidence") or "confirmed").strip().lower() not in UNPROVEN_CONFIDENCE
 
 
+#: The CANONICAL key for a finding's machine-checkable success oracle. Measured across the platform:
+#: 38 modules mention `success_oracle` and 87 sites write a plain `oracle`, and the two CONSUMERS
+#: disagreed with each other — `poc_bundle` read only `oracle` (so every family whose producer chose
+#: `success_oracle` reached the PoC bundle with an empty oracle) while `report_integrity_check` read
+#: only `success_oracle` (so every family that chose `oracle` was invisible to its has-an-oracle
+#: check). Neither spelling is dead, so neither is deleted: producers keep writing whichever they
+#: already write, and everything that READS an oracle goes through `oracle_of` / the normalisation
+#: below. Note `oracle` is also a key on techniques, candidate-validation records and retest plans —
+#: different objects with their own meaning. This is about FINDINGS only.
+ORACLE_KEY = "success_oracle"
+_ORACLE_ALIASES = (ORACLE_KEY, "oracle")
+
+
+def oracle_of(finding: dict) -> str:
+    """This finding's success oracle, whichever spelling its producer used. The canonical key wins.
+    Pure; returns "" when the finding has neither."""
+    if not isinstance(finding, dict):
+        return ""
+    for k in _ORACLE_ALIASES:
+        v = str(finding.get(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+def normalize_oracle(finding: dict) -> dict:
+    """Return the finding with the CANONICAL oracle key populated from whichever spelling it has.
+    Non-destructive (copies only when something actually changes) and additive — the legacy `oracle`
+    key is left in place, so a producer or consumer still using it keeps working."""
+    if not isinstance(finding, dict):
+        return finding
+    v = oracle_of(finding)
+    if not v or str(finding.get(ORACLE_KEY) or "").strip():
+        return finding
+    g = dict(finding)
+    g[ORACLE_KEY] = v
+    return g
+
+
 def demote_unproven(findings: list, enforce_families=None) -> list:
     """Return findings with any confirmed-but-unproven item demoted to a lead + tagged, so a weak
     'confirmed' can never reach a report. Non-destructive: copies, never drops. `enforce_families`
@@ -185,6 +224,10 @@ def demote_unproven(findings: list, enforce_families=None) -> list:
     mode = enforce_families if enforce_families is not None else os.environ.get("APOLAKI_ENFORCE_PROOF", "")
     out = []
     for f in findings or []:
+        # ONE chokepoint for the oracle-key vocabulary. `db.get_findings_gated` routes everything
+        # that PRESENTS a finding through here, so normalising the canonical key once means no
+        # consumer has to know which spelling its producer happened to pick.
+        f = normalize_oracle(f)
         fam = family_of(f)
         enforce = (mode == "all") or (fam in _DEFAULT_ENFORCE)
         if not enforce:

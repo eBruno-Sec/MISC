@@ -271,3 +271,64 @@ def test_kev_stays_silent_when_the_sca_cve_is_not_in_the_catalog():
     f = dep.vulnerable_component_finding(comp, dep.assess_component(comp))
     html = report.generate_html_report("P", [f], {"in_scope": ["t"]}, kev_cves={"CVE-1999-0001"})
     assert "Not identified in KEV" in html
+
+
+# ── slice 5: `success_oracle` vs `oracle` — one canonical key ────────────────
+def test_oracle_of_reads_both_producer_spellings():
+    """Measured platform-wide: 38 modules mention `success_oracle`, 87 sites write a plain `oracle`.
+    `poc_bundle` read only `oracle`; `report.report_integrity_check` read only `success_oracle` — the
+    two consumers disagreed with EACH OTHER. Neither spelling is dead, so neither is deleted: one
+    canonical key (`success_oracle`), one reader, both producer spellings still accepted."""
+    assert proof_schema.ORACLE_KEY == "success_oracle"
+    assert proof_schema.oracle_of({"success_oracle": "canonical"}) == "canonical"
+    assert proof_schema.oracle_of({"oracle": "legacy"}) == "legacy"
+    assert proof_schema.oracle_of({"success_oracle": "canonical", "oracle": "legacy"}) == "canonical"
+    assert proof_schema.oracle_of({}) == ""
+    assert proof_schema.oracle_of(None) == ""
+
+
+def test_the_proof_gate_normalises_the_oracle_key_at_one_chokepoint():
+    """`db.get_findings_gated` -> `demote_unproven` is the documented single chokepoint every
+    presenting consumer reads through. Normalise there, not in each consumer."""
+    f = {"title": "t", "family": "xss", "confidence": "confirmed", "oracle": "the canary executed"}
+    out = proof_schema.demote_unproven([f])[0]
+    assert out["success_oracle"] == "the canary executed"
+    assert out["oracle"] == "the canary executed"        # the legacy spelling still works
+    assert f.get("success_oracle") is None                # non-destructive: the input is not mutated
+
+
+def test_normalisation_never_overwrites_an_existing_success_oracle():
+    """NEGATIVE CONTROL — the canonical key wins; a stale legacy `oracle` must not clobber it."""
+    f = {"title": "t", "family": "xss", "confidence": "confirmed",
+         "success_oracle": "canonical", "oracle": "stale"}
+    assert proof_schema.demote_unproven([f])[0]["success_oracle"] == "canonical"
+
+
+def test_poc_bundle_carries_the_oracle_of_a_success_oracle_producer():
+    """poc_bundle read only `oracle`, so every family whose producer chose `success_oracle` reached
+    the PoC bundle with an empty confirmation oracle."""
+    import poc_bundle
+    comp = _angular()
+    f = dep.vulnerable_component_finding(comp, dep.assess_component(comp), behaviour_proof=_proof())
+    f["id"] = "F1"
+    assert f.get("oracle") is None and f["success_oracle"]     # the producer chose success_oracle
+    b = poc_bundle.build(f)
+    assert b["confirmation"]["oracle"] == f["success_oracle"]
+
+
+def test_report_integrity_accepts_a_confirmed_finding_that_wrote_the_plain_oracle_key():
+    f = {"title": "legacy-spelling finding", "family": "xss", "severity": "medium",
+         "confidence": "confirmed", "evidence": "GET /x -> payload reflected unencoded",
+         "impact": "script runs in the victim session",
+         "reproduction_steps": ["GET /x?q=<payload>"],
+         "oracle": "the injected canary executed in a real browser"}
+    assert not any("success oracle" in i for i in report.report_integrity_check([f]))
+
+
+def test_report_integrity_still_flags_a_confirmed_finding_with_no_oracle_at_all():
+    """NEGATIVE CONTROL — accepting the second spelling must not neuter the check."""
+    f = {"title": "no oracle anywhere", "family": "xss", "severity": "medium",
+         "confidence": "confirmed", "evidence": "GET /x -> payload reflected unencoded",
+         "impact": "script runs in the victim session",
+         "reproduction_steps": ["GET /x?q=<payload>"]}
+    assert any("success oracle" in i for i in report.report_integrity_check([f]))
