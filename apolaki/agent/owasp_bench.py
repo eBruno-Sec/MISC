@@ -214,6 +214,25 @@ def _detected(row: dict, cat: str) -> bool:
     return any(f in want and c not in _UNPROVEN for f, c in zip(fams, confs))
 
 
+def _any_confirmed(row: dict) -> bool:
+    """True when ANY confirmed finding came back, whatever family it claims.
+
+    `_detected` deliberately only credits the case's OWN family — that is the official CWE-matching
+    convention and it is correct for TPR. It is WRONG for a false-positive rate, and that error was
+    load-bearing: 22 clean `securecookie` cases carried CONFIRMED `path_traversal` findings and every
+    one of them scored as a true negative, because path_traversal is not securecookie's family. The
+    published FPR was 0.0% while a client's report for those same cases would have carried 22 false
+    positives.
+
+    A within-family scorer structurally cannot measure a whole-product false-positive rate. Anything
+    the tool would actually put in front of a client on a clean case is a false positive, whatever
+    family it claims.
+    """
+    fams = row.get("families") or []
+    confs = row.get("conf") or ["confirmed"] * len(fams)
+    return any(c not in _UNPROVEN for c in confs[:len(fams)] or confs)
+
+
 def score(run: dict, key: dict) -> dict:
     """TPR, FPR and the Benchmark score (Youden J = TPR - FPR) per category and overall.
 
@@ -229,7 +248,8 @@ def score(run: dict, key: dict) -> dict:
             continue
         _cat_in_key, is_vuln = entry
         cat = r["category"]
-        b = per.setdefault(cat, {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0})
+        b = per.setdefault(cat, {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0,
+                                 "fp_any": 0, "tn_any": 0, "cross_family_fp": 0})
         if r.get("error"):
             b["errors"] += 1
         detected = _detected(r, cat)
@@ -237,6 +257,14 @@ def score(run: dict, key: dict) -> dict:
             b["tp" if detected else "fn"] += 1
         else:
             b["fp" if detected else "tn"] += 1
+            # PRODUCT VIEW, tracked alongside the official one rather than replacing it. Both numbers
+            # are real; they answer different questions, and quoting the wrong one is how 0.0% FPR got
+            # published. `fp_any` counts every clean case the tool would have reported ANYTHING
+            # confirmed on. `cross_family_fp` isolates the ones the official convention forgives.
+            any_conf = _any_confirmed(r)
+            b["fp_any" if any_conf else "tn_any"] += 1
+            if any_conf and not detected:
+                b["cross_family_fp"] += 1
     total = {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0}
     for b in per.values():
         for k in total:
@@ -249,21 +277,30 @@ def score(run: dict, key: dict) -> dict:
     # this run's raw hit rate when sampling is uneven.
     scored = [b["youden"] for b in cats.values() if b["youden"] is not None]
     macro = (sum(scored) / len(scored)) if scored else None
+    scored_p = [b["youden_product"] for b in cats.values() if b.get("youden_product") is not None]
+    macro_product = (sum(scored_p) / len(scored_p)) if scored_p else None
     # OFFICIAL: divide by every category the SUITE has, not by the ones we measured. A category with no
     # engine, or one we skipped, contributes 0 -- it is a real miss, not an exemption.
     suite = SUITE_CATEGORIES.get(run.get("target") or "", [])
-    suite_macro, missing = None, []
+    suite_macro, suite_macro_product, missing = None, None, []
     if suite:
-        vals = []
+        vals, vals_p = [], []
         for c in suite:
             y = cats.get(c, {}).get("youden")
             vals.append(y if y is not None else 0.0)
+            yp = cats.get(c, {}).get("youden_product")
+            vals_p.append(yp if yp is not None else 0.0)
             if c not in cats:
                 missing.append(c)
         suite_macro = sum(vals) / len(vals)
+        suite_macro_product = sum(vals_p) / len(vals_p)
     return {"per_category": cats, "overall": _rates(total),
             "official_macro": macro, "categories_scored": len(scored),
             "suite_macro": suite_macro, "suite_size": len(suite), "suite_missing": missing,
+            # The product figures. Quote THESE when the question is "how good is Apolaki"; quote the
+            # official ones only when comparing against a published Benchmark score, and say which.
+            "product_macro": macro_product, "suite_macro_product": suite_macro_product,
+            "cross_family_fp": sum(b.get("cross_family_fp", 0) for b in cats.values()),
             "unscored": unscored}
 
 
@@ -275,6 +312,11 @@ def _rates(b: dict) -> dict:
     out["tpr"] = tpr
     out["fpr"] = fpr
     out["youden"] = (tpr - fpr) if (tpr is not None and fpr is not None) else None
+    # The product view: same TPR, but every confirmed finding on a clean case counts against us.
+    neg_any = b.get("fp_any", 0) + b.get("tn_any", 0)
+    fpr_any = (b["fp_any"] / neg_any) if neg_any else None
+    out["fpr_any"] = fpr_any
+    out["youden_product"] = (tpr - fpr_any) if (tpr is not None and fpr_any is not None) else None
     return out
 
 
@@ -297,7 +339,16 @@ def report(s: dict) -> str:
     if s.get("suite_macro") is not None:
         lines.append("OFFICIAL SUITE SCORE (macro over ALL %d suite categories, unmeasured = 0): %s"
                      % (s.get("suite_size"), _fmt(s.get("suite_macro"))))
-        lines.append("   ^ THIS is the number comparable to a published tool score")
+        lines.append("   ^ comparable to a PUBLISHED tool score (official CWE-matching convention:")
+        lines.append("     a finding only counts against a clean case if it claims that case's family)")
+        lines.append("")
+        lines.append("PRODUCT SUITE SCORE (same TPR; every confirmed finding on a clean case is an FP): %s"
+                     % _fmt(s.get("suite_macro_product")))
+        lines.append("   ^ THIS is the number to quote when the question is 'how good is Apolaki'")
+        _x = s.get("cross_family_fp") or 0
+        if _x:
+            lines.append("   cross-family false positives the official convention forgives: %d" % _x)
+            lines.append("   (clean cases where the tool WOULD have reported something to a client)")
         if s.get("suite_missing"):
             lines.append("   counted as 0 (no engine / not scanned): %s" % ", ".join(s["suite_missing"]))
     lines.append("measured-categories macro (%d cats, NOT comparable): %s"
