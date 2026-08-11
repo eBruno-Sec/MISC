@@ -211,11 +211,49 @@ Apolaki as a product.
 
 ---
 
+## Code-assisted lane — MEASURED 2026-08-11. The "unreachable" categories are not unreachable.
+
+**The standing write-off was wrong, and it went unchallenged for weeks.** "100% is unreachable" was
+true of the *HTTP* lane and got restated as though it were true of *Apolaki*. Apolaki already ships
+`agent/codereview.py` with `scan_weak_crypto`, and the benchmark source is 5480 files sitting in the
+lab container. Nobody had ever pointed one at the other.
+
+Evaluated **semgrep** (not previously installed; 9 external tools are wired, this was not one).
+Blind-sealed before the key was fetched: `ec71f4335d521f889b7c6b477458a071b65a1cabd5a3be6659d87d2208f17cf2`.
+2740 files scanned, 1950 findings, `p/java` ruleset.
+
+| category | cases | TP | FN | FP | TPR | **FPR** | score | previously |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **crypto** | 246 | 130 | 0 | 0 | 100.0% | **0.0%** | **100.0%** | 0.0% |
+| **weakrand** | 493 | 193 | 25 | 0 | 88.5% | **0.0%** | **88.5%** | 0.0% |
+| **hash** | 236 | 89 | 40 | 0 | 69.0% | **0.0%** | **69.0%** | 0.0% |
+| trustbound | 126 | 43 | 40 | 18 | 51.8% | 41.9% | 9.9% | 0.0% |
+
+`weakrand` came from a **12-line custom rule** (`new Random()`, `Math.random()`,
+`ThreadLocalRandom.current()`) because `p/java` ships none — the single largest category in the suite
+and it needed twelve lines.
+
+**Three categories at 0.0% FPR, where every published DAST scores exactly 0.00% and the 11-tool mean
+is 0.0%.** This is not a scanner trick: reading the client's source is what real assessments do.
+
+**Semgrep alone is NOT better overall** — macro 26.8%, because its taint rules have severe FPR
+(ldapi 87.5%, pathtraver 78.5%, cmdi 76.8%). The design that follows from the measurement is a
+**hybrid**: Apolaki's high-precision DAST for the injection families, semgrep restricted to the
+categories DAST structurally cannot see, and only the rules measured at 0% FPR.
+
+**Provisional projection, NOT a claim:** substituting crypto/weakrand/hash into the 11-category macro
+in place of three zeros gives roughly **64.7%** against best-published-DAST 26% and ZAP 17.99%. It is
+provisional because the DAST side is itself under revision — the pathtraver component was a
+reflection signature and is being rewritten, which will lower it. **Re-measure end to end before
+quoting any number.**
+
+Standing rule this replaces: *never restate a limit of one lane as a limit of the platform.*
+
 ## Standing honesty constraints
 
-- **100% is not reachable on the black-box lane.** crypto + hash + trustbound = 608 Java cases with no
-  externally observable signal. ZAP scores 0.00% on all three; all 11 tools in the published study
-  average 0.0%. Those need the runtime/IAST lane, and that result must be labelled IAST, not DAST.
+- **100% is not reachable on the black-box lane** — but see the code-assisted lane above: the
+  constraint is on HTTP, not on Apolaki. A code-derived result must be labelled **code-assisted
+  (SAST)** and must never be folded into a DAST figure or compared against ZAP's 17.99%.
 - **Never narrow the denominator to raise the number.** The macro divides by every category the suite
   has, unmeasured ones included as 0.
 - **Leads are not detections.** Score only gated-confirmed rows.

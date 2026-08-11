@@ -1,0 +1,11 @@
+rules:
+  - id: apolaki-weak-random
+    languages: [java]
+    severity: WARNING
+    message: Insecure randomness — java.util.Random / Math.random() is predictable.
+    patterns:
+      - pattern-either:
+          - pattern: new java.util.Random(...)
+          - pattern: new Random(...)
+          - pattern: Math.random()
+          - pattern: java.util.concurrent.ThreadLocalRandom.current()
