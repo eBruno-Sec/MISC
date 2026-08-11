@@ -3154,6 +3154,56 @@ class ToolRegistry:
             f["timing"] = timing
         return f
 
+    @staticmethod
+    def _traversal_finding(verdict: dict, target: str, parameter: str, payload: str,
+                           carrier: str) -> dict:
+        """One shape for every traversal carrier (query, POST body, request header).
+
+        The verdict's own `oracle` decides the wording, because the difference between them is the
+        whole point: `reflection` means the parameter reaches the response and NOTHING more, while
+        `existence-differential` and `file-content-signature` are evidence the parameter could not have
+        supplied. Titling both "path traversal" is how 22 echoes became confirmed findings."""
+        oracle = verdict.get("oracle", "")
+        proven = str(verdict.get("confidence") or "").lower() not in ws.UNPROVEN_TRAVERSAL_CONFIDENCE
+        title = (f"Path traversal in {carrier} '{parameter}'" if proven
+                 else f"Path traversal LEAD on {carrier} '{parameter}' (unproven: {oracle or 'weak signal'})")
+        return {
+            "title": title,
+            "severity": verdict["severity"], "target": target, "family": "path_traversal",
+            "cwe": "CWE-22", "oracle": oracle,
+            "description": f"Traversal probe ({payload}) in the {carrier} — {verdict['reason']}",
+            "evidence": f"{carrier} {parameter}={payload}: {verdict['reason']}",
+            "confidence": verdict["confidence"],
+            "tags": ["lfi", "traversal"] + ([] if proven else ["lead"])}
+
+    async def _traversal_differential(self, send, *, parameter: str, target: str,
+                                      carrier: str, baseline=None, max_twins: int = 2) -> list:
+        """The experiment that can CONFIRM traversal, driven over any carrier.
+
+        `send(payload)` performs one request with the payload in the carrier and returns the response.
+        Per twin it sends three shape-identical payloads — one file that MUST exist on the far side of
+        the escape, two that cannot — and hands them to the two-sided oracle. Three requests, not one,
+        because a single response cannot distinguish a file system from an echo."""
+        out: list = []
+        for twin in ws.build_traversal_twins(max_twins=max_twins):
+            try:
+                r_exists = await send(twin.exists)
+                r_absent_a = await send(twin.absent_a)
+                r_absent_b = await send(twin.absent_b)
+            except Exception as exc:
+                self._swallow(exc, "web_probes.traversal_differential", target)
+                return out
+            if any((r or {}).get("error") for r in (r_exists, r_absent_a, r_absent_b)):
+                continue
+            verdict = ws.analyze_traversal_differential(
+                r_exists, r_absent_a, r_absent_b, twin, baseline=baseline)
+            if verdict:
+                out.append(self._attach_poc(
+                    self._traversal_finding(verdict, target, parameter, twin.exists, carrier),
+                    target, r_exists))
+                break
+        return out
+
     def _swallow(self, exc: BaseException, where: str, target: str = "") -> None:
         """Record a defensively-caught engine error instead of discarding it.
 
@@ -5472,20 +5522,28 @@ class ToolRegistry:
                     _prng.finding(url, _pv["api"], _pv["oracle"]), url, None))
         except Exception as _e:
             self._swallow(_e, "web_probes.prng_disclosure", url)
-        # traversal
+        # traversal. A single probe can only ever produce a LEAD unless the body carries file content —
+        # reflection is not traversal (docs/LEDGERS.md, RETRACTION 2026-08-10). One verdict per
+        # parameter: seven payloads echoing the same non-evidence is seven copies of nothing.
+        _trav_seen = set()
         for probe in ws.build_traversal_probes(url, lab_mode=lab):
-            if not self.scope.validate(probe.url)[0]:
+            if probe.parameter in _trav_seen or not self.scope.validate(probe.url)[0]:
                 continue
             r = await self._http(probe.url, capture=False)
             verdict = ws.analyze_traversal_pair(baseline, r, probe.payload, lab_mode=lab)
             if verdict:
-                findings.append({
-                    "title": f"Path traversal signal on '{probe.parameter}'",
-                    "severity": verdict["severity"], "target": probe.url,
-                    "description": f"Traversal probe ({probe.payload}) — {verdict['reason']}",
-                    "evidence": f"{probe.payload}: {verdict['reason']}",
-                    "confidence": verdict["confidence"], "family": "path_traversal",
-                    "tags": ["lfi", "traversal"]})
+                _trav_seen.add(probe.parameter)
+                findings.append(self._traversal_finding(
+                    verdict, probe.url, probe.parameter, probe.payload, f"query parameter"))
+        # ...then the experiment that can actually CONFIRM: a file that must exist beyond the escape
+        # against shape-identical files that cannot, with the echo redacted out of the comparison.
+        for _pname in ws.traversal_parameters(url, limit=2):
+            _hits = await self._traversal_differential(
+                lambda p, _n=_pname: self._http(ws.with_param(url, _n, p), capture=False),
+                parameter=_pname, target=url, baseline=baseline, carrier="query parameter")
+            findings.extend(_hits)
+            if _hits:
+                break
         # traversal through POST FORM BODIES. The probes above only rewrite query params, so an app whose
         # filename arrives in a form body was never tested — and a query string on the PAGE url does not
         # mean the sink is reachable by GET: it is routinely decorative while the real handler is a POST
@@ -5518,14 +5576,17 @@ class ToolRegistry:
                                               _ue(fx.body_with(fm, field, payload)), capture=False)
                         verdict = ws.analyze_traversal_pair(fbase, rp, payload, lab_mode=lab)
                         if verdict:
-                            findings.append({
-                                "title": f"Path traversal signal on form field '{field}'",
-                                "severity": verdict["severity"], "target": fm["action"],
-                                "description": f"Traversal probe ({payload}) in a POST body — {verdict['reason']}",
-                                "evidence": f"POST {fm['action']} {field}={payload}: {verdict['reason']}",
-                                "confidence": verdict["confidence"], "family": "path_traversal",
-                                "tags": ["lfi", "traversal"]})
+                            findings.append(self._traversal_finding(
+                                verdict, fm["action"], field, payload, "POST body field"))
                             break
+                    # The confirming experiment on the same carrier. The single-probe pass above can
+                    # only lead; this is what proves the file system was reached.
+                    _budget -= 3
+                    findings.extend(await self._traversal_differential(
+                        lambda p, _f=field, _fm=fm: self._http(
+                            _fm["action"], "POST", hdrs, _ue(fx.body_with(_fm, _f, p)), capture=False),
+                        parameter=field, target=fm["action"], baseline=fbase,
+                        carrier="POST body field"))
         except Exception:
             pass
         # traversal through a CUSTOM REQUEST HEADER. Third carrier, same oracle: an app that reads its
@@ -5553,14 +5614,12 @@ class ToolRegistry:
                         _hr = await self._http(_htgt, "POST", {_hn: _pl}, "", capture=False)
                         _v = ws.analyze_traversal_pair(_hbase, _hr, _pl, lab_mode=lab)
                         if _v:
-                            findings.append({
-                                "title": f"Path traversal signal in request header '{_hn}'",
-                                "severity": _v["severity"], "target": _htgt,
-                                "description": f"Traversal probe ({_pl}) in request header — {_v['reason']}",
-                                "evidence": f"header {_hn}: {_pl} — {_v['reason']}",
-                                "confidence": _v["confidence"], "family": "path_traversal",
-                                "tags": ["lfi", "traversal"]})
+                            findings.append(self._traversal_finding(
+                                _v, _htgt, _hn, _pl, "request header"))
                             break
+                    findings.extend(await self._traversal_differential(
+                        lambda p, _h=_hn: self._http(_htgt, "POST", {_h: p}, "", capture=False),
+                        parameter=_hn, target=_htgt, baseline=_hbase, carrier="request header"))
         except Exception as _e:
             self._swallow(_e, "web_probes.traversal_header", url)
         # idor

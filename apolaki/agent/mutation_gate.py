@@ -80,6 +80,19 @@ MUTANTS = [
     ("prng_disclosure.py", "drop the security-context gate — a display-only PRNG would confirm",
      r'if not ctx:', 'if False:',
      "tests/test_prng_disclosure.py::test_weak_generator_without_security_meaning_is_not_a_vulnerability"),
+    # The traversal oracle. Its FP guard is the redaction: two responses to two different payloads
+    # ALWAYS differ, and until 2026-08-10 that difference was accepted as proof of a file read.
+    ("web_security.py", "traversal: compare responses WITHOUT redacting the echo — reflection confirms again",
+     r'    a = redact_payload_echo\(text_a, payloads\)\n    b = redact_payload_echo\(text_b, payloads\)',
+     '    a = text_a or ""\n    b = text_b or ""',
+     "tests/test_traversal_oracle.py::test_unexplained_divergence_ignores_pure_echo_and_catches_real_text"),
+    ("web_security.py", "traversal: drop the determinism control — a page with a request id confirms",
+     r'if a_st != b_st or unexplained_divergence\(a_text, b_text, payloads\):', 'if False:',
+     "tests/test_traversal_oracle.py::test_a_nondeterministic_endpoint_cannot_confirm"),
+    ("web_security.py", "traversal: promote a reflected payload back to a confirmation",
+     r'return \{"severity": "info", "confidence": "lead", "oracle": "reflection",',
+     'return {"severity": "high", "confidence": "confirmed", "oracle": "reflection",',
+     "tests/test_traversal_oracle.py::test_reflected_traversal_payload_alone_is_not_a_confirmation"),
 ]
 
 

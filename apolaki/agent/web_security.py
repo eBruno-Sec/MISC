@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import html as _html
+import os
 import posixpath
 import re
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlparse, urlunparse
 
 TRAVERSAL_PARAM_HINTS = {
     "file", "filepath", "filename", "path", "dir", "folder", "template",
@@ -77,6 +79,35 @@ TRAVERSAL_RESPONSE_HINTS = (
     "no such file or directory", "failed to open stream",
     "permission denied", "directory traversal", "path traversal",
     "invalid path", "not allowed to load local resource",
+)
+
+# Content the PARAMETER CANNOT HAVE SUPPLIED. This is the only single-response evidence that a file
+# was actually read: the body carries the interior of a known system file, and no probe value contains
+# it. Each is checked two-sided (present in the probe response, absent from the baseline) so a page
+# that always displays such text is not mistaken for a traversal.
+FILE_CONTENT_SIGNATURES = (
+    ("root:x:0:0", "/etc/passwd content returned (root:x:0:0)"),
+    ("[boot loader]", "win.ini content returned ([boot loader])"),
+    ("; for 16-bit app support", "win.ini content returned (16-bit app support stanza)"),
+    ("[mci extensions]", "win.ini content returned ([mci extensions])"),
+    ("[extensions]", "win.ini content returned ([extensions])"),
+    ("[fonts]", "win.ini content returned ([fonts])"),
+    ("root:*:0:0", "/etc/passwd content returned (BSD root entry)"),
+    ("daemon:x:1:1", "/etc/passwd content returned (daemon entry)"),
+)
+
+# Confidences the product does NOT report as a real vulnerability. Mirrors
+# proof_schema.UNPROVEN_CONFIDENCE; duplicated rather than imported to keep this module dependency-free
+# (it is the pure primitives layer). test_traversal_oracle pins the two together.
+UNPROVEN_TRAVERSAL_CONFIDENCE = frozenset(
+    {"lead", "candidate", "unconfirmed", "informational", "info", "tentative"})
+
+# The file that must EXIST on the far side of the traversal, per platform, plus the separator its
+# encodings rewrite. The absent twin is generated from this model so both payloads have identical
+# length, identical separator positions and identical punctuation — see _absent_tail.
+_TWIN_MODELS = (
+    ("posix", "etc/passwd", "/"),
+    ("windows", "windows\\win.ini", "\\"),
 )
 
 
@@ -233,6 +264,28 @@ def build_traversal_probes(url: str, *, lab_mode: bool = False, max_probes: int 
     return probes
 
 
+def with_param(url: str, name: str, value: str) -> str:
+    """Public form of the query rewrite the probe builders use, so a caller driving its own payload
+    sequence (the traversal differential) does not have to reach for a private helper."""
+    return _replace_query_value(url, name, value)
+
+
+def traversal_parameters(url: str, *, limit: int = 3) -> list:
+    """Query parameter names worth a traversal experiment, path-like ones first.
+
+    Same ordering rule as build_traversal_probes: the heuristic ORDERS the work, it never gates it —
+    an opaque parameter name reaching a file read is still a file read."""
+    pairs = parse_qsl(urlparse(url).query, keep_blank_values=True)
+    ordered = ([n for n, v in pairs if looks_pathlike(n, v)]
+               + [n for n, v in pairs if not looks_pathlike(n, v)])
+    seen, out = set(), []
+    for name in ordered:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out[:limit]
+
+
 def build_idor_probes(url: str, max_probes: int = 8) -> list:
     probes: list = []
     parsed = urlparse(url)
@@ -292,7 +345,142 @@ def _body_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+@dataclass(frozen=True)
+class TraversalTwin:
+    """A shape-identical pair of traversal payloads: one that resolves to a file which MUST exist on
+    the far side of the escape, and two that resolve to files which cannot. Same length, same segment
+    count, same separators, same encoding — so any response that is a function of the parameter's
+    SHAPE is identical for all three, and only the target's existence on disk can separate them."""
+    label: str
+    encoding: str
+    exists: str
+    absent_a: str
+    absent_b: str
+    target: str
+
+
+def _absent_tail(model: str, nonce: str) -> str:
+    """A tail of the same length as `model` with its separators and dots in the same places."""
+    out, k = [], 0
+    for ch in model:
+        if ch in "/\\.":
+            out.append(ch)
+        else:
+            out.append(nonce[k % len(nonce)])
+            k += 1
+    return "".join(out)
+
+
+def _encode_seps(text: str, sep: str, encoded: str) -> str:
+    return text.replace(sep, encoded) if encoded else text
+
+
+def build_traversal_twins(*, depth: int = 6, nonces=None, max_twins: int = 3) -> list:
+    """Shape-identical exists/absent payload triples, one per platform × encoding.
+
+    The absent targets are random per call: a fixed absent name would eventually exist somewhere, and
+    a target that learned the name could answer "exists" to both halves and defeat the oracle."""
+    if not nonces:
+        nonces = [os.urandom(10).hex(), os.urandom(10).hex()]
+    na, nb = (list(nonces) + list(nonces))[:2]
+    # (encoding label, encoded form of the separator; None = literal)
+    encodings = (("raw", None), ("url", "%2f"))
+    twins = []
+    for label, model, sep in _TWIN_MODELS:
+        for enc_label, enc in encodings:
+            if enc and sep != "/":
+                continue                      # %2f only rewrites a forward slash
+            prefix = (".." + _encode_seps(sep, sep, enc)) * depth
+            twins.append(TraversalTwin(
+                label=label, encoding=enc_label, target=model,
+                exists=prefix + _encode_seps(model, sep, enc),
+                absent_a=prefix + _encode_seps(_absent_tail(model, na), sep, enc),
+                absent_b=prefix + _encode_seps(_absent_tail(model, nb), sep, enc)))
+    return twins[:max_twins]
+
+
+def _decode_echo(text: str) -> str:
+    """Undo the two transports an application uses when it echoes a path back: HTML entity escaping
+    (the OWASP Benchmark writes `/` as `&#x2f;`) and percent-encoding."""
+    try:
+        text = _html.unescape(text or "")
+    except Exception:
+        pass
+    try:
+        text = unquote_plus(text)
+    except Exception:
+        pass
+    return text
+
+
+def redact_payload_echo(body: str, payloads) -> str:
+    """`body` with every trace of the probe values removed.
+
+    This is what makes the differential sound. Two responses to two different payloads always differ —
+    by the payloads. Strip the payload, its decoded form, its individual path segments and the path
+    punctuation left behind, and whatever still differs is text the APPLICATION produced, not text we
+    supplied. On a pure-echo endpoint the redacted responses are identical."""
+    text = _decode_echo(body or "")
+    variants, tokens = set(), set()
+    for p in payloads or []:
+        if not p:
+            continue
+        d = _decode_echo(p)
+        variants.update({p, d, d.replace("/", "\\"), d.replace("\\", "/")})
+        for tok in re.split(r"[^A-Za-z0-9_\-]+", d):
+            tok = tok.strip(".")
+            if len(tok) >= 2:
+                tokens.add(tok)
+    for v in sorted(variants, key=len, reverse=True):
+        text = re.sub(re.escape(v), " ", text, flags=re.I)
+    # ...then the segments on their own, so an app that echoes the RESOLVED path (`/etc/passwd`
+    # after normalising the `../`) is still recognised as echo rather than as evidence.
+    for tok in sorted(tokens, key=len, reverse=True):
+        text = re.sub(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(tok), " ", text, flags=re.I)
+    text = re.sub(r"[\\/.]+", " ", text)
+    return " ".join(text.split())
+
+
+def unexplained_divergence(text_a: str, text_b: str, payloads, *, min_chars: int = 3):
+    """The first difference between two responses that the echoed payloads CANNOT account for.
+
+    Returns the evidence snippet, or None when every difference is echo. This is the whole point of
+    the rewritten oracle: reflection is not evidence, so any difference explained by reflection is
+    discarded before the responses are compared."""
+    a = redact_payload_echo(text_a, payloads)
+    b = redact_payload_echo(text_b, payloads)
+    if a == b:
+        return None
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b).get_opcodes():
+        if tag == "equal":
+            continue
+        for chunk in (b[j1:j2], a[i1:i2]):
+            if len(re.sub(r"[^A-Za-z0-9]+", "", chunk)) >= min_chars:
+                return chunk.strip()[:200]
+    return None
+
+
+def _content_signature(probe_text: str, base_text: str):
+    """A known system file's interior, present in the probe response and absent from the baseline."""
+    low = (probe_text or "").lower()
+    base_low = (base_text or "").lower()
+    for needle, reason in FILE_CONTENT_SIGNATURES:
+        if needle in low and needle not in base_low:
+            return reason
+    return None
+
+
 def analyze_traversal_pair(baseline, probe, payload: str, *, lab_mode: bool = False):
+    """A SINGLE request can confirm traversal only when the response carries content the parameter
+    could not have supplied.
+
+    HISTORY, and the reason this is written the way it is: this function used to return
+    `confirmed` whenever the probe value appeared in the response — so an application that echoes its
+    input produced a confirmed path traversal for a payload with no `../` in it, and for a string that
+    was not a filename at all. 22 clean OWASP Benchmark cases carried one, and the whole pathtraver
+    score rested on it (docs/LEDGERS.md, RETRACTION 2026-08-10). Reflection now yields a LEAD:
+    the parameter reaches the page, which is worth the follow-up differential
+    (`analyze_traversal_differential`), and is not by itself evidence that any file was read."""
     base_text = text_from_response(baseline)
     probe_text = text_from_response(probe)
     low = probe_text.lower()
@@ -300,23 +488,74 @@ def analyze_traversal_pair(baseline, probe, payload: str, *, lab_mode: bool = Fa
     base_status = _status_of(baseline)
     similarity = _body_similarity(base_text, probe_text)
 
-    strong = []
-    if "root:x:0:0" in low or "[extensions]" in low or "[fonts]" in low:
-        strong.append("sensitive file signature returned")
-    if "bbh-canary" in low or "yggdrasil-canary" in low or "olympus-canary" in low:
-        strong.append("canary filename reflected through file handling path")
+    signature = _content_signature(probe_text, base_text)
+    if signature:
+        return {"severity": "high", "confidence": "confirmed", "oracle": "file-content-signature",
+                "reason": signature, "similarity": similarity}
 
-    weak = [hint for hint in TRAVERSAL_RESPONSE_HINTS if hint in low]
-    if strong:
-        return {"severity": "high" if lab_mode else "medium",
-                "confidence": "confirmed" if lab_mode else "probable",
-                "reason": ", ".join(strong), "similarity": similarity}
+    if "bbh-canary" in low or "yggdrasil-canary" in low or "olympus-canary" in low:
+        return {"severity": "info", "confidence": "lead", "oracle": "reflection",
+                "reason": "probe value reflected — the parameter reaches the response, but nothing "
+                          "shows a file was read; needs the exists/absent differential",
+                "similarity": similarity}
+
+    weak = [hint for hint in TRAVERSAL_RESPONSE_HINTS
+            if hint in low and hint not in base_text.lower()]
     if weak and status >= 400 and similarity < 0.98:
-        return {"severity": "medium", "confidence": "possible",
-                "reason": f"file/path error after traversal probe: {weak[0]}", "similarity": similarity}
+        return {"severity": "low", "confidence": "lead", "oracle": "file-error",
+                "reason": f"file/path error after traversal probe: {weak[0]} — proves a file sink, "
+                          f"not a successful escape", "similarity": similarity}
     if status != base_status and status in (200, 206, 400, 403, 404, 500) and similarity < 0.80:
-        return {"severity": "low", "confidence": "possible",
+        return {"severity": "info", "confidence": "lead", "oracle": "response-differential",
                 "reason": f"status/body changed from {base_status} to {status}", "similarity": similarity}
+    return None
+
+
+def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, twin,
+                                   *, baseline=None):
+    """CONFIRM path traversal from a three-request, two-sided experiment.
+
+    Requests, all with the same parameter and shape-identical payloads:
+      exists   -> `../../../../etc/passwd`      (must exist on the far side of the escape)
+      absent_a -> `../../../../q7x/a1b2c3`      (cannot exist)
+      absent_b -> `../../../../z3k/d4e5f6`      (cannot exist, different name)
+
+    Confirmation requires all of:
+      1. the two ABSENT responses agree once the echo is redacted — otherwise the endpoint is
+         nondeterministic (a request id, a timestamp) and any difference is noise, not a file system;
+      2. the EXISTS response diverges from them in a way the echoed payload cannot explain;
+    and the shortcut of (0) the response simply containing the file's contents.
+
+    A reflecting endpoint fails (2) by construction: redaction removes the only thing that differed."""
+    e_text = text_from_response(exists_resp)
+    a_text = text_from_response(absent_a_resp)
+    b_text = text_from_response(absent_b_resp)
+    base_text = text_from_response(baseline) if baseline is not None else ""
+    e_st, a_st, b_st = (_status_of(exists_resp), _status_of(absent_a_resp), _status_of(absent_b_resp))
+    payloads = [twin.exists, twin.absent_a, twin.absent_b]
+
+    signature = _content_signature(e_text, base_text)
+    if signature:
+        return {"severity": "high", "confidence": "confirmed", "oracle": "file-content-signature",
+                "reason": signature, "payload": twin.exists, "twin": twin.label}
+
+    # (1) determinism control — the negative control that keeps a noisy page from confirming.
+    if a_st != b_st or unexplained_divergence(a_text, b_text, payloads):
+        return None
+
+    # (2) the present/absent divergence. A status code cannot be echoed, so it counts on its own.
+    if e_st != a_st:
+        return {"severity": "high", "confidence": "confirmed", "oracle": "existence-differential",
+                "reason": f"'{twin.target}' answered {e_st} where an absent file of identical shape "
+                          f"answered {a_st} twice — the path was resolved against the file system "
+                          f"outside the application directory",
+                "payload": twin.exists, "twin": twin.label}
+    evidence = unexplained_divergence(e_text, a_text, payloads)
+    if evidence and unexplained_divergence(e_text, b_text, payloads):
+        return {"severity": "high", "confidence": "confirmed", "oracle": "existence-differential",
+                "reason": f"'{twin.target}' produced a response an absent file of identical shape did "
+                          f"not, twice over, and the difference is not the echoed payload: {evidence!r}",
+                "payload": twin.exists, "twin": twin.label, "evidence": evidence}
     return None
 
 
