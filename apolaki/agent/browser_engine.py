@@ -24,6 +24,10 @@ import os
 _OBSERVE_JS = r"""
 export default async function ({ page }) {
   const target = %TARGET_JSON%;
+  // Script-level failures are COLLECTED, not swallowed. A navigation that fails silently produces an
+  // empty observation indistinguishable from a page with nothing on it -- the defect that hid a dead
+  // page.waitForTimeout call and an unguarded localStorage read for the entire life of this engine.
+  const errs = [];
   const api = new Set(), ws = new Set(), gql = new Set();
   page.on('request', r => { const u = r.url();
     if (/\/(api|rest|v1|v2|internal)\//i.test(u)) api.add(u.split('?')[0]);
@@ -32,8 +36,12 @@ export default async function ({ page }) {
   let csp = '';
   page.on('response', res => { try { if (res.url() === target) {
     const h = res.headers(); csp = h['content-security-policy'] || csp; } } catch (e) {} });
-  try { await page.goto(target, { waitUntil: 'networkidle2', timeout: 25000 }); } catch (e) {}
-  try { await page.waitForTimeout(1500); } catch (e) {}
+  try { await page.goto(target, { waitUntil: "networkidle2", timeout: 25000 }); }
+  catch (e) { errs.push("goto: " + String(e).slice(0, 120)); }
+  // page.waitForTimeout was REMOVED in modern Puppeteer. It threw TypeError into the silent catch
+  // below, and because that catch also wrapped the navigation the whole observation came back empty:
+  // links 0, forms 0, title "". A plain promise sleep works on every version.
+  await new Promise(r => setTimeout(r, 1500));
   const dom = await page.evaluate(() => {
     const forms = [...document.querySelectorAll('form')].map(f => ({
       action: f.getAttribute('action') || '', method: (f.getAttribute('method') || 'get').toLowerCase(),
@@ -65,7 +73,8 @@ export default async function ({ page }) {
   // empty result -- so the browser sensor produced NOTHING against the pinned browserless/chromium v2
   // image, for every mission, silently. drive() already unwraps data.get("data", data), so only the
   // script side was wrong.
-  return { data: { ...dom, runtime_api: [...api], runtime_ws: [...ws], graphql: [...gql], csp },
+  return { data: { ...dom, runtime_api: [...api], runtime_ws: [...ws], graphql: [...gql], csp,
+                   script_errors: errs, url: page.url() },
            type: "application/json" };
 }
 """
@@ -150,6 +159,17 @@ def observe(target_url, browser_url=None):
     res = res if isinstance(res, dict) else {}
     res.setdefault("target", target_url)
     res["browser"] = True
+    # `browser: True` means the SCRIPT RAN, not that the page loaded. A failed navigation still returns
+    # a well-formed observation full of zeros, which reads exactly like a page with nothing on it —
+    # the ambiguity that let a dead API and a cert error hide here indefinitely. Promote the script's
+    # own error list into `note` so the caller sees WHY the observation is empty.
+    errs = res.get("script_errors") or []
+    if errs:
+        res["note"] = "; ".join(str(e) for e in errs[:3])
+    elif not (res.get("links") or res.get("forms") or res.get("scripts") or res.get("title")):
+        landed = str(res.get("url") or "")
+        res["note"] = ("navigated but observed nothing (landed on %s)" % landed if landed
+                       else "navigated but observed nothing")
     return res
 
 

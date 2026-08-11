@@ -2645,7 +2645,12 @@ async def sarif_export(session_id: str):
     Apolaki's own model). Snippets/evidence are redacted before emission."""
     import sarif_io as _sf
     _require_mission(session_id)
-    findings = db.get_findings(session_id) or []
+    # GATED, like every other export boundary. This read was RAW while its sibling poc_bundle_export
+    # two functions away used get_findings_gated -- so a confirmed-but-unproven finding that
+    # demote_unproven rewrites to "lead" everywhere else shipped to CI, DefectDojo and GitHub code
+    # scanning as a CONFIRMED result at full severity. SARIF is where results LEAVE the platform;
+    # it is the last place the proof gate may stop holding.
+    findings = db.get_findings_gated(session_id) or []
     return _sf.export_sarif(findings, tool_name="Apolaki")
 
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import uuid
 from typing import AsyncGenerator
 
@@ -172,7 +173,69 @@ def _is_generic_objective(objective: str) -> bool:
     return (not o) or o.startswith("perform comprehensive bug bounty recon")
 
 
-def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
+# Deterministic-sweep budgets. MEASURED on the OWASP Benchmark lab, 2026-08-10 (Q-019), one URL through
+# the ten sweep engines: the eight HTTP-only engines cost **1.1 s per URL between them**, while the two
+# browser-backed confirmers cost **~19 s per URL** (run_xss 10 s, run_dom_trace 9 s) — 95% of the wall
+# clock for 20% of the engines. A single cap for both is why it had to be 20: twenty endpoints against a
+# 2756-URL surface, all twenty inside one directory. Budget the two tiers separately and the same wall
+# clock buys an order of magnitude more coverage. Both are env-tunable; neither is unbounded.
+SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "400") or 400))
+# targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
+# order so they are representatives of the whole site rather than the first N of one directory.
+SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
+# the split itself. HTTP-only engines are cheap enough to run on every selected target; the two that
+# drive a real browser are not, and pretending otherwise is what capped coverage at twenty endpoints.
+_SWEEP_HTTP_ENGINES = ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap", "run_ssi",
+                       "run_css_injection", "run_waf_bypass", "run_injection_probes")
+_SWEEP_BROWSER_ENGINES = ("run_xss", "run_dom_trace")
+
+_SHAPE_DIGITS = re.compile(r"\d+")
+_SHAPE_HEXID = re.compile(r"\b[0-9a-f]{8,}\b", re.I)
+
+
+def target_shape(url: str) -> str:
+    """The STRUCTURAL shape of a URL — its path with identifier-looking segments collapsed, plus its
+    sorted parameter names. `/benchmark/sqli-04/BenchmarkTest01234.html?BenchmarkTest01234=x` and
+    `/benchmark/sqli-09/BenchmarkTest02345.html?BenchmarkTest02345=y` share a shape; `/benchmark/xss-00/…`
+    does not.
+
+    This is NOT a deduplication key — two URLs of the same shape can hit completely different sinks, and
+    collapsing them would be exactly the kind of case-specific cheating this project forbids. It is an
+    ORDERING key: when a budget forces a truncation, spend it round-robin across shapes so the cut
+    spans the whole application instead of exhausting itself in the first directory it walked into.
+    MEASURED: the old selection's twenty targets were twenty consecutive files in one category folder.
+    """
+    from urllib.parse import urlparse, parse_qs
+
+    def _norm(s: str) -> str:
+        return _SHAPE_DIGITS.sub("#", _SHAPE_HEXID.sub("#", s))
+
+    pr = urlparse(url or "")
+    segs = [_norm(s) for s in (pr.path or "/").split("/") if s]
+    # PARAMETER NAMES ARE NORMALIZED TOO. A framework that names the parameter after the page
+    # (`?BenchmarkTest00006=…`, `?item_4711=…`) gives every endpoint a unique parameter, so shaping the
+    # path alone leaves one shape per URL and the round-robin degenerates back into discovery order —
+    # which is the bug, wearing the fix's clothes.
+    params = sorted({_norm(k) for k in parse_qs(pr.query).keys()})
+    return "/".join(segs) + "|" + ",".join(params)
+
+
+def _spread_by_shape(targets: list) -> list:
+    """Round-robin the targets across their structural shapes, preserving first-seen order inside each
+    shape. Deterministic: same input, same output, so a re-run probes the same endpoints."""
+    groups: dict = {}
+    for t in targets:
+        groups.setdefault(target_shape(t), []).append(t)
+    out, order = [], list(groups)
+    while len(out) < len(targets):
+        for k in order:
+            g = groups[k]
+            if g:
+                out.append(g.pop(0))
+    return out
+
+
+def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
     """Endpoints the deterministic injection sweep will probe.
 
     Query-bearing URLs, one representative per (path, param-signature) — PLUS the page that carries each
@@ -184,6 +247,12 @@ def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
     A form contributes its `page` (the document the form was parsed out of) and NOT its `action`: the
     engines re-parse the page to rebuild the form, and fetching a bare action usually returns a handler
     response with no <form> in it. Pure and order-stable so a re-run picks the same surface.
+
+    THE CAP IS A BUDGET, AND THE ORDER MATTERS MORE THAN THE NUMBER (Q-019). `limit` defaulted to 20 and
+    the mission call site never passed one, so twenty was the real bound on a 2756-URL surface — and
+    because candidates were emitted in discovery order, all twenty landed in the first category folder
+    the crawl walked. The candidate set is now built in full and then round-robined across structural
+    shapes before truncation, so whatever the budget is, it is spent across the whole application.
     """
     from urllib.parse import urlparse, parse_qs
     seen_sig, seen_paths, targets = set(), set(), []
@@ -221,7 +290,9 @@ def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
                 seen_sig.add(sig)
                 seen_paths.add(urlparse(action).path)
                 targets.append(merged)
-    return targets[:limit]
+    if len(targets) <= limit:
+        return targets
+    return _spread_by_shape(targets)[:limit]
 
 
 class BBHAgent:
@@ -1211,6 +1282,18 @@ class BBHAgent:
                         % (type(e).__name__, str(e)[:160], traceback.format_exc().splitlines()[-2][:120])}]
         for e in (pevents or []):
             yield e
+        # Third leg: session LIFECYCLE (CWE-613). It runs LAST on purpose — it is the only engine that
+        # deliberately ends a session, so the authorization matrix has already finished with the personas
+        # it needs before anything is destroyed. It never touches those personas anyway (it mints its own
+        # sacrificial account and `_session_kill_is_safe` re-checks that as a fact), but ordering it after
+        # the matrix means a future bug in that guard costs nothing already gathered.
+        try:
+            sevents = await self._do_session_lifecycle(session_id)
+        except Exception as e:
+            sevents = [{"type": "info", "content": "session-lifecycle artery error: %s: %s"
+                        % (type(e).__name__, str(e)[:180])}]
+        for e in (sevents or []):
+            yield e
 
     async def _do_scan_auth(self, session_id: str) -> list:
         events: list = []
@@ -1536,13 +1619,26 @@ class BBHAgent:
         never walking to any of the 2740 test cases -- the default scanning mode had no surface
         discovery at all.
 
-        Same bounds as the authenticated pass (BBH_CRAWL_DEPTH, default 2, capped 4; frontier 30 per
-        round) and the same scope gate on every visit, so this widens reach without widening risk.
+        BOUNDED BY A PAGE BUDGET, NOT BY A PER-ROUND FRONTIER (Q-019). The old bound was
+        `depth(2) x frontier(30)`, and MEASURED against a 2740-case lab it fetched **12 pages** —
+        because a BFS round's frontier is chosen from what is already known when the round starts, so
+        round 2 could only ever see the 11 links round 1 had found. Everything round 2 discovered (all
+        2740 cases) arrived after the last frontier was picked and was therefore never fetched. Since
+        `sweep_targets` and the form store only ever see pages that WERE fetched, the entire mission's
+        coverage was arithmetic on those 12 pages.
+
+        `http_probe` is the cheapest thing the platform does — MEASURED 13 ms for a small page, 0.43 s
+        for a 32 KB index — so the honest bound is a total page budget (BBH_SURFACE_PAGES, default 250
+        ≈ a few seconds) spread over BBH_SURFACE_DEPTH levels, rather than a frontier so tight that the
+        crawl stops one level above the application. `_authenticated_recrawl` keeps its own
+        BBH_CRAWL_DEPTH bound untouched: that pass fetches as several personas and its cost is not this
+        pass's cost. Same scope gate on every visit, so this widens reach without widening risk.
         """
         import os as _os
 
         import crawl as _crawl
-        depth = max(1, min(int(_os.environ.get("BBH_CRAWL_DEPTH", "2") or 2), 4))
+        depth = max(1, min(int(_os.environ.get("BBH_SURFACE_DEPTH", "4") or 4), 8))
+        budget = max(1, min(int(_os.environ.get("BBH_SURFACE_PAGES", "250") or 250), 5000))
         seen, visited = set(), 0
 
         # robots.txt and sitemap.xml FIRST — the owner's own index of the site, and of the paths they
@@ -1568,15 +1664,20 @@ class BBHAgent:
         except Exception as e:
             self.tools._swallow(e, "surface_crawl.robots_sitemap", base or "")
         for _round in range(depth):
+            if visited >= budget:
+                break
             cands = [u for u in (getattr(self.tools, "urls", None) or []) if u not in seen]
             if not cands:
                 break
-            frontier = _crawl.bfs_frontier(cands, base or cands[0], seen, limit=30)
+            # the frontier is whatever the remaining page budget can still afford. A single number
+            # bounds the whole crawl, so a deep site is walked to its budget instead of being cut off
+            # one level above its content by an arbitrary per-round 30.
+            frontier = _crawl.bfs_frontier(cands, base or cands[0], seen, limit=budget - visited)
             if not frontier:
                 break
             for u in frontier:
                 seen.add(u)
-                if self.stop_event.is_set():
+                if self.stop_event.is_set() or visited >= budget:
                     return visited
                 if not self.scope.validate(u)[0]:
                     continue
@@ -1680,6 +1781,56 @@ class BBHAgent:
                 self._persona_refs[role] = ref
                 restored.append(role)
         return restored
+
+    async def _do_session_lifecycle(self, session_id: str) -> list:
+        """The artery's third leg: session-lifecycle invalidation (CWE-613 — WSTG-SESS-06/07/11), the
+        mirror of session fixation. Fixation asks whether the identifier is regenerated when a session is
+        CREATED; this asks whether it is destroyed when the session ENDS.
+
+        Gated on `authenticated_scan` for exactly the reason persona minting is: it creates an account
+        through the target's own signup, which is state-changing. It is also the ONLY engine that ends a
+        session, so it runs after the matrix and only ever against an identity it minted itself.
+
+        The sacrificial identity is recorded in the persona manager under the SESSION_PROBE role, so the
+        engagement can see the account it created and cleaned up — `Persona.sacrificial` is what keeps
+        every other consumer (the matrix pair, the authenticated re-crawl, `_sessions`) from picking up a
+        session that is about to be destroyed."""
+        events: list = []
+        if not self.authenticated_scan or self.mode == "passive":
+            return events
+        base = self._primary_base()
+        if not base:
+            return events
+        res = await self._exec_internal("run_session_lifecycle",       # gated (#2)
+                                        {"base_url": base,
+                                         "register_urls": self._register_candidates(base),
+                                         "login_urls": self._login_candidates(base)}, session_id)
+        for f in (res.findings or []):
+            if self.mission_id:
+                try:
+                    f["id"] = db.add_finding(self.mission_id, f)
+                except Exception:
+                    pass
+            self.findings.append(f)
+            events.append({"type": "finding", "finding": f})
+        ident = getattr(self.tools, "_sesslife_identity", "")
+        pm = getattr(self, "_persona_manager", None)
+        if ident and pm is not None:
+            try:
+                import personas as _p
+                pm.add(_p.SESSION_PROBE, identity=ident, method="registered", sacrificial=True)
+            except Exception:
+                pass
+        self._session_lifecycle_result = {
+            "ran": bool(res.ran), "confirmed": len(res.findings or []),
+            "sacrificial_identity": ident or None,
+            "session_kill_endpoints_quarantined": len(getattr(self.tools, "session_kill_urls", []) or []),
+            "detail": (res.output or "")[:400],
+        }
+        events.append({"type": "info", "content": "Session lifecycle (CWE-613): %s%s"
+                       % (res.output or res.error or "no result",
+                          " — sacrificial identity %s" % ident if ident else "")})
+        return events
 
     async def _do_persona_authz(self, session_id: str) -> list:
         """The artery's second half: mint TWO same-privilege personas via the target's own signup,
@@ -2496,23 +2647,80 @@ class BBHAgent:
             # directly affects primary action selection — record it so the executor can surface it.
             self._graph_projection_error = str(e)
 
+    @staticmethod
+    def _endpoint_url(key: str, bases: dict) -> str:
+        """Resolve ONE graph endpoint node to an absolute, probeable URL — or "" when the graph never
+        recorded a host for it.
+
+        MEASURED (mission 90cee81c, Q-019). The graph carries the same asset under two identities:
+        `tools._graph_add_url` keys an endpoint by `host+path` but LABELS it with the bare `path`,
+        while `_seed_and_project_graph` keys and labels it with the whole URL. This function's caller
+        used to read the LABEL, so the planner received a host-less `/benchmark/cmdi-Index.html`, and
+        `planner._b("")` concatenated that onto `https://` to produce `https:///benchmark/…` — scheme,
+        EMPTY netloc. `ScopeEngine.validate()` refused every one, correctly: ten `scope_block` events
+        per mission aimed at exactly the category index pages that link the whole test corpus. The
+        scope engine was right; the producer handed it garbage and nothing named the producer.
+
+        Read the KEY (the node's identity, which carries the host) and rebuild scheme+port from the
+        scope's base map. Returns "" rather than a host-less string: a URL with no host is not a
+        target, and manufacturing one out of an empty host is precisely how the defect happened.
+        """
+        from urllib.parse import urlparse as _up
+        s = str(key or "").strip()
+        if not s:
+            return ""
+        if "://" in s:
+            return s if _up(s).netloc else ""
+        host, sep, rest = s.partition("/")
+        if not host:                     # a bare path — no host was ever recorded for this node
+            return ""
+        b = (bases or {})
+        base = b.get(host) or b.get(host.split(":")[0]) or ("https://" + host)
+        return base.rstrip("/") + (sep + rest if sep else "/")
+
     def _graph_primary_state(self, g):
         """Derive the planner's ASSET-SELECTION world-state FROM THE GRAPH only. roots = graph host
-        labels; urls = graph endpoint labels; live_hosts = the tool-discovered detail for hosts the
-        GRAPH holds. An empty graph yields empty roots+urls, so flat recon can NEVER independently
-        select a primary action (that is the graph-authoritative guarantee). Returns (roots, urls, recon)."""
+        labels; urls = graph endpoint identities resolved to ABSOLUTE URLs; live_hosts = the
+        tool-discovered detail for hosts the GRAPH holds. An empty graph yields empty roots+urls, so
+        flat recon can NEVER independently select a primary action (that is the graph-authoritative
+        guarantee). Returns (roots, urls, recon)."""
         from urllib.parse import urlparse
+        try:
+            bases = self.scope.base_map() or {}
+        except Exception:
+            bases = {}
         hosts = sorted({n.get("label") for n in g.nodes("host") if n.get("label")})
         hostset = set(hosts)
-        eps = [n.get("label") for n in g.nodes("endpoint") if n.get("label")]
+        # ABSOLUTE URLs ONLY (Q-019). See _endpoint_url for why reading the label produced
+        # `https:///path`. Anything that cannot be resolved to a host is DROPPED and RECORDED naming
+        # the producer — a silently dropped bad URL is the same invisible failure that hid this for
+        # weeks, so `_swallow` carries the count and the first offenders into the mission record.
+        eps, _seen, _unresolved = [], set(), []
+        for n in g.nodes("endpoint"):
+            u = self._endpoint_url(n.get("key"), bases)
+            if not u:
+                _unresolved.append(str(n.get("key") or n.get("label") or "")[:120])
+                continue
+            if u in _seen:
+                continue
+            _seen.add(u)
+            eps.append(u)
+        if _unresolved:
+            try:
+                self.tools._swallow(
+                    ValueError("%d graph endpoint node(s) carry no host, so no absolute URL exists for "
+                               "them; they cannot be probed and were NOT faked onto a bare scheme. "
+                               "First: %s" % (len(_unresolved), ", ".join(_unresolved[:3]))),
+                    "graph_primary_state.hostless_endpoint", _unresolved[0])
+            except Exception:
+                pass
         # The graph stores endpoints by PATH (canonical asset identity), which DROPS the query string —
         # so the planner would probe a bare /catalog with NO parameter to inject, and every query-param
         # vuln (SQLi/reflected-XSS/header-injection/base64/DOM-data on ?category=/?searchTerm=/?productId=)
         # is unreachable. Re-attach the live surface's PARAMETERIZED URLs for endpoints the graph already
         # holds, so the injection probes actually reach the inputs. Graph-faithful (path must be a known
         # endpoint) and additive (bare-path endpoints stay in the set).
-        _gp = set(eps)
-        _seen = set(eps)
+        _gp = {urlparse(u).path for u in eps}
         for _u in (self.tools.urls or []):
             if "?" not in _u:
                 continue
@@ -2533,6 +2741,35 @@ class BBHAgent:
         recon = {"subdomains": hosts, "live_hosts": live,
                  "target": self.tools.recon.get("target"), "domain": self.tools.recon.get("domain")}
         return hosts, eps, recon
+
+    def _reject_hostless_step(self, step: dict) -> bool:
+        """Ingress guard on the planner→executor boundary: refuse a step whose target carries a scheme
+        but an EMPTY netloc (`https:///x`), and RECORD it naming the producing tool.
+
+        This is deliberately a guard *and* a recorder. Q-019's real cost was not the ten wasted probes;
+        it was that the failure was invisible — the scope engine refused each one correctly, the mission
+        logged a generic `scope_block`, and nothing anywhere said which component had built the broken
+        URL. A guard that silently drops the bad value would reproduce that exact blindness, so the
+        drop goes through `_swallow` with the tool name attached. Returns True when the step is refused.
+        """
+        from urllib.parse import urlparse as _up
+        inp = step.get("input") or {}
+        for k in ("url", "base_url", "target"):
+            v = inp.get(k)
+            if not isinstance(v, str) or "://" not in v:
+                continue
+            if _up(v).netloc:
+                continue
+            try:
+                self.tools._swallow(
+                    ValueError("planner step %r built a host-less URL %r (scheme present, netloc empty); "
+                               "refused at the executor ingress rather than handed to scope"
+                               % (step.get("tool"), v[:160])),
+                    "execute_plan.hostless_step:%s" % step.get("tool"), v)
+            except Exception:
+                pass
+            return True
+        return False
 
     async def _execute_plan(self, session_id: str):
         """Drive the planner through the SAME scoped, HITL-gated tool pipeline — but GRAPH-FIRST
@@ -2606,6 +2843,8 @@ class BBHAgent:
                         self._plan_steps = steps
                         return
                     done.add(step["key"])
+                    if self._reject_hostless_step(step):
+                        continue
                     steps += 1
                     async for ev in self._run_tool(step["tool"], step["input"], session_id):
                         if "_content" not in ev:      # no model to feed; drop the tool-result payload
@@ -2764,14 +3003,20 @@ class BBHAgent:
                 pass
             if len(_seen_psig) >= 25:
                 break
+        # THE BUDGET IS PASSED EXPLICITLY (Q-019). The call site used to omit `limit`, so the function
+        # signature's default — 20 — was the real bound on the whole sweep, and nothing at the call site
+        # said so. Naming it here makes the budget visible where the cost is paid.
         targets = sweep_targets(self.tools.urls, self.tools.recon.get("forms"),
-                                lambda u: self.scope.validate(u)[0])
+                                lambda u: self.scope.validate(u)[0], limit=SWEEP_TARGET_CAP)
         swept_paths = {urlparse(t).path for t in targets}   # paths the param sweep already DOM-traced
         if not targets:
             return
         yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
                "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect + "
-               "runtime DOM source-to-sink (coverage guarantee, planner-independent)." % len(targets)}
+               "runtime DOM source-to-sink (coverage guarantee, planner-independent). The %d "
+               "browser-backed confirmer(s) at the front of the shape-spread order additionally get "
+               "run_xss + run_dom_trace (~19 s each, measured)."
+               % (len(targets), min(SWEEP_BROWSER_CAP, len(targets)))}
         # encoded-cookie/param injection once per distinct host base (cookies are host-wide)
         for hb in list(dict.fromkeys("%s://%s" % (urlparse(t).scheme, urlparse(t).netloc) + urlparse(t).path for t in targets))[:6]:
             try:
@@ -2794,8 +3039,13 @@ class BBHAgent:
                         yield ev
             except Exception:
                 pass
-        for u in targets:
-            for tool in ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap", "run_ssi", "run_css_injection", "run_waf_bypass", "run_injection_probes", "run_xss", "run_dom_trace"):
+        # TWO TIERS, TWO BUDGETS (Q-019). MEASURED per URL on a live lab: the eight HTTP-only engines
+        # below total 1.1 s, run_xss 10 s and run_dom_trace 9 s. Running all ten on every target made
+        # the sweep 20x more expensive than its evidence justified, which is what forced the cap to 20.
+        # Every selected target still gets the full deterministic HTTP battery; the browser-backed pair
+        # runs on the leading SWEEP_BROWSER_CAP shape-representatives.
+        for _i, u in enumerate(targets):
+            for tool in (_SWEEP_HTTP_ENGINES + (_SWEEP_BROWSER_ENGINES if _i < SWEEP_BROWSER_CAP else ())):
                 if self.stop_event.is_set():
                     return
                 try:

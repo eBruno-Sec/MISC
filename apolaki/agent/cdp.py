@@ -29,7 +29,10 @@ export default async function ({ page }) {
   const seen = new Set();
   page.on('request', r => { const u = r.url(); if (/\\/(api|rest|graphql|v1|v2|internal)\\//i.test(u)) seen.add(u); });
   try { await page.goto(target, { waitUntil: 'networkidle2', timeout: 25000 }); } catch (e) {}
-  try { await page.waitForTimeout(1500); } catch (e) {}
+  // page.waitForTimeout was REMOVED in modern Puppeteer. It threw TypeError into the silent catch
+  // below, and because that catch also wrapped the navigation the whole observation came back empty:
+  // links 0, forms 0, title "". A plain promise sleep works on every version.
+  await new Promise(r => setTimeout(r, 1500));
   const sw = await page.evaluate(async () => {
     if (!navigator.serviceWorker) return [];
     try { const rs = await navigator.serviceWorker.getRegistrations();

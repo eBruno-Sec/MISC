@@ -27,6 +27,9 @@ _LAB_ADDR = {
     "smb": ("smb", 445), "dvga": ("dvga", 5013), "domsource": ("domsource", 8080),
     "clientauthz": ("clientauthz", 8080),
     "dnp3": ("dnp3-outstation", 20000),
+    # Surface-discovery check: an app mounted on a SUBPATH with RELATIVE links — the exact shape that
+    # defeated recon seeding, the unauthenticated crawl, and link resolution.
+    "owaspbench": ("owaspbench", 8443),
 }
 
 
@@ -63,6 +66,19 @@ async def _run_one(check: dict) -> dict:
     if not _reachable(check["lab"]):
         return lv.verdict(check, [], lab_up=False)
     try:
+        if check["kind"] == "surface":
+            # Drive the REAL discovery chain — scoped-path seed, http_probe link extraction,
+            # bfs_frontier, robots/sitemap — and report the URLs it reached as the "findings".
+            import agent as agent_mod
+            from tools import ToolRegistry
+            seed = check["seed"]
+            sc = _scope_for({"kind": "tool", "input": {"url": seed}})
+            tb = ToolRegistry(sc, lab_mode=True)
+            tb._add_urls([seed])
+            ag = agent_mod.BBHAgent(sc, tb, asyncio.Event(), mode="active",
+                                    authenticated_scan=False, mission_id=None)
+            await ag._surface_crawl("liveness", base=seed)
+            return lv.verdict(check, list(tb.urls or []), lab_up=True)
         if check["kind"] == "tool":
             from tools import ToolRegistry
             tb = ToolRegistry(_scope_for(check), lab_mode=True)
