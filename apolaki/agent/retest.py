@@ -17,7 +17,12 @@ from urllib.parse import urlparse
 # family -> the GET-oracle used to re-confirm it. Only these are auto-retestable (idempotent read).
 _GET_ORACLE = {
     "exposure": "reachable", "sensitive_exposure": "reachable", "git_exposure": "reachable",
-    "exposed_files": "reachable", "exposed_credentials": "reachable", "vulnerable_component": "reachable",
+    "exposed_files": "reachable", "exposed_credentials": "reachable",
+    # NOT "reachable" (Q-021A): a patched library is still served from the same URL and still
+    # returns a non-empty 2xx, so the reachability oracle called every fix OPEN — telling a client
+    # their remediation did not work, which is worse than missing the bug. The question is not
+    # "is a file still served here" but "is the AFFECTED VERSION still served here".
+    "vulnerable_component": "component_version",
     "cors": "reachable", "jsonp_info_leak": "reachable", "excessive_data_exposure": "reachable",
     "open_redirect": "offsite_redirect", "redirect": "offsite_redirect",
     "reflected_xss": "reflects", "xss": "reflects", "csti": "reflects", "ssti": "reflects",
@@ -97,6 +102,37 @@ def evaluate(finding: dict, status, body: str = "", headers: dict = None, payloa
         if 200 <= status < 300 and len(body.strip()) > 0:
             return _v("open", "resource still served (HTTP %s, %d bytes)" % (status, len(body)), url)
         return _v("closed", "resource no longer served (HTTP %s)" % status, url)
+
+    if oracle == "component_version":
+        # Re-FINGERPRINT the replacement instead of pinging the URL. CONTENT first, filename second:
+        # a stale bundle name (/assets/jquery-3.4.0.js now serving 3.6.0) must never keep a fixed
+        # finding OPEN — the body states the truth, the path is only a label and an in-place patch
+        # does not rename the file.
+        name = str(finding.get("component") or "").strip().lower()
+        want = str(finding.get("component_version") or "").strip()
+        if not (name and want):
+            return _v("inconclusive", "finding carries no structured component/version to re-check "
+                                      "(persisted before the SCA fields existed); operator retest", url)
+        if not (200 <= status < 300) or not body.strip():
+            return _v("closed", "%s no longer served (HTTP %s)" % (name, status), url)
+        import dependency_intel as dep
+        served = [c for c in dep.fingerprint_js_content(body, url) if c["name"] == name]
+        if not served:
+            # The only evidence left is the URL, which is byte-identical to the one we detected on —
+            # it cannot distinguish "unpatched" from "patched in place". Saying OPEN here would be
+            # the remediation lie itself, and saying CLOSED would be a false closure.
+            return _v("inconclusive", "%s is still served but the replacement declares no version "
+                                      "(only the unchanged filename, which an in-place patch does not "
+                                      "update); operator retest" % name, url)
+        now = served[0]
+        if dep._norm_ver(now["version"]) == dep._norm_ver(want):
+            return _v("open", "%s %s still served (version banner in the served body)"
+                      % (name, now["version"]), url)
+        if dep.assess_component(now):
+            return _v("open", "%s upgraded %s -> %s, but the new version is still inside a "
+                              "known-vulnerable range" % (name, want, now["version"]), url)
+        return _v("closed", "%s upgraded %s -> %s, no longer inside a known-vulnerable range"
+                  % (name, want, now["version"]), url)
 
     if oracle == "offsite_redirect":
         loc = next((str(v) for k, v in headers.items() if str(k).lower() == "location"), "")

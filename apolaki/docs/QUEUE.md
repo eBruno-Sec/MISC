@@ -60,7 +60,7 @@ the baked image.
 |---|---|---|
 | 1 | `dependency_intel` — split version-certainty from exploitability-certainty | **done** |
 | 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | **done** |
-| 3 | `retest` — a patched component must CLOSE, not stay OPEN | todo |
+| 3 | `retest` — a patched component must CLOSE, not stay OPEN | **done** |
 | 4 | structured `cves` on the SCA finding so KEV can match it | todo |
 | 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | todo |
 | 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | todo |
@@ -102,6 +102,27 @@ producer, or a persisted pre-fix finding, still slipped through).
 
 Mutation test: reverting `_DEFAULT_ENFORCE`, and separately weakening the family rule to the CVE
 signal alone, both leave the stale row `confirmed` — the targeted tests fail in both cases.
+
+### Slice 3 — retest could not tell "patched" from "still there"
+`_GET_ORACLE["vulnerable_component"] = "reachable"` asked *is a file still served here*. A patched
+library is served from the same URL and returns the same non-empty 2xx, so **every fix came back
+OPEN**. New `component_version` oracle re-FINGERPRINTS the replacement:
+
+| replacement | verdict |
+|---|---|
+| body still declares the affected version | `open` |
+| body declares a newer version still inside a known-vulnerable range | `open` |
+| body declares a version outside every range | `closed` |
+| non-2xx / empty | `closed` |
+| body declares **no** version (only the unchanged filename) | `inconclusive` |
+| finding predates the structured `component` fields | `inconclusive` |
+
+Content beats filename, deliberately: `/assets/jquery-3.4.0.js` serving 3.6.0 is a fixed finding, and
+an in-place patch never renames the file. Where only the path is left as evidence the honest answer
+is `inconclusive` — a false OPEN is the remediation lie this slice exists to remove, and a false
+CLOSED is the failure the module was written to avoid.
+
+Mutation test: restoring `"reachable"` makes the patched replacement report `open` again.
 
 ---
 

@@ -158,3 +158,71 @@ def test_proof_gate_still_ignores_families_outside_the_enforce_set():
     assert proof_schema.demote_unproven([other])[0]["confidence"] == "confirmed"
     assert "vulnerable_component" in proof_schema._DEFAULT_ENFORCE
     assert "weak_random" not in proof_schema._DEFAULT_ENFORCE
+
+
+# ── slice 3: a patched component must CLOSE, not stay OPEN ───────────────────
+import retest
+
+_JQ_340 = "/*! jQuery JavaScript Library v3.4.0 */ ;(function(){})();"
+_JQ_360 = "/*! jQuery JavaScript Library v3.6.0 */ ;(function(){})();"
+_JQ_341 = "/*! jQuery JavaScript Library v3.4.1 */ ;(function(){})();"
+
+
+def _jq_finding(url="https://t/assets/jquery-3.4.0.js"):
+    comp = dep.make_component("jquery", "3.4.0", "js-content-banner", dep.CONFIRMED,
+                              "jQuery JavaScript Library v3.4.0", url)
+    return dep.vulnerable_component_finding(comp, dep.assess_component(comp))
+
+
+def test_retest_uses_a_version_oracle_not_a_reachability_oracle():
+    p = retest.plan(_jq_finding())
+    assert p["retestable"] is True and p["oracle"] == "component_version"
+    # the old mapping asked "is a file still served here", which any patched replacement answers yes to
+    assert retest._GET_ORACLE["vulnerable_component"] != "reachable"
+
+
+def test_retest_patched_component_closes():
+    """(b) THE NEGATIVE CONTROL. A patched replacement still returns a non-empty 2xx from the same
+    URL. Under the `reachable` oracle that was OPEN — telling a client their fix did not work, which
+    is worse than missing the bug."""
+    v = retest.evaluate(_jq_finding(), 200, _JQ_360)
+    assert v["verdict"] == "closed", v
+    assert "3.6.0" in v["detail"]
+
+
+def test_retest_stale_bundle_filename_does_not_keep_a_fixed_finding_open():
+    """FP risk — /assets/jquery-3.4.0.js now SERVING 3.6.0. The body states the truth; the path is
+    only a label, and an in-place patch does not rename the file."""
+    v = retest.evaluate(_jq_finding("https://t/assets/jquery-3.4.0.js"), 200, _JQ_360)
+    assert v["verdict"] == "closed"
+
+
+def test_retest_unpatched_component_stays_open():
+    v = retest.evaluate(_jq_finding(), 200, _JQ_340)
+    assert v["verdict"] == "open" and "3.4.0" in v["detail"]
+
+
+def test_retest_upgrade_that_is_still_in_range_stays_open():
+    """3.4.0 -> 3.4.1 leaves the <3.5.0 range unfixed. A version CHANGE is not a fix."""
+    v = retest.evaluate(_jq_finding(), 200, _JQ_341)
+    assert v["verdict"] == "open" and "3.4.1" in v["detail"]
+
+
+def test_retest_component_no_longer_served_closes():
+    assert retest.evaluate(_jq_finding(), 404, "")["verdict"] == "closed"
+
+
+def test_retest_never_reports_open_from_the_filename_alone():
+    """Filename spoofing / stale-label safety: if the replacement body states no version, the only
+    evidence left is the unchanged path — which a patch in place never updates. Honest answer is
+    INCONCLUSIVE; a false OPEN here is the remediation lie this slice exists to remove."""
+    v = retest.evaluate(_jq_finding(), 200, "!function(){}();")   # minified, banner stripped
+    assert v["verdict"] == "inconclusive"
+
+
+def test_retest_without_structured_component_fields_is_inconclusive_not_open():
+    """A finding persisted before Q-021A carries no component/component_version. It must degrade to
+    an honest 'cannot tell', never back to the reachability answer."""
+    legacy = {"family": "vulnerable_component", "target": "https://t/assets/jquery-3.4.0.js",
+              "title": "Vulnerable component: jquery@3.4.0", "confidence": "lead"}
+    assert retest.evaluate(legacy, 200, _JQ_340)["verdict"] == "inconclusive"
