@@ -332,3 +332,52 @@ def test_report_integrity_still_flags_a_confirmed_finding_with_no_oracle_at_all(
          "impact": "script runs in the victim session",
          "reproduction_steps": ["GET /x?q=<payload>"]}
     assert any("success oracle" in i for i in report.report_integrity_check([f]))
+
+
+# ── slice 6 (bonus): SARIF still un-demoted proof-gate-demoted rows ──────────
+def test_sarif_downgrades_a_demoted_row_where_the_consumer_can_see_it():
+    """707b3b9 / 5af0af8 fixed HTML, markdown, JSON and CSV. SARIF still emitted level=error and
+    security-severity=9.5 for a row the proof gate had demoted, burying the demotion in
+    `properties.confidence` — which GitHub code scanning and DefectDojo do not read. They read
+    `level` and `security-severity`, so that is where the demotion has to appear."""
+    import sarif_io
+    demoted = {"title": "unproven idor", "family": "idor", "cwe": "CWE-639", "severity": "critical",
+               "confidence": "lead", "target": "https://t/a", "proof_gap": ["impact"]}
+    res = sarif_io.export_sarif([demoted])["runs"][0]["results"][0]
+    assert res["level"] == "warning"
+    assert res["properties"]["security-severity"] == "5.0"     # matches the level, not the claim
+    # the original severity is preserved as data, not as an alarm level
+    assert res["properties"]["claimed_severity"] == "critical"
+    assert res["properties"]["confidence"] == "lead"
+
+
+def test_sarif_leaves_a_confirmed_row_at_full_severity():
+    """NEGATIVE CONTROL — the downgrade must key off the PROOF STATE, not off severity. A genuinely
+    confirmed critical must still be error / 9.5."""
+    import sarif_io
+    proven = {"title": "confirmed idor", "family": "idor", "cwe": "CWE-639", "severity": "critical",
+              "confidence": "confirmed", "target": "https://t/a"}
+    res = sarif_io.export_sarif([proven])["runs"][0]["results"][0]
+    assert res["level"] == "error" and res["properties"]["security-severity"] == "9.5"
+    assert "claimed_severity" not in res["properties"]
+
+
+def test_sarif_uses_the_shared_is_confirmed_definition():
+    """A finding with NO confidence key at all is confirmed by convention (proof_schema.is_confirmed);
+    SARIF must use that one definition rather than a fourth private copy."""
+    import sarif_io
+    no_key = {"title": "x", "family": "xss", "severity": "high", "target": "https://t/a"}
+    assert sarif_io.export_sarif([no_key])["runs"][0]["results"][0]["level"] == "error"
+    for word in ("candidate", "unconfirmed", "tentative"):
+        row = {"title": "x", "family": "xss", "severity": "high", "confidence": word,
+               "target": "https://t/a"}
+        assert sarif_io.export_sarif([row])["runs"][0]["results"][0]["level"] == "warning", word
+
+
+def test_sarif_never_downgrades_below_the_level_the_severity_already_earned():
+    """A demoted LOW must not be promoted to warning by the demotion rule."""
+    import sarif_io
+    row = {"title": "x", "family": "xss", "severity": "low", "confidence": "lead",
+           "target": "https://t/a"}
+    res = sarif_io.export_sarif([row])["runs"][0]["results"][0]
+    assert res["level"] == "note" and res["properties"]["security-severity"] == "3.0"

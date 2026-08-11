@@ -26,6 +26,30 @@ _LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "not
 _SEC_SEVERITY = {"critical": "9.5", "high": "8.0", "medium": "5.0", "low": "3.0", "informational": "1.0"}
 _CWE_RX = re.compile(r"(?i)cwe[-/_ ]?(\d{1,5})")
 
+#: The severity a proof-gate-DEMOTED row is exported at. Not a judgement about the underlying class —
+#: the row's claimed severity is preserved in `properties.claimed_severity`. It is the honest ceiling
+#: for something Apolaki did not prove.
+_DEMOTED_SEVERITY = "medium"
+
+
+def _sev_num(sev: str) -> float:
+    try:
+        return float(_SEC_SEVERITY.get(str(sev or "").lower(), "1.0"))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _proof_state(f: dict) -> bool:
+    """Is this row still confirmed? Through `proof_schema.is_confirmed` — the ONE definition. A
+    fourth private copy of "what counts as confirmed" is exactly how the HTML report came to stamp
+    CONFIRMED on rows the gate had already demoted."""
+    try:
+        import proof_schema
+        return proof_schema.is_confirmed(f)
+    except Exception:
+        return str((f or {}).get("confidence") or "confirmed").strip().lower() not in (
+            "lead", "candidate", "unconfirmed", "informational", "info", "tentative")
+
 
 # ── secret redaction (reuse codereview patterns; over-redaction is the safe direction) ──
 def redact_snippet(text) -> str:
@@ -88,17 +112,30 @@ def export_sarif(findings: list, tool_name: str = "Apolaki") -> dict:
             rules.append({"id": rule_id, "name": (f.get("title") or rule_id),
                           "properties": {"tags": tags, **({"cwe": cwe} if cwe else {})}})
         sev = str(f.get("severity") or "informational").lower()
+        # A row the proof gate DEMOTED must not be exported as an error at 9.5. GitHub code scanning
+        # and DefectDojo route on `level` and `security-severity` and never read
+        # `properties.confidence`, so burying the demotion there un-demotes it for every downstream
+        # consumer — the same defect 707b3b9 fixed in HTML/markdown/JSON/CSV, still open here.
+        # The demotion can only ever LOWER the level; a demoted `low` stays a note.
+        eff = sev
+        if not _proof_state(f) and _sev_num(sev) > _sev_num(_DEMOTED_SEVERITY):
+            eff = _DEMOTED_SEVERITY
         target = str(f.get("target") or f.get("url") or "")
         msg = redact_snippet(" — ".join(x for x in (str(f.get("title") or ""), str(f.get("description") or "")) if x))
+        props = {"family": family, "cwe": cwe, "confidence": f.get("confidence"),
+                 "owasp": f.get("owasp"), "security-severity": _SEC_SEVERITY.get(eff, "1.0"),
+                 "apolaki_finding_id": f.get("id") or "finding-%d" % i, "atomic": True}
+        if eff != sev:
+            # the claim is preserved as DATA (so nothing is lost) rather than as an alarm level
+            props["claimed_severity"] = sev
+            props["proof_gap"] = f.get("proof_gap") or None
         results.append({
             "ruleId": rule_id, "ruleIndex": rule_index[rule_id],
-            "level": _LEVEL.get(sev, "note"),
+            "level": _LEVEL.get(eff, "note"),
             "message": {"text": msg or rule_id},
             "locations": [_location(target)] if target else [],
             "partialFingerprints": {FP_KEY: apolaki_fingerprint(family, cwe, target)},
-            "properties": {"family": family, "cwe": cwe, "confidence": f.get("confidence"),
-                           "owasp": f.get("owasp"), "security-severity": _SEC_SEVERITY.get(sev, "1.0"),
-                           "apolaki_finding_id": f.get("id") or "finding-%d" % i, "atomic": True},
+            "properties": props,
         })
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "version": SARIF_VERSION,

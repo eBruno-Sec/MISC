@@ -63,7 +63,7 @@ the baked image.
 | 3 | `retest` — a patched component must CLOSE, not stay OPEN | **done** |
 | 4 | structured `cves` on the SCA finding so KEV can match it | **done** |
 | 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | **done** |
-| 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | todo |
+| 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | **done** |
 
 ### Slice 1 — `confidence` no longer answers two questions with one word
 `vulnerable_component_finding` set `confidence=CONFIRMED` while its own `impact` said exploitability
@@ -174,6 +174,20 @@ their own meaning and were deliberately left alone. This slice is about FINDINGS
 
 Mutation test: restrict `_ORACLE_ALIASES` to either spelling alone -> the normalisation returns
 `None` and the PoC bundle's oracle goes empty again.
+
+### Slice 6 — SARIF stops un-demoting the proof gate (closes the last export)
+`707b3b9` / `5af0af8` fixed HTML, markdown, JSON and CSV. SARIF still emitted `level=error` and
+`security-severity=9.5` for a demoted row, with the demotion buried in `properties.confidence` —
+which GitHub code scanning and DefectDojo do not read. They route on `level` and
+`security-severity`, so that is where the demotion now appears: a demoted row is capped at
+`warning` / `5.0`, via the shared `proof_schema.is_confirmed()` rather than a fourth private copy of
+"what counts as confirmed".
+
+The cap can only ever LOWER a row (a demoted `low` stays `note`), and the original claim is kept as
+`properties.claimed_severity` + `properties.proof_gap` so nothing is lost — it is preserved as data
+instead of as an alarm level.
+
+Mutation test: force `_proof_state` to `True` -> the demoted row exports as `error` / `9.5` again.
 
 ---
 
