@@ -381,3 +381,46 @@ def test_sarif_never_downgrades_below_the_level_the_severity_already_earned():
            "target": "https://t/a"}
     res = sarif_io.export_sarif([row])["runs"][0]["results"][0]
     assert res["level"] == "note" and res["properties"]["security-severity"] == "3.0"
+
+
+# ── slice 7: contradictory fingerprints of the same library ──────────────────
+def test_reconcile_prefers_the_served_body_over_a_stale_bundle_filename():
+    """FP risk, detection side. /assets/jquery-3.4.0.js SERVING 3.6.0 fingerprints TWICE: 3.6.0 from
+    the body (CONFIRMED) and 3.4.0 from the path (HIGH). They are different (name, version) keys, so
+    both survive dedupe and the stale one raises a vulnerable_component finding for a library that
+    was already patched. The file states its own version; the path is a label an in-place upgrade
+    never renames."""
+    url = "https://t/assets/jquery-3.4.0.js"
+    comps = (dep.fingerprint_js_content("/*! jQuery JavaScript Library v3.6.0 */", url)
+             + dep.fingerprint_url(url))
+    assert len(comps) == 2 and {c["version"] for c in comps} == {"3.6.0", "3.4.0"}
+    kept = dep.reconcile_components(comps)
+    assert len(kept) == 1 and kept[0]["version"] == "3.6.0"
+    assert kept[0]["confidence"] == dep.CONFIRMED
+    assert dep.assess_component(kept[0]) == []      # and the false finding disappears with it
+
+
+def test_reconcile_keeps_the_same_library_served_from_two_different_locations():
+    """NEGATIVE CONTROL — two bundles really can ship two versions. Reconciliation is per LOCATION,
+    so it must not collapse genuinely distinct components."""
+    a = dep.make_component("jquery", "3.4.0", "script-filename", dep.HIGH, "", "https://t/a.js")
+    b = dep.make_component("jquery", "3.6.0", "js-content-banner", dep.CONFIRMED, "", "https://t/b.js")
+    assert len(dep.reconcile_components([a, b])) == 2
+
+
+def test_reconcile_is_order_preserving_and_keeps_unrelated_components():
+    ng = dep.make_component("angular", "1.7.7", "script-filename", dep.HIGH, "", "https://t/x.js")
+    jq_lo = dep.make_component("jquery", "3.4.0", "script-filename", dep.HIGH, "", "https://t/x.js")
+    jq_hi = dep.make_component("jquery", "3.6.0", "js-content-banner", dep.CONFIRMED, "", "https://t/x.js")
+    out = dep.reconcile_components([ng, jq_lo, jq_hi])
+    assert [c["name"] for c in out] == ["angular", "jquery"]
+    assert out[1]["version"] == "3.6.0"
+
+
+def test_reconcile_does_not_invent_a_winner_between_equal_evidence():
+    """NEGATIVE CONTROL — with two equally-strong contradictory fingerprints there is no principled
+    winner, so BOTH are kept rather than silently dropping one (dropping the vulnerable one would be
+    a false negative; dropping the patched one would be the FP we are removing)."""
+    a = dep.make_component("jquery", "3.4.0", "script-filename", dep.HIGH, "", "https://t/x.js")
+    b = dep.make_component("jquery", "3.6.0", "cdn-path", dep.HIGH, "", "https://t/x.js")
+    assert len(dep.reconcile_components([a, b])) == 2

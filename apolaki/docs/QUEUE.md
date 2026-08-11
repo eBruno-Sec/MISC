@@ -64,6 +64,7 @@ the baked image.
 | 4 | structured `cves` on the SCA finding so KEV can match it | **done** |
 | 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | **done** |
 | 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | **done** |
+| 7 | stale-bundle-filename FP — contradictory fingerprints of one library | **done** |
 
 ### Slice 1 — `confidence` no longer answers two questions with one word
 `vulnerable_component_finding` set `confidence=CONFIRMED` while its own `impact` said exploitability
@@ -188,6 +189,33 @@ The cap can only ever LOWER a row (a demoted `low` stays `note`), and the origin
 instead of as an alarm level.
 
 Mutation test: force `_proof_state` to `True` -> the demoted row exports as `error` / `9.5` again.
+
+### Slice 7 — contradictory fingerprints of the same library (the stale-bundle-filename FP)
+`/assets/jquery-3.4.0.js` that now SERVES 3.6.0 fingerprints **twice** — 3.6.0 from the body
+(CONFIRMED) and 3.4.0 from the path (HIGH). Different `(name, version)` keys, so both survive the
+caller's dedupe and the stale one raises a `vulnerable_component` finding for a library that was
+already patched. New pure `dependency_intel.reconcile_components()` keeps the strongest evidence per
+`(name, location)`.
+
+Two deliberate limits, both with a negative control: reconciliation is per LOCATION (one page really
+can ship two versions from two bundles), and two EQUALLY strong contradictory readings are both kept
+— dropping the vulnerable one would be a false negative, dropping the patched one would be the FP.
+
+**The no-island guard earned its keep here.** The first version of this slice left
+`reconcile_components` uncalled and `test_deadcode_gate.py::test_the_ratchet_holds` failed
+immediately (37 -> 38). Rather than raise the baseline, the function was wired into slice 3's retest
+oracle, which had been hand-rolling the same "content beats filename" preference inline — so the
+rule now lives in exactly one place and the ratchet is back at 37.
+
+**Hand-off note — `agent/tools.py:5202` (engine lane).** Detection-time reconciliation is still
+missing: that line builds `comps = dep.fingerprint_js_content(text, label) + dep.fingerprint_url(label)`
+and the FP above is raised there. One-line patch:
+
+```python
+comps = dep.reconcile_components(dep.fingerprint_js_content(text, label) + dep.fingerprint_url(label))
+```
+
+Until it lands, the FP is caught at RETEST (the finding closes) but is still raised at detection.
 
 ---
 
@@ -803,3 +831,261 @@ blind SQLi and cmdi (both with matching zero-delay controls) · mass assignment 
 vulnerable components (`dependency_intel.py`) · host header · JSONP/XSSI · clickjacking (header
 level, correctly two-condition) · HTTP parameter pollution (excluded, FP-prone, no clean oracle) ·
 padding oracle (excluded, no clean general oracle).
+
+---
+
+## Rank 3d â€” new tickets from today's measurements (Distillation, 2026-08-10). All `proposed`.
+
+### Q-022 Â· "How this was confirmed" is a template, not a record â€” 626 of 660 findings Â· **CRITICAL** Â· `proposed`
+
+*The platform's differentiator is that its proofs are real. This is the one place the report says a
+proof happened without checking that it did.*
+
+**Repository-proven gap.** `report.proof_and_retest()` (`report.py:1204-1219`) constructs a synthetic
+record from the finding's **family alone** and asks the technique model to describe a control:
+
+```python
+nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
+```
+
+`technique_model.proof_contract` (`:169`) â†’ `_neg_control_for(vc)` (`:161-166`) â†’ a canned per-class
+string. The finding's `evidence`, `browser_evidence`, `request`, `response`, `negative_control` and
+`proof_gap` fields are **never read**. The result is rendered verbatim under
+**"How this was confirmed (false-positive safety)"** at `report.py:2128-2131` (HTML) and
+`report.py:459-461` (Markdown).
+
+**MEASURED** â€” a finding with no evidence at all still gets a confident sentence:
+
+```
+>>> report.proof_and_retest({'family':'sqli','confidence':'confirmed','target':'http://x/?id=1'})
+negative_control: "An inert control of the same shape but without SQL metacharacters does NOT
+                   reproduce the error/boolean/time differential; the unmodified baseline behaves
+                   normally."
+>>> report.proof_and_retest({'family':'idor', ...})     # no controls either
+negative_control: "A negative-control request WITHOUT the trigger does NOT reproduce the confirming
+                   signal (differential measured over a stable baseline)."
+```
+
+**MEASURED scale**, every stored finding across all 151 missions:
+
+```
+confirmed findings stored                                     : 660
+carry ANY recorded control artifact                           :  34   (dom_link_manipulation 32, bola 2)
+carry NONE, yet the report prints a declarative control claim : 626   (94.8%)
+sqli 89 Â· backup_exposure 84 Â· vulnerable_component 56 Â· csti 56 Â· prototype_pollution 50 Â·
+crlf 46 Â· dom_data_manipulation 46 Â· broken_auth 33 Â· dom_xss 28 Â· security_misconfig 24 ...
+```
+
+A representative confirmed `sqli` row's whole evidence is one request and one response:
+`evidence: 'SQLite error triggered by "\')"'`, `request: 'GET .../search?q=%27%29'`,
+`response: 'HTTP 500 ... SQLITE_ERROR'`. **No baseline. No inert control.** The report tells the
+client the inert control was run.
+
+**Root cause.** Exactly the same as `707b3b9`: a **rendering surface asserting a property the gate
+never verified**. `proof_contract` is a *specification* of what a technique's control ought to be â€”
+correct for the technique registry, wrong as a per-finding statement of what happened. The two were
+never distinguished, and `proof_and_retest` uses the specification as if it were a record.
+
+**Be precise about what is false.** Several engines genuinely do run a differential (boolean-blind
+compares a true-condition against a false-condition response; error-recovery compares against a
+recovery baseline). For those, the sentence is *true but unevidenced and unfalsifiable from the
+report*. For engines that run no control, it is *false*. Both are unacceptable in the section whose
+entire purpose is false-positive safety, and the report cannot tell them apart. **The ticket is not
+"delete the sentence" â€” it is "make the sentence a function of what was recorded."**
+
+**Producer/consumer contracts.**
+- *Producer*: an engine that runs a control **records it** on the finding, in one canonical shape.
+  The shape already exists in two places â€” pick one and make it the contract: `browser_evidence.
+  negative_controls` (a dict of `{label: {url, status, len}}`, rendered by `report.py:1157-1164`) or
+  `dependency_intel`'s Q-021A fields (`control`, `control_observed`). The BIE dict is the more
+  general of the two.
+- *Consumer*: `proof_and_retest` reads the finding and returns one of three shapes:
+  - a control **was recorded** â†’ describe the recorded control, quoting its actual values;
+  - a control **was not recorded** â†’ *"Negative control not recorded for this finding"* plus the
+    technique-registry expectation clearly labelled as **expected**, not **performed**;
+  - the family is in `proof_schema._DEFAULT_ENFORCE` and no control was recorded â†’ the finding should
+    already have been demoted by `demote_unproven`; assert that, and surface the `proof_gap`.
+- *Contract*: **no string in this section may be in the past or present indicative unless it is
+  derived from a stored artifact.** Everything else is phrased as an expectation.
+
+**Dependencies.** None â€” this is a truth-containment fix with no prerequisites, exactly like Q-021A.
+It should be ranked with Q-021A's urgency for the same reason: everything else in the queue is a
+missing capability; this is a **wrong answer already shipping to clients**.
+
+**Likely files.** `agent/report.py` (owned by the Coordinator this cycle) Â· `agent/technique_model.py`
+Â· `agent/proof_schema.py` (Builder-owned â€” the `proof_gap` read is a hand-off note) Â·
+`agent/tests/test_report*.py`.
+
+**Deterministic oracle.**
+1. A finding with a recorded control renders the **recorded** values (url/status/length), and those
+   values appear in the output.
+2. A finding with no recorded control renders the not-recorded wording, and the string
+   `"does NOT reproduce"` (or any indicative claim) does **not** appear.
+3. HTML and Markdown produce the same verdict for the same finding â€” one projection, two renderers.
+
+**Negative control (three, all mandatory).**
+- **(a) The honest case must not regress**: the 34 findings that *do* carry a control must still show
+  a full control description. A fix that renders "not recorded" for everything has deleted the section
+  rather than repaired it.
+- **(b) A demoted finding must not display a confirmation narrative at all** â€” it is a lead.
+- **(c) Non-vacuity**: assert the test corpus contains â‰¥ 1 finding of each kind (control recorded /
+  control absent), because a test over a single-kind corpus passes for free.
+
+**Mutation tests.** Restore the family-only `proof_contract` call â†’ oracle 2 must fail. Strip the
+recorded-control branch â†’ control (a) must fail. Make the Markdown renderer use its own copy of the
+projection and change it â†’ oracle 3 must fail.
+
+**Regression tests.** `technique_model.proof_contract` keeps its current behaviour for the **technique
+registry** and its guard test (`every proven technique declares its FP-safety differential`) â€” that
+use is correct and must not change. Report snapshot tests updated with the reason stated in the commit
+message, because "the test changed" is what weakening looks like from the outside.
+
+**False-positive risks (of the fix).** Over-flagging: an engine that records its control in a shape
+the reader does not recognise would render "not recorded" on an honest finding. Mitigation: enumerate
+the recorded-control shapes in one table and add a test per producer that actually records one.
+
+**Secondary observation, UNVERIFIED â€” do not queue as fact.** The same function's retest string reads
+*"(Apolaki auto-retests this)"*. `/retest` (`main.py:2561`) is an operator-invoked endpoint; I found
+no scheduler that calls it. Whether "auto" is accurate needs a UI/behaviour check I did not run.
+
+**Definition of done.** All three oracle assertions, all three negative controls, the two mutations;
+a re-render of an existing stored mission's report showing "not recorded" on the findings that carry
+no control; and the count of findings displaying an unbacked control claim measured before and after.
+
+**Expected benefit.** Removes 626 unbacked proof claims from client-facing output and creates the
+back-pressure that makes engines record their controls â€” which is the only route to the 34/660 figure
+improving for real.
+
+---
+
+### Q-023 Â· ZAP has never executed in any mission, and three flags do not explain it Â· **HIGH** Â· `proposed`
+
+**MEASURED, whole corpus.** `run_zap` tool calls across 151 missions and **29,109** `tool_call` rows:
+**0**. (`run_fingerprint` 2,641 Â· `http_probe` 4,542 over the same corpus, so the counter works.)
+
+**Three independent gates, each sufficient on its own** â€” all three confirmed by reading:
+
+```
+main.py:81    enable_zap: bool = False                     <- default off
+main.py:336   if enable_zap and req.mode != "full": 422    <- Full mode only
+tools.py:138  "run_zap": PermissionLevel.INTRUSIVE         <- outside the active/passive tiers;
+                                                              planner.fresh() -> _allowed() drops it
+```
+
+**The planner branch is LIVE â€” measured, not assumed.** Driving `planner.next_batch` directly with
+`mode=full, zap=True`:
+
+```
+urls=1     batches=8  total_steps=55   run_zap first scheduled at (batch 7, step 54)
+urls=30    batches=8  total_steps=287  run_zap first scheduled at (batch 7, step 286)
+urls=300   batches=8  total_steps=287  run_zap first scheduled at (batch 7, step 286)
+```
+
+Note the third row: phase E is internally capped, so **phase F is reachable in a bounded number of
+steps regardless of surface size**. "The mission never gets that far on a big target" is therefore
+**DISPROVED** as an explanation.
+
+**THE RESIDUE THAT DEFINES THIS TICKET â€” flipping the flag is NOT a sufficient fix.** Four missions
+carried `enable_zap` truthy in their stored context and fired **zero** `run_zap` calls:
+
+```
+c7bfe8e8  ginandjuice.shop              full  2026-07-26  tool_calls=222  run_zap=0
+ce35b361  ginandjuice.shop              full  2026-07-26  tool_calls=222  run_zap=0
+6771ec21  G&J-FULLBLOWN-26Jul2026@1243  full  2026-07-26  tool_calls=333  run_zap=0
+94e8b564  OWASP-JS-FULLBLOWN            full  2026-07-26  tool_calls=375  run_zap=0
+```
+
+All four reached `status=complete, phase=report` and all four ran INTRUSIVE tools
+(`run_sqlmap`, `run_ffuf`, `run_dalfox`), so `_allowed(INTRUSIVE, full)` passed and the mission was in
+Full mode. `run_nuclei` (phase F1, immediately before ZAP) is also absent from all four. **There is a
+fifth cause and it is unidentified.** It is `CANNOT_VERIFY_STATICALLY` today because those missions ran
+on 2026-07-26 code and the plan loop has since moved to the graph-authoritative path
+(`agent.py:2820-2841`, `_graph_primary_state`). Candidate hypotheses for the implementer, in order:
+`self.enable_zap` not propagating from `EngageRequest` into the agent Â· `_zap_configured()` false at
+the time (today it is `True`: `ZAP_ADDR=http://zap:8090`, `zap_client.configured() -> True`) Â·
+`_graph_primary_state` returning a `g_roots`/`g_urls` pair that ends the loop before phase F.
+
+**Root cause (of the ticket's existence).** Nobody ever asserted that ZAP *ran*. `docs` and the report
+describe a "ZAP Executed â€” Safe Active" state; no test and no liveness check requires a `run_zap` row
+to exist. This is the **"guards that check declarations, not facts"** shape at the orchestration layer.
+
+**Also in scope â€” three confirmed sub-defects.**
+
+1. **`recon["zap"]` is a dead write.** `tools.py:8470`
+   `self.recon.setdefault("zap", []).extend(findings)` is the sole occurrence. Repo-wide search for
+   `recon["zap"]` / `recon.get("zap")` finds no reader (`planner.py:167`'s `state.get("zap")` is the
+   *enable flag* on a different dict). ZAP's own alerts reach the report only via the ToolResult /
+   `_AUTO_STORE_TOOLS` path, never via recon.
+2. **Targeted rescan is NOT WIRED.** The planner key is `f"run_zap:{h}"` (`planner.py:601`) and
+   `fresh()` (`planner.py:219-234`) drops any step whose key is in `done`. **One ZAP call per host per
+   mission, ever** â€” a second, narrower ZAP pass against a newly discovered path is unrepresentable.
+3. **The AJAX spider fails silently.** `tools.py:8413-8416`:
+   ```python
+   try:
+       await zap.ajax_start(url, context=name)
+       await zap.wait_str(lambda: zap.ajax_status(), cap=120, stop_event=self.stop_event)
+   except Exception:
+       pass
+   ```
+   A bare swallow, and the SPA crawl is exactly the part that matters on a modern target. **The correct
+   idiom is 50 lines below in the same function**: the active scan's `except Exception as _ae:
+   ascan_err = ...` is surfaced in the ToolResult note. Mirror it.
+
+**MEASURED CORRECTION to the intake brief â€” do not use `numberOfMessages` as the oracle.** The brief
+records `numberOfMessages: 0` after 10h up. Today:
+
+```
+GET /JSON/core/view/version/          -> {"version":"2.17.0"}
+GET /JSON/core/view/numberOfMessages/ -> {"numberOfMessages":"4411"}
+```
+
+The daemon has now seen 4,411 messages while `run_zap` calls remain **0**, so that counter is
+contaminated by something other than Apolaki's ZAP engine. **The oracle must be a `run_zap`
+`tool_call` row plus a ZAP-sourced finding, never a daemon-side counter.**
+
+**Producer/consumer contracts.** Producer = `tools._run_zap`, which must (i) write its alerts
+somewhere with a reader or stop writing `recon["zap"]`, and (ii) report AJAX-spider failure in its
+note. Consumer = the report's "ZAP Executed" state, which must be computed from the presence of a
+`run_zap` result, not from the `enable_zap` flag.
+
+**Dependencies.** None. Independent of Q-019 and the Q-021 family.
+
+**Likely files.** `agent/tools.py` (`_run_zap`) and `agent/planner.py` â€” **`tools.py` is Builder-owned
+this cycle; write the patch as a hand-off note.** Plus `agent/agent.py` (flag propagation),
+`agent/liveness.py` (Coordinator-owned â€” hand-off), `agent/tests/`.
+
+**Deterministic oracle â€” end-to-end, and nothing less counts.** Run one real mission in Full mode with
+`enable_zap=True` against a standing lab, then assert **from the persisted event log**:
+1. â‰¥ 1 `tool_call` row with `tool == "run_zap"`;
+2. its paired `tool_result` is `success=True` with a note beginning with a policy token;
+3. the mission's ZAP state in the report is derived from (1), not from the request flag.
+
+**Negative control (four).** **(a)** The same mission with `enable_zap=False` produces **zero**
+`run_zap` rows and a report that does not claim ZAP ran. **(b)** With the ZAP daemon **stopped**, an
+`enable_zap=True` mission must degrade *visibly* â€” a recorded unreachable-daemon error, not a silent
+skip and not a crash. **(c)** With the AJAX spider forced to raise, the ToolResult note must say so
+while the passive alerts survive (mirroring the existing `ascan_err` behaviour). **(d) Non-vacuity**:
+assert the mission actually completed and produced > 0 tool calls, so an aborted mission cannot pass
+control (a) for free.
+
+**Mutation tests.** Set `enable_zap=False` in the e2e fixture â†’ oracle 1 must fail. Re-introduce the
+bare `except: pass` around the AJAX spider â†’ control (c) must fail. Remove the `run_zap:{host}` key
+uniqueness change (if targeted rescan is implemented) â†’ the second, narrower pass must be dropped and
+a test must catch it.
+
+**Regression tests.** Missions in `active`/`passive` mode still never schedule ZAP; the 422 for
+`enable_zap` outside Full mode is preserved; `require_zap` still blocks when the daemon is absent.
+
+**False-positive risks.** ZAP's own alerts are `_CONFIRMED_BY_TOOL` (`agent.py:117`) â€” confirmed by
+construction. Turning ZAP on for the first time in 151 missions will introduce a **new false-positive
+source into the report that has never been measured.** The DoD must include an FPR check on a clean
+paired lab before ZAP is enabled by default anywhere, and this ticket must **not** change the default.
+
+**Definition of done.** The three oracle assertions from a real mission's event log; all four negative
+controls; the dead write and the bare swallow fixed; a `liveness.py` CHECKS entry that fails when a
+ZAP-enabled mission produces zero `run_zap` rows; **and the fifth cause named, with the measurement
+that identified it.** Closing this ticket by flipping `enable_zap` is explicitly not acceptable.
+
+**Expected benefit.** Either a whole DAST capability the platform ships and has never run, or â€”
+equally valuable â€” a measured decision to remove the claim. Both beat the current state, where the
+product describes a capability that has executed zero times in 151 missions.

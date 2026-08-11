@@ -220,6 +220,43 @@ def assess_component(component):
     return out
 
 
+_EVIDENCE_RANK = {CONFIRMED: 2, HIGH: 1, LOW: 0}
+
+
+def reconcile_components(components) -> list:
+    """Collapse CONTRADICTORY fingerprints of the same library at the same location, keeping the one
+    with the strongest evidence. Order-preserving and pure.
+
+    The false positive this removes: `/assets/jquery-3.4.0.js` that now SERVES 3.6.0 fingerprints
+    twice — 3.6.0 from the body (CONFIRMED, the file states its own version) and 3.4.0 from the path
+    (HIGH, a label an in-place upgrade never renames). They are different `(name, version)` keys, so
+    both survive the caller's dedupe and the stale one raises a `vulnerable_component` finding for a
+    library that was already patched.
+
+    Two deliberate limits. Reconciliation is per LOCATION, because one page really can ship two
+    versions from two bundles. And when the two contradictory fingerprints are EQUALLY strong there
+    is no principled winner, so both are kept — dropping the vulnerable one would be a false
+    negative and dropping the patched one would be the false positive being removed.
+    """
+    best, order = {}, []
+    for c in (components or []):
+        if not isinstance(c, dict):
+            continue
+        key = ((c.get("name") or "").lower(), canon_location(c.get("location") or ""))
+        rank = _EVIDENCE_RANK.get(str(c.get("confidence") or "").lower(), -1)
+        if key not in best:
+            best[key] = [(rank, c)]
+            order.append(key)
+            continue
+        top = max(r for r, _ in best[key])
+        if rank > top:
+            best[key] = [(rank, c)]           # stronger evidence replaces every weaker reading
+        elif rank == top and not any(str(o.get("version") or "") == str(c.get("version") or "")
+                                     for _, o in best[key]):
+            best[key].append((rank, c))       # equally strong and contradictory -> keep both
+    return [c for key in order for _, c in best[key]]
+
+
 def behaviour_proof_ok(proof, cve_ids=()) -> tuple:
     """(ok, gaps[]) — did a CVE-SPECIFIC BEHAVIOUR DIFFERENTIAL demonstrate this vulnerability?
 

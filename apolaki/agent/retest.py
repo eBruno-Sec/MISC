@@ -116,7 +116,13 @@ def evaluate(finding: dict, status, body: str = "", headers: dict = None, payloa
         if not (200 <= status < 300) or not body.strip():
             return _v("closed", "%s no longer served (HTTP %s)" % (name, status), url)
         import dependency_intel as dep
-        served = [c for c in dep.fingerprint_js_content(body, url) if c["name"] == name]
+        # Fingerprint the body AND the path, then let `reconcile_components` pick the winner, so the
+        # "served content beats a stale filename" rule lives in ONE place rather than being
+        # hand-rolled here as a second copy. Only a CONFIRMED (content-derived) reading can decide a
+        # verdict — see below.
+        served = [c for c in dep.reconcile_components(dep.fingerprint_js_content(body, url)
+                                                      + dep.fingerprint_url(url))
+                  if c["name"] == name and c["confidence"] == dep.CONFIRMED]
         if not served:
             # The only evidence left is the URL, which is byte-identical to the one we detected on —
             # it cannot distinguish "unpatched" from "patched in place". Saying OPEN here would be
