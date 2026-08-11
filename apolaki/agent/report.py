@@ -471,7 +471,11 @@ def generate_report(program: str, findings: list, scope: dict,
                       f"- _Unverified worst case:_ {_g['unverified']}",
                       f"- _Confidence:_ {_g['confidence']} — {_g['assumptions']}", ""]
         _pr = proof_and_retest(f)
-        lines += ["**How this was confirmed (false-positive safety)**", "", _pr["negative_control"], "",
+        # The HEADING is a claim too. "How this was confirmed" over a control that never ran is the
+        # same lie as the body text, just harder to notice.
+        _pr_head = ("**How this was confirmed (false-positive safety)**" if control_ran(f)
+                    else "**False-positive safety: NOT ESTABLISHED for this finding**")
+        lines += [_pr_head, "", _pr["negative_control"], "",
                   "**Retest / closure**", "", _pr["retest"], ""]
         if str(f.get("false_positive_check") or "").strip():
             lines += ["**False-positive check**", "", str(f["false_positive_check"]), ""]
@@ -1215,14 +1219,51 @@ def browser_evidence_html(finding: dict, e) -> str:
                trs, shots, flow_html, trace_html, steps, e(str(be.get("replay_script", "")))))
 
 
+#: Keys under which a producer records that a negative control ACTUALLY RAN. A finding carrying none
+#: of these has no control artifact, whatever its family's contract says such a control would look like.
+_CONTROL_KEYS = ("negative_controls", "controls", "control", "control_evidence", "control_response")
+
+
+def control_ran(finding: dict) -> bool:
+    """Did a negative control actually run for THIS finding? Pure, and deliberately strict."""
+    if not isinstance(finding, dict):
+        return False
+    for k in _CONTROL_KEYS:
+        v = finding.get(k)
+        if isinstance(v, (list, tuple, dict)) and len(v):
+            return True
+        if isinstance(v, str) and v.strip():
+            return True
+    return False
+
+
 def proof_and_retest(finding: dict) -> dict:
-    """A finding's FALSE-POSITIVE-safety negative control (from the #115 technique proof contract, keyed
-    by family) + its RETEST/closure method (from the #117 closure loop). Deterministic; surfaces both in
-    the report so a reviewer sees how the finding was kept honest and how to re-verify a fix."""
+    """A finding's FALSE-POSITIVE-safety negative control + its RETEST/closure method.
+
+    THE CLAIM MUST MATCH THE ARTIFACT. This built a synthetic control description from the finding's
+    FAMILY alone -- `_tm.proof_contract(...)` keyed on vuln_class, never looking at the finding's own
+    evidence -- and the report rendered it verbatim, present-indicative, under the heading "How this
+    was confirmed (false-positive safety)". So a finding with no evidence, no controls, no request and
+    no response still asserted "An inert control of the same shape ... does NOT reproduce the
+    differential".
+
+    Measured across all 151 missions: 660 confirmed findings stored, **34** carry any recorded control
+    artifact, **626 (94.8%)** carried none and printed the claim anyway. Truth-first proof is the
+    platform's entire differentiator, and on 94.8% of findings the proof text was a template.
+
+    The contract text is still worth showing -- it tells a reviewer what would settle the question --
+    but it is a PRESCRIPTION, not a report of something that happened. The two are now grammatically
+    and structurally distinct, and `control_ran` decides which one you get.
+    """
     import technique_model as _tm
     import retest as _rt
     fam = str(finding.get("family") or "").strip().lower()
     nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
+    if not control_ran(finding):
+        nc = ("NO NEGATIVE CONTROL WAS RECORDED for this finding. The control that would settle it: "
+              + (str(nc).strip() or "an otherwise identical request with the trigger removed must not "
+                                     "reproduce the confirming signal")
+              + " -- run it before treating this as false-positive-safe.")
     rp = _rt.plan(finding)
     if rp.get("retestable"):
         how = {"reachable": "the resource is still served with content",
@@ -2143,7 +2184,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
                            f"<p><b>Unverified worst case:</b> {e(_g['unverified'])}</p>"
                            f"<p class='sub'>Confidence: {e(str(_g['confidence']))} — {e(_g['assumptions'])}</p></div>")
         _pr = proof_and_retest(f)
-        pr_html = (f"<div class='biz'><h4>How this was confirmed (false-positive safety)</h4>"
+        _pr_head = ("How this was confirmed (false-positive safety)" if control_ran(f)
+                    else "False-positive safety: NOT ESTABLISHED for this finding")
+        pr_html = (f"<div class='biz'><h4>{e(_pr_head)}</h4>"
                    f"<p>{e(_pr['negative_control'])}</p>"
                    f"<h4>Retest / closure</h4><p>{e(_pr['retest'])}</p></div>")
         # Evidence-dossier chips: the remediation-action priority + the ASVS objective(s)/WSTG test this
