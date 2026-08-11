@@ -252,6 +252,89 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
     return out
 
 
+# ── CODE-ASSISTED (SAST) LANE over a source tree ─────────────────
+# `review()` below is the LEAD generator: line-oriented regex, output labelled "confirm this
+# dynamically". This is the other half of the same idea and it is deliberately a different shape,
+# because its findings are DEFINITIONAL rather than suggestive -- a weak cipher is weak whether or
+# not a request ever reaches it, so there is nothing to hand to the dynamic scanner.
+#
+# Source is an EXPLICIT operator input. It is never fetched from the target and never assumed, and
+# its absence is reported as "no source provided" rather than as a clean result.
+_PROP_LINE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*[=:]\s*(.*?)\s*$")
+
+
+def load_properties(root: str, max_files: int = 200) -> dict:
+    """Externalized configuration found in the tree.
+
+    A reviewer asks what the deployed value IS, not what the in-code default claims. `getProperty
+    ("hashAlg1", "SHA512")` reads reassuring while the shipped properties file says MD5; resolving
+    only the default literal gets that codebase exactly backwards, and resolving only the file gets
+    a codebase with no properties file wrong the other way. Both are consulted, file first.
+    """
+    props: dict = {}
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for fn in filenames:
+            if not fn.endswith(".properties") or seen >= max_files:
+                continue
+            seen += 1
+            try:
+                with open(os.path.join(dirpath, fn), "r", encoding="utf-8", errors="ignore") as fh:
+                    for line in fh:
+                        if line.lstrip().startswith(("#", "!")):
+                            continue
+                        m = _PROP_LINE.match(line)
+                        if m and m.group(1) not in props:      # first definition wins
+                            props[m.group(1)] = m.group(2)
+            except Exception:
+                continue
+    return props
+
+
+def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
+    """CODE-ASSISTED (SAST) review of an operator-supplied Java source tree.
+
+    Returns findings that are all `provenance: source-derived`. THIS IS NOT A DAST RESULT and the
+    number it produces may never be folded into one or compared against a published DAST score.
+    """
+    import codereview as cr
+    blank = {"lane": "code-assisted", "provenance": "source-derived", "root": root or "",
+             "files_scanned": 0, "files": [], "properties_resolved": 0, "findings": [],
+             "by_cwe": {}, "by_file": {}}
+    if not root:
+        return dict(blank, error="no source provided")
+    if not os.path.isdir(root):
+        return dict(blank, error="no source provided: not a directory: %s" % root)
+    props = load_properties(root)
+    findings, files = [], []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for fn in filenames:
+            if not fn.endswith(".java"):
+                continue
+            fp = os.path.join(dirpath, fn)
+            rel = os.path.relpath(fp, root).replace("\\", "/")
+            try:
+                if os.path.getsize(fp) > max_file_bytes:
+                    continue
+                with open(fp, "r", encoding="utf-8", errors="ignore") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            files.append(rel)
+            for f in cr.review_java(text, rel, props):
+                f["file"] = rel
+                findings.append(f)
+    by_cwe, by_file = {}, {}
+    for f in findings:
+        by_cwe[f["cwe"]] = by_cwe.get(f["cwe"], 0) + 1
+        by_file.setdefault(f["file"], []).append(f["cwe"])
+    return {"lane": "code-assisted", "provenance": "source-derived", "root": root, "error": "",
+            "files_scanned": len(files), "files": files, "properties_resolved": len(props),
+            "findings": findings, "by_cwe": by_cwe, "by_file": by_file}
+
+
 def review(root: str, max_hits: int = 500, max_file_bytes: int = 1_000_000) -> dict:
     """Statically review a source tree; return leads (file:line + why + dynamic-confirm hint)."""
     if not os.path.isdir(root):

@@ -19,6 +19,9 @@ fake call site inside a string -- and every weakrand case declares
 `java.util.Random numGen = java.security.SecureRandom.getInstance("SHA1PRNG");`, where the *declared
 type* is the weak class but the object is a CSPRNG. A regex over raw text scores both wrong.
 """
+import os
+
+import codeintel
 import codereview as cr
 
 
@@ -197,3 +200,71 @@ def test_every_source_finding_is_marked_source_derived():
     assert out and all(f["provenance"] == "source-derived" for f in out)
     assert all(f["lane"] == "code-assisted" for f in out)
     assert all(f["target"] == "Foo.java" for f in out)
+
+
+def test_review_routes_java_source_into_the_code_assisted_lane():
+    # composition, not an island: the product's own entry point picks the lane up
+    res = cr.review('package a.b;\nimport java.security.MessageDigest;\n'
+                    'class C { void f(){ MessageDigest.getInstance("MD5"); } }', "C.java")
+    assert any(f.get("lane") == "code-assisted" for f in res["findings"])
+
+
+def test_review_leaves_javascript_untouched_by_the_java_rules():
+    res = cr.review('var x = 1; el.innerHTML = y;', "app.js")
+    assert not any(f.get("lane") == "code-assisted" for f in res["findings"])
+
+
+# ── tree lane: source is an EXPLICIT operator input ──────────────
+def _tree(tmp_path, files):
+    for name, body in files.items():
+        p = tmp_path / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf8")
+    return str(tmp_path)
+
+
+def test_absent_source_is_reported_not_returned_as_clean():
+    """A missing input is not a clean bill of health. Reporting one as the other is how a lane that
+    never ran gets read as a lane that found nothing."""
+    for bad in (None, "", "/nonexistent/path/xyz"):
+        res = codeintel.review_source_tree(bad)
+        assert "no source provided" in res["error"]
+        assert res["findings"] == [] and res["files_scanned"] == 0
+
+
+def test_tree_resolves_an_algorithm_across_files(tmp_path):
+    root = _tree(tmp_path, {
+        "src/App.java": ('package x;\nimport java.security.MessageDigest;\n'
+                         'class App { void f() throws Exception {\n'
+                         '  String algorithm = props.getProperty("hashAlg1", "SHA512");\n'
+                         '  MessageDigest.getInstance(algorithm);\n} }\n'),
+        "src/resources/benchmark.properties": "# comment\nhashAlg1=MD5\nhashAlg2=SHA-256\n",
+    })
+    res = codeintel.review_source_tree(root)
+    assert res["properties_resolved"] >= 2
+    assert any(f["family"] == "weak_hash" and f["cwe"] == "CWE-328" for f in res["findings"])
+    assert all(f["provenance"] == "source-derived" for f in res["findings"])
+    assert res["lane"] == "code-assisted"
+    assert "App.java" in {os.path.basename(f["file"]) for f in res["findings"]}
+
+
+def test_tree_keeps_the_matched_clean_twin_clean(tmp_path):
+    root = _tree(tmp_path, {
+        "src/Safe.java": ('package x;\nimport java.security.MessageDigest;\n'
+                          'class Safe { void f() throws Exception {\n'
+                          '  String algorithm = props.getProperty("hashAlg2", "SHA5");\n'
+                          '  MessageDigest.getInstance(algorithm);\n'
+                          '  javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");\n'
+                          '  java.util.Random g = java.security.SecureRandom.getInstance("SHA1PRNG");\n'
+                          '} }\n'),
+        "src/resources/benchmark.properties": "hashAlg1=MD5\nhashAlg2=SHA-256\n",
+    })
+    res = codeintel.review_source_tree(root)
+    assert res["files_scanned"] == 1
+    assert res["findings"] == []
+
+
+def test_tree_lists_every_file_it_read_so_a_missing_case_is_visible(tmp_path):
+    root = _tree(tmp_path, {"a/One.java": "class One {}", "b/Two.java": "class Two {}"})
+    res = codeintel.review_source_tree(root)
+    assert {os.path.basename(p) for p in res["files"]} == {"One.java", "Two.java"}
