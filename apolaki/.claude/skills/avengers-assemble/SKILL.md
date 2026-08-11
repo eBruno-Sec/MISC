@@ -111,17 +111,43 @@ and never let an agent hold the only copy of a decision. Agent death is the norm
 failure case. Budget for the Coordinator to spend real time on **recovery** — reading what landed,
 repairing what half-landed, and committing what was left green but uncommitted.
 
-## Rule 7 — The main thread never just waits.
+## Rule 7 — The main thread never just waits — but it NEVER works inside an assigned lane.
 
 While agents run, the Coordinator does real work: ledger entries, sequencing, verification of claims
 that touch its own files, small fixes in files nobody owns. **Never return a turn that is only a
 status report.** A wait is working time.
+
+**The Coordinator's own failure mode is DUPLICATION, and it is expensive.** In one cycle I spawned a
+Builder for the code-assisted lane and then, on the main thread, ran the entire semgrep evaluation
+myself. The agent independently reached the same result — "perfect recall, zero false positives" —
+and we had paid twice for one measurement, in a session where the API limit was the binding
+constraint. Ownership binds the Coordinator exactly as hard as it binds an agent.
+
+If the Coordinator realises mid-flight that it knows something the lane needs, the answer is
+`SendMessage`, not doing the work. And note what that cycle also proved: **a relay usually lands too
+late.** The message reached the agent after it had already re-derived the finding. So put everything
+you already know into the **spawn prompt** — measurements taken, wrong turns ruled out, traps hit.
+The prompt is the cheap channel; the relay is the expensive one.
 
 ## Rule 8 — Relay, then re-task.
 
 When an agent finishes, read its output file, route the result (research → distillation → queue →
 build), and either `SendMessage` it the next slice (keeps its context — cheaper) or spawn fresh only
 for a genuinely new topic. Never leave a finished agent idle while its lane has work.
+
+## Rule 8b — Scope a lane to ONE completable result, not a programme.
+
+Agents are now dying to the API limit roughly every cycle, mid-task. That is the environment, not an
+accident. So the unit of work handed to a lane must be something that can **finish**, and the prompt
+must name the smallest useful deliverable first: *"measure X and write the number, THEN optimise"*.
+
+A lane told to "diagnose then fix throughput" died holding a half-formed diagnosis. A lane told to
+"detect three categories and report per-category TPR/FPR" died having already produced *perfect
+recall on 498 clean cases* — a complete, usable result. Same environment, same interruption; the
+difference was entirely how the work was cut.
+
+Order every lane's instructions so the **first** thing it produces is the thing you would most
+regret losing.
 
 ## Rule 9 — Re-decide the shape each cycle.
 
