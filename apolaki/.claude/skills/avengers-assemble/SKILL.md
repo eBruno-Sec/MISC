@@ -1,6 +1,6 @@
 ---
 name: avengers-assemble
-description: Apolaki's coordinated multi-agent mode. Trigger on "avengers assemble", "assemble", "multi agent", "multi-agent", "spawn the agents", "spawn them agents", "run the squad", "parallelize this", or any time a long job (benchmark scan, full mission, docker build) leaves the main thread waiting. Six roles — RESEARCH (the Watcher), DISTILLATION (the Analyst), QUEUE (the Coordinator), IMPLEMENTATION (the Builder), VERIFICATION (the Breaker), INTEGRATION (the Conductor) — driving one operating loop toward 100% TPR / 0% FPR with deterministic proof, treating Apolaki as one unified platform rather than a bag of scanners. Never idle; benchmarks are immutable.
+description: Apolaki's multi-agent mode, tuned for efficiency. Trigger on "avengers assemble", "assemble", "multi agent", "multi-agent", "spawn the agents", "spawn them agents", "run the squad", "parallelize this", or any time a long job leaves the main thread waiting. Six ROLES — Watcher, Analyst, Coordinator, Builder, Breaker, Conductor — but the number of AGENTS is decided by how many independent read-lanes exist, plus at most one Builder. Every agent writes to a file as it goes so a killed agent still delivers. Never idle; benchmarks are immutable; one owner per file.
 ---
 
 # Avengers Assemble — Apolaki multi-agent mode
@@ -9,131 +9,199 @@ Apolaki is **one unified pentest platform**. Improve the whole system — not is
 dead-end features, benchmark hacks, or disconnected experiments.
 
 Repo: `C:\Users\voice\Desktop\GitHub\MISC\apolaki`
-Ledgers: `docs/LEDGERS.md` (index) · `docs/CODEBASE_REVIEW.md` (defects) · `docs/QUEUE.md` (the
-canonical queue) · `docs/research/INBOX.md` (raw research) · `docs/STATUS.md` (live dashboard) ·
-`docs/benchmarks/PEER_BASELINES.md` (peers).
+Ledgers: `docs/LEDGERS.md` · `docs/CODEBASE_REVIEW.md` · `docs/QUEUE.md` · `docs/research/INBOX.md` ·
+`docs/STATUS.md` · `docs/benchmarks/PEER_BASELINES.md`
 
 ## Mission
 
-- 100% true-positive detection
-- 0 false positives
-- Deterministic proof for every reported vulnerability
-- Full orchestration of Apolaki's existing arsenal
-- Generalization beyond known benchmark cases
-- **No modification of benchmarks, labels, scorers, or expected results**
+100% true-positive detection · 0 false positives · deterministic proof for every reported
+vulnerability · full orchestration of the existing arsenal · generalization beyond benchmark cases ·
+**no modification of benchmarks, labels, scorers, or expected results.**
 
-## Step 0 — Inspect, then present, then assemble
+---
 
-Before spawning anything: read the repo state, the available skills, the active benchmark numbers,
-the roadmap and the improvement ledger. Then present, in chat, the proposed team, ownership
-boundaries, selected skills with justification, the first queue, and the safety gates. **Then**
-spawn.
+# The efficiency rules (learned the hard way — do not relax these)
 
-## Step 1 — Select skills honestly
+These come from a measured session where six agents were spawned at once and all six were killed
+mid-flight by an API session limit. What survived was not random.
 
-Inspect the available skills. Select only those **materially relevant to the current assignment**.
-Do not force an arbitrary count — more skills are not automatically better. Each selected skill
-declares: purpose, owner (which agent), input, expected output. If a needed skill does not exist,
-say so; write it or work without it, but never pretend a loadout you do not have.
+## Rule 1 — Roles are jobs. Agents are a budget. They are not the same number.
 
-## Step 2 — The six roles
+There are six roles. **There is no rule that says six agents.** Spawn:
 
-Spawn in ONE message (parallel calls), `run_in_background: true`. Each prompt is self-contained —
-an agent starts cold. **One owner per ticket. No two agents editing the same files concurrently.**
+> **(one agent per independent READ lane) + (at most ONE Builder) + the main thread as Coordinator**
 
-**1. RESEARCH — the Watcher.** Continuously research missing capabilities, current techniques,
-standards, papers, competing DAST behaviour, better deterministic oracles. Every proposal carries:
-problem solved · evidence and primary sources · Apolaki compatibility · expected benchmark or
-real-world benefit · false-positive risk · a concrete acceptance test. **Research never enters
-implementation automatically.** Writes `docs/research/INBOX.md`.
+A read lane is independent if it can finish without waiting on another lane's output. If two
+proposed lanes read the same question, they are one lane. Three or four agents is a normal squad;
+six is a lot and needs justifying. The Coordinator is *always* the main thread — never spend an
+agent on it, because coordination needs the conversation's full context.
 
-**2. DISTILLATION — the Analyst.** Review research against the **actual repository**. Reject
-duplicates, speculation, benchmark-specific signatures, things Apolaki already has, ideas without
-deterministic proof, and anything that creates a capability island. Convert survivors into
-implementation-ready tickets: root cause · producer and consumer contracts · files likely affected ·
-oracle and negative control · tests and mutations required · dependencies · definition of done.
-Writes tickets into `docs/QUEUE.md`.
+## Rule 2 — Losing a reader is cheap. Losing a Builder is expensive.
 
-**3. QUEUE — the Coordinator.** Owns ONE canonical, dependency-ordered queue. Deduplicates, ranks by
-expected capability gain / coverage gain / proof strength / risk / cost, tracks
-`blocked · ready · active · verification · completed · rejected · rolled-back`, prevents overlapping
-file ownership, enforces prerequisite order, keeps every ticket linked to evidence. **Only the
-Coordinator changes queue state.**
+Measured: the killed research and analysis agents still delivered — the funnel diagnosis (2756 URLs
+discovered, 36 probed) and ten queue tickets both came from agents that died before finishing. The
+killed Builder delivered nothing usable and left gate-failing, uncommitted code across four modules
+that someone else then had to fence off.
 
-**4. IMPLEMENTATION — the Builder.** Takes the highest-priority ready ticket and implements the
-**smallest general solution**. Uses Apolaki as one whole unit — graph, planner, browser driver, CDP
-telemetry, ZAP, crawlers, scanners, oracle registry, evidence system, replay, UI, reporting.
-Sequence per change: reproduce -> diagnose -> implement -> targeted test -> negative controls ->
-mutation test -> category regression -> full regression. **Never hardcode benchmark test IDs,
-expected labels, endpoint names, source lines, or case-specific fingerprints.**
+**A dead reader costs one report. A dead writer costs a dirty tree.** So: many readers, one writer.
+When in doubt about implementation, keep it on the main thread.
 
-**5. VERIFICATION — the Breaker.** Independently tries to **disprove** every claimed improvement.
-Confirms: the exact intended assertion killed the mutant · negative controls stay clean · false
-positives did not increase · deterministic replay succeeds · existing capabilities intact · UI, API,
-graph, planner, evidence and report agree · a clean-environment run reproduces it · unseen semantic
-variants demonstrate generalization. **A crash, timeout, unrelated assertion, fixture failure or
-generic nonzero exit is not proof.**
+## Rule 3 — Write-as-you-go, or the work does not exist.
 
-**6. INTEGRATION — the Conductor.** Watches the whole system: findings feed the canonical graph; the
-planner can consume new facts; ZAP is orchestrated across initial scan, spider, AJAX crawl,
-passive/active scan, targeted rescan and recrawl; browser/CDP observations feed evidence and
-decisions; no capability becomes an island; reports expose only deterministically proven findings;
-the UI shows honest capability and benchmark status.
+This is *the* rule that makes agent death cheap. Every agent prompt must name **the file it writes
+to** and instruct it to append findings **as it discovers them**, not at the end. The readers
+survived their own deaths purely because they were writing to `QUEUE.md` and `INBOX.md` along the way.
 
-## Step 3 — Operating loop
+For the Builder the equivalent is: **commit small, commit often.** A Builder that lands one green
+slice per commit leaves a commit when it dies. A Builder that plans one big commit leaves wreckage.
+Say this explicitly in the prompt: *"land each green slice as its own commit; do not batch."*
 
-Research -> Distill -> Prioritize -> Implement -> Verify adversarially -> Integrate -> targeted
-benchmark tests -> full benchmark regression -> orchestration tests -> OPTEST + UI validation ->
-code QA -> report QA -> record in the immutable improvement ledger -> select the next highest-value
-gap. Repeat.
+## Rule 4 — Disjoint write sets, declared before anyone spawns.
 
-## Quality gates — all must hold to merge
+Write the ownership table into `docs/QUEUE.md` **first**, then spawn. Every agent gets the list of
+files it may write **and** the list it must not touch, with the reason. Cross-lane needs are written
+as **hand-off notes in the queue, never applied across an ownership line.**
 
-1. The intended test **fails before** the fix.
-2. The **exact intended assertion** passes after the fix.
-3. Negative controls pass.
-4. Mutation testing proves the test is non-vacuous.
-5. No false-positive regression.
-6. Deterministic replay succeeds.
-7. Clean-environment reproduction succeeds.
-8. Existing functionality intact.
-9. Evidence, graph, planner, API, UI and report stay consistent.
+Without this, four agents edit four modules, one dies, and the tree state is unattributable.
 
-## Benchmark rules — immutable
+## Rule 5 — Factor the house rules into every prompt, but keep them short.
 
-Never modify benchmark applications, vulnerable or clean cases, expected-result labels, scoring
-code, denominators, or test execution to skip failures. Macro-average over **all** suite categories;
-never narrow the denominator. Benchmark success does not prove universal capability — validate on
-unseen semantic variants before marking a fix generally proven. (See `benchmark-score`.)
+An agent starts cold and cannot see the conversation, so a thin prompt wastes a whole run. But
+boilerplate costs tokens on every spawn. Paste the House Rules block below verbatim, then add only
+what is specific to the lane. What is specific and worth its length: **the measurements already
+taken**, so the agent does not re-derive them, and **the wrong turns already ruled out**, so it does
+not take them. Telling a Builder "the crawl is already proven clean, do not fix it" is worth more
+than a page of process.
 
-## Safety and control
+## Rule 6 — Stagger, don't stampede.
 
-Approved: modifying Apolaki when the change improves the platform and passes all gates.
-**Not** auto-approved: destructive repository operations · credential exposure · out-of-scope target
-activity · benchmark modification · suppressing failing tests · lowering validation thresholds ·
-irreversible infrastructure changes. Checkpoint before risky changes. Roll back anything that
-increases false positives, breaks capability, weakens evidence, or fails deterministic reproduction.
+Six simultaneous spawns exhausted the session limit and killed everything at once, including work
+already in flight. Spawn the highest-value lane first, confirm it launched, then the rest. If a
+spawn fails on a limit, work solo on the main thread rather than retrying in a loop — and say so.
 
-Operational hazards every agent inherits:
-- **`docker compose build agent` SIGKILLs any mission running in the container.** Check for a
-  running mission first. Code work first, builds later, missions last.
-- `/app` is baked into the image, not bind-mounted — a change is not live until rebuild or
-  `docker cp` + `docker restart apolaki-agent-1`.
-- Never `git add -A`. Stage named files.
+## Rule 7 — The main thread never just waits.
+
+While agents run, the Coordinator does real work: ledger entries, sequencing, verification of claims
+that touch its own files, small fixes in files nobody owns. **Never return a turn that is only a
+status report.** A wait is working time.
+
+## Rule 8 — Relay, then re-task.
+
+When an agent finishes, read its output file, route the result (research → distillation → queue →
+build), and either `SendMessage` it the next slice (keeps its context — cheaper) or spawn fresh only
+for a genuinely new topic. Never leave a finished agent idle while its lane has work.
+
+## Rule 9 — Re-decide the shape each cycle.
+
+Before every assemble, ask: *did the last cycle's Builder come back clean?* If yes, keep the Builder
+lane. If it came back half-done twice, implementation is the wrong shape for an agent on this task —
+take it back to the main thread and use agents purely for read work. The squad shape is a hypothesis,
+not a ritual.
+
+---
+
+# Step 0 — Inspect, decide, declare, then spawn
+
+1. Read `docs/QUEUE.md`, `docs/STATUS.md`, `docs/LEDGERS.md`. Learn what the current job actually is.
+2. **Count the independent read lanes.** That plus one Builder is your agent count.
+3. Inspect available skills. Select only those **materially relevant**, each with a declared purpose,
+   owner, input and expected output. **Do not force a count** — more skills are not better. If a
+   needed skill does not exist, say so; never pretend a loadout you do not have.
+4. Write the ownership table into `docs/QUEUE.md`.
+5. State in chat: the lanes, who owns which files, the selected skills, the first ticket. Then spawn.
+
+# The six roles
+
+**Watcher (research).** Missing capabilities, current techniques, standards, papers, competing DAST
+behaviour, better deterministic oracles. Every proposal: problem solved · evidence and primary
+sources · Apolaki compatibility (name the existing file it builds on) · expected benefit ·
+false-positive risk · concrete acceptance test. **Research never enters implementation
+automatically.** Writes `docs/research/INBOX.md`.
+
+**Analyst (distillation).** Verifies proposals — and any external audit — against the **actual
+repository**. Rejects duplicates, speculation, benchmark-specific signatures, things Apolaki already
+has, ideas without deterministic proof, and anything that creates an island. Converts survivors into
+tickets: root cause · producer/consumer contracts · files affected · oracle and negative control ·
+tests and mutations · dependencies · definition of done. Records rejections so ideas do not return.
+
+**Coordinator (always the main thread).** Owns `docs/QUEUE.md` and `docs/STATUS.md`. Ranks by
+capability gain × coverage gain × proof strength ÷ (risk × cost). Tracks `blocked · ready · active ·
+verification · completed · rejected · rolled-back`. Enforces disjoint ownership and prerequisite
+order. **Only the Coordinator changes ticket state.**
+
+**Builder (implementation).** Highest-priority ready ticket, **smallest general solution**, using
+Apolaki as one unit — graph, planner, browser driver, CDP, ZAP, crawlers, scanners, oracle registry,
+evidence, replay, UI, reporting. Per change: reproduce → diagnose → implement → targeted test →
+negative controls → mutation test → category regression → full regression. **Never hardcode benchmark
+test IDs, labels, endpoint names, source lines or case fingerprints.** One green slice per commit.
+
+**Breaker (verification).** Tries to **disprove**. See `verify-adversarial` for the eight checks. A
+crash, timeout, unrelated assertion, fixture failure or generic nonzero exit is not proof.
+
+**Conductor (integration).** Findings feed the canonical graph; the planner can consume new facts;
+ZAP is orchestrated across initial scan, spider, AJAX crawl, passive/active scan, targeted rescan and
+recrawl; browser/CDP observations feed evidence; no capability becomes an island; reports expose only
+deterministically proven findings; the UI shows honest capability and benchmark status.
+
+# Operating loop
+
+Research → Distill → Prioritize → Implement → Verify adversarially → Integrate → targeted benchmark
+tests → full benchmark regression → orchestration tests → OPTEST + UI validation → code QA → report
+QA → record in the ledger → select the next highest-value gap.
+
+# Quality gates — all must hold to merge
+
+1. The intended test **fails before** the fix. 2. The **exact intended assertion** passes after.
+3. Negative controls pass. 4. Mutation testing proves the test is non-vacuous. 5. No false-positive
+regression. 6. Deterministic replay succeeds. 7. Clean-environment reproduction succeeds.
+8. Existing functionality intact. 9. Evidence, graph, planner, API, UI and report stay consistent.
+
+# Benchmark rules — immutable
+
+Never modify benchmark applications, cases, expected-result labels, scoring code, denominators, or
+test execution to skip failures. Macro-average over **all** suite categories; never narrow a
+denominator. Benchmark success does not prove universal capability — validate on unseen semantic
+variants before marking a fix generally proven. See `benchmark-score`.
+
+---
+
+# House Rules — paste verbatim into every agent prompt
+
+```
+- Write your findings to <FILE> AS YOU GO, not at the end. If you are killed mid-run, whatever is in
+  that file is your entire contribution. (Builders: land each green slice as its own commit; do not
+  batch — a killed Builder that batched leaves wreckage, not work.)
+- You may WRITE only: <FILES>. Do NOT touch <OFF-LIMITS> — owned by another agent with uncommitted
+  work. If you need a change there, write the exact patch into docs/QUEUE.md as a hand-off note.
+- Every claim tagged MEASURED (with the command and its real output) or UNVERIFIED. A disproved
+  hypothesis is a result — record it as disproved, never drop it quietly.
+- Never weaken a test or a gate to make it pass. SKIPPED is never a pass. Never fake a result.
+- Measure the baseline before claiming an improvement. Macro-average over ALL suite categories.
+- No islands: registration is not invocation, a descriptor is not an executor, a declaration is not
+  a fact. ToolRegistry.execute() dispatches via getattr(self, "_" + tool_name) and CLAUDE_TOOLS is a
+  second emitter — check both before calling anything unreachable.
+- Benchmarks are immutable: never modify apps, cases, labels, scoring code or denominators, and never
+  build a benchmark-specific signature.
+- Check `curl -s http://localhost:8000/missions` before `docker compose build agent` — a build
+  SIGKILLs any running mission (three have died that way here). Fast deploy:
+  `docker cp <f> apolaki-agent-1:/app/<f>` + `docker restart apolaki-agent-1`. /app is BAKED, not
+  bind-mounted, so an uncopied change is simply not live.
+- Git Bash: MSYS_NO_PATHCONV=1 for docker exec with absolute paths; -w /app must be absolute. pytest
+  already sets addopts = -q, so your own -q makes it -qq and hides the summary line.
+- Never `git add -A` — other agents have uncommitted work in this tree. Stage named files only.
 - No secrets, no machine-specific paths, no reliance on uncommitted local state.
-- Authorized targets only: the local labs, Natas, and the vulnweb/ginandjuice hosts Erwin authorized.
+- Authorized targets only: the local docker labs, Natas, and the vulnweb/ginandjuice hosts.
+- ANTI-IDLE: pull the next independent ready task the moment capacity exists. Do not generate filler.
+  If blocked, say why in your file and move to the next item.
+```
 
-## Anti-idle rule
-
-Pull the next independent ready task the moment capacity exists. Do **not** generate filler work.
-If no implementation task is ready: RESEARCH investigates the highest-value known gap · DISTILLATION
-audits unresolved evidence · QUEUE removes blockers and reconciles dependencies · VERIFICATION
-attacks completed claims · INTEGRATION audits producer-consumer wiring.
-
-**The main thread never returns a turn that is only a status report.** A wait is working time.
-
-## Status dashboard — `docs/STATUS.md`, kept live
+# Status dashboard — `docs/STATUS.md`, kept live
 
 Active agents and assignments · selected skills and justification · queue depth and blockers ·
 current benchmark TPR / FPR / macro score · per-category results · improvements since the previous
-clean run · regressions and rollbacks · unproven claims · next highest-value task.
+clean run · regressions and rollbacks · **unproven claims** · next highest-value task.
+
+# Stand down
+
+Only when the stated target is met or Erwin says stop. Then one completion report: what shipped,
+measured before/after, what is still open and why. **No victory claims without a number.**
