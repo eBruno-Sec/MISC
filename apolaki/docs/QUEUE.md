@@ -43,6 +43,51 @@ not by silencing the gate.
 
 ---
 
+## Rank 0a — Q-021A · contain the SCA proof overclaim · **CRITICAL** · `in flight`
+
+Spec: [CODEX_AUDIT_VERDICTS.md](CODEX_AUDIT_VERDICTS.md) verdicts 1–5. Jumps the queue ahead of
+Q-019: everything else is a missing capability, this one is a **wrong answer already shipping to
+clients**. Owner this cycle: **Builder · SCA**, files `dependency_intel.py` · `proof_schema.py` ·
+`retest.py` · `poc_bundle.py` · `candidate_pipeline.py` · `report.py` · `sarif_io.py` · tests.
+
+Measured baseline before the first slice: **1730 passed, 9 skipped, 0 failed** (agent image,
+python 3.12). The `test_t7_zero_delta` PRECONDITIONS failure noted in the hand-off is not present in
+the baked image.
+
+**Slice log** (each slice: implement → targeted test that failed first → negative control → commit):
+
+| # | slice | state |
+|---|---|---|
+| 1 | `dependency_intel` — split version-certainty from exploitability-certainty | **done** |
+| 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | todo |
+| 3 | `retest` — a patched component must CLOSE, not stay OPEN | todo |
+| 4 | structured `cves` on the SCA finding so KEV can match it | todo |
+| 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | todo |
+| 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | todo |
+
+### Slice 1 — `confidence` no longer answers two questions with one word
+`vulnerable_component_finding` set `confidence=CONFIRMED` while its own `impact` said exploitability
+"was NOT confirmed in this test". Fixed by separating the fields, not by deleting the claim:
+
+* `version_confidence` — `confirmed`/`high`/`low`, how sure we are of the **served version**.
+* `component_status` — `affected` / `potentially_affected`, whether the CVE's **own behaviour** was
+  observed. New module constants `AFFECTED` / `POTENTIALLY_AFFECTED`.
+* `confidence` — the platform-wide proof verdict. `confirmed` **only** when
+  `behaviour_proof_ok()` passes; otherwise `lead` + `proof_gap` + a `needs-confirmation` tag.
+* `behaviour_proof_ok(proof, cve_ids)` — pure oracle. Requires a CVE **from the matched ranges**, a
+  trigger, the observed vulnerable behaviour, a structurally identical **trigger-absent control**,
+  and a real differential between the two. Caller performs the requests; this only judges them.
+* `CVE_ELIGIBLE` is reused (not reinvented) as the enforcement point: a `LOW` fingerprint is a guess
+  and can never be `affected`, however many CVEs a feed returns.
+
+Preserved deliberately: the MEDIUM severity cap and its scanner-inflation comment.
+
+Hand-off note (files owned elsewhere) — none for slice 1; `tools.py:5210` calls
+`vulnerable_component_finding(comp, vulns)` positionally and keeps working unchanged, now emitting a
+lead instead of a false confirm.
+
+---
+
 ## Rank 0 — the funnel (supersedes everything below)
 
 ### Q-019 · ANSWERED Q-010 · 2756 URLs discovered, 36 probed · **CRITICAL** · `ready` · **take this first**

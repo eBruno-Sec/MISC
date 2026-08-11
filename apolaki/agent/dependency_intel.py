@@ -22,6 +22,19 @@ HIGH = "high"             # exact version from a filename / CDN path
 LOW = "low"               # heuristic / no version — NEVER CVE-eligible
 CVE_ELIGIBLE = frozenset({CONFIRMED, HIGH})
 
+# ── Q-021A: version-certainty is NOT exploitability-certainty ────────────────────────────────
+# `confidence` used to answer two different questions with one word — "are we sure the served
+# version is X?" and "are we sure this is exploitable?" — so a pure database match shipped to the
+# client as CONFIRMED while the prose beside it said reachability was never proven. They are now
+# separate fields on the finding:
+#
+#   version_confidence : CONFIRMED / HIGH / LOW      how sure we are of the SERVED VERSION
+#   component_status   : AFFECTED / POTENTIALLY_AFFECTED   whether the CVE's OWN behaviour was seen
+#   confidence         : the platform-wide proof verdict — `confirmed` ONLY when a CVE-specific
+#                        behaviour differential fired; otherwise a lead.
+AFFECTED = "affected"                            # the CVE's own behaviour was observed on this target
+POTENTIALLY_AFFECTED = "potentially_affected"    # version falls in a published range; behaviour unprobed
+
 _VER = r"(\d+\.\d+(?:\.\d+)?(?:[-.]?(?:alpha|beta|rc)\d*)?)"
 
 
@@ -207,9 +220,50 @@ def assess_component(component):
     return out
 
 
-def vulnerable_component_finding(component, vulns):
-    """CONFIRMED 'vulnerable component' finding for a cve-eligible component with
-    known vulns. Severity is the worst matched; evidence cites the served version."""
+def behaviour_proof_ok(proof, cve_ids=()) -> tuple:
+    """(ok, gaps[]) — did a CVE-SPECIFIC BEHAVIOUR DIFFERENTIAL demonstrate this vulnerability?
+
+    A version falling inside a published range is a DATABASE MATCH, not an observation. The only
+    thing that upgrades it to a confirmation is: fire the CVE's own trigger and see the vulnerable
+    behaviour, then fire a STRUCTURALLY IDENTICAL request with the trigger ABSENT and see that
+    behaviour not happen. Both halves are required — without the negative control the "vulnerable
+    behaviour" may simply be what the application always does.
+
+    The proof is a dict: {cve, trigger, observed, control, control_observed}. Pure — the caller
+    performs the two requests; this only judges what came back.
+    """
+    p = proof if isinstance(proof, dict) else {}
+    if not p:
+        return False, ["behaviour_probe_not_run"]
+    gaps = []
+    cve = str(p.get("cve") or "").strip().upper()
+    if not cve:
+        gaps.append("cve")
+    elif cve_ids and cve not in {str(c).strip().upper() for c in cve_ids}:
+        # A grouped range yields several CVEs; a proof for a CVE this component's version did NOT
+        # match proves nothing about this component (jQuery 3.4.0 matches <3.5.0 but not <3.4.0).
+        gaps.append("cve_not_in_matched_ranges")
+    for k in ("trigger", "observed", "control", "control_observed"):
+        if not str(p.get(k) or "").strip():
+            gaps.append(k)
+    obs, ctl = str(p.get("observed") or "").strip(), str(p.get("control_observed") or "").strip()
+    if obs and ctl and obs == ctl:
+        gaps.append("no_differential")   # trigger-absent control behaved identically => baseline, not a bug
+    return (not gaps), gaps
+
+
+def vulnerable_component_finding(component, vulns, behaviour_proof=None):
+    """A 'vulnerable component' finding whose CONFIDENCE states what was PROVEN, not what a version
+    table says (Q-021A).
+
+    Without `behaviour_proof` this is a LEAD: the served version is certain (`version_confidence`),
+    the component is `potentially_affected`, and nothing about exploitability has been observed.
+    With a CVE-specific behaviour differential that passes `behaviour_proof_ok`, and only then, the
+    finding becomes `confirmed` / `affected`.
+
+    `CVE_ELIGIBLE` stays the single enforcement point for version evidence: a LOW-confidence
+    fingerprint is a guess, so it can never be AFFECTED however many CVEs a feed returns for it.
+    """
     order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
     worst = max((v["severity"] for v in vulns), key=lambda s: order.get(s, 0)) if vulns else "info"
     # Truth-first: SCA is PRESENCE detection — the vulnerable version is confirmed, but
@@ -221,24 +275,66 @@ def vulnerable_component_finding(component, vulns):
     lead = ids[0] if ids else ""
     extra = f", +{len(ids) - 1} more" if len(ids) > 1 else ""
     comp, ver = component["name"], component["version"]
-    return {
-        "title": f"Vulnerable component: {comp}@{ver} ({lead}{extra})",
+    ver_conf = str(component.get("confidence") or LOW).lower()
+
+    ok, gaps = behaviour_proof_ok(behaviour_proof, ids)
+    if not cve_eligible(component):
+        ok = False
+        gaps = ["version_confidence_too_low"] + [g for g in gaps if g != "behaviour_probe_not_run"]
+    status = AFFECTED if ok else POTENTIALLY_AFFECTED
+    p = behaviour_proof if isinstance(behaviour_proof, dict) else {}
+    base_ev = f"{comp}@{ver} from {component['source']}: {component.get('evidence','')}"[:300]
+
+    if ok:
+        title = f"Vulnerable component: {comp}@{ver} ({lead}{extra})"
+        evidence = (f"{base_ev} | {str(p.get('cve')).upper()} behaviour differential: trigger "
+                    f"{p.get('trigger')} -> {p.get('observed')}; negative control (trigger absent) "
+                    f"{p.get('control')} -> {p.get('control_observed')}")[:600]
+        impact = (f"Exploitable on this target: the {str(p.get('cve')).upper()} behaviour was OBSERVED here and a "
+                  f"structurally identical request with the trigger absent did not reproduce it (upstream CVE "
+                  f"severity: {worst}). Rated MEDIUM pending a full impact demonstration.")
+        oracle = (f"{str(p.get('cve')).upper()}'s own vulnerable behaviour was reproduced on this target "
+                  f"({p.get('observed')}) and the trigger-absent negative control did not reproduce it.")
+        steps = [f"Load {component.get('location') or 'the served script'}",
+                 f"Confirm the version banner/filename reports {comp} {ver}",
+                 f"Send the trigger: {p.get('trigger')} -> expect: {p.get('observed')}",
+                 f"Send the negative control: {p.get('control')} -> expect: {p.get('control_observed')}"]
+    else:
+        title = f"Potentially vulnerable component: {comp}@{ver} ({lead}{extra})"
+        evidence = (f"{base_ev} | version-range match only against {', '.join(ids)}; no CVE-specific "
+                    f"behaviour probe confirmed it ({', '.join(gaps)})")[:600]
+        impact = (f"Known-vulnerable dependency (upstream CVE severity: {worst}). Rated MEDIUM here because "
+                  "exploitability depends on a reachable sink, which was NOT confirmed in this test — this is a "
+                  "version-range match, not an observed exploit. Probe the CVE behaviour to escalate.")
+        oracle = (f"the served response/filename reports the exact version {comp} {ver}, which falls in the "
+                  f"affected range of {lead or 'the referenced CVE'} — PRESENCE-confirmed only. Confirmation "
+                  f"requires a {lead or 'CVE'}-specific behaviour differential: the trigger reproduces the "
+                  "vulnerable behaviour and a trigger-absent control does not.")
+        steps = [f"Load {component.get('location') or 'the served script'}",
+                 f"Confirm the version banner/filename reports {comp} {ver}",
+                 f"Cross-reference {lead} for the affected range and a safe PoC",
+                 f"Run a {lead or 'CVE'}-specific behaviour probe plus its trigger-absent control to confirm"]
+
+    out = {
+        "title": title,
         "severity": sev, "target": component.get("location", ""),
         "description": (f"The target serves {comp} {ver} ({component['source']}), which has known "
                         f"vulnerabilities: {', '.join(ids)}. " + " ".join(v["summary"] for v in vulns)),
-        "impact": (f"Known-vulnerable dependency (upstream CVE severity: {worst}). Rated MEDIUM here because "
-                   "exploitability depends on a reachable sink, which was NOT confirmed in this test — verify "
-                   "reachability to escalate."),
-        "evidence": f"{comp}@{ver} from {component['source']}: {component.get('evidence','')}"[:300],
-        "reproduction_steps": [f"Load {component.get('location') or 'the served script'}",
-                               f"Confirm the version banner/filename reports {comp} {ver}",
-                               f"Cross-reference {lead} for the affected range and a safe PoC"],
+        "impact": impact,
+        "evidence": evidence,
+        "reproduction_steps": steps,
         "cwe": "CWE-1104", "family": "vulnerable_component", "tags": ["sca", "dependency", comp],
-        "confidence": CONFIRMED,
-        "success_oracle": (f"the served response/filename reports the exact version {comp} {ver}, which falls in "
-                           f"the affected range of {lead or 'the referenced CVE'} (presence-confirmed; reachability "
-                           "not proven)."),
+        # the two questions, answered separately
+        "confidence": CONFIRMED if ok else "lead",
+        "version_confidence": ver_conf,
+        "component_status": status,
+        "component": comp, "component_version": ver,
+        "success_oracle": oracle,
     }
+    if not ok:
+        out["proof_gap"] = gaps
+        out["tags"] = out["tags"] + ["needs-confirmation"]
+    return out
 
 
 def gadget_findings(url):

@@ -1851,8 +1851,17 @@ def test_sca_maps_exact_version_to_cve_with_guardrail():
     f = dep.vulnerable_component_finding(comp, vulns)
     # SCA presence findings are capped at MEDIUM (reachability unconfirmed = not High);
     # the upstream CVE severity is stated in the impact text.
-    assert f["confidence"] == "confirmed" and f["severity"] == "medium" and f["evidence"]
+    assert f["severity"] == "medium" and f["evidence"]
     assert "high" in f["impact"].lower()   # upstream CVE severity still surfaced
+    # Q-021A: this assertion used to read `f["confidence"] == "confirmed"`, which pinned the DEFECT —
+    # the field said confirmed while the impact text beside it said exploitability was never proven.
+    # A pure version-range match is a LEAD; only a CVE-specific behaviour differential confirms.
+    assert f["confidence"] != "confirmed" and f["component_status"] == dep.POTENTIALLY_AFFECTED
+    assert f["version_confidence"] == dep.HIGH      # the VERSION is still certain — that never changed
+    proof = {"cve": "CVE-2023-26117", "trigger": "t", "observed": "vulnerable behaviour seen",
+             "control": "same request, trigger absent", "control_observed": "behaviour absent"}
+    g = dep.vulnerable_component_finding(comp, vulns, behaviour_proof=proof)
+    assert g["confidence"] == "confirmed" and g["component_status"] == dep.AFFECTED
     # GUARDRAIL: no version, or LOW confidence -> never CVE-eligible, no vulns
     assert dep.assess_component(dep.make_component("jquery", "", "x", dep.LOW)) == []
     assert dep.assess_component(dep.make_component("angular", "1.7.7", "guess", dep.LOW)) == []
