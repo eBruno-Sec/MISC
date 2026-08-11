@@ -5295,11 +5295,34 @@ class ToolRegistry:
                     # crawled + fixed-wordlist params.
                     disc_params = await self._discover_params(url, limit=8)
                     seen_cls, pollutable = set(), False
-                    for probe in dom.build_probes(url, extra_params=disc_params):
-                        if probe["class"] in seen_cls:      # one confirmation per class is enough
-                            continue
+
+                    # `confirmed` is the EARLY-EXIT view read by bounded_map's skip at each chunk's
+                    # dispatch. A worker only ever ADDS the class it confirmed, and set union does not
+                    # depend on who finished first, so after any chunk this holds exactly the classes
+                    # confirmed by the chunks before it — a function of the probe list and the width
+                    # alone. `seen_cls` below stays the authoritative dedup, applied in probe order.
+                    confirmed = set()
+
+                    async def _probe_one(probe):
                         f = await _audit_one(browser, probe)
                         if f:
+                            confirmed.add(probe["class"])
+                        return f
+
+                    # Render the probes CONCURRENTLY, browser_concurrency() at a time. MEASURED
+                    # (docs/handoff/throughput.md): this is the most expensive single tool call in the
+                    # product at 26.58 s, and 87% of it is serial WAITING — 50.4% a fixed settle after
+                    # each render, 19.6% the navigation, 17.0% the CSTI networkidle wait. The waits are
+                    # untouched and still full-length; they just happen at the same time.
+                    probes = list(dom.build_probes(url, extra_params=disc_params))
+                    for probe, f in await bounded_map(probes, _probe_one, browser_concurrency(),
+                                                      skip=lambda p: p["class"] in confirmed):
+                        if isinstance(f, BaseException):
+                            # A probe that crashed must be visible: previously one bad probe hit the
+                            # engine's outer `except` and returned a partial audit labelled complete.
+                            self._swallow(f, "dom_audit.probe", probe.get("nav") or url)
+                            continue
+                        if f and probe["class"] not in seen_cls:   # one confirmation per class is enough
                             findings.append(f)
                             seen_cls.add(probe["class"])
                             if probe["class"] == "proto":
@@ -5343,14 +5366,29 @@ class ToolRegistry:
                             for i, n in enumerate(dom.harvest_gadget_props(s, cap=10)):
                                 ranked[n] = min(ranked.get(n, 99), i)   # best rank across app scripts
                         extra_props = [n for n, _ in sorted(ranked.items(), key=lambda kv: kv[1])][:6]
-                        for probe in dom.gadget_probes(url, extra_props=extra_props, cap=6):
-                            fam = "open_redirect" if probe["flavor"] == "nav" else "dom_xss"
-                            if fam in gseen:
-                                continue
+                        def _gfam(p):
+                            return "open_redirect" if p["flavor"] == "nav" else "dom_xss"
+
+                        gconfirmed = set()      # the early-exit view, same contract as `confirmed`
+
+                        async def _gadget_one(probe):
                             f = await _audit_one(browser, probe)
                             if f:
+                                gconfirmed.add(f.get("family") or _gfam(probe))
+                            return f
+
+                        # Concurrent like the main pass, and folded in the SAME order. It still runs
+                        # AFTER that pass rather than alongside it, because it only exists when the main
+                        # pass CONFIRMED pollution on this page.
+                        gprobes = list(dom.gadget_probes(url, extra_props=extra_props, cap=6))
+                        for probe, f in await bounded_map(gprobes, _gadget_one, browser_concurrency(),
+                                                          skip=lambda p: _gfam(p) in gconfirmed):
+                            if isinstance(f, BaseException):
+                                self._swallow(f, "dom_audit.gadget", probe.get("nav") or url)
+                                continue
+                            if f and _gfam(probe) not in gseen:
                                 findings.append(f)
-                                gseen.add(f.get("family") or fam)
+                                gseen.add(f.get("family") or _gfam(probe))
                 finally:
                     await browser.close()
         except Exception as ex:
